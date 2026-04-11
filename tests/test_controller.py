@@ -17,6 +17,7 @@ from custom_components.heating_assistant.thermal_model import (
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
 from custom_components.heating_assistant.controller import (
     LinearDiscreteModel,
+    KalmanFilter,
     StateEstimator,
     OptimalControlProblem,
     MPCController,
@@ -106,26 +107,90 @@ class TestHouseThermalSystem:
         np.testing.assert_array_equal(ub, [1.0, 1.0])
 
 
-class TestStateEstimator:
+class TestKalmanFilter:
+    """Tests for the discrete-time Kalman filter."""
+
     def test_bootstrap_from_measurement(self):
+        """First update should return y (for full-state observation C = I)."""
         model, sources = make_model_and_sources()
         sys_ = HouseThermalSystem(model, sources, dt=900.0)
-        est = StateEstimator(sys_)
+        kf = KalmanFilter(sys_)
         d = sys_.disturbance_vector(5.0, {})
         y = np.array([18.5, 17.5])
-        x_hat = est.update(y, d)
+        x_hat = kf.update(y, d)
         np.testing.assert_array_almost_equal(x_hat, y)
 
     def test_subsequent_update_blends_prediction(self):
+        """After the first call the Kalman filter runs predict–update."""
         model, sources = make_model_and_sources()
         sys_ = HouseThermalSystem(model, sources, dt=900.0)
-        est = StateEstimator(sys_)
+        kf = KalmanFilter(sys_)
         d = sys_.disturbance_vector(5.0, {})
-        est.update(np.array([18.0, 17.0]), d)
-        est.record_action(np.zeros(2))
+        kf.update(np.array([18.0, 17.0]), d)
+        kf.record_action(np.zeros(2))
         y1 = np.array([18.1, 17.1])
-        x_hat = est.update(y1, d)
-        np.testing.assert_array_almost_equal(x_hat, y1)
+        x_hat = kf.update(y1, d)
+        # With C = I the estimate should be close to y1 (high Kalman gain)
+        np.testing.assert_array_almost_equal(x_hat, y1, decimal=1)
+
+    def test_covariance_is_propagated(self):
+        """P should change after a predict–update cycle."""
+        model, sources = make_model_and_sources()
+        sys_ = HouseThermalSystem(model, sources, dt=900.0)
+        kf = KalmanFilter(sys_)
+        d = sys_.disturbance_vector(5.0, {})
+        P0 = kf.P.copy()
+        kf.update(np.array([18.0, 17.0]), d)
+        kf.record_action(np.zeros(2))
+        kf.update(np.array([18.1, 17.1]), d)
+        P1 = kf.P
+        # Covariance should have been updated (not identical to initial)
+        assert not np.allclose(P0, P1)
+
+    def test_covariance_stays_symmetric(self):
+        """P must remain symmetric after multiple steps."""
+        model, sources = make_model_and_sources()
+        sys_ = HouseThermalSystem(model, sources, dt=900.0)
+        kf = KalmanFilter(sys_)
+        d = sys_.disturbance_vector(5.0, {})
+        for temp in [18.0, 18.05, 18.1, 18.15]:
+            y = np.array([temp, temp - 1.0])
+            kf.update(y, d)
+            kf.record_action(np.array([0.5, 0.3]))
+        P = kf.P
+        np.testing.assert_array_almost_equal(P, P.T)
+
+    def test_covariance_stays_positive_semidefinite(self):
+        """Eigenvalues of P must remain non-negative."""
+        model, sources = make_model_and_sources()
+        sys_ = HouseThermalSystem(model, sources, dt=900.0)
+        kf = KalmanFilter(sys_)
+        d = sys_.disturbance_vector(0.0, {})
+        for i in range(10):
+            y = np.array([18.0 + 0.05 * i, 17.0 + 0.03 * i])
+            kf.update(y, d)
+            kf.record_action(np.array([0.8, 0.5]))
+        eigvals = np.linalg.eigvalsh(kf.P)
+        assert np.all(eigvals >= -1e-10)
+
+    def test_custom_noise_covariances(self):
+        """Custom Q_w and R_v should be accepted and affect the estimate."""
+        model, sources = make_model_and_sources()
+        sys_ = HouseThermalSystem(model, sources, dt=900.0)
+        Q_w = 0.1 * np.eye(sys_.n_x)
+        R_v = 0.001 * np.eye(sys_.n_x)  # very accurate sensors
+        kf = KalmanFilter(sys_, Q_w=Q_w, R_v=R_v)
+        d = sys_.disturbance_vector(5.0, {})
+        kf.update(np.array([18.0, 17.0]), d)
+        kf.record_action(np.zeros(2))
+        y1 = np.array([18.1, 17.1])
+        x_hat = kf.update(y1, d)
+        # With very low R_v (accurate sensors), estimate should track y closely
+        np.testing.assert_array_almost_equal(x_hat, y1, decimal=1)
+
+    def test_backward_compatible_alias(self):
+        """StateEstimator should be an alias for KalmanFilter."""
+        assert StateEstimator is KalmanFilter
 
 
 class TestOptimalControlProblem:

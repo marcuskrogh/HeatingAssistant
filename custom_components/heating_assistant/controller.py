@@ -11,15 +11,23 @@ LinearDiscreteModel (abstract)
 
     Matrices A, B, E may depend on d (LPV); C is time-invariant.
 
-StateEstimator
-    Prediction-correction (Luenberger) observer:
+KalmanFilter
+    Discrete-time Kalman filter (optimal state estimator):
 
-      x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]    (prediction)
-      x̂[k]  = x̂⁻[k]  +  L (y[k] − C x̂⁻[k])      (correction)
+      Prediction:
+        x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]
+        P⁻[k]  = A P[k-1] Aᵀ + Q_w
 
-    Default gain L = Cᵀ(CCᵀ)⁻¹ is the minimum-norm left inverse of C.
-    For full-state observation (C = Iₙ) this reduces to L = Iₙ, giving
-    x̂[k] = y[k] (direct measurement update).
+      Update (correction):
+        S[k]   = C P⁻[k] Cᵀ + R_v              (innovation covariance)
+        K[k]   = P⁻[k] Cᵀ S[k]⁻¹              (Kalman gain)
+        x̂[k]  = x̂⁻[k] + K[k] (y[k] − C x̂⁻[k])  (state estimate)
+        P[k]   = (I − K[k] C) P⁻[k]            (posterior covariance)
+
+    Q_w models process noise (unmodelled disturbances, model mismatch).
+    R_v models measurement noise (sensor accuracy).
+    The gain K[k] is recomputed at every step from the current covariance,
+    giving the minimum-variance estimate under Gaussian noise assumptions.
 
 OptimalControlProblem
     Receding-horizon quadratic regulator:
@@ -37,7 +45,7 @@ OptimalControlProblem
     Solved with projected gradient descent on the box-constrained QP.
 
 MPCController (generic)
-    Composes StateEstimator + OptimalControlProblem for any LinearDiscreteModel:
+    Composes KalmanFilter + OptimalControlProblem for any LinearDiscreteModel:
 
       1. Estimate  x̂[k] ← estimator.update(y[k], d[k])
       2. Optimise  U*    ← ocp.solve(x̂[k], D, r)
@@ -219,32 +227,48 @@ class LinearDiscreteModel(ABC):
         """
 
 
-class StateEstimator:
+class KalmanFilter:
     """
-    Prediction-correction (Luenberger) observer.
+    Discrete-time Kalman filter (optimal state estimator).
 
-      Prediction:  x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]
-      Correction:  x̂[k]  = x̂⁻[k] + L (y[k] − C x̂⁻[k])
+      Prediction:
+        x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]
+        P⁻[k]  = A P[k-1] Aᵀ + Q_w
+
+      Update (correction):
+        S[k]   = C P⁻[k] Cᵀ + R_v              (innovation covariance)
+        K[k]   = P⁻[k] Cᵀ S[k]⁻¹              (Kalman gain)
+        x̂[k]  = x̂⁻[k] + K[k] (y[k] − C x̂⁻[k])  (state estimate)
+        P[k]   = (I − K[k] C) P⁻[k]            (posterior covariance)
 
     Parameters
     ----------
     model : LinearDiscreteModel
-    L : (n_x, n_y) observer gain, optional.
-        Defaults to Cᵀ(CCᵀ)⁻¹, the minimum-norm left inverse of C.
-        For full-state observation (C = I) this gives L = I and x̂ = y.
+    Q_w : (n_x, n_x) process noise covariance, optional.
+        Models unmodelled disturbances and model mismatch.
+        Default: 0.01 · Iₙ  (low process uncertainty).
+    R_v : (n_y, n_y) measurement noise covariance, optional.
+        Models sensor noise.
+        Default: 0.1 · Iₗ  (moderate sensor uncertainty).
+    P0 : (n_x, n_x) initial state covariance, optional.
+        Default: Iₙ.
     """
 
     def __init__(
         self,
         model: LinearDiscreteModel,
-        L: Optional[np.ndarray] = None,
+        Q_w: Optional[np.ndarray] = None,
+        R_v: Optional[np.ndarray] = None,
+        P0: Optional[np.ndarray] = None,
     ) -> None:
         self._model = model
-        C = model.C
-        self._L: np.ndarray = (
-            L if L is not None
-            else np.linalg.solve(C @ C.T, C).T   # Cᵀ(CCᵀ)⁻¹
-        )
+        n_x = model.n_x
+        n_y = model.C.shape[0]
+
+        self._Q_w: np.ndarray = Q_w if Q_w is not None else 0.01 * np.eye(n_x)
+        self._R_v: np.ndarray = R_v if R_v is not None else 0.1 * np.eye(n_y)
+        self._P: np.ndarray = P0 if P0 is not None else np.eye(n_x)
+
         self._x_hat: np.ndarray = model.x.copy()
         self._u_prev: np.ndarray = np.zeros(model.n_u)
         self._d_prev: np.ndarray = np.zeros(model.n_d)
@@ -255,20 +279,37 @@ class StateEstimator:
         """Current state estimate x̂[k]."""
         return self._x_hat.copy()
 
+    @property
+    def P(self) -> np.ndarray:
+        """Current state covariance P[k]."""
+        return self._P.copy()
+
     def update(self, y: np.ndarray, d: np.ndarray) -> np.ndarray:
         """
         Assimilate measurement y[k] and return corrected estimate x̂[k].
 
-        On the first call the state is bootstrapped directly from the
-        measurement, avoiding a spurious prediction step.
+        On the first call the state is bootstrapped from the measurement
+        to avoid a spurious prediction step.  Subsequent calls run the
+        full predict–update cycle with covariance propagation.
         """
+        C = self._model.C
+
         if self._first:
-            self._x_hat = self._L @ y
+            # Bootstrap: x̂ = Cᵀ(CCᵀ)⁻¹ y  (left inverse of C)
+            self._x_hat = np.linalg.solve(C @ C.T, C).T @ y
             self._first = False
         else:
+            # ── Prediction step ──────────────────────────────────────────
             A, B, E = self._model.discretize(self._d_prev)
             x_pred = A @ self._x_hat + B @ self._u_prev + E @ self._d_prev
-            self._x_hat = x_pred + self._L @ (y - self._model.C @ x_pred)
+            P_pred = A @ self._P @ A.T + self._Q_w
+
+            # ── Update step ──────────────────────────────────────────────
+            S = C @ P_pred @ C.T + self._R_v         # innovation covariance
+            K = P_pred @ C.T @ np.linalg.inv(S)      # Kalman gain
+            innovation = y - C @ x_pred
+            self._x_hat = x_pred + K @ innovation
+            self._P = (np.eye(self._model.n_x) - K @ C) @ P_pred
 
         self._d_prev = d.copy()
         return self._x_hat.copy()
@@ -276,6 +317,10 @@ class StateEstimator:
     def record_action(self, u: np.ndarray) -> None:
         """Record the applied action u[k] for use in the next prediction."""
         self._u_prev = u.copy()
+
+
+# Keep backward-compatible alias
+StateEstimator = KalmanFilter
 
 
 class OptimalControlProblem:
@@ -381,7 +426,7 @@ class MPCController:
     """
     Generic model predictive controller.
 
-    Composes a StateEstimator and an OptimalControlProblem for any
+    Composes a KalmanFilter and an OptimalControlProblem for any
     LinearDiscreteModel and implements the receding-horizon policy:
 
       1. Estimate  x̂[k] ← estimator.update(y[k], d[k])
@@ -392,14 +437,14 @@ class MPCController:
     Parameters
     ----------
     model     : LinearDiscreteModel
-    estimator : StateEstimator
+    estimator : KalmanFilter
     ocp       : OptimalControlProblem
     """
 
     def __init__(
         self,
         model: LinearDiscreteModel,
-        estimator: StateEstimator,
+        estimator: KalmanFilter,
         ocp: OptimalControlProblem,
     ) -> None:
         self._model = model
@@ -589,7 +634,7 @@ class HeatingMPCController:
     """
     Application facade for house-heating MPC.
 
-    Builds a HouseThermalSystem, StateEstimator, OptimalControlProblem, and
+    Builds a HouseThermalSystem, KalmanFilter, OptimalControlProblem, and
     the generic MPCController, then provides the coordinator-facing API:
 
       actions = controller.compute(outdoor_temp, solar_gains, now)
@@ -635,7 +680,7 @@ class HeatingMPCController:
         R = energy_weight * np.eye(n_u)
 
         # Assemble generic MPC
-        estimator = StateEstimator(self._system)
+        estimator = KalmanFilter(self._system)
         ocp       = OptimalControlProblem(self._system, horizon, Q, R)
         self._mpc = MPCController(self._system, estimator, ocp)
 

@@ -20,9 +20,9 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
    - 3.5 [Heat source models](#35-heat-source-models)
 4. [Model Predictive Controller](#4-model-predictive-controller)
    - 4.1 [Overview](#41-overview)
-   - 4.2 [Cost function](#42-cost-function)
-   - 4.3 [Disturbance forecasts](#43-disturbance-forecasts)
-   - 4.4 [Room-independent optimisation](#44-room-independent-optimisation)
+   - 4.2 [State estimation — Kalman filter](#42-state-estimation--kalman-filter)
+   - 4.3 [Optimal control problem — batch QP](#43-optimal-control-problem--batch-qp)
+   - 4.4 [Disturbance forecasts](#44-disturbance-forecasts)
    - 4.5 [Control cycle](#45-control-cycle)
 5. [Home Assistant Integration](#5-home-assistant-integration)
    - 5.1 [Platforms and entities](#51-platforms-and-entities)
@@ -107,8 +107,9 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Electric heater support** | Resistive heaters and infrared panels modelled as `Q_thermal = P_electrical × η`.  Efficiency is configurable. |
 | **Air-source heat pump support** | Temperature-dependent COP based on Carnot scaling.  The pump shuts off automatically below a configurable outdoor temperature floor to prevent defrost damage. |
 | **Multiple heat sources per room** | Any number of heaters and/or heat pumps can be assigned to the same room; the controller optimises them jointly. |
-| **Receding-horizon MPC** | Each control cycle the controller looks `horizon × dt` seconds ahead and selects the power level that minimises a discounted cost of temperature error and energy use. |
-| **Asymmetric comfort penalty** | Under-heating (room too cold) is penalised twice as much as over-heating, reflecting real-world comfort asymmetry. |
+| **Receding-horizon MPC** | Each control cycle the controller solves a quadratic program over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error and energy use.  Inputs are applied via zero-order hold. |
+| **Kalman filter state estimation** | A discrete-time Kalman filter fuses model predictions with sensor measurements, providing the minimum-variance state estimate under Gaussian noise assumptions. |
+| **Generic MPC framework** | The controller is built on a generic framework (`LinearDiscreteModel`, `KalmanFilter`, `OptimalControlProblem`, `MPCController`) that can be reused for any linear discrete-time system. |
 | **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface. |
 | **HA sensor entities** | Predicted temperature and active heating power sensors per room, with model metadata exposed as state attributes. |
 | **Advanced visualisation sensors** | Temperature forecast trajectory, heat loss breakdown, energy balance, and system efficiency sensors provide deep insight into system operation. |
@@ -161,12 +162,13 @@ custom_components/heating_assistant/
 │                          • HeatSource (ABC), ElectricHeater, HeatPump
 │                          • _cop_at_temp() helper (Carnot COP correction)
 │
-├── controller.py          MPC controller
-│                          • MPCController: compute() public entry-point
-│                          • _rollout_cost(): simulates horizon and accumulates cost
-│                          • _forecast_outdoor(): persistence forecast
-│                          • _forecast_solar(): solar model forecast per horizon step
-│                          • predictions property: stores predicted temperature trajectory
+├── controller.py          MPC controller (generic framework + heating application)
+│                          • LinearDiscreteModel (ABC): x[k+1] = A x[k] + B u[k] + E d[k]
+│                          • KalmanFilter: discrete-time Kalman filter (state estimator)
+│                          • OptimalControlProblem: batch QP over receding horizon
+│                          • MPCController: generic MPC (KalmanFilter + OCP)
+│                          • HouseThermalSystem: ZOH-discretised RC thermal model
+│                          • HeatingMPCController: application facade (coordinator API)
 │
 ├── diagnostics.py         HA diagnostics platform
 │                          • async_get_config_entry_diagnostics(): full system state dump
@@ -208,7 +210,7 @@ custom_components/heating_assistant/
 │        │                             │                                   │
 │        │  1. Read sensor states      │                                   │
 │        │  2. Update HouseModel temps │                                   │
-│        │  3. Call MPCController      │                                   │
+│        │  3. Call HeatingMPCController │                                   │
 │        │  4. Write heater actions    │──► switch.heater  (turn_on/off)   │
 │        │  5. Notify platforms        │──► number.heater  (set_value)     │
 │        └────────────┬────────────────┘──► climate.hp     (set_hvac_mode) │
@@ -220,17 +222,25 @@ custom_components/heating_assistant/
 │   HVAC mode/action)            per room)                                 │
 └─────────────────────────────────────────────────────────────────────────┘
 
-Inside MPCController.compute():
+Inside HeatingMPCController.compute():
 
   solar_model ──► solar_gain[room, k]  for k = 0…N-1
   persistence  ──► outdoor_temp[k]     for k = 0…N-1
 
-  for each room:
-    for each power-level combination:
-      HouseModel.predict(horizon) ──► T_predicted[room, k]
-      cost = Σ_k γ^k · [penalty(T_sp - T_predicted[k]) + λ·Σu]
-    choose combination with minimum cost
-  apply actions
+  D = disturbance forecast matrix (N × p)
+  y = current room temperatures (measurement vector)
+
+  ┌─ KalmanFilter.update(y, d[0])  →  x̂ (state estimate)
+  │    predict: x̂⁻ = A x̂ + B u + E d,  P⁻ = A P Aᵀ + Q_w
+  │    update:  K = P⁻ Cᵀ (C P⁻ Cᵀ + R_v)⁻¹
+  │             x̂ = x̂⁻ + K (y − C x̂⁻),  P = (I − K C) P⁻
+  │
+  ├─ OptimalControlProblem.solve(x̂, D, x_ref)
+  │    batch lift: X = Ψ x̂ + Γ U + Λ D
+  │    QP:  min  Uᵀ H U + 2 fᵀ U   s.t.  0 ≤ u ≤ 1
+  │    solve via projected gradient descent
+  │
+  └─ apply u[0] to heat sources (receding horizon)
 ```
 
 ---
@@ -281,18 +291,27 @@ where:
 
 This representation makes each `step()` call a simple vector-matrix multiply — fast even for large houses.
 
-### 3.3 Numerical integration
+### 3.3 Discretisation
 
-The continuous-time ODE is discretised with the **explicit (forward) Euler** method:
+The MPC controller uses **exact zero-order hold (ZOH) discretisation** of the continuous-time thermal model.  Given the continuous state-space form
 
 ```
-T[k+1] = T[k] + dt · C^{-1} · (A·T[k] + B_ext·T_outdoor[k] + Q[k])
+Ṫ = F T + G_u u + G_d d
 ```
 
-For typical residential buildings (large thermal masses, slow dynamics) a step size `dt ≤ 900 s` (15 minutes) gives accurate results.  The default `dt = 900 s` is a good balance between accuracy and computational load.  If you reduce `dt` below ~60 s you should also reduce `UPDATE_INTERVAL` accordingly.
+with `F = C_cap⁻¹ A` (state matrix) and `G_u`, `G_d` the input and disturbance matrices, the discrete-time matrices are computed as:
 
-**Stability condition (rule of thumb):**
-The Euler method is stable as long as `dt < min(C_i / |A[i,i]|)` for all rooms.  For a room with `C = 5 MJ/K` and `R_ext = 0.05 K/W` the pole time constant is `τ = C · R_ext = 250 000 s ≈ 2.9 days`, and Euler is stable for any dt you would practically use.
+```
+A_d = expm(F · dt)                     (matrix exponential)
+B_d = F⁻¹ (A_d − I) · G_u             (exact ZOH input matrix)
+E_d = F⁻¹ (A_d − I) · G_d             (exact ZOH disturbance matrix)
+```
+
+This gives the exact solution `T[k+1] = A_d T[k] + B_d u[k] + E_d d[k]` for piecewise-constant inputs held over each sampling interval `dt`.  Unlike forward Euler, ZOH discretisation is unconditionally stable and introduces no discretisation error for the assumed piecewise-constant input profile.
+
+The `HouseModel.step()` and `HouseModel.predict()` methods still use forward Euler for fast multi-step rollouts (e.g. the `simulate_thermal_response` service).  The MPC controller exclusively uses ZOH for its prediction model.
+
+For typical residential buildings (large thermal masses, slow dynamics) a step size `dt ≤ 900 s` (15 minutes) gives accurate results.  The default `dt = 900 s` is a good balance between accuracy and computational load.
 
 ### 3.4 Solar heat gain model
 
@@ -423,60 +442,102 @@ The `max(…, 1)` guard ensures the COP never falls below 1.0 (even in extreme c
 
 ### 4.1 Overview
 
-The MPC controller (`MPCController` in `controller.py`) is a **receding-horizon** optimiser.  At each control step it:
+The controller (`controller.py`) implements a **generic model predictive control (MPC) framework** built on four composable components:
 
-1. Accepts the current outdoor temperature and (optionally) pre-computed solar gains.
-2. Builds a *N*-step disturbance forecast.
-3. For each room that has at least one heat source, exhaustively evaluates all combinations of discrete power levels over the forecast horizon.
-4. Selects the power level combination with the lowest total discounted cost.
-5. Applies only the **first step** of the optimal sequence (the "receding horizon" principle — the next cycle re-solves with updated measurements).
+| Component | Class | Role |
+|-----------|-------|------|
+| **System model** | `LinearDiscreteModel` (ABC) | Defines the discrete-time dynamics `x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k]`, `y[k] = C x[k]`.  Matrices may depend on disturbances (LPV). |
+| **State estimator** | `KalmanFilter` | Discrete-time Kalman filter.  Fuses model predictions with sensor measurements to produce the minimum-variance state estimate. |
+| **Optimal control** | `OptimalControlProblem` | Batch QP formulation of the receding-horizon regulator.  Lifts the problem to U-space and solves via projected gradient descent. |
+| **MPC policy** | `MPCController` | Orchestrates estimate → optimise → apply at each step. |
 
-### 4.2 Cost function
+The house-heating application provides two additional classes:
 
-The cost for a candidate constant control action `u = {u_s}` applied over the horizon is:
+| Class | Role |
+|-------|------|
+| `HouseThermalSystem` | Concrete `LinearDiscreteModel` wrapping `HouseModel` and `HeatSource` objects.  ZOH-discretises the RC thermal model with LPV input matrix (heat-pump COP varies with outdoor temperature). |
+| `HeatingMPCController` | Application facade.  Builds the system, estimator, and OCP; adds solar/outdoor forecasting; applies source set-points; exposes visualisation properties for the coordinator. |
+
+At each control step the `HeatingMPCController`:
+
+1. Reads room temperatures from HA sensors (measurement vector **y**).
+2. Builds an *N*-step disturbance forecast **D** (outdoor temperature + solar gains).
+3. Runs the Kalman filter to obtain the state estimate **x̂**.
+4. Solves the quadratic program to find the optimal continuous input sequence **U***.
+5. Applies only the **first step** u*[0] of the optimal sequence (receding horizon).
+
+### 4.2 State estimation — Kalman filter
+
+The state estimator is a standard **discrete-time Kalman filter**.  At each time step *k*:
+
+**Prediction:**
+```
+x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]
+P⁻[k]  = A P[k-1] Aᵀ + Q_w
+```
+
+**Update (correction):**
+```
+S[k]  = C P⁻[k] Cᵀ + R_v              (innovation covariance)
+K[k]  = P⁻[k] Cᵀ S[k]⁻¹              (Kalman gain)
+x̂[k] = x̂⁻[k] + K[k] (y[k] − C x̂⁻[k])  (corrected state estimate)
+P[k]  = (I − K[k] C) P⁻[k]            (posterior covariance)
+```
+
+| Symbol | Meaning |
+|--------|---------|
+| **Q_w** | Process noise covariance — models unmodelled disturbances and model mismatch (default: `0.01 · I`). |
+| **R_v** | Measurement noise covariance — models sensor noise (default: `0.1 · I`). |
+| **P** | State error covariance — propagated at every step; determines the time-varying Kalman gain. |
+| **K[k]** | Kalman gain — automatically balances trust in the model vs. the sensors. |
+
+For the house thermal system with full-state observation (`C = I`, one temperature sensor per room), the Kalman gain converges quickly to a steady-state value that weights measurements heavily relative to the model prediction.  The filter provides robustness against temporary sensor noise and gradual model drift.
+
+### 4.3 Optimal control problem — batch QP
+
+The cost function over the prediction horizon *N* is:
 
 ```
-J(u) = Σ_{k=0}^{N-1}  γ^k · [ p(T_sp − T_k)  +  λ · Σ_s u_s ]
+J(U) = Σ_{k=0}^{N-1} ‖x[k+1] − r‖²_Q  +  ‖u[k]‖²_R  +  ‖x[N] − r‖²_P
 ```
 
 where:
 
 | Symbol | Value / meaning |
 |--------|----------------|
-| `N` | prediction horizon (default 6 steps) |
-| `k` | step index |
-| `γ` | 0.9 — discount factor; future deviations matter less |
-| `T_sp` | room setpoint [°C] |
-| `T_k` | model-predicted room temperature at step k [°C] |
-| `p(e)` | asymmetric quadratic penalty:  `1.0 · e²` if `e ≥ 0` (too cold),  `0.5 · e²` if `e < 0` (too warm) |
-| `λ` | `energy_weight` (default 0.01) — penalises running heaters |
-| `u_s` | fractional set-point of source *s* ∈ {0, 0.33, 0.67, 1.0} |
+| **x[k]** | Predicted state (room temperatures) at step *k* |
+| **r** | Reference (room setpoints) |
+| **Q** | State tracking cost (default: `I`) |
+| **R** | Input cost — `energy_weight · I` (default: `0.01 · I`) |
+| **P** | Terminal cost (default: `Q`) |
+| **u[k]** | Input vector (continuous fractions ∈ [0, 1]) |
 
-The asymmetric penalty (`_PENALTY_TOO_COLD = 1.0`, `_PENALTY_TOO_WARM = 0.5`) reflects the fact that being cold is more uncomfortable than being slightly warm, and that over-heated rooms will naturally cool down.
+The problem is lifted to the **batch form** using prediction matrices:
 
-The energy term `λ · Σu` softly discourages running multiple heaters at full power when the room is already close to setpoint.  Increasing `energy_weight` makes the controller more energy-conservative at the cost of tighter temperature tracking.
+```
+X = Ψ x₀ + Γ U + Λ D         (predicted state trajectory)
+J = Uᵀ H U + 2 fᵀ U + const
+H = Γᵀ Q̄ Γ + R̄,   f = Γᵀ Q̄ (Ψ x₀ + Λ D − r̄)
+```
 
-### 4.3 Disturbance forecasts
+Subject to the box constraint `0 ≤ u[k] ≤ 1` (actuator limits), the QP is solved via **projected gradient descent** with step size `α = 1 / λ_max(H)`.
 
-The controller builds two forecast arrays of length *N* before the optimisation loop:
+The input cost `R` softly discourages running heaters when the room is close to setpoint.  Increasing `energy_weight` makes the controller more energy-conservative at the expense of tighter temperature tracking.
+
+**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the MPC optimises the continuous fraction `u ∈ [0, 1]`, interpreted as the proportion of the sampling interval `dt` for which the source is active.  The coordinator maps this fraction to on/off commands.
+
+### 4.4 Disturbance forecasts
+
+The controller builds a disturbance forecast matrix **D** ∈ ℝ^(N × p) before solving the QP:
 
 | Disturbance | Forecast method |
 |-------------|----------------|
-| **Outdoor temperature** | Persistence: the current measured value is held constant for all horizon steps.  This is the simplest possible forecast; a weather API integration is on the roadmap. |
+| **Outdoor temperature** | Persistence: the current measured value is held constant for all horizon steps.  A weather API integration is on the roadmap. |
 | **Solar gains** | The solar position model is evaluated at times `now + k·dt` for each horizon step `k`.  This uses the deterministic orbital equations and produces an accurate prediction of how solar irradiance through each window will evolve over the next `N·dt` seconds. |
-
-### 4.4 Room-independent optimisation
-
-The optimisation is performed **room by room** rather than jointly across all rooms.  This is an approximation that keeps computation tractable:
-
-- A house with 5 rooms each having 2 heaters and 4 discrete levels would require evaluating 4^10 ≈ 1 million combinations jointly.
-- Per-room, the worst case is 4^2 = 16 combinations, repeated for each room.
-
-The approximation is accurate because inter-room heat flow is typically much smaller than heater power over a single time step.  While one room is being optimised, the other rooms' heat inputs are held fixed at their current `current_power` values.
 
 ### 4.5 Control cycle
 
-Each call to `MPCController.compute()` follows this sequence:
+Each call to `HeatingMPCController.compute()` follows this sequence:
 
 ```
 compute(outdoor_temp, solar_gains=None, now=None)
@@ -484,22 +545,19 @@ compute(outdoor_temp, solar_gains=None, now=None)
 ├─ if solar_gains is None: compute from solar model
 ├─ _forecast_outdoor(outdoor_temp)     → list of N floats
 ├─ _forecast_solar(now)                → list of N {room: W} dicts
+├─ Build D ∈ ℝ^(N × p) from forecasts
 │
-└─ for each room with heat sources:
-   │
-   ├─ build level_grid = itertools.product(_LEVELS, repeat=len(sources))
-   │
-   └─ for each candidate fraction tuple:
-      │
-      ├─ _rollout_cost(room, fractions, outdoor_temps, solar_schedules, sources)
-      │   ├─ build heat_schedule (candidate action for target room; current power for others)
-      │   ├─ HouseModel.predict(horizon, dt, heat_schedule, outdoor_temps, solar_schedules)
-      │   └─ accumulate discounted cost over predictions
-      │
-      └─ update best if cost is lower
-
-Apply best fractions → src.set_power(fraction, outdoor_temp)
-Return {source_name: fraction}
+├─ KalmanFilter.update(y, d[0])        → x̂  (state estimate)
+│   ├─ predict:  x̂⁻ = A x̂ + B u + E d,  P⁻ = A P Aᵀ + Q_w
+│   └─ update:   K = P⁻ Cᵀ S⁻¹,  x̂ = x̂⁻ + K (y − C x̂⁻)
+│
+├─ OptimalControlProblem.solve(x̂, D, x_ref)
+│   ├─ batch lift:  X = Ψ x̂ + Γ U + Λ D
+│   ├─ QP:  min Uᵀ H U + 2 fᵀ U  s.t. 0 ≤ u ≤ 1
+│   └─ solve via projected gradient descent
+│
+└─ Apply u*[0] to heat sources (receding horizon)
+   Return {source_name: fraction}
 ```
 
 ---
@@ -555,7 +613,7 @@ update_interval = timedelta(seconds=UPDATE_INTERVAL)   # UPDATE_INTERVAL = 60 s
 Every 60 seconds:
 1. All room temperature sensors are polled from the HA state machine.
 2. The outdoor temperature sensor is polled.
-3. The MPC controller runs (`MPCController.compute()`).
+3. The MPC controller runs (`HeatingMPCController.compute()`).
 4. Heater entities are updated via HA services.
 5. All subscribed climate and sensor entities are notified to refresh their state.
 
