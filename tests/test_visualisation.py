@@ -182,11 +182,6 @@ class TestSteadyStateTemperature:
 
 class TestControllerPredictions:
     def test_predictions_stored_after_compute(self):
-        model, sources = make_two_room_model(), [
-            ElectricHeater("lr", "living_room", 2000),
-            ElectricHeater("br", "bedroom", 1500),
-        ]
-        # Need to rebuild model since make_two_room_model() doesn't return sources
         living = Room(
             name="living_room", thermal_mass=5_000_000.0, r_external=0.05,
             connections=[RoomConnection("bedroom", 0.2)],

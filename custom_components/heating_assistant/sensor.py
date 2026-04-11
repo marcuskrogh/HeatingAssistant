@@ -470,13 +470,13 @@ class EnergyBalanceSensor(CoordinatorEntity, SensorEntity):
         external_loss = flows.get("external_loss", 0.0)
         room = self._coordinator.model.rooms[self._room_name]
 
-        inter_room_loss = total_loss - external_loss
+        inter_room_exchange = total_loss - external_loss
 
         return {
             "heating_power": round(heating, 1),
             "solar_gain": round(solar, 1),
             "external_heat_loss": round(external_loss, 1),
-            "inter_room_heat_exchange": round(inter_room_loss, 1),
+            "inter_room_heat_exchange": round(inter_room_exchange, 1),
             "total_heat_loss": round(total_loss, 1),
             "net_energy_flow": round(heating + solar - total_loss, 1),
             "room_temperature": round(room.temperature, 2),
