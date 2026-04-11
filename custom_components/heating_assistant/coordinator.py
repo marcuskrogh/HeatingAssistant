@@ -33,6 +33,7 @@ from .const import (
     CONF_SOURCE_EFFICIENCY,
     CONF_SOURCE_HEATER_ENTITY,
     CONF_SOURCE_MAX_POWER,
+    CONF_SOURCE_MIN_POWER,
     CONF_SOURCE_NAME,
     CONF_SOURCE_ROOM,
     CONF_SOURCE_TYPE,
@@ -43,6 +44,7 @@ from .const import (
     CONF_ROOM_NAME,
     CONF_SETPOINT,
     CONF_TEMP_SENSOR,
+    CONF_TEMP_SENSORS,
     CONF_THERMAL_MASS,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
@@ -53,6 +55,7 @@ from .const import (
     DEFAULT_DT,
     DEFAULT_EFFICIENCY,
     DEFAULT_HORIZON,
+    DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
@@ -65,6 +68,7 @@ from .const import (
 from .heat_sources import ElectricHeater, HeatPump, HeatSource
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import MPCController
+from .solar_model import room_solar_gains
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,6 +139,7 @@ def build_heat_sources(
                     max_power=max_power,
                     cop_rated=sc.get(CONF_SOURCE_COP_RATED, DEFAULT_COP_RATED),
                     cop_temp_ref=sc.get(CONF_SOURCE_COP_TEMP_REF, DEFAULT_COP_TEMP_REF),
+                    min_power=sc.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER),
                     heater_entity=entity,
                 )
             )
@@ -170,12 +175,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.model: HouseModel = build_house_model(rooms_cfg)
         self.heat_sources: List[HeatSource] = build_heat_sources(sources_cfg)
 
-        # Map room_name → temp_sensor entity_id (for state updates)
-        self._temp_sensors: Dict[str, str] = {
-            rc[CONF_ROOM_NAME]: rc[CONF_TEMP_SENSOR]
-            for rc in rooms_cfg
-            if CONF_TEMP_SENSOR in rc
-        }
+        # Map room_name → list of temp_sensor entity_ids (for state updates)
+        self._temp_sensors: Dict[str, List[str]] = {}
+        for rc in rooms_cfg:
+            room_name = rc[CONF_ROOM_NAME]
+            sensors: List[str] = []
+            # Support both singular 'temp_sensor' and plural 'temp_sensors'
+            if CONF_TEMP_SENSORS in rc:
+                sensors.extend(rc[CONF_TEMP_SENSORS])
+            if CONF_TEMP_SENSOR in rc:
+                single = rc[CONF_TEMP_SENSOR]
+                if single not in sensors:
+                    sensors.append(single)
+            if sensors:
+                self._temp_sensors[room_name] = sensors
 
         self.controller = MPCController(
             model=self.model,
@@ -188,6 +201,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         # Latest control actions (source_name → fraction 0‑1)
         self.actions: Dict[str, float] = {}
+
+        # Visualization data
+        self.solar_gains: Dict[str, float] = {}
+        self.outdoor_temp: float = 5.0
 
         super().__init__(
             hass,
@@ -206,37 +223,58 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         and returns a snapshot of the system state.
         """
         try:
-            # 1. Update measured room temperatures from HA sensor states
-            for room_name, entity_id in self._temp_sensors.items():
-                state = self.hass.states.get(entity_id)
-                if state and state.state not in ("unknown", "unavailable"):
-                    try:
-                        temp = float(state.state)
-                        self.model.rooms[room_name].temperature = temp
-                    except ValueError:
-                        _LOGGER.warning(
-                            "Cannot parse temperature from entity %s: %r",
-                            entity_id,
-                            state.state,
-                        )
+            # 1. Update measured room temperatures from HA sensor states.
+            #    When multiple sensors are configured for a room, use the
+            #    average of all valid readings.
+            for room_name, entity_ids in self._temp_sensors.items():
+                readings: List[float] = []
+                for entity_id in entity_ids:
+                    state = self.hass.states.get(entity_id)
+                    if state and state.state not in ("unknown", "unavailable"):
+                        try:
+                            readings.append(float(state.state))
+                        except ValueError:
+                            _LOGGER.warning(
+                                "Cannot parse temperature from entity %s: %r",
+                                entity_id,
+                                state.state,
+                            )
+                if readings:
+                    self.model.rooms[room_name].temperature = (
+                        sum(readings) / len(readings)
+                    )
 
             # 2. Read outdoor temperature
             outdoor_temp = self._read_outdoor_temp()
+            self.outdoor_temp = outdoor_temp
 
-            # 3. Run MPC controller
+            # 3. Compute current solar gains for visualization
             now = datetime.now(tz=timezone.utc)
+            self.solar_gains = {
+                name: room_solar_gains(
+                    self.model.rooms[name].windows,
+                    now,
+                    self._latitude,
+                    self._longitude,
+                )
+                for name in self.model.room_names
+            }
+
+            # 4. Run MPC controller
             self.actions = self.controller.compute(
                 outdoor_temp=outdoor_temp,
+                solar_gains=self.solar_gains,
                 now=now,
             )
 
-            # 4. Write set-points to heater entities
+            # 5. Write set-points to heater entities
             await self._apply_actions(outdoor_temp)
 
             return {
                 "temperatures": dict(self.model.temperatures),
                 "outdoor_temp": outdoor_temp,
                 "actions": dict(self.actions),
+                "solar_gains": dict(self.solar_gains),
             }
 
         except Exception as exc:

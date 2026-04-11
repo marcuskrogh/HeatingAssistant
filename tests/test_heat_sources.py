@@ -84,3 +84,36 @@ class TestHeatPump:
         p_half = hp.thermal_power(0.5, outdoor_temp=7.0)
         p_full = hp.thermal_power(1.0, outdoor_temp=7.0)
         assert p_full == pytest.approx(2.0 * p_half, rel=1e-6)
+
+    def test_min_power_clamps_to_zero(self):
+        """When output would be below min_power, thermal_power returns 0."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6100.0,
+            cop_rated=3.5, cop_temp_ref=7.0, min_power=1000.0,
+        )
+        # At rated conditions, fraction 0.1 → 6100*0.1 = 610 W < 1000 W → 0
+        power = hp.thermal_power(0.1, outdoor_temp=7.0)
+        assert power == pytest.approx(0.0)
+
+    def test_min_power_allows_above_threshold(self):
+        """When output is at or above min_power, thermal_power returns normally."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6100.0,
+            cop_rated=3.5, cop_temp_ref=7.0, min_power=1000.0,
+        )
+        # At rated conditions, fraction 0.3 → 6100*0.3 = 1830 W > 1000 W → normal
+        power = hp.thermal_power(0.3, outdoor_temp=7.0)
+        assert power > 1000.0
+
+    def test_min_power_zero_fraction_is_zero(self):
+        """Fraction 0 should always return 0, regardless of min_power."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6100.0,
+            cop_rated=3.5, cop_temp_ref=7.0, min_power=1000.0,
+        )
+        assert hp.thermal_power(0.0, outdoor_temp=7.0) == pytest.approx(0.0)
+
+    def test_min_power_default_is_zero(self):
+        """Default min_power should be 0 (backward compatible)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.min_power == 0.0

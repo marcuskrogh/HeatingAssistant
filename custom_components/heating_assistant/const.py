@@ -19,6 +19,7 @@ CONF_WINDOWS = "windows"               # list of {area, orientation, tilt}
 CONF_SETPOINT = "setpoint"             # °C
 CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_TEMP_SENSOR = "temp_sensor"       # HA entity_id for measured room temp
+CONF_TEMP_SENSORS = "temp_sensors"     # list of HA entity_ids for measured room temp
 
 # Connection configuration keys
 CONF_CONNECTED_ROOM = "room"
@@ -37,6 +38,7 @@ CONF_SOURCE_MAX_POWER = "max_power"    # W (thermal)
 CONF_SOURCE_EFFICIENCY = "efficiency"  # 0‑1 for electric heaters
 CONF_SOURCE_COP_RATED = "cop_rated"   # rated COP for heat pumps
 CONF_SOURCE_COP_TEMP_REF = "cop_temp_ref"  # outdoor temp (°C) at which rated COP applies
+CONF_SOURCE_MIN_POWER = "min_power"    # W (minimum thermal output for heat pumps)
 CONF_SOURCE_HEATER_ENTITY = "heater_entity"  # HA entity_id for the heater
 
 # Controller configuration keys
@@ -53,6 +55,7 @@ DEFAULT_DT = 900                       # 15-minute steps (seconds)
 DEFAULT_EFFICIENCY = 1.0
 DEFAULT_COP_RATED = 3.5
 DEFAULT_COP_TEMP_REF = 7.0             # °C
+DEFAULT_MIN_POWER = 0.0                # W (no minimum by default)
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 
 # Source types

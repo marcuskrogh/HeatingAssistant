@@ -154,12 +154,14 @@ class HeatPump(HeatSource):
         cop_rated: float = 3.5,
         cop_temp_ref: float = 7.0,
         min_outdoor_temp: float = -20.0,
+        min_power: float = 0.0,
         heater_entity: Optional[str] = None,
     ) -> None:
         super().__init__(name, room, max_power, heater_entity)
         self.cop_rated = cop_rated
         self.cop_temp_ref = cop_temp_ref
         self.min_outdoor_temp = min_outdoor_temp
+        self.min_power = min_power
 
     def cop(self, outdoor_temp: float) -> float:
         """Return the estimated COP at the given outdoor temperature."""
@@ -174,7 +176,13 @@ class HeatPump(HeatSource):
         The heat pump's *rated* electrical input power is ``max_power / cop_rated``.
         The actual thermal output depends on the actual COP at the current
         outdoor temperature.
+
+        If the computed output is positive but below ``min_power`` the heat
+        pump cannot operate and the method returns 0.
         """
         electric_max = self.max_power / self.cop_rated  # rated electrical input [W]
         actual_cop = self.cop(outdoor_temp)
-        return electric_max * setpoint_fraction * actual_cop
+        power = electric_max * setpoint_fraction * actual_cop
+        if 0.0 < power < self.min_power:
+            return 0.0
+        return power

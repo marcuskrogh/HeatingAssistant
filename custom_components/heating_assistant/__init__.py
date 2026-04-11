@@ -18,6 +18,10 @@ YAML configuration example
           r_external: 0.04          # K/W
           setpoint: 21.0
           temp_sensor: sensor.living_room_temperature
+          # Multiple sensors can be used for averaging:
+          # temp_sensors:
+          #   - sensor.living_room_temp_north
+          #   - sensor.living_room_temp_south
           connections:
             - room: kitchen
               r_value: 0.2
@@ -45,6 +49,7 @@ YAML configuration example
           max_power: 5000           # W thermal
           cop_rated: 3.5
           cop_temp_ref: 7.0
+          min_power: 1000           # W thermal (minimum operating power)
           heater_entity: climate.heat_pump
 
       outdoor_temp_entity: sensor.outdoor_temperature
@@ -80,10 +85,12 @@ from .const import (
     CONF_SOURCE_EFFICIENCY,
     CONF_SOURCE_HEATER_ENTITY,
     CONF_SOURCE_MAX_POWER,
+    CONF_SOURCE_MIN_POWER,
     CONF_SOURCE_NAME,
     CONF_SOURCE_ROOM,
     CONF_SOURCE_TYPE,
     CONF_TEMP_SENSOR,
+    CONF_TEMP_SENSORS,
     CONF_THERMAL_MASS,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
@@ -94,6 +101,7 @@ from .const import (
     DEFAULT_DT,
     DEFAULT_EFFICIENCY,
     DEFAULT_HORIZON,
+    DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
@@ -135,6 +143,7 @@ _ROOM_SCHEMA = vol.Schema(
         vol.Optional(CONF_R_EXTERNAL, default=DEFAULT_R_EXTERNAL): vol.Coerce(float),
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
+        vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],
         vol.Optional(CONF_CONNECTIONS, default=[]): [_CONNECTION_SCHEMA],
         vol.Optional(CONF_WINDOWS, default=[]): [_WINDOW_SCHEMA],
     }
@@ -151,6 +160,7 @@ _SOURCE_SCHEMA = vol.Schema(
         vol.Optional(CONF_SOURCE_EFFICIENCY, default=DEFAULT_EFFICIENCY): vol.Coerce(float),
         vol.Optional(CONF_SOURCE_COP_RATED, default=DEFAULT_COP_RATED): vol.Coerce(float),
         vol.Optional(CONF_SOURCE_COP_TEMP_REF, default=DEFAULT_COP_TEMP_REF): vol.Coerce(float),
+        vol.Optional(CONF_SOURCE_MIN_POWER, default=DEFAULT_MIN_POWER): vol.Coerce(float),
         vol.Optional(CONF_SOURCE_HEATER_ENTITY): str,
     }
 )
