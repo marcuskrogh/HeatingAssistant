@@ -63,7 +63,7 @@ from typing import Any, Dict
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -116,6 +116,9 @@ from .coordinator import HeatingAssistantCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["climate", "sensor"]
+
+SERVICE_SIMULATE_THERMAL_RESPONSE = "simulate_thermal_response"
+SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
 
 # ---------------------------------------------------------------------------
 # YAML schema
@@ -226,6 +229,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # Register services (only once for the domain)
+    if not hass.services.has_service(DOMAIN, SERVICE_SIMULATE_THERMAL_RESPONSE):
+        _register_services(hass)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -247,3 +254,130 @@ class _MergedEntry:
         self.options = entry.options
         self.entry_id = entry.entry_id
         self.title = entry.title
+
+
+# ---------------------------------------------------------------------------
+# Service helpers
+# ---------------------------------------------------------------------------
+
+def _get_coordinator(hass: HomeAssistant) -> HeatingAssistantCoordinator:
+    """Return the first available coordinator instance."""
+    for entry_id, obj in hass.data.get(DOMAIN, {}).items():
+        if isinstance(obj, HeatingAssistantCoordinator):
+            return obj
+    raise ValueError("No Heating Assistant coordinator found")
+
+
+def _register_services(hass: HomeAssistant) -> None:
+    """Register domain services for setup assistance."""
+
+    async def handle_simulate(call: ServiceCall) -> None:
+        coordinator = _get_coordinator(hass)
+        result = coordinator.simulate_thermal_response(
+            room_name=call.data["room_name"],
+            initial_temp=call.data["initial_temp"],
+            outdoor_temp=call.data["outdoor_temp"],
+            heating_power=call.data["heating_power"],
+            duration_hours=call.data["duration_hours"],
+        )
+        # Fire an event so automations or the UI can consume the result
+        hass.bus.async_fire(
+            f"{DOMAIN}_simulation_result",
+            result,
+        )
+        # Also create a persistent notification for easy access
+        if "error" in result:
+            message = f"**Error:** {result['error']}"
+        else:
+            traj = result.get("trajectory", [])
+            traj_lines = "\n".join(
+                f"  {p['time_minutes']} min → {p['temperature']} °C"
+                for p in traj[-10:]  # last 10 data points
+            )
+            message = (
+                f"**Room:** {call.data['room_name']}\n"
+                f"**Heating power:** {call.data['heating_power']} W\n"
+                f"**Outdoor temp:** {call.data['outdoor_temp']} °C\n"
+                f"**Start temp:** {call.data['initial_temp']} °C\n\n"
+                f"**Final temperature:** {result['final_temperature']} °C\n"
+                f"**Steady-state temperature:** {result['steady_state_temperature']} °C\n"
+                f"**Time constant:** {result['time_constant_hours']} hours\n\n"
+                f"**Trajectory (last points):**\n{traj_lines}"
+            )
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – Thermal Response Simulation",
+                "message": message,
+                "notification_id": f"{DOMAIN}_simulation",
+            },
+            blocking=False,
+        )
+
+    async def handle_estimate(call: ServiceCall) -> None:
+        coordinator = _get_coordinator(hass)
+        result = coordinator.estimate_parameters(
+            room_name=call.data["room_name"],
+            heating_power=call.data["heating_power"],
+            outdoor_temp=call.data["outdoor_temp"],
+            initial_temp=call.data["initial_temp"],
+            final_temp=call.data["final_temp"],
+            duration_seconds=call.data["duration_seconds"],
+        )
+        hass.bus.async_fire(
+            f"{DOMAIN}_estimation_result",
+            result,
+        )
+        if "error" in result:
+            message = f"**Error:** {result['error']}"
+        else:
+            message = (
+                f"**Room:** {call.data['room_name']}\n\n"
+                f"**Estimated thermal_mass:** {result['estimated_thermal_mass']:,.0f} J/K\n"
+                f"**Estimated r_external:** {result['estimated_r_external']} K/W\n\n"
+                f"**Current thermal_mass:** {result['current_thermal_mass']:,.0f} J/K\n"
+                f"**Current r_external:** {result['current_r_external']} K/W\n\n"
+                f"**Notes:** {result['notes']}"
+            )
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – Parameter Estimation",
+                "message": message,
+                "notification_id": f"{DOMAIN}_estimation",
+            },
+            blocking=False,
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SIMULATE_THERMAL_RESPONSE,
+        handle_simulate,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("initial_temp"): vol.Coerce(float),
+                vol.Required("outdoor_temp"): vol.Coerce(float),
+                vol.Required("heating_power"): vol.Coerce(float),
+                vol.Required("duration_hours"): vol.Coerce(float),
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ESTIMATE_PARAMETERS,
+        handle_estimate,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("heating_power"): vol.Coerce(float),
+                vol.Required("outdoor_temp"): vol.Coerce(float),
+                vol.Required("initial_temp"): vol.Coerce(float),
+                vol.Required("final_temp"): vol.Coerce(float),
+                vol.Required("duration_seconds"): vol.Coerce(float),
+            }
+        ),
+    )
