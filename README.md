@@ -55,6 +55,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 11.1 [Studio apartment – single room, one electric heater](#111-studio-apartment--single-room-one-electric-heater)
     - 11.2 [Two-bedroom flat – rooms with heat pump and supplemental heater](#112-two-bedroom-flat--rooms-with-heat-pump-and-supplemental-heater)
     - 11.3 [Full house – five rooms, heat pump, and solar-facing windows](#113-full-house--five-rooms-heat-pump-and-solar-facing-windows)
+    - 11.4 [Multiple temperature sensors per room](#114-multiple-temperature-sensors-per-room)
 12. [Entity Reference](#12-entity-reference)
     - 12.1 [Climate entities](#121-climate-entities)
     - 12.2 [Sensor entities – predicted temperature](#122-sensor-entities--predicted-temperature)
@@ -870,7 +871,11 @@ rooms:
     thermal_mass: 8000000       # J/K  – optional
     r_external: 0.04            # K/W  – optional
     setpoint: 21.0              # °C   – optional
-    temp_sensor: sensor.living_room_temperature  # optional
+    temp_sensor: sensor.living_room_temperature  # optional – single sensor
+    # OR use a list of sensors whose readings are averaged:
+    # temp_sensors:
+    #   - sensor.living_room_temp_north
+    #   - sensor.living_room_temp_south
     connections:                # optional
       - ...
     windows:                    # optional
@@ -883,7 +888,8 @@ rooms:
 | `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 13.1](#131-thermal-mass-thermal_mass) for guidance. |
 | `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 13.2](#132-external-thermal-resistance-r_external) for guidance. |
 | `setpoint` | float | No | `21.0` | Initial desired temperature [°C].  Can be overridden at runtime by the `climate.*` entity. |
-| `temp_sensor` | string | No | — | Entity ID of a HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode. |
+| `temp_sensor` | string | No | — | Entity ID of a single HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode.  Cannot be combined with `temp_sensors`. |
+| `temp_sensors` | list of strings | No | — | List of HA sensor entity IDs for the room.  The coordinator reads all of them at each update cycle and uses their **arithmetic mean** as the measured room temperature.  Useful when the room is large or has significant temperature gradients.  Cannot be combined with `temp_sensor`. |
 | `connections` | list | No | `[]` | List of thermal connections to adjacent rooms. |
 | `windows` | list | No | `[]` | List of window definitions for solar gain calculation. |
 
@@ -942,6 +948,7 @@ heat_sources:
     heater_entity: climate.living_room_heat_pump  # optional
     cop_rated: 3.5              # optional (heat_pump only)
     cop_temp_ref: 7.0           # °C – optional (heat_pump only)
+    min_power: 800              # W thermal – optional (heat_pump only)
 ```
 
 **Common keys (all types)**
@@ -966,6 +973,7 @@ heat_sources:
 |-----|------|----------|---------|-------------|
 | `cop_rated` | float | No | `3.5` | Coefficient of Performance at the reference outdoor temperature.  Check your heat pump's datasheet for the value at the EN 14511 test point (usually A7/W35, i.e. 7 °C outdoor, 35 °C supply). |
 | `cop_temp_ref` | float | No | `7.0` | Outdoor temperature [°C] at which `cop_rated` was measured.  Default matches the EN 14511 A7/W35 test condition. |
+| `min_power` | float | No | `0.0` | Minimum thermal output [W] below which the heat pump shuts off entirely.  Real inverter-driven heat pumps have a lower modulation limit (often 20–30 % of rated capacity); if the optimal control signal would produce a positive output below this threshold the integration forces the unit off instead.  Set this to your unit's minimum continuous output to prevent short-cycling. |
 
 ---
 
@@ -1045,6 +1053,7 @@ heating_assistant:
       max_power: 4500         # 4.5 kW thermal at A7/W35
       cop_rated: 4.0
       cop_temp_ref: 7.0
+      min_power: 900          # unit cannot modulate below 20 % of rated capacity
       heater_entity: climate.mitsubishi_hp
 
     - name: backup_heater_living
@@ -1153,7 +1162,163 @@ heating_assistant:
       max_power: 7000
       cop_rated: 3.8
       cop_temp_ref: 7.0
+      min_power: 1400         # ~20 % of rated – prevents short-cycling
       heater_entity: climate.daikin_hp
+
+    - name: bedroom1_heater
+      type: electric_heater
+      room: bedroom_1
+      max_power: 1000
+      heater_entity: switch.bedroom1_heater
+
+    - name: bedroom2_heater
+      type: electric_heater
+      room: bedroom_2
+      max_power: 800
+      heater_entity: switch.bedroom2_heater
+```
+
+### 11.4 Multiple temperature sensors per room
+
+Large or irregularly shaped rooms often have noticeable temperature gradients — one corner near a radiator can read 2–3 °C warmer than the opposite wall.  Using a single sensor introduces a systematic bias into the model correction step.  By listing several sensors under `temp_sensors`, the coordinator automatically averages their readings before feeding the value to the thermal model.
+
+The same mechanism can also be used when you have redundant sensors and want to guard against a single sensor going offline (the average of the remaining valid readings is used).
+
+#### 11.4.1 Open-plan living/dining room with two sensors
+
+A large open-plan space has one sensor mounted near the dining area (north wall) and another near the sofa/TV area (south wall, closer to the heat pump).  The average of the two sensors gives a more representative room temperature.
+
+```yaml
+heating_assistant:
+  outdoor_temp_entity: sensor.outdoor_temperature
+
+  rooms:
+    - name: living_dining
+      thermal_mass: 12000000    # large open-plan space
+      r_external: 0.03
+      setpoint: 21.0
+      temp_sensors:             # averaged by the coordinator
+        - sensor.living_dining_temp_north
+        - sensor.living_dining_temp_south
+      windows:
+        - area: 5.0
+          orientation: 180      # south-facing glazing
+          tilt: 90
+
+  heat_sources:
+    - name: hp_living
+      type: heat_pump
+      room: living_dining
+      max_power: 5000
+      cop_rated: 4.0
+      cop_temp_ref: 7.0
+      min_power: 1000         # unit cannot modulate below 1 kW thermal
+      heater_entity: climate.living_heat_pump
+```
+
+#### 11.4.2 Full house with mixed single- and multi-sensor rooms
+
+This example combines rooms that use a single `temp_sensor` with rooms that use multiple sensors under `temp_sensors`.  The kitchen uses three sensors — one at counter height near the window, one above the stove, and one at seating height — to capture the wider temperature spread in a heavily used cooking space.
+
+```yaml
+heating_assistant:
+  outdoor_temp_entity: sensor.weather_station_outdoor
+  latitude: 55.68
+  longitude: 12.57
+  dt: 900
+  horizon: 6
+
+  rooms:
+    - name: hallway
+      thermal_mass: 2000000
+      r_external: 0.1
+      setpoint: 18.0
+      temp_sensor: sensor.hallway_temp   # single sensor is fine for a small hallway
+      connections:
+        - room: living_room
+          r_value: 0.25
+        - room: kitchen
+          r_value: 0.4
+        - room: bedroom_1
+          r_value: 0.3
+        - room: bedroom_2
+          r_value: 0.3
+
+    - name: living_room
+      thermal_mass: 9000000
+      r_external: 0.03
+      setpoint: 21.0
+      temp_sensors:            # two sensors: one at each end of the room
+        - sensor.living_room_temp_east
+        - sensor.living_room_temp_west
+      connections:
+        - room: hallway
+          r_value: 0.25
+        - room: kitchen
+          r_value: 0.2
+      windows:
+        - area: 5.0
+          orientation: 180
+          tilt: 90
+
+    - name: kitchen
+      thermal_mass: 5000000
+      r_external: 0.05
+      setpoint: 20.0
+      temp_sensors:            # three sensors averaged for representative reading
+        - sensor.kitchen_temp_window
+        - sensor.kitchen_temp_stove
+        - sensor.kitchen_temp_table
+      connections:
+        - room: hallway
+          r_value: 0.4
+        - room: living_room
+          r_value: 0.2
+      windows:
+        - area: 1.5
+          orientation: 90
+
+    - name: bedroom_1
+      thermal_mass: 4000000
+      r_external: 0.04
+      setpoint: 19.0
+      temp_sensor: sensor.bedroom1_temp
+      connections:
+        - room: hallway
+          r_value: 0.3
+      windows:
+        - area: 2.0
+          orientation: 180
+          tilt: 90
+
+    - name: bedroom_2
+      thermal_mass: 3500000
+      r_external: 0.045
+      setpoint: 19.0
+      temp_sensor: sensor.bedroom2_temp
+      connections:
+        - room: hallway
+          r_value: 0.3
+      windows:
+        - area: 1.5
+          orientation: 0
+          tilt: 90
+
+  heat_sources:
+    - name: main_heat_pump
+      type: heat_pump
+      room: living_room
+      max_power: 7000
+      cop_rated: 3.8
+      cop_temp_ref: 7.0
+      min_power: 1400         # ~20 % of rated – prevents short-cycling
+      heater_entity: climate.daikin_hp
+
+    - name: kitchen_heater
+      type: electric_heater
+      room: kitchen
+      max_power: 1200
+      heater_entity: switch.kitchen_heater
 
     - name: bedroom1_heater
       type: electric_heater
