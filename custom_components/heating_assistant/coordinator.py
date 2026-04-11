@@ -67,7 +67,7 @@ from .const import (
 )
 from .heat_sources import ElectricHeater, HeatPump, HeatSource
 from .thermal_model import HouseModel, Room, RoomConnection, Window
-from .controller import MPCController
+from .controller import HeatingMPCController
 from .solar_model import room_solar_gains
 
 _LOGGER = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if sensors:
                 self._temp_sensors[room_name] = sensors
 
-        self.controller = MPCController(
+        self.controller = HeatingMPCController(
             model=self.model,
             heat_sources=self.heat_sources,
             horizon=self._horizon,

@@ -1,73 +1,613 @@
 """
-Model Predictive Controller for the Heating Assistant integration.
+Model Predictive Controller.
 
-Algorithm
----------
-1. Collect the current room temperatures and outdoor temperature.
-2. Build a *N*-step prediction of disturbances (solar gains, outdoor temp).
-3. For each room, run a receding-horizon search over discrete power levels
-   (off / 33 % / 67 % / 100 %) to minimise a cost that balances:
-   - Temperature tracking error  (setpoint − predicted temperature)²
-   - Energy consumption (proportional to heater power)
-4. Apply only the first step of the optimal sequence (receding horizon).
+Generic Framework
+-----------------
+LinearDiscreteModel (abstract)
+    x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k],   y[k] = C x[k]
 
-The search is performed independently for each room because the inter-room
-coupling is weak over a single time step and independent optimisation avoids
-a combinatorial explosion.  A full multi-room joint optimisation can be
-added later without changing the public API.
+    x ∈ ℝⁿ  state,  u ∈ ℝᵐ  input (ZOH over each dt),
+    d ∈ ℝᵖ  disturbance,    y ∈ ℝˡ  output.
 
-Public API
-----------
-    controller = MPCController(model, heat_sources, config)
-    actions = controller.compute(outdoor_temp, solar_gains, now)
-    # actions: {source_name: setpoint_fraction (0‑1)}
+    Matrices A, B, E may depend on d (LPV); C is time-invariant.
+
+StateEstimator
+    Prediction-correction (Luenberger) observer:
+
+      x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]    (prediction)
+      x̂[k]  = x̂⁻[k]  +  L (y[k] − C x̂⁻[k])      (correction)
+
+    Default gain L = Cᵀ(CCᵀ)⁻¹ is the minimum-norm left inverse of C.
+    For full-state observation (C = Iₙ) this reduces to L = Iₙ, giving
+    x̂[k] = y[k] (direct measurement update).
+
+OptimalControlProblem
+    Receding-horizon quadratic regulator:
+
+      min_{U}   Σₖ₌₀ᴺ⁻¹ ‖x[k+1] − r‖²_Q + ‖u[k]‖²_R + ‖x[N] − r‖²_P
+      s.t.      x[k+1] = A x[k] + B u[k] + E d[k],   x[0] = x̂
+                u_min ≤ u[k] ≤ u_max
+
+    Lifted to U-space (batch formulation):
+
+      X = Ψ x₀ + Γ U + Λ D,
+      J = Uᵀ H U + 2 fᵀ U + const,
+      H = Γᵀ Q̄ Γ + R̄,   f = Γᵀ Q̄ (Ψ x₀ + Λ D − r̄)
+
+    Solved with projected gradient descent on the box-constrained QP.
+
+MPCController (generic)
+    Composes StateEstimator + OptimalControlProblem for any LinearDiscreteModel:
+
+      1. Estimate  x̂[k] ← estimator.update(y[k], d[k])
+      2. Optimise  U*    ← ocp.solve(x̂[k], D, r)
+      3. Apply     u[k]  = U*[0]                 (receding horizon)
+      4. Record    estimator.record_action(u[k])
+
+House-Heating Application
+--------------------------
+HouseThermalSystem(LinearDiscreteModel)
+    Wraps HouseModel + list of HeatSource objects.
+
+    State        x = [T₁, …, Tₙ]            (room temperatures, °C)
+    Input        u = [f₁, …, fₘ]            (setpoint fractions, ∈ [0, 1])
+    Disturbance  d = [T_out, Q_sol,1, …, Q_sol,n]  (°C and W)
+    Output       y = x                      (full-state observation, C = Iₙ)
+
+    The continuous-time RC model is ZOH-discretised at each step:
+
+      Ṫ = F T + G_u u + G_d d
+      F   = C_cap⁻¹ Aᶜ           (state matrix, n × n)
+      G_u = C_cap⁻¹ Φ(T_out)     (input matrix, n × m; LPV for heat-pump COP)
+      G_d = C_cap⁻¹ [b_ext | Iₙ] (disturbance matrix, n × (1+n))
+
+      A_d = expm(F dt)
+      B_d = F⁻¹(A_d − I) G_u
+      E_d = F⁻¹(A_d − I) G_d
+
+    On-off sources (e.g. connected to a switch entity) are treated as
+    continuous actuators; the fraction u ∈ [0, 1] is interpreted as the
+    duty cycle within each sampling interval dt.
+
+HeatingMPCController
+    Application facade: builds HouseThermalSystem + MPCController, adds
+    solar/outdoor forecasting, applies source set-points, and exposes the
+    visualisation properties consumed by the coordinator.
+
+    Public API (unchanged from the previous implementation):
+        controller = HeatingMPCController(model, heat_sources, ...)
+        actions    = controller.compute(outdoor_temp, solar_gains, now)
+        # controller.predictions, .outdoor_forecast, .solar_forecast,
+        # .heating_schedule
 """
 
 from __future__ import annotations
 
-import itertools
+from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 
 from .thermal_model import HouseModel
 from .heat_sources import HeatSource
 from .solar_model import room_solar_gains
 
 
-# Discrete control levels tried during the horizon search
-_LEVELS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+# ============================================================
+# Helpers
+# ============================================================
 
-# Asymmetric tracking-error penalty weights.
-# Being *too cold* (positive error = setpoint − temperature > 0) is penalised
-# with a weight of 1.0 so the controller strongly avoids under-heating.
-# Being *too warm* (negative error) is penalised with a smaller weight of 0.5
-# because mild overheating is less uncomfortable than under-heating and the
-# heat pump / heater will naturally reduce output as the room warms up.
-_PENALTY_TOO_COLD = 1.0
-_PENALTY_TOO_WARM = 0.5
+def _expm(M: np.ndarray) -> np.ndarray:
+    """
+    Matrix exponential via eigendecomposition.
+
+    For a real matrix M with distinct eigenvalues this is exact.
+    Thermal state matrices have real, distinct, negative eigenvalues
+    (stable RC circuit), so this approach is numerically well-conditioned.
+    """
+    vals, vecs = np.linalg.eig(M)
+    return np.real(vecs @ np.diag(np.exp(vals)) @ np.linalg.inv(vecs))
+
+
+def _zoh(Fc: np.ndarray, Gc: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Zero-order hold discretisation of ẋ = Fc x + Gc u.
+
+    Returns (A_d, B_d) such that x[k+1] = A_d x[k] + B_d u[k].
+
+    Using:  A_d = expm(Fc dt),   B_d = Fc⁻¹ (A_d − I) Gc
+    """
+    n = Fc.shape[0]
+    A_d = _expm(Fc * dt)
+    B_d = np.linalg.solve(Fc, (A_d - np.eye(n)) @ Gc)
+    return A_d, B_d
+
+
+def _solve_qp_box(
+    H: np.ndarray,
+    f: np.ndarray,
+    lb: np.ndarray,
+    ub: np.ndarray,
+    n_iter: int = 300,
+    tol: float = 1e-8,
+) -> np.ndarray:
+    """
+    Solve the box-constrained QP  min_U ½ Uᵀ H U + fᵀ U  s.t. lb ≤ U ≤ ub
+    using projected gradient descent.
+
+    Step size α = 1 / λ_max(H) guarantees convergence.
+    Initialised from the clamped unconstrained minimiser.
+    """
+    try:
+        U = np.clip(np.linalg.solve(H, -f), lb, ub)
+    except np.linalg.LinAlgError:
+        U = np.clip(np.zeros_like(f), lb, ub)
+
+    lam_max = float(np.linalg.eigvalsh(H).max())
+    alpha = 1.0 / max(lam_max, 1e-8)
+
+    for _ in range(n_iter):
+        U_new = np.clip(U - alpha * (H @ U + f), lb, ub)
+        if np.linalg.norm(U_new - U, np.inf) < tol:
+            break
+        U = U_new
+    return U
+
+
+# ============================================================
+# Generic framework
+# ============================================================
+
+class LinearDiscreteModel(ABC):
+    """
+    Abstract interface for a linear discrete-time system:
+
+      x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k],   y[k] = C x[k]
+
+    Matrices A, B, E may depend on the current disturbance d (LPV model);
+    C is time-invariant. Subclasses implement ``discretize`` to return
+    the ZOH-discretised matrices for a given d.
+    """
+
+    @property
+    @abstractmethod
+    def n_x(self) -> int:
+        """State dimension n."""
+
+    @property
+    @abstractmethod
+    def n_u(self) -> int:
+        """Input dimension m."""
+
+    @property
+    @abstractmethod
+    def n_d(self) -> int:
+        """Disturbance dimension p."""
+
+    @property
+    @abstractmethod
+    def C(self) -> np.ndarray:
+        """Output matrix C ∈ ℝˡˣⁿ."""
+
+    @property
+    @abstractmethod
+    def x(self) -> np.ndarray:
+        """Current state x ∈ ℝⁿ."""
+
+    @x.setter
+    @abstractmethod
+    def x(self, val: np.ndarray) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def x_ref(self) -> np.ndarray:
+        """Reference / setpoint x_ref ∈ ℝⁿ."""
+
+    @property
+    @abstractmethod
+    def u_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Box constraint on inputs (u_min, u_max), each ∈ ℝᵐ."""
+
+    @abstractmethod
+    def discretize(self, d: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Return ZOH-discretised matrices (A_d, B_d, E_d) for disturbance d.
+
+        Allows LPV models to update B_d with the current operating point.
+        """
+
+
+class StateEstimator:
+    """
+    Prediction-correction (Luenberger) observer.
+
+      Prediction:  x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]
+      Correction:  x̂[k]  = x̂⁻[k] + L (y[k] − C x̂⁻[k])
+
+    Parameters
+    ----------
+    model : LinearDiscreteModel
+    L : (n_x, n_y) observer gain, optional.
+        Defaults to Cᵀ(CCᵀ)⁻¹, the minimum-norm left inverse of C.
+        For full-state observation (C = I) this gives L = I and x̂ = y.
+    """
+
+    def __init__(
+        self,
+        model: LinearDiscreteModel,
+        L: Optional[np.ndarray] = None,
+    ) -> None:
+        self._model = model
+        C = model.C
+        self._L: np.ndarray = (
+            L if L is not None
+            else np.linalg.solve(C @ C.T, C).T   # Cᵀ(CCᵀ)⁻¹
+        )
+        self._x_hat: np.ndarray = model.x.copy()
+        self._u_prev: np.ndarray = np.zeros(model.n_u)
+        self._d_prev: np.ndarray = np.zeros(model.n_d)
+        self._first: bool = True
+
+    @property
+    def x_hat(self) -> np.ndarray:
+        """Current state estimate x̂[k]."""
+        return self._x_hat.copy()
+
+    def update(self, y: np.ndarray, d: np.ndarray) -> np.ndarray:
+        """
+        Assimilate measurement y[k] and return corrected estimate x̂[k].
+
+        On the first call the state is bootstrapped directly from the
+        measurement, avoiding a spurious prediction step.
+        """
+        if self._first:
+            self._x_hat = self._L @ y
+            self._first = False
+        else:
+            A, B, E = self._model.discretize(self._d_prev)
+            x_pred = A @ self._x_hat + B @ self._u_prev + E @ self._d_prev
+            self._x_hat = x_pred + self._L @ (y - self._model.C @ x_pred)
+
+        self._d_prev = d.copy()
+        return self._x_hat.copy()
+
+    def record_action(self, u: np.ndarray) -> None:
+        """Record the applied action u[k] for use in the next prediction."""
+        self._u_prev = u.copy()
+
+
+class OptimalControlProblem:
+    """
+    Receding-horizon quadratic regulator (batch QP formulation).
+
+    Cost:
+      J(U) = Σₖ₌₀ᴺ⁻¹ ‖x[k+1] − r‖²_Q + ‖u[k]‖²_R + ‖x[N] − r‖²_P
+
+    Batch form (X = Ψ x₀ + Γ U + Λ D):
+      J(U) = Uᵀ H U + 2 fᵀ U + const
+      H = Γᵀ Q̄ Γ + R̄,   f = Γᵀ Q̄ (Ψ x₀ + Λ D − r̄)
+
+    Solved with projected gradient on the box constraint u_min ≤ u ≤ u_max.
+
+    Parameters
+    ----------
+    model : LinearDiscreteModel
+    N     : prediction horizon.
+    Q     : (n_x, n_x) stage tracking cost.
+    R     : (n_u, n_u) input cost.
+    P     : (n_x, n_x) terminal cost; defaults to Q.
+    """
+
+    def __init__(
+        self,
+        model: LinearDiscreteModel,
+        N: int,
+        Q: np.ndarray,
+        R: np.ndarray,
+        P: Optional[np.ndarray] = None,
+    ) -> None:
+        self._model = model
+        self._N = N
+        self._Q = Q
+        self._R = R
+        self._P = P if P is not None else Q.copy()
+
+    def solve(
+        self,
+        x0: np.ndarray,
+        D: np.ndarray,
+        x_ref: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Solve the OCP starting from x0.
+
+        Parameters
+        ----------
+        x0    : (n_x,) current state estimate x̂.
+        D     : (N, n_d) disturbance forecast.
+        x_ref : (n_x,) reference (repeated for all horizon steps).
+
+        Returns
+        -------
+        U : (N, n_u) optimal input sequence (first row is applied).
+        X : (N, n_x) predicted state trajectory x[1], …, x[N].
+        """
+        N = self._N
+        n_x, n_u, n_d = self._model.n_x, self._model.n_u, self._model.n_d
+
+        # LPV: linearise B at the current disturbance d[0]
+        A, B, E = self._model.discretize(D[0])
+
+        # ── Powers of A: A_pow[k] = Aᵏ ─────────────────────────────────
+        A_pow = [np.eye(n_x)]
+        for _ in range(N):
+            A_pow.append(A @ A_pow[-1])
+
+        # ── Prediction matrices ──────────────────────────────────────────
+        # x[k+1] = A^{k+1} x₀ + Σⱼ₌₀ᵏ A^{k−j} (B u[j] + E d[j])
+        Psi    = np.vstack([A_pow[k + 1] for k in range(N)])  # (N·n, n)
+        Gamma  = np.zeros((N * n_x, N * n_u))                 # (N·n, N·m)
+        Lambda = np.zeros((N * n_x, N * n_d))                 # (N·n, N·p)
+
+        for k in range(N):
+            for j in range(k + 1):
+                row = slice(k * n_x, (k + 1) * n_x)
+                Gamma [row, j * n_u:(j + 1) * n_u] = A_pow[k - j] @ B
+                Lambda[row, j * n_d:(j + 1) * n_d] = A_pow[k - j] @ E
+
+        # ── Block-diagonal cost matrices (terminal block uses P) ─────────
+        Q_bar = np.kron(np.eye(N), self._Q)
+        Q_bar[(N - 1) * n_x:, (N - 1) * n_x:] = self._P
+        R_bar = np.kron(np.eye(N), self._R)
+
+        # ── QP matrices ──────────────────────────────────────────────────
+        E_free = Psi @ x0 + Lambda @ D.flatten() - np.tile(x_ref, N)
+        H = Gamma.T @ Q_bar @ Gamma + R_bar
+        f = Gamma.T @ Q_bar @ E_free
+
+        # ── Projected gradient on box constraint ─────────────────────────
+        u_min, u_max = self._model.u_bounds
+        U_flat = _solve_qp_box(H, f, np.tile(u_min, N), np.tile(u_max, N))
+
+        # ── Predicted trajectory ─────────────────────────────────────────
+        X_flat = Psi @ x0 + Gamma @ U_flat + Lambda @ D.flatten()
+
+        return U_flat.reshape(N, n_u), X_flat.reshape(N, n_x)
 
 
 class MPCController:
     """
-    Receding-horizon model-based controller.
+    Generic model predictive controller.
+
+    Composes a StateEstimator and an OptimalControlProblem for any
+    LinearDiscreteModel and implements the receding-horizon policy:
+
+      1. Estimate  x̂[k] ← estimator.update(y[k], d[k])
+      2. Optimise  U*    ← ocp.solve(x̂[k], D[k:k+N], r)
+      3. Apply     u[k]  = U*[0]   (receding horizon, discard rest)
+      4. Record    estimator.record_action(u[k])
 
     Parameters
     ----------
-    model : HouseModel
-        Thermal model of the house.
-    heat_sources : list of HeatSource
-        All controllable heat sources.
-    horizon : int
-        Prediction horizon (number of time steps).
-    dt : float
-        Time step in seconds.
-    latitude : float
-        Site latitude [degrees] (for solar prediction).
-    longitude : float
-        Site longitude [degrees].
-    energy_weight : float
-        Weight on the energy-consumption term in the cost function.
-        Higher values favour lower energy use over tighter temperature tracking.
+    model     : LinearDiscreteModel
+    estimator : StateEstimator
+    ocp       : OptimalControlProblem
+    """
+
+    def __init__(
+        self,
+        model: LinearDiscreteModel,
+        estimator: StateEstimator,
+        ocp: OptimalControlProblem,
+    ) -> None:
+        self._model = model
+        self._estimator = estimator
+        self._ocp = ocp
+
+    def step(
+        self,
+        y: np.ndarray,
+        D: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Execute one MPC step.
+
+        Parameters
+        ----------
+        y : (n_y,) current measurement vector.
+        D : (N, n_d) disturbance forecast over the horizon.
+
+        Returns
+        -------
+        u     : (n_u,) optimal input for the current step.
+        U_seq : (N, n_u) full optimal input sequence.
+        X_seq : (N, n_x) predicted state trajectory.
+        """
+        x_hat = self._estimator.update(y, D[0])
+        U_seq, X_seq = self._ocp.solve(x_hat, D, self._model.x_ref)
+        u = U_seq[0]
+        self._estimator.record_action(u)
+        return u, U_seq, X_seq
+
+
+# ============================================================
+# House-heating application
+# ============================================================
+
+class HouseThermalSystem(LinearDiscreteModel):
+    """
+    House thermal model as a linear discrete-time system.
+
+    Continuous-time RC circuit per room i:
+
+      Cᵢ Ṫᵢ = Σⱼ∈adj(i) (Tⱼ − Tᵢ)/Rᵢⱼ + (T_out − Tᵢ)/Rᵢ,ext
+              + Q_heat,i + Q_sol,i
+
+    In matrix form: Ṫ = F T + G_u(T_out) u + G_d d
+
+      F        = C_cap⁻¹ Aᶜ              (n × n, time-invariant)
+      G_u[:,j] = φⱼ(T_out) / Cᵢ         (n × m, LPV via heat-pump COP)
+      G_d      = C_cap⁻¹ [b_ext | Iₙ]   (n × (1+n), time-invariant)
+      d        = [T_out, Q_sol,1, …, Q_sol,n]
+
+    ZOH discretisation (exact for piecewise-constant inputs):
+      A_d = expm(F dt),   B_d = F⁻¹(A_d − I) G_u,   E_d = F⁻¹(A_d − I) G_d
+
+    On-off sources are modelled with a duty-cycle relaxation: the MPC
+    optimises the continuous fraction u ∈ [0, 1], representing the
+    fraction of dt for which the source is active.  The coordinator
+    maps this fraction to on/off commands for switch-type entities.
+
+    Parameters
+    ----------
+    model   : HouseModel
+    sources : list of HeatSource (index j → source j)
+    dt      : sampling interval [s]
+    """
+
+    def __init__(
+        self,
+        model: HouseModel,
+        sources: List[HeatSource],
+        dt: float,
+    ) -> None:
+        self._model = model
+        self._sources = sources
+        self._dt = dt
+        self._room_list: List[str] = model.room_names
+        self._room_idx: Dict[str, int] = {
+            name: i for i, name in enumerate(self._room_list)
+        }
+        n = len(self._room_list)
+
+        # Capacitance vector C_cap[i] = Cᵢ  [J/K]
+        self._C_cap = np.array(
+            [model.rooms[name].thermal_mass for name in self._room_list]
+        )
+
+        # Continuous state matrix F = C_cap⁻¹ Aᶜ
+        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]
+
+        # Continuous disturbance matrix G_d = C_cap⁻¹ [b_ext | Iₙ]
+        self._G_d: np.ndarray = np.zeros((n, 1 + n))
+        self._G_d[:, 0] = model._B_ext / self._C_cap          # outdoor temp
+        for i in range(n):
+            self._G_d[i, 1 + i] = 1.0 / self._C_cap[i]       # solar gain room i
+
+        # Full-state observation: C = Iₙ
+        self._C_mat: np.ndarray = np.eye(n)
+
+    # ── LinearDiscreteModel interface ────────────────────────────────────
+
+    @property
+    def n_x(self) -> int:
+        return len(self._room_list)
+
+    @property
+    def n_u(self) -> int:
+        return len(self._sources)
+
+    @property
+    def n_d(self) -> int:
+        return 1 + len(self._room_list)   # T_out + n solar gains
+
+    @property
+    def C(self) -> np.ndarray:
+        return self._C_mat
+
+    @property
+    def x(self) -> np.ndarray:
+        return np.array(
+            [self._model.rooms[name].temperature for name in self._room_list]
+        )
+
+    @x.setter
+    def x(self, val: np.ndarray) -> None:
+        for i, name in enumerate(self._room_list):
+            self._model.rooms[name].temperature = float(val[i])
+
+    @property
+    def x_ref(self) -> np.ndarray:
+        return np.array(
+            [self._model.rooms[name].setpoint for name in self._room_list]
+        )
+
+    @property
+    def u_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
+        return np.zeros(self.n_u), np.ones(self.n_u)
+
+    def discretize(self, d: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        ZOH-discretise the RC model at outdoor temperature d[0].
+
+        The input matrix G_u depends on T_out because heat-pump COP is
+        temperature-dependent (LPV update at each controller step).
+        """
+        outdoor_temp = float(d[0])
+        n, m = self.n_x, self.n_u
+
+        G_u = np.zeros((n, m))
+        for j, src in enumerate(self._sources):
+            i = self._room_idx[src.room]
+            # Maximum thermal power per unit fraction at current T_out
+            G_u[i, j] = src.thermal_power(1.0, outdoor_temp) / self._C_cap[i]
+
+        A_d, B_d = _zoh(self._F, G_u, self._dt)
+        _, E_d    = _zoh(self._F, self._G_d, self._dt)
+        return A_d, B_d, E_d
+
+    # ── Convenience helpers for the application layer ────────────────────
+
+    def disturbance_vector(
+        self,
+        outdoor_temp: float,
+        solar_gains: Dict[str, float],
+    ) -> np.ndarray:
+        """Pack outdoor temperature and per-room solar gains into d ∈ ℝᵖ."""
+        d = np.zeros(self.n_d)
+        d[0] = outdoor_temp
+        for name, gain in solar_gains.items():
+            if name in self._room_idx:
+                d[1 + self._room_idx[name]] = gain
+        return d
+
+    def heating_powers(
+        self,
+        u: np.ndarray,
+        outdoor_temp: float,
+    ) -> Dict[str, float]:
+        """Convert fractions u to per-room total thermal power [W]."""
+        powers: Dict[str, float] = {name: 0.0 for name in self._room_list}
+        for j, src in enumerate(self._sources):
+            powers[src.room] += src.thermal_power(float(u[j]), outdoor_temp)
+        return powers
+
+
+class HeatingMPCController:
+    """
+    Application facade for house-heating MPC.
+
+    Builds a HouseThermalSystem, StateEstimator, OptimalControlProblem, and
+    the generic MPCController, then provides the coordinator-facing API:
+
+      actions = controller.compute(outdoor_temp, solar_gains, now)
+
+    Forecasts
+    ---------
+    Outdoor temperature: persistence (constant at the current measurement).
+    Solar gains: computed from the solar geometry model for each horizon step.
+
+    Parameters
+    ----------
+    model         : HouseModel
+    heat_sources  : list of HeatSource
+    horizon       : prediction horizon N (number of time steps)
+    dt            : sampling interval [s]
+    latitude      : site latitude [°]
+    longitude     : site longitude [°]
+    energy_weight : scalar weight on ‖u‖² in the cost (favours energy saving)
     """
 
     def __init__(
@@ -80,53 +620,54 @@ class MPCController:
         longitude: float = 12.0,
         energy_weight: float = 0.01,
     ) -> None:
-        self._model = model
         self._sources = heat_sources
         self._horizon = horizon
         self._dt = dt
         self._latitude = latitude
         self._longitude = longitude
-        self._energy_weight = energy_weight
 
-        # Group sources by room
-        self._room_sources: Dict[str, List[HeatSource]] = {}
-        for src in heat_sources:
-            self._room_sources.setdefault(src.room, []).append(src)
+        # Build the linear discrete-time model
+        self._system = HouseThermalSystem(model, heat_sources, dt)
 
-        # Stored after each compute(): predicted temperature trajectory
-        self._predictions: List[Dict[str, float]] = []
-        # Stored after each compute(): forecast disturbance data for visualisation
-        self._outdoor_forecast: List[float] = []
-        self._solar_forecast: List[Dict[str, float]] = []
+        # Cost matrices: Q = I (tracking), R = energy_weight·I, P = Q (terminal)
+        n_x, n_u = self._system.n_x, self._system.n_u
+        Q = np.eye(n_x)
+        R = energy_weight * np.eye(n_u)
+
+        # Assemble generic MPC
+        estimator = StateEstimator(self._system)
+        ocp       = OptimalControlProblem(self._system, horizon, Q, R)
+        self._mpc = MPCController(self._system, estimator, ocp)
+
+        # Visualisation data (populated after each compute())
+        self._predictions:      List[Dict[str, float]] = []
+        self._outdoor_forecast: List[float]            = []
+        self._solar_forecast:   List[Dict[str, float]] = []
         self._heating_schedule: List[Dict[str, float]] = []
 
-    # ------------------------------------------------------------------
-    # Public properties
-    # ------------------------------------------------------------------
+    # ── Visualisation properties ─────────────────────────────────────────
 
     @property
     def predictions(self) -> List[Dict[str, float]]:
-        """Return the latest prediction trajectory (list of {room: temp} per step)."""
+        """Latest predicted temperature trajectory [{room: °C}, …]."""
         return self._predictions
 
     @property
     def outdoor_forecast(self) -> List[float]:
-        """Return the outdoor temperature forecast used in the last compute."""
+        """Outdoor temperature forecast used in the last compute()."""
         return self._outdoor_forecast
 
     @property
     def solar_forecast(self) -> List[Dict[str, float]]:
-        """Return the solar gain forecast used in the last compute."""
+        """Solar gain forecast used in the last compute()."""
         return self._solar_forecast
 
     @property
     def heating_schedule(self) -> List[Dict[str, float]]:
-        """Return the planned heating power schedule from the last compute."""
+        """Planned heating power schedule from the last compute()."""
         return self._heating_schedule
 
-    # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
+    # ── Main entry point ─────────────────────────────────────────────────
 
     def compute(
         self,
@@ -141,207 +682,91 @@ class MPCController:
         ----------
         outdoor_temp : float
             Current outdoor temperature [°C].
-        solar_gains : dict, optional
-            Pre-computed solar gains {room: W}.  If None they are computed
-            from the solar model using ``now`` and the stored lat/lon.
+        solar_gains  : dict, optional
+            Pre-computed solar gains {room: W}.  If None, computed from
+            the solar model using ``now`` and the stored lat/lon.
         now : datetime, optional
             Current time (UTC).  Required when solar_gains is None.
 
         Returns
         -------
         dict
-            ``{source_name: setpoint_fraction}`` where setpoint_fraction ∈ [0, 1].
+            ``{source_name: setpoint_fraction}`` where fraction ∈ [0, 1].
         """
         if now is None:
             now = datetime.now(tz=timezone.utc)
-
         if solar_gains is None:
-            solar_gains = self._compute_solar_gains(now)
+            solar_gains = self._current_solar(now)
 
-        # Build prediction arrays for the horizon
-        outdoor_temps = self._forecast_outdoor(outdoor_temp)
-        solar_schedules = self._forecast_solar(now)
+        # ── Build disturbance forecast D ∈ ℝ^(N × p) ────────────────────
+        outdoor_seq = self._forecast_outdoor(outdoor_temp)
+        solar_seq   = self._forecast_solar(now)
+
+        D = np.vstack([
+            self._system.disturbance_vector(outdoor_seq[k], solar_seq[k])
+            for k in range(self._horizon)
+        ])                                              # (N, n_d)
 
         # Store forecasts for visualisation
-        self._outdoor_forecast = list(outdoor_temps)
-        self._solar_forecast = [dict(s) for s in solar_schedules]
+        self._outdoor_forecast = list(outdoor_seq)
+        self._solar_forecast   = [dict(s) for s in solar_seq]
 
+        # ── Current measurement y = room temperatures ─────────────────────
+        y = self._system.x                              # (n_x,)
+
+        # ── MPC step ──────────────────────────────────────────────────────
+        u_opt, U_seq, X_seq = self._mpc.step(y, D)
+
+        # ── Apply actions to heat sources ─────────────────────────────────
         actions: Dict[str, float] = {}
+        for j, src in enumerate(self._sources):
+            frac = float(np.clip(u_opt[j], 0.0, 1.0))
+            actions[src.name] = frac
+            src.set_power(frac, outdoor_temp)
 
-        # Optimise each room independently
-        for room_name in self._model.room_names:
-            sources_in_room = self._room_sources.get(room_name, [])
-            if not sources_in_room:
-                continue
-
-            best_cost = float("inf")
-            best_fractions = {src.name: 0.0 for src in sources_in_room}
-
-            # Generate all combinations of discrete levels for sources in this room
-            level_grid = list(itertools.product(_LEVELS, repeat=len(sources_in_room)))
-
-            for fractions in level_grid:
-                frac_map = {
-                    src.name: fractions[k]
-                    for k, src in enumerate(sources_in_room)
-                }
-                cost = self._rollout_cost(
-                    room_name,
-                    frac_map,
-                    outdoor_temps,
-                    solar_schedules,
-                    sources_in_room,
-                )
-                if cost < best_cost:
-                    best_cost = cost
-                    best_fractions = dict(frac_map)
-
-            actions.update(best_fractions)
-
-        # Apply and return
-        for src in self._sources:
-            src.set_power(actions.get(src.name, 0.0), outdoor_temp)
-
-        # Run a final prediction with the optimal actions and store it
-        self._predictions = self._compute_predictions(
-            actions, outdoor_temps, solar_schedules, outdoor_temp,
-        )
+        # ── Store visualisation data ──────────────────────────────────────
+        room_list = self._system._room_list
+        self._predictions = [
+            {name: float(X_seq[k, i]) for i, name in enumerate(room_list)}
+            for k in range(self._horizon)
+        ]
+        self._heating_schedule = [
+            self._system.heating_powers(U_seq[k], outdoor_seq[k])
+            for k in range(self._horizon)
+        ]
 
         return actions
 
-    # ------------------------------------------------------------------
-    # Prediction trajectory (for visualisation)
-    # ------------------------------------------------------------------
-
-    def _compute_predictions(
-        self,
-        actions: Dict[str, float],
-        outdoor_temps: List[float],
-        solar_schedules: List[Dict[str, float]],
-        outdoor_temp: float,
-    ) -> List[Dict[str, float]]:
-        """Run a forward simulation with the chosen actions to build a trajectory."""
-        heat_schedule = []
-        for k in range(self._horizon):
-            heat_k: Dict[str, float] = {}
-            for room_name in self._model.room_names:
-                sources = self._room_sources.get(room_name, [])
-                heat_k[room_name] = sum(
-                    src.thermal_power(actions.get(src.name, 0.0), outdoor_temps[k])
-                    for src in sources
-                )
-            heat_schedule.append(heat_k)
-
-        # Store the heating schedule for visualisation
-        self._heating_schedule = [dict(h) for h in heat_schedule]
-
-        return self._model.predict(
-            horizon=self._horizon,
-            dt=self._dt,
-            heat_schedule=heat_schedule,
-            outdoor_temps=outdoor_temps,
-            solar_gain_schedule=solar_schedules,
-        )
-
-    # ------------------------------------------------------------------
-    # Cost function (receding horizon rollout)
-    # ------------------------------------------------------------------
-
-    def _rollout_cost(
-        self,
-        room_name: str,
-        frac_map: Dict[str, float],
-        outdoor_temps: List[float],
-        solar_schedules: List[Dict[str, float]],
-        sources: List[HeatSource],
-    ) -> float:
-        """
-        Simulate the house model over the prediction horizon with a constant
-        control action and return the total discounted cost.
-        """
-        room = self._model.rooms[room_name]
-        setpoint = room.setpoint
-
-        # Build heat-input schedule: same action for all horizon steps
-        heat_schedule = []
-        for k in range(self._horizon):
-            q_room = sum(
-                src.thermal_power(frac_map[src.name], outdoor_temps[k])
-                for src in sources
-            )
-            # Other rooms keep their current heater powers (constant)
-            heat_k: Dict[str, float] = {}
-            for r in self._model.room_names:
-                if r == room_name:
-                    heat_k[r] = q_room
-                else:
-                    heat_k[r] = sum(
-                        s.current_power
-                        for s in self._room_sources.get(r, [])
-                    )
-            heat_schedule.append(heat_k)
-
-        predictions = self._model.predict(
-            horizon=self._horizon,
-            dt=self._dt,
-            heat_schedule=heat_schedule,
-            outdoor_temps=outdoor_temps,
-            solar_gain_schedule=solar_schedules,
-        )
-
-        cost = 0.0
-        discount = 1.0
-        for k, pred in enumerate(predictions):
-            temp = pred.get(room_name, setpoint)
-            # Asymmetric tracking error: penalise under-heating more than over-heating.
-            # See module-level _PENALTY_TOO_COLD / _PENALTY_TOO_WARM constants.
-            error = setpoint - temp
-            tracking = (_PENALTY_TOO_COLD if error >= 0 else _PENALTY_TOO_WARM) * error ** 2
-            # Energy cost (proportional to total fraction)
-            energy = self._energy_weight * sum(frac_map.values())
-            cost += discount * (tracking + energy)
-            discount *= 0.9  # discount factor per step
-
-        return cost
-
-    # ------------------------------------------------------------------
-    # Disturbance forecasts
-    # ------------------------------------------------------------------
+    # ── Disturbance forecasts ─────────────────────────────────────────────
 
     def _forecast_outdoor(self, current: float) -> List[float]:
-        """
-        Simple persistence forecast: outdoor temperature stays constant.
-        A real implementation would pull a weather-API forecast.
-        """
+        """Persistence forecast: outdoor temperature constant over horizon."""
         return [current] * self._horizon
 
     def _forecast_solar(self, now: datetime) -> List[Dict[str, float]]:
-        """
-        Predict solar gains for each future time step using the solar model.
-        """
+        """Solar gain forecast using the geometric solar model."""
         schedules = []
         for k in range(self._horizon):
-            future = now + timedelta(seconds=self._dt * k)
-            gains = {
+            t = now + timedelta(seconds=self._dt * k)
+            schedules.append({
                 name: room_solar_gains(
-                    self._model.rooms[name].windows,
-                    future,
+                    self._system._model.rooms[name].windows,
+                    t,
                     self._latitude,
                     self._longitude,
                 )
-                for name in self._model.room_names
-            }
-            schedules.append(gains)
+                for name in self._system._room_list
+            })
         return schedules
 
-    def _compute_solar_gains(self, now: datetime) -> Dict[str, float]:
-        """Compute current-step solar gains for all rooms."""
+    def _current_solar(self, now: datetime) -> Dict[str, float]:
+        """Current-step solar gains for all rooms."""
         return {
             name: room_solar_gains(
-                self._model.rooms[name].windows,
+                self._system._model.rooms[name].windows,
                 now,
                 self._latitude,
                 self._longitude,
             )
-            for name in self._model.room_names
+            for name in self._system._room_list
         }
