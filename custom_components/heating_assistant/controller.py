@@ -95,6 +95,10 @@ class MPCController:
 
         # Stored after each compute(): predicted temperature trajectory
         self._predictions: List[Dict[str, float]] = []
+        # Stored after each compute(): forecast disturbance data for visualisation
+        self._outdoor_forecast: List[float] = []
+        self._solar_forecast: List[Dict[str, float]] = []
+        self._heating_schedule: List[Dict[str, float]] = []
 
     # ------------------------------------------------------------------
     # Public properties
@@ -104,6 +108,21 @@ class MPCController:
     def predictions(self) -> List[Dict[str, float]]:
         """Return the latest prediction trajectory (list of {room: temp} per step)."""
         return self._predictions
+
+    @property
+    def outdoor_forecast(self) -> List[float]:
+        """Return the outdoor temperature forecast used in the last compute."""
+        return self._outdoor_forecast
+
+    @property
+    def solar_forecast(self) -> List[Dict[str, float]]:
+        """Return the solar gain forecast used in the last compute."""
+        return self._solar_forecast
+
+    @property
+    def heating_schedule(self) -> List[Dict[str, float]]:
+        """Return the planned heating power schedule from the last compute."""
+        return self._heating_schedule
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -142,6 +161,10 @@ class MPCController:
         # Build prediction arrays for the horizon
         outdoor_temps = self._forecast_outdoor(outdoor_temp)
         solar_schedules = self._forecast_solar(now)
+
+        # Store forecasts for visualisation
+        self._outdoor_forecast = list(outdoor_temps)
+        self._solar_forecast = [dict(s) for s in solar_schedules]
 
         actions: Dict[str, float] = {}
 
@@ -208,6 +231,9 @@ class MPCController:
                     for src in sources
                 )
             heat_schedule.append(heat_k)
+
+        # Store the heating schedule for visualisation
+        self._heating_schedule = [dict(h) for h in heat_schedule]
 
         return self._model.predict(
             horizon=self._horizon,
