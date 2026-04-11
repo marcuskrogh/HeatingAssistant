@@ -1,0 +1,135 @@
+simulate_thermal_response:
+  name: Simulate thermal response
+  description: >
+    Run a standalone thermal simulation showing how a room responds to constant
+    heating power over a specified duration.  Useful during setup to verify that
+    configured thermal parameters and heater power are realistic.  The result is
+    returned as a persistent notification containing the predicted temperature
+    trajectory, time constant, and steady-state temperature.
+  fields:
+    room_name:
+      name: Room name
+      description: Name of the room to simulate (must match a configured room name).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    initial_temp:
+      name: Initial temperature
+      description: Starting temperature of the room [°C].
+      required: true
+      default: 15.0
+      example: 15.0
+      selector:
+        number:
+          min: -10
+          max: 40
+          step: 0.5
+          unit_of_measurement: "°C"
+    outdoor_temp:
+      name: Outdoor temperature
+      description: Outdoor temperature held constant during the simulation [°C].
+      required: true
+      default: 0.0
+      example: 0.0
+      selector:
+        number:
+          min: -30
+          max: 40
+          step: 0.5
+          unit_of_measurement: "°C"
+    heating_power:
+      name: Heating power
+      description: Constant thermal power applied to the room [W].
+      required: true
+      default: 2000
+      example: 2000
+      selector:
+        number:
+          min: 0
+          max: 20000
+          step: 100
+          unit_of_measurement: "W"
+    duration_hours:
+      name: Duration
+      description: Length of the simulation [hours].
+      required: true
+      default: 8.0
+      example: 8.0
+      selector:
+        number:
+          min: 1
+          max: 48
+          step: 1
+          unit_of_measurement: "h"
+
+estimate_parameters:
+  name: Estimate thermal parameters
+  description: >
+    Back-calculate thermal_mass and r_external from an observed heating
+    experiment.  Heat a room with known power for a known time and record the
+    start and end temperatures.  The service returns estimated values as a
+    persistent notification.
+  fields:
+    room_name:
+      name: Room name
+      description: Name of the room (must match a configured room name).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    heating_power:
+      name: Heating power
+      description: Constant thermal power applied during the experiment [W].
+      required: true
+      example: 2000
+      selector:
+        number:
+          min: 0
+          max: 20000
+          step: 100
+          unit_of_measurement: "W"
+    outdoor_temp:
+      name: Outdoor temperature
+      description: Outdoor temperature during the experiment [°C].
+      required: true
+      example: 5.0
+      selector:
+        number:
+          min: -30
+          max: 40
+          step: 0.5
+          unit_of_measurement: "°C"
+    initial_temp:
+      name: Initial temperature
+      description: Room temperature at the start of the experiment [°C].
+      required: true
+      example: 15.0
+      selector:
+        number:
+          min: -10
+          max: 40
+          step: 0.1
+          unit_of_measurement: "°C"
+    final_temp:
+      name: Final temperature
+      description: Room temperature at the end of the experiment [°C].
+      required: true
+      example: 20.0
+      selector:
+        number:
+          min: -10
+          max: 40
+          step: 0.1
+          unit_of_measurement: "°C"
+    duration_seconds:
+      name: Duration
+      description: Duration of the experiment [seconds].
+      required: true
+      example: 7200
+      selector:
+        number:
+          min: 60
+          max: 172800
+          step: 60
+          unit_of_measurement: "s"

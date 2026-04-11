@@ -250,3 +250,102 @@ class HouseModel:
             self._rooms[name].temperature = temp
 
         return predictions
+
+    # ------------------------------------------------------------------
+    # Heat-flow analysis
+    # ------------------------------------------------------------------
+
+    def compute_heat_flows(
+        self,
+        outdoor_temp: float,
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Compute the instantaneous heat-flow breakdown for every room.
+
+        For each room the returned dict contains:
+
+        * ``external_loss`` – heat flow to outdoor [W] (positive = losing heat)
+        * ``<other_room>`` – heat flow to/from each connected room [W]
+          (positive = losing heat to that room)
+        * ``total_loss`` – algebraic sum of all loss terms [W]
+
+        Parameters
+        ----------
+        outdoor_temp : float
+            Outdoor air temperature [°C].
+
+        Returns
+        -------
+        dict
+            ``{room_name: {component: watts, ...}}``
+        """
+        idx = {name: i for i, name in enumerate(self._room_list)}
+        flows: Dict[str, Dict[str, float]] = {}
+
+        for name, room in self._rooms.items():
+            breakdown: Dict[str, float] = {}
+
+            # Heat loss to outdoors
+            external_loss = (room.temperature - outdoor_temp) / room.r_external
+            breakdown["external_loss"] = round(external_loss, 2)
+
+            # Heat flow to each connected room
+            total = external_loss
+            for conn in room.connections:
+                other_temp = self._rooms[conn.connected_room].temperature
+                flow = (room.temperature - other_temp) / conn.r_value
+                breakdown[conn.connected_room] = round(flow, 2)
+                total += flow
+
+            breakdown["total_loss"] = round(total, 2)
+            flows[name] = breakdown
+
+        return flows
+
+    def time_constant(self, room_name: str) -> float:
+        """
+        Return the dominant thermal time constant τ = C × R_eff [seconds]
+        for a room, where R_eff is the effective thermal resistance combining
+        external and inter-room paths in parallel.
+
+        This is useful for setup: it tells the user how many seconds the room
+        takes to respond to a step change (63 % of final value in 1 τ).
+        """
+        room = self._rooms[room_name]
+        g_total = 1.0 / room.r_external
+        for conn in room.connections:
+            g_total += 1.0 / conn.r_value
+        r_eff = 1.0 / g_total
+        return room.thermal_mass * r_eff
+
+    def steady_state_temperature(
+        self,
+        room_name: str,
+        heating_power: float,
+        outdoor_temp: float,
+    ) -> float:
+        """
+        Compute the steady-state temperature a room would reach with a
+        constant heating power, assuming all connected rooms are at the
+        outdoor temperature (worst case).
+
+        Useful during setup to verify that a heater is powerful enough.
+
+        Parameters
+        ----------
+        room_name : str
+        heating_power : float
+            Constant thermal power input [W].
+        outdoor_temp : float
+            Outdoor temperature [°C].
+
+        Returns
+        -------
+        float
+            Steady-state room temperature [°C].
+        """
+        room = self._rooms[room_name]
+        g_total = 1.0 / room.r_external
+        for conn in room.connections:
+            g_total += 1.0 / conn.r_value
+        return outdoor_temp + heating_power / g_total

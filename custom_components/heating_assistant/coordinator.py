@@ -205,6 +205,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Visualization data
         self.solar_gains: Dict[str, float] = {}
         self.outdoor_temp: float = 5.0
+        self.heat_flows: Dict[str, Dict[str, float]] = {}
+        self.predictions: list = []
 
         super().__init__(
             hass,
@@ -267,7 +269,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 now=now,
             )
 
-            # 5. Write set-points to heater entities
+            # 5. Store prediction trajectory and heat-flow breakdown
+            self.predictions = self.controller.predictions
+            self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
+
+            # 6. Write set-points to heater entities
             await self._apply_actions(outdoor_temp)
 
             return {
@@ -275,6 +281,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "outdoor_temp": outdoor_temp,
                 "actions": dict(self.actions),
                 "solar_gains": dict(self.solar_gains),
+                "predictions": list(self.predictions),
+                "heat_flows": dict(self.heat_flows),
             }
 
         except Exception as exc:
@@ -353,3 +361,131 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if room_name in self.model.rooms:
             return self.model.rooms[room_name].setpoint
         return DEFAULT_SETPOINT
+
+    # ------------------------------------------------------------------
+    # Setup helpers (used by services)
+    # ------------------------------------------------------------------
+
+    def simulate_thermal_response(
+        self,
+        room_name: str,
+        initial_temp: float,
+        outdoor_temp: float,
+        heating_power: float,
+        duration_hours: float,
+    ) -> Dict[str, Any]:
+        """
+        Run a standalone thermal simulation to show how a room responds to
+        constant heating power.  Useful during setup to verify that the
+        configured thermal parameters and heater power are realistic.
+
+        Returns a dict with keys:
+            trajectory : list of {time_minutes: float, temperature: float}
+            final_temperature : float
+            time_constant_hours : float
+            steady_state_temperature : float
+        """
+        if room_name not in self.model.rooms:
+            return {"error": f"Room {room_name!r} not found"}
+
+        dt = 60.0  # 1-minute steps for smooth curves
+        steps = int(duration_hours * 3600 / dt)
+
+        initial_temps = {
+            name: initial_temp if name == room_name else outdoor_temp
+            for name in self.model.room_names
+        }
+        heat_schedule = [
+            {name: heating_power if name == room_name else 0.0
+             for name in self.model.room_names}
+            for _ in range(steps)
+        ]
+        outdoor_temps = [outdoor_temp] * steps
+        solar_schedule = [{name: 0.0 for name in self.model.room_names}] * steps
+
+        preds = self.model.predict(
+            horizon=steps,
+            dt=dt,
+            heat_schedule=heat_schedule,
+            outdoor_temps=outdoor_temps,
+            solar_gain_schedule=solar_schedule,
+            initial_temps=initial_temps,
+        )
+
+        # Sample every 5 minutes for readability
+        trajectory = []
+        for i, pred in enumerate(preds):
+            minutes = (i + 1) * dt / 60.0
+            if i % 5 == 0 or i == len(preds) - 1:
+                trajectory.append({
+                    "time_minutes": round(minutes, 1),
+                    "temperature": round(pred[room_name], 2),
+                })
+
+        tau = self.model.time_constant(room_name)
+        t_ss = self.model.steady_state_temperature(
+            room_name, heating_power, outdoor_temp,
+        )
+
+        return {
+            "trajectory": trajectory,
+            "final_temperature": round(preds[-1][room_name], 2),
+            "time_constant_hours": round(tau / 3600, 2),
+            "steady_state_temperature": round(t_ss, 2),
+        }
+
+    def estimate_parameters(
+        self,
+        room_name: str,
+        heating_power: float,
+        outdoor_temp: float,
+        initial_temp: float,
+        final_temp: float,
+        duration_seconds: float,
+    ) -> Dict[str, Any]:
+        """
+        Estimate ``thermal_mass`` and ``r_external`` from an observed
+        heating or cooling experiment.
+
+        The user heats a room with known power and observes the temperature
+        change over a known time.  This method back-calculates the thermal
+        mass (from the rate of temperature change) and the external thermal
+        resistance (from the steady-state balance).
+
+        Returns a dict with recommended values and the current configuration.
+        """
+        if room_name not in self.model.rooms:
+            return {"error": f"Room {room_name!r} not found"}
+
+        room = self.model.rooms[room_name]
+        delta_t = final_temp - initial_temp
+        avg_temp = (initial_temp + final_temp) / 2.0
+
+        # Estimate R_external from power balance at average temperature
+        # Q_heater ≈ (T_avg - T_outdoor) / R_ext  →  R_ext = ΔT / Q
+        temp_diff = avg_temp - outdoor_temp
+        if heating_power > 0 and temp_diff > 0:
+            estimated_r = temp_diff / heating_power
+        else:
+            estimated_r = room.r_external
+
+        # Estimate thermal mass from rate of temperature change
+        # Q_net = Q_heater - Q_loss ≈ C × ΔT / Δt
+        avg_loss = temp_diff / estimated_r if estimated_r > 0 else 0
+        q_net = heating_power - avg_loss
+        if duration_seconds > 0 and abs(delta_t) > 0.01:
+            estimated_mass = abs(q_net * duration_seconds / delta_t)
+        else:
+            estimated_mass = room.thermal_mass
+
+        return {
+            "estimated_thermal_mass": round(estimated_mass, 0),
+            "estimated_r_external": round(estimated_r, 4),
+            "current_thermal_mass": room.thermal_mass,
+            "current_r_external": room.r_external,
+            "notes": (
+                "These are rough estimates. For thermal_mass, a typical room "
+                "is 2–15 × 10⁶ J/K. For r_external, typical values are "
+                "0.02–0.15 K/W. Run multiple experiments and average results."
+            ),
+        }

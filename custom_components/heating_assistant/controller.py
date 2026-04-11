@@ -93,6 +93,18 @@ class MPCController:
         for src in heat_sources:
             self._room_sources.setdefault(src.room, []).append(src)
 
+        # Stored after each compute(): predicted temperature trajectory
+        self._predictions: List[Dict[str, float]] = []
+
+    # ------------------------------------------------------------------
+    # Public properties
+    # ------------------------------------------------------------------
+
+    @property
+    def predictions(self) -> List[Dict[str, float]]:
+        """Return the latest prediction trajectory (list of {room: temp} per step)."""
+        return self._predictions
+
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
@@ -167,7 +179,43 @@ class MPCController:
         for src in self._sources:
             src.set_power(actions.get(src.name, 0.0), outdoor_temp)
 
+        # Run a final prediction with the optimal actions and store it
+        self._predictions = self._compute_predictions(
+            actions, outdoor_temps, solar_schedules, outdoor_temp,
+        )
+
         return actions
+
+    # ------------------------------------------------------------------
+    # Prediction trajectory (for visualisation)
+    # ------------------------------------------------------------------
+
+    def _compute_predictions(
+        self,
+        actions: Dict[str, float],
+        outdoor_temps: List[float],
+        solar_schedules: List[Dict[str, float]],
+        outdoor_temp: float,
+    ) -> List[Dict[str, float]]:
+        """Run a forward simulation with the chosen actions to build a trajectory."""
+        heat_schedule = []
+        for k in range(self._horizon):
+            heat_k: Dict[str, float] = {}
+            for room_name in self._model.room_names:
+                sources = self._room_sources.get(room_name, [])
+                heat_k[room_name] = sum(
+                    src.thermal_power(actions.get(src.name, 0.0), outdoor_temps[k])
+                    for src in sources
+                )
+            heat_schedule.append(heat_k)
+
+        return self._model.predict(
+            horizon=self._horizon,
+            dt=self._dt,
+            heat_schedule=heat_schedule,
+            outdoor_temps=outdoor_temps,
+            solar_gain_schedule=solar_schedules,
+        )
 
     # ------------------------------------------------------------------
     # Cost function (receding horizon rollout)

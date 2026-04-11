@@ -26,5 +26,63 @@
         }
       }
     }
+  },
+  "services": {
+    "simulate_thermal_response": {
+      "name": "Simulate thermal response",
+      "description": "Run a standalone thermal simulation showing how a room responds to constant heating power.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Name of the room to simulate."
+        },
+        "initial_temp": {
+          "name": "Initial temperature",
+          "description": "Starting temperature of the room (°C)."
+        },
+        "outdoor_temp": {
+          "name": "Outdoor temperature",
+          "description": "Outdoor temperature during the simulation (°C)."
+        },
+        "heating_power": {
+          "name": "Heating power",
+          "description": "Constant thermal power applied to the room (W)."
+        },
+        "duration_hours": {
+          "name": "Duration",
+          "description": "Length of the simulation (hours)."
+        }
+      }
+    },
+    "estimate_parameters": {
+      "name": "Estimate thermal parameters",
+      "description": "Back-calculate thermal_mass and r_external from an observed heating experiment.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Name of the room."
+        },
+        "heating_power": {
+          "name": "Heating power",
+          "description": "Constant thermal power applied during the experiment (W)."
+        },
+        "outdoor_temp": {
+          "name": "Outdoor temperature",
+          "description": "Outdoor temperature during the experiment (°C)."
+        },
+        "initial_temp": {
+          "name": "Initial temperature",
+          "description": "Room temperature at the start of the experiment (°C)."
+        },
+        "final_temp": {
+          "name": "Final temperature",
+          "description": "Room temperature at the end of the experiment (°C)."
+        },
+        "duration_seconds": {
+          "name": "Duration",
+          "description": "Duration of the experiment (seconds)."
+        }
+      }
+    }
   }
 }
