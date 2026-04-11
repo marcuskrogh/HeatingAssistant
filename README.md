@@ -638,7 +638,7 @@ For each room, open **Settings → Entities** in HA and confirm:
 
 ### 8.5 Step 4 – Estimate thermal parameters
 
-For each room, estimate two key parameters.  If you are unsure, start with the defaults and refine later (see [Section 13](#13-thermal-model-parameter-estimation-guide) for detailed guidance):
+For each room, estimate two key parameters.  If you are unsure, start with the defaults and refine later once the system is running (detailed guidance in [Section 13](#13-thermal-model-parameter-estimation-guide)):
 
 | Parameter | Key | Rough starting point |
 |-----------|-----|---------------------|
@@ -777,7 +777,7 @@ Over the first few days of operation, observe the system and refine your paramet
 
 After any change to `configuration.yaml` (rooms, heat sources, or top-level keys), **restart HA** for the changes to take effect.
 
-Refer to [Section 15](#15-troubleshooting) for a full list of known issues and their solutions, and to [Section 13](#13-thermal-model-parameter-estimation-guide) for detailed guidance on estimating thermal parameters.
+Refer to [Section 13](#13-thermal-model-parameter-estimation-guide) for detailed guidance on estimating thermal parameters, and to [Section 15](#15-troubleshooting) for a full list of known issues and their solutions.
 
 ---
 
