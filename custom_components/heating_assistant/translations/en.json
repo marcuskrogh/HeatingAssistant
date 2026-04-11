@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Heating Assistant – Site Settings",
+        "description": "Configure the basic settings for Heating Assistant. Room and heat-source definitions are provided in configuration.yaml.",
+        "data": {
+          "latitude": "Latitude (degrees, positive = North)",
+          "longitude": "Longitude (degrees, positive = East)",
+          "outdoor_temp_entity": "Outdoor temperature sensor entity ID (leave blank to use HA default)",
+          "dt": "Control time step (seconds, 60–3600)",
+          "horizon": "MPC prediction horizon (steps)"
+        }
+      }
+    },
+    "error": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Heating Assistant – Options",
+        "data": {
+          "outdoor_temp_entity": "Outdoor temperature sensor entity ID",
+          "dt": "Control time step (seconds, 60–3600)",
+          "horizon": "MPC prediction horizon (steps)"
+        }
+      }
+    }
+  }
+}
