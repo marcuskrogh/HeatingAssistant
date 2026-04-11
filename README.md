@@ -32,34 +32,46 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 7. [Installation](#7-installation)
    - 7.1 [Manual installation](#71-manual-installation)
    - 7.2 [HACS installation (future)](#72-hacs-installation-future)
-8. [Setup Wizard](#8-setup-wizard)
-9. [Configuration Reference](#9-configuration-reference)
-   - 9.1 [Top-level keys](#91-top-level-keys)
-   - 9.2 [Room block (`rooms`)](#92-room-block-rooms)
-   - 9.3 [Connection block (`connections`)](#93-connection-block-connections)
-   - 9.4 [Window block (`windows`)](#94-window-block-windows)
-   - 9.5 [Heat source block (`heat_sources`)](#95-heat-source-block-heat_sources)
-10. [Complete Configuration Examples](#10-complete-configuration-examples)
-    - 10.1 [Studio apartment – single room, one electric heater](#101-studio-apartment--single-room-one-electric-heater)
-    - 10.2 [Two-bedroom flat – rooms with heat pump and supplemental heater](#102-two-bedroom-flat--rooms-with-heat-pump-and-supplemental-heater)
-    - 10.3 [Full house – five rooms, heat pump, and solar-facing windows](#103-full-house--five-rooms-heat-pump-and-solar-facing-windows)
-11. [Entity Reference](#11-entity-reference)
-    - 11.1 [Climate entities](#111-climate-entities)
-    - 11.2 [Sensor entities – predicted temperature](#112-sensor-entities--predicted-temperature)
-    - 11.3 [Sensor entities – heating power](#113-sensor-entities--heating-power)
-12. [Thermal Model Parameter Estimation Guide](#12-thermal-model-parameter-estimation-guide)
-    - 12.1 [Thermal mass `thermal_mass`](#121-thermal-mass-thermal_mass)
-    - 12.2 [External thermal resistance `r_external`](#122-external-thermal-resistance-r_external)
-    - 12.3 [Inter-room thermal resistance `r_value`](#123-inter-room-thermal-resistance-r_value)
-    - 12.4 [Window orientation and tilt](#124-window-orientation-and-tilt)
-13. [Developer Guide](#13-developer-guide)
-    - 13.1 [Repository layout](#131-repository-layout)
-    - 13.2 [Running the tests](#132-running-the-tests)
-    - 13.3 [Adding a new heat source type](#133-adding-a-new-heat-source-type)
-    - 13.4 [Extending the solar model](#134-extending-the-solar-model)
-14. [Troubleshooting](#14-troubleshooting)
-15. [Roadmap](#15-roadmap)
-16. [References](#16-references)
+8. [Setting Up Your First Heating System](#8-setting-up-your-first-heating-system)
+   - 8.1 [Prerequisites](#81-prerequisites)
+   - 8.2 [Step 1 – Run the UI setup wizard](#82-step-1--run-the-ui-setup-wizard)
+   - 8.3 [Step 2 – Plan your room topology](#83-step-2--plan-your-room-topology)
+   - 8.4 [Step 3 – Identify your HA entities](#84-step-3--identify-your-ha-entities)
+   - 8.5 [Step 4 – Estimate thermal parameters](#85-step-4--estimate-thermal-parameters)
+   - 8.6 [Step 5 – Write the YAML configuration](#86-step-5--write-the-yaml-configuration)
+   - 8.7 [Step 6 – Restart Home Assistant](#87-step-6--restart-home-assistant)
+   - 8.8 [Step 7 – Verify entities are created](#88-step-7--verify-entities-are-created)
+   - 8.9 [Step 8 – Set your temperature setpoints](#89-step-8--set-your-temperature-setpoints)
+   - 8.10 [Step 9 – Confirm heater control is active](#810-step-9--confirm-heater-control-is-active)
+   - 8.11 [Step 10 – Monitor and tune](#811-step-10--monitor-and-tune)
+9. [Setup Wizard](#9-setup-wizard)
+10. [Configuration Reference](#10-configuration-reference)
+    - 10.1 [Top-level keys](#101-top-level-keys)
+    - 10.2 [Room block (`rooms`)](#102-room-block-rooms)
+    - 10.3 [Connection block (`connections`)](#103-connection-block-connections)
+    - 10.4 [Window block (`windows`)](#104-window-block-windows)
+    - 10.5 [Heat source block (`heat_sources`)](#105-heat-source-block-heat_sources)
+11. [Complete Configuration Examples](#11-complete-configuration-examples)
+    - 11.1 [Studio apartment – single room, one electric heater](#111-studio-apartment--single-room-one-electric-heater)
+    - 11.2 [Two-bedroom flat – rooms with heat pump and supplemental heater](#112-two-bedroom-flat--rooms-with-heat-pump-and-supplemental-heater)
+    - 11.3 [Full house – five rooms, heat pump, and solar-facing windows](#113-full-house--five-rooms-heat-pump-and-solar-facing-windows)
+12. [Entity Reference](#12-entity-reference)
+    - 12.1 [Climate entities](#121-climate-entities)
+    - 12.2 [Sensor entities – predicted temperature](#122-sensor-entities--predicted-temperature)
+    - 12.3 [Sensor entities – heating power](#123-sensor-entities--heating-power)
+13. [Thermal Model Parameter Estimation Guide](#13-thermal-model-parameter-estimation-guide)
+    - 13.1 [Thermal mass `thermal_mass`](#131-thermal-mass-thermal_mass)
+    - 13.2 [External thermal resistance `r_external`](#132-external-thermal-resistance-r_external)
+    - 13.3 [Inter-room thermal resistance `r_value`](#133-inter-room-thermal-resistance-r_value)
+    - 13.4 [Window orientation and tilt](#134-window-orientation-and-tilt)
+14. [Developer Guide](#14-developer-guide)
+    - 14.1 [Repository layout](#141-repository-layout)
+    - 14.2 [Running the tests](#142-running-the-tests)
+    - 14.3 [Adding a new heat source type](#143-adding-a-new-heat-source-type)
+    - 14.4 [Extending the solar model](#144-extending-the-solar-model)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Roadmap](#16-roadmap)
+17. [References](#17-references)
 
 ---
 
@@ -555,7 +567,7 @@ No cloud connectivity is required.  The integration is classified as `iot_class:
 5. **Add the integration** through the UI:  
    Settings → Devices & Services → + Add Integration → search "Heating Assistant" → follow the wizard.
 
-6. **Add the YAML configuration** to your `configuration.yaml` (see [Section 9](#9-configuration-reference) and [Section 10](#10-complete-configuration-examples)).
+6. **Add the YAML configuration** to your `configuration.yaml` (see [Section 10](#10-configuration-reference) and [Section 11](#11-complete-configuration-examples)).
 
 7. **Restart Home Assistant again** to load the room and heat-source topology from YAML.
 
@@ -565,7 +577,211 @@ HACS support is planned.  Once added, the integration will appear in the HACS st
 
 ---
 
-## 8. Setup Wizard
+## 8. Setting Up Your First Heating System
+
+This section walks you through every step required to go from a freshly installed integration to a fully functioning, room-by-room heating system.  Work through the steps in order — each one builds on the previous.
+
+### 8.1 Prerequisites
+
+Before you begin, confirm the following are in place:
+
+- **Integration installed** — the `custom_components/heating_assistant/` folder is in your HA config directory and HA has been restarted (see [Section 7](#7-installation)).
+- **Outdoor temperature sensor** — a HA sensor entity that measures outdoor air temperature (e.g. from OpenWeatherMap, Météo-France, a Netatmo weather station, or any local sensor).  Note the entity ID (e.g. `sensor.openweathermap_temperature`).
+- **Room temperature sensor(s)** — at least one temperature sensor per room you want to control.  Note the entity ID for each (e.g. `sensor.living_room_temperature`).
+- **Controllable heater entity/entities** — each heater must already be reachable in HA as a `switch.*`, `number.*`, or `climate.*` entity.  Note the entity ID for each (e.g. `switch.bedroom_heater`, `climate.mitsubishi_hp`).
+
+---
+
+### 8.2 Step 1 – Run the UI setup wizard
+
+1. In Home Assistant, go to **Settings → Devices & Services**.
+2. Click **+ Add Integration** (bottom-right).
+3. Search for **Heating Assistant** and select it.
+4. Fill in the form:
+
+   | Field | What to enter |
+   |-------|---------------|
+   | **Latitude** | Your site latitude (pre-filled from HA settings — verify it is correct). |
+   | **Longitude** | Your site longitude (pre-filled from HA settings — verify it is correct). |
+   | **Outdoor temperature sensor entity ID** | The entity ID of your outdoor sensor, e.g. `sensor.openweathermap_temperature`.  Leave blank to use the 5 °C fallback (not recommended for real use). |
+   | **Control time step (dt)** | Leave at `900` (15 minutes) unless you have a specific reason to change it. |
+   | **MPC prediction horizon** | Leave at `6` (90-minute lookahead at dt = 900 s).  Increase to `8`–`12` for buildings with high thermal mass. |
+
+5. Click **Submit**.
+
+The integration entry is now created, but no rooms or heaters are defined yet — that happens in the YAML steps below.
+
+---
+
+### 8.3 Step 2 – Plan your room topology
+
+Draw a quick sketch of your home and answer these questions for each room you want to control:
+
+- **What is the room name?**  Choose a short identifier made of letters, digits, and underscores only (e.g. `living_room`, `bedroom_1`).  This name will appear in entity IDs.
+- **Which other rooms share a wall, floor, or ceiling with it?**  These become `connections` entries.
+- **Does it have windows?**  If so, note the total glazed area (m²) and the compass direction each window faces.
+- **What type of heater(s) does it have?**  Electric panel heater (→ `electric_heater`) or air-source heat pump (→ `heat_pump`)?
+- **What is the heater's maximum power output?**  Check the device label or datasheet for the watt rating.
+
+---
+
+### 8.4 Step 3 – Identify your HA entities
+
+For each room, open **Settings → Entities** in HA and confirm:
+
+- The **room temperature sensor** entity ID (e.g. `sensor.living_room_temperature`).
+- The **heater control** entity ID (e.g. `switch.living_room_heater`, `number.panel_heater_power`, or `climate.heat_pump`).
+
+> **Tip:** Click the entity and look at the *Entity ID* field in the entity details dialog — use exactly that string in your YAML.
+
+---
+
+### 8.5 Step 4 – Estimate thermal parameters
+
+For each room, estimate two key parameters.  If you are unsure, start with the defaults and refine later once the system is running (detailed guidance in [Section 13](#13-thermal-model-parameter-estimation-guide)):
+
+| Parameter | Key | Rough starting point |
+|-----------|-----|---------------------|
+| Thermal mass | `thermal_mass` | `4 000 × floor_area_m²` [J/K] |
+| External thermal resistance | `r_external` | `0.05` for a typical post-1980 house; `0.03` for modern; `0.10` for older poorly insulated building |
+
+For inter-room connections, a good default `r_value` is:
+- `0.1`–`0.2` for an open doorway or archway
+- `0.2`–`0.5` for a closed interior door
+- `0.3`–`0.6` for a solid brick or concrete wall
+
+---
+
+### 8.6 Step 5 – Write the YAML configuration
+
+Open your `configuration.yaml` file (located in your HA config directory) and add a `heating_assistant:` block.  Below is a minimal template — expand it to match your home:
+
+```yaml
+heating_assistant:
+  # Optional: override the outdoor sensor set in the UI wizard
+  # outdoor_temp_entity: sensor.openweathermap_temperature
+
+  rooms:
+    - name: living_room                          # unique identifier
+      thermal_mass: 8000000                      # J/K
+      r_external: 0.04                           # K/W
+      setpoint: 21.0                             # °C default target
+      temp_sensor: sensor.living_room_temperature
+
+    - name: bedroom
+      thermal_mass: 4000000
+      r_external: 0.05
+      setpoint: 19.0
+      temp_sensor: sensor.bedroom_temperature
+      connections:
+        - room: living_room   # shared wall with the living room
+          r_value: 0.3
+
+  heat_sources:
+    - name: living_room_heater
+      type: electric_heater
+      room: living_room
+      max_power: 2000                            # W
+      heater_entity: switch.living_room_heater
+
+    - name: bedroom_heater
+      type: electric_heater
+      room: bedroom
+      max_power: 1000
+      heater_entity: switch.bedroom_heater
+```
+
+Key rules to remember:
+
+- Every `name` under `rooms` and `heat_sources` must be unique.
+- The `room` key of each heat source must exactly match a room `name`.
+- Only use `heater_entity` domains `switch`, `number`, or `climate`.
+- Use only letters, digits, and underscores in `name` values (no spaces).
+
+See [Section 10](#10-configuration-reference) for the full field reference and [Section 11](#11-complete-configuration-examples) for more complete examples.
+
+---
+
+### 8.7 Step 6 – Restart Home Assistant
+
+Save `configuration.yaml` and restart HA to load the room topology:
+
+- **UI:** Settings → System → Restart → Restart Home Assistant.
+- **CLI:** `ha core restart`
+
+Wait for HA to finish restarting (typically 30–90 seconds depending on your hardware).
+
+> **If HA fails to start**, open **Settings → System → Logs** and search for `heating_assistant`.  The most common cause is a YAML syntax error (wrong indentation, missing required key, or a `room` reference that does not match any room `name`).
+
+---
+
+### 8.8 Step 7 – Verify entities are created
+
+Once HA has restarted:
+
+1. Go to **Settings → Entities** and search for `heating_assistant`.
+2. You should see three entity types for each room you defined:
+
+   | Entity ID pattern | What it is |
+   |-------------------|------------|
+   | `climate.heating_assistant_<room_name>` | Thermostat — set your target temperature here |
+   | `sensor.heating_assistant_<room_name>_predicted_temperature` | Model-predicted temperature [°C] |
+   | `sensor.heating_assistant_<room_name>_heating_power` | Current total heating power [W] |
+
+3. If entities are **missing**, check the HA log for errors under the `heating_assistant` integration.  The most common cause is a room or heat source configuration error in `configuration.yaml`.
+
+---
+
+### 8.9 Step 8 – Set your temperature setpoints
+
+The climate entities are now controllable from anywhere in HA:
+
+- **Lovelace dashboard:** Add a *Thermostat* card and point it at `climate.heating_assistant_<room_name>`.  Use the dial to set the desired temperature.
+- **Developer Tools → Services:** Call `climate.set_temperature` with `entity_id` and `temperature`.
+- **Automations:** Use `climate.set_temperature` in automations to schedule temperature changes.
+
+Setpoint range: 5 °C (frost protection) to 30 °C, adjustable in 0.5 °C steps.
+
+> **Note:** The `setpoint` values in `configuration.yaml` are only the initial defaults loaded at startup.  After the first start, setpoints are persisted in HA's entity registry and changes made through the UI or automations take immediate effect without requiring a restart.
+
+---
+
+### 8.10 Step 9 – Confirm heater control is active
+
+After the first full coordinator update cycle (up to 60 seconds after startup):
+
+1. Check `sensor.heating_assistant_<room_name>_heating_power`.  If the room is below setpoint it should show a positive value (W).
+2. Verify the linked heater entity has changed state — e.g. a `switch.*` heater should be `on` if the controller decided to heat.
+3. If the room is already at or above setpoint, the controller may correctly output 0 W.  Temporarily raise the setpoint by a degree or two to test the response.
+
+If heaters are not responding, check:
+- The `heater_entity` value is the correct HA entity ID (not the friendly name).
+- The entity domain is `switch`, `number`, or `climate`.
+- The entity is not in an `unavailable` state.
+- The HA log for any `heating_assistant` errors during the update cycle.
+
+---
+
+### 8.11 Step 10 – Monitor and tune
+
+Over the first few days of operation, observe the system and refine your parameters:
+
+| Observation | Likely cause | Action |
+|-------------|-------------|--------|
+| Room consistently undershoots setpoint | `r_external` too high (overestimates heat loss) **or** `thermal_mass` too low | Decrease `r_external` or increase `thermal_mass` |
+| Room consistently overshoots setpoint | `r_external` too low **or** `thermal_mass` too high | Increase `r_external` or decrease `thermal_mass` |
+| Predicted temperature diverges quickly from actual | Wrong `thermal_mass` or `r_external` | Compare steady-state heat loss empirically (see [Section 13.2](#132-external-thermal-resistance-r_external)) |
+| Temperature oscillates (undershoot then overshoot) | Horizon too short | Increase `horizon` (e.g. from `6` to `8`) |
+| Heater runs at full power then cuts out abruptly | `energy_weight` too low | No direct config key yet; increase `horizon` as an alternative |
+| Solar gain is always zero | Wrong `latitude`/`longitude` or wrong window `orientation` | Verify coordinates; remember `orientation: 0` = North, `180` = South |
+
+After any change to `configuration.yaml` (rooms, heat sources, or top-level keys), **restart HA** for the changes to take effect.
+
+Refer to [Section 13](#13-thermal-model-parameter-estimation-guide) for detailed guidance on estimating thermal parameters, and to [Section 15](#15-troubleshooting) for a full list of known issues and their solutions.
+
+---
+
+## 9. Setup Wizard
 
 After installation, navigate to **Settings → Devices & Services → + Add Integration** and search for **Heating Assistant**.  A single-step form will appear:
 
@@ -584,7 +800,7 @@ Settings → Devices & Services → Heating Assistant → Configure.
 
 ---
 
-## 9. Configuration Reference
+## 10. Configuration Reference
 
 All room, window, and heat-source configuration is declared in `configuration.yaml` under the `heating_assistant:` key.
 
@@ -601,7 +817,7 @@ heating_assistant:
     - ...
 ```
 
-### 9.1 Top-level keys
+### 10.1 Top-level keys
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
@@ -613,7 +829,7 @@ heating_assistant:
 | `rooms` | list | No | `[]` | List of room definitions (see below). |
 | `heat_sources` | list | No | `[]` | List of heat source definitions (see below). |
 
-### 9.2 Room block (`rooms`)
+### 10.2 Room block (`rooms`)
 
 Each entry in the `rooms` list fully describes one room.
 
@@ -633,14 +849,14 @@ rooms:
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `name` | string | **Yes** | — | Unique identifier for the room.  Used to match heat sources, connections, and HA entity IDs.  Use only letters, digits, and underscores (no spaces). |
-| `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 12.1](#121-thermal-mass-thermal_mass) for guidance. |
-| `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 12.2](#122-external-thermal-resistance-r_external) for guidance. |
+| `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 13.1](#131-thermal-mass-thermal_mass) for guidance. |
+| `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 13.2](#132-external-thermal-resistance-r_external) for guidance. |
 | `setpoint` | float | No | `21.0` | Initial desired temperature [°C].  Can be overridden at runtime by the `climate.*` entity. |
 | `temp_sensor` | string | No | — | Entity ID of a HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode. |
 | `connections` | list | No | `[]` | List of thermal connections to adjacent rooms. |
 | `windows` | list | No | `[]` | List of window definitions for solar gain calculation. |
 
-### 9.3 Connection block (`connections`)
+### 10.3 Connection block (`connections`)
 
 Each connection represents a wall, door, floor or ceiling shared with another room.
 
@@ -653,9 +869,9 @@ connections:
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `room` | string | **Yes** | — | The `name` of the adjacent room.  Connections are directional in the YAML but the thermal model treats them symmetrically — you do NOT need to repeat the entry in both rooms.  (The matrix is built correctly even if only one side is declared, but declaring both sides is also harmless.) |
-| `r_value` | float | **Yes** | — | Thermal resistance between the two rooms [K/W].  See [Section 12.3](#123-inter-room-thermal-resistance-r_value) for guidance. |
+| `r_value` | float | **Yes** | — | Thermal resistance between the two rooms [K/W].  See [Section 13.3](#133-inter-room-thermal-resistance-r_value) for guidance. |
 
-### 9.4 Window block (`windows`)
+### 10.4 Window block (`windows`)
 
 Each window (or glazed door) is a separate entry.
 
@@ -672,7 +888,7 @@ windows:
 | `orientation` | float | **Yes** | — | Direction the window faces, in degrees **clockwise from North**.  0° = North, 90° = East, 180° = South, 270° = West.  A south-facing window in the Northern hemisphere receives the most direct solar gain in winter. |
 | `tilt` | float | No | `90.0` | Angle of the window surface from the horizontal [°].  90° = vertical wall window (most common).  0° = horizontal skylight.  Roof windows are typically 30°–60°. |
 
-### 9.5 Heat source block (`heat_sources`)
+### 10.5 Heat source block (`heat_sources`)
 
 Each entry describes one controllable heating device.
 
@@ -722,9 +938,9 @@ heat_sources:
 
 ---
 
-## 10. Complete Configuration Examples
+## 11. Complete Configuration Examples
 
-### 10.1 Studio apartment – single room, one electric heater
+### 11.1 Studio apartment – single room, one electric heater
 
 A single-room installation with one window and a direct plug-in electric heater controlled via a smart plug (switch entity).
 
@@ -751,7 +967,7 @@ heating_assistant:
       heater_entity: switch.studio_smart_plug
 ```
 
-### 10.2 Two-bedroom flat – rooms with heat pump and supplemental heater
+### 11.2 Two-bedroom flat – rooms with heat pump and supplemental heater
 
 A two-bedroom apartment with an open-plan living/kitchen area and one separate bedroom.  The living area has a wall-mounted heat pump (exposed as a `climate.*` entity in HA) and a backup electric panel heater on a smart switch.  The bedroom has a small electric heater only.  The two rooms are connected through a doorway.
 
@@ -813,7 +1029,7 @@ heating_assistant:
       heater_entity: switch.bedroom_heater
 ```
 
-### 10.3 Full house – five rooms, heat pump, and solar-facing windows
+### 11.3 Full house – five rooms, heat pump, and solar-facing windows
 
 A detached house with a central hallway connecting all other rooms, a ground-floor living room and kitchen, and two upstairs bedrooms.  The heat pump serves the main living space; each bedroom has a panel heater.
 
@@ -923,9 +1139,9 @@ heating_assistant:
 
 ---
 
-## 11. Entity Reference
+## 12. Entity Reference
 
-### 11.1 Climate entities
+### 12.1 Climate entities
 
 **Entity ID format:** `climate.heating_assistant_<room_name>`
 
@@ -957,7 +1173,7 @@ data:
   hvac_mode: "off"
 ```
 
-### 11.2 Sensor entities – predicted temperature
+### 12.2 Sensor entities – predicted temperature
 
 **Entity ID format:** `sensor.heating_assistant_<room_name>_predicted_temperature`
 
@@ -976,7 +1192,7 @@ data:
 | `thermal_mass` | float | Configured thermal mass [J/K] |
 | `r_external` | float | Configured external thermal resistance [K/W] |
 
-### 11.3 Sensor entities – heating power
+### 12.3 Sensor entities – heating power
 
 **Entity ID format:** `sensor.heating_assistant_<room_name>_heating_power`
 
@@ -991,11 +1207,11 @@ data:
 
 ---
 
-## 12. Thermal Model Parameter Estimation Guide
+## 13. Thermal Model Parameter Estimation Guide
 
 Accurate parameters lead to accurate predictions and better control.  This section gives practical guidance on how to estimate them.
 
-### 12.1 Thermal mass `thermal_mass`
+### 13.1 Thermal mass `thermal_mass`
 
 The effective thermal mass captures how much energy must be added (or removed) to change the room's temperature by 1 K.  It includes:
 
@@ -1015,7 +1231,7 @@ The effective thermal mass captures how much energy must be added (or removed) t
 
 **Quick estimate:** start with `thermal_mass ≈ 4000 × floor_area_m2` (in J/K) and adjust based on construction type and observation.
 
-### 12.2 External thermal resistance `r_external`
+### 13.2 External thermal resistance `r_external`
 
 The external thermal resistance describes the overall thermal barrier between the room and the outdoors.  It is the reciprocal of the overall heat-transfer coefficient multiplied by area: `R = 1 / (U × A_total)`.
 
@@ -1030,7 +1246,7 @@ Alternatively you can measure it empirically: run the room at a steady temperatu
 | Pre-1970 poorly insulated house | 0.07 – 0.15 |
 | Modern flat / apartment (interior rooms) | 0.1 – 0.3 |
 
-### 12.3 Inter-room thermal resistance `r_value`
+### 13.3 Inter-room thermal resistance `r_value`
 
 This represents the thermal conductance of the wall, floor, ceiling, or doorway between two adjacent rooms.  Higher `r_value` means less heat exchange.
 
@@ -1045,7 +1261,7 @@ This represents the thermal conductance of the wall, floor, ceiling, or doorway 
 | Brick or concrete interior wall | 0.3 – 0.6 |
 | Insulated floor/ceiling between flats | 0.5 – 1.5 |
 
-### 12.4 Window orientation and tilt
+### 13.4 Window orientation and tilt
 
 The `orientation` key is the compass bearing of the **outward-facing normal** of the window, measured clockwise from North.
 
@@ -1064,9 +1280,9 @@ For a roof window pitched towards the South at 30° from horizontal, use `orient
 
 ---
 
-## 13. Developer Guide
+## 14. Developer Guide
 
-### 13.1 Repository layout
+### 14.1 Repository layout
 
 ```
 HeatingAssistant/
@@ -1082,7 +1298,7 @@ HeatingAssistant/
 └── README.md
 ```
 
-### 13.2 Running the tests
+### 14.2 Running the tests
 
 Install the required packages once:
 
@@ -1107,7 +1323,7 @@ python -m pytest tests/test_heat_sources.py -v
 python -m pytest tests/test_controller.py -v
 ```
 
-### 13.3 Adding a new heat source type
+### 14.3 Adding a new heat source type
 
 1. **Add a new constant** in `const.py`:
    ```python
@@ -1131,7 +1347,7 @@ python -m pytest tests/test_controller.py -v
 
 5. **Write tests** for the new class in `tests/test_heat_sources.py`.
 
-### 13.4 Extending the solar model
+### 14.4 Extending the solar model
 
 The solar model in `solar_model.py` uses a **clear-sky** approximation (no clouds).  To add cloud cover correction:
 
@@ -1146,7 +1362,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 **Integration does not appear in the Add Integration search**
 
@@ -1187,7 +1403,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 ---
 
-## 15. Roadmap
+## 16. Roadmap
 
 - [ ] **Weather-API outdoor temperature forecast** — replace the persistence assumption with a multi-hour forecast from an integrated HA weather entity.
 - [ ] **Comfort schedule support** — define day/night/away setpoint profiles per room on a weekly timetable.
@@ -1200,7 +1416,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 ---
 
-## 16. References
+## 17. References
 
 1. ISO 13790:2008 — *Energy performance of buildings – Calculation of energy use for space heating and cooling.*
 2. Duffie, J. A. & Beckman, W. A. (2013) — *Solar Engineering of Thermal Processes*, 4th edition, Wiley.
