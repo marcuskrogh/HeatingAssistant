@@ -357,7 +357,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         predictions = self._coordinator.predictions
         room = self._coordinator.model.rooms[self._room_name]
-        dt = self._coordinator._dt
+        dt = self._coordinator.dt
 
         trajectory = []
         for i, pred in enumerate(predictions):
@@ -643,7 +643,7 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         schedule = self._coordinator.heating_schedule
-        dt = self._coordinator._dt
+        dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
         forecast = []
@@ -699,7 +699,7 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         solar_forecast = self._coordinator.solar_forecast
-        dt = self._coordinator._dt
+        dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
         forecast = []

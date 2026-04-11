@@ -219,6 +219,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
     # ------------------------------------------------------------------
+    # Public properties
+    # ------------------------------------------------------------------
+
+    @property
+    def dt(self) -> float:
+        """Return the time step in seconds."""
+        return self._dt
+
+    # ------------------------------------------------------------------
     # DataUpdateCoordinator hook
     # ------------------------------------------------------------------
 
