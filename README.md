@@ -59,19 +59,37 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 12.1 [Climate entities](#121-climate-entities)
     - 12.2 [Sensor entities – predicted temperature](#122-sensor-entities--predicted-temperature)
     - 12.3 [Sensor entities – heating power](#123-sensor-entities--heating-power)
-13. [Thermal Model Parameter Estimation Guide](#13-thermal-model-parameter-estimation-guide)
-    - 13.1 [Thermal mass `thermal_mass`](#131-thermal-mass-thermal_mass)
-    - 13.2 [External thermal resistance `r_external`](#132-external-thermal-resistance-r_external)
-    - 13.3 [Inter-room thermal resistance `r_value`](#133-inter-room-thermal-resistance-r_value)
-    - 13.4 [Window orientation and tilt](#134-window-orientation-and-tilt)
-14. [Developer Guide](#14-developer-guide)
-    - 14.1 [Repository layout](#141-repository-layout)
-    - 14.2 [Running the tests](#142-running-the-tests)
-    - 14.3 [Adding a new heat source type](#143-adding-a-new-heat-source-type)
-    - 14.4 [Extending the solar model](#144-extending-the-solar-model)
-15. [Troubleshooting](#15-troubleshooting)
-16. [Roadmap](#16-roadmap)
-17. [References](#17-references)
+    - 12.4 [Sensor entities – solar gain](#124-sensor-entities--solar-gain)
+    - 12.5 [Sensor entities – temperature forecast](#125-sensor-entities--temperature-forecast)
+    - 12.6 [Sensor entities – heat loss](#126-sensor-entities--heat-loss)
+    - 12.7 [Sensor entities – energy balance](#127-sensor-entities--energy-balance)
+    - 12.8 [Sensor entities – control action](#128-sensor-entities--control-action)
+    - 12.9 [Sensor entities – heat pump COP](#129-sensor-entities--heat-pump-cop)
+    - 12.10 [Sensor entities – outdoor temperature](#1210-sensor-entities--outdoor-temperature)
+    - 12.11 [Sensor entities – system summary](#1211-sensor-entities--system-summary)
+13. [Advanced Visualisation and Setup Tools](#13-advanced-visualisation-and-setup-tools)
+    - 13.1 [Visualisation sensors overview](#131-visualisation-sensors-overview)
+    - 13.2 [Temperature forecast trajectory](#132-temperature-forecast-trajectory)
+    - 13.3 [Heat loss analysis](#133-heat-loss-analysis)
+    - 13.4 [Energy balance](#134-energy-balance)
+    - 13.5 [System efficiency summary](#135-system-efficiency-summary)
+    - 13.6 [Diagnostics panel](#136-diagnostics-panel)
+    - 13.7 [Setup service – simulate thermal response](#137-setup-service--simulate-thermal-response)
+    - 13.8 [Setup service – estimate parameters](#138-setup-service--estimate-parameters)
+    - 13.9 [Lovelace dashboard examples](#139-lovelace-dashboard-examples)
+14. [Thermal Model Parameter Estimation Guide](#14-thermal-model-parameter-estimation-guide)
+    - 14.1 [Thermal mass `thermal_mass`](#141-thermal-mass-thermal_mass)
+    - 14.2 [External thermal resistance `r_external`](#142-external-thermal-resistance-r_external)
+    - 14.3 [Inter-room thermal resistance `r_value`](#143-inter-room-thermal-resistance-r_value)
+    - 14.4 [Window orientation and tilt](#144-window-orientation-and-tilt)
+15. [Developer Guide](#15-developer-guide)
+    - 15.1 [Repository layout](#151-repository-layout)
+    - 15.2 [Running the tests](#152-running-the-tests)
+    - 15.3 [Adding a new heat source type](#153-adding-a-new-heat-source-type)
+    - 15.4 [Extending the solar model](#154-extending-the-solar-model)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Roadmap](#17-roadmap)
+18. [References](#18-references)
 
 ---
 
@@ -88,6 +106,9 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Asymmetric comfort penalty** | Under-heating (room too cold) is penalised twice as much as over-heating, reflecting real-world comfort asymmetry. |
 | **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface. |
 | **HA sensor entities** | Predicted temperature and active heating power sensors per room, with model metadata exposed as state attributes. |
+| **Advanced visualisation sensors** | Temperature forecast trajectory, heat loss breakdown, energy balance, and system efficiency sensors provide deep insight into system operation. |
+| **Setup assistance services** | `simulate_thermal_response` and `estimate_parameters` services help you verify and tune your configuration by running simulations and back-calculating thermal parameters. |
+| **Diagnostics platform** | Full system state dump accessible via the HA diagnostics panel for troubleshooting — includes model matrices, predictions, heat flows, and steady-state analysis. |
 | **Flexible heater entity control** | Automatically dispatches to `switch.*`, `number.*`, or `climate.*` entities depending on the HA domain of each configured heater. |
 | **YAML + UI config** | Room topology and heat sources are declared in `configuration.yaml`.  Site-level settings (location, time step, horizon) are configured through the HA UI setup wizard. |
 
@@ -124,6 +145,8 @@ custom_components/heating_assistant/
 ├── thermal_model.py       Physics: lumped RC model
 │                          • RoomConnection, Window, Room  (dataclasses)
 │                          • HouseModel: step(), predict(), state-space matrices
+│                          • compute_heat_flows(): per-room heat loss breakdown
+│                          • time_constant(), steady_state_temperature(): setup helpers
 │
 ├── solar_model.py         Physics: clear-sky solar irradiance pipeline
 │                          • solar_angles(), clear_sky_dni(), clear_sky_dhi()
@@ -138,6 +161,12 @@ custom_components/heating_assistant/
 │                          • _rollout_cost(): simulates horizon and accumulates cost
 │                          • _forecast_outdoor(): persistence forecast
 │                          • _forecast_solar(): solar model forecast per horizon step
+│                          • predictions property: stores predicted temperature trajectory
+│
+├── diagnostics.py         HA diagnostics platform
+│                          • async_get_config_entry_diagnostics(): full system state dump
+│
+├── services.yaml          Service definitions for setup assistance
 │
 ├── climate.py             HA climate platform
 │                          • RoomClimateEntity per room
@@ -558,6 +587,8 @@ No cloud connectivity is required.  The integration is classified as `iot_class:
            ├── controller.py
            ├── climate.py
            ├── sensor.py
+           ├── diagnostics.py
+           ├── services.yaml
            └── translations/
                └── en.json
    ```
@@ -1205,13 +1236,371 @@ data:
 
 **State attributes:**  one attribute per heat source in the room, keyed by source `name`, giving that source's individual `current_power` [W].
 
+### 12.4 Sensor entities – solar gain
+
+**Entity ID format:** `sensor.heating_assistant_<room_name>_solar_gain`
+
+| Property | Value |
+|----------|-------|
+| Device class | `power` |
+| State class | `measurement` |
+| Unit | W |
+| Icon | `mdi:white-balance-sunny` |
+| Value | Current solar heat gain through room windows, rounded to 1 decimal |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `window_count` | int | Number of windows configured for this room |
+| `total_window_area` | float | Total glazed area [m²] |
+
+### 12.5 Sensor entities – temperature forecast
+
+**Entity ID format:** `sensor.heating_assistant_<room_name>_temperature_forecast`
+
+| Property | Value |
+|----------|-------|
+| Device class | `temperature` |
+| State class | `measurement` |
+| Unit | °C |
+| Icon | `mdi:chart-line` |
+| Value | Predicted temperature at the end of the MPC horizon |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `trajectory` | list[float] | Predicted temperatures for each horizon step [°C] |
+| `setpoint` | float | Current room setpoint [°C] |
+| `current_temperature` | float | Current room temperature [°C] |
+| `horizon_steps` | int | Number of prediction steps |
+| `step_seconds` | float | Time step duration [s] |
+| `horizon_minutes` | float | Total prediction horizon [min] |
+
+### 12.6 Sensor entities – heat loss
+
+**Entity ID format:** `sensor.heating_assistant_<room_name>_heat_loss`
+
+| Property | Value |
+|----------|-------|
+| Device class | `power` |
+| State class | `measurement` |
+| Unit | W |
+| Icon | `mdi:thermometer-minus` |
+| Value | Total instantaneous heat loss [W] (positive = losing heat) |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `external_loss` | float | Heat flow to outdoors [W] |
+| `<room_name>` | float | Heat flow to/from each connected room [W] (positive = losing heat to that room) |
+| `total_loss` | float | Sum of all loss components [W] |
+| `outdoor_temp` | float | Current outdoor temperature [°C] |
+| `room_temp` | float | Current room temperature [°C] |
+
+### 12.7 Sensor entities – energy balance
+
+**Entity ID format:** `sensor.heating_assistant_<room_name>_energy_balance`
+
+| Property | Value |
+|----------|-------|
+| Device class | `power` |
+| State class | `measurement` |
+| Unit | W |
+| Icon | `mdi:scale-balance` |
+| Value | Net energy flow [W] (positive = room gaining energy, negative = losing) |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `heating_power` | float | Total active heating power [W] |
+| `solar_gain` | float | Solar heat gain [W] |
+| `external_heat_loss` | float | Heat loss to outdoors [W] |
+| `inter_room_heat_exchange` | float | Net heat exchange with connected rooms [W] |
+| `total_heat_loss` | float | Total heat loss [W] |
+| `net_energy_flow` | float | Net energy flow = heating + solar − loss [W] |
+| `room_temperature` | float | Current room temperature [°C] |
+| `setpoint` | float | Current room setpoint [°C] |
+
+### 12.8 Sensor entities – control action
+
+**Entity ID format:** `sensor.heating_assistant_<source_name>_control_action`
+
+| Property | Value |
+|----------|-------|
+| State class | `measurement` |
+| Unit | % |
+| Icon | `mdi:tune-vertical` |
+| Value | MPC control action [0–100 %] |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `room` | str | Room this source heats |
+| `max_power` | float | Maximum thermal output [W] |
+| `current_power` | float | Current thermal output [W] |
+
+### 12.9 Sensor entities – heat pump COP
+
+**Entity ID format:** `sensor.heating_assistant_<source_name>_cop`
+
+| Property | Value |
+|----------|-------|
+| State class | `measurement` |
+| Icon | `mdi:heat-pump-outline` |
+| Value | Current COP at the current outdoor temperature |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `cop_rated` | float | Rated COP at reference temperature |
+| `cop_temp_ref` | float | Reference outdoor temperature [°C] |
+| `min_power` | float | Minimum thermal output before shutdown [W] |
+| `outdoor_temp` | float | Current outdoor temperature [°C] |
+
+### 12.10 Sensor entities – outdoor temperature
+
+**Entity ID format:** `sensor.heating_assistant_outdoor_temperature`
+
+| Property | Value |
+|----------|-------|
+| Device class | `temperature` |
+| State class | `measurement` |
+| Unit | °C |
+| Value | Outdoor temperature as read by the integration |
+
+### 12.11 Sensor entities – system summary
+
+**Entity ID format:** `sensor.heating_assistant_system_summary`
+
+| Property | Value |
+|----------|-------|
+| Device class | `power` |
+| State class | `measurement` |
+| Unit | W |
+| Icon | `mdi:home-thermometer` |
+| Value | Total heating power across all sources [W] |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `total_heating_power` | float | Total thermal output from all sources [W] |
+| `total_solar_gain` | float | Total solar gain across all rooms [W] |
+| `total_heat_loss` | float | Total heat loss across all rooms [W] |
+| `net_energy_flow` | float | System-wide net energy flow [W] |
+| `effective_system_cop` | float | Effective COP (thermal output ÷ electrical input) |
+| `electrical_input_estimate` | float | Estimated total electrical input [W] |
+| `active_sources` | int | Number of currently active heat sources |
+| `total_sources` | int | Total number of configured heat sources |
+| `room_heating_power` | dict | Per-room heating power breakdown |
+| `outdoor_temperature` | float | Current outdoor temperature [°C] |
+
 ---
 
-## 13. Thermal Model Parameter Estimation Guide
+## 13. Advanced Visualisation and Setup Tools
+
+This section describes the advanced visualisation sensors and setup assistance services that help you understand, monitor, and tune your heating system.
+
+### 13.1 Visualisation sensors overview
+
+In addition to the basic sensors (predicted temperature, heating power, solar gain), the integration creates four advanced sensor types that provide deep insight into system operation:
+
+| Sensor | Per-room | Purpose |
+|--------|:--------:|---------|
+| **Temperature Forecast** | ✓ | MPC-predicted temperature trajectory over the prediction horizon |
+| **Heat Loss** | ✓ | Instantaneous heat-loss breakdown (external + inter-room components) |
+| **Energy Balance** | ✓ | Net energy flow: heating + solar − losses |
+| **System Summary** | ✗ (1 total) | Aggregate system metrics: total power, COP, active sources |
+
+All sensors update every coordinator cycle (default 60 seconds) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
+
+### 13.2 Temperature forecast trajectory
+
+The **Temperature Forecast** sensor shows what the MPC controller *predicts* will happen to the room temperature over the prediction horizon (e.g. the next 90 minutes at default settings).
+
+- **State:** predicted temperature at the end of the horizon [°C]
+- **`trajectory` attribute:** list of predicted temperatures at each time step, enabling a multi-point chart
+
+This is useful for:
+- Verifying that the model's predictions are reasonable
+- Understanding whether the controller expects a room to warm up, cool down, or remain stable
+- Identifying rooms where the model is inaccurate (compare trajectory vs. actual measured temperature over time)
+
+### 13.3 Heat loss analysis
+
+The **Heat Loss** sensor quantifies *where* each room is losing (or gaining) heat at any given moment.
+
+- **State:** total heat loss [W] (positive = room is losing heat)
+- **Attributes:** breakdown by component — `external_loss` (to outdoors), plus one entry per connected room
+
+This is useful for:
+- Identifying the biggest sources of heat loss (poor insulation vs. open doorways)
+- Understanding why a room is slow to heat up
+- Comparing rooms to see which has the most aggressive heat loss
+
+### 13.4 Energy balance
+
+The **Energy Balance** sensor computes the net energy flow for each room: **heating power + solar gain − total heat loss**.
+
+- **State:** net energy flow [W] (positive = room is warming, negative = cooling)
+- **Attributes:** detailed breakdown of all energy terms
+
+This is the key sensor for understanding *why* a room's temperature is changing. A positive net balance means the room is warming; negative means it is cooling even with heaters running.
+
+### 13.5 System efficiency summary
+
+The **System Summary** sensor provides aggregate metrics for the entire heating installation.
+
+- **State:** total heating power across all sources [W]
+- **Key attributes:**
+  - `effective_system_cop` — overall thermal output divided by estimated electrical input (accounts for heat pump COP)
+  - `net_energy_flow` — system-wide heating + solar − losses [W]
+  - `room_heating_power` — per-room heating power breakdown
+
+### 13.6 Diagnostics panel
+
+The integration includes a full **HA diagnostics platform**.  Access it via:
+
+> **Settings → Devices & Services → Heating Assistant → ⋮ (three dots) → Download diagnostics**
+
+The diagnostics dump includes:
+
+- **Room configuration:** thermal mass, R-values, time constants, connections, windows
+- **Heat source details:** type, power, COP, current state
+- **Heat flow breakdown:** per-room heat loss/gain components
+- **Prediction trajectory:** MPC-predicted temperatures for each future step
+- **Solar gains:** current solar heat gain per room
+- **Steady-state analysis:** predicted steady-state temperatures at −10 °C, 0 °C, and 5 °C outdoor temperature using maximum heating power
+- **Controller parameters:** horizon, dt, latitude, longitude
+
+This is invaluable for troubleshooting or sharing your system configuration with others.
+
+### 13.7 Setup service – simulate thermal response
+
+Service: `heating_assistant.simulate_thermal_response`
+
+This service runs a standalone thermal simulation to show how a room responds to constant heating power.  It helps answer the question: *"Is my heater powerful enough to keep this room at 21 °C when it is −10 °C outside?"*
+
+**Service data:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `room_name` | string | Room to simulate |
+| `initial_temp` | float | Starting temperature [°C] |
+| `outdoor_temp` | float | Outdoor temperature [°C] |
+| `heating_power` | float | Constant heating power [W] |
+| `duration_hours` | float | Simulation duration [hours] |
+
+**Example call (Developer Tools → Services):**
+
+```yaml
+service: heating_assistant.simulate_thermal_response
+data:
+  room_name: "living_room"
+  initial_temp: 10.0
+  outdoor_temp: -5.0
+  heating_power: 3000
+  duration_hours: 12
+```
+
+**Result:** A persistent notification is created containing:
+- Temperature trajectory (sampled every 5 minutes)
+- Final temperature reached
+- Steady-state temperature (what the room would reach if heated indefinitely)
+- Time constant (how quickly the room responds — 63 % of final value in 1 τ)
+
+An event `heating_assistant_simulation_result` is also fired, which automations can consume.
+
+### 13.8 Setup service – estimate parameters
+
+Service: `heating_assistant.estimate_parameters`
+
+This service back-calculates `thermal_mass` and `r_external` from an observed heating experiment.  You heat a room with known power and known outdoor temperature, record the start and end temperatures and the duration, and the service estimates the thermal parameters.
+
+**Service data:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `room_name` | string | Room name |
+| `heating_power` | float | Power applied during the experiment [W] |
+| `outdoor_temp` | float | Outdoor temperature during the experiment [°C] |
+| `initial_temp` | float | Room temperature at the start [°C] |
+| `final_temp` | float | Room temperature at the end [°C] |
+| `duration_seconds` | float | Duration of the experiment [s] |
+
+**Example call:**
+
+```yaml
+service: heating_assistant.estimate_parameters
+data:
+  room_name: "bedroom"
+  heating_power: 1500
+  outdoor_temp: 3.0
+  initial_temp: 14.0
+  final_temp: 18.0
+  duration_seconds: 7200
+```
+
+**Result:** A persistent notification with estimated `thermal_mass` and `r_external`, compared to the current configuration values.
+
+### 13.9 Lovelace dashboard examples
+
+Below are example Lovelace card configurations for visualising the advanced sensors.
+
+**Temperature forecast chart (using mini-graph-card):**
+
+```yaml
+type: custom:mini-graph-card
+entities:
+  - entity: sensor.heating_assistant_living_room_predicted_temperature
+    name: Current
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Forecast
+name: Living Room Temperature Forecast
+hours_to_show: 4
+```
+
+**Energy balance overview (using entities card):**
+
+```yaml
+type: entities
+title: Living Room Energy Balance
+entities:
+  - entity: sensor.heating_assistant_living_room_energy_balance
+    name: Net Energy Flow
+  - entity: sensor.heating_assistant_living_room_heating_power
+    name: Heating Power
+  - entity: sensor.heating_assistant_living_room_solar_gain
+    name: Solar Gain
+  - entity: sensor.heating_assistant_living_room_heat_loss
+    name: Heat Loss
+```
+
+**System summary (using entities card):**
+
+```yaml
+type: entities
+title: Heating System Summary
+entities:
+  - entity: sensor.heating_assistant_system_summary
+    name: Total Heating Power
+  - entity: sensor.heating_assistant_outdoor_temperature
+    name: Outdoor Temperature
+```
+
+---
+
+## 14. Thermal Model Parameter Estimation Guide
 
 Accurate parameters lead to accurate predictions and better control.  This section gives practical guidance on how to estimate them.
 
-### 13.1 Thermal mass `thermal_mass`
+### 14.1 Thermal mass `thermal_mass`
 
 The effective thermal mass captures how much energy must be added (or removed) to change the room's temperature by 1 K.  It includes:
 
@@ -1231,7 +1620,7 @@ The effective thermal mass captures how much energy must be added (or removed) t
 
 **Quick estimate:** start with `thermal_mass ≈ 4000 × floor_area_m2` (in J/K) and adjust based on construction type and observation.
 
-### 13.2 External thermal resistance `r_external`
+### 14.2 External thermal resistance `r_external`
 
 The external thermal resistance describes the overall thermal barrier between the room and the outdoors.  It is the reciprocal of the overall heat-transfer coefficient multiplied by area: `R = 1 / (U × A_total)`.
 
@@ -1246,7 +1635,7 @@ Alternatively you can measure it empirically: run the room at a steady temperatu
 | Pre-1970 poorly insulated house | 0.07 – 0.15 |
 | Modern flat / apartment (interior rooms) | 0.1 – 0.3 |
 
-### 13.3 Inter-room thermal resistance `r_value`
+### 14.3 Inter-room thermal resistance `r_value`
 
 This represents the thermal conductance of the wall, floor, ceiling, or doorway between two adjacent rooms.  Higher `r_value` means less heat exchange.
 
@@ -1261,7 +1650,7 @@ This represents the thermal conductance of the wall, floor, ceiling, or doorway 
 | Brick or concrete interior wall | 0.3 – 0.6 |
 | Insulated floor/ceiling between flats | 0.5 – 1.5 |
 
-### 13.4 Window orientation and tilt
+### 14.4 Window orientation and tilt
 
 The `orientation` key is the compass bearing of the **outward-facing normal** of the window, measured clockwise from North.
 
@@ -1280,9 +1669,9 @@ For a roof window pitched towards the South at 30° from horizontal, use `orient
 
 ---
 
-## 14. Developer Guide
+## 15. Developer Guide
 
-### 14.1 Repository layout
+### 15.1 Repository layout
 
 ```
 HeatingAssistant/
@@ -1293,12 +1682,13 @@ HeatingAssistant/
 │   ├── test_thermal_model.py  ← 14 tests: construction, step, predict, inter-room flow
 │   ├── test_solar_model.py    ← 13 tests: angles, DNI, incidence, window gain
 │   ├── test_heat_sources.py   ← 11 tests: electric, heat pump, COP curve
-│   └── test_controller.py     ←  6 tests: actions, fractions, heating/off behaviour
+│   ├── test_controller.py     ←  8 tests: actions, fractions, heating/off behaviour
+│   └── test_visualisation.py  ← 21 tests: heat flows, time constant, steady state, predictions
 ├── .gitignore
 └── README.md
 ```
 
-### 14.2 Running the tests
+### 15.2 Running the tests
 
 Install the required packages once:
 
@@ -1312,7 +1702,7 @@ Run the full test suite:
 python -m pytest tests/ -v
 ```
 
-Expected output: **44 tests pass**.
+Expected output: **71 tests pass**.
 
 Run a single test module:
 
@@ -1321,9 +1711,10 @@ python -m pytest tests/test_thermal_model.py -v
 python -m pytest tests/test_solar_model.py -v
 python -m pytest tests/test_heat_sources.py -v
 python -m pytest tests/test_controller.py -v
+python -m pytest tests/test_visualisation.py -v
 ```
 
-### 14.3 Adding a new heat source type
+### 15.3 Adding a new heat source type
 
 1. **Add a new constant** in `const.py`:
    ```python
@@ -1347,7 +1738,7 @@ python -m pytest tests/test_controller.py -v
 
 5. **Write tests** for the new class in `tests/test_heat_sources.py`.
 
-### 14.4 Extending the solar model
+### 15.4 Extending the solar model
 
 The solar model in `solar_model.py` uses a **clear-sky** approximation (no clouds).  To add cloud cover correction:
 
@@ -1362,7 +1753,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 **Integration does not appear in the Add Integration search**
 
@@ -1403,7 +1794,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 ---
 
-## 16. Roadmap
+## 17. Roadmap
 
 - [ ] **Weather-API outdoor temperature forecast** — replace the persistence assumption with a multi-hour forecast from an integrated HA weather entity.
 - [ ] **Comfort schedule support** — define day/night/away setpoint profiles per room on a weekly timetable.
@@ -1416,7 +1807,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 ---
 
-## 17. References
+## 18. References
 
 1. ISO 13790:2008 — *Energy performance of buildings – Calculation of energy use for space heating and cooling.*
 2. Duffie, J. A. & Beckman, W. A. (2013) — *Solar Engineering of Thermal Processes*, 4th edition, Wiley.
