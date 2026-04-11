@@ -68,16 +68,20 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 12.9 [Sensor entities – heat pump COP](#129-sensor-entities--heat-pump-cop)
     - 12.10 [Sensor entities – outdoor temperature](#1210-sensor-entities--outdoor-temperature)
     - 12.11 [Sensor entities – system summary](#1211-sensor-entities--system-summary)
+    - 12.12 [Sensor entities – heating plan](#1212-sensor-entities--heating-plan)
+    - 12.13 [Sensor entities – solar forecast](#1213-sensor-entities--solar-forecast)
 13. [Advanced Visualisation and Setup Tools](#13-advanced-visualisation-and-setup-tools)
     - 13.1 [Visualisation sensors overview](#131-visualisation-sensors-overview)
     - 13.2 [Temperature forecast trajectory](#132-temperature-forecast-trajectory)
     - 13.3 [Heat loss analysis](#133-heat-loss-analysis)
     - 13.4 [Energy balance](#134-energy-balance)
     - 13.5 [System efficiency summary](#135-system-efficiency-summary)
-    - 13.6 [Diagnostics panel](#136-diagnostics-panel)
-    - 13.7 [Setup service – simulate thermal response](#137-setup-service--simulate-thermal-response)
-    - 13.8 [Setup service – estimate parameters](#138-setup-service--estimate-parameters)
-    - 13.9 [Lovelace dashboard examples](#139-lovelace-dashboard-examples)
+    - 13.6 [Heating plan forecast](#136-heating-plan-forecast)
+    - 13.7 [Solar gain forecast](#137-solar-gain-forecast)
+    - 13.8 [Diagnostics panel](#138-diagnostics-panel)
+    - 13.9 [Setup service – simulate thermal response](#139-setup-service--simulate-thermal-response)
+    - 13.10 [Setup service – estimate parameters](#1310-setup-service--estimate-parameters)
+    - 13.11 [Lovelace dashboard examples](#1311-lovelace-dashboard-examples)
 14. [Thermal Model Parameter Estimation Guide](#14-thermal-model-parameter-estimation-guide)
     - 14.1 [Thermal mass `thermal_mass`](#141-thermal-mass-thermal_mass)
     - 14.2 [External thermal resistance `r_external`](#142-external-thermal-resistance-r_external)
@@ -174,8 +178,18 @@ custom_components/heating_assistant/
 │                          • Setpoint range: 5 °C – 30 °C, step 0.5 °C
 │
 └── sensor.py              HA sensor platform
-                           • PredictedTemperatureSensor per room  [°C]
+                           • PredictedTemperatureSensor per room   [°C]
                            • HeatingPowerSensor per room           [W]
+                           • SolarGainSensor per room              [W]
+                           • TemperatureForecastSensor per room    [°C] (MPC trajectory + timestamped forecast)
+                           • HeatLossSensor per room               [W]
+                           • EnergyBalanceSensor per room          [W]
+                           • HeatingPlanSensor per room            [W] (planned heating schedule)
+                           • SolarForecastSensor per room          [W] (predicted solar gains)
+                           • ControlActionSensor per heat source   [%]
+                           • HeatPumpCOPSensor per heat pump
+                           • OutdoorTemperatureSensor system-wide  [°C]
+                           • SystemEfficiencySensor system-wide    [W]
 ```
 
 ### 2.2 Data flow
@@ -503,6 +517,12 @@ For each room declared in `configuration.yaml` the integration creates:
 | `climate.heating_assistant_<room_name>` | climate | HVAC mode (`heat` / `off`) | current_temperature, target_temperature |
 | `sensor.heating_assistant_<room_name>_predicted_temperature` | sensor | Temperature in °C | setpoint, thermal_mass, r_external |
 | `sensor.heating_assistant_<room_name>_heating_power` | sensor | Total heating power in W | Per-source breakdown by source name |
+| `sensor.heating_assistant_<room_name>_solar_gain` | sensor | Current solar heat gain in W | window_count, total_window_area |
+| `sensor.heating_assistant_<room_name>_temperature_forecast` | sensor | End-of-horizon temperature in °C | trajectory, forecast (timestamped), setpoint, horizon_steps |
+| `sensor.heating_assistant_<room_name>_heat_loss` | sensor | Total heat loss in W | external_loss, per-room flows, outdoor_temp |
+| `sensor.heating_assistant_<room_name>_energy_balance` | sensor | Net energy flow in W | heating_power, solar_gain, losses breakdown |
+| `sensor.heating_assistant_<room_name>_heating_plan` | sensor | Current planned heating power in W | forecast (timestamped), horizon_steps |
+| `sensor.heating_assistant_<room_name>_solar_forecast` | sensor | Current predicted solar gain in W | forecast (timestamped), horizon_steps, window_count |
 
 **Climate entity behaviour:**
 
@@ -752,13 +772,19 @@ Wait for HA to finish restarting (typically 30–90 seconds depending on your ha
 Once HA has restarted:
 
 1. Go to **Settings → Entities** and search for `heating_assistant`.
-2. You should see three entity types for each room you defined:
+2. You should see multiple entity types for each room you defined:
 
    | Entity ID pattern | What it is |
    |-------------------|------------|
    | `climate.heating_assistant_<room_name>` | Thermostat — set your target temperature here |
    | `sensor.heating_assistant_<room_name>_predicted_temperature` | Model-predicted temperature [°C] |
    | `sensor.heating_assistant_<room_name>_heating_power` | Current total heating power [W] |
+   | `sensor.heating_assistant_<room_name>_solar_gain` | Current solar heat gain [W] |
+   | `sensor.heating_assistant_<room_name>_temperature_forecast` | MPC temperature trajectory [°C] |
+   | `sensor.heating_assistant_<room_name>_heat_loss` | Heat loss breakdown [W] |
+   | `sensor.heating_assistant_<room_name>_energy_balance` | Net energy flow [W] |
+   | `sensor.heating_assistant_<room_name>_heating_plan` | Planned heating schedule [W] |
+   | `sensor.heating_assistant_<room_name>_solar_forecast` | Predicted solar gain schedule [W] |
 
 3. If entities are **missing**, check the HA log for errors under the `heating_assistant` integration.  The most common cause is a room or heat source configuration error in `configuration.yaml`.
 
@@ -1437,6 +1463,7 @@ data:
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `trajectory` | list[float] | Predicted temperatures for each horizon step [°C] |
+| `forecast` | list[dict] | Timestamped forecast entries.  Each dict contains `time` (ISO-8601 string), `temperature` (°C), `heating_power` (W), `solar_gain` (W), and `outdoor_temp` (°C).  Suitable for `apexcharts-card` and similar community dashboard cards. |
 | `setpoint` | float | Current room setpoint [°C] |
 | `current_temperature` | float | Current room temperature [°C] |
 | `horizon_steps` | int | Number of prediction steps |
@@ -1566,6 +1593,48 @@ data:
 | `room_heating_power` | dict | Per-room heating power breakdown |
 | `outdoor_temperature` | float | Current outdoor temperature [°C] |
 
+### 12.12 Sensor entities – heating plan
+
+**Entity ID format:** `sensor.heating_assistant_<room_name>_heating_plan`
+
+| Property | Value |
+|----------|-------|
+| Device class | `power` |
+| State class | `measurement` |
+| Unit | W |
+| Icon | `mdi:radiator` |
+| Value | Planned heating power for the first (current) MPC horizon step [W] |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `forecast` | list[dict] | Timestamped heating schedule.  Each dict contains `time` (ISO-8601 string) and `heating_power` (W).  Suitable for `apexcharts-card` to display the controller's planned heat output over the horizon. |
+| `horizon_steps` | int | Number of schedule steps |
+| `step_seconds` | float | Time step duration [s] |
+
+### 12.13 Sensor entities – solar forecast
+
+**Entity ID format:** `sensor.heating_assistant_<room_name>_solar_forecast`
+
+| Property | Value |
+|----------|-------|
+| Device class | `power` |
+| State class | `measurement` |
+| Unit | W |
+| Icon | `mdi:weather-sunny-alert` |
+| Value | Predicted solar gain for the first (current) MPC horizon step [W] |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `forecast` | list[dict] | Timestamped solar gain forecast.  Each dict contains `time` (ISO-8601 string) and `solar_gain` (W).  The solar position model evaluates each horizon step's time so this gives an accurate view of expected solar irradiance entering the room. |
+| `horizon_steps` | int | Number of forecast steps |
+| `step_seconds` | float | Time step duration [s] |
+| `window_count` | int | Number of windows configured for this room |
+| `total_window_area` | float | Total glazed area [m²] |
+
 ---
 
 ## 13. Advanced Visualisation and Setup Tools
@@ -1574,13 +1643,15 @@ This section describes the advanced visualisation sensors and setup assistance s
 
 ### 13.1 Visualisation sensors overview
 
-In addition to the basic sensors (predicted temperature, heating power, solar gain), the integration creates four advanced sensor types that provide deep insight into system operation:
+In addition to the basic sensors (predicted temperature, heating power, solar gain), the integration creates six advanced sensor types that provide deep insight into system operation:
 
 | Sensor | Per-room | Purpose |
 |--------|:--------:|---------|
-| **Temperature Forecast** | ✓ | MPC-predicted temperature trajectory over the prediction horizon |
+| **Temperature Forecast** | ✓ | MPC-predicted temperature trajectory over the prediction horizon, plus a timestamped `forecast` attribute for charting |
 | **Heat Loss** | ✓ | Instantaneous heat-loss breakdown (external + inter-room components) |
 | **Energy Balance** | ✓ | Net energy flow: heating + solar − losses |
+| **Heating Plan** | ✓ | Planned heating power schedule over the full MPC horizon, as a timestamped `forecast` attribute |
+| **Solar Forecast** | ✓ | Predicted solar heat gain over the full MPC horizon, as a timestamped `forecast` attribute |
 | **System Summary** | ✗ (1 total) | Aggregate system metrics: total power, COP, active sources |
 
 All sensors update every coordinator cycle (default 60 seconds) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
@@ -1591,6 +1662,7 @@ The **Temperature Forecast** sensor shows what the MPC controller *predicts* wil
 
 - **State:** predicted temperature at the end of the horizon [°C]
 - **`trajectory` attribute:** list of predicted temperatures at each time step, enabling a multi-point chart
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC), `temperature` (°C), `heating_power` (W), `solar_gain` (W), and `outdoor_temp` (°C).  This combined attribute lets a single dashboard card show all forecast signals on one chart.
 
 This is useful for:
 - Verifying that the model's predictions are reasonable
@@ -1628,7 +1700,31 @@ The **System Summary** sensor provides aggregate metrics for the entire heating 
   - `net_energy_flow` — system-wide heating + solar − losses [W]
   - `room_heating_power` — per-room heating power breakdown
 
-### 13.6 Diagnostics panel
+### 13.6 Heating plan forecast
+
+The **Heating Plan** sensor shows the controller's *intended* heating schedule for each room over the full MPC horizon.
+
+- **State:** planned heating power for the current step [W]
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `heating_power` (W).
+
+This is useful for:
+- Seeing in advance whether the controller intends to pre-heat a room before the setpoint is needed
+- Comparing the planned heating schedule against actual solar gain to understand how the controller balances the two
+- Verifying that the `energy_weight` is not making the controller too reluctant to heat
+
+### 13.7 Solar gain forecast
+
+The **Solar Forecast** sensor shows the deterministic solar heat-gain prediction for each room over the full MPC horizon.
+
+- **State:** predicted solar gain for the current step [W]
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `solar_gain` (W).
+
+Because the solar position model is fully deterministic, this forecast is exact (assuming clear skies) and reflects the sun's trajectory over the coming horizon period.  This is useful for:
+- Confirming that the solar model is producing sensible predictions for your location and window orientations
+- Understanding why the controller is choosing to heat less in rooms with south-facing windows
+- Identifying the peak solar gain time of day for each room
+
+### 13.8 Diagnostics panel
 
 The integration includes a full **HA diagnostics platform**.  Access it via:
 
@@ -1646,7 +1742,7 @@ The diagnostics dump includes:
 
 This is invaluable for troubleshooting or sharing your system configuration with others.
 
-### 13.7 Setup service – simulate thermal response
+### 13.9 Setup service – simulate thermal response
 
 Service: `heating_assistant.simulate_thermal_response`
 
@@ -1682,7 +1778,7 @@ data:
 
 An event `heating_assistant_simulation_result` is also fired, which automations can consume.
 
-### 13.8 Setup service – estimate parameters
+### 13.10 Setup service – estimate parameters
 
 Service: `heating_assistant.estimate_parameters`
 
@@ -1714,9 +1810,101 @@ data:
 
 **Result:** A persistent notification with estimated `thermal_mass` and `r_external`, compared to the current configuration values.
 
-### 13.9 Lovelace dashboard examples
+### 13.11 Lovelace dashboard examples
 
 Below are example Lovelace card configurations for visualising the advanced sensors.
+
+#### Setting up apexcharts-card (HACS)
+
+The timestamped `forecast` attributes on `TemperatureForecastSensor`, `HeatingPlanSensor`, and `SolarForecastSensor` are designed to be consumed directly by [apexcharts-card](https://github.com/RomRider/apexcharts-card), a popular HACS community card.  Install it via HACS → Frontend → apexcharts-card before using the examples below.
+
+**Temperature + heating plan + solar forecast on one chart (apexcharts-card):**
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Living Room Forecast
+graph_span: 2h
+now:
+  show: true
+  label: Now
+series:
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Temperature (°C)
+    attribute: forecast
+    data_generator: |
+      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.temperature]);
+    yaxis_id: temp
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Heating Power (W)
+    attribute: forecast
+    data_generator: |
+      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.heating_power ?? 0]);
+    yaxis_id: power
+    type: area
+    opacity: 0.3
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Solar Gain (W)
+    attribute: forecast
+    data_generator: |
+      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.solar_gain ?? 0]);
+    yaxis_id: power
+    type: area
+    opacity: 0.2
+yaxis:
+  - id: temp
+    apex_config:
+      title:
+        text: Temperature (°C)
+  - id: power
+    opposite: true
+    apex_config:
+      title:
+        text: Power (W)
+```
+
+**Heating plan schedule (apexcharts-card):**
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Living Room Heating Plan
+graph_span: 2h
+now:
+  show: true
+  label: Now
+series:
+  - entity: sensor.heating_assistant_living_room_heating_plan
+    name: Planned Heating (W)
+    attribute: forecast
+    data_generator: |
+      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.heating_power]);
+    type: column
+```
+
+**Solar gain forecast (apexcharts-card):**
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Living Room Solar Forecast
+graph_span: 8h
+now:
+  show: true
+  label: Now
+series:
+  - entity: sensor.heating_assistant_living_room_solar_forecast
+    name: Predicted Solar Gain (W)
+    attribute: forecast
+    data_generator: |
+      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.solar_gain]);
+    type: area
+    color: '#FFC107'
+    opacity: 0.5
+```
 
 **Temperature forecast chart (using mini-graph-card):**
 
@@ -1844,11 +2032,11 @@ HeatingAssistant/
 │   └── heating_assistant/     ← HA integration (described above)
 ├── tests/
 │   ├── __init__.py
-│   ├── test_thermal_model.py  ← 14 tests: construction, step, predict, inter-room flow
+│   ├── test_thermal_model.py  ← 11 tests: construction, step, predict, inter-room flow
 │   ├── test_solar_model.py    ← 13 tests: angles, DNI, incidence, window gain
-│   ├── test_heat_sources.py   ← 11 tests: electric, heat pump, COP curve
+│   ├── test_heat_sources.py   ← 18 tests: electric, heat pump, COP curve
 │   ├── test_controller.py     ←  8 tests: actions, fractions, heating/off behaviour
-│   └── test_visualisation.py  ← 21 tests: heat flows, time constant, steady state, predictions
+│   └── test_visualisation.py  ← 27 tests: heat flows, time constant, steady state, predictions, forecast sensors
 ├── .gitignore
 └── README.md
 ```
@@ -1867,7 +2055,7 @@ Run the full test suite:
 python -m pytest tests/ -v
 ```
 
-Expected output: **71 tests pass**.
+Expected output: **77 tests pass**.
 
 Run a single test module:
 
