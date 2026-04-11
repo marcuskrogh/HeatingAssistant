@@ -170,7 +170,13 @@ class SolarGainSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> float:
-        return round(self._coordinator.solar_gains.get(self._room_name, 0.0), 1)
+        gain = self._coordinator.solar_gains.get(self._room_name, None)
+        if gain is None:
+            _LOGGER.debug(
+                "No solar gain data for room %s; defaulting to 0", self._room_name
+            )
+            return 0.0
+        return round(gain, 1)
 
     @property
     def extra_state_attributes(self) -> dict:
