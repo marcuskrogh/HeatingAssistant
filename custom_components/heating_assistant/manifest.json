@@ -1,0 +1,12 @@
+{
+  "domain": "heating_assistant",
+  "name": "Heating Assistant",
+  "version": "1.0.0",
+  "documentation": "https://github.com/marcuskrogh/HeatingAssistant",
+  "issue_tracker": "https://github.com/marcuskrogh/HeatingAssistant/issues",
+  "requirements": ["numpy>=1.21.0"],
+  "dependencies": [],
+  "codeowners": ["@marcuskrogh"],
+  "iot_class": "local_push",
+  "config_flow": true
+}
