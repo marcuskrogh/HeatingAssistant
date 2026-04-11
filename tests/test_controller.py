@@ -48,7 +48,7 @@ def make_model_and_sources():
     model = HouseModel([living, bedroom])
     sources = [
         ElectricHeater("lr_heater", "living_room", max_power=2000.0),
-        ElectricHeater("br_heater", "bedroom",     max_power=1500.0),
+        ElectricHeater("br_heater", "bedroom", max_power=1500.0),
     ]
     return model, sources
 
@@ -167,7 +167,7 @@ class TestOptimalControlProblem:
         model   = HouseModel([living, bedroom])
         sources = [
             ElectricHeater("lr_heater", "living_room", max_power=2000.0),
-            ElectricHeater("br_heater", "bedroom",     max_power=1500.0),
+            ElectricHeater("br_heater", "bedroom", max_power=1500.0),
         ]
         sys_ = HouseThermalSystem(model, sources, dt=900.0)
         N = 3
@@ -220,7 +220,7 @@ class TestHeatingMPCController:
         model   = HouseModel([living, bedroom])
         sources = [
             ElectricHeater("lr_heater", "living_room", max_power=2000.0),
-            ElectricHeater("br_heater", "bedroom",     max_power=1500.0),
+            ElectricHeater("br_heater", "bedroom", max_power=1500.0),
         ]
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
