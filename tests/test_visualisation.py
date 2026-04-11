@@ -14,7 +14,7 @@ from custom_components.heating_assistant.thermal_model import (
     Window,
 )
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
-from custom_components.heating_assistant.controller import MPCController
+from custom_components.heating_assistant.controller import HeatingMPCController as MPCController
 
 
 # ---------------------------------------------------------------------------
