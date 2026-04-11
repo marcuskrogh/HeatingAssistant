@@ -948,6 +948,7 @@ heat_sources:
     heater_entity: climate.living_room_heat_pump  # optional
     cop_rated: 3.5              # optional (heat_pump only)
     cop_temp_ref: 7.0           # °C – optional (heat_pump only)
+    min_power: 800              # W thermal – optional (heat_pump only)
 ```
 
 **Common keys (all types)**
@@ -972,6 +973,7 @@ heat_sources:
 |-----|------|----------|---------|-------------|
 | `cop_rated` | float | No | `3.5` | Coefficient of Performance at the reference outdoor temperature.  Check your heat pump's datasheet for the value at the EN 14511 test point (usually A7/W35, i.e. 7 °C outdoor, 35 °C supply). |
 | `cop_temp_ref` | float | No | `7.0` | Outdoor temperature [°C] at which `cop_rated` was measured.  Default matches the EN 14511 A7/W35 test condition. |
+| `min_power` | float | No | `0.0` | Minimum thermal output [W] below which the heat pump shuts off entirely.  Real inverter-driven heat pumps have a lower modulation limit (often 20–30 % of rated capacity); if the optimal control signal would produce a positive output below this threshold the integration forces the unit off instead.  Set this to your unit's minimum continuous output to prevent short-cycling. |
 
 ---
 
@@ -1051,6 +1053,7 @@ heating_assistant:
       max_power: 4500         # 4.5 kW thermal at A7/W35
       cop_rated: 4.0
       cop_temp_ref: 7.0
+      min_power: 900          # unit cannot modulate below 20 % of rated capacity
       heater_entity: climate.mitsubishi_hp
 
     - name: backup_heater_living
@@ -1159,6 +1162,7 @@ heating_assistant:
       max_power: 7000
       cop_rated: 3.8
       cop_temp_ref: 7.0
+      min_power: 1400         # ~20 % of rated – prevents short-cycling
       heater_entity: climate.daikin_hp
 
     - name: bedroom1_heater
@@ -1208,6 +1212,7 @@ heating_assistant:
       max_power: 5000
       cop_rated: 4.0
       cop_temp_ref: 7.0
+      min_power: 1000         # unit cannot modulate below 1 kW thermal
       heater_entity: climate.living_heat_pump
 ```
 
@@ -1306,6 +1311,7 @@ heating_assistant:
       max_power: 7000
       cop_rated: 3.8
       cop_temp_ref: 7.0
+      min_power: 1400         # ~20 % of rated – prevents short-cycling
       heater_entity: climate.daikin_hp
 
     - name: kitchen_heater
