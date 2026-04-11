@@ -12,7 +12,7 @@ from custom_components.heating_assistant.thermal_model import (
     Room,
     RoomConnection,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater
+from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
 from custom_components.heating_assistant.controller import MPCController
 
 
@@ -123,3 +123,38 @@ class TestMPCController:
         for src in sources:
             expected = src.thermal_power(actions[src.name])
             assert src.current_power == pytest.approx(expected, rel=1e-6)
+
+    def test_finer_granularity_levels(self):
+        """Controller should use finer levels than the original [0, 0.33, 0.67, 1.0]."""
+        model, sources = make_model_and_sources()
+        ctrl = MPCController(model, sources, horizon=2, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=0.0, now=now)
+
+        # With finer levels, we should see fractional values beyond {0, 0.33, 0.67, 1.0}
+        # At minimum the controller should be able to produce 0.1-step fractions
+        for frac in actions.values():
+            assert frac * 10 == pytest.approx(round(frac * 10), abs=1e-9), (
+                f"Fraction {frac} not on 0.1-step grid"
+            )
+
+    def test_heat_pump_min_power_respected(self):
+        """A heat pump with min_power should never produce output below min_power."""
+        living = Room(
+            name="living_room",
+            thermal_mass=5_000_000.0,
+            r_external=0.05,
+            temperature=20.5,  # close to setpoint → low demand
+            setpoint=21.0,
+        )
+        model = HouseModel([living])
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6100.0,
+            cop_rated=3.5, cop_temp_ref=7.0, min_power=1000.0,
+        )
+        ctrl = MPCController(model, [hp], horizon=2, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=7.0, now=now)
+
+        # The heat pump's current_power should be either 0 or >= min_power
+        assert hp.current_power == 0.0 or hp.current_power >= 1000.0

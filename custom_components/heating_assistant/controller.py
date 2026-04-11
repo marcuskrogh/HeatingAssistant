@@ -35,7 +35,7 @@ from .solar_model import room_solar_gains
 
 
 # Discrete control levels tried during the horizon search
-_LEVELS = [0.0, 0.33, 0.67, 1.0]
+_LEVELS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 # Asymmetric tracking-error penalty weights.
 # Being *too cold* (positive error = setpoint − temperature > 0) is penalised
