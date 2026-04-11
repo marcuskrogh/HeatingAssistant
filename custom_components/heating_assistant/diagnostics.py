@@ -80,12 +80,27 @@ async def async_get_config_entry_diagnostics(
     # --- Predictions ---
     predictions_diag = []
     for i, pred in enumerate(coordinator.predictions):
-        predictions_diag.append({
+        step_data: Dict[str, Any] = {
             "step": i + 1,
             "temperatures": {
                 k: round(v, 2) for k, v in pred.items()
             },
-        })
+        }
+        if i < len(coordinator.heating_schedule):
+            step_data["heating_power"] = {
+                k: round(v, 1)
+                for k, v in coordinator.heating_schedule[i].items()
+            }
+        if i < len(coordinator.solar_forecast):
+            step_data["solar_gains"] = {
+                k: round(v, 1)
+                for k, v in coordinator.solar_forecast[i].items()
+            }
+        if i < len(coordinator.outdoor_forecast):
+            step_data["outdoor_temp"] = round(
+                coordinator.outdoor_forecast[i], 2
+            )
+        predictions_diag.append(step_data)
 
     # --- Solar gains ---
     solar_gains = {

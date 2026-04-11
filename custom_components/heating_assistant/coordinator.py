@@ -207,6 +207,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.outdoor_temp: float = 5.0
         self.heat_flows: Dict[str, Dict[str, float]] = {}
         self.predictions: list = []
+        self.outdoor_forecast: List[float] = []
+        self.solar_forecast: list = []
+        self.heating_schedule: list = []
 
         super().__init__(
             hass,
@@ -272,6 +275,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 5. Store prediction trajectory and heat-flow breakdown
             self.predictions = self.controller.predictions
             self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
+            self.outdoor_forecast = self.controller.outdoor_forecast
+            self.solar_forecast = self.controller.solar_forecast
+            self.heating_schedule = self.controller.heating_schedule
 
             # 6. Write set-points to heater entities
             await self._apply_actions(outdoor_temp)
@@ -283,6 +289,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "solar_gains": dict(self.solar_gains),
                 "predictions": list(self.predictions),
                 "heat_flows": dict(self.heat_flows),
+                "outdoor_forecast": list(self.outdoor_forecast),
+                "solar_forecast": list(self.solar_forecast),
+                "heating_schedule": list(self.heating_schedule),
             }
 
         except Exception as exc:

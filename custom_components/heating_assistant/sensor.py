@@ -8,6 +8,8 @@ For each room the following sensor entities are created:
 - Temperature forecast   (MPC prediction trajectory) [°C]
 - Heat loss              (instantaneous heat loss breakdown) [W]
 - Energy balance         (net energy flow in the room) [W]
+- Heating plan           (planned heating power over MPC horizon) [W]
+- Solar forecast         (predicted solar gain over MPC horizon) [W]
 
 For each heat source:
 - Control action         (MPC controller output fraction) [%]
@@ -23,6 +25,7 @@ System-wide:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from homeassistant.components.sensor import (
@@ -61,6 +64,8 @@ async def async_setup_entry(
         entities.append(TemperatureForecastSensor(coordinator, room_name))
         entities.append(HeatLossSensor(coordinator, room_name))
         entities.append(EnergyBalanceSensor(coordinator, room_name))
+        entities.append(HeatingPlanSensor(coordinator, room_name))
+        entities.append(SolarForecastSensor(coordinator, room_name))
 
     # Per-source sensors
     for src in coordinator.heat_sources:
@@ -360,8 +365,39 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             if temp is not None:
                 trajectory.append(round(temp, 2))
 
+        # Build timestamped forecast entries for dashboard visualisation.
+        # Each entry combines temperature, heating power, solar gain, and
+        # outdoor temperature so cards (e.g. apexcharts-card) can plot
+        # them all from a single attribute.
+        now = datetime.now(tz=timezone.utc)
+        forecast = []
+        outdoor_forecast = self._coordinator.outdoor_forecast
+        solar_forecast = self._coordinator.solar_forecast
+        heating_schedule = self._coordinator.heating_schedule
+        for i, pred in enumerate(predictions):
+            temp = pred.get(self._room_name)
+            if temp is None:
+                continue
+            step_time = now + timedelta(seconds=dt * (i + 1))
+            entry: Dict[str, Any] = {
+                "time": step_time.isoformat(),
+                "temperature": round(temp, 2),
+            }
+            if i < len(heating_schedule):
+                entry["heating_power"] = round(
+                    heating_schedule[i].get(self._room_name, 0.0), 1
+                )
+            if i < len(solar_forecast):
+                entry["solar_gain"] = round(
+                    solar_forecast[i].get(self._room_name, 0.0), 1
+                )
+            if i < len(outdoor_forecast):
+                entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
+            forecast.append(entry)
+
         attrs: Dict[str, Any] = {
             "trajectory": trajectory,
+            "forecast": forecast,
             "setpoint": room.setpoint,
             "current_temperature": round(room.temperature, 2),
             "horizon_steps": len(predictions),
@@ -565,4 +601,120 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
             "total_sources": len(sources),
             "room_heating_power": room_heating,
             "outdoor_temperature": self._coordinator.outdoor_temp,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Heating plan sensor (per room)
+# ---------------------------------------------------------------------------
+
+class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the planned heating power over the MPC horizon for a room.
+
+    The state is the current planned heating power [W].  The full schedule
+    is exposed as a timestamped ``forecast`` attribute so it can be plotted
+    in dashboard cards like ``apexcharts-card``.
+    """
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:radiator"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Heating Plan"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_heating_plan"
+
+    @property
+    def native_value(self) -> float:
+        schedule = self._coordinator.heating_schedule
+        if schedule:
+            return round(schedule[0].get(self._room_name, 0.0), 1)
+        return 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        schedule = self._coordinator.heating_schedule
+        dt = self._coordinator._dt
+        now = datetime.now(tz=timezone.utc)
+
+        forecast = []
+        for i, step in enumerate(schedule):
+            step_time = now + timedelta(seconds=dt * (i + 1))
+            forecast.append({
+                "time": step_time.isoformat(),
+                "heating_power": round(step.get(self._room_name, 0.0), 1),
+            })
+
+        return {
+            "forecast": forecast,
+            "horizon_steps": len(schedule),
+            "step_seconds": dt,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Solar forecast sensor (per room)
+# ---------------------------------------------------------------------------
+
+class SolarForecastSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the predicted solar gain over the MPC horizon for a room.
+
+    The state is the current solar gain [W].  The full forecast is exposed as
+    a timestamped ``forecast`` attribute for dashboard visualisation.
+    """
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:weather-sunny-alert"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Solar Forecast"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_solar_forecast"
+
+    @property
+    def native_value(self) -> float:
+        solar_forecast = self._coordinator.solar_forecast
+        if solar_forecast:
+            return round(solar_forecast[0].get(self._room_name, 0.0), 1)
+        return 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        solar_forecast = self._coordinator.solar_forecast
+        dt = self._coordinator._dt
+        now = datetime.now(tz=timezone.utc)
+
+        forecast = []
+        for i, step in enumerate(solar_forecast):
+            step_time = now + timedelta(seconds=dt * (i + 1))
+            forecast.append({
+                "time": step_time.isoformat(),
+                "solar_gain": round(step.get(self._room_name, 0.0), 1),
+            })
+
+        room = self._coordinator.model.rooms[self._room_name]
+        return {
+            "forecast": forecast,
+            "horizon_steps": len(solar_forecast),
+            "step_seconds": dt,
+            "window_count": len(room.windows),
+            "total_window_area": round(sum(w.area for w in room.windows), 2),
         }

@@ -247,6 +247,88 @@ class TestControllerPredictions:
 
 
 # ---------------------------------------------------------------------------
+# Tests: controller forecast data storage
+# ---------------------------------------------------------------------------
+
+class TestControllerForecastData:
+    """Test that the controller stores forecast data for visualisation."""
+
+    def test_outdoor_forecast_stored(self):
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=4, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=5.0, now=now)
+
+        assert len(ctrl.outdoor_forecast) == 4
+        # Persistence forecast: all values equal current outdoor temp
+        for val in ctrl.outdoor_forecast:
+            assert val == pytest.approx(5.0)
+
+    def test_solar_forecast_stored(self):
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=4, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=5.0, now=now)
+
+        assert len(ctrl.solar_forecast) == 4
+        for step in ctrl.solar_forecast:
+            assert "studio" in step
+            assert isinstance(step["studio"], (int, float))
+
+    def test_heating_schedule_stored(self):
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=4, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=5.0, now=now)
+
+        assert len(ctrl.heating_schedule) == 4
+        for step in ctrl.heating_schedule:
+            assert "studio" in step
+            assert step["studio"] >= 0.0
+
+    def test_forecast_data_empty_before_compute(self):
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=4, dt=900)
+
+        assert ctrl.outdoor_forecast == []
+        assert ctrl.solar_forecast == []
+        assert ctrl.heating_schedule == []
+
+    def test_heating_schedule_matches_predictions_count(self):
+        model = make_two_room_model()
+        sources = [
+            ElectricHeater("lr", "living_room", 2000),
+            ElectricHeater("br", "bedroom", 1500),
+        ]
+        ctrl = MPCController(model, sources, horizon=6, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=0.0, now=now)
+
+        assert len(ctrl.predictions) == 6
+        assert len(ctrl.heating_schedule) == 6
+        assert len(ctrl.solar_forecast) == 6
+        assert len(ctrl.outdoor_forecast) == 6
+
+    def test_heating_schedule_covers_all_rooms(self):
+        model = make_two_room_model()
+        sources = [
+            ElectricHeater("lr", "living_room", 2000),
+            ElectricHeater("br", "bedroom", 1500),
+        ]
+        ctrl = MPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=0.0, now=now)
+
+        for step in ctrl.heating_schedule:
+            assert "living_room" in step
+            assert "bedroom" in step
+
+
+# ---------------------------------------------------------------------------
 # Tests: coordinator simulate_thermal_response and estimate_parameters
 # ---------------------------------------------------------------------------
 
