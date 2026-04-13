@@ -343,6 +343,10 @@ class OptimalControlProblem:
     Q     : (n_x, n_x) stage tracking cost.
     R     : (n_u, n_u) input cost.
     P     : (n_x, n_x) terminal cost; defaults to Q.
+    S     : (n_u, n_u) input rate-of-change cost; defaults to None (no Δu
+            penalty).  When provided the cost function includes an additional
+            term  Σ ‖u[k] − u[k−1]‖²_S  which penalises rapid changes in the
+            control input, resulting in smoother actuator behaviour.
     """
 
     def __init__(
@@ -352,18 +356,21 @@ class OptimalControlProblem:
         Q: np.ndarray,
         R: np.ndarray,
         P: Optional[np.ndarray] = None,
+        S: Optional[np.ndarray] = None,
     ) -> None:
         self._model = model
         self._N = N
         self._Q = Q
         self._R = R
         self._P = P if P is not None else Q.copy()
+        self._S = S  # rate-of-change penalty (Δu cost)
 
     def solve(
         self,
         x0: np.ndarray,
         D: np.ndarray,
         x_ref: np.ndarray,
+        u_prev: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Solve the OCP starting from x0.
@@ -373,6 +380,8 @@ class OptimalControlProblem:
         x0    : (n_x,) current state estimate x̂.
         D     : (N, n_d) disturbance forecast.
         x_ref : (n_x,) reference (repeated for all horizon steps).
+        u_prev : (n_u,) previous applied input (for Δu penalty).
+                 Defaults to zeros if not provided.
 
         Returns
         -------
@@ -412,6 +421,38 @@ class OptimalControlProblem:
         H = Gamma.T @ Q_bar @ Gamma + R_bar
         f = Gamma.T @ Q_bar @ E_free
 
+        # ── Rate-of-change (Δu) penalty ──────────────────────────────────
+        # Adds  Σ ‖u[k] − u[k−1]‖²_S  to discourage rapid input changes.
+        #
+        # ΔU = D_diff @ U + d0,  where d0 = [−u_prev, 0, …, 0]ᵀ
+        #
+        # D_diff is the block first-difference matrix:
+        #   [ I                ]
+        #   [-I   I            ]
+        #   [    -I   I        ]
+        #   [         ...   I  ]
+        #
+        # Cost:  ΔUᵀ S̄ ΔU  →  H += D_diffᵀ S̄ D_diff,  f += D_diffᵀ S̄ d0
+        if self._S is not None:
+            if u_prev is None:
+                u_prev = np.zeros(n_u)
+
+            # Build block first-difference matrix D_diff  (N·m × N·m)
+            D_diff = np.zeros((N * n_u, N * n_u))
+            I_u = np.eye(n_u)
+            for k in range(N):
+                D_diff[k * n_u:(k + 1) * n_u, k * n_u:(k + 1) * n_u] = I_u
+                if k > 0:
+                    D_diff[k * n_u:(k + 1) * n_u, (k - 1) * n_u:k * n_u] = -I_u
+
+            # d0 = [-u_prev, 0, …, 0]  (shift term for first difference)
+            d0 = np.zeros(N * n_u)
+            d0[:n_u] = -u_prev
+
+            S_bar = np.kron(np.eye(N), self._S)
+            H += D_diff.T @ S_bar @ D_diff
+            f += D_diff.T @ S_bar @ d0
+
         # ── Projected gradient on box constraint ─────────────────────────
         u_min, u_max = self._model.u_bounds
         U_flat = _solve_qp_box(H, f, np.tile(u_min, N), np.tile(u_max, N))
@@ -450,6 +491,7 @@ class MPCController:
         self._model = model
         self._estimator = estimator
         self._ocp = ocp
+        self._u_prev: np.ndarray = np.zeros(model.n_u)
 
     def step(
         self,
@@ -471,8 +513,9 @@ class MPCController:
         X_seq : (N, n_x) predicted state trajectory.
         """
         x_hat = self._estimator.update(y, D[0])
-        U_seq, X_seq = self._ocp.solve(x_hat, D, self._model.x_ref)
+        U_seq, X_seq = self._ocp.solve(x_hat, D, self._model.x_ref, u_prev=self._u_prev)
         u = U_seq[0]
+        self._u_prev = u.copy()
         self._estimator.record_action(u)
         return u, U_seq, X_seq
 
@@ -653,6 +696,9 @@ class HeatingMPCController:
     latitude      : site latitude [°]
     longitude     : site longitude [°]
     energy_weight : scalar weight on ‖u‖² in the cost (favours energy saving)
+    smoothing_weight : scalar weight on ‖Δu‖² in the cost (penalises rapid
+                       input changes for smoother actuator behaviour).
+                       Set to 0.0 to disable.
     """
 
     def __init__(
@@ -664,6 +710,7 @@ class HeatingMPCController:
         latitude: float = 55.0,
         longitude: float = 12.0,
         energy_weight: float = 0.01,
+        smoothing_weight: float = 0.1,
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
@@ -675,13 +722,15 @@ class HeatingMPCController:
         self._system = HouseThermalSystem(model, heat_sources, dt)
 
         # Cost matrices: Q = I (tracking), R = energy_weight·I, P = Q (terminal)
+        # S = smoothing_weight·I (rate-of-change penalty on Δu)
         n_x, n_u = self._system.n_x, self._system.n_u
         Q = np.eye(n_x)
         R = energy_weight * np.eye(n_u)
+        S = smoothing_weight * np.eye(n_u) if smoothing_weight > 0.0 else None
 
         # Assemble generic MPC
         estimator = KalmanFilter(self._system)
-        ocp       = OptimalControlProblem(self._system, horizon, Q, R)
+        ocp       = OptimalControlProblem(self._system, horizon, Q, R, S=S)
         self._mpc = MPCController(self._system, estimator, ocp)
 
         # Visualisation data (populated after each compute())

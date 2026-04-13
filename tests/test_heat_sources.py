@@ -151,3 +151,13 @@ class TestHeatPump:
         hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=8.0)
         assert hp.max_temp_offset == 8.0
         assert hp.target_temperature(1.0, 20.0) == pytest.approx(28.0)
+
+    def test_turn_off_deadband_default(self):
+        """Default turn_off_deadband should be 1.0 °C."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.turn_off_deadband == 1.0
+
+    def test_custom_turn_off_deadband(self):
+        """Custom turn_off_deadband is stored correctly."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, turn_off_deadband=2.5)
+        assert hp.turn_off_deadband == 2.5

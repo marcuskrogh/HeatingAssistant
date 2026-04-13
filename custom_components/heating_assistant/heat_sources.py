@@ -156,6 +156,7 @@ class HeatPump(HeatSource):
         min_outdoor_temp: float = -20.0,
         min_power: float = 0.0,
         max_temp_offset: float = 5.0,
+        turn_off_deadband: float = 1.0,
         heater_entity: Optional[str] = None,
     ) -> None:
         super().__init__(name, room, max_power, heater_entity)
@@ -164,6 +165,7 @@ class HeatPump(HeatSource):
         self.min_outdoor_temp = min_outdoor_temp
         self.min_power = min_power
         self.max_temp_offset = max_temp_offset
+        self.turn_off_deadband = turn_off_deadband
 
     def cop(self, outdoor_temp: float) -> float:
         """Return the estimated COP at the given outdoor temperature."""
