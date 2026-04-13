@@ -334,12 +334,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 continue
             domain = entity_id.split(".")[0]
             if domain == "climate":
-                # For climate entities, map fraction to a heat mode
+                # For climate entities, map fraction to heat mode and
+                # synchronise the climate entity's temperature setpoint
+                # with the HeatingAssistant room setpoint so the
+                # underlying device (e.g. heat pump) actually produces
+                # heat when turned on.
                 if fraction > 0.0:
                     await self.hass.services.async_call(
                         "climate",
                         "set_hvac_mode",
                         {"entity_id": entity_id, "hvac_mode": "heat"},
+                        blocking=False,
+                    )
+                    room_setpoint = self.get_room_setpoint(src.room)
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_temperature",
+                        {"entity_id": entity_id, "temperature": room_setpoint},
                         blocking=False,
                     )
                 else:
