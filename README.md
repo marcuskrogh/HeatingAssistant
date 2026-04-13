@@ -105,9 +105,10 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Room-by-room thermal model** | Each room is an independent RC thermal node.  Heat flows between adjacent rooms and to the outdoors through configurable thermal resistances. |
 | **Solar heat gain disturbances** | Every window is modelled individually: area, compass orientation, and tilt angle feed a clear-sky solar irradiance pipeline to produce a time-varying heat gain in Watts. |
 | **Electric heater support** | Resistive heaters and infrared panels modelled as `Q_thermal = P_electrical × η`.  Efficiency is configurable. |
-| **Air-source heat pump support** | Temperature-dependent COP based on Carnot scaling.  The pump shuts off automatically below a configurable outdoor temperature floor to prevent defrost damage. |
+| **Air-source heat pump support** | Temperature-dependent COP based on Carnot scaling.  The pump shuts off automatically below a configurable outdoor temperature floor to prevent defrost damage.  Offset-based setpoint control (`max_temp_offset`) lets the heat pump modulate output via the gap between its internal sensor and the target temperature. |
 | **Multiple heat sources per room** | Any number of heaters and/or heat pumps can be assigned to the same room; the controller optimises them jointly. |
-| **Receding-horizon MPC** | Each control cycle the controller solves a quadratic program over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error and energy use.  Inputs are applied via zero-order hold. |
+| **Turn-off deadband** | Heat pumps stay in heat mode (idling at the internal temperature) when the MPC says "no heat needed" but the room is still within a configurable deadband of the setpoint.  Only when the room exceeds *setpoint + deadband* does the unit actually turn off — dramatically reducing compressor short-cycling. |
+| **Receding-horizon MPC** | Each control cycle the controller solves a quadratic program over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error, energy use, and input rate-of-change (Δu smoothing).  Inputs are applied via zero-order hold. |
 | **Kalman filter state estimation** | A discrete-time Kalman filter fuses model predictions with sensor measurements, providing the minimum-variance state estimate under Gaussian noise assumptions. |
 | **Generic MPC framework** | The controller is built on a generic framework (`LinearDiscreteModel`, `KalmanFilter`, `OptimalControlProblem`, `MPCController`) that can be reused for any linear discrete-time system. |
 | **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface. |
@@ -425,6 +426,24 @@ The `max(…, 1)` guard ensures the COP never falls below 1.0 (even in extreme c
 
 **Minimum outdoor temperature:** if `T_outdoor < min_outdoor_temp` (default −20 °C) the heat pump shuts off completely (`COP = 0`) to represent the compressor lock-out that real units implement to avoid defrost damage.
 
+**Offset-based setpoint control:** when the heat pump is connected via a `climate.*` entity, Heating Assistant reads the heat pump's own internal temperature sensor (`current_temperature` attribute) and sets the heat pump's target temperature to:
+
+```
+T_target = T_hp_internal + fraction × max_temp_offset
+```
+
+where `max_temp_offset` (default 5 °C) is the maximum temperature differential at full power.  This makes the heat pump modulate its own output based on the gap between the setpoint it receives and its own temperature reading.  If the heat pump's internal temperature is unavailable, the HA room temperature is used as a fallback.
+
+**Turn-off deadband:** to prevent aggressive on/off cycling of the compressor, heat pumps use a three-state control strategy based on the configurable `turn_off_deadband` parameter (default 1.0 °C):
+
+| MPC fraction | Room temperature condition | Action |
+|:---:|:---|:---|
+| `> 0` | — | **Heat mode:** target = T_hp_internal + fraction × max_temp_offset |
+| `= 0` | `room_temp ≤ setpoint + deadband` | **Idle:** stay in heat mode, set target = T_hp_internal (no offset — HP idles with minimal output) |
+| `= 0` | `room_temp > setpoint + deadband` | **Off:** set HVAC mode to "off" |
+
+This means the heat pump compressor keeps running (but produces minimal heat) when the room is near the setpoint, and only shuts down once the room is well above the target.  This dramatically reduces wear from short-cycling.
+
 **Example COP curve** (COP_rated = 3.5, T_ref = 7 °C):
 
 | Outdoor temp | COP (approx.) |
@@ -498,10 +517,10 @@ For the house thermal system with full-state observation (`C = I`, one temperatu
 The cost function over the prediction horizon *N* is:
 
 ```
-J(U) = Σ_{k=0}^{N-1} ‖x[k+1] − r‖²_Q  +  ‖u[k]‖²_R  +  ‖x[N] − r‖²_P
+J(U) = Σ_{k=0}^{N-1} ‖x[k+1] − r‖²_Q  +  ‖u[k]‖²_R  +  ‖Δu[k]‖²_S  +  ‖x[N] − r‖²_P
 ```
 
-where:
+where `Δu[k] = u[k] − u[k−1]` (with `u[−1]` equal to the previous step's applied input):
 
 | Symbol | Value / meaning |
 |--------|----------------|
@@ -509,6 +528,7 @@ where:
 | **r** | Reference (room setpoints) |
 | **Q** | State tracking cost (default: `I`) |
 | **R** | Input cost — `energy_weight · I` (default: `0.01 · I`) |
+| **S** | Input rate-of-change cost — `smoothing_weight · I` (default: `0.1 · I`).  Penalises rapid input changes, producing smoother actuator behaviour.  Set `smoothing_weight` to `0.0` to disable. |
 | **P** | Terminal cost (default: `Q`) |
 | **u[k]** | Input vector (continuous fractions ∈ [0, 1]) |
 
@@ -517,12 +537,16 @@ The problem is lifted to the **batch form** using prediction matrices:
 ```
 X = Ψ x₀ + Γ U + Λ D         (predicted state trajectory)
 J = Uᵀ H U + 2 fᵀ U + const
-H = Γᵀ Q̄ Γ + R̄,   f = Γᵀ Q̄ (Ψ x₀ + Λ D − r̄)
+H = Γᵀ Q̄ Γ + R̄ + D_diffᵀ S̄ D_diff,   f = Γᵀ Q̄ (Ψ x₀ + Λ D − r̄) + D_diffᵀ S̄ d₀
 ```
+
+where `D_diff` is the block first-difference matrix and `d₀ = [−u_prev, 0, …, 0]ᵀ` encodes the previous applied input.
 
 Subject to the box constraint `0 ≤ u[k] ≤ 1` (actuator limits), the QP is solved via **projected gradient descent** with step size `α = 1 / λ_max(H)`.
 
 The input cost `R` softly discourages running heaters when the room is close to setpoint.  Increasing `energy_weight` makes the controller more energy-conservative at the expense of tighter temperature tracking.
+
+The smoothing cost `S` penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
 
 **On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the MPC optimises the continuous fraction `u ∈ [0, 1]`, interpreted as the proportion of the sampling interval `dt` for which the source is active.  The coordinator maps this fraction to on/off commands.
 
@@ -598,7 +622,20 @@ When the coordinator applies actions it inspects the HA domain of each `heater_e
 |-----------|---------------|---------|
 | `switch` | `switch.turn_on` / `switch.turn_off` | `entity_id` — turns on if fraction > 0.5 |
 | `number` | `number.set_value` | `value = round(fraction × 100)` (0–100) |
-| `climate` | `climate.set_hvac_mode` | `hvac_mode = "heat"` if fraction > 0, else `"off"` |
+| `climate` (non-heat-pump) | `climate.set_hvac_mode` + `climate.set_temperature` | `hvac_mode = "heat"` + room setpoint if fraction > 0, else `"off"` |
+| `climate` (heat pump) | `climate.set_hvac_mode` + `climate.set_temperature` | Three-state deadband control (see below) |
+
+**Heat pump climate entity control (deadband strategy)**
+
+Heat pumps connected via `climate.*` entities use an offset-based, deadband-aware control strategy to avoid aggressive compressor cycling:
+
+| MPC fraction | Room temperature | HVAC mode | Temperature setpoint |
+|:---:|:---|:---:|:---|
+| `> 0` | — | `heat` | `T_hp_internal + fraction × max_temp_offset` |
+| `= 0` | `≤ setpoint + turn_off_deadband` | `heat` | `T_hp_internal` (idle — no offset, minimal output) |
+| `= 0` | `> setpoint + turn_off_deadband` | `off` | — |
+
+The heat pump's own internal temperature (`current_temperature` attribute on the climate entity) is read each cycle.  If unavailable, the HA room temperature from the configured `temp_sensor` is used as a fallback.
 
 If a `heater_entity` is not specified for a source, the controller still runs and stores the computed fraction but no HA service call is made (useful for simulation/testing).
 
@@ -1033,6 +1070,8 @@ heat_sources:
     cop_rated: 3.5              # optional (heat_pump only)
     cop_temp_ref: 7.0           # °C – optional (heat_pump only)
     min_power: 800              # W thermal – optional (heat_pump only)
+    max_temp_offset: 5.0        # °C – optional (heat_pump only)
+    turn_off_deadband: 1.0      # °C – optional (heat_pump only)
 ```
 
 **Common keys (all types)**
@@ -1058,6 +1097,8 @@ heat_sources:
 | `cop_rated` | float | No | `3.5` | Coefficient of Performance at the reference outdoor temperature.  Check your heat pump's datasheet for the value at the EN 14511 test point (usually A7/W35, i.e. 7 °C outdoor, 35 °C supply). |
 | `cop_temp_ref` | float | No | `7.0` | Outdoor temperature [°C] at which `cop_rated` was measured.  Default matches the EN 14511 A7/W35 test condition. |
 | `min_power` | float | No | `0.0` | Minimum thermal output [W] below which the heat pump shuts off entirely.  Real inverter-driven heat pumps have a lower modulation limit (often 20–30 % of rated capacity); if the optimal control signal would produce a positive output below this threshold the integration forces the unit off instead.  Set this to your unit's minimum continuous output to prevent short-cycling. |
+| `max_temp_offset` | float | No | `5.0` | Maximum temperature offset [°C] added to the heat pump's internal temperature at full power.  When the heat pump is controlled via a `climate.*` entity, the integration sets `target = T_internal + fraction × max_temp_offset`.  Larger values give the heat pump a bigger temperature gap to ramp up against; smaller values limit maximum output.  The default of 5 °C works well for most underfloor and radiator systems. |
+| `turn_off_deadband` | float | No | `1.0` | Temperature [°C] above the room setpoint before the heat pump actually turns off.  When the MPC outputs zero heating demand but the room is still within this deadband of the setpoint, the heat pump stays in heat mode at idle (target = internal temperature, no offset) instead of turning off.  This prevents aggressive compressor short-cycling.  Increase this value if you notice the compressor toggling frequently. |
 
 ---
 
@@ -1138,6 +1179,8 @@ heating_assistant:
       cop_rated: 4.0
       cop_temp_ref: 7.0
       min_power: 900          # unit cannot modulate below 20 % of rated capacity
+      max_temp_offset: 5.0    # °C offset at full power
+      turn_off_deadband: 1.0  # °C above setpoint before actual turn-off
       heater_entity: climate.mitsubishi_hp
 
     - name: backup_heater_living
@@ -1247,6 +1290,8 @@ heating_assistant:
       cop_rated: 3.8
       cop_temp_ref: 7.0
       min_power: 1400         # ~20 % of rated – prevents short-cycling
+      max_temp_offset: 5.0    # °C offset at full power
+      turn_off_deadband: 1.0  # °C above setpoint before actual turn-off
       heater_entity: climate.daikin_hp
 
     - name: bedroom1_heater
@@ -1297,6 +1342,8 @@ heating_assistant:
       cop_rated: 4.0
       cop_temp_ref: 7.0
       min_power: 1000         # unit cannot modulate below 1 kW thermal
+      max_temp_offset: 5.0
+      turn_off_deadband: 1.0
       heater_entity: climate.living_heat_pump
 ```
 
@@ -1396,6 +1443,8 @@ heating_assistant:
       cop_rated: 3.8
       cop_temp_ref: 7.0
       min_power: 1400         # ~20 % of rated – prevents short-cycling
+      max_temp_offset: 5.0
+      turn_off_deadband: 1.0
       heater_entity: climate.daikin_hp
 
     - name: kitchen_heater
@@ -1611,6 +1660,8 @@ data:
 | `cop_rated` | float | Rated COP at reference temperature |
 | `cop_temp_ref` | float | Reference outdoor temperature [°C] |
 | `min_power` | float | Minimum thermal output before shutdown [W] |
+| `max_temp_offset` | float | Maximum temperature offset at full power [°C] |
+| `turn_off_deadband` | float | Temperature above setpoint before actual turn-off [°C] |
 | `outdoor_temp` | float | Current outdoor temperature [°C] |
 
 ### 12.10 Sensor entities – outdoor temperature
@@ -2092,8 +2143,9 @@ HeatingAssistant/
 │   ├── __init__.py
 │   ├── test_thermal_model.py  ← 11 tests: construction, step, predict, inter-room flow
 │   ├── test_solar_model.py    ← 13 tests: angles, DNI, incidence, window gain
-│   ├── test_heat_sources.py   ← 18 tests: electric, heat pump, COP curve
-│   ├── test_controller.py     ←  8 tests: actions, fractions, heating/off behaviour
+│   ├── test_heat_sources.py   ← 20 tests: electric, heat pump, COP curve, deadband
+│   ├── test_controller.py     ← 16 tests: actions, fractions, heating/off, smoothing
+│   ├── test_coordinator_apply_actions.py ← 13 tests: climate/switch/number dispatch, deadband
 │   └── test_visualisation.py  ← 27 tests: heat flows, time constant, steady state, predictions, forecast sensors
 ├── .gitignore
 └── README.md
@@ -2104,7 +2156,7 @@ HeatingAssistant/
 Install the required packages once:
 
 ```bash
-pip install numpy homeassistant pytest
+pip install numpy homeassistant pytest voluptuous pytest-asyncio
 ```
 
 Run the full test suite:
@@ -2113,7 +2165,7 @@ Run the full test suite:
 python -m pytest tests/ -v
 ```
 
-Expected output: **77 tests pass**.
+Expected output: **122 tests pass**.
 
 Run a single test module:
 
@@ -2122,6 +2174,7 @@ python -m pytest tests/test_thermal_model.py -v
 python -m pytest tests/test_solar_model.py -v
 python -m pytest tests/test_heat_sources.py -v
 python -m pytest tests/test_controller.py -v
+python -m pytest tests/test_coordinator_apply_actions.py -v
 python -m pytest tests/test_visualisation.py -v
 ```
 
@@ -2202,6 +2255,12 @@ To use a measured irradiance sensor instead of a computed one:
 - Increase `horizon` — a longer prediction horizon helps the controller anticipate the thermal inertia of the room.
 - Reduce `energy_weight` — if the energy penalty is too high, the controller may heat too little, causing undershoot; then overheat on the next cycle.
 - Reduce `dt` — finer time steps give the controller more opportunities to correct.
+- Increase `smoothing_weight` (default `0.1`) — a higher value penalises rapid changes in the control input, resulting in smoother actuator commands.
+
+**Heat pump turns on and off too frequently (short-cycling)**
+
+- Increase `turn_off_deadband` (default `1.0` °C) — this keeps the heat pump in heat mode (idling at the internal temperature) until the room exceeds the setpoint by the configured deadband.  Try `1.5` or `2.0` °C if the compressor still cycles too often.
+- Increase `smoothing_weight` — the rate-of-change penalty in the MPC cost function discourages the controller from toggling between heating and not-heating across consecutive time steps.
 
 ---
 
