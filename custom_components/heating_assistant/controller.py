@@ -365,6 +365,21 @@ class OptimalControlProblem:
         self._P = P if P is not None else Q.copy()
         self._S = S  # rate-of-change penalty (Δu cost)
 
+        # Pre-compute the block first-difference matrix D_diff for Δu
+        # penalty (constant across solve() calls for fixed N and n_u).
+        self._D_diff: Optional[np.ndarray] = None
+        self._S_bar: Optional[np.ndarray] = None
+        if S is not None:
+            n_u = model.n_u
+            D_diff = np.zeros((N * n_u, N * n_u))
+            I_u = np.eye(n_u)
+            for k in range(N):
+                D_diff[k * n_u:(k + 1) * n_u, k * n_u:(k + 1) * n_u] = I_u
+                if k > 0:
+                    D_diff[k * n_u:(k + 1) * n_u, (k - 1) * n_u:k * n_u] = -I_u
+            self._D_diff = D_diff
+            self._S_bar = np.kron(np.eye(N), S)
+
     def solve(
         self,
         x0: np.ndarray,
@@ -437,21 +452,12 @@ class OptimalControlProblem:
             if u_prev is None:
                 u_prev = np.zeros(n_u)
 
-            # Build block first-difference matrix D_diff  (N·m × N·m)
-            D_diff = np.zeros((N * n_u, N * n_u))
-            I_u = np.eye(n_u)
-            for k in range(N):
-                D_diff[k * n_u:(k + 1) * n_u, k * n_u:(k + 1) * n_u] = I_u
-                if k > 0:
-                    D_diff[k * n_u:(k + 1) * n_u, (k - 1) * n_u:k * n_u] = -I_u
-
             # d0 = [-u_prev, 0, …, 0]  (shift term for first difference)
             d0 = np.zeros(N * n_u)
             d0[:n_u] = -u_prev
 
-            S_bar = np.kron(np.eye(N), self._S)
-            H += D_diff.T @ S_bar @ D_diff
-            f += D_diff.T @ S_bar @ d0
+            H += self._D_diff.T @ self._S_bar @ self._D_diff
+            f += self._D_diff.T @ self._S_bar @ d0
 
         # ── Projected gradient on box constraint ─────────────────────────
         u_min, u_max = self._model.u_bounds
@@ -717,6 +723,11 @@ class HeatingMPCController:
         self._dt = dt
         self._latitude = latitude
         self._longitude = longitude
+
+        if smoothing_weight < 0.0:
+            raise ValueError(
+                f"smoothing_weight must be >= 0; got {smoothing_weight}"
+            )
 
         # Build the linear discrete-time model
         self._system = HouseThermalSystem(model, heat_sources, dt)

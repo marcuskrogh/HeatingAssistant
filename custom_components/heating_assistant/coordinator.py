@@ -387,9 +387,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                                 fraction, hp_internal_temp,
                             )
                         else:
-                            room_temp_fallback = self.model.rooms[src.room].temperature
                             target_temp = src.target_temperature(
-                                fraction, room_temp_fallback,
+                                fraction, room_temp,
                             )
 
                         await self.hass.services.async_call(
