@@ -24,14 +24,25 @@ def _make_fake_hass(entity_states: dict):
     """
     Build a mock *hass* object that knows about the given entity states
     and records every ``services.async_call``.
+
+    ``entity_states`` values may be:
+      - a plain string (the entity's ``state``), or
+      - a dict ``{"state": ..., "attributes": {...}}`` to also set
+        attributes like ``current_temperature``.
     """
     hass = MagicMock()
     hass.services.async_call = AsyncMock()
 
     def _get_state(entity_id):
         if entity_id in entity_states:
+            raw = entity_states[entity_id]
             s = MagicMock()
-            s.state = entity_states[entity_id]
+            if isinstance(raw, dict):
+                s.state = raw.get("state", "unknown")
+                s.attributes = raw.get("attributes", {})
+            else:
+                s.state = raw
+                s.attributes = {}
             return s
         return None
 
@@ -39,7 +50,8 @@ def _make_fake_hass(entity_states: dict):
     return hass
 
 
-async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoints):
+async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoints,
+                            room_temperatures=None):
     """
     Directly exercise the ``_apply_actions`` logic without spinning up
     a full coordinator.  We import the module and patch just enough to
@@ -62,6 +74,7 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
     for name, sp in room_setpoints.items():
         room = MagicMock()
         room.setpoint = sp
+        room.temperature = (room_temperatures or {}).get(name, 20.0)
         model_rooms[name] = room
     model = MagicMock()
     model.rooms = model_rooms
@@ -77,17 +90,28 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
 
 
 class TestApplyActionsClimate:
-    """climate.* entity handling."""
+    """climate.* entity handling with offset-based heat pump control."""
 
     @pytest.mark.asyncio
-    async def test_climate_heat_sets_hvac_mode_and_temperature(self):
-        """When fraction > 0, both set_hvac_mode and set_temperature must be called."""
-        hp = HeatPump("hp1", "living_room", max_power=5000, heater_entity="climate.heat_pump")
+    async def test_heat_pump_uses_internal_temp_plus_offset(self):
+        """When fraction > 0 the heat pump setpoint = T_hp_internal + fraction × max_offset."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000,
+            max_temp_offset=5.0,
+            heater_entity="climate.heat_pump",
+        )
+        # Heat pump's own sensor reads 23 °C  (distinct from HA room sensor)
         hass = await _run_apply_actions(
             heat_sources=[hp],
-            actions={"hp1": 0.8},
-            entity_states={"climate.heat_pump": "off"},
+            actions={"hp1": 0.6},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "off",
+                    "attributes": {"current_temperature": 23.0},
+                },
+            },
             room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 22.0},
         )
 
         calls = hass.services.async_call.call_args_list
@@ -95,13 +119,61 @@ class TestApplyActionsClimate:
 
         # First call: set_hvac_mode → heat
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
-        assert calls[0].args[2]["entity_id"] == "climate.heat_pump"
         assert calls[0].args[2]["hvac_mode"] == "heat"
 
-        # Second call: set_temperature → room setpoint
+        # Second call: set_temperature = 23 + 0.6 × 5 = 26.0
         assert calls[1].args[:2] == ("climate", "set_temperature")
-        assert calls[1].args[2]["entity_id"] == "climate.heat_pump"
-        assert calls[1].args[2]["temperature"] == 25.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(26.0)
+
+    @pytest.mark.asyncio
+    async def test_heat_pump_full_power_offset(self):
+        """At fraction=1.0 the full max_temp_offset is applied."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000,
+            max_temp_offset=4.0,
+            heater_entity="climate.heat_pump",
+        )
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 1.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "off",
+                    "attributes": {"current_temperature": 21.0},
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+        )
+
+        temp_call = hass.services.async_call.call_args_list[1]
+        # 21 + 1.0 × 4 = 25.0
+        assert temp_call.args[2]["temperature"] == pytest.approx(25.0)
+
+    @pytest.mark.asyncio
+    async def test_heat_pump_fallback_to_room_temp(self):
+        """When the heat pump entity has no current_temperature attribute,
+        fall back to the HA room temperature + offset."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000,
+            max_temp_offset=5.0,
+            heater_entity="climate.heat_pump",
+        )
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.5},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "off",
+                    "attributes": {},  # no current_temperature
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 22.0},
+        )
+
+        temp_call = hass.services.async_call.call_args_list[1]
+        # fallback: 22 + 0.5 × 5 = 24.5
+        assert temp_call.args[2]["temperature"] == pytest.approx(24.5)
 
     @pytest.mark.asyncio
     async def test_climate_off_only_sets_hvac_mode(self):
@@ -110,7 +182,12 @@ class TestApplyActionsClimate:
         hass = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
-            entity_states={"climate.heat_pump": "heat"},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 23.0},
+                },
+            },
             room_setpoints={"living_room": 25.0},
         )
 
@@ -120,13 +197,21 @@ class TestApplyActionsClimate:
         assert calls[0].args[2]["hvac_mode"] == "off"
 
     @pytest.mark.asyncio
-    async def test_climate_setpoint_matches_room(self):
-        """The temperature sent to the climate entity equals the HA room setpoint."""
-        hp = HeatPump("hp1", "bedroom", max_power=3000, heater_entity="climate.bedroom_hp")
+    async def test_non_heat_pump_climate_uses_room_setpoint(self):
+        """An ElectricHeater on a climate entity falls back to the room setpoint."""
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000,
+            heater_entity="climate.bedroom_heater",
+        )
         hass = await _run_apply_actions(
-            heat_sources=[hp],
-            actions={"hp1": 0.5},
-            entity_states={"climate.bedroom_hp": "off"},
+            heat_sources=[heater],
+            actions={"e1": 0.7},
+            entity_states={
+                "climate.bedroom_heater": {
+                    "state": "off",
+                    "attributes": {"current_temperature": 20.0},
+                },
+            },
             room_setpoints={"bedroom": 22.5},
         )
 

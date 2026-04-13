@@ -117,3 +117,37 @@ class TestHeatPump:
         """Default min_power should be 0 (backward compatible)."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
         assert hp.min_power == 0.0
+
+    # -- target_temperature (offset-based heat pump control) ---------------
+
+    def test_target_temperature_full_power(self):
+        """At fraction=1.0 the full max_temp_offset is added."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        assert hp.target_temperature(1.0, 23.0) == pytest.approx(28.0)
+
+    def test_target_temperature_zero(self):
+        """At fraction=0.0 the target equals the internal temperature."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        assert hp.target_temperature(0.0, 23.0) == pytest.approx(23.0)
+
+    def test_target_temperature_half_power(self):
+        """At fraction=0.5 half the max_temp_offset is added."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=4.0)
+        assert hp.target_temperature(0.5, 20.0) == pytest.approx(22.0)
+
+    def test_target_temperature_clamps_fraction(self):
+        """Fractions above 1.0 or below 0.0 are clamped."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        assert hp.target_temperature(1.5, 20.0) == pytest.approx(25.0)
+        assert hp.target_temperature(-0.5, 20.0) == pytest.approx(20.0)
+
+    def test_max_temp_offset_default(self):
+        """Default max_temp_offset should be 5.0 °C."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.max_temp_offset == 5.0
+
+    def test_custom_max_temp_offset(self):
+        """Custom max_temp_offset is stored correctly."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=8.0)
+        assert hp.max_temp_offset == 8.0
+        assert hp.target_temperature(1.0, 20.0) == pytest.approx(28.0)

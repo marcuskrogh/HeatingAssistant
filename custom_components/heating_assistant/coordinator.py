@@ -33,6 +33,7 @@ from .const import (
     CONF_SOURCE_EFFICIENCY,
     CONF_SOURCE_HEATER_ENTITY,
     CONF_SOURCE_MAX_POWER,
+    CONF_SOURCE_MAX_TEMP_OFFSET,
     CONF_SOURCE_MIN_POWER,
     CONF_SOURCE_NAME,
     CONF_SOURCE_ROOM,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_EFFICIENCY,
     DEFAULT_HORIZON,
     DEFAULT_MIN_POWER,
+    DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
@@ -140,6 +142,7 @@ def build_heat_sources(
                     cop_rated=sc.get(CONF_SOURCE_COP_RATED, DEFAULT_COP_RATED),
                     cop_temp_ref=sc.get(CONF_SOURCE_COP_TEMP_REF, DEFAULT_COP_TEMP_REF),
                     min_power=sc.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER),
+                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
                     heater_entity=entity,
                 )
             )
@@ -334,11 +337,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 continue
             domain = entity_id.split(".")[0]
             if domain == "climate":
-                # For climate entities, map fraction to heat mode and
-                # synchronise the climate entity's temperature setpoint
-                # with the HeatingAssistant room setpoint so the
-                # underlying device (e.g. heat pump) actually produces
-                # heat when turned on.
+                # For climate entities we need to ensure the heat pump
+                # actually modulates to the desired power output.
+                #
+                # Heat pumps regulate output based on the gap between
+                # their internal temperature reading and their setpoint.
+                # We read the heat pump's own temperature from the
+                # climate entity's ``current_temperature`` attribute and
+                # add an offset proportional to the desired power
+                # fraction so that the heat pump delivers the computed
+                # thermal output.
                 if fraction > 0.0:
                     await self.hass.services.async_call(
                         "climate",
@@ -346,11 +354,41 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         {"entity_id": entity_id, "hvac_mode": "heat"},
                         blocking=False,
                     )
-                    room_setpoint = self.get_room_setpoint(src.room)
+
+                    # Determine target temperature for the heat pump.
+                    # For HeatPump sources we use the offset model;
+                    # for other source types we fall back to the room
+                    # setpoint.
+                    if isinstance(src, HeatPump):
+                        # Read the heat pump's own internal temperature
+                        hp_internal_temp: Optional[float] = None
+                        attrs = getattr(state, "attributes", {})
+                        raw = attrs.get("current_temperature")
+                        if raw is not None:
+                            try:
+                                hp_internal_temp = float(raw)
+                            except (ValueError, TypeError):
+                                pass
+
+                        if hp_internal_temp is not None:
+                            target_temp = src.target_temperature(
+                                fraction, hp_internal_temp,
+                            )
+                        else:
+                            # Fallback: use the HA room temperature +
+                            # offset when the heat pump's own sensor is
+                            # unavailable.
+                            room_temp = self.model.rooms[src.room].temperature
+                            target_temp = src.target_temperature(
+                                fraction, room_temp,
+                            )
+                    else:
+                        target_temp = self.get_room_setpoint(src.room)
+
                     await self.hass.services.async_call(
                         "climate",
                         "set_temperature",
-                        {"entity_id": entity_id, "temperature": room_setpoint},
+                        {"entity_id": entity_id, "temperature": target_temp},
                         blocking=False,
                     )
                 else:

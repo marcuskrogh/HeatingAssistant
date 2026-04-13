@@ -155,6 +155,7 @@ class HeatPump(HeatSource):
         cop_temp_ref: float = 7.0,
         min_outdoor_temp: float = -20.0,
         min_power: float = 0.0,
+        max_temp_offset: float = 5.0,
         heater_entity: Optional[str] = None,
     ) -> None:
         super().__init__(name, room, max_power, heater_entity)
@@ -162,6 +163,7 @@ class HeatPump(HeatSource):
         self.cop_temp_ref = cop_temp_ref
         self.min_outdoor_temp = min_outdoor_temp
         self.min_power = min_power
+        self.max_temp_offset = max_temp_offset
 
     def cop(self, outdoor_temp: float) -> float:
         """Return the estimated COP at the given outdoor temperature."""
@@ -186,3 +188,36 @@ class HeatPump(HeatSource):
         if 0.0 < power < self.min_power:
             return 0.0
         return power
+
+    def target_temperature(
+        self, setpoint_fraction: float, internal_temp: float,
+    ) -> float:
+        """
+        Compute the temperature setpoint to send to the heat pump's climate
+        entity so that it produces the desired fraction of its maximum
+        thermal output.
+
+        The heat pump modulates its output based on the gap between its
+        internal setpoint and its own temperature sensor.  This method
+        returns::
+
+            T_target = T_hp + fraction × max_temp_offset
+
+        where *T_hp* is the heat pump's own temperature reading (which may
+        differ from HeatingAssistant's room sensor) and *max_temp_offset*
+        is the configured maximum temperature differential at full power.
+
+        Parameters
+        ----------
+        setpoint_fraction : float
+            Desired power as a fraction of maximum [0, 1].
+        internal_temp : float
+            The heat pump's own internal temperature reading [°C].
+
+        Returns
+        -------
+        float
+            Target temperature [°C] to set on the heat pump climate entity.
+        """
+        setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
+        return internal_temp + setpoint_fraction * self.max_temp_offset
