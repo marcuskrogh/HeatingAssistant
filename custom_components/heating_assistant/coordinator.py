@@ -35,6 +35,7 @@ from .const import (
     CONF_SOURCE_MAX_POWER,
     CONF_SOURCE_MAX_TEMP_OFFSET,
     CONF_SOURCE_MIN_POWER,
+    CONF_SOURCE_TURN_OFF_DEADBAND,
     CONF_SOURCE_NAME,
     CONF_SOURCE_ROOM,
     CONF_SOURCE_TYPE,
@@ -58,6 +59,7 @@ from .const import (
     DEFAULT_HORIZON,
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
+    DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
@@ -143,6 +145,7 @@ def build_heat_sources(
                     cop_temp_ref=sc.get(CONF_SOURCE_COP_TEMP_REF, DEFAULT_COP_TEMP_REF),
                     min_power=sc.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER),
                     max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
+                    turn_off_deadband=sc.get(CONF_SOURCE_TURN_OFF_DEADBAND, DEFAULT_TURN_OFF_DEADBAND),
                     heater_entity=entity,
                 )
             )
@@ -347,57 +350,105 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # add an offset proportional to the desired power
                 # fraction so that the heat pump delivers the computed
                 # thermal output.
-                if fraction > 0.0:
-                    await self.hass.services.async_call(
-                        "climate",
-                        "set_hvac_mode",
-                        {"entity_id": entity_id, "hvac_mode": "heat"},
-                        blocking=False,
-                    )
+                #
+                # To reduce aggressive on/off cycling, heat pump climate
+                # entities use a deadband strategy:
+                #   - fraction > 0  → heat mode, offset-based setpoint
+                #   - fraction == 0 AND room_temp <= setpoint + deadband
+                #     → stay in heat mode, set target = internal temp
+                #       (HP idles with no temperature gap)
+                #   - fraction == 0 AND room_temp > setpoint + deadband
+                #     → actually turn off
+                if isinstance(src, HeatPump):
+                    room_temp = self.model.rooms[src.room].temperature
+                    room_setpoint = self.get_room_setpoint(src.room)
 
-                    # Determine target temperature for the heat pump.
-                    # For HeatPump sources we use the offset model;
-                    # for other source types we fall back to the room
-                    # setpoint.
-                    if isinstance(src, HeatPump):
-                        # Read the heat pump's own internal temperature
-                        hp_internal_temp: Optional[float] = None
-                        attrs = getattr(state, "attributes", {})
-                        raw = attrs.get("current_temperature")
-                        if raw is not None:
-                            try:
-                                hp_internal_temp = float(raw)
-                            except (ValueError, TypeError):
-                                pass
+                    # Read the heat pump's own internal temperature
+                    hp_internal_temp: Optional[float] = None
+                    attrs = getattr(state, "attributes", {})
+                    raw = attrs.get("current_temperature")
+                    if raw is not None:
+                        try:
+                            hp_internal_temp = float(raw)
+                        except (ValueError, TypeError):
+                            pass
+
+                    if fraction > 0.0:
+                        # Active heating: keep on with offset-based setpoint
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "heat"},
+                            blocking=False,
+                        )
 
                         if hp_internal_temp is not None:
                             target_temp = src.target_temperature(
                                 fraction, hp_internal_temp,
                             )
                         else:
-                            # Fallback: use the HA room temperature +
-                            # offset when the heat pump's own sensor is
-                            # unavailable.
-                            room_temp = self.model.rooms[src.room].temperature
                             target_temp = src.target_temperature(
                                 fraction, room_temp,
                             )
-                    else:
-                        target_temp = self.get_room_setpoint(src.room)
 
-                    await self.hass.services.async_call(
-                        "climate",
-                        "set_temperature",
-                        {"entity_id": entity_id, "temperature": target_temp},
-                        blocking=False,
-                    )
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": entity_id, "temperature": target_temp},
+                            blocking=False,
+                        )
+                    elif room_temp > room_setpoint + src.turn_off_deadband:
+                        # Room is well above setpoint – actually turn off
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "off"},
+                            blocking=False,
+                        )
+                    else:
+                        # Idle within deadband: keep HP on but set target
+                        # to internal temp (no offset → minimal output)
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "heat"},
+                            blocking=False,
+                        )
+
+                        if hp_internal_temp is not None:
+                            target_temp = hp_internal_temp
+                        else:
+                            target_temp = self.model.rooms[src.room].temperature
+
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": entity_id, "temperature": target_temp},
+                            blocking=False,
+                        )
                 else:
-                    await self.hass.services.async_call(
-                        "climate",
-                        "set_hvac_mode",
-                        {"entity_id": entity_id, "hvac_mode": "off"},
-                        blocking=False,
-                    )
+                    # Non-heat-pump climate entity (original behaviour)
+                    if fraction > 0.0:
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "heat"},
+                            blocking=False,
+                        )
+                        target_temp = self.get_room_setpoint(src.room)
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": entity_id, "temperature": target_temp},
+                            blocking=False,
+                        )
+                    else:
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "off"},
+                            blocking=False,
+                        )
             elif domain == "number":
                 await self.hass.services.async_call(
                     "number",

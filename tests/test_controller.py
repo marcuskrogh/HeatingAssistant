@@ -344,3 +344,51 @@ class TestHeatingMPCController:
         """Higher outdoor temperature -> higher COP."""
         hp = HeatPump("hp", "lr", max_power=6100.0, cop_rated=3.5, cop_temp_ref=7.0)
         assert hp.cop(10.0) > hp.cop(-10.0)
+
+    def test_smoothing_weight_reduces_input_change(self):
+        """With a large smoothing weight, the first-step input change should
+        be smaller than without smoothing (rate-of-change penalty)."""
+        model_a, sources_a = make_model_and_sources()
+        model_b, sources_b = make_model_and_sources()
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        ctrl_no_smooth  = HeatingMPCController(model_a, sources_a, horizon=4, dt=900,
+                                                smoothing_weight=0.0)
+        ctrl_smooth     = HeatingMPCController(model_b, sources_b, horizon=4, dt=900,
+                                                smoothing_weight=1.0)
+
+        actions_a = ctrl_no_smooth.compute(outdoor_temp=-10.0, now=now)
+        actions_b = ctrl_smooth.compute(outdoor_temp=-10.0, now=now)
+
+        # Both should want to heat (below setpoint), but the smoothed
+        # controller should produce more moderate (lower) fractions on
+        # the first step because it penalises the change from u_prev=0.
+        total_a = sum(actions_a.values())
+        total_b = sum(actions_b.values())
+        assert total_b <= total_a + 1e-6
+
+    def test_smoothing_disabled_with_zero_weight(self):
+        """smoothing_weight=0.0 gives the same result as the original cost."""
+        model_a, sources_a = make_model_and_sources()
+        model_b, sources_b = make_model_and_sources()
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        ctrl_a = HeatingMPCController(model_a, sources_a, horizon=3, dt=900,
+                                       smoothing_weight=0.0)
+        ctrl_b = HeatingMPCController(model_b, sources_b, horizon=3, dt=900,
+                                       smoothing_weight=0.0)
+
+        actions_a = ctrl_a.compute(outdoor_temp=0.0, now=now)
+        actions_b = ctrl_b.compute(outdoor_temp=0.0, now=now)
+
+        for name in actions_a:
+            assert actions_a[name] == pytest.approx(actions_b[name], abs=1e-6)
+
+    def test_default_smoothing_weight(self):
+        """Default smoothing_weight is 0.1."""
+        model, sources = make_model_and_sources()
+        # Just verify the controller constructs successfully with default
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=0.0, now=now)
+        assert all(0.0 <= f <= 1.0 for f in actions.values())

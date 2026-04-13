@@ -176,9 +176,12 @@ class TestApplyActionsClimate:
         assert temp_call.args[2]["temperature"] == pytest.approx(24.5)
 
     @pytest.mark.asyncio
-    async def test_climate_off_only_sets_hvac_mode(self):
-        """When fraction == 0, only set_hvac_mode → off is called (no set_temperature)."""
-        hp = HeatPump("hp1", "living_room", max_power=5000, heater_entity="climate.heat_pump")
+    async def test_heat_pump_idles_within_deadband(self):
+        """When fraction == 0 and room temp is within deadband of setpoint,
+        the HP stays on with target = internal temp (idle, no offset)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=1.0,
+                       heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
@@ -189,12 +192,91 @@ class TestApplyActionsClimate:
                 },
             },
             room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 24.5},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        # Should stay in heat mode and set temperature to internal temp
+        assert len(calls) == 2
+        assert calls[0].args[:2] == ("climate", "set_hvac_mode")
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        assert calls[1].args[:2] == ("climate", "set_temperature")
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+
+    @pytest.mark.asyncio
+    async def test_heat_pump_turns_off_above_deadband(self):
+        """When fraction == 0 and room temp > setpoint + deadband,
+        the HP actually turns off."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=1.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 27.0},
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.5},
         )
 
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 1
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "off"
+
+    @pytest.mark.asyncio
+    async def test_heat_pump_idle_fallback_to_room_temp(self):
+        """When idling and internal temp is unavailable, fall back to room temp."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=1.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {},  # no current_temperature
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 22.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # Falls back to room temperature (22.0)
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+
+    @pytest.mark.asyncio
+    async def test_heat_pump_custom_deadband(self):
+        """Custom turn_off_deadband is respected."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=2.0,
+                       heater_entity="climate.heat_pump")
+        # Room at 26.5 with setpoint 25.0 → 26.5 < 25.0 + 2.0 → idles (doesn't turn off)
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 26.0},
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.5},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        assert calls[1].args[2]["temperature"] == pytest.approx(26.0)
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_uses_room_setpoint(self):
