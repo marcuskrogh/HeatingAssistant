@@ -5,8 +5,10 @@ One ``climate`` entity is created for each configured room.  The entity
 exposes:
 - current temperature  (from the measured or model temperature)
 - target temperature   (setpoint)
-- HVAC mode            (``heat`` when any heater in the room is active,
-                        ``off`` otherwise)
+- HVAC mode            (``heat`` when the room is enabled by the user,
+                        ``off`` when the user has turned it off)
+- HVAC action          (``heating`` when heaters are actively producing
+                        heat, ``idle`` otherwise)
 """
 
 from __future__ import annotations
@@ -85,16 +87,19 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
 
     @property
     def hvac_mode(self) -> HVACMode:
-        """Return the current HVAC mode based on active heater power."""
-        sources = self._coordinator.heat_sources
-        room_sources = [s for s in sources if s.room == self._room_name]
-        if any(s.current_power > 0 for s in room_sources):
+        """Return the current HVAC mode based on the user-controlled room state."""
+        if self._coordinator.is_room_enabled(self._room_name):
             return HVACMode.HEAT
         return HVACMode.OFF
 
     @property
     def hvac_action(self) -> HVACAction:
-        if self.hvac_mode == HVACMode.HEAT:
+        """Return the current action based on active heater power."""
+        if self.hvac_mode == HVACMode.OFF:
+            return HVACAction.OFF
+        sources = self._coordinator.heat_sources
+        room_sources = [s for s in sources if s.room == self._room_name]
+        if any(s.current_power > 0 for s in room_sources):
             return HVACAction.HEATING
         return HVACAction.IDLE
 
@@ -111,13 +116,18 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """
-        Switching to ``off`` sets the room setpoint to MIN_TEMP (frost protection).
-        Switching to ``heat`` restores DEFAULT_SETPOINT if the current setpoint
+        Toggle the room on or off.
+
+        Switching to ``off`` disables the room and sets the setpoint to
+        MIN_TEMP (frost protection).  Switching to ``heat`` re-enables
+        the room and restores DEFAULT_SETPOINT if the current setpoint
         is at the frost-protection level.
         """
         if hvac_mode == HVACMode.OFF:
+            self._coordinator.set_room_enabled(self._room_name, False)
             self._coordinator.set_room_setpoint(self._room_name, MIN_TEMP)
         elif hvac_mode == HVACMode.HEAT:
+            self._coordinator.set_room_enabled(self._room_name, True)
             if self._coordinator.get_room_setpoint(self._room_name) <= MIN_TEMP:
                 self._coordinator.set_room_setpoint(self._room_name, DEFAULT_SETPOINT)
         await self._coordinator.async_request_refresh()

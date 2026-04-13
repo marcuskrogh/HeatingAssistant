@@ -325,7 +325,7 @@ The sun's position is expressed as **altitude** α (angle above the horizon, rad
    $$\delta = 23.45° \cdot \sin\!\left(\frac{360}{365} \cdot (n - 81)\right) \quad [\text{converted to radians}]$$
 
 4. **Apparent solar time** corrects UTC for longitude and EoT.
-5. **Hour angle** $\omega = 15° \times (\text{solar\_time} - 12)$ [degrees → radians].
+5. **Hour angle** $\omega = 15° \times (\text{solar time} - 12)$ [degrees → radians].
 6. **Altitude** from the spherical-trigonometry formula:
 
    $$\sin \alpha = \sin \varphi \cdot \sin \delta + \cos \varphi \cdot \cos \delta \cdot \cos \omega$$
@@ -411,7 +411,7 @@ The `max(…, 1)` guard ensures the COP never falls below 1.0 (even in extreme c
 
 **Offset-based setpoint control:** when the heat pump is connected via a `climate.*` entity, Heating Assistant reads the heat pump's own internal temperature sensor (`current_temperature` attribute) and sets the heat pump's target temperature to:
 
-$$T_{\text{target}} = T_{\text{hp,internal}} + \text{fraction} \times \text{max\_temp\_offset}$$
+$$T_{\text{target}} = T_{\text{hp,internal}} + \text{fraction} \times \text{max temp offset}$$
 
 where `max_temp_offset` (default 5 °C) is the maximum temperature differential at full power.  This makes the heat pump modulate its own output based on the gap between the setpoint it receives and its own temperature reading.  If the heat pump's internal temperature is unavailable, the HA room temperature is used as a fallback.
 
@@ -508,8 +508,8 @@ where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u
 | $\mathbf{x}[k]$ | Predicted state (room temperatures) at step *k* |
 | $\mathbf{r}$ | Reference (room setpoints) |
 | $\mathbf{Q}$ | State tracking cost (default: $\mathbf{I}$) |
-| $\mathbf{R}$ | Input cost — $\text{energy\_weight} \cdot \mathbf{I}$ (default: $0.01 \cdot \mathbf{I}$) |
-| $\mathbf{S}$ | Input rate-of-change cost — $\text{smoothing\_weight} \cdot \mathbf{I}$ (default: $0.1 \cdot \mathbf{I}$).  Penalises rapid input changes, producing smoother actuator behaviour.  Set `smoothing_weight` to `0.0` to disable. |
+| $\mathbf{R}$ | Input cost — $\text{energy weight} \cdot \mathbf{I}$ (default: $0.01 \cdot \mathbf{I}$) |
+| $\mathbf{S}$ | Input rate-of-change cost — $\text{smoothing weight} \cdot \mathbf{I}$ (default: $0.1 \cdot \mathbf{I}$).  Penalises rapid input changes, producing smoother actuator behaviour.  Set `smoothing_weight` to `0.0` to disable. |
 | $\mathbf{P}$ | Terminal cost (default: $\mathbf{Q}$) |
 | $\mathbf{u}[k]$ | Input vector (continuous fractions $\in [0, 1]$) |
 

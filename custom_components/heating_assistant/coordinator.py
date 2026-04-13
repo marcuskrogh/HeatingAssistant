@@ -205,6 +205,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             longitude=self._longitude,
         )
 
+        # Per-room enabled state (True = active, False = off).
+        # Defaults to True so the system is active after (re)start.
+        self._room_enabled: Dict[str, bool] = {
+            name: True for name in self.model.room_names
+        }
+
         # Latest control actions (source_name → fraction 0‑1)
         self.actions: Dict[str, float] = {}
 
@@ -331,6 +337,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """Write the computed set-point fractions to heater entities via HA services."""
         for src in self.heat_sources:
             fraction = self.actions.get(src.name, 0.0)
+
+            # If the room is disabled, force fraction to 0 (turn off).
+            if not self.is_room_enabled(src.room):
+                fraction = 0.0
+
             entity_id = src.heater_entity
             if not entity_id:
                 continue
@@ -479,6 +490,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if room_name in self.model.rooms:
             return self.model.rooms[room_name].setpoint
         return DEFAULT_SETPOINT
+
+    # ------------------------------------------------------------------
+    # Room enable/disable helpers (called by climate platform)
+    # ------------------------------------------------------------------
+
+    def set_room_enabled(self, room_name: str, enabled: bool) -> None:
+        """Enable or disable heating control for a room."""
+        self._room_enabled[room_name] = enabled
+
+    def is_room_enabled(self, room_name: str) -> bool:
+        """Return whether heating control is active for a room."""
+        return self._room_enabled.get(room_name, True)
 
     # ------------------------------------------------------------------
     # Setup helpers (used by services)
