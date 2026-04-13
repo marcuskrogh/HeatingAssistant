@@ -40,6 +40,7 @@ CONF_SOURCE_COP_RATED = "cop_rated"   # rated COP for heat pumps
 CONF_SOURCE_COP_TEMP_REF = "cop_temp_ref"  # outdoor temp (°C) at which rated COP applies
 CONF_SOURCE_MIN_POWER = "min_power"    # W (minimum thermal output for heat pumps)
 CONF_SOURCE_HEATER_ENTITY = "heater_entity"  # HA entity_id for the heater
+CONF_SOURCE_MAX_TEMP_OFFSET = "max_temp_offset"  # °C max temperature offset for heat pump power control
 
 # Controller configuration keys
 CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
@@ -56,6 +57,7 @@ DEFAULT_EFFICIENCY = 1.0
 DEFAULT_COP_RATED = 3.5
 DEFAULT_COP_TEMP_REF = 7.0             # °C
 DEFAULT_MIN_POWER = 0.0                # W (no minimum by default)
+DEFAULT_MAX_TEMP_OFFSET = 5.0          # °C (heat pump offset at full power)
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 
 # Source types
