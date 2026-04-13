@@ -80,6 +80,9 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
     model.rooms = model_rooms
     coord.model = model
 
+    # All rooms enabled by default (matches coordinator __init__)
+    coord._room_enabled = {name: True for name in room_setpoints}
+
     await coord._apply_actions(outdoor_temp=5.0)
     return hass
 
