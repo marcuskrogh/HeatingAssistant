@@ -254,41 +254,34 @@ Each room is treated as a single, well-mixed thermal node — the **lumped-param
 
 The energy balance for room *i* is:
 
-```
-C_i · dT_i/dt = Q_heater_i(t)
-               + Σ_{j ∈ adj(i)}  (T_j(t) − T_i(t)) / R_ij    [inter-room conduction]
-               + (T_outdoor(t) − T_i(t)) / R_i,ext             [fabric heat loss/gain]
-               + Q_solar_i(t)                                   [solar gain]
-```
+$$C_i \cdot \frac{dT_i}{dt} = Q_{\text{heater},i}(t) + \sum_{j \in \text{adj}(i)} \frac{T_j(t) - T_i(t)}{R_{ij}} + \frac{T_{\text{outdoor}}(t) - T_i(t)}{R_{i,\text{ext}}} + Q_{\text{solar},i}(t)$$
 
 **Symbol table**
 
 | Symbol | Unit | Meaning |
 |--------|------|---------|
-| `C_i` | J/K | Effective thermal mass (heat capacity) of room *i*.  Includes air, furniture, walls. |
-| `T_i` | °C | Current (lumped) temperature of room *i*. |
-| `T_outdoor` | °C | Outdoor air temperature (read from a HA sensor). |
-| `R_ij` | K/W | Thermal resistance of the wall, floor, or ceiling between rooms *i* and *j*. |
-| `R_i,ext` | K/W | Total thermal resistance between room *i* and the outdoor environment (walls + roof + ground). |
-| `Q_heater_i` | W | Sum of thermal power output from all heaters assigned to room *i*. |
-| `Q_solar_i` | W | Solar heat gain through all windows of room *i*. |
+| $C_i$ | J/K | Effective thermal mass (heat capacity) of room *i*.  Includes air, furniture, walls. |
+| $T_i$ | °C | Current (lumped) temperature of room *i*. |
+| $T_{\text{outdoor}}$ | °C | Outdoor air temperature (read from a HA sensor). |
+| $R_{ij}$ | K/W | Thermal resistance of the wall, floor, or ceiling between rooms *i* and *j*. |
+| $R_{i,\text{ext}}$ | K/W | Total thermal resistance between room *i* and the outdoor environment (walls + roof + ground). |
+| $Q_{\text{heater},i}$ | W | Sum of thermal power output from all heaters assigned to room *i*. |
+| $Q_{\text{solar},i}$ | W | Solar heat gain through all windows of room *i*. |
 
 ### 3.2 State-space matrix form
 
 For a house with *n* rooms, the set of coupled ODEs is assembled once at startup into a compact matrix form:
 
-```
-C · dT/dt = A · T + B_ext · T_outdoor + Q(t)
-```
+$$\mathbf{C} \cdot \frac{d\mathbf{T}}{dt} = \mathbf{A} \cdot \mathbf{T} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{Q}(t)$$
 
 where:
-- **C** is an *n*-vector of thermal masses (diagonal of the capacitance matrix).
-- **T** is the *n*-vector of room temperatures.
-- **A** is an *n×n* conductance matrix:
-  - off-diagonal element A[i,j] = +1/R_ij (heat flowing in from room j)
-  - diagonal element A[i,i] = −1/R_i,ext − Σ_j 1/R_ij (total heat flowing out)
-- **B_ext** is an *n*-vector of outdoor conductances (1/R_i,ext for each room).
-- **Q(t)** is the *n*-vector of heater power plus solar gains.
+- $\mathbf{C}$ is an *n*-vector of thermal masses (diagonal of the capacitance matrix).
+- $\mathbf{T}$ is the *n*-vector of room temperatures.
+- $\mathbf{A}$ is an $n \times n$ conductance matrix:
+  - off-diagonal element $A_{ij} = +1/R_{ij}$ (heat flowing in from room *j*)
+  - diagonal element $A_{ii} = -1/R_{i,\text{ext}} - \sum_j 1/R_{ij}$ (total heat flowing out)
+- $\mathbf{B}_{\text{ext}}$ is an *n*-vector of outdoor conductances ($1/R_{i,\text{ext}}$ for each room).
+- $\mathbf{Q}(t)$ is the *n*-vector of heater power plus solar gains.
 
 This representation makes each `step()` call a simple vector-matrix multiply — fast even for large houses.
 
@@ -296,19 +289,17 @@ This representation makes each `step()` call a simple vector-matrix multiply —
 
 The MPC controller uses **exact zero-order hold (ZOH) discretisation** of the continuous-time thermal model.  Given the continuous state-space form
 
-```
-Ṫ = F T + G_u u + G_d d
-```
+$$\dot{\mathbf{T}} = \mathbf{F}\,\mathbf{T} + \mathbf{G}_u\,\mathbf{u} + \mathbf{G}_d\,\mathbf{d}$$
 
-with `F = C_cap⁻¹ A` (state matrix) and `G_u`, `G_d` the input and disturbance matrices, the discrete-time matrices are computed as:
+with $\mathbf{F} = \mathbf{C}_{\text{cap}}^{-1}\,\mathbf{A}$ (state matrix) and $\mathbf{G}_u$, $\mathbf{G}_d$ the input and disturbance matrices, the discrete-time matrices are computed as:
 
-```
-A_d = expm(F · dt)                     (matrix exponential)
-B_d = F⁻¹ (A_d − I) · G_u             (exact ZOH input matrix)
-E_d = F⁻¹ (A_d − I) · G_d             (exact ZOH disturbance matrix)
-```
+$$\mathbf{A}_d = \text{expm}(\mathbf{F} \cdot dt)$$
 
-This gives the exact solution `T[k+1] = A_d T[k] + B_d u[k] + E_d d[k]` for piecewise-constant inputs held over each sampling interval `dt`.  Unlike forward Euler, ZOH discretisation is unconditionally stable and introduces no discretisation error for the assumed piecewise-constant input profile.
+$$\mathbf{B}_d = \mathbf{F}^{-1}(\mathbf{A}_d - \mathbf{I}) \cdot \mathbf{G}_u$$
+
+$$\mathbf{E}_d = \mathbf{F}^{-1}(\mathbf{A}_d - \mathbf{I}) \cdot \mathbf{G}_d$$
+
+This gives the exact solution $\mathbf{T}[k{+}1] = \mathbf{A}_d\,\mathbf{T}[k] + \mathbf{B}_d\,\mathbf{u}[k] + \mathbf{E}_d\,\mathbf{d}[k]$ for piecewise-constant inputs held over each sampling interval $dt$.  Unlike forward Euler, ZOH discretisation is unconditionally stable and introduces no discretisation error for the assumed piecewise-constant input profile.
 
 The `HouseModel.step()` and `HouseModel.predict()` methods still use forward Euler for fast multi-step rollouts (e.g. the `simulate_thermal_response` service).  The MPC controller exclusively uses ZOH for its prediction model.
 
@@ -324,70 +315,67 @@ The sun's position is expressed as **altitude** α (angle above the horizon, rad
 
 1. **Day-of-year** *n* is extracted from the datetime.
 2. **Equation of time** (Spencer 1971) corrects for the eccentricity and obliquity of Earth's orbit:
-   ```
-   B = 360/365 · (n − 81)   [degrees]
-   EoT [min] = 9.87·sin(2B) − 7.53·cos(B) − 1.5·sin(B)
-   ```
+
+   $$B = \frac{360}{365} \cdot (n - 81) \quad [\text{degrees}]$$
+
+   $$\text{EoT [min]} = 9.87 \sin(2B) - 7.53 \cos(B) - 1.5 \sin(B)$$
+
 3. **Solar declination** (Cooper equation):
-   ```
-   δ [rad] = 23.45° · sin(360/365 · (n − 81))   [converted to radians]
-   ```
+
+   $$\delta = 23.45° \cdot \sin\!\left(\frac{360}{365} \cdot (n - 81)\right) \quad [\text{converted to radians}]$$
+
 4. **Apparent solar time** corrects UTC for longitude and EoT.
-5. **Hour angle** ω = 15° × (solar_time − 12) [degrees → radians].
+5. **Hour angle** $\omega = 15° \times (\text{solar\_time} - 12)$ [degrees → radians].
 6. **Altitude** from the spherical-trigonometry formula:
-   ```
-   sin α = sin φ · sin δ + cos φ · cos δ · cos ω
-   ```
-   where φ is the geographic latitude.
+
+   $$\sin \alpha = \sin \varphi \cdot \sin \delta + \cos \varphi \cdot \cos \delta \cdot \cos \omega$$
+
+   where $\varphi$ is the geographic latitude.
 7. **Azimuth** from the clockwise-from-South formula, then converted to clockwise-from-North.
 
 #### Step 2 — Clear-sky Direct Normal Irradiance (DNI)
 
 The extra-terrestrial irradiance is corrected for the Earth–Sun distance:
-```
-G_on = 1361 · (1 + 0.033 · cos(360·n/365))   [W/m²]
-```
+
+$$G_{on} = 1361 \cdot \left(1 + 0.033 \cdot \cos\!\left(\frac{360 \cdot n}{365}\right)\right) \quad [\text{W/m}^2]$$
 
 The air-mass number uses the Kasten & Young (1989) formula which avoids a singularity at the horizon:
-```
-am = 1 / (sin α + 0.50572 · (α_deg + 0.07628)^{−1.6364})
-```
+
+$$am = \frac{1}{\sin \alpha + 0.50572 \cdot (\alpha_{\text{deg}} + 0.07628)^{-1.6364}}$$
 
 Atmospheric transmittance (Meinel & Meinel approximation):
-```
-τ_b = 0.56 · (e^{−0.65·am} + e^{−0.095·am})
-DNI = G_on · τ_b   [W/m²]
-```
+
+$$\tau_b = 0.56 \cdot \left(e^{-0.65 \cdot am} + e^{-0.095 \cdot am}\right)$$
+
+$$\text{DNI} = G_{on} \cdot \tau_b \quad [\text{W/m}^2]$$
 
 #### Step 3 — Diffuse Horizontal Irradiance (DHI)
 
 A simplified isotropic model:
-```
-GHI = DNI · sin α
-DHI = 0.1 · GHI   [W/m²]
-```
+
+$$\text{GHI} = \text{DNI} \cdot \sin \alpha$$
+
+$$\text{DHI} = 0.1 \cdot \text{GHI} \quad [\text{W/m}^2]$$
 
 #### Step 4 — Angle of incidence on the window
 
-The angle θ between the direct beam and the surface normal is:
-```
-cos θ = cos α · cos γ · sin β  +  sin α · cos β
-```
-where β is the surface tilt from horizontal (90° = vertical) and γ is the relative azimuth (sun azimuth − surface azimuth).
+The angle $\theta$ between the direct beam and the surface normal is:
+
+$$\cos \theta = \cos \alpha \cdot \cos \gamma \cdot \sin \beta + \sin \alpha \cdot \cos \beta$$
+
+where $\beta$ is the surface tilt from horizontal (90° = vertical) and $\gamma$ is the relative azimuth (sun azimuth − surface azimuth).
 
 #### Step 5 — Irradiance on the window
 
-```
-I_direct  = max(0, DNI · cos θ)
-I_diffuse = DHI · (1 + cos β) / 2      [Liu & Jordan isotropic sky model]
-I_window  = I_direct + I_diffuse        [W/m²]
-```
+$$I_{\text{direct}} = \max(0,\; \text{DNI} \cdot \cos \theta)$$
+
+$$I_{\text{diffuse}} = \text{DHI} \cdot \frac{1 + \cos \beta}{2} \quad \text{(Liu \& Jordan isotropic sky model)}$$
+
+$$I_{\text{window}} = I_{\text{direct}} + I_{\text{diffuse}} \quad [\text{W/m}^2]$$
 
 #### Step 6 — Solar heat gain
 
-```
-Q_solar = SHGC · area · I_window   [W]
-```
+$$Q_{\text{solar}} = \text{SHGC} \cdot \text{area} \cdot I_{\text{window}} \quad [\text{W}]$$
 
 The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear double glazing).  This constant is defined in `solar_model.py` as `DEFAULT_SHGC` and can be changed at the module level if your windows have a different specification.
 
@@ -395,32 +383,27 @@ The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear dou
 
 #### Electric heater
 
-```
-Q_thermal = P_max · u · η
-```
+$$Q_{\text{thermal}} = P_{\max} \cdot u \cdot \eta$$
 
-- `P_max` — rated maximum electrical (= thermal) power [W].
-- `u` — control signal in [0, 1] (fractional output chosen by the MPC controller).
-- `η` — efficiency, default 1.0.  For a purely resistive heater η = 1.0 exactly (all electrical energy becomes heat).  Infrared heaters can be specified with η < 1 if a fraction is radiated outside the thermal envelope.
+- $P_{\max}$ — rated maximum electrical (= thermal) power [W].
+- $u$ — control signal in $[0, 1]$ (fractional output chosen by the MPC controller).
+- $\eta$ — efficiency, default 1.0.  For a purely resistive heater $\eta = 1.0$ exactly (all electrical energy becomes heat).  Infrared heaters can be specified with $\eta < 1$ if a fraction is radiated outside the thermal envelope.
 
 The outdoor temperature has no effect on an electric heater's output.
 
 #### Air-source heat pump
 
-The electrical input power is fixed at `P_elec = P_max / COP_rated`.  The actual thermal output is:
+The electrical input power is fixed at $P_{\text{elec}} = P_{\max} / \text{COP}_{\text{rated}}$.  The actual thermal output is:
 
-```
-COP(T_outdoor) = max(1, COP_rated · COP_Carnot(T_outdoor) / COP_Carnot(T_ref))
-Q_thermal      = P_elec · u · COP(T_outdoor)
-               = (P_max / COP_rated) · u · COP(T_outdoor)
-```
+$$\text{COP}(T_{\text{outdoor}}) = \max\!\left(1,\; \text{COP}_{\text{rated}} \cdot \frac{\text{COP}_{\text{Carnot}}(T_{\text{outdoor}})}{\text{COP}_{\text{Carnot}}(T_{\text{ref}})}\right)$$
 
-The Carnot COP at temperature T_outdoor is computed assuming a fixed **supply temperature of 35 °C** (typical for low-temperature underfloor or radiator systems):
+$$Q_{\text{thermal}} = P_{\text{elec}} \cdot u \cdot \text{COP}(T_{\text{outdoor}}) = \frac{P_{\max}}{\text{COP}_{\text{rated}}} \cdot u \cdot \text{COP}(T_{\text{outdoor}})$$
 
-```
-T_supply = 35 + 273.15   [K]
-COP_Carnot(T) = T_supply / max(T_supply − T, 1)
-```
+The Carnot COP at temperature $T_{\text{outdoor}}$ is computed assuming a fixed **supply temperature of 35 °C** (typical for low-temperature underfloor or radiator systems):
+
+$$T_{\text{supply}} = 35 + 273.15 \quad [\text{K}]$$
+
+$$\text{COP}_{\text{Carnot}}(T) = \frac{T_{\text{supply}}}{\max(T_{\text{supply}} - T,\; 1)}$$
 
 The `max(…, 1)` guard ensures the COP never falls below 1.0 (even in extreme cold, a heat pump is at least as efficient as direct electric heating).
 
@@ -428,9 +411,7 @@ The `max(…, 1)` guard ensures the COP never falls below 1.0 (even in extreme c
 
 **Offset-based setpoint control:** when the heat pump is connected via a `climate.*` entity, Heating Assistant reads the heat pump's own internal temperature sensor (`current_temperature` attribute) and sets the heat pump's target temperature to:
 
-```
-T_target = T_hp_internal + fraction × max_temp_offset
-```
+$$T_{\text{target}} = T_{\text{hp,internal}} + \text{fraction} \times \text{max\_temp\_offset}$$
 
 where `max_temp_offset` (default 5 °C) is the maximum temperature differential at full power.  This makes the heat pump modulate its own output based on the gap between the setpoint it receives and its own temperature reading.  If the heat pump's internal temperature is unavailable, the HA room temperature is used as a fallback.
 
@@ -490,69 +471,69 @@ At each control step the `HeatingMPCController`:
 The state estimator is a standard **discrete-time Kalman filter**.  At each time step *k*:
 
 **Prediction:**
-```
-x̂⁻[k] = A x̂[k-1] + B u[k-1] + E d[k-1]
-P⁻[k]  = A P[k-1] Aᵀ + Q_w
-```
+
+$$\hat{\mathbf{x}}^{-}[k] = \mathbf{A}\,\hat{\mathbf{x}}[k{-}1] + \mathbf{B}\,\mathbf{u}[k{-}1] + \mathbf{E}\,\mathbf{d}[k{-}1]$$
+
+$$\mathbf{P}^{-}[k] = \mathbf{A}\,\mathbf{P}[k{-}1]\,\mathbf{A}^\top + \mathbf{Q}_w$$
 
 **Update (correction):**
-```
-S[k]  = C P⁻[k] Cᵀ + R_v              (innovation covariance)
-K[k]  = P⁻[k] Cᵀ S[k]⁻¹              (Kalman gain)
-x̂[k] = x̂⁻[k] + K[k] (y[k] − C x̂⁻[k])  (corrected state estimate)
-P[k]  = (I − K[k] C) P⁻[k]            (posterior covariance)
-```
+
+$$\mathbf{S}[k] = \mathbf{C}\,\mathbf{P}^{-}[k]\,\mathbf{C}^\top + \mathbf{R}_v \qquad \text{(innovation covariance)}$$
+
+$$\mathbf{K}[k] = \mathbf{P}^{-}[k]\,\mathbf{C}^\top\,\mathbf{S}[k]^{-1} \qquad \text{(Kalman gain)}$$
+
+$$\hat{\mathbf{x}}[k] = \hat{\mathbf{x}}^{-}[k] + \mathbf{K}[k]\bigl(\mathbf{y}[k] - \mathbf{C}\,\hat{\mathbf{x}}^{-}[k]\bigr) \qquad \text{(corrected state estimate)}$$
+
+$$\mathbf{P}[k] = \bigl(\mathbf{I} - \mathbf{K}[k]\,\mathbf{C}\bigr)\,\mathbf{P}^{-}[k] \qquad \text{(posterior covariance)}$$
 
 | Symbol | Meaning |
 |--------|---------|
-| **Q_w** | Process noise covariance — models unmodelled disturbances and model mismatch (default: `0.01 · I`). |
-| **R_v** | Measurement noise covariance — models sensor noise (default: `0.1 · I`). |
-| **P** | State error covariance — propagated at every step; determines the time-varying Kalman gain. |
-| **K[k]** | Kalman gain — automatically balances trust in the model vs. the sensors. |
+| $\mathbf{Q}_w$ | Process noise covariance — models unmodelled disturbances and model mismatch (default: $0.01 \cdot \mathbf{I}$). |
+| $\mathbf{R}_v$ | Measurement noise covariance — models sensor noise (default: $0.1 \cdot \mathbf{I}$). |
+| $\mathbf{P}$ | State error covariance — propagated at every step; determines the time-varying Kalman gain. |
+| $\mathbf{K}[k]$ | Kalman gain — automatically balances trust in the model vs. the sensors. |
 
-For the house thermal system with full-state observation (`C = I`, one temperature sensor per room), the Kalman gain converges quickly to a steady-state value that weights measurements heavily relative to the model prediction.  The filter provides robustness against temporary sensor noise and gradual model drift.
+For the house thermal system with full-state observation ($\mathbf{C} = \mathbf{I}$, one temperature sensor per room), the Kalman gain converges quickly to a steady-state value that weights measurements heavily relative to the model prediction.  The filter provides robustness against temporary sensor noise and gradual model drift.
 
 ### 4.3 Optimal control problem — batch QP
 
 The cost function over the prediction horizon *N* is:
 
-```
-J(U) = Σ_{k=0}^{N-1} ‖x[k+1] − r‖²_Q  +  ‖u[k]‖²_R  +  ‖Δu[k]‖²_S  +  ‖x[N] − r‖²_P
-```
+$$J(\mathbf{U}) = \sum_{k=0}^{N-1} \left\lVert \mathbf{x}[k{+}1] - \mathbf{r} \right\rVert_{\mathbf{Q}}^2 + \left\lVert \mathbf{u}[k] \right\rVert_{\mathbf{R}}^2 + \left\lVert \Delta\mathbf{u}[k] \right\rVert_{\mathbf{S}}^2 + \left\lVert \mathbf{x}[N] - \mathbf{r} \right\rVert_{\mathbf{P}}^2$$
 
-where `Δu[k] = u[k] − u[k−1]` (with `u[−1]` equal to the previous step's applied input):
+where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u}[-1]$ equal to the previous step's applied input):
 
 | Symbol | Value / meaning |
 |--------|----------------|
-| **x[k]** | Predicted state (room temperatures) at step *k* |
-| **r** | Reference (room setpoints) |
-| **Q** | State tracking cost (default: `I`) |
-| **R** | Input cost — `energy_weight · I` (default: `0.01 · I`) |
-| **S** | Input rate-of-change cost — `smoothing_weight · I` (default: `0.1 · I`).  Penalises rapid input changes, producing smoother actuator behaviour.  Set `smoothing_weight` to `0.0` to disable. |
-| **P** | Terminal cost (default: `Q`) |
-| **u[k]** | Input vector (continuous fractions ∈ [0, 1]) |
+| $\mathbf{x}[k]$ | Predicted state (room temperatures) at step *k* |
+| $\mathbf{r}$ | Reference (room setpoints) |
+| $\mathbf{Q}$ | State tracking cost (default: $\mathbf{I}$) |
+| $\mathbf{R}$ | Input cost — $\text{energy\_weight} \cdot \mathbf{I}$ (default: $0.01 \cdot \mathbf{I}$) |
+| $\mathbf{S}$ | Input rate-of-change cost — $\text{smoothing\_weight} \cdot \mathbf{I}$ (default: $0.1 \cdot \mathbf{I}$).  Penalises rapid input changes, producing smoother actuator behaviour.  Set `smoothing_weight` to `0.0` to disable. |
+| $\mathbf{P}$ | Terminal cost (default: $\mathbf{Q}$) |
+| $\mathbf{u}[k]$ | Input vector (continuous fractions $\in [0, 1]$) |
 
 The problem is lifted to the **batch form** using prediction matrices:
 
-```
-X = Ψ x₀ + Γ U + Λ D         (predicted state trajectory)
-J = Uᵀ H U + 2 fᵀ U + const
-H = Γᵀ Q̄ Γ + R̄ + D_diffᵀ S̄ D_diff,   f = Γᵀ Q̄ (Ψ x₀ + Λ D − r̄) + D_diffᵀ S̄ d₀
-```
+$$\mathbf{X} = \boldsymbol{\Psi}\,\mathbf{x}_0 + \boldsymbol{\Gamma}\,\mathbf{U} + \boldsymbol{\Lambda}\,\mathbf{D} \qquad \text{(predicted state trajectory)}$$
 
-where `D_diff` is the block first-difference matrix and `d₀ = [−u_prev, 0, …, 0]ᵀ` encodes the previous applied input.
+$$J = \mathbf{U}^\top \mathbf{H}\,\mathbf{U} + 2\,\mathbf{f}^\top \mathbf{U} + \text{const}$$
 
-Subject to the box constraint `0 ≤ u[k] ≤ 1` (actuator limits), the QP is solved via **projected gradient descent** with step size `α = 1 / λ_max(H)`.
+$$\mathbf{H} = \boldsymbol{\Gamma}^\top \bar{\mathbf{Q}}\,\boldsymbol{\Gamma} + \bar{\mathbf{R}} + \mathbf{D}_{\text{diff}}^\top \bar{\mathbf{S}}\,\mathbf{D}_{\text{diff}}, \qquad \mathbf{f} = \boldsymbol{\Gamma}^\top \bar{\mathbf{Q}}\bigl(\boldsymbol{\Psi}\,\mathbf{x}_0 + \boldsymbol{\Lambda}\,\mathbf{D} - \bar{\mathbf{r}}\bigr) + \mathbf{D}_{\text{diff}}^\top \bar{\mathbf{S}}\,\mathbf{d}_0$$
 
-The input cost `R` softly discourages running heaters when the room is close to setpoint.  Increasing `energy_weight` makes the controller more energy-conservative at the expense of tighter temperature tracking.
+where $\mathbf{D}_{\text{diff}}$ is the block first-difference matrix and $\mathbf{d}_0 = [-\mathbf{u}_{\text{prev}}, 0, \ldots, 0]^\top$ encodes the previous applied input.
 
-The smoothing cost `S` penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
+Subject to the box constraint $0 \le \mathbf{u}[k] \le 1$ (actuator limits), the QP is solved via **projected gradient descent** with step size $\alpha = 1 / \lambda_{\max}(\mathbf{H})$.
 
-**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the MPC optimises the continuous fraction `u ∈ [0, 1]`, interpreted as the proportion of the sampling interval `dt` for which the source is active.  The coordinator maps this fraction to on/off commands.
+The input cost $\mathbf{R}$ softly discourages running heaters when the room is close to setpoint.  Increasing `energy_weight` makes the controller more energy-conservative at the expense of tighter temperature tracking.
+
+The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
+
+**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the MPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval $dt$ for which the source is active.  The coordinator maps this fraction to on/off commands.
 
 ### 4.4 Disturbance forecasts
 
-The controller builds a disturbance forecast matrix **D** ∈ ℝ^(N × p) before solving the QP:
+The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{N \times p}$ before solving the QP:
 
 | Disturbance | Forecast method |
 |-------------|----------------|
@@ -2066,7 +2047,7 @@ Accurate parameters lead to accurate predictions and better control.  This secti
 
 The effective thermal mass captures how much energy must be added (or removed) to change the room's temperature by 1 K.  It includes:
 
-- **Air mass:**  ρ_air × V_room × c_p,air ≈ 1.2 kg/m³ × V × 1005 J/(kg·K) ≈ 1200 × V J/K
+- **Air mass:**  $\rho_{\text{air}} \times V_{\text{room}} \times c_{p,\text{air}} \approx 1.2\;\text{kg/m}^3 \times V \times 1005\;\text{J/(kg·K)} \approx 1200 \times V\;\text{J/K}$
 - **Furniture and contents:**  roughly 0.5–1 × air mass for a furnished room
 - **Interior wall surface layers:**  the inner few centimetres of plasterboard, brick, or timber absorb/release heat on the timescale of hours
 - **Floor and ceiling finishes**
@@ -2084,9 +2065,9 @@ The effective thermal mass captures how much energy must be added (or removed) t
 
 ### 14.2 External thermal resistance `r_external`
 
-The external thermal resistance describes the overall thermal barrier between the room and the outdoors.  It is the reciprocal of the overall heat-transfer coefficient multiplied by area: `R = 1 / (U × A_total)`.
+The external thermal resistance describes the overall thermal barrier between the room and the outdoors.  It is the reciprocal of the overall heat-transfer coefficient multiplied by area: $R = 1 / (U \times A_{\text{total}})$.
 
-Alternatively you can measure it empirically: run the room at a steady temperature with no solar gain (night, overcast) and observe the steady-state heater power `Q` [W] and the indoor–outdoor temperature difference ΔT [K].  Then `R_ext ≈ ΔT / Q` [K/W].
+Alternatively you can measure it empirically: run the room at a steady temperature with no solar gain (night, overcast) and observe the steady-state heater power $Q$ [W] and the indoor–outdoor temperature difference $\Delta T$ [K].  Then $R_{\text{ext}} \approx \Delta T / Q$ [K/W].
 
 **Typical values:**
 
