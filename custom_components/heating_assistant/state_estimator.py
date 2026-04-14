@@ -196,13 +196,11 @@ class KalmanFilter:
         # Innovation covariance  S = C P⁻ Cᵀ + R
         S = C * P_pred * C.T + self._R
 
-        # Solve  S Kᵀ = C P⁻ᵀ  for K  (more stable than explicit inversion)
-        # Equivalent to K = P⁻ Cᵀ S⁻¹
+        # Solve  S Kᵀ = (P⁻ Cᵀ)ᵀ  for Kᵀ  via Cholesky factorisation
+        # (S is symmetric positive-definite).  Equivalent to K = P⁻ Cᵀ S⁻¹.
         Kt = matrix(P_pred * C.T)      # n × l, will be overwritten
-        S_copy = matrix(S)              # lapack.posv overwrites S
-        ipiv = matrix(0, (S.size[0], 1))
-        lapack.sytrf(S_copy, ipiv)
-        lapack.sytrs(S_copy, ipiv, Kt)
+        S_copy = matrix(S)              # posv overwrites S
+        lapack.posv(S_copy, Kt)
         K = Kt                          # n × l
 
         # Innovation  ν = y − C x̂⁻
@@ -241,14 +239,12 @@ class KalmanFilter:
         C = self._model.C
 
         if self._first:
-            # Bootstrap:  x̂ = C⁺ y  (left pseudo-inverse for C with full
-            # column rank; for C = I this is simply x̂ = y).
+            # Bootstrap:  x̂ = C⁺ y  (Moore–Penrose pseudoinverse for C
+            # with full column rank; for C = I this reduces to x̂ = y).
             from cvxopt import lapack
             CtC = C.T * C
             Cty = C.T * y
-            ipiv = matrix(0, (CtC.size[0], 1))
-            lapack.sytrf(CtC, ipiv)
-            lapack.sytrs(CtC, ipiv, Cty)
+            lapack.posv(CtC, Cty)
             self._x_hat = Cty
             self._first = False
         else:

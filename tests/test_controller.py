@@ -310,7 +310,7 @@ class TestOptimalControlProblem:
         x0 = cvx_matrix(sys_.x, (n_x, 1))
         U, _ = ocp.solve(x0, D, sys_.x_ref)
         U_np = _cvx_col_to_np(U)
-        np.testing.assert_array_almost_equal(U_np, np.zeros(N * n_u), decimal=3)
+        np.testing.assert_array_almost_equal(U_np, np.zeros(N * n_u), decimal=6)
 
 
 # -- HeatingMPCController (application facade) tests -------------------------
@@ -360,7 +360,7 @@ class TestHeatingMPCController:
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=22.0, now=now)
-        assert all(frac == pytest.approx(0.0, abs=1e-3) for frac in actions.values())
+        assert all(frac == pytest.approx(0.0, abs=1e-6) for frac in actions.values())
 
     def test_solar_gains_provided_externally(self):
         model, sources = make_model_and_sources()

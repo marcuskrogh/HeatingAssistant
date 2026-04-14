@@ -99,7 +99,8 @@ def _np_to_cvx(a: np.ndarray) -> matrix:
 def _cvx_to_np(m: matrix) -> np.ndarray:
     """Convert a cvxopt dense matrix to a 2-D numpy array."""
     rows, cols = m.size
-    return np.array(list(m), dtype=float).reshape(cols, rows).T
+    # cvxopt stores matrices in column-major (Fortran) order
+    return np.array(list(m), dtype=float).reshape((rows, cols), order="F")
 
 
 def _cvx_col_to_np(m: matrix) -> np.ndarray:
