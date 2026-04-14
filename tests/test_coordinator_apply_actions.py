@@ -202,12 +202,12 @@ class TestApplyActionsClimate:
         )
 
         calls = hass.services.async_call.call_args_list
-        # Should stay in heat mode and set temperature to internal temp
+        # Should stay in heat mode and set temperature to internal temp - idle offset
         assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "heat"
         assert calls[1].args[:2] == ("climate", "set_temperature")
-        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)  # 23.0 - 1.0
 
     @pytest.mark.asyncio
     async def test_heat_pump_turns_off_above_deadband(self):
@@ -256,8 +256,8 @@ class TestApplyActionsClimate:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        # Falls back to room temperature (22.0)
-        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+        # Falls back to room temperature minus idle offset (22.0 - 1.0)
+        assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
 
     @pytest.mark.asyncio
     async def test_heat_pump_custom_deadband(self):
@@ -282,7 +282,7 @@ class TestApplyActionsClimate:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        assert calls[1].args[2]["temperature"] == pytest.approx(26.0)
+        assert calls[1].args[2]["temperature"] == pytest.approx(25.0)  # 26.0 - 1.0
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_uses_room_setpoint(self):
@@ -329,12 +329,12 @@ class TestApplyActionsClimate:
         )
 
         calls = hass.services.async_call.call_args_list
-        # heat mode + setpoint at internal temperature (not room setpoint)
+        # heat mode + setpoint at internal temperature minus idle offset
         assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "heat"
         assert calls[1].args[:2] == ("climate", "set_temperature")
-        assert calls[1].args[2]["temperature"] == pytest.approx(21.5)
+        assert calls[1].args[2]["temperature"] == pytest.approx(20.5)  # 21.5 - 1.0
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_idle_fallback_to_room_temp(self):
@@ -360,8 +360,8 @@ class TestApplyActionsClimate:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        # fallback: HA room temperature
-        assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
+        # fallback: HA room temperature minus idle offset (21.0 - 1.0)
+        assert calls[1].args[2]["temperature"] == pytest.approx(20.0)
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_disabled_room_turns_off(self):

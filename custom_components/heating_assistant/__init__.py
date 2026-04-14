@@ -210,10 +210,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if yaml_cfg:
         entry_data.setdefault(CONF_ROOMS, yaml_cfg.get(CONF_ROOMS, []))
         entry_data.setdefault(CONF_HEAT_SOURCES, yaml_cfg.get(CONF_HEAT_SOURCES, []))
-        entry_data.setdefault(
-            CONF_OUTDOOR_TEMP_ENTITY,
-            yaml_cfg.get(CONF_OUTDOOR_TEMP_ENTITY, ""),
-        )
+        # Use YAML outdoor entity if the config entry value is empty/missing.
+        # setdefault would not overwrite the empty-string default from the
+        # config-flow, so we need an explicit check here.
+        if not entry_data.get(CONF_OUTDOOR_TEMP_ENTITY):
+            entry_data[CONF_OUTDOOR_TEMP_ENTITY] = yaml_cfg.get(
+                CONF_OUTDOOR_TEMP_ENTITY, ""
+            )
         entry_data.setdefault(CONF_DT, yaml_cfg.get(CONF_DT, DEFAULT_DT))
         entry_data.setdefault(CONF_HORIZON, yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON))
         if CONF_LATITUDE not in entry_data and CONF_LATITUDE in yaml_cfg:
