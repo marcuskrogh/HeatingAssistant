@@ -490,6 +490,8 @@ class HeatingMPCController:
             for i in range(n_u):
                 S[i, i] = smoothing_weight
 
+        self._constraint_offset = constraint_offset
+
         # Assemble generic MPC
         estimator = KalmanFilter(self._system)
         ocp = OptimalControlProblem(
@@ -505,6 +507,11 @@ class HeatingMPCController:
         self._heating_schedule: List[Dict[str, float]] = []
 
     # ── Visualisation properties ─────────────────────────────────────────
+
+    @property
+    def constraint_offset(self) -> float:
+        """Symmetric offset δ around the setpoint for soft output constraints [°C]."""
+        return self._constraint_offset
 
     @property
     def predictions(self) -> List[Dict[str, float]]:
