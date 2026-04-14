@@ -369,7 +369,7 @@ where $\beta$ is the surface tilt from horizontal (90° = vertical) and $\gamma$
 
 $$I_{\text{direct}} = \max(0,\; \text{DNI} \cdot \cos \theta)$$
 
-$$I_{\text{diffuse}} = \text{DHI} \cdot \frac{1 + \cos \beta}{2} \quad \text{(Liu} ~\&~ \text{Jordan isotropic sky model)}$$
+$$I_{\text{diffuse}} = \text{DHI} \cdot \frac{1 + \cos \beta}{2} \quad$$ \text{(Liu \& Jordan isotropic sky model)}
 
 $$I_{\text{window}} = I_{\text{direct}} + I_{\text{diffuse}} \quad [\text{W/m}^2]$$
 
