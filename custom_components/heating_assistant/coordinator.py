@@ -60,6 +60,7 @@ from .const import (
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_TURN_OFF_DEADBAND,
+    DEFAULT_IDLE_OFFSET,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
@@ -418,7 +419,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
                     else:
                         # Idle within deadband: keep HP on but set target
-                        # to internal temp (no offset → minimal output)
+                        # below internal temp so the device stops heating.
+                        # The offset is re-applied every update cycle to
+                        # track any drift in the internal sensor.
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
@@ -427,9 +430,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
 
                         if hp_internal_temp is not None:
-                            target_temp = hp_internal_temp
+                            target_temp = hp_internal_temp - DEFAULT_IDLE_OFFSET
                         else:
-                            target_temp = self.model.rooms[src.room].temperature
+                            target_temp = self.model.rooms[src.room].temperature - DEFAULT_IDLE_OFFSET
 
                         await self.hass.services.async_call(
                             "climate",
@@ -463,14 +466,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
                     else:
                         # System idle (MPC says no heat needed).  Keep the
-                        # entity in heat mode but set the setpoint to the
-                        # entity's own internal temperature so it will not
-                        # produce heat.  Commands are still issued every
+                        # entity in heat mode but set the setpoint below the
+                        # entity's own internal temperature so the device
+                        # stops heating.  Commands are still issued every
                         # update cycle so that if the entity's internal
-                        # sensor drifts below the setpoint the next cycle
-                        # will correct it before uncontrolled heating occurs.
-                        # (The entity's sensor and HA's room sensor can
-                        # differ, so we must keep issuing these commands.)
+                        # sensor drifts the next cycle will re-apply the
+                        # offset to keep the setpoint consistently below.
                         entity_temp: Optional[float] = None
                         attrs = getattr(state, "attributes", {})
                         raw_temp = attrs.get("current_temperature")
@@ -482,6 +483,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         if entity_temp is None:
                             entity_temp = self.model.rooms[src.room].temperature
 
+                        target_temp = entity_temp - DEFAULT_IDLE_OFFSET
+
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
@@ -491,7 +494,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         await self.hass.services.async_call(
                             "climate",
                             "set_temperature",
-                            {"entity_id": entity_id, "temperature": entity_temp},
+                            {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
             elif domain == "number":

@@ -61,6 +61,7 @@ DEFAULT_COP_TEMP_REF = 7.0             # °C
 DEFAULT_MIN_POWER = 0.0                # W (no minimum by default)
 DEFAULT_MAX_TEMP_OFFSET = 5.0          # °C (heat pump offset at full power)
 DEFAULT_TURN_OFF_DEADBAND = 1.0        # °C above setpoint before heat pump turns off
+DEFAULT_IDLE_OFFSET = 1.0              # °C below internal temp for idle setpoint
 DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint offset
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 
