@@ -471,16 +471,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         # will correct it before uncontrolled heating occurs.
                         # (The entity's sensor and HA's room sensor can
                         # differ, so we must keep issuing these commands.)
-                        idle_internal_temp: Optional[float] = None
-                        idle_attrs = getattr(state, "attributes", {})
-                        idle_raw = idle_attrs.get("current_temperature")
-                        if idle_raw is not None:
+                        entity_temp: Optional[float] = None
+                        attrs = getattr(state, "attributes", {})
+                        raw_temp = attrs.get("current_temperature")
+                        if raw_temp is not None:
                             try:
-                                idle_internal_temp = float(idle_raw)
+                                entity_temp = float(raw_temp)
                             except (ValueError, TypeError):
                                 pass
-                        if idle_internal_temp is None:
-                            idle_internal_temp = self.model.rooms[src.room].temperature
+                        if entity_temp is None:
+                            entity_temp = self.model.rooms[src.room].temperature
 
                         await self.hass.services.async_call(
                             "climate",
@@ -491,7 +491,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         await self.hass.services.async_call(
                             "climate",
                             "set_temperature",
-                            {"entity_id": entity_id, "temperature": idle_internal_temp},
+                            {"entity_id": entity_id, "temperature": entity_temp},
                             blocking=False,
                         )
             elif domain == "number":
