@@ -81,7 +81,15 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 13.8 [Diagnostics panel](#138-diagnostics-panel)
     - 13.9 [Setup service – simulate thermal response](#139-setup-service--simulate-thermal-response)
     - 13.10 [Setup service – estimate parameters](#1310-setup-service--estimate-parameters)
-    - 13.11 [Lovelace dashboard examples](#1311-lovelace-dashboard-examples)
+    - 13.11 [Lovelace dashboard – board and card reference](#1311-lovelace-dashboard--board-and-card-reference)
+        - 13.11.1 [Prerequisites](#13111-prerequisites)
+        - 13.11.2 [Dashboard structure – board with room subboards](#13112-dashboard-structure--board-with-room-subboards)
+        - 13.11.3 [MPC predicted temperature card](#13113-mpc-predicted-temperature-card)
+        - 13.11.4 [MPC control input card](#13114-mpc-control-input-card)
+        - 13.11.5 [Disturbance forecast card](#13115-disturbance-forecast-card)
+        - 13.11.6 [Room performance card](#13116-room-performance-card)
+        - 13.11.7 [System overview card](#13117-system-overview-card)
+        - 13.11.8 [Complete room subboard example](#13118-complete-room-subboard-example)
 14. [Thermal Model Parameter Estimation Guide](#14-thermal-model-parameter-estimation-guide)
     - 14.1 [Thermal mass `thermal_mass`](#141-thermal-mass-thermal_mass)
     - 14.2 [External thermal resistance `r_external`](#142-external-thermal-resistance-r_external)
@@ -1553,6 +1561,7 @@ data:
 | `trajectory` | list[float] | Predicted temperatures for each horizon step [°C] |
 | `forecast` | list[dict] | Timestamped forecast entries.  Each dict contains `time` (ISO-8601 string), `temperature` (°C), `heating_power` (W), `solar_gain` (W), and `outdoor_temp` (°C).  Suitable for `apexcharts-card` and similar community dashboard cards. |
 | `setpoint` | float | Current room setpoint [°C] |
+| `constraint_offset` | float | Symmetric offset δ around the setpoint for soft output constraints [°C].  The MPC keeps the predicted temperature within `[setpoint − δ, setpoint + δ]`.  Use this attribute to draw constraint bands on dashboard charts. |
 | `current_temperature` | float | Current room temperature [°C] |
 | `horizon_steps` | int | Number of prediction steps |
 | `step_seconds` | float | Time step duration [s] |
@@ -1900,142 +1909,471 @@ data:
 
 **Result:** A persistent notification with estimated `thermal_mass` and `r_external`, compared to the current configuration values.
 
-### 13.11 Lovelace dashboard examples
+### 13.11 Lovelace dashboard – board and card reference
 
-Below are example Lovelace card configurations for visualising the advanced sensors.
+This section provides a complete set of Lovelace card configurations for building an MPC-style monitoring dashboard.  The cards follow the standard model predictive control visualisation layout used in industry and academia:
 
-#### Setting up apexcharts-card (HACS)
+1. **Predicted output** – temperature trajectory with setpoint reference and soft constraint band
+2. **Control input** – planned heating power over the prediction horizon (step function)
+3. **Disturbances** – outdoor temperature and solar gain forecasts
 
-The timestamped `forecast` attributes on `TemperatureForecastSensor`, `HeatingPlanSensor`, and `SolarForecastSensor` are designed to be consumed directly by [apexcharts-card](https://github.com/RomRider/apexcharts-card), a popular HACS community card.  Install it via HACS → Frontend → apexcharts-card before using the examples below.
+Together, these three panels give a complete picture of what the controller sees, what it plans to do, and why.
 
-**Temperature + heating plan + solar forecast on one chart (apexcharts-card):**
+#### 13.11.1 Prerequisites
+
+All forecast charts below use [apexcharts-card](https://github.com/RomRider/apexcharts-card), a popular HACS community card.  Install it via **HACS → Frontend → Search "apexcharts-card" → Install** and refresh your browser before using the examples.
+
+#### 13.11.2 Dashboard structure – board with room subboards
+
+Create a top-level **Heating Assistant** dashboard with a navigation view for the system overview and one subview for each room.  This mirrors the MPC structure: the overview shows system-wide metrics while each room subview shows the full MPC triplet (output, input, disturbances).
+
+**Step 1 – Create the dashboard:**
+
+> **Settings → Dashboards → Add Dashboard**
+> - Title: *Heating Assistant*
+> - Icon: `mdi:home-thermometer`
+
+**Step 2 – Add the system overview view** (default view):
+
+Add the system overview card (§ 13.11.7) and one compact status card per room.
+
+**Step 3 – Add a subview for each room:**
+
+> In the dashboard editor, click **+ Add View** for each room:
+> - View type: *Panel* (single column, full width) or *Sections* for multi-column
+> - Title: Room name (e.g. *Living Room*)
+> - Icon: `mdi:sofa` / `mdi:bed` / etc.
+> - Toggle **Subview** on – this makes the view accessible via navigation cards on the overview
+
+In each room subview, add the three MPC cards below (§ 13.11.3 – § 13.11.5) arranged vertically so the time axes align, plus the room performance card (§ 13.11.6).
+
+**Step 4 – Add navigation cards** to the overview view so you can click through to each room subview.
+
+#### 13.11.3 MPC predicted temperature card
+
+This is the primary MPC output visualisation.  It shows:
+- The predicted temperature trajectory over the MPC horizon (solid line)
+- The current setpoint as a reference line (dashed)
+- The soft constraint band `[setpoint − δ, setpoint + δ]` as a shaded region
+- The current measured temperature as the first data point
 
 ```yaml
 type: custom:apexcharts-card
 header:
   show: true
-  title: Living Room Forecast
-graph_span: 2h
+  title: Living Room – Predicted Temperature
+  show_states: true
+graph_span: 3h
+span:
+  start: minute
 now:
   show: true
   label: Now
-series:
-  - entity: sensor.heating_assistant_living_room_temperature_forecast
-    name: Temperature (°C)
-    attribute: forecast
-    data_generator: |
-      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.temperature]);
-    yaxis_id: temp
-  - entity: sensor.heating_assistant_living_room_temperature_forecast
-    name: Heating Power (W)
-    attribute: forecast
-    data_generator: |
-      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.heating_power ?? 0]);
-    yaxis_id: power
-    type: area
-    opacity: 0.3
-  - entity: sensor.heating_assistant_living_room_temperature_forecast
-    name: Solar Gain (W)
-    attribute: forecast
-    data_generator: |
-      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.solar_gain ?? 0]);
-    yaxis_id: power
-    type: area
-    opacity: 0.2
 yaxis:
   - id: temp
     apex_config:
       title:
         text: Temperature (°C)
+      tickAmount: 5
+series:
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Constraint Upper
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      const sp = entity.attributes.setpoint;
+      const co = entity.attributes.constraint_offset;
+      if (!fc || sp == null || co == null) return [];
+      return fc.map(f => [new Date(f.time).getTime(), sp + co]);
+    yaxis_id: temp
+    color: transparent
+    stroke_width: 0
+    show:
+      legend_value: false
+      in_header: false
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Constraint Band
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      const sp = entity.attributes.setpoint;
+      const co = entity.attributes.constraint_offset;
+      if (!fc || sp == null || co == null) return [];
+      return fc.map(f => [new Date(f.time).getTime(), sp - co]);
+    yaxis_id: temp
+    type: area
+    color: '#E3F2FD'
+    opacity: 0.4
+    stroke_width: 0
+    show:
+      legend_value: false
+      in_header: false
+    group_by:
+      func: raw
+      fill: last
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Setpoint
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      const sp = entity.attributes.setpoint;
+      if (!fc || sp == null) return [];
+      return fc.map(f => [new Date(f.time).getTime(), sp]);
+    yaxis_id: temp
+    color: '#F44336'
+    stroke_width: 2
+    curve: stepline
+    float_precision: 1
+    show:
+      in_header: true
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Predicted
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.temperature]);
+    yaxis_id: temp
+    color: '#1E88E5'
+    stroke_width: 3
+    curve: smooth
+    float_precision: 2
+    show:
+      in_header: true
+```
+
+> **Tip:** Replace `living_room` with your room's entity suffix throughout.
+
+#### 13.11.4 MPC control input card
+
+Shows the controller's planned heating power as a step chart – the standard control input representation for zero-order-hold MPC.
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Living Room – Planned Heating Power
+  show_states: true
+graph_span: 3h
+span:
+  start: minute
+now:
+  show: true
+  label: Now
+yaxis:
   - id: power
-    opposite: true
+    min: 0
     apex_config:
       title:
-        text: Power (W)
-```
-
-**Heating plan schedule (apexcharts-card):**
-
-```yaml
-type: custom:apexcharts-card
-header:
-  show: true
-  title: Living Room Heating Plan
-graph_span: 2h
-now:
-  show: true
-  label: Now
+        text: Heating Power (W)
+      tickAmount: 4
 series:
   - entity: sensor.heating_assistant_living_room_heating_plan
-    name: Planned Heating (W)
-    attribute: forecast
+    name: Planned Heating
     data_generator: |
-      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.heating_power]);
-    type: column
+      const fc = entity.attributes.forecast;
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.heating_power]);
+    yaxis_id: power
+    type: area
+    curve: stepline
+    color: '#E65100'
+    opacity: 0.35
+    stroke_width: 2
+    float_precision: 0
+    show:
+      in_header: true
 ```
 
-**Solar gain forecast (apexcharts-card):**
+#### 13.11.5 Disturbance forecast card
+
+Shows the external disturbances the MPC controller accounts for: outdoor temperature and solar heat gain through windows.  Dual y-axes keep both signals readable.
 
 ```yaml
 type: custom:apexcharts-card
 header:
   show: true
-  title: Living Room Solar Forecast
-graph_span: 8h
+  title: Living Room – Disturbance Forecast
+  show_states: true
+graph_span: 3h
+span:
+  start: minute
 now:
   show: true
   label: Now
+yaxis:
+  - id: temp
+    apex_config:
+      title:
+        text: Outdoor Temp (°C)
+  - id: power
+    opposite: true
+    min: 0
+    apex_config:
+      title:
+        text: Solar Gain (W)
 series:
-  - entity: sensor.heating_assistant_living_room_solar_forecast
-    name: Predicted Solar Gain (W)
-    attribute: forecast
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Outdoor Temp
     data_generator: |
-      return entity.attributes.forecast.map(f => [new Date(f.time).getTime(), f.solar_gain]);
+      const fc = entity.attributes.forecast;
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.outdoor_temp ?? null]);
+    yaxis_id: temp
+    color: '#78909C'
+    stroke_width: 2
+    curve: smooth
+    float_precision: 1
+    show:
+      in_header: true
+  - entity: sensor.heating_assistant_living_room_solar_forecast
+    name: Solar Gain
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.solar_gain]);
+    yaxis_id: power
     type: area
     color: '#FFC107'
-    opacity: 0.5
+    opacity: 0.4
+    stroke_width: 2
+    float_precision: 0
+    show:
+      in_header: true
 ```
 
-**Temperature forecast chart (using mini-graph-card):**
+#### 13.11.6 Room performance card
 
-```yaml
-type: custom:mini-graph-card
-entities:
-  - entity: sensor.heating_assistant_living_room_predicted_temperature
-    name: Current
-  - entity: sensor.heating_assistant_living_room_temperature_forecast
-    name: Forecast
-name: Living Room Temperature Forecast
-hours_to_show: 4
-```
-
-**Energy balance overview (using entities card):**
+An entities card summarising the room's current state – useful at the top of each room subview.
 
 ```yaml
 type: entities
-title: Living Room Energy Balance
+title: Living Room – Current State
 entities:
-  - entity: sensor.heating_assistant_living_room_energy_balance
-    name: Net Energy Flow
+  - entity: climate.heating_assistant_living_room
+    name: Thermostat
+  - entity: sensor.heating_assistant_living_room_predicted_temperature
+    name: Predicted Temperature
   - entity: sensor.heating_assistant_living_room_heating_power
     name: Heating Power
   - entity: sensor.heating_assistant_living_room_solar_gain
     name: Solar Gain
   - entity: sensor.heating_assistant_living_room_heat_loss
     name: Heat Loss
+  - entity: sensor.heating_assistant_living_room_energy_balance
+    name: Net Energy Balance
 ```
 
-**System summary (using entities card):**
+#### 13.11.7 System overview card
+
+Place this on the main overview view for a system-wide summary.
 
 ```yaml
 type: entities
-title: Heating System Summary
+title: Heating System Overview
 entities:
   - entity: sensor.heating_assistant_system_summary
     name: Total Heating Power
   - entity: sensor.heating_assistant_outdoor_temperature
     name: Outdoor Temperature
 ```
+
+For systems with heat pumps, add:
+
+```yaml
+type: entities
+title: Heat Pump Status
+entities:
+  - entity: sensor.heating_assistant_<source_name>_control_action
+    name: Control Action
+  - entity: sensor.heating_assistant_<source_name>_cop
+    name: COP
+```
+
+#### 13.11.8 Complete room subboard example
+
+Below is a complete vertical-stack card that combines all MPC panels for a single room.  Add this as the only card in a room subview configured with *Panel* view type for a clean full-width layout.
+
+```yaml
+type: vertical-stack
+cards:
+  # ── Room status ──────────────────────────────────────────────────────
+  - type: entities
+    title: Living Room – Current State
+    entities:
+      - entity: climate.heating_assistant_living_room
+        name: Thermostat
+      - entity: sensor.heating_assistant_living_room_predicted_temperature
+        name: Predicted Temperature
+      - entity: sensor.heating_assistant_living_room_energy_balance
+        name: Net Energy Balance
+
+  # ── MPC output: predicted temperature trajectory ─────────────────────
+  - type: custom:apexcharts-card
+    header:
+      show: true
+      title: Predicted Temperature
+      show_states: true
+    graph_span: 3h
+    span:
+      start: minute
+    now:
+      show: true
+      label: Now
+    yaxis:
+      - id: temp
+        apex_config:
+          title:
+            text: Temperature (°C)
+          tickAmount: 5
+    series:
+      - entity: sensor.heating_assistant_living_room_temperature_forecast
+        name: Constraint Upper
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          const sp = entity.attributes.setpoint;
+          const co = entity.attributes.constraint_offset;
+          if (!fc || sp == null || co == null) return [];
+          return fc.map(f => [new Date(f.time).getTime(), sp + co]);
+        yaxis_id: temp
+        color: transparent
+        stroke_width: 0
+        show:
+          legend_value: false
+          in_header: false
+      - entity: sensor.heating_assistant_living_room_temperature_forecast
+        name: Constraint Band
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          const sp = entity.attributes.setpoint;
+          const co = entity.attributes.constraint_offset;
+          if (!fc || sp == null || co == null) return [];
+          return fc.map(f => [new Date(f.time).getTime(), sp - co]);
+        yaxis_id: temp
+        type: area
+        color: '#E3F2FD'
+        opacity: 0.4
+        stroke_width: 0
+        show:
+          legend_value: false
+          in_header: false
+        group_by:
+          func: raw
+          fill: last
+      - entity: sensor.heating_assistant_living_room_temperature_forecast
+        name: Setpoint
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          const sp = entity.attributes.setpoint;
+          if (!fc || sp == null) return [];
+          return fc.map(f => [new Date(f.time).getTime(), sp]);
+        yaxis_id: temp
+        color: '#F44336'
+        stroke_width: 2
+        curve: stepline
+        float_precision: 1
+        show:
+          in_header: true
+      - entity: sensor.heating_assistant_living_room_temperature_forecast
+        name: Predicted
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.temperature]);
+        yaxis_id: temp
+        color: '#1E88E5'
+        stroke_width: 3
+        curve: smooth
+        float_precision: 2
+        show:
+          in_header: true
+
+  # ── MPC input: planned heating power ─────────────────────────────────
+  - type: custom:apexcharts-card
+    header:
+      show: true
+      title: Planned Heating Power
+      show_states: true
+    graph_span: 3h
+    span:
+      start: minute
+    now:
+      show: true
+      label: Now
+    yaxis:
+      - id: power
+        min: 0
+        apex_config:
+          title:
+            text: Heating Power (W)
+          tickAmount: 4
+    series:
+      - entity: sensor.heating_assistant_living_room_heating_plan
+        name: Planned Heating
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.heating_power]);
+        yaxis_id: power
+        type: area
+        curve: stepline
+        color: '#E65100'
+        opacity: 0.35
+        stroke_width: 2
+        float_precision: 0
+        show:
+          in_header: true
+
+  # ── MPC disturbances: outdoor temperature + solar gain ───────────────
+  - type: custom:apexcharts-card
+    header:
+      show: true
+      title: Disturbance Forecast
+      show_states: true
+    graph_span: 3h
+    span:
+      start: minute
+    now:
+      show: true
+      label: Now
+    yaxis:
+      - id: temp
+        apex_config:
+          title:
+            text: Outdoor Temp (°C)
+      - id: power
+        opposite: true
+        min: 0
+        apex_config:
+          title:
+            text: Solar Gain (W)
+    series:
+      - entity: sensor.heating_assistant_living_room_temperature_forecast
+        name: Outdoor Temp
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.outdoor_temp ?? null]);
+        yaxis_id: temp
+        color: '#78909C'
+        stroke_width: 2
+        curve: smooth
+        float_precision: 1
+        show:
+          in_header: true
+      - entity: sensor.heating_assistant_living_room_solar_forecast
+        name: Solar Gain
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.solar_gain]);
+        yaxis_id: power
+        type: area
+        color: '#FFC107'
+        opacity: 0.4
+        stroke_width: 2
+        float_precision: 0
+        show:
+          in_header: true
+```
+
+> **Adapting for other rooms:** Duplicate this vertical-stack card for each room subview and replace every occurrence of `living_room` with the room's entity suffix (e.g. `bedroom`, `kitchen`).  The `graph_span` of `3h` covers the default MPC horizon; increase it if you have configured a longer horizon.
 
 ---
 
