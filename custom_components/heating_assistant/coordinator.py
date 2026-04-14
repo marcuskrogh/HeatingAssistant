@@ -438,7 +438,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             blocking=False,
                         )
                 else:
-                    # Non-heat-pump climate entity (original behaviour)
+                    # Non-heat-pump climate entity
                     if fraction > 0.0:
                         await self.hass.services.async_call(
                             "climate",
@@ -453,11 +453,45 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
-                    else:
+                    elif not self.is_room_enabled(src.room):
+                        # Room explicitly disabled – turn the entity off.
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
                             {"entity_id": entity_id, "hvac_mode": "off"},
+                            blocking=False,
+                        )
+                    else:
+                        # System idle (MPC says no heat needed).  Keep the
+                        # entity in heat mode but set the setpoint to the
+                        # entity's own internal temperature so it will not
+                        # produce heat.  Commands are still issued every
+                        # update cycle so that if the entity's internal
+                        # sensor drifts below the setpoint the next cycle
+                        # will correct it before uncontrolled heating occurs.
+                        # (The entity's sensor and HA's room sensor can
+                        # differ, so we must keep issuing these commands.)
+                        idle_internal_temp: Optional[float] = None
+                        idle_attrs = getattr(state, "attributes", {})
+                        idle_raw = idle_attrs.get("current_temperature")
+                        if idle_raw is not None:
+                            try:
+                                idle_internal_temp = float(idle_raw)
+                            except (ValueError, TypeError):
+                                pass
+                        if idle_internal_temp is None:
+                            idle_internal_temp = self.model.rooms[src.room].temperature
+
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "heat"},
+                            blocking=False,
+                        )
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": entity_id, "temperature": idle_internal_temp},
                             blocking=False,
                         )
             elif domain == "number":

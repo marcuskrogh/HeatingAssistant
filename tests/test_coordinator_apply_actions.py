@@ -51,7 +51,7 @@ def _make_fake_hass(entity_states: dict):
 
 
 async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoints,
-                            room_temperatures=None):
+                            room_temperatures=None, room_enabled=None):
     """
     Directly exercise the ``_apply_actions`` logic without spinning up
     a full coordinator.  We import the module and patch just enough to
@@ -80,8 +80,11 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
     model.rooms = model_rooms
     coord.model = model
 
-    # All rooms enabled by default (matches coordinator __init__)
+    # All rooms enabled by default (matches coordinator __init__).
+    # Caller may override individual rooms via room_enabled dict.
     coord._room_enabled = {name: True for name in room_setpoints}
+    if room_enabled:
+        coord._room_enabled.update(room_enabled)
 
     await coord._apply_actions(outdoor_temp=5.0)
     return hass
@@ -302,6 +305,90 @@ class TestApplyActionsClimate:
 
         temp_call = hass.services.async_call.call_args_list[1]
         assert temp_call.args[2]["temperature"] == 22.5
+
+    @pytest.mark.asyncio
+    async def test_non_heat_pump_climate_idle_uses_internal_temp(self):
+        """When fraction == 0 and room is enabled (system idle), a non-HP climate
+        entity stays in heat mode with the setpoint equal to its own internal
+        temperature so it does not produce heat but commands keep being sent."""
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000,
+            heater_entity="climate.bedroom_heater",
+        )
+        hass = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 0.0},
+            entity_states={
+                "climate.bedroom_heater": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 21.5},
+                },
+            },
+            room_setpoints={"bedroom": 22.5},
+            room_temperatures={"bedroom": 22.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        # heat mode + setpoint at internal temperature (not room setpoint)
+        assert len(calls) == 2
+        assert calls[0].args[:2] == ("climate", "set_hvac_mode")
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        assert calls[1].args[:2] == ("climate", "set_temperature")
+        assert calls[1].args[2]["temperature"] == pytest.approx(21.5)
+
+    @pytest.mark.asyncio
+    async def test_non_heat_pump_climate_idle_fallback_to_room_temp(self):
+        """When idling and the entity has no current_temperature attribute,
+        the setpoint falls back to the HA room temperature."""
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000,
+            heater_entity="climate.bedroom_heater",
+        )
+        hass = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 0.0},
+            entity_states={
+                "climate.bedroom_heater": {
+                    "state": "heat",
+                    "attributes": {},  # no current_temperature
+                },
+            },
+            room_setpoints={"bedroom": 22.5},
+            room_temperatures={"bedroom": 21.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # fallback: HA room temperature
+        assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
+
+    @pytest.mark.asyncio
+    async def test_non_heat_pump_climate_disabled_room_turns_off(self):
+        """When the room is disabled the climate entity is turned off,
+        regardless of what fraction the MPC may have computed."""
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000,
+            heater_entity="climate.bedroom_heater",
+        )
+        hass = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 0.0},
+            entity_states={
+                "climate.bedroom_heater": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 21.5},
+                },
+            },
+            room_setpoints={"bedroom": 22.5},
+            room_temperatures={"bedroom": 22.0},
+            room_enabled={"bedroom": False},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 1
+        assert calls[0].args[:2] == ("climate", "set_hvac_mode")
+        assert calls[0].args[2]["hvac_mode"] == "off"
 
 
 class TestApplyActionsSwitch:
