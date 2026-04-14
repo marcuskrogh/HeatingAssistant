@@ -47,6 +47,7 @@ CONF_SOURCE_TURN_OFF_DEADBAND = "turn_off_deadband"  # °C above setpoint before
 CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
 CONF_DT = "dt"                         # time step in seconds
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
+CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output constraints
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -60,6 +61,7 @@ DEFAULT_COP_TEMP_REF = 7.0             # °C
 DEFAULT_MIN_POWER = 0.0                # W (no minimum by default)
 DEFAULT_MAX_TEMP_OFFSET = 5.0          # °C (heat pump offset at full power)
 DEFAULT_TURN_OFF_DEADBAND = 1.0        # °C above setpoint before heat pump turns off
+DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint offset
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 
 # Source types
