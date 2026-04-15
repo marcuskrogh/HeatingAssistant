@@ -1917,6 +1917,8 @@ This section provides a complete set of Lovelace card configurations for buildin
 2. **Control input** – planned heating power over the prediction horizon (step function)
 3. **Disturbances** – outdoor temperature and solar gain forecasts
 
+Each chart displays **historical recorder data** to the left of the "Now" line and **MPC predictions** to the right.  The history window is twice the prediction horizon (default 6 h history + 3 h forecast = 9 h total) so you can visually assess how well the model tracks reality before examining the upcoming plan.
+
 Together, these three panels give a complete picture of what the controller sees, what it plans to do, and why.
 
 #### 13.11.1 Prerequisites
@@ -1952,10 +1954,10 @@ In each room subview, add the three MPC cards below (§ 13.11.3 – § 13.11.5) 
 #### 13.11.3 MPC predicted temperature card
 
 This is the primary MPC output visualisation.  It shows:
-- The predicted temperature trajectory over the MPC horizon (solid line)
-- The current setpoint as a reference line (dashed)
+- **History** (left of Now): the measured room temperature from the HA recorder (solid line)
+- **Prediction** (right of Now): the MPC-predicted temperature trajectory (solid line)
+- The current setpoint as a step reference line
 - The soft constraint band `[setpoint − δ, setpoint + δ]` as a shaded region
-- The current measured temperature as the first data point
 
 ```yaml
 type: custom:apexcharts-card
@@ -1963,12 +1965,14 @@ header:
   show: true
   title: Living Room – Predicted Temperature
   show_states: true
-graph_span: 3h
+graph_span: 9h
 span:
   start: minute
+  offset: '-6h'
 now:
   show: true
   label: Now
+  color: '#424242'
 yaxis:
   - id: temp
     apex_config:
@@ -1976,6 +1980,21 @@ yaxis:
         text: Temperature (°C)
       tickAmount: 5
 series:
+  # ── History: measured temperature (from HA recorder) ─────────────────
+  - entity: sensor.heating_assistant_living_room_predicted_temperature
+    name: Measured
+    yaxis_id: temp
+    color: '#0D47A1'
+    stroke_width: 2
+    curve: smooth
+    float_precision: 2
+    extend_to: now
+    group_by:
+      func: raw
+      fill: last
+    show:
+      in_header: true
+  # ── Forecast: constraint upper (invisible, forms band top) ───────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Constraint Upper
     data_generator: |
@@ -1990,6 +2009,7 @@ series:
     show:
       legend_value: false
       in_header: false
+  # ── Forecast: constraint band (shaded area) ─────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Constraint Band
     data_generator: |
@@ -2009,6 +2029,7 @@ series:
     group_by:
       func: raw
       fill: last
+  # ── Forecast: setpoint reference ─────────────────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Setpoint
     data_generator: |
@@ -2023,6 +2044,7 @@ series:
     float_precision: 1
     show:
       in_header: true
+  # ── Forecast: predicted temperature trajectory ───────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Predicted
     data_generator: |
@@ -2042,7 +2064,7 @@ series:
 
 #### 13.11.4 MPC control input card
 
-Shows the controller's planned heating power as a step chart – the standard control input representation for zero-order-hold MPC.
+Shows the controller's planned heating power as a step chart – the standard control input representation for zero-order-hold MPC.  Historical actual heating power from the recorder is shown to the left of the "Now" line for comparison.
 
 ```yaml
 type: custom:apexcharts-card
@@ -2050,12 +2072,14 @@ header:
   show: true
   title: Living Room – Planned Heating Power
   show_states: true
-graph_span: 3h
+graph_span: 9h
 span:
   start: minute
+  offset: '-6h'
 now:
   show: true
   label: Now
+  color: '#424242'
 yaxis:
   - id: power
     min: 0
@@ -2064,6 +2088,23 @@ yaxis:
         text: Heating Power (W)
       tickAmount: 4
 series:
+  # ── History: actual heating power (from HA recorder) ─────────────────
+  - entity: sensor.heating_assistant_living_room_heating_power
+    name: Actual Heating
+    yaxis_id: power
+    type: area
+    curve: stepline
+    color: '#BF360C'
+    opacity: 0.2
+    stroke_width: 2
+    float_precision: 0
+    extend_to: now
+    group_by:
+      func: raw
+      fill: last
+    show:
+      in_header: true
+  # ── Forecast: planned heating power ──────────────────────────────────
   - entity: sensor.heating_assistant_living_room_heating_plan
     name: Planned Heating
     data_generator: |
@@ -2083,7 +2124,7 @@ series:
 
 #### 13.11.5 Disturbance forecast card
 
-Shows the external disturbances the MPC controller accounts for: outdoor temperature and solar heat gain through windows.  Dual y-axes keep both signals readable.
+Shows the external disturbances the MPC controller accounts for: outdoor temperature and solar heat gain through windows.  Dual y-axes keep both signals readable.  Actual recorder history is shown to the left of the "Now" line alongside the forecasts to the right.
 
 ```yaml
 type: custom:apexcharts-card
@@ -2091,12 +2132,14 @@ header:
   show: true
   title: Living Room – Disturbance Forecast
   show_states: true
-graph_span: 3h
+graph_span: 9h
 span:
   start: minute
+  offset: '-6h'
 now:
   show: true
   label: Now
+  color: '#424242'
 yaxis:
   - id: temp
     apex_config:
@@ -2109,8 +2152,38 @@ yaxis:
       title:
         text: Solar Gain (W)
 series:
+  # ── History: actual outdoor temperature (from HA recorder) ───────────
+  - entity: sensor.heating_assistant_outdoor_temperature
+    name: Outdoor (actual)
+    yaxis_id: temp
+    color: '#37474F'
+    stroke_width: 2
+    curve: smooth
+    float_precision: 1
+    extend_to: now
+    group_by:
+      func: raw
+      fill: last
+    show:
+      in_header: true
+  # ── History: actual solar gain (from HA recorder) ────────────────────
+  - entity: sensor.heating_assistant_living_room_solar_gain
+    name: Solar (actual)
+    yaxis_id: power
+    type: area
+    color: '#FF8F00'
+    opacity: 0.25
+    stroke_width: 2
+    float_precision: 0
+    extend_to: now
+    group_by:
+      func: raw
+      fill: last
+    show:
+      in_header: true
+  # ── Forecast: outdoor temperature ────────────────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
-    name: Outdoor Temp
+    name: Outdoor (forecast)
     data_generator: |
       const fc = entity.attributes.forecast;
       if (!fc) return [];
@@ -2122,8 +2195,9 @@ series:
     float_precision: 1
     show:
       in_header: true
+  # ── Forecast: solar gain ─────────────────────────────────────────────
   - entity: sensor.heating_assistant_living_room_solar_forecast
-    name: Solar Gain
+    name: Solar (forecast)
     data_generator: |
       const fc = entity.attributes.forecast;
       if (!fc) return [];
@@ -2210,12 +2284,14 @@ cards:
       show: true
       title: Predicted Temperature
       show_states: true
-    graph_span: 3h
+    graph_span: 9h
     span:
       start: minute
+      offset: '-6h'
     now:
       show: true
       label: Now
+      color: '#424242'
     yaxis:
       - id: temp
         apex_config:
@@ -2223,6 +2299,21 @@ cards:
             text: Temperature (°C)
           tickAmount: 5
     series:
+      # ── History: measured temperature (from HA recorder) ─────────────
+      - entity: sensor.heating_assistant_living_room_predicted_temperature
+        name: Measured
+        yaxis_id: temp
+        color: '#0D47A1'
+        stroke_width: 2
+        curve: smooth
+        float_precision: 2
+        extend_to: now
+        group_by:
+          func: raw
+          fill: last
+        show:
+          in_header: true
+      # ── Forecast: constraint upper (invisible, forms band top) ───────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
         name: Constraint Upper
         data_generator: |
@@ -2237,6 +2328,7 @@ cards:
         show:
           legend_value: false
           in_header: false
+      # ── Forecast: constraint band (shaded area) ─────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
         name: Constraint Band
         data_generator: |
@@ -2256,6 +2348,7 @@ cards:
         group_by:
           func: raw
           fill: last
+      # ── Forecast: setpoint reference ─────────────────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
         name: Setpoint
         data_generator: |
@@ -2270,6 +2363,7 @@ cards:
         float_precision: 1
         show:
           in_header: true
+      # ── Forecast: predicted temperature trajectory ───────────────────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
         name: Predicted
         data_generator: |
@@ -2290,12 +2384,14 @@ cards:
       show: true
       title: Planned Heating Power
       show_states: true
-    graph_span: 3h
+    graph_span: 9h
     span:
       start: minute
+      offset: '-6h'
     now:
       show: true
       label: Now
+      color: '#424242'
     yaxis:
       - id: power
         min: 0
@@ -2304,6 +2400,23 @@ cards:
             text: Heating Power (W)
           tickAmount: 4
     series:
+      # ── History: actual heating power (from HA recorder) ─────────────
+      - entity: sensor.heating_assistant_living_room_heating_power
+        name: Actual Heating
+        yaxis_id: power
+        type: area
+        curve: stepline
+        color: '#BF360C'
+        opacity: 0.2
+        stroke_width: 2
+        float_precision: 0
+        extend_to: now
+        group_by:
+          func: raw
+          fill: last
+        show:
+          in_header: true
+      # ── Forecast: planned heating power ──────────────────────────────
       - entity: sensor.heating_assistant_living_room_heating_plan
         name: Planned Heating
         data_generator: |
@@ -2326,12 +2439,14 @@ cards:
       show: true
       title: Disturbance Forecast
       show_states: true
-    graph_span: 3h
+    graph_span: 9h
     span:
       start: minute
+      offset: '-6h'
     now:
       show: true
       label: Now
+      color: '#424242'
     yaxis:
       - id: temp
         apex_config:
@@ -2344,8 +2459,38 @@ cards:
           title:
             text: Solar Gain (W)
     series:
+      # ── History: actual outdoor temperature (from HA recorder) ───────
+      - entity: sensor.heating_assistant_outdoor_temperature
+        name: Outdoor (actual)
+        yaxis_id: temp
+        color: '#37474F'
+        stroke_width: 2
+        curve: smooth
+        float_precision: 1
+        extend_to: now
+        group_by:
+          func: raw
+          fill: last
+        show:
+          in_header: true
+      # ── History: actual solar gain (from HA recorder) ────────────────
+      - entity: sensor.heating_assistant_living_room_solar_gain
+        name: Solar (actual)
+        yaxis_id: power
+        type: area
+        color: '#FF8F00'
+        opacity: 0.25
+        stroke_width: 2
+        float_precision: 0
+        extend_to: now
+        group_by:
+          func: raw
+          fill: last
+        show:
+          in_header: true
+      # ── Forecast: outdoor temperature ────────────────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
-        name: Outdoor Temp
+        name: Outdoor (forecast)
         data_generator: |
           const fc = entity.attributes.forecast;
           if (!fc) return [];
@@ -2357,8 +2502,9 @@ cards:
         float_precision: 1
         show:
           in_header: true
+      # ── Forecast: solar gain ─────────────────────────────────────────
       - entity: sensor.heating_assistant_living_room_solar_forecast
-        name: Solar Gain
+        name: Solar (forecast)
         data_generator: |
           const fc = entity.attributes.forecast;
           if (!fc) return [];
@@ -2373,7 +2519,7 @@ cards:
           in_header: true
 ```
 
-> **Adapting for other rooms:** Duplicate this vertical-stack card for each room subview and replace every occurrence of `living_room` with the room's entity suffix (e.g. `bedroom`, `kitchen`).  The `graph_span` of `3h` covers the default MPC horizon; increase it if you have configured a longer horizon.
+> **Adapting for other rooms:** Duplicate this vertical-stack card for each room subview and replace every occurrence of `living_room` with the room's entity suffix (e.g. `bedroom`, `kitchen`).  The default `graph_span` of `9h` shows 6 h of recorder history plus the 3 h MPC prediction horizon.  If you have configured a longer prediction horizon, increase `graph_span` and the `offset` accordingly (history = 2 × horizon, total = 3 × horizon).
 
 ---
 
