@@ -423,11 +423,12 @@ class HeatingMPCController:
     Builds a HouseThermalSystem, KalmanFilter, OptimalControlProblem, and
     the generic MPCController, then provides the coordinator-facing API:
 
-      actions = controller.compute(outdoor_temp, solar_gains, now)
+      actions = controller.compute(outdoor_temp, solar_gains, now, outdoor_forecast)
 
     Forecasts
     ---------
-    Outdoor temperature: persistence (constant at the current measurement).
+    Outdoor temperature: uses weather forecast if provided by the coordinator;
+        otherwise falls back to persistence (constant at the current measurement).
     Solar gains: computed from the solar geometry model for each horizon step.
 
     Parameters
@@ -520,7 +521,7 @@ class HeatingMPCController:
 
     @property
     def outdoor_forecast(self) -> List[float]:
-        """Outdoor temperature forecast used in the last compute()."""
+        """Outdoor temperature forecast used in the last compute() (weather or persistence)."""
         return self._outdoor_forecast
 
     @property
@@ -540,6 +541,7 @@ class HeatingMPCController:
         outdoor_temp: float,
         solar_gains: Optional[Dict[str, float]] = None,
         now: Optional[datetime] = None,
+        outdoor_forecast: Optional[List[float]] = None,
     ) -> Dict[str, float]:
         """
         Compute optimal control actions for the current time step.
@@ -553,6 +555,10 @@ class HeatingMPCController:
             the solar model using ``now`` and the stored lat/lon.
         now : datetime, optional
             Current time (UTC).  Required when solar_gains is None.
+        outdoor_forecast : list of float, optional
+            External outdoor temperature forecast for each horizon step
+            (e.g. from a weather integration).  If provided, replaces
+            the default persistence forecast.  Must have length >= horizon.
 
         Returns
         -------
@@ -570,7 +576,10 @@ class HeatingMPCController:
         n_d = self._system.n_d
 
         # ── Build disturbance forecast D ∈ ℝ^{N·p × 1} ──────────────────
-        outdoor_seq = self._forecast_outdoor(outdoor_temp)
+        if outdoor_forecast is not None and len(outdoor_forecast) >= N:
+            outdoor_seq = list(outdoor_forecast[:N])
+        else:
+            outdoor_seq = self._forecast_outdoor(outdoor_temp)
         solar_seq = self._forecast_solar(now)
 
         D = matrix(0.0, (N * n_d, 1))

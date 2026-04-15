@@ -121,7 +121,8 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Generic MPC framework** | The controller is built on a generic framework (`LinearDiscreteModel`, `KalmanFilter`, `OptimalControlProblem`, `MPCController`) that can be reused for any linear discrete-time system. |
 | **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface. |
 | **HA sensor entities** | Predicted temperature and active heating power sensors per room, with model metadata exposed as state attributes. |
-| **Advanced visualisation sensors** | Temperature forecast trajectory, heat loss breakdown, energy balance, and system efficiency sensors provide deep insight into system operation. |
+| **Advanced visualisation sensors** | Temperature forecast trajectory, heat loss breakdown, energy balance, and system efficiency sensors provide deep insight into system operation.  Forecast data includes a "now" bridge point for seamless connection between recorder history and MPC predictions, and setpoints are included in every forecast entry. |
+| **Weather forecast integration** | Optionally configure a HA weather entity (e.g. Met.no, OpenWeatherMap) to provide outdoor temperature forecasts.  The controller interpolates the forecast to each MPC horizon step for improved prediction accuracy during temperature transitions. |
 | **Setup assistance services** | `simulate_thermal_response` and `estimate_parameters` services help you verify and tune your configuration by running simulations and back-calculating thermal parameters. |
 | **Diagnostics platform** | Full system state dump accessible via the HA diagnostics panel for troubleshooting — includes model matrices, predictions, heat flows, and steady-state analysis. |
 | **Flexible heater entity control** | Automatically dispatches to `switch.*`, `number.*`, or `climate.*` entities depending on the HA domain of each configured heater. |
@@ -210,6 +211,7 @@ custom_components/heating_assistant/
 │  Home Assistant state machine                                            │
 │                                                                          │
 │   sensor.outdoor_temp ──┐                                                │
+│   weather.forecast_*  ──┤  (optional: weather forecast)                   │
 │   sensor.room_A_temp ───┤                                                │
 │   sensor.room_B_temp ───┤                                                │
 │   …                     │                                                │
@@ -234,7 +236,7 @@ custom_components/heating_assistant/
 Inside HeatingMPCController.compute():
 
   solar_model ──► solar_gain[room, k]  for k = 0…N-1
-  persistence  ──► outdoor_temp[k]     for k = 0…N-1
+  weather/persistence ──► outdoor_temp[k]  for k = 0…N-1
 
   D = disturbance forecast matrix (N × p)
   y = current room temperatures (measurement vector)
@@ -545,7 +547,7 @@ The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{
 
 | Disturbance | Forecast method |
 |-------------|----------------|
-| **Outdoor temperature** | Persistence: the current measured value is held constant for all horizon steps.  A weather API integration is on the roadmap. |
+| **Outdoor temperature** | If a `weather_entity` is configured (e.g. the Met.no integration), the controller uses the weather forecast temperatures interpolated to each horizon step.  Otherwise, it falls back to persistence: the current measured value is held constant for all horizon steps.  Configure `outdoor_temp_entity` for the current measurement and `weather_entity` for the forecast. |
 | **Solar gains** | The solar position model is evaluated at times `now + k·dt` for each horizon step `k`.  This uses the deterministic orbital equations and produces an accurate prediction of how solar irradiance through each window will evolve over the next `N·dt` seconds. |
 
 ### 4.5 Control cycle
@@ -553,10 +555,11 @@ The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{
 Each call to `HeatingMPCController.compute()` follows this sequence:
 
 ```
-compute(outdoor_temp, solar_gains=None, now=None)
+compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
 │
 ├─ if solar_gains is None: compute from solar model
-├─ _forecast_outdoor(outdoor_temp)     → list of N floats
+├─ if outdoor_forecast provided: use weather forecast
+│  else: _forecast_outdoor(outdoor_temp)  → list of N floats (persistence)
 ├─ _forecast_solar(now)                → list of N {room: W} dicts
 ├─ Build D ∈ ℝ^(N × p) from forecasts
 │
@@ -723,6 +726,7 @@ Before you begin, confirm the following are in place:
 
 - **Integration installed** — the `custom_components/heating_assistant/` folder is in your HA config directory and HA has been restarted (see [Section 7](#7-installation)).
 - **Outdoor temperature sensor** — a HA sensor entity that measures outdoor air temperature (e.g. from OpenWeatherMap, Météo-France, a Netatmo weather station, or any local sensor).  Note the entity ID (e.g. `sensor.openweathermap_temperature`).
+- **Weather integration (optional)** — a HA weather entity providing temperature forecasts (e.g. `weather.forecast_home` from the Met.no integration).  This enables the controller to predict outdoor temperature changes instead of assuming the current value stays constant.
 - **Room temperature sensor(s)** — at least one temperature sensor per room you want to control.  Note the entity ID for each (e.g. `sensor.living_room_temperature`).
 - **Controllable heater entity/entities** — each heater must already be reachable in HA as a `switch.*`, `number.*`, or `climate.*` entity.  Note the entity ID for each (e.g. `switch.bedroom_heater`, `climate.mitsubishi_hp`).
 
@@ -740,6 +744,7 @@ Before you begin, confirm the following are in place:
    | **Latitude** | Your site latitude (pre-filled from HA settings — verify it is correct). |
    | **Longitude** | Your site longitude (pre-filled from HA settings — verify it is correct). |
    | **Outdoor temperature sensor entity ID** | The entity ID of your outdoor sensor, e.g. `sensor.openweathermap_temperature`.  Leave blank to use the 5 °C fallback (not recommended for real use). |
+   | **Weather entity ID** | The entity ID of a HA weather entity, e.g. `weather.forecast_home`.  Leave blank to use the persistence forecast (current outdoor temperature assumed constant).  Recommended for improved prediction accuracy. |
    | **Control time step (dt)** | Leave at `900` (15 minutes) unless you have a specific reason to change it. |
    | **MPC prediction horizon** | Leave at `6` (90-minute lookahead at dt = 900 s).  Increase to `8`–`12` for buildings with high thermal mass. |
 
@@ -796,6 +801,8 @@ Open your `configuration.yaml` file (located in your HA config directory) and ad
 heating_assistant:
   # Optional: override the outdoor sensor set in the UI wizard
   # outdoor_temp_entity: sensor.openweathermap_temperature
+  # Optional: enable weather forecast for outdoor temperature predictions
+  # weather_entity: weather.forecast_home
 
   rooms:
     - name: living_room                          # unique identifier
@@ -932,12 +939,13 @@ After installation, navigate to **Settings → Devices & Services → + Add Inte
 | **Latitude** | HA configured latitude | Site latitude in decimal degrees (positive = North). Used to compute solar position. |
 | **Longitude** | HA configured longitude | Site longitude in decimal degrees (positive = East). Used to compute solar position. |
 | **Outdoor temperature sensor entity ID** | *(empty)* | The entity ID of a HA temperature sensor that measures outdoor air temperature (e.g. `sensor.openweathermap_temperature`, `sensor.netatmo_outdoor_temperature`).  If left blank the controller uses a fallback of 5 °C — configure this for accurate operation. |
+| **Weather entity ID** | *(empty)* | The entity ID of a HA weather entity (e.g. `weather.forecast_home` from the Met.no integration).  When configured, the controller uses the weather forecast to predict outdoor temperature changes over the MPC horizon instead of assuming the current temperature stays constant.  This significantly improves prediction accuracy during temperature transitions (e.g. overnight cooling, morning warm-up). |
 | **Control time step (dt)** | 900 | Interval in seconds at which the MPC controller advances its simulation.  Range: 60–3600.  Default 900 s = 15 minutes. |
 | **MPC prediction horizon** | 6 | Number of dt steps to look ahead.  At dt=900 s, horizon=6 means 90 minutes of prediction. Range: 1–24. |
 
 After saving, the integration entry is created.  The room topology and heat-source configuration still need to be added to `configuration.yaml`.
 
-To **edit** the outdoor sensor, dt, or horizon after installation:  
+To **edit** the outdoor sensor, weather entity, dt, or horizon after installation:  
 Settings → Devices & Services → Heating Assistant → Configure.
 
 ---
@@ -949,6 +957,7 @@ All room, window, and heat-source configuration is declared in `configuration.ya
 ```yaml
 heating_assistant:
   outdoor_temp_entity: ...
+  weather_entity: ...
   latitude: ...
   longitude: ...
   dt: ...
@@ -964,6 +973,7 @@ heating_assistant:
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `outdoor_temp_entity` | string | No | — | Entity ID of an outdoor temperature sensor.  Overrides the value set in the UI wizard. |
+| `weather_entity` | string | No | — | Entity ID of a HA weather entity (e.g. `weather.forecast_home`) providing temperature forecasts.  When set, the controller uses the weather forecast for outdoor temperature predictions over the MPC horizon instead of assuming the current value is constant.  Works with any HA weather integration that exposes a `forecast` attribute (Met.no, OpenWeatherMap, AccuWeather, etc.). |
 | `latitude` | float | No | HA / wizard setting | Site latitude [°].  Overrides the wizard value. |
 | `longitude` | float | No | HA / wizard setting | Site longitude [°].  Overrides the wizard value. |
 | `dt` | int | No | `900` | Control time step [s].  Range 60–3600. |
@@ -1100,6 +1110,7 @@ A single-room installation with one window and a direct plug-in electric heater 
 ```yaml
 heating_assistant:
   outdoor_temp_entity: sensor.openweathermap_temperature
+  weather_entity: weather.forecast_home         # optional: enables weather-based outdoor temp forecast
 
   rooms:
     - name: studio
@@ -1761,7 +1772,7 @@ The **Temperature Forecast** sensor shows what the MPC controller *predicts* wil
 
 - **State:** predicted temperature at the end of the horizon [°C]
 - **`trajectory` attribute:** list of predicted temperatures at each time step, enabling a multi-point chart
-- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC), `temperature` (°C), `heating_power` (W), `solar_gain` (W), and `outdoor_temp` (°C).  This combined attribute lets a single dashboard card show all forecast signals on one chart.
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC), `temperature` (°C), `heating_power` (W), `solar_gain` (W), `outdoor_temp` (°C), and `setpoint` (°C).  The first entry is timestamped at "now" and contains the current measured values, so the forecast trace connects seamlessly to the HA recorder history with no gap.  The `setpoint` field is included in every entry (both the "now" entry and future steps), allowing dashboard cards to plot the setpoint reference line across the full time range.
 
 This is useful for:
 - Verifying that the model's predictions are reasonable
@@ -1804,7 +1815,7 @@ The **System Summary** sensor provides aggregate metrics for the entire heating 
 The **Heating Plan** sensor shows the controller's *intended* heating schedule for each room over the full MPC horizon.
 
 - **State:** planned heating power for the current step [W]
-- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `heating_power` (W).
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `heating_power` (W).  The first entry is at "now" with the current actual heating power, providing a seamless connection to the HA recorder history.
 
 This is useful for:
 - Seeing in advance whether the controller intends to pre-heat a room before the setpoint is needed
@@ -1816,7 +1827,7 @@ This is useful for:
 The **Solar Forecast** sensor shows the deterministic solar heat-gain prediction for each room over the full MPC horizon.
 
 - **State:** predicted solar gain for the current step [W]
-- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `solar_gain` (W).
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `solar_gain` (W).  The first entry is at "now" with the current actual solar gain, providing a seamless connection to the HA recorder history.
 
 Because the solar position model is fully deterministic, this forecast is exact (assuming clear skies) and reflects the sun's trajectory over the coming horizon period.  This is useful for:
 - Confirming that the solar model is producing sensible predictions for your location and window orientations
@@ -1917,7 +1928,7 @@ This section provides a complete set of Lovelace card configurations for buildin
 2. **Control input** – planned heating power over the prediction horizon (step function)
 3. **Disturbances** – outdoor temperature and solar gain forecasts
 
-Each chart displays **historical recorder data** to the left of the "Now" line and **MPC predictions** to the right.  The history window is twice the prediction horizon (default 6 h history + 3 h forecast = 9 h total) so you can visually assess how well the model tracks reality before examining the upcoming plan.
+Each chart displays **historical recorder data** to the left of the "Now" line and **MPC predictions** to the right.  The forecast data includes a data point at the current time ("now") with the current measured values, ensuring that the predicted traces connect seamlessly to the recorder history with no gap.  The history window is twice the prediction horizon (default 6 h history + 3 h forecast = 9 h total) so you can visually assess how well the model tracks reality before examining the upcoming plan.
 
 Together, these three panels give a complete picture of what the controller sees, what it plans to do, and why.
 
@@ -2731,7 +2742,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 ## 17. Roadmap
 
-- [ ] **Weather-API outdoor temperature forecast** — replace the persistence assumption with a multi-hour forecast from an integrated HA weather entity.
+- [x] **Weather-API outdoor temperature forecast** — the controller can use a HA weather entity (e.g. Met.no, OpenWeatherMap) for multi-hour outdoor temperature forecasts instead of the persistence assumption.  Configure `weather_entity` in YAML or the UI wizard.
 - [ ] **Comfort schedule support** — define day/night/away setpoint profiles per room on a weekly timetable.
 - [ ] **Energy price optimisation** — weight the energy cost term in the MPC by the time-of-use electricity tariff so the controller pre-heats the house before peak pricing periods.
 - [ ] **GUI room editor** — add config-flow steps for defining rooms and heat sources through the UI, eliminating the YAML requirement.
