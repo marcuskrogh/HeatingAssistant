@@ -575,7 +575,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             blocking=False,
                         )
                     elif fraction > 0.0 and room_temp <= room_setpoint:
-                        # Active heating: room is at or below setpoint
+                        # Active heating: room is at or below setpoint.
+                        # When fraction > 0 but room_temp > setpoint the
+                        # code intentionally falls through to the else
+                        # branch (cooling protection) to prevent the
+                        # heater from firing.
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",

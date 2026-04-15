@@ -492,7 +492,7 @@ class TestHeatPumpFanMode:
 
     @pytest.mark.asyncio
     async def test_fan_mode_not_applied_at_setpoint(self):
-        """When room is exactly at setpoint, HP idles in heat mode (no fan)."""
+        """When room is exactly at setpoint, HP idles in heat mode."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
@@ -559,14 +559,8 @@ class TestHeatPumpFanMode:
             room_enabled={"living_room": False},
         )
 
-        # When disabled, the HP idle/fan logic still runs but with fraction forced to 0.
-        # Since room is above setpoint, fan_only is used (room is enabled check
-        # only forces fraction to 0, the room_enabled off-path is only in non-HP).
-        # Actually, for HP disabled rooms the fraction is forced to 0 at the top
-        # of _apply_actions.  The HP logic then sees fraction==0, room_temp>setpoint
-        # → fan_only.  This is acceptable: the HP recirculates air even when
-        # the room is "disabled" rather than shutting down entirely.
-        # If true off is desired, the user should use the HA climate entity directly.
+        # When disabled, fraction is forced to 0.  The HP logic then sees
+        # fraction==0 and room_temp > setpoint → fan_only mode is used.
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 1
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
