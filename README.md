@@ -548,7 +548,7 @@ The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{
 | Disturbance | Forecast method |
 |-------------|----------------|
 | **Outdoor temperature** | If a `weather_entity` is configured (e.g. the Met.no integration), the controller uses the weather forecast temperatures interpolated to each horizon step.  Otherwise, it falls back to persistence: the current measured value is held constant for all horizon steps.  Configure `outdoor_temp_entity` for the current measurement and `weather_entity` for the forecast. |
-| **Solar gains** | The solar position model is evaluated at times `now + k·dt` for each horizon step `k`.  This uses the deterministic orbital equations and produces an accurate prediction of how solar irradiance through each window will evolve over the next `N·dt` seconds. |
+| **Solar gains** | The solar position model is evaluated at times `now + (k+1)·dt` for each horizon step `k = 0, …, N−1`, matching the end of each prediction interval.  This uses the deterministic orbital equations and produces an accurate prediction of how solar irradiance through each window will evolve over the next `N·dt` seconds.  The same time convention is used for the outdoor temperature forecast so that both disturbance components are evaluated consistently. |
 
 ### 4.5 Control cycle
 
@@ -614,20 +614,35 @@ When the coordinator applies actions it inspects the HA domain of each `heater_e
 |-----------|---------------|---------|
 | `switch` | `switch.turn_on` / `switch.turn_off` | `entity_id` — turns on if fraction > 0.5 |
 | `number` | `number.set_value` | `value = round(fraction × 100)` (0–100) |
-| `climate` (non-heat-pump) | `climate.set_hvac_mode` + `climate.set_temperature` | `hvac_mode = "heat"` + room setpoint if fraction > 0, else `"off"` |
-| `climate` (heat pump) | `climate.set_hvac_mode` + `climate.set_temperature` | Three-state deadband control (see below) |
+| `climate` (non-heat-pump) | `climate.set_hvac_mode` + `climate.set_temperature` | Cooling-protected setpoint control (see below) |
+| `climate` (heat pump) | `climate.set_hvac_mode` + `climate.set_temperature` | Three-state control with fan mode (see below) |
 
-**Heat pump climate entity control (deadband strategy)**
+**Heat pump climate entity control**
 
-Heat pumps connected via `climate.*` entities use an offset-based, deadband-aware control strategy to avoid aggressive compressor cycling:
+Heat pumps connected via `climate.*` entities use an offset-based control strategy with fan mode for cooling:
 
 | MPC fraction | Room temperature | HVAC mode | Temperature setpoint |
 |:---:|:---|:---:|:---|
 | `> 0` | — | `heat` | `T_hp_internal + fraction × max_temp_offset` |
-| `= 0` | `≤ setpoint + turn_off_deadband` | `heat` | `T_hp_internal` (idle — no offset, minimal output) |
-| `= 0` | `> setpoint + turn_off_deadband` | `off` | — |
+| `= 0` | `≤ setpoint` | `heat` | `T_hp_internal − idle_offset` (idle — setpoint below internal temp to prevent heating) |
+| `= 0` | `> setpoint` | `fan_only` | — (fan recirculates air without engaging compressor cooling) |
+
+When the room temperature exceeds the setpoint and no heating is required, the heat pump is placed in **fan-only mode** (`fan_only`).  This gently recirculates and mixes the room air without engaging the compressor in active cooling mode.  This avoids unnecessary energy use from the compressor while still promoting air movement to help even out temperature.
 
 The heat pump's own internal temperature (`current_temperature` attribute on the climate entity) is read each cycle.  If unavailable, the HA room temperature from the configured `temp_sensor` is used as a fallback.
+
+**Non-heat-pump climate entity control (e.g. electric heaters with built-in thermostat)**
+
+Electric heaters (or other non-heat-pump sources) connected via `climate.*` entities include cooling protection to prevent the heater from firing when the room is already above the setpoint:
+
+| MPC fraction | Room temperature | HVAC mode | Temperature setpoint |
+|:---:|:---|:---:|:---|
+| `> 0` | `≤ setpoint` | `heat` | Room setpoint (normal heating) |
+| `> 0` | `> setpoint` | `heat` | `T_entity_internal − idle_offset` (cooling protection override) |
+| `= 0` | — | `heat` | `T_entity_internal − idle_offset` (idle — no heating) |
+| — | — (room disabled) | `off` | — |
+
+The key safety feature is the **cooling protection override**: if the HA room sensor indicates the room is warmer than the setpoint, the entity's internal setpoint is always placed below the entity's own internal temperature reading (`current_temperature` attribute).  This guarantees the heater's built-in thermostat will not fire, even when the entity's internal sensor disagrees with HeatingAssistant's room sensor.
 
 If a `heater_entity` is not specified for a source, the controller still runs and stores the computed fraction but no HA service call is made (useful for simulation/testing).
 
