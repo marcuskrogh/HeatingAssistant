@@ -466,14 +466,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # fraction so that the heat pump delivers the computed
                 # thermal output.
                 #
-                # To reduce aggressive on/off cycling, heat pump climate
-                # entities use a deadband strategy:
+                # Heat pump climate entities use a three-state strategy:
                 #   - fraction > 0  → heat mode, offset-based setpoint
-                #   - fraction == 0 AND room_temp <= setpoint + deadband
-                #     → stay in heat mode, set target = internal temp
+                #   - fraction == 0 AND room_temp > setpoint
+                #     → fan_only mode to recirculate / gently cool air
+                #   - fraction == 0 AND room_temp ≤ setpoint
+                #     → stay in heat mode, set target below internal temp
                 #       (HP idles with no temperature gap)
-                #   - fraction == 0 AND room_temp > setpoint + deadband
-                #     → actually turn off
                 if isinstance(src, HeatPump):
                     room_temp = self.model.rooms[src.room].temperature
                     room_setpoint = self.get_room_setpoint(src.room)
@@ -512,19 +511,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
-                    elif room_temp > room_setpoint + src.turn_off_deadband:
-                        # Room is well above setpoint – actually turn off
+                    elif room_temp > room_setpoint:
+                        # Room is above setpoint – use fan mode to
+                        # recirculate air and assist with cooling without
+                        # engaging the compressor in cooling mode.
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": "off"},
+                            {"entity_id": entity_id, "hvac_mode": "fan_only"},
                             blocking=False,
                         )
                     else:
-                        # Idle within deadband: keep HP on but set target
-                        # below internal temp so the device stops heating.
-                        # The offset is re-applied every update cycle to
-                        # track any drift in the internal sensor.
+                        # Idle: room at or below setpoint, keep HP on but
+                        # set target below internal temp so the device
+                        # stops heating.  The offset is re-applied every
+                        # update cycle to track any drift in the internal
+                        # sensor.
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
@@ -544,22 +546,27 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             blocking=False,
                         )
                 else:
-                    # Non-heat-pump climate entity
-                    if fraction > 0.0:
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": "heat"},
-                            blocking=False,
-                        )
-                        target_temp = self.get_room_setpoint(src.room)
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_temperature",
-                            {"entity_id": entity_id, "temperature": target_temp},
-                            blocking=False,
-                        )
-                    elif not self.is_room_enabled(src.room):
+                    # Non-heat-pump climate entity (e.g. electric heater
+                    # with a built-in thermostat).
+                    #
+                    # Read the entity's own internal temperature so we
+                    # can guarantee the applied setpoint is below it
+                    # whenever the room is above the desired setpoint.
+                    entity_temp: Optional[float] = None
+                    attrs = getattr(state, "attributes", {})
+                    raw_temp = attrs.get("current_temperature")
+                    if raw_temp is not None:
+                        try:
+                            entity_temp = float(raw_temp)
+                        except (ValueError, TypeError):
+                            pass
+                    if entity_temp is None:
+                        entity_temp = self.model.rooms[src.room].temperature
+
+                    room_temp = self.model.rooms[src.room].temperature
+                    room_setpoint = self.get_room_setpoint(src.room)
+
+                    if not self.is_room_enabled(src.room):
                         # Room explicitly disabled – turn the entity off.
                         await self.hass.services.async_call(
                             "climate",
@@ -567,25 +574,34 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "hvac_mode": "off"},
                             blocking=False,
                         )
+                    elif fraction > 0.0 and room_temp <= room_setpoint:
+                        # Active heating: room is at or below setpoint.
+                        # When fraction > 0 but room_temp > setpoint the
+                        # code intentionally falls through to the else
+                        # branch (cooling protection) to prevent the
+                        # heater from firing.
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "heat"},
+                            blocking=False,
+                        )
+                        target_temp = room_setpoint
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": entity_id, "temperature": target_temp},
+                            blocking=False,
+                        )
                     else:
-                        # System idle (MPC says no heat needed).  Keep the
-                        # entity in heat mode but set the setpoint below the
-                        # entity's own internal temperature so the device
-                        # stops heating.  Commands are still issued every
-                        # update cycle so that if the entity's internal
-                        # sensor drifts the next cycle will re-apply the
-                        # offset to keep the setpoint consistently below.
-                        entity_temp: Optional[float] = None
-                        attrs = getattr(state, "attributes", {})
-                        raw_temp = attrs.get("current_temperature")
-                        if raw_temp is not None:
-                            try:
-                                entity_temp = float(raw_temp)
-                            except (ValueError, TypeError):
-                                pass
-                        if entity_temp is None:
-                            entity_temp = self.model.rooms[src.room].temperature
-
+                        # Idle or cooling protection.  The room is above
+                        # setpoint or the MPC requests no heat.  In either
+                        # case the entity's internal setpoint is placed
+                        # below the entity's own temperature reading so
+                        # the heater's built-in thermostat never fires,
+                        # even if its internal sensor disagrees with the
+                        # HA room sensor.  Commands are re-issued every
+                        # update cycle to track sensor drift.
                         target_temp = entity_temp - DEFAULT_IDLE_OFFSET
 
                         await self.hass.services.async_call(

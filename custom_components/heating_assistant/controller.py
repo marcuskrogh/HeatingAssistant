@@ -633,7 +633,7 @@ class HeatingMPCController:
         """Solar gain forecast using the geometric solar model."""
         schedules = []
         for k in range(self._horizon):
-            t = now + timedelta(seconds=self._dt * k)
+            t = now + timedelta(seconds=self._dt * (k + 1))
             schedules.append({
                 name: room_solar_gains(
                     self._system._model.rooms[name].windows,
