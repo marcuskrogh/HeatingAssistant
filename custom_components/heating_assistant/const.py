@@ -47,6 +47,7 @@ CONF_SOURCE_TURN_OFF_DEADBAND = "turn_off_deadband"  # °C above setpoint before
 CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
 CONF_DT = "dt"                         # time step in seconds
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
+CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
 CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output constraints
 
 # Defaults

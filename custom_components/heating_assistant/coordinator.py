@@ -27,6 +27,7 @@ from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_WEATHER_ENTITY,
     CONF_ROOMS,
     CONF_SOURCE_COP_RATED,
     CONF_SOURCE_COP_TEMP_REF,
@@ -173,6 +174,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._latitude: float = data.get(CONF_LATITUDE, hass.config.latitude)
         self._longitude: float = data.get(CONF_LONGITUDE, hass.config.longitude)
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
+        self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
         self._dt: float = data.get(CONF_DT, DEFAULT_DT)
         self._horizon: int = data.get(CONF_HORIZON, DEFAULT_HORIZON)
 
@@ -275,6 +277,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             outdoor_temp = self._read_outdoor_temp()
             self.outdoor_temp = outdoor_temp
 
+            # 2b. Read weather forecast for outdoor temperature prediction
+            outdoor_forecast = self._read_weather_forecast()
+
             # 3. Compute current solar gains for visualization
             now = datetime.now(tz=timezone.utc)
             self.solar_gains = {
@@ -292,6 +297,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 outdoor_temp=outdoor_temp,
                 solar_gains=self.solar_gains,
                 now=now,
+                outdoor_forecast=outdoor_forecast,
             )
 
             # 5. Store prediction trajectory and heat-flow breakdown
@@ -333,6 +339,103 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     pass
         # Fall back to a benign default
         return 5.0
+
+    def _read_weather_forecast(self) -> Optional[List[float]]:
+        """Read outdoor temperature forecast from a weather entity.
+
+        Weather entities in HA (e.g. Met.no, OpenWeatherMap) expose a
+        ``forecast`` attribute containing hourly or twice-daily forecasts.
+        Each entry has a ``datetime`` and a ``temperature`` field.
+
+        Returns a list of N outdoor temperature values aligned to the MPC
+        horizon steps, or None if no weather entity is configured or
+        no forecast data is available.
+        """
+        if not self._weather_entity:
+            return None
+
+        state = self.hass.states.get(self._weather_entity)
+        if state is None:
+            return None
+
+        # Weather entities store forecast data in the attributes.
+        forecast_data = state.attributes.get("forecast")
+        if not forecast_data:
+            return None
+
+        # Parse forecast entries into (timestamp_seconds, temperature) pairs.
+        now = datetime.now(tz=timezone.utc)
+        entries: List[tuple] = []
+        for entry in forecast_data:
+            dt_str = entry.get("datetime")
+            temp = entry.get("temperature")
+            if dt_str is None or temp is None:
+                continue
+            try:
+                if isinstance(dt_str, str):
+                    # Handle ISO-8601 strings (with or without timezone)
+                    if dt_str.endswith("Z"):
+                        dt_str = dt_str[:-1] + "+00:00"
+                    fc_time = datetime.fromisoformat(dt_str)
+                elif isinstance(dt_str, datetime):
+                    fc_time = dt_str
+                else:
+                    continue
+                if fc_time.tzinfo is None:
+                    fc_time = fc_time.replace(tzinfo=timezone.utc)
+                entries.append((fc_time.timestamp(), float(temp)))
+            except (ValueError, TypeError):
+                continue
+
+        if not entries:
+            return None
+
+        # Sort by time
+        entries.sort(key=lambda e: e[0])
+
+        # Interpolate forecast temperatures at each MPC horizon step.
+        now_ts = now.timestamp()
+        result: List[float] = []
+        for k in range(self._horizon):
+            target_ts = now_ts + self._dt * (k + 1)
+            # Find surrounding entries for linear interpolation
+            temp = self._interpolate_forecast(entries, target_ts)
+            result.append(temp)
+
+        return result
+
+    @staticmethod
+    def _interpolate_forecast(
+        entries: List[tuple], target_ts: float,
+    ) -> float:
+        """Linearly interpolate forecast temperature at a target timestamp.
+
+        If the target is before all entries, returns the first entry's temp.
+        If after all entries, returns the last entry's temp.
+        """
+        if not entries:
+            return 5.0  # fallback
+
+        # Before first entry
+        if target_ts <= entries[0][0]:
+            return entries[0][1]
+
+        # After last entry
+        if target_ts >= entries[-1][0]:
+            return entries[-1][1]
+
+        # Find the two surrounding entries
+        for i in range(len(entries) - 1):
+            t0, temp0 = entries[i]
+            t1, temp1 = entries[i + 1]
+            if t0 <= target_ts <= t1:
+                # Linear interpolation
+                if t1 == t0:
+                    return temp0
+                frac = (target_ts - t0) / (t1 - t0)
+                return temp0 + frac * (temp1 - temp0)
+
+        return entries[-1][1]
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         """Write the computed set-point fractions to heater entities via HA services."""

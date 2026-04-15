@@ -18,6 +18,7 @@ from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_WEATHER_ENTITY,
     CONF_ROOMS,
     CONF_HEAT_SOURCES,
     DEFAULT_DT,
@@ -61,6 +62,7 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
                 vol.Required(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
                 vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): str,
+                vol.Optional(CONF_WEATHER_ENTITY, default=""): str,
                 vol.Optional(CONF_DT, default=DEFAULT_DT): vol.All(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
@@ -105,6 +107,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_OUTDOOR_TEMP_ENTITY,
                     default=current.get(CONF_OUTDOOR_TEMP_ENTITY, ""),
+                ): str,
+                vol.Optional(
+                    CONF_WEATHER_ENTITY,
+                    default=current.get(CONF_WEATHER_ENTITY, ""),
                 ): str,
                 vol.Optional(
                     CONF_DT,

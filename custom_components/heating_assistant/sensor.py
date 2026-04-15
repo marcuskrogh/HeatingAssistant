@@ -366,14 +366,38 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
                 trajectory.append(round(temp, 2))
 
         # Build timestamped forecast entries for dashboard visualisation.
-        # Each entry combines temperature, heating power, solar gain, and
-        # outdoor temperature so cards (e.g. apexcharts-card) can plot
-        # them all from a single attribute.
+        # Each entry combines temperature, heating power, solar gain,
+        # outdoor temperature, and setpoint so cards (e.g. apexcharts-card)
+        # can plot them all from a single attribute.
+        #
+        # The first entry is at t=now with the *current* measured values so
+        # that the predicted trace connects seamlessly to the historical
+        # recorder trace (no gap between history and forecast).
         now = datetime.now(tz=timezone.utc)
         forecast = []
         outdoor_forecast = self._coordinator.outdoor_forecast
         solar_forecast = self._coordinator.solar_forecast
         heating_schedule = self._coordinator.heating_schedule
+
+        # Current heating power for this room (actual, not planned)
+        current_heating = sum(
+            s.current_power
+            for s in self._coordinator.heat_sources
+            if s.room == self._room_name
+        )
+        current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
+
+        # Entry at t=now: bridge between history and prediction
+        now_entry: Dict[str, Any] = {
+            "time": now.isoformat(),
+            "temperature": round(room.temperature, 2),
+            "heating_power": round(current_heating, 1),
+            "solar_gain": round(current_solar, 1),
+            "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
+            "setpoint": room.setpoint,
+        }
+        forecast.append(now_entry)
+
         for i, pred in enumerate(predictions):
             temp = pred.get(self._room_name)
             if temp is None:
@@ -382,6 +406,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             entry: Dict[str, Any] = {
                 "time": step_time.isoformat(),
                 "temperature": round(temp, 2),
+                "setpoint": room.setpoint,
             }
             if i < len(heating_schedule):
                 entry["heating_power"] = round(
@@ -653,7 +678,19 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
+        # Current actual heating power for this room
+        current_heating = sum(
+            s.current_power
+            for s in self._coordinator.heat_sources
+            if s.room == self._room_name
+        )
+
         forecast = []
+        # Entry at t=now: bridge between history and prediction
+        forecast.append({
+            "time": now.isoformat(),
+            "heating_power": round(current_heating, 1),
+        })
         for i, step in enumerate(schedule):
             step_time = now + timedelta(seconds=dt * (i + 1))
             forecast.append({
@@ -709,7 +746,15 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
+        # Current actual solar gain for this room
+        current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
+
         forecast = []
+        # Entry at t=now: bridge between history and prediction
+        forecast.append({
+            "time": now.isoformat(),
+            "solar_gain": round(current_solar, 1),
+        })
         for i, step in enumerate(solar_forecast):
             step_time = now + timedelta(seconds=dt * (i + 1))
             forecast.append({

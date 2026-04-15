@@ -75,6 +75,7 @@ from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_WEATHER_ENTITY,
     CONF_R_EXTERNAL,
     CONF_R_VALUE,
     CONF_ROOM_NAME,
@@ -175,6 +176,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_ROOMS, default=[]): [_ROOM_SCHEMA],
                 vol.Optional(CONF_HEAT_SOURCES, default=[]): [_SOURCE_SCHEMA],
                 vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): str,
+                vol.Optional(CONF_WEATHER_ENTITY): str,
                 vol.Optional(CONF_LATITUDE): vol.Coerce(float),
                 vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
                 vol.Optional(CONF_DT, default=DEFAULT_DT): vol.Coerce(int),
@@ -216,6 +218,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not entry_data.get(CONF_OUTDOOR_TEMP_ENTITY):
             entry_data[CONF_OUTDOOR_TEMP_ENTITY] = yaml_cfg.get(
                 CONF_OUTDOOR_TEMP_ENTITY, ""
+            )
+        if not entry_data.get(CONF_WEATHER_ENTITY):
+            entry_data[CONF_WEATHER_ENTITY] = yaml_cfg.get(
+                CONF_WEATHER_ENTITY, ""
             )
         entry_data.setdefault(CONF_DT, yaml_cfg.get(CONF_DT, DEFAULT_DT))
         entry_data.setdefault(CONF_HORIZON, yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON))
