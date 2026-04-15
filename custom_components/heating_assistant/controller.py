@@ -423,11 +423,12 @@ class HeatingMPCController:
     Builds a HouseThermalSystem, KalmanFilter, OptimalControlProblem, and
     the generic MPCController, then provides the coordinator-facing API:
 
-      actions = controller.compute(outdoor_temp, solar_gains, now)
+      actions = controller.compute(outdoor_temp, solar_gains, now, outdoor_forecast)
 
     Forecasts
     ---------
-    Outdoor temperature: persistence (constant at the current measurement).
+    Outdoor temperature: uses weather forecast if provided by the coordinator;
+        otherwise falls back to persistence (constant at the current measurement).
     Solar gains: computed from the solar geometry model for each horizon step.
 
     Parameters
@@ -520,7 +521,7 @@ class HeatingMPCController:
 
     @property
     def outdoor_forecast(self) -> List[float]:
-        """Outdoor temperature forecast used in the last compute()."""
+        """Outdoor temperature forecast used in the last compute() (weather or persistence)."""
         return self._outdoor_forecast
 
     @property

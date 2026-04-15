@@ -374,3 +374,117 @@ class TestCoordinatorSetupHelpers:
         hours = tau / 3600.0
         # 4e6 * 0.05 = 200000s ≈ 55.6 hours
         assert hours == pytest.approx(200000 / 3600, rel=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Tests: outdoor forecast with weather data
+# ---------------------------------------------------------------------------
+
+class TestOutdoorForecast:
+    """Test that external outdoor forecasts are correctly used by the controller."""
+
+    def test_external_forecast_replaces_persistence(self):
+        """When an outdoor_forecast is provided, it replaces the persistence forecast."""
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=4, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        external_forecast = [3.0, 2.5, 2.0, 1.5]
+        ctrl.compute(outdoor_temp=5.0, now=now, outdoor_forecast=external_forecast)
+
+        assert len(ctrl.outdoor_forecast) == 4
+        for i, val in enumerate(ctrl.outdoor_forecast):
+            assert val == pytest.approx(external_forecast[i])
+
+    def test_persistence_fallback_when_no_forecast(self):
+        """Without an outdoor_forecast, the persistence forecast is used."""
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=4, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        ctrl.compute(outdoor_temp=5.0, now=now, outdoor_forecast=None)
+
+        assert len(ctrl.outdoor_forecast) == 4
+        for val in ctrl.outdoor_forecast:
+            assert val == pytest.approx(5.0)
+
+    def test_external_forecast_too_short_falls_back(self):
+        """When the external forecast is shorter than the horizon, persistence is used."""
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=4, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        short_forecast = [3.0, 2.5]  # Only 2 entries, horizon is 4
+        ctrl.compute(outdoor_temp=5.0, now=now, outdoor_forecast=short_forecast)
+
+        # Falls back to persistence since forecast is too short
+        assert len(ctrl.outdoor_forecast) == 4
+        for val in ctrl.outdoor_forecast:
+            assert val == pytest.approx(5.0)
+
+    def test_external_forecast_longer_than_horizon(self):
+        """When the external forecast is longer than needed, only N entries are used."""
+        model = make_single_room_model()
+        sources = [ElectricHeater("h", "studio", 2000)]
+        ctrl = MPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        long_forecast = [3.0, 2.5, 2.0, 1.5, 1.0, 0.5]
+        ctrl.compute(outdoor_temp=5.0, now=now, outdoor_forecast=long_forecast)
+
+        assert len(ctrl.outdoor_forecast) == 3
+        assert ctrl.outdoor_forecast[0] == pytest.approx(3.0)
+        assert ctrl.outdoor_forecast[1] == pytest.approx(2.5)
+        assert ctrl.outdoor_forecast[2] == pytest.approx(2.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: coordinator weather forecast interpolation
+# ---------------------------------------------------------------------------
+
+from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+
+
+class TestForecastInterpolation:
+    """Test the _interpolate_forecast static method on the coordinator."""
+
+    def test_interpolate_exact_match(self):
+        entries = [(100.0, 5.0), (200.0, 10.0), (300.0, 15.0)]
+        result = HeatingAssistantCoordinator._interpolate_forecast(entries, 200.0)
+        assert result == pytest.approx(10.0)
+
+    def test_interpolate_midpoint(self):
+        entries = [(100.0, 0.0), (200.0, 10.0)]
+        result = HeatingAssistantCoordinator._interpolate_forecast(entries, 150.0)
+        assert result == pytest.approx(5.0)
+
+    def test_interpolate_before_first(self):
+        entries = [(100.0, 5.0), (200.0, 10.0)]
+        result = HeatingAssistantCoordinator._interpolate_forecast(entries, 50.0)
+        assert result == pytest.approx(5.0)
+
+    def test_interpolate_after_last(self):
+        entries = [(100.0, 5.0), (200.0, 10.0)]
+        result = HeatingAssistantCoordinator._interpolate_forecast(entries, 300.0)
+        assert result == pytest.approx(10.0)
+
+    def test_interpolate_empty_entries(self):
+        result = HeatingAssistantCoordinator._interpolate_forecast([], 100.0)
+        assert result == pytest.approx(5.0)  # fallback
+
+    def test_interpolate_quarter_point(self):
+        entries = [(0.0, 0.0), (100.0, 20.0)]
+        result = HeatingAssistantCoordinator._interpolate_forecast(entries, 25.0)
+        assert result == pytest.approx(5.0)
+
+    def test_interpolate_multiple_segments(self):
+        entries = [(0.0, 0.0), (100.0, 10.0), (200.0, 5.0)]
+        # In first segment
+        r1 = HeatingAssistantCoordinator._interpolate_forecast(entries, 50.0)
+        assert r1 == pytest.approx(5.0)
+        # In second segment
+        r2 = HeatingAssistantCoordinator._interpolate_forecast(entries, 150.0)
+        assert r2 == pytest.approx(7.5)

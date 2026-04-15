@@ -53,6 +53,7 @@ YAML configuration example
           heater_entity: climate.heat_pump
 
       outdoor_temp_entity: sensor.outdoor_temperature
+      weather_entity: weather.forecast_home       # optional: weather forecast
 """
 
 from __future__ import annotations
