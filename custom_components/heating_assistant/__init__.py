@@ -117,10 +117,11 @@ from .coordinator import HeatingAssistantCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["climate", "sensor"]
+PLATFORMS = ["climate", "sensor", "button"]
 
 SERVICE_SIMULATE_THERMAL_RESPONSE = "simulate_thermal_response"
 SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
+SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 
 # ---------------------------------------------------------------------------
 # YAML schema
@@ -361,6 +362,65 @@ def _register_services(hass: HomeAssistant) -> None:
             blocking=False,
         )
 
+    async def handle_estimate_ml(call: ServiceCall) -> None:
+        """Run ML parameter estimation using the Kalman filter log-likelihood."""
+        coordinator = _get_coordinator(hass)
+        apply_params: bool = call.data.get("apply_parameters", True)
+        result = await coordinator.async_estimate_parameters_ml(
+            apply_params=apply_params,
+        )
+        hass.bus.async_fire(
+            f"{DOMAIN}_ml_estimation_result",
+            {
+                k: v
+                for k, v in result.items()
+                if isinstance(v, (str, int, float, bool, type(None)))
+            },
+        )
+        if not result["success"]:
+            message = (
+                f"**Status:** {result['message']}\n\n"
+                f"**Steps in buffer:** {result['n_steps']}"
+            )
+        else:
+            lines = []
+            for room, params in result["estimated_params"].items():
+                curr = result["current_params"][room]
+                lines.append(
+                    f"**{room}**\n"
+                    f"  thermal\\_mass: {params['thermal_mass']:,.0f} J/K "
+                    f"(was {curr['thermal_mass']:,.0f})\n"
+                    f"  r\\_external: {params['r_external']:.5f} K/W "
+                    f"(was {curr['r_external']:.5f})"
+                )
+            applied_str = (
+                "Parameters applied to live model."
+                if apply_params
+                else "Dry run – parameters NOT applied."
+            )
+            ll_str = (
+                f"{result['log_likelihood']:.1f}"
+                if result["log_likelihood"] is not None
+                else "n/a"
+            )
+            message = (
+                f"**{applied_str}**\n\n"
+                + "\n\n".join(lines)
+                + f"\n\n**Data steps used:** {result['n_steps']}\n"
+                f"**Log-likelihood:** {ll_str}\n"
+                f"**Status:** {result['message']}"
+            )
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – ML Parameter Estimation",
+                "message": message,
+                "notification_id": f"{DOMAIN}_ml_estimation",
+            },
+            blocking=False,
+        )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_SIMULATE_THERMAL_RESPONSE,
@@ -388,6 +448,17 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("initial_temp"): vol.Coerce(float),
                 vol.Required("final_temp"): vol.Coerce(float),
                 vol.Required("duration_seconds"): vol.Coerce(float),
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_ESTIMATE_PARAMETERS_ML,
+        handle_estimate_ml,
+        schema=vol.Schema(
+            {
+                vol.Optional("apply_parameters", default=True): cv.boolean,
             }
         ),
     )

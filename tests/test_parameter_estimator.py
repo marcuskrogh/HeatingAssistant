@@ -1,0 +1,319 @@
+"""Unit tests for the Kalman-filter ML parameter estimator."""
+
+import math
+import sys
+import os
+
+import pytest
+import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from custom_components.heating_assistant.thermal_model import (
+    HouseModel,
+    Room,
+    RoomConnection,
+)
+from custom_components.heating_assistant.heat_sources import ElectricHeater
+from custom_components.heating_assistant.parameter_estimator import (
+    KalmanMLEstimator,
+    MIN_HISTORY_STEPS,
+    _nelder_mead,
+    _LOG_MASS_LO,
+    _LOG_MASS_HI,
+    _LOG_R_LO,
+    _LOG_R_HI,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers / fixtures
+# ---------------------------------------------------------------------------
+
+def _make_single_room(thermal_mass: float = 5_000_000.0,
+                      r_external: float = 0.05) -> Room:
+    return Room(
+        name="living_room",
+        thermal_mass=thermal_mass,
+        r_external=r_external,
+        temperature=20.0,
+        setpoint=21.0,
+    )
+
+
+def _make_two_rooms(
+    mass1: float = 5_000_000.0, r1: float = 0.05,
+    mass2: float = 3_000_000.0, r2: float = 0.08,
+) -> list:
+    living = Room(
+        name="living_room",
+        thermal_mass=mass1,
+        r_external=r1,
+        connections=[RoomConnection("bedroom", 0.2)],
+        temperature=20.0,
+        setpoint=21.0,
+    )
+    bedroom = Room(
+        name="bedroom",
+        thermal_mass=mass2,
+        r_external=r2,
+        connections=[RoomConnection("living_room", 0.2)],
+        temperature=18.0,
+        setpoint=20.0,
+    )
+    return [living, bedroom]
+
+
+def _make_sources(rooms):
+    return [
+        ElectricHeater(f"{r.name}_heater", r.name, max_power=2000.0)
+        for r in rooms
+    ]
+
+
+def _generate_history(rooms, sources, dt=60.0, n_steps=60,
+                      outdoor_temp=5.0, heating_fraction=0.5,
+                      noise_std=0.05, seed=42):
+    """
+    Simulate a history buffer using the true model parameters so the
+    estimator has something real to fit.
+    """
+    rng = np.random.default_rng(seed)
+    model = HouseModel(rooms)
+    n = len(rooms)
+
+    temps = {r.name: r.temperature for r in rooms}
+
+    history = []
+    for _ in range(n_steps):
+        y = [temps[r.name] + rng.normal(0, noise_std) for r in rooms]
+        u = [heating_fraction] * len(sources)
+        solar = {r.name: 0.0 for r in rooms}
+
+        history.append({
+            "y": y,
+            "u": u,
+            "d_outdoor": outdoor_temp,
+            "d_solar": solar,
+        })
+
+        # Advance model one step
+        heat_inputs = {
+            src.room: src.thermal_power(heating_fraction, outdoor_temp)
+            for src in sources
+        }
+        temps = model.step(dt, heat_inputs, outdoor_temp, solar)
+
+    return history
+
+
+# ---------------------------------------------------------------------------
+# Tests for _nelder_mead
+# ---------------------------------------------------------------------------
+
+class TestNelderMead:
+    """Tests for the pure-NumPy Nelder-Mead implementation."""
+
+    def test_minimises_quadratic(self):
+        """Should find the minimum of a simple quadratic."""
+        def f(x):
+            return float(np.sum((x - np.array([1.0, 2.0])) ** 2))
+
+        x0 = np.array([0.0, 0.0])
+        x_best, f_best, converged = _nelder_mead(f, x0, tol=1e-6)
+        assert converged
+        np.testing.assert_allclose(x_best, [1.0, 2.0], atol=1e-3)
+        assert f_best < 1e-6
+
+    def test_minimises_rosenbrock(self):
+        """Should converge on the 2-D Rosenbrock function."""
+        def rosenbrock(x):
+            return float(100 * (x[1] - x[0] ** 2) ** 2 + (1 - x[0]) ** 2)
+
+        x0 = np.array([0.5, 0.5])
+        x_best, f_best, _ = _nelder_mead(rosenbrock, x0, tol=1e-6,
+                                          max_iter=5000)
+        np.testing.assert_allclose(x_best, [1.0, 1.0], atol=1e-2)
+
+    def test_returns_finite_result(self):
+        x0 = np.array([3.0])
+        x_best, f_best, _ = _nelder_mead(lambda x: float(x[0] ** 2), x0)
+        assert math.isfinite(f_best)
+
+    def test_default_max_iter(self):
+        """Default max_iter should be 200 × n (no exception raised)."""
+        x0 = np.array([1.0, 2.0, 3.0])
+        _nelder_mead(lambda x: float(np.sum(x ** 2)), x0)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Tests for KalmanMLEstimator
+# ---------------------------------------------------------------------------
+
+class TestKalmanMLEstimator:
+
+    def test_insufficient_data_returns_failure(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        short_history = _generate_history(rooms, sources, n_steps=5)
+        result = estimator.estimate(short_history)
+        assert result["success"] is False
+        assert result["n_steps"] == 5
+        assert str(MIN_HISTORY_STEPS) in result["message"]
+
+    def test_returns_current_params_on_failure(self):
+        rooms = [_make_single_room(thermal_mass=4_000_000.0, r_external=0.06)]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=5)
+        result = estimator.estimate(history)
+        assert result["current_params"]["living_room"]["thermal_mass"] == pytest.approx(
+            4_000_000.0
+        )
+        assert result["current_params"]["living_room"]["r_external"] == pytest.approx(
+            0.06
+        )
+
+    def test_success_with_sufficient_data(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=MIN_HISTORY_STEPS + 10)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+        assert result["n_steps"] >= MIN_HISTORY_STEPS
+
+    def test_estimated_params_are_positive(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=60)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+        p = result["estimated_params"]["living_room"]
+        assert p["thermal_mass"] > 0
+        assert p["r_external"] > 0
+
+    def test_estimated_params_within_bounds(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=60)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+        p = result["estimated_params"]["living_room"]
+        assert math.exp(_LOG_MASS_LO) <= p["thermal_mass"] <= math.exp(_LOG_MASS_HI)
+        assert math.exp(_LOG_R_LO) <= p["r_external"] <= math.exp(_LOG_R_HI)
+
+    def test_log_likelihood_is_finite(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=60)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+        assert result["log_likelihood"] is not None
+        assert math.isfinite(result["log_likelihood"])
+
+    def test_two_room_model_succeeds(self):
+        rooms = _make_two_rooms()
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=60)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+        for room in ["living_room", "bedroom"]:
+            assert result["estimated_params"][room]["thermal_mass"] > 0
+            assert result["estimated_params"][room]["r_external"] > 0
+
+    def test_compute_log_likelihood_current_params(self):
+        """compute_log_likelihood should return a finite value at the prior."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=60)
+        ll = estimator.compute_log_likelihood(history)
+        assert ll is not None
+        assert math.isfinite(ll)
+
+    def test_regularization_pulls_toward_prior(self):
+        """Strong regularisation should yield estimates near the prior."""
+        rooms = [_make_single_room(thermal_mass=5_000_000.0, r_external=0.05)]
+        sources = _make_sources(rooms)
+        # Use very strong regularisation
+        estimator = KalmanMLEstimator(
+            rooms, sources, dt=60.0, regularization=1e6
+        )
+        history = _generate_history(rooms, sources, n_steps=60)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+        p = result["estimated_params"]["living_room"]
+        # With very strong regularisation the estimates should be very close
+        # to the prior (configured) values.
+        assert p["thermal_mass"] == pytest.approx(5_000_000.0, rel=0.1)
+        assert p["r_external"] == pytest.approx(0.05, rel=0.1)
+
+    def test_result_contains_required_keys(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=60)
+        result = estimator.estimate(history)
+        for key in ("success", "estimated_params", "current_params",
+                    "n_steps", "log_likelihood", "message"):
+            assert key in result, f"missing key: {key}"
+
+    def test_ml_improves_likelihood_over_prior(self):
+        """
+        Estimated parameters should achieve a better (higher) log-likelihood
+        than the initial prior when there is enough data from a different model.
+        """
+        # Generate data from a model with *different* parameters
+        true_rooms = [_make_single_room(thermal_mass=3_000_000.0,
+                                         r_external=0.08)]
+        sources = _make_sources(true_rooms)
+        history = _generate_history(true_rooms, sources, n_steps=120, seed=0)
+
+        # Fit with a model that starts at the *wrong* prior
+        prior_rooms = [_make_single_room(thermal_mass=5_000_000.0,
+                                          r_external=0.05)]
+        estimator = KalmanMLEstimator(
+            prior_rooms, sources, dt=60.0, regularization=0.0
+        )
+        prior_ll = estimator.compute_log_likelihood(history)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+        estimated_ll = result["log_likelihood"]
+        assert estimated_ll is not None
+        # Estimated LL should be >= prior LL (optimizer should not make things worse)
+        assert estimated_ll >= prior_ll - 1.0  # allow 1 nat tolerance
+
+    def test_neg_log_likelihood_returns_sentinel_for_bad_params(self):
+        """Out-of-bounds log_params should return the sentinel (1e10)."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=40)
+
+        # log_mass way too large
+        bad_params = np.array([100.0, math.log(0.05)])
+        val = estimator._neg_log_likelihood(bad_params, history)
+        assert val >= 1e9
+
+        # NaN
+        nan_params = np.array([float("nan"), float("nan")])
+        val_nan = estimator._neg_log_likelihood(nan_params, history)
+        assert val_nan >= 1e9
+
+    def test_history_with_zero_solar(self):
+        """History records without solar gains should not raise."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = [
+            {"y": [20.0], "u": [0.5], "d_outdoor": 5.0, "d_solar": {}}
+            for _ in range(MIN_HISTORY_STEPS + 5)
+        ]
+        result = estimator.estimate(history)
+        assert result["success"] is True

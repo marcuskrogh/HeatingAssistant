@@ -77,3 +77,10 @@ SUFFIX_HEATING_POWER = "heating_power"
 
 # Update interval (seconds)
 UPDATE_INTERVAL = 60
+
+# Parameter estimation
+#: Number of update steps to keep in the rolling history buffer.
+#: At UPDATE_INTERVAL=60 s this is ≈8 hours of data.
+HISTORY_BUFFER_SIZE = 480
+#: Service name for ML parameter estimation
+SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
