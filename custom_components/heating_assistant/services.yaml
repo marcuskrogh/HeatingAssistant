@@ -133,3 +133,26 @@ estimate_parameters:
           max: 172800
           step: 60
           unit_of_measurement: "s"
+
+estimate_parameters_ml:
+  name: Estimate thermal parameters (ML)
+  description: >
+    Estimate thermal_mass and r_external for all rooms using maximum-likelihood
+    optimisation of the Kalman-filter prediction-error decomposition
+    log-likelihood.  The estimation uses the rolling observation history that
+    HeatingAssistant accumulates automatically during normal operation (at least
+    30 steps, ~30 minutes, of data are required).  The result is reported as a
+    persistent notification.  By default the estimated parameters are applied
+    immediately to the live model so future MPC runs benefit from them;
+    set apply_parameters to false for a dry run that only reports the estimates.
+  fields:
+    apply_parameters:
+      name: Apply parameters
+      description: >
+        When true (default) the estimated values are applied to the running
+        model.  When false the service only reports the estimates without
+        changing anything (dry run).
+      required: false
+      default: true
+      selector:
+        boolean:

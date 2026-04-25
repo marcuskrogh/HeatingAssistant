@@ -13,6 +13,7 @@ The coordinator
 from __future__ import annotations
 
 import logging
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -67,6 +68,7 @@ from .const import (
     DEFAULT_THERMAL_MASS,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
+    HISTORY_BUFFER_SIZE,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
     UPDATE_INTERVAL,
@@ -226,6 +228,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.solar_forecast: list = []
         self.heating_schedule: list = []
 
+        # Rolling observation history for ML parameter estimation.
+        # Each entry is a dict: {y, u, d_outdoor, d_solar, timestamp}.
+        self._history_buffer: deque = deque(maxlen=HISTORY_BUFFER_SIZE)
+
         super().__init__(
             hass,
             _LOGGER,
@@ -241,6 +247,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     def dt(self) -> float:
         """Return the time step in seconds."""
         return self._dt
+
+    @property
+    def history_buffer(self) -> deque:
+        """Return a view of the rolling observation history buffer."""
+        return self._history_buffer
 
     # ------------------------------------------------------------------
     # DataUpdateCoordinator hook
@@ -307,7 +318,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.solar_forecast = self.controller.solar_forecast
             self.heating_schedule = self.controller.heating_schedule
 
-            # 6. Write set-points to heater entities
+            # 6. Record observation in the rolling history buffer for ML
+            #    parameter estimation.
+            self._history_buffer.append({
+                "y": [
+                    self.model.rooms[name].temperature
+                    for name in self.model.room_names
+                ],
+                "u": [
+                    self.actions.get(src.name, 0.0)
+                    for src in self.heat_sources
+                ],
+                "d_outdoor": outdoor_temp,
+                "d_solar": dict(self.solar_gains),
+                "timestamp": now.timestamp(),
+            })
+
+            # 7. Write set-points to heater entities
             await self._apply_actions(outdoor_temp)
 
             return {
@@ -829,3 +856,94 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "0.02–0.15 K/W. Run multiple experiments and average results."
             ),
         }
+
+    # ------------------------------------------------------------------
+    # ML parameter estimation (Kalman filter / maximum likelihood)
+    # ------------------------------------------------------------------
+
+    async def async_estimate_parameters_ml(
+        self,
+        apply_params: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Estimate thermal parameters using Kalman-filter maximum-likelihood.
+
+        Runs the prediction-error decomposition (PED) log-likelihood
+        optimisation over the rolling observation history buffer in a
+        thread-executor so that the HA event loop is not blocked.
+
+        Parameters
+        ----------
+        apply_params : bool
+            When *True* (default) the estimated parameters are immediately
+            applied to the live model and the MPC controller is rebuilt.
+            When *False* the result is only reported (dry run).
+
+        Returns
+        -------
+        dict – the result dict from :class:`~.parameter_estimator.KalmanMLEstimator`.
+        """
+        from .parameter_estimator import KalmanMLEstimator
+
+        estimator = KalmanMLEstimator(
+            rooms=list(self.model.rooms.values()),
+            sources=self.heat_sources,
+            dt=self._dt,
+        )
+
+        history = list(self._history_buffer)
+
+        # Optimisation may take a few seconds; run in a thread executor.
+        result: Dict[str, Any] = await self.hass.async_add_executor_job(
+            estimator.estimate, history
+        )
+
+        if result["success"] and apply_params:
+            self._apply_estimated_parameters(result["estimated_params"])
+
+        return result
+
+    def _apply_estimated_parameters(
+        self, estimated_params: Dict[str, Dict[str, float]]
+    ) -> None:
+        """
+        Apply estimated parameters to the house model and rebuild the
+        MPC controller so that the new values take effect immediately.
+
+        The existing Kalman filter state is discarded when the controller
+        is rebuilt; it will be re-bootstrapped on the next update cycle.
+        """
+        for room_name, params in estimated_params.items():
+            if room_name not in self.model.rooms:
+                continue
+            room = self.model.rooms[room_name]
+            room.thermal_mass = float(params["thermal_mass"])
+            room.r_external = float(params["r_external"])
+
+        # Rebuild the internal model matrices (A, B_ext, C_cap)
+        (
+            self.model._C,
+            self.model._A,
+            self.model._B_ext,
+        ) = self.model._build_matrices()
+
+        # Rebuild the MPC controller with the updated model
+        self.controller = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=self._horizon,
+            dt=self._dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+        )
+
+        _LOGGER.info(
+            "Applied estimated thermal parameters: %s",
+            {
+                name: {
+                    "thermal_mass": params["thermal_mass"],
+                    "r_external": params["r_external"],
+                }
+                for name, params in estimated_params.items()
+            },
+        )
