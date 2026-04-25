@@ -3,7 +3,7 @@
 import sys
 import os
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -488,3 +488,109 @@ class TestForecastInterpolation:
         # In second segment
         r2 = HeatingAssistantCoordinator._interpolate_forecast(entries, 150.0)
         assert r2 == pytest.approx(7.5)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _parse_weather_forecast (coordinator static method)
+# ---------------------------------------------------------------------------
+
+class TestParseForecastData:
+    """Test the _parse_weather_forecast static method on the coordinator."""
+
+    def test_empty_returns_none(self):
+        result = HeatingAssistantCoordinator._parse_weather_forecast([], 4, 900)
+        assert result is None
+
+    def test_all_missing_fields_returns_none(self):
+        data = [{"condition": "sunny"}]  # no datetime or temperature
+        result = HeatingAssistantCoordinator._parse_weather_forecast(data, 4, 900)
+        assert result is None
+
+    def test_correct_horizon_length(self):
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [
+            {"datetime": (now + timedelta(hours=i)).isoformat(), "temperature": float(i)}
+            for i in range(8)
+        ]
+        result = HeatingAssistantCoordinator._parse_weather_forecast(data, 4, 900, now=now)
+        assert result is not None
+        assert len(result) == 4
+
+    def test_single_entry_constant_forecast(self):
+        """A single forecast entry extrapolates as a constant."""
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [{"datetime": (now + timedelta(hours=1)).isoformat(), "temperature": 5.0}]
+        result = HeatingAssistantCoordinator._parse_weather_forecast(data, 4, 900, now=now)
+        assert result is not None
+        for val in result:
+            assert val == pytest.approx(5.0)
+
+    def test_z_suffix_datetime_parsed(self):
+        """Entries with ISO-8601 'Z' suffix timezone are parsed correctly."""
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        t_str = (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data = [{"datetime": t_str, "temperature": 3.0}]
+        result = HeatingAssistantCoordinator._parse_weather_forecast(data, 4, 900, now=now)
+        assert result is not None
+        for val in result:
+            assert val == pytest.approx(3.0)
+
+    def test_interpolates_decreasing_temperatures(self):
+        """Multiple entries with decreasing temps produce a decreasing forecast."""
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        # Entries at 15-min intervals with decreasing temp
+        data = [
+            {
+                "datetime": (now + timedelta(minutes=15 * (i + 1))).isoformat(),
+                "temperature": 10.0 - i,
+            }
+            for i in range(8)
+        ]
+        result = HeatingAssistantCoordinator._parse_weather_forecast(data, 4, 900, now=now)
+        assert result is not None
+        assert len(result) == 4
+        # First step is warmer than last step
+        assert result[0] > result[-1]
+
+    def test_forecast_matches_entries_at_exact_timestamps(self):
+        """Forecast values match entry temperatures exactly at horizon timestamps."""
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        dt = 900.0
+        horizon = 4
+        temps = [5.0, 4.0, 3.0, 2.0]
+        data = [
+            {
+                "datetime": (now + timedelta(seconds=dt * (k + 1))).isoformat(),
+                "temperature": temps[k],
+            }
+            for k in range(horizon)
+        ]
+        result = HeatingAssistantCoordinator._parse_weather_forecast(
+            data, horizon, dt, now=now
+        )
+        assert result is not None
+        for i, expected in enumerate(temps):
+            assert result[i] == pytest.approx(expected)
+
+    def test_datetime_object_entries(self):
+        """Entries with datetime objects (not strings) are parsed correctly."""
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [
+            {"datetime": now + timedelta(hours=1), "temperature": 7.0},
+            {"datetime": now + timedelta(hours=2), "temperature": 5.0},
+        ]
+        result = HeatingAssistantCoordinator._parse_weather_forecast(data, 4, 900, now=now)
+        assert result is not None
+        assert len(result) == 4
+
+    def test_skips_entries_with_invalid_temp(self):
+        """Entries with non-numeric temperature are silently skipped."""
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [
+            {"datetime": (now + timedelta(hours=1)).isoformat(), "temperature": "hot"},
+            {"datetime": (now + timedelta(hours=2)).isoformat(), "temperature": 5.0},
+        ]
+        result = HeatingAssistantCoordinator._parse_weather_forecast(data, 4, 900, now=now)
+        # Should still return a result using the valid entry
+        assert result is not None
+        assert len(result) == 4

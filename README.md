@@ -70,6 +70,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 12.11 [Sensor entities – system summary](#1211-sensor-entities--system-summary)
     - 12.12 [Sensor entities – heating plan](#1212-sensor-entities--heating-plan)
     - 12.13 [Sensor entities – solar forecast](#1213-sensor-entities--solar-forecast)
+    - 12.14 [Sensor entities – outdoor temperature forecast](#1214-sensor-entities--outdoor-temperature-forecast)
 13. [Advanced Visualisation and Setup Tools](#13-advanced-visualisation-and-setup-tools)
     - 13.1 [Visualisation sensors overview](#131-visualisation-sensors-overview)
     - 13.2 [Temperature forecast trajectory](#132-temperature-forecast-trajectory)
@@ -78,18 +79,19 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 13.5 [System efficiency summary](#135-system-efficiency-summary)
     - 13.6 [Heating plan forecast](#136-heating-plan-forecast)
     - 13.7 [Solar gain forecast](#137-solar-gain-forecast)
-    - 13.8 [Diagnostics panel](#138-diagnostics-panel)
-    - 13.9 [Setup service – simulate thermal response](#139-setup-service--simulate-thermal-response)
-    - 13.10 [Setup service – estimate parameters](#1310-setup-service--estimate-parameters)
-    - 13.11 [Lovelace dashboard – board and card reference](#1311-lovelace-dashboard--board-and-card-reference)
-        - 13.11.1 [Prerequisites](#13111-prerequisites)
-        - 13.11.2 [Dashboard structure – board with room subboards](#13112-dashboard-structure--board-with-room-subboards)
-        - 13.11.3 [MPC predicted temperature card](#13113-mpc-predicted-temperature-card)
-        - 13.11.4 [MPC control input card](#13114-mpc-control-input-card)
-        - 13.11.5 [Disturbance forecast card](#13115-disturbance-forecast-card)
-        - 13.11.6 [Room performance card](#13116-room-performance-card)
-        - 13.11.7 [System overview card](#13117-system-overview-card)
-        - 13.11.8 [Complete room subboard example](#13118-complete-room-subboard-example)
+    - 13.8 [Outdoor temperature forecast](#138-outdoor-temperature-forecast)
+    - 13.9 [Diagnostics panel](#139-diagnostics-panel)
+    - 13.10 [Setup service – simulate thermal response](#1310-setup-service--simulate-thermal-response)
+    - 13.11 [Setup service – estimate parameters](#1311-setup-service--estimate-parameters)
+    - 13.12 [Lovelace dashboard – board and card reference](#1312-lovelace-dashboard--board-and-card-reference)
+        - 13.12.1 [Prerequisites](#13121-prerequisites)
+        - 13.12.2 [Dashboard structure – board with room subboards](#13122-dashboard-structure--board-with-room-subboards)
+        - 13.12.3 [MPC predicted temperature card](#13123-mpc-predicted-temperature-card)
+        - 13.12.4 [MPC control input card](#13124-mpc-control-input-card)
+        - 13.12.5 [Disturbance forecast card](#13125-disturbance-forecast-card)
+        - 13.12.6 [Room performance card](#13126-room-performance-card)
+        - 13.12.7 [System overview card](#13127-system-overview-card)
+        - 13.12.8 [Complete room subboard example](#13128-complete-room-subboard-example)
 14. [Thermal Model Parameter Estimation Guide](#14-thermal-model-parameter-estimation-guide)
     - 14.1 [Thermal mass `thermal_mass`](#141-thermal-mass-thermal_mass)
     - 14.2 [External thermal resistance `r_external`](#142-external-thermal-resistance-r_external)
@@ -201,6 +203,7 @@ custom_components/heating_assistant/
                            • ControlActionSensor per heat source   [%]
                            • HeatPumpCOPSensor per heat pump
                            • OutdoorTemperatureSensor system-wide  [°C]
+                           • OutdoorForecastSensor system-wide     [°C] (outdoor temp forecast)
                            • SystemEfficiencySensor system-wide    [W]
 ```
 
@@ -597,6 +600,7 @@ For each room declared in `configuration.yaml` the integration creates:
 | `sensor.heating_assistant_<room_name>_energy_balance` | sensor | Net energy flow in W | heating_power, solar_gain, losses breakdown |
 | `sensor.heating_assistant_<room_name>_heating_plan` | sensor | Current planned heating power in W | forecast (timestamped), horizon_steps |
 | `sensor.heating_assistant_<room_name>_solar_forecast` | sensor | Current predicted solar gain in W | forecast (timestamped), horizon_steps, window_count |
+| `sensor.heating_assistant_outdoor_temperature_forecast` | sensor | Current outdoor temperature in °C | forecast (timestamped), horizon_steps |
 
 **Climate entity behaviour:**
 
@@ -891,6 +895,7 @@ Once HA has restarted:
    | `sensor.heating_assistant_<room_name>_energy_balance` | Net energy flow [W] |
    | `sensor.heating_assistant_<room_name>_heating_plan` | Planned heating schedule [W] |
    | `sensor.heating_assistant_<room_name>_solar_forecast` | Predicted solar gain schedule [W] |
+   | `sensor.heating_assistant_outdoor_temperature_forecast` | Outdoor temperature forecast over the MPC horizon [°C] |
 
 3. If entities are **missing**, check the HA log for errors under the `heating_assistant` integration.  The most common cause is a room or heat source configuration error in `configuration.yaml`.
 
@@ -1760,6 +1765,27 @@ data:
 | `window_count` | int | Number of windows configured for this room |
 | `total_window_area` | float | Total glazed area [m²] |
 
+### 12.14 Sensor entities – outdoor temperature forecast
+
+**Entity ID format:** `sensor.heating_assistant_outdoor_temperature_forecast`
+
+| Property | Value |
+|----------|-------|
+| Device class | `temperature` |
+| State class | `measurement` |
+| Unit | °C |
+| Icon | `mdi:thermometer-lines` |
+| Value | Current outdoor temperature [°C] |
+
+**State attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `forecast` | list[dict] | Timestamped outdoor temperature forecast.  Each dict contains `time` (ISO-8601 string) and `outdoor_temp` (°C).  The first entry is at "now" with the current measured outdoor temperature; subsequent entries use the MPC outdoor forecast (from the configured weather entity, or persistence if none is configured). |
+| `horizon_steps` | int | Number of forecast steps |
+| `step_seconds` | float | Time step duration [s] |
+| `horizon_minutes` | float | Total prediction horizon [min] |
+
 ---
 
 ## 13. Advanced Visualisation and Setup Tools
@@ -1768,7 +1794,7 @@ This section describes the advanced visualisation sensors and setup assistance s
 
 ### 13.1 Visualisation sensors overview
 
-In addition to the basic sensors (predicted temperature, heating power, solar gain), the integration creates six advanced sensor types that provide deep insight into system operation:
+In addition to the basic sensors (predicted temperature, heating power, solar gain), the integration creates seven advanced sensor types that provide deep insight into system operation:
 
 | Sensor | Per-room | Purpose |
 |--------|:--------:|---------|
@@ -1777,6 +1803,7 @@ In addition to the basic sensors (predicted temperature, heating power, solar ga
 | **Energy Balance** | ✓ | Net energy flow: heating + solar − losses |
 | **Heating Plan** | ✓ | Planned heating power schedule over the full MPC horizon, as a timestamped `forecast` attribute |
 | **Solar Forecast** | ✓ | Predicted solar heat gain over the full MPC horizon, as a timestamped `forecast` attribute |
+| **Outdoor Temperature Forecast** | ✗ (1 total) | Outdoor temperature forecast over the full MPC horizon — uses weather entity when configured, falls back to persistence otherwise |
 | **System Summary** | ✗ (1 total) | Aggregate system metrics: total power, COP, active sources |
 
 All sensors update every coordinator cycle (default 60 seconds) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
@@ -1849,7 +1876,25 @@ Because the solar position model is fully deterministic, this forecast is exact 
 - Understanding why the controller is choosing to heat less in rooms with south-facing windows
 - Identifying the peak solar gain time of day for each room
 
-### 13.8 Diagnostics panel
+### 13.8 Outdoor temperature forecast
+
+The **Outdoor Temperature Forecast** sensor exposes the outdoor temperature prediction the MPC controller uses when planning ahead.  It is a system-wide (not per-room) sensor with entity ID `sensor.heating_assistant_outdoor_temperature_forecast`.
+
+- **State:** current outdoor temperature [°C] (same source as `sensor.heating_assistant_outdoor_temperature`)
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `outdoor_temp` (°C).  The first entry is at "now" with the current measured outdoor temperature; subsequent entries cover each MPC horizon step.
+
+**How the forecast is populated:**
+
+When a `weather_entity` is configured (e.g. `weather.forecast_home` from Met.no), the coordinator retrieves the hourly forecast using the `weather.get_forecasts` service introduced in HA 2023.9.  For older HA versions, it falls back to reading the deprecated `forecast` state attribute.  In both cases the raw hourly forecast entries are linearly interpolated to the MPC time grid so there is a value for every horizon step.
+
+When no weather entity is configured, a persistence forecast is used: the current outdoor temperature is repeated for every step.  Configure a weather entity (see [Section 8.2](#82-step-1--run-the-ui-setup-wizard)) for improved prediction accuracy.
+
+This sensor is useful for:
+- Verifying that the weather forecast is being picked up correctly — the `outdoor_temp` values in the `forecast` attribute should vary over time when a weather entity is configured, not be constant
+- Understanding why the controller is pre-heating (or not) in anticipation of a cold front
+- Showing the outdoor forecast alongside the room temperature forecast and solar gain on the disturbance card (§ 13.12.5)
+
+### 13.9 Diagnostics panel
 
 The integration includes a full **HA diagnostics platform**.  Access it via:
 
@@ -1867,7 +1912,7 @@ The diagnostics dump includes:
 
 This is invaluable for troubleshooting or sharing your system configuration with others.
 
-### 13.9 Setup service – simulate thermal response
+### 13.10 Setup service – simulate thermal response
 
 Service: `heating_assistant.simulate_thermal_response`
 
@@ -1903,7 +1948,7 @@ data:
 
 An event `heating_assistant_simulation_result` is also fired, which automations can consume.
 
-### 13.10 Setup service – estimate parameters
+### 13.11 Setup service – estimate parameters
 
 Service: `heating_assistant.estimate_parameters`
 
@@ -1935,7 +1980,7 @@ data:
 
 **Result:** A persistent notification with estimated `thermal_mass` and `r_external`, compared to the current configuration values.
 
-### 13.11 Lovelace dashboard – board and card reference
+### 13.12 Lovelace dashboard – board and card reference
 
 This section provides a complete set of Lovelace card configurations for building an MPC-style monitoring dashboard.  The cards follow the standard model predictive control visualisation layout used in industry and academia:
 
@@ -1947,11 +1992,11 @@ Each chart displays **historical recorder data** to the left of the "Now" line a
 
 Together, these three panels give a complete picture of what the controller sees, what it plans to do, and why.
 
-#### 13.11.1 Prerequisites
+#### 13.12.1 Prerequisites
 
 All forecast charts below use [apexcharts-card](https://github.com/RomRider/apexcharts-card), a popular HACS community card.  Install it via **HACS → Frontend → Search "apexcharts-card" → Install** and refresh your browser before using the examples.
 
-#### 13.11.2 Dashboard structure – board with room subboards
+#### 13.12.2 Dashboard structure – board with room subboards
 
 Create a top-level **Heating Assistant** dashboard with a navigation view for the system overview and one subview for each room.  This mirrors the MPC structure: the overview shows system-wide metrics while each room subview shows the full MPC triplet (output, input, disturbances).
 
@@ -1963,7 +2008,7 @@ Create a top-level **Heating Assistant** dashboard with a navigation view for th
 
 **Step 2 – Add the system overview view** (default view):
 
-Add the system overview card (§ 13.11.7) and one compact status card per room.
+Add the system overview card (§ 13.12.7) and one compact status card per room.
 
 **Step 3 – Add a subview for each room:**
 
@@ -1973,11 +2018,11 @@ Add the system overview card (§ 13.11.7) and one compact status card per room.
 > - Icon: `mdi:sofa` / `mdi:bed` / etc.
 > - Toggle **Subview** on – this makes the view accessible via navigation cards on the overview
 
-In each room subview, add the three MPC cards below (§ 13.11.3 – § 13.11.5) arranged vertically so the time axes align, plus the room performance card (§ 13.11.6).
+In each room subview, add the three MPC cards below (§ 13.12.3 – § 13.12.5) arranged vertically so the time axes align, plus the room performance card (§ 13.12.6).
 
 **Step 4 – Add navigation cards** to the overview view so you can click through to each room subview.
 
-#### 13.11.3 MPC predicted temperature card
+#### 13.12.3 MPC predicted temperature card
 
 This is the primary MPC output visualisation.  It shows:
 - **History** (left of Now): the measured room temperature from the HA recorder (solid line)
@@ -2088,7 +2133,7 @@ series:
 
 > **Tip:** Replace `living_room` with your room's entity suffix throughout.
 
-#### 13.11.4 MPC control input card
+#### 13.12.4 MPC control input card
 
 Shows the controller's planned heating power as a step chart – the standard control input representation for zero-order-hold MPC.  Historical actual heating power from the recorder is shown to the left of the "Now" line for comparison.
 
@@ -2148,9 +2193,11 @@ series:
       in_header: true
 ```
 
-#### 13.11.5 Disturbance forecast card
+#### 13.12.5 Disturbance forecast card
 
 Shows the external disturbances the MPC controller accounts for: outdoor temperature and solar heat gain through windows.  Dual y-axes keep both signals readable.  Actual recorder history is shown to the left of the "Now" line alongside the forecasts to the right.
+
+The outdoor temperature forecast is read from `sensor.heating_assistant_outdoor_temperature_forecast` (see § 13.8), which exposes a dedicated `forecast` attribute.  When a weather entity is configured, this forecast varies over the horizon; otherwise it is a flat persistence forecast equal to the current outdoor temperature.
 
 ```yaml
 type: custom:apexcharts-card
@@ -2208,7 +2255,7 @@ series:
     show:
       in_header: true
   # ── Forecast: outdoor temperature ────────────────────────────────────
-  - entity: sensor.heating_assistant_living_room_temperature_forecast
+  - entity: sensor.heating_assistant_outdoor_temperature_forecast
     name: Outdoor (forecast)
     data_generator: |
       const fc = entity.attributes.forecast;
@@ -2238,7 +2285,9 @@ series:
       in_header: true
 ```
 
-#### 13.11.6 Room performance card
+> **Tip:** Replace `living_room` with your room's entity suffix in the solar gain series.
+
+#### 13.12.6 Room performance card
 
 An entities card summarising the room's current state – useful at the top of each room subview.
 
@@ -2260,7 +2309,7 @@ entities:
     name: Net Energy Balance
 ```
 
-#### 13.11.7 System overview card
+#### 13.12.7 System overview card
 
 Place this on the main overview view for a system-wide summary.
 
@@ -2271,7 +2320,9 @@ entities:
   - entity: sensor.heating_assistant_system_summary
     name: Total Heating Power
   - entity: sensor.heating_assistant_outdoor_temperature
-    name: Outdoor Temperature
+    name: Outdoor Temperature (measured)
+  - entity: sensor.heating_assistant_outdoor_temperature_forecast
+    name: Outdoor Temperature (forecast)
 ```
 
 For systems with heat pumps, add:
@@ -2286,7 +2337,7 @@ entities:
     name: COP
 ```
 
-#### 13.11.8 Complete room subboard example
+#### 13.12.8 Complete room subboard example
 
 Below is a complete vertical-stack card that combines all MPC panels for a single room.  Add this as the only card in a room subview configured with *Panel* view type for a clean full-width layout.
 

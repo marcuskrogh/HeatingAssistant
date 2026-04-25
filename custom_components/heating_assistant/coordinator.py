@@ -278,7 +278,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.outdoor_temp = outdoor_temp
 
             # 2b. Read weather forecast for outdoor temperature prediction
-            outdoor_forecast = self._read_weather_forecast()
+            outdoor_forecast = await self._async_read_weather_forecast()
 
             # 3. Compute current solar gains for visualization
             now = datetime.now(tz=timezone.utc)
@@ -340,12 +340,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Fall back to a benign default
         return 5.0
 
-    def _read_weather_forecast(self) -> Optional[List[float]]:
+    async def _async_read_weather_forecast(self) -> Optional[List[float]]:
         """Read outdoor temperature forecast from a weather entity.
 
-        Weather entities in HA (e.g. Met.no, OpenWeatherMap) expose a
-        ``forecast`` attribute containing hourly or twice-daily forecasts.
-        Each entry has a ``datetime`` and a ``temperature`` field.
+        Tries the modern ``weather.get_forecasts`` service first (HA 2023.9+),
+        then falls back to reading the deprecated ``forecast`` state attribute
+        for backward compatibility with older HA versions.
 
         Returns a list of N outdoor temperature values aligned to the MPC
         horizon steps, or None if no weather entity is configured or
@@ -354,17 +354,77 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if not self._weather_entity:
             return None
 
+        # ── Modern approach: weather.get_forecasts service (HA 2023.9+) ──────
+        if self.hass.services.has_service("weather", "get_forecasts"):
+            try:
+                response = await self.hass.services.async_call(
+                    "weather",
+                    "get_forecasts",
+                    service_data={
+                        "entity_id": self._weather_entity,
+                        "type": "hourly",
+                    },
+                    blocking=True,
+                    return_response=True,
+                )
+                if response and self._weather_entity in response:
+                    forecast_data = response[self._weather_entity].get("forecast", [])
+                    if forecast_data:
+                        return self._parse_weather_forecast(
+                            forecast_data, self._horizon, self._dt
+                        )
+            except Exception as exc:
+                _LOGGER.debug(
+                    "weather.get_forecasts service call failed for %s, "
+                    "falling back to state attribute: %s",
+                    self._weather_entity,
+                    exc,
+                )
+
+        # ── Fallback: read from the deprecated state attribute ────────────────
         state = self.hass.states.get(self._weather_entity)
         if state is None:
             return None
 
-        # Weather entities store forecast data in the attributes.
         forecast_data = state.attributes.get("forecast")
         if not forecast_data:
             return None
 
-        # Parse forecast entries into (timestamp_seconds, temperature) pairs.
-        now = datetime.now(tz=timezone.utc)
+        return self._parse_weather_forecast(forecast_data, self._horizon, self._dt)
+
+    @staticmethod
+    def _parse_weather_forecast(
+        forecast_data: list,
+        horizon: int,
+        dt: float,
+        now: Optional[datetime] = None,
+    ) -> Optional[List[float]]:
+        """Parse raw weather forecast entries into interpolated MPC horizon temperatures.
+
+        Parameters
+        ----------
+        forecast_data : list of dict
+            Raw forecast entries from either the ``weather.get_forecasts``
+            service or the deprecated ``forecast`` state attribute.  Each
+            entry must have a ``datetime`` key (ISO-8601 string or datetime
+            object) and a ``temperature`` key (float, °C).
+        horizon : int
+            Number of MPC prediction steps.
+        dt : float
+            MPC time step in seconds.
+        now : datetime, optional
+            Reference time for interpolation.  Defaults to the current UTC
+            time when not provided.
+
+        Returns
+        -------
+        list of float or None
+            List of ``horizon`` interpolated outdoor temperatures (one per MPC
+            step), or None if the data cannot be parsed into any valid entries.
+        """
+        if now is None:
+            now = datetime.now(tz=timezone.utc)
+
         entries: List[tuple] = []
         for entry in forecast_data:
             dt_str = entry.get("datetime")
@@ -390,17 +450,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if not entries:
             return None
 
-        # Sort by time
         entries.sort(key=lambda e: e[0])
 
-        # Interpolate forecast temperatures at each MPC horizon step.
         now_ts = now.timestamp()
         result: List[float] = []
-        for k in range(self._horizon):
-            target_ts = now_ts + self._dt * (k + 1)
-            # Find surrounding entries for linear interpolation
-            temp = self._interpolate_forecast(entries, target_ts)
-            result.append(temp)
+        for k in range(horizon):
+            target_ts = now_ts + dt * (k + 1)
+            result.append(HeatingAssistantCoordinator._interpolate_forecast(entries, target_ts))
 
         return result
 

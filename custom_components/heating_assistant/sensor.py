@@ -19,6 +19,7 @@ For each heat pump source:
 
 System-wide:
 - Outdoor temperature    (as read by the integration) [°C]
+- Outdoor temp forecast  (timestamped forecast over MPC horizon) [°C]
 - System efficiency      (aggregate system metrics)
 """
 
@@ -75,6 +76,7 @@ async def async_setup_entry(
 
     # System-wide sensors
     entities.append(OutdoorTemperatureSensor(coordinator))
+    entities.append(OutdoorForecastSensor(coordinator))
     entities.append(SystemEfficiencySensor(coordinator))
 
     async_add_entities(entities)
@@ -312,6 +314,65 @@ class OutdoorTemperatureSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> float:
         return round(self._coordinator.outdoor_temp, 2)
+
+
+# ---------------------------------------------------------------------------
+# Outdoor temperature forecast sensor (system-wide)
+# ---------------------------------------------------------------------------
+
+class OutdoorForecastSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the outdoor temperature forecast over the MPC horizon.
+
+    The state is the current outdoor temperature [°C].  The full forecast is
+    exposed as a timestamped ``forecast`` attribute for dashboard visualisation.
+    When a weather entity is configured, the forecast reflects the interpolated
+    weather predictions; otherwise a persistence forecast (current value held
+    constant) is used.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:thermometer-lines"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+    ) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Outdoor Temperature Forecast"
+        self._attr_unique_id = f"{DOMAIN}_outdoor_temperature_forecast"
+
+    @property
+    def native_value(self) -> float:
+        return round(self._coordinator.outdoor_temp, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        outdoor_forecast = self._coordinator.outdoor_forecast
+        dt = self._coordinator.dt
+        now = datetime.now(tz=timezone.utc)
+
+        # Entry at t=now: bridge between history and prediction
+        forecast: List[Dict[str, Any]] = [{
+            "time": now.isoformat(),
+            "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
+        }]
+        for i, temp in enumerate(outdoor_forecast):
+            step_time = now + timedelta(seconds=dt * (i + 1))
+            forecast.append({
+                "time": step_time.isoformat(),
+                "outdoor_temp": round(temp, 2),
+            })
+
+        return {
+            "forecast": forecast,
+            "horizon_steps": len(outdoor_forecast),
+            "step_seconds": dt,
+            "horizon_minutes": round(len(outdoor_forecast) * dt / 60, 1),
+        }
 
 
 # ---------------------------------------------------------------------------
