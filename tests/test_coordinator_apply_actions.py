@@ -211,8 +211,9 @@ class TestApplyActionsClimate:
 
     @pytest.mark.asyncio
     async def test_heat_pump_turns_off_above_deadband(self):
-        """When fraction == 0 and room temp > setpoint,
-        the HP switches to fan_only mode to recirculate air."""
+        """When fraction == 0 and room temp > setpoint, the HP switches to
+        fan_only mode (no dry mode listed) and sets the temperature below the
+        internal sensor by DEFAULT_IDLE_OFFSET + overshoot."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        turn_off_deadband=1.0,
                        heater_entity="climate.heat_pump")
@@ -222,6 +223,7 @@ class TestApplyActionsClimate:
             entity_states={
                 "climate.heat_pump": {
                     "state": "heat",
+                    # No "hvac_modes" attr → fallback to fan_only
                     "attributes": {"current_temperature": 27.0},
                 },
             },
@@ -230,9 +232,13 @@ class TestApplyActionsClimate:
         )
 
         calls = hass.services.async_call.call_args_list
-        assert len(calls) == 1
+        assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        # overshoot = 26.5 - 25.0 = 1.5 → offset = 1.0 + 1.5 = 2.5
+        # target = 27.0 - 2.5 = 24.5
+        assert calls[1].args[:2] == ("climate", "set_temperature")
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.5)
 
     @pytest.mark.asyncio
     async def test_heat_pump_idle_fallback_to_room_temp(self):
@@ -261,11 +267,12 @@ class TestApplyActionsClimate:
 
     @pytest.mark.asyncio
     async def test_heat_pump_custom_deadband(self):
-        """When room is above setpoint, fan_only mode is used regardless of deadband."""
+        """When room is above setpoint, cooling mode is used regardless of
+        deadband, and temperature is set below internal by scaled offset."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        turn_off_deadband=2.0,
                        heater_entity="climate.heat_pump")
-        # Room at 26.5 with setpoint 25.0 → room_temp > setpoint → fan_only
+        # Room at 26.5 with setpoint 25.0 → room_temp > setpoint → fan_only + temp
         hass = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
@@ -280,9 +287,12 @@ class TestApplyActionsClimate:
         )
 
         calls = hass.services.async_call.call_args_list
-        assert len(calls) == 1
+        assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        # overshoot = 1.5 → offset = 2.5; target = 26.0 - 2.5 = 23.5
+        assert calls[1].args[:2] == ("climate", "set_temperature")
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.5)
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_uses_room_setpoint(self):
@@ -469,7 +479,8 @@ class TestHeatPumpFanMode:
 
     @pytest.mark.asyncio
     async def test_fan_mode_slightly_above_setpoint(self):
-        """When room is just above setpoint, fan_only mode is activated."""
+        """When room is just above setpoint, fan_only mode is activated and a
+        temperature setpoint below the HP's internal sensor is applied."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
@@ -486,9 +497,12 @@ class TestHeatPumpFanMode:
         )
 
         calls = hass.services.async_call.call_args_list
-        assert len(calls) == 1
+        assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        # overshoot = 0.1 → offset = 1.1; target = 25.5 - 1.1 = 24.4
+        assert calls[1].args[:2] == ("climate", "set_temperature")
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.4)
 
     @pytest.mark.asyncio
     async def test_fan_mode_not_applied_at_setpoint(self):
@@ -516,7 +530,8 @@ class TestHeatPumpFanMode:
 
     @pytest.mark.asyncio
     async def test_fan_mode_not_applied_to_electric_heater(self):
-        """Fan mode is only for heat pumps; electric heaters stay in heat mode."""
+        """Fan/dry mode is only for heat pumps; electric heaters stay in heat mode
+        with a scaled idle offset when room is above setpoint."""
         heater = ElectricHeater(
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
@@ -537,12 +552,14 @@ class TestHeatPumpFanMode:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        # Entity temp 24.0 - 1.0 = 23.0
-        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+        # overshoot = 1.0 → offset = 2.0; entity_temp 24.0 - 2.0 = 22.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
 
     @pytest.mark.asyncio
     async def test_heat_pump_disabled_room_turns_off_not_fan(self):
-        """When room is disabled, HP turns off (not fan_only)."""
+        """When room is disabled, fraction is forced to 0.  Because the room
+        temp is above setpoint the HP uses cooling mode (fan_only/dry) and
+        sets a temperature below its internal sensor."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
@@ -559,11 +576,12 @@ class TestHeatPumpFanMode:
             room_enabled={"living_room": False},
         )
 
-        # When disabled, fraction is forced to 0.  The HP logic then sees
-        # fraction==0 and room_temp > setpoint → fan_only mode is used.
+        # room_temp (26) > setpoint (25) → cooling mode + temperature
         calls = hass.services.async_call.call_args_list
-        assert len(calls) == 1
+        assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        # overshoot = 1.0 → offset = 2.0; target = 27.0 - 2.0 = 25.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(25.0)
 
 
 class TestElectricHeaterCoolingProtection:
@@ -571,8 +589,9 @@ class TestElectricHeaterCoolingProtection:
 
     @pytest.mark.asyncio
     async def test_above_setpoint_no_heating(self):
-        """When room is above setpoint with fraction=0, entity setpoint is
-        placed below entity's internal temperature."""
+        """When room is above setpoint with fraction=0, the entity setpoint is
+        placed below the entity's internal temperature by DEFAULT_IDLE_OFFSET
+        plus the room overshoot."""
         heater = ElectricHeater(
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
@@ -593,13 +612,14 @@ class TestElectricHeaterCoolingProtection:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        # Entity internal temp 24.0 - 1.0 = 23.0 (below entity's own reading)
-        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+        # overshoot = 1.0 → offset = 2.0; entity_temp 24.0 - 2.0 = 22.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
 
     @pytest.mark.asyncio
     async def test_above_setpoint_overrides_positive_fraction(self):
         """Even when MPC says fraction > 0, if room is above setpoint the
-        electric heater setpoint must be below the entity's internal temp."""
+        electric heater setpoint must be below the entity's internal temp
+        by DEFAULT_IDLE_OFFSET plus the room overshoot."""
         heater = ElectricHeater(
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
@@ -621,12 +641,13 @@ class TestElectricHeaterCoolingProtection:
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
         # Despite fraction=0.5, room is above setpoint → use cooling protection
-        # Entity internal temp 24.0 - 1.0 = 23.0
-        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+        # overshoot = 1.0 → offset = 2.0; entity_temp 24.0 - 2.0 = 22.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
 
     @pytest.mark.asyncio
     async def test_above_setpoint_fallback_to_room_temp(self):
-        """When entity has no current_temperature, fall back to HA room temp."""
+        """When entity has no current_temperature, fall back to HA room temp
+        for the offset calculation."""
         heater = ElectricHeater(
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
@@ -647,8 +668,9 @@ class TestElectricHeaterCoolingProtection:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        # Fallback: room temp 23.0 - 1.0 = 22.0
-        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+        # Fallback to room temp: entity_temp = 23.0
+        # overshoot = 1.0 → offset = 2.0; 23.0 - 2.0 = 21.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
 
     @pytest.mark.asyncio
     async def test_at_setpoint_with_fraction_heats_normally(self):
@@ -675,3 +697,194 @@ class TestElectricHeaterCoolingProtection:
         assert calls[0].args[2]["hvac_mode"] == "heat"
         # Room at setpoint, fraction > 0 → use room setpoint
         assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+
+
+class TestHeatPumpDryMode:
+    """Heat pump dry/fan mode selection and scaled temperature offset."""
+
+    @pytest.mark.asyncio
+    async def test_dry_mode_preferred_when_available(self):
+        """When the HP entity supports 'dry' mode, it is chosen over 'fan_only'."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 26.0,
+                        "hvac_modes": ["heat", "dry", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "dry"
+        # overshoot = 1.0 → offset = 2.0; target = 26.0 - 2.0 = 24.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+
+    @pytest.mark.asyncio
+    async def test_fan_only_fallback_when_no_dry(self):
+        """When 'dry' is not listed in hvac_modes, fall back to 'fan_only'."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 26.0,
+                        "hvac_modes": ["heat", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+
+    @pytest.mark.asyncio
+    async def test_hp_cooling_protection_overrides_positive_fraction(self):
+        """Even when MPC fraction > 0, if room is above setpoint the HP switches
+        to cooling mode instead of heating."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.8},  # MPC wants heating
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 27.0,
+                        "hvac_modes": ["heat", "dry", "fan_only"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        # Should switch to dry mode, not heat
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "dry"
+        # overshoot = 1.0 → offset = 2.0; target = 27.0 - 2.0 = 25.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(25.0)
+
+    @pytest.mark.asyncio
+    async def test_hp_cooling_scaled_offset_large_overshoot(self):
+        """A larger room overshoot produces a proportionally lower HP setpoint."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 25.0},
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 23.0},  # 2°C above setpoint
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        # overshoot = 2.0 → offset = 3.0; target = 25.0 - 3.0 = 22.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+
+    @pytest.mark.asyncio
+    async def test_hp_cooling_fallback_to_room_temp(self):
+        """When HP has no current_temperature, fall back to room temp for the
+        cooling setpoint calculation."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {},  # no current_temperature
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 23.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        # fallback: room_temp=23.0; overshoot=2.0 → offset=3.0; 23.0-3.0=20.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(20.0)
+
+
+class TestScaledIdleOffsetNonHP:
+    """Non-HP electric heater scaled idle offset when room exceeds setpoint."""
+
+    @pytest.mark.asyncio
+    async def test_two_degrees_above_setpoint(self):
+        """When room is 2°C above setpoint the offset is DEFAULT_IDLE_OFFSET + 2."""
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000,
+            heater_entity="climate.bedroom_heater",
+        )
+        hass = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 0.0},
+            entity_states={
+                "climate.bedroom_heater": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 25.0},
+                },
+            },
+            room_setpoints={"bedroom": 21.0},
+            room_temperatures={"bedroom": 23.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # overshoot = 2.0 → offset = 3.0; entity_temp 25.0 - 3.0 = 22.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+
+    @pytest.mark.asyncio
+    async def test_at_setpoint_uses_default_offset(self):
+        """When room is exactly at setpoint, only DEFAULT_IDLE_OFFSET (1°C) is used."""
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000,
+            heater_entity="climate.bedroom_heater",
+        )
+        hass = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 0.0},
+            entity_states={
+                "climate.bedroom_heater": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 22.0},
+                },
+            },
+            room_setpoints={"bedroom": 21.0},
+            room_temperatures={"bedroom": 21.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # overshoot = 0 → offset = 1.0; 22.0 - 1.0 = 21.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(21.0)

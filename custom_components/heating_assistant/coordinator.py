@@ -487,7 +487,53 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         except (ValueError, TypeError):
                             pass
 
-                    if fraction > 0.0:
+                    if room_temp > room_setpoint:
+                        # Room is above setpoint – activate a passive/gentle
+                        # cooling mode.  "dry" (dehumidify) is preferred as it
+                        # provides a slight cooling effect without running the
+                        # compressor in full cooling mode; fall back to
+                        # "fan_only" if "dry" is not listed in the entity's
+                        # supported modes.
+                        #
+                        # The temperature setpoint is also placed below the
+                        # HP's own sensor reading to prevent any residual
+                        # heating.  The offset grows with the degree to which
+                        # the room exceeds the desired setpoint.
+                        overshoot = max(0.0, room_temp - room_setpoint)
+                        idle_offset = DEFAULT_IDLE_OFFSET + overshoot
+
+                        supported_modes = attrs.get("hvac_modes", [])
+                        if "dry" in supported_modes:
+                            cooling_mode = "dry"
+                        elif "fan_only" in supported_modes or not supported_modes:
+                            cooling_mode = "fan_only"
+                        else:
+                            _LOGGER.warning(
+                                "Heat pump %r supports neither 'dry' nor 'fan_only' "
+                                "modes (%r); defaulting to 'fan_only'",
+                                entity_id, supported_modes,
+                            )
+                            cooling_mode = "fan_only"
+
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": cooling_mode},
+                            blocking=False,
+                        )
+
+                        if hp_internal_temp is not None:
+                            target_temp = hp_internal_temp - idle_offset
+                        else:
+                            target_temp = room_temp - idle_offset
+
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": entity_id, "temperature": target_temp},
+                            blocking=False,
+                        )
+                    elif fraction > 0.0:
                         # Active heating: keep on with offset-based setpoint
                         await self.hass.services.async_call(
                             "climate",
@@ -509,16 +555,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             "climate",
                             "set_temperature",
                             {"entity_id": entity_id, "temperature": target_temp},
-                            blocking=False,
-                        )
-                    elif room_temp > room_setpoint:
-                        # Room is above setpoint – use fan mode to
-                        # recirculate air and assist with cooling without
-                        # engaging the compressor in cooling mode.
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": "fan_only"},
                             blocking=False,
                         )
                     else:
@@ -602,7 +638,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         # even if its internal sensor disagrees with the
                         # HA room sensor.  Commands are re-issued every
                         # update cycle to track sensor drift.
-                        target_temp = entity_temp - DEFAULT_IDLE_OFFSET
+                        #
+                        # The offset grows proportionally with how far the
+                        # room temperature exceeds the setpoint so that
+                        # heaters that regulate on their own internal sensor
+                        # are pushed further away from firing the more the
+                        # room overshoots.
+                        overshoot = max(0.0, room_temp - room_setpoint)
+                        target_temp = entity_temp - (DEFAULT_IDLE_OFFSET + overshoot)
 
                         await self.hass.services.async_call(
                             "climate",
