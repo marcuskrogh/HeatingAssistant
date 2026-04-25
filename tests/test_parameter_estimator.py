@@ -296,9 +296,8 @@ class TestKalmanMLEstimator:
         estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
         history = _generate_history(rooms, sources, n_steps=40)
 
-        import math as _math
         # log_mass way too large
-        bad_params = np.array([100.0, _math.log(0.05)])
+        bad_params = np.array([100.0, math.log(0.05)])
         val = estimator._neg_log_likelihood(bad_params, history)
         assert val >= 1e9
 

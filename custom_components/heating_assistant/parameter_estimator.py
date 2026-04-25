@@ -297,7 +297,6 @@ class KalmanMLEstimator:
                 }
 
             # Negative log-likelihood (without regularisation) for reporting
-            x_no_reg = x_best.copy()
             log_ll_val: Optional[float] = None
             try:
                 reg = self._regularization * float(
