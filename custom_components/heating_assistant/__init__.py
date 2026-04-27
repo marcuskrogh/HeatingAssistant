@@ -489,3 +489,231 @@ def _register_services(hass: HomeAssistant) -> None:
             }
         ),
     )
+
+    async def handle_analyze_model_fit(call: ServiceCall) -> None:
+        """Analyze model fit quality for all or specific room."""
+        from .model_diagnostics import generate_model_fit_report
+
+        coordinator = _get_coordinator(hass)
+        room_name_filter = call.data.get("room_name")
+
+        # Build room parameters dict
+        room_params = {}
+        setpoints = {}
+        for name, room in coordinator.model.rooms.items():
+            room_params[name] = (room.thermal_mass, room.r_external)
+            setpoints[name] = room.setpoint
+
+        try:
+            report = generate_model_fit_report(
+                coordinator.history_buffer,
+                coordinator.model.room_names,
+                room_params,
+                setpoints,
+            )
+
+            # Filter to specific room if requested
+            if room_name_filter and room_name_filter in report.get("rooms", {}):
+                filtered_rooms = {room_name_filter: report["rooms"][room_name_filter]}
+                report["rooms"] = filtered_rooms
+
+            # Format message
+            if "error" in report:
+                message = f"**Error:** {report['error']}"
+            else:
+                lines = [f"**Data steps analyzed:** {report['n_steps']}\n"]
+                for room, data in report["rooms"].items():
+                    if "error" in data:
+                        lines.append(f"**{room}:** {data['error']}")
+                        continue
+
+                    fit = data.get("fit_metrics", {})
+                    lines.append(
+                        f"**{room}**\n"
+                        f"  R² score: {fit.get('r_squared', 'n/a')}\n"
+                        f"  RMSE: {fit.get('rmse', 'n/a')} °C\n"
+                        f"  MAE: {fit.get('mae', 'n/a')} °C\n"
+                        f"  Bias: {fit.get('bias', 'n/a')} °C\n"
+                        f"  Max error: {fit.get('max_error', 'n/a')} °C\n"
+                        f"  Autocorr (lag-1): {fit.get('residual_autocorr_lag1', 'n/a')}"
+                    )
+
+                message = "\n\n".join(lines)
+
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Heating Assistant – Model Fit Analysis",
+                    "message": message,
+                    "notification_id": f"{DOMAIN}_model_fit",
+                },
+                blocking=False,
+            )
+        except Exception as exc:
+            _LOGGER.error("Model fit analysis failed: %s", exc, exc_info=True)
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Heating Assistant – Model Fit Analysis",
+                    "message": f"**Error:** {exc}",
+                    "notification_id": f"{DOMAIN}_model_fit",
+                },
+                blocking=False,
+            )
+
+    async def handle_validate_parameters(call: ServiceCall) -> None:
+        """Validate thermal parameters for all or specific room."""
+        from .model_diagnostics import validate_parameters
+
+        coordinator = _get_coordinator(hass)
+        room_name_filter = call.data.get("room_name")
+
+        rooms_to_check = (
+            [room_name_filter]
+            if room_name_filter and room_name_filter in coordinator.model.rooms
+            else coordinator.model.room_names
+        )
+
+        lines = []
+        for room_name in rooms_to_check:
+            room = coordinator.model.rooms[room_name]
+            try:
+                validation = validate_parameters(
+                    room_name, room.thermal_mass, room.r_external
+                )
+
+                status = "✓ Valid" if all([
+                    validation.mass_valid,
+                    validation.r_external_valid,
+                    validation.time_constant_valid,
+                ]) else "⚠ Warnings"
+
+                lines.append(
+                    f"**{room_name}** – {status}\n"
+                    f"  Thermal mass: {validation.thermal_mass:,.0f} J/K "
+                    f"({'✓' if validation.mass_valid else '⚠'})\n"
+                    f"  R external: {validation.r_external:.5f} K/W "
+                    f"({'✓' if validation.r_external_valid else '⚠'})\n"
+                    f"  Time constant: {validation.time_constant_hours:.2f} hours "
+                    f"({'✓' if validation.time_constant_valid else '⚠'})"
+                )
+
+                if validation.warnings:
+                    lines.append("  **Warnings:**")
+                    for warning in validation.warnings:
+                        lines.append(f"    • {warning}")
+
+            except Exception as exc:
+                _LOGGER.error("Parameter validation failed for %s: %s", room_name, exc)
+                lines.append(f"**{room_name}:** Error – {exc}")
+
+        message = "\n\n".join(lines)
+
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – Parameter Validation",
+                "message": message,
+                "notification_id": f"{DOMAIN}_param_validation",
+            },
+            blocking=False,
+        )
+
+    async def handle_controller_performance(call: ServiceCall) -> None:
+        """Generate controller performance report for all or specific room."""
+        from .model_diagnostics import compute_controller_performance
+
+        coordinator = _get_coordinator(hass)
+        room_name_filter = call.data.get("room_name")
+
+        rooms_to_check = (
+            [room_name_filter]
+            if room_name_filter and room_name_filter in coordinator.model.rooms
+            else coordinator.model.room_names
+        )
+
+        lines = []
+        for room_name in rooms_to_check:
+            room = coordinator.model.rooms[room_name]
+
+            # Extract temperature history for this room
+            room_idx = coordinator.model.room_names.index(room_name)
+            temperatures = []
+            for record in coordinator.history_buffer:
+                y = record.get("y", [])
+                if room_idx < len(y):
+                    temperatures.append(y[room_idx])
+
+            if len(temperatures) < 2:
+                lines.append(f"**{room_name}:** Insufficient data")
+                continue
+
+            try:
+                perf = compute_controller_performance(
+                    temperatures, room.setpoint, room_name
+                )
+
+                lines.append(
+                    f"**{room_name}** (setpoint: {room.setpoint} °C)\n"
+                    f"  Mean tracking error: {perf.mean_tracking_error:+.3f} °C\n"
+                    f"  Tracking error std: {perf.tracking_error_std:.3f} °C\n"
+                    f"  Time above setpoint: {perf.time_above_setpoint * 100:.1f}%\n"
+                    f"  Time below setpoint: {perf.time_below_setpoint * 100:.1f}%\n"
+                    f"  Time in deadband (±0.5°C): {perf.time_in_deadband * 100:.1f}%\n"
+                    f"  Max overshoot: {perf.max_overshoot:.2f} °C\n"
+                    f"  Max undershoot: {perf.max_undershoot:.2f} °C\n"
+                    f"  Samples: {perf.n_samples}"
+                )
+
+            except Exception as exc:
+                _LOGGER.error("Controller performance analysis failed for %s: %s", room_name, exc)
+                lines.append(f"**{room_name}:** Error – {exc}")
+
+        message = "\n\n".join(lines)
+
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – Controller Performance",
+                "message": message,
+                "notification_id": f"{DOMAIN}_controller_perf",
+            },
+            blocking=False,
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        "analyze_model_fit",
+        handle_analyze_model_fit,
+        schema=vol.Schema(
+            {
+                vol.Optional("room_name"): cv.string,
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "validate_parameters",
+        handle_validate_parameters,
+        schema=vol.Schema(
+            {
+                vol.Optional("room_name"): cv.string,
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "controller_performance_report",
+        handle_controller_performance,
+        schema=vol.Schema(
+            {
+                vol.Optional("room_name"): cv.string,
+            }
+        ),
+    )
