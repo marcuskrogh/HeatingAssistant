@@ -67,6 +67,10 @@ async def async_setup_entry(
         entities.append(EnergyBalanceSensor(coordinator, room_name))
         entities.append(HeatingPlanSensor(coordinator, room_name))
         entities.append(SolarForecastSensor(coordinator, room_name))
+        # Model fit diagnostics sensors
+        entities.append(PredictionErrorSensor(coordinator, room_name))
+        entities.append(ModelFitQualitySensor(coordinator, room_name))
+        entities.append(ParameterConfidenceSensor(coordinator, room_name))
 
     # Per-source sensors
     for src in coordinator.heat_sources:
@@ -836,3 +840,287 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
             "window_count": len(room.windows),
             "total_window_area": round(sum(w.area for w in room.windows), 2),
         }
+
+
+# ---------------------------------------------------------------------------
+# Prediction error sensor (per room) - for model fit visualization
+# ---------------------------------------------------------------------------
+
+class PredictionErrorSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the current prediction error (residual) for a room.
+
+    The state is the most recent prediction error [°C]:
+        error = predicted_temp - measured_temp
+
+    Positive error = model over-predicts (predicts warmer than actual)
+    Negative error = model under-predicts (predicts colder than actual)
+
+    Historical errors over the MPC horizon are exposed as attributes for
+    visualization of model fit quality.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:chart-bell-curve"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Prediction Error"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_prediction_error"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the current prediction error [°C]."""
+        # Get current predicted and measured temperatures
+        room = self._coordinator.model.rooms[self._room_name]
+        predicted_temp = room.temperature
+
+        # Try to get actual measured temperature from the history buffer
+        if len(self._coordinator.history_buffer) > 0:
+            latest = self._coordinator.history_buffer[-1]
+            room_idx = self._coordinator.model.room_names.index(self._room_name)
+            measured = latest.get("y", [])[room_idx] if room_idx < len(latest.get("y", [])) else None
+
+            if measured is not None:
+                error = predicted_temp - measured
+                return round(error, 3)
+
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose historical prediction errors and fit metrics."""
+        # Extract recent prediction errors from history buffer
+        errors = []
+        room_idx = self._coordinator.model.room_names.index(self._room_name)
+
+        for record in self._coordinator.history_buffer[-50:]:  # Last 50 samples
+            y = record.get("y", [])
+            y_pred = record.get("y_pred", [])
+
+            if room_idx < len(y) and room_idx < len(y_pred):
+                error = y_pred[room_idx] - y[room_idx]
+                errors.append(round(error, 3))
+
+        # Compute basic statistics
+        if errors:
+            import numpy as np
+            errors_arr = np.array(errors)
+            rmse = float(np.sqrt(np.mean(errors_arr ** 2)))
+            mae = float(np.mean(np.abs(errors_arr)))
+            bias = float(np.mean(errors_arr))
+            max_error = float(np.max(np.abs(errors_arr)))
+        else:
+            rmse = mae = bias = max_error = 0.0
+
+        return {
+            "recent_errors": errors,
+            "rmse": round(rmse, 3),
+            "mae": round(mae, 3),
+            "bias": round(bias, 3),
+            "max_error": round(max_error, 3),
+            "n_samples": len(errors),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Model fit quality sensor (per room)
+# ---------------------------------------------------------------------------
+
+class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting overall model fit quality for a room.
+
+    The state is the R² (coefficient of determination) score [0-1]:
+        1.0 = perfect fit
+        0.0 = no better than mean prediction
+        < 0 = worse than mean prediction
+
+    Additional fit metrics (RMSE, MAE, autocorrelation) are exposed as
+    attributes for detailed diagnostics.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:poll"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Model Fit Quality"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_model_fit_quality"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return R² score as the main quality metric."""
+        from .model_diagnostics import compute_model_fit_metrics
+
+        # Extract predictions and measurements from history
+        room_idx = self._coordinator.model.room_names.index(self._room_name)
+        predictions = []
+        measurements = []
+
+        for record in self._coordinator.history_buffer:
+            y = record.get("y", [])
+            y_pred = record.get("y_pred", [])
+
+            if room_idx < len(y) and room_idx < len(y_pred):
+                predictions.append(y_pred[room_idx])
+                measurements.append(y[room_idx])
+
+        if len(predictions) < 2:
+            return None
+
+        try:
+            metrics = compute_model_fit_metrics(predictions, measurements, self._room_name)
+            return round(metrics.r_squared, 4)
+        except Exception as exc:
+            _LOGGER.warning("Failed to compute model fit quality for %s: %s", self._room_name, exc)
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose detailed fit metrics."""
+        from .model_diagnostics import compute_model_fit_metrics
+
+        # Extract predictions and measurements from history
+        room_idx = self._coordinator.model.room_names.index(self._room_name)
+        predictions = []
+        measurements = []
+
+        for record in self._coordinator.history_buffer:
+            y = record.get("y", [])
+            y_pred = record.get("y_pred", [])
+
+            if room_idx < len(y) and room_idx < len(y_pred):
+                predictions.append(y_pred[room_idx])
+                measurements.append(y[room_idx])
+
+        if len(predictions) < 2:
+            return {
+                "error": "Insufficient data",
+                "n_samples": len(predictions),
+            }
+
+        try:
+            metrics = compute_model_fit_metrics(predictions, measurements, self._room_name)
+            return {
+                "r_squared": round(metrics.r_squared, 4),
+                "rmse": round(metrics.rmse, 3),
+                "mae": round(metrics.mae, 3),
+                "bias": round(metrics.bias, 3),
+                "max_error": round(metrics.max_error, 2),
+                "residual_std": round(metrics.residual_std, 3),
+                "residual_autocorr_lag1": (
+                    round(metrics.residual_autocorr_lag1, 3)
+                    if metrics.residual_autocorr_lag1 is not None
+                    else None
+                ),
+                "n_samples": metrics.n_samples,
+            }
+        except Exception as exc:
+            _LOGGER.warning("Failed to compute fit metrics for %s: %s", self._room_name, exc)
+            return {
+                "error": str(exc),
+                "n_samples": len(predictions),
+            }
+
+
+# ---------------------------------------------------------------------------
+# Parameter confidence sensor (per room)
+# ---------------------------------------------------------------------------
+
+class ParameterConfidenceSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting confidence/validity of thermal parameters for a room.
+
+    The state is a confidence score [0-100]:
+        100 = all parameters in valid range
+        0 = parameters outside valid range or no data
+
+    Detailed parameter validation warnings are exposed as attributes.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:shield-check"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Parameter Confidence"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_parameter_confidence"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return confidence score [0-100]."""
+        from .model_diagnostics import validate_parameters
+
+        room = self._coordinator.model.rooms[self._room_name]
+
+        try:
+            validation = validate_parameters(
+                self._room_name,
+                room.thermal_mass,
+                room.r_external,
+            )
+
+            # Compute confidence score
+            score = 0.0
+            if validation.mass_valid:
+                score += 33.3
+            if validation.r_external_valid:
+                score += 33.3
+            if validation.time_constant_valid:
+                score += 33.4
+
+            return round(score, 1)
+        except Exception as exc:
+            _LOGGER.warning("Failed to validate parameters for %s: %s", self._room_name, exc)
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose detailed parameter validation."""
+        from .model_diagnostics import validate_parameters
+
+        room = self._coordinator.model.rooms[self._room_name]
+
+        try:
+            validation = validate_parameters(
+                self._room_name,
+                room.thermal_mass,
+                room.r_external,
+            )
+
+            return {
+                "thermal_mass": validation.thermal_mass,
+                "r_external": validation.r_external,
+                "time_constant_hours": round(validation.time_constant_hours, 2),
+                "mass_valid": validation.mass_valid,
+                "r_external_valid": validation.r_external_valid,
+                "time_constant_valid": validation.time_constant_valid,
+                "warnings": validation.warnings,
+            }
+        except Exception as exc:
+            _LOGGER.warning("Failed to validate parameters for %s: %s", self._room_name, exc)
+            return {
+                "error": str(exc),
+            }
