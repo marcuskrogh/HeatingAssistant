@@ -70,7 +70,9 @@ import homeassistant.helpers.config_validation as cv
 from .const import (
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
+    CONF_CONSTRAINT_OFFSET,
     CONF_DT,
+    CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
     CONF_LATITUDE,
@@ -82,6 +84,7 @@ from .const import (
     CONF_ROOM_NAME,
     CONF_ROOMS,
     CONF_SETPOINT,
+    CONF_SMOOTHING_WEIGHT,
     CONF_SOURCE_COP_RATED,
     CONF_SOURCE_COP_TEMP_REF,
     CONF_SOURCE_EFFICIENCY,
@@ -100,12 +103,15 @@ from .const import (
     CONF_WINDOW_TILT,
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
+    DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_DT,
     DEFAULT_EFFICIENCY,
+    DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
+    DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_THERMAL_MASS,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
@@ -183,6 +189,15 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
                 vol.Optional(CONF_DT, default=DEFAULT_DT): vol.Coerce(int),
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.Coerce(int),
+                vol.Optional(
+                    CONF_ENERGY_WEIGHT, default=DEFAULT_ENERGY_WEIGHT
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                vol.Optional(
+                    CONF_SMOOTHING_WEIGHT, default=DEFAULT_SMOOTHING_WEIGHT
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                vol.Optional(
+                    CONF_CONSTRAINT_OFFSET, default=DEFAULT_CONSTRAINT_OFFSET
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             }
         )
     },
@@ -231,6 +246,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_data[CONF_LATITUDE] = yaml_cfg[CONF_LATITUDE]
         if CONF_LONGITUDE not in entry_data and CONF_LONGITUDE in yaml_cfg:
             entry_data[CONF_LONGITUDE] = yaml_cfg[CONF_LONGITUDE]
+        entry_data.setdefault(
+            CONF_ENERGY_WEIGHT,
+            yaml_cfg.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT),
+        )
+        entry_data.setdefault(
+            CONF_SMOOTHING_WEIGHT,
+            yaml_cfg.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT),
+        )
+        entry_data.setdefault(
+            CONF_CONSTRAINT_OFFSET,
+            yaml_cfg.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET),
+        )
 
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)

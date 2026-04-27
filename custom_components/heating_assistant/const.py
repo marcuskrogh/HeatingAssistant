@@ -49,6 +49,8 @@ CONF_DT = "dt"                         # time step in seconds
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
 CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output constraints
+CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (energy saving vs. tracking)
+CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (dampens rapid input changes)
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -64,6 +66,8 @@ DEFAULT_MAX_TEMP_OFFSET = 5.0          # °C (heat pump offset at full power)
 DEFAULT_TURN_OFF_DEADBAND = 1.0        # °C above setpoint before heat pump turns off
 DEFAULT_IDLE_OFFSET = 1.0              # °C below internal temp for idle setpoint
 DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint offset
+DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
+DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 
 # Source types

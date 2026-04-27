@@ -97,6 +97,12 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 14.2 [External thermal resistance `r_external`](#142-external-thermal-resistance-r_external)
     - 14.3 [Inter-room thermal resistance `r_value`](#143-inter-room-thermal-resistance-r_value)
     - 14.4 [Window orientation and tilt](#144-window-orientation-and-tilt)
+    - 14.5 [MPC regulator tuning](#145-mpc-regulator-tuning)
+        - 14.5.1 [Overview of tunable parameters](#1451-overview-of-tunable-parameters)
+        - 14.5.2 [Diagnosing and correcting oscillations](#1452-diagnosing-and-correcting-oscillations)
+        - 14.5.3 [Step-by-step detuning procedure](#1453-step-by-step-detuning-procedure)
+        - 14.5.4 [Effect of `smoothing_weight` on heat pump short-cycling](#1454-effect-of-smoothing_weight-on-heat-pump-short-cycling)
+        - 14.5.5 [Quick reference — tuning cheat sheet](#1455-quick-reference--tuning-cheat-sheet)
 15. [Developer Guide](#15-developer-guide)
     - 15.1 [Repository layout](#151-repository-layout)
     - 15.2 [Running the tests](#152-running-the-tests)
@@ -940,13 +946,13 @@ Over the first few days of operation, observe the system and refine your paramet
 | Room consistently undershoots setpoint | `r_external` too high (overestimates heat loss) **or** `thermal_mass` too low | Decrease `r_external` or increase `thermal_mass` |
 | Room consistently overshoots setpoint | `r_external` too low **or** `thermal_mass` too high | Increase `r_external` or decrease `thermal_mass` |
 | Predicted temperature diverges quickly from actual | Wrong `thermal_mass` or `r_external` | Compare steady-state heat loss empirically (see [Section 13.2](#132-external-thermal-resistance-r_external)) |
-| Temperature oscillates (undershoot then overshoot) | Horizon too short | Increase `horizon` (e.g. from `6` to `8`) |
-| Heater runs at full power then cuts out abruptly | `energy_weight` too low | No direct config key yet; increase `horizon` as an alternative |
+| Temperature oscillates (undershoot then overshoot) | Horizon too short or `smoothing_weight` too low | Increase `horizon` (e.g. from `6` to `8`) and/or increase `smoothing_weight` |
+| Heater runs at full power then cuts out abruptly | `energy_weight` too low | Increase `energy_weight` (e.g. from `0.01` to `0.05`) |
 | Solar gain is always zero | Wrong `latitude`/`longitude` or wrong window `orientation` | Verify coordinates; remember `orientation: 0` = North, `180` = South |
 
 After any change to `configuration.yaml` (rooms, heat sources, or top-level keys), **restart HA** for the changes to take effect.
 
-Refer to [Section 13](#13-thermal-model-parameter-estimation-guide) for detailed guidance on estimating thermal parameters, and to [Section 15](#15-troubleshooting) for a full list of known issues and their solutions.
+Refer to [Section 14](#14-thermal-model-parameter-estimation-guide) for detailed guidance on estimating thermal parameters, [Section 14.5](#145-mpc-regulator-tuning) for controller tuning guidance, and to [Section 16](#16-troubleshooting) for a full list of known issues and their solutions.
 
 ---
 
@@ -998,6 +1004,9 @@ heating_assistant:
 | `longitude` | float | No | HA / wizard setting | Site longitude [°].  Overrides the wizard value. |
 | `dt` | int | No | `900` | Control time step [s].  Range 60–3600. |
 | `horizon` | int | No | `6` | MPC prediction horizon [steps].  Range 1–24. |
+| `energy_weight` | float | No | `0.01` | Weight on the input cost ‖**u**‖² in the MPC objective.  Higher values make the controller more conservative about running heaters, reducing overshoot at the expense of slightly slower heating.  Typical range: `0.001`–`0.5`.  See [Section 14.5](#145-mpc-regulator-tuning). |
+| `smoothing_weight` | float | No | `0.1` | Weight on the input rate-of-change cost ‖Δ**u**‖² in the MPC objective.  Higher values strongly penalise rapid changes in heater output between consecutive time steps, dampening oscillations and reducing actuator wear.  Set to `0.0` to disable.  Typical range: `0.0`–`2.0`.  See [Section 14.5](#145-mpc-regulator-tuning). |
+| `constraint_offset` | float | No | `2.0` | Symmetric soft output constraint band [°C] around the setpoint: the controller keeps predicted room temperatures within `[setpoint − δ, setpoint + δ]`.  Violations are penalised but not forbidden.  Decrease for tighter tracking; increase if the QP solver reports infeasibility. |
 | `rooms` | list | No | `[]` | List of room definitions (see below). |
 | `heat_sources` | list | No | `[]` | List of heat source definitions (see below). |
 
@@ -2671,6 +2680,103 @@ The `orientation` key is the compass bearing of the **outward-facing normal** of
 
 For a roof window pitched towards the South at 30° from horizontal, use `orientation: 180` and `tilt: 30`.
 
+### 14.5 MPC regulator tuning
+
+The MPC controller solves a quadratic program at each update cycle.  Its behaviour is determined by three cost weights and the prediction horizon.  This section explains how to diagnose common problems and what to adjust.
+
+#### 14.5.1 Overview of tunable parameters
+
+| Parameter | Config key | Default | Effect |
+|-----------|-----------|---------|--------|
+| **Prediction horizon** | `horizon` | `6` steps | How many time steps ahead the controller plans.  Longer horizons give the controller more room to "see" the thermal inertia of the building and act proactively. |
+| **Energy weight** | `energy_weight` | `0.01` | Weight on ‖**u**‖² — penalises running heaters.  Increase to make the controller more conservative (less aggressive heating). |
+| **Smoothing weight** | `smoothing_weight` | `0.1` | Weight on ‖Δ**u**‖² — penalises changing the heater output from one step to the next.  Increase to dampen oscillations and reduce actuator wear. |
+| **Constraint offset** | `constraint_offset` | `2.0 °C` | Half-width of the soft temperature band around the setpoint.  Does not directly affect oscillations but controls how strictly the constraint is enforced. |
+
+All four parameters are set under the top-level `heating_assistant:` key in `configuration.yaml`.  Restart Home Assistant after any change.
+
+#### 14.5.2 Diagnosing and correcting oscillations
+
+Oscillations appear as repeated undershoot/overshoot cycles around the setpoint in the room temperature history.  The most common causes and fixes are:
+
+**Cause 1 — Prediction horizon too short**
+
+When `horizon` is small (e.g. 2–4 steps at 15-minute intervals = only 30–60 minutes of lookahead), the controller does not see far enough ahead to account for the building's thermal lag.  It heats aggressively to hit the setpoint within the short window, overshoots, then cuts off heating, undershoots, and repeats.
+
+*Fix:* Increase `horizon`.  Start with 6–8 steps (90–120 min at `dt = 900 s`).  The computational cost scales roughly as O(N²), so avoid very large horizons (> 24).
+
+```yaml
+heating_assistant:
+  horizon: 8
+```
+
+**Cause 2 — Smoothing weight too low**
+
+With a low `smoothing_weight` the controller is free to swing the heating fraction between 0 and 1 from one 15-minute step to the next.  This produces bang-bang-like behaviour that generates oscillations.
+
+*Fix:* Increase `smoothing_weight`.  The default is `0.1`; try values in the range `0.5`–`2.0` if oscillations persist.  A value of `1.0` penalises a full 0→1 step change as heavily as a 1 °C tracking error.
+
+```yaml
+heating_assistant:
+  smoothing_weight: 1.0
+```
+
+**Cause 3 — Energy weight too high**
+
+A very high `energy_weight` forces the controller to keep heating to a minimum.  The room cools below setpoint, triggering a burst of full-power heating, which overshoots, causing a repeated cycle.
+
+*Fix:* Reduce `energy_weight`.  The default is `0.01`; values below `0.001` are rarely needed.  If you notice abrupt full-power bursts followed by long off periods, decrease `energy_weight`.
+
+```yaml
+heating_assistant:
+  energy_weight: 0.005
+```
+
+**Cause 4 — Incorrect thermal parameters**
+
+If `thermal_mass` is underestimated the model predicts the room heats and cools faster than it actually does, leading to oscillatory corrections.  If `r_external` is wrong the steady-state balance is off, producing drift.
+
+*Fix:* Re-estimate `thermal_mass` and `r_external` using the empirical method in [Section 14.1](#141-thermal-mass-thermal_mass) and [Section 14.2](#142-external-thermal-resistance-r_external), or run the `estimate_parameters` service (see [Section 13.11](#1311-setup-service--estimate-parameters)).
+
+#### 14.5.3 Step-by-step detuning procedure
+
+If you are experiencing oscillations, follow these steps in order:
+
+1. **Check the predicted temperature sensor** (`sensor.heating_assistant_<room>_temperature_forecast`).  If the MPC prediction closely tracks the oscillation, the problem is in the controller weights.  If the prediction is smooth but the actual temperature oscillates, the issue is in the thermal model parameters.
+
+2. **Increase `smoothing_weight` in steps** — try `0.5`, then `1.0`, then `2.0`.  After each change, restart HA and observe the system for one to two hours.  The oscillation amplitude should decrease.  Stop when the response is acceptably smooth.
+
+3. **If oscillations persist, increase `horizon`** — try `8`, then `10`.  This gives the controller enough lookahead to ride out the room's thermal lag without overshooting.
+
+4. **Check `energy_weight`** — if the heater makes aggressive on/off transitions, try reducing `energy_weight` from `0.01` to `0.005`.
+
+5. **Verify thermal model parameters** — if the MPC predictions do not match actual temperatures, correct `thermal_mass` and `r_external` before tuning controller weights.
+
+#### 14.5.4 Effect of `smoothing_weight` on heat pump short-cycling
+
+Heat pumps are particularly sensitive to rapid on/off commands because each compressor start causes mechanical wear and a brief efficiency dip.  In addition to the heat pump's own `turn_off_deadband` parameter, increasing `smoothing_weight` at the controller level discourages the MPC from requesting large changes in the heating fraction between consecutive steps.
+
+Recommended starting point for a heat pump installation:
+
+```yaml
+heating_assistant:
+  smoothing_weight: 0.5   # penalises rapid changes; reduce short-cycling
+  horizon: 8              # longer lookahead reduces the need for rapid corrections
+```
+
+If the compressor still short-cycles after increasing `smoothing_weight`, also increase `turn_off_deadband` on the heat pump source (default `1.0 °C`; try `1.5`–`2.0 °C`).
+
+#### 14.5.5 Quick reference — tuning cheat sheet
+
+| Symptom | Primary fix | Secondary fix |
+|---------|-------------|---------------|
+| Oscillating temperature (repeated undershoot/overshoot) | ↑ `smoothing_weight` (try 0.5 → 1.0 → 2.0) | ↑ `horizon` (try 8 → 10) |
+| Heater runs at 100 % then cuts off abruptly | ↑ `energy_weight` (try 0.02 → 0.05) | ↑ `horizon` |
+| Room never quite reaches setpoint | ↓ `energy_weight` (try 0.005 → 0.001) | ↑ `horizon` |
+| Heat pump compressor short-cycling | ↑ `smoothing_weight` + ↑ `turn_off_deadband` | ↑ `horizon` |
+| Sluggish response / room heats too slowly | ↓ `energy_weight` or ↓ `smoothing_weight` | — |
+| Temperature tracks setpoint but with slow drift | Correct `r_external` or `thermal_mass` | — |
+
 ---
 
 ## 15. Developer Guide
@@ -2794,15 +2900,15 @@ To use a measured irradiance sensor instead of a computed one:
 
 **Temperature oscillates (undershoot/overshoot)**
 
-- Increase `horizon` — a longer prediction horizon helps the controller anticipate the thermal inertia of the room.
-- Reduce `energy_weight` — if the energy penalty is too high, the controller may heat too little, causing undershoot; then overheat on the next cycle.
+- Increase `smoothing_weight` (default `0.1`) — a higher value penalises rapid changes in the control input, dampening oscillations.  Try `0.5`, then `1.0`.  See [Section 14.5.2](#1452-diagnosing-and-correcting-oscillations) for a step-by-step guide.
+- Increase `horizon` — a longer prediction horizon helps the controller anticipate the thermal inertia of the room and reduces overcorrection.
+- Check `energy_weight` — if the energy penalty is too high, the controller heats too little, causing undershoot followed by overcorrection.  Try reducing from `0.01` to `0.005`.
 - Reduce `dt` — finer time steps give the controller more opportunities to correct.
-- Increase `smoothing_weight` (default `0.1`) — a higher value penalises rapid changes in the control input, resulting in smoother actuator commands.
 
 **Heat pump turns on and off too frequently (short-cycling)**
 
-- Increase `turn_off_deadband` (default `1.0` °C) — this keeps the heat pump in heat mode (idling at the internal temperature) until the room exceeds the setpoint by the configured deadband.  Try `1.5` or `2.0` °C if the compressor still cycles too often.
-- Increase `smoothing_weight` — the rate-of-change penalty in the MPC cost function discourages the controller from toggling between heating and not-heating across consecutive time steps.
+- Increase `smoothing_weight` — the rate-of-change penalty in the MPC cost function discourages the controller from toggling between heating and not-heating across consecutive time steps.  See [Section 14.5.4](#1454-effect-of-smoothing_weight-on-heat-pump-short-cycling).
+- Increase `turn_off_deadband` on the heat pump source (default `1.0` °C) — this keeps the heat pump in heat mode until the room exceeds the setpoint by the configured deadband.  Try `1.5` or `2.0` °C if the compressor still cycles too often.
 
 ---
 
