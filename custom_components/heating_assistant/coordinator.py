@@ -22,7 +22,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_CONSTRAINT_OFFSET,
     CONF_DT,
+    CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
     CONF_LATITUDE,
@@ -30,6 +32,7 @@ from .const import (
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_WEATHER_ENTITY,
     CONF_ROOMS,
+    CONF_SMOOTHING_WEIGHT,
     CONF_SOURCE_COP_RATED,
     CONF_SOURCE_COP_TEMP_REF,
     CONF_SOURCE_EFFICIENCY,
@@ -54,13 +57,16 @@ from .const import (
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
+    DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
     DEFAULT_DT,
     DEFAULT_EFFICIENCY,
+    DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
+    DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
     DEFAULT_R_EXTERNAL,
@@ -179,6 +185,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
         self._dt: float = data.get(CONF_DT, DEFAULT_DT)
         self._horizon: int = data.get(CONF_HORIZON, DEFAULT_HORIZON)
+        self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
+        self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
+        self._constraint_offset: float = data.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)
 
         rooms_cfg: List[Dict[str, Any]] = data.get(CONF_ROOMS, [])
         sources_cfg: List[Dict[str, Any]] = data.get(CONF_HEAT_SOURCES, [])
@@ -208,6 +217,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             dt=self._dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            constraint_offset=self._constraint_offset,
         )
 
         # Per-room enabled state (True = active, False = off).
@@ -991,6 +1003,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             dt=self._dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            constraint_offset=self._constraint_offset,
         )
 
         _LOGGER.info(
