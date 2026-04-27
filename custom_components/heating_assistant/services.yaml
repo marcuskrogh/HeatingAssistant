@@ -156,3 +156,57 @@ estimate_parameters_ml:
       default: true
       selector:
         boolean:
+
+analyze_model_fit:
+  name: Analyze model fit
+  description: >
+    Perform comprehensive analysis of model fit quality for all rooms.
+    Computes goodness-of-fit metrics (RMSE, MAE, R²), residual statistics,
+    and autocorrelation analysis from the accumulated history buffer.
+    Results are reported as a persistent notification with detailed metrics
+    for each room, helping identify when model parameters need adjustment.
+  fields:
+    room_name:
+      name: Room name
+      description: >
+        Optional room name to analyze. If not specified, analyzes all rooms.
+      required: false
+      example: "living_room"
+      selector:
+        text:
+
+validate_parameters:
+  name: Validate thermal parameters
+  description: >
+    Validate the physical reasonableness of current thermal parameters
+    (thermal_mass, r_external) for all rooms. Checks if parameters are
+    within expected ranges and computes thermal time constants.
+    Warns about potentially invalid or extreme parameter values that
+    may indicate estimation problems or configuration errors.
+  fields:
+    room_name:
+      name: Room name
+      description: >
+        Optional room name to validate. If not specified, validates all rooms.
+      required: false
+      example: "living_room"
+      selector:
+        text:
+
+controller_performance_report:
+  name: Controller performance report
+  description: >
+    Generate a detailed report on MPC controller performance for setpoint
+    tracking. Analyzes tracking errors, overshoot/undershoot, time spent
+    above/below setpoint, and overall control quality. Helps identify
+    whether controller tuning parameters (energy_weight, smoothing_weight,
+    constraint_offset) need adjustment.
+  fields:
+    room_name:
+      name: Room name
+      description: >
+        Optional room name to analyze. If not specified, analyzes all rooms.
+      required: false
+      example: "living_room"
+      selector:
+        text:
