@@ -144,6 +144,9 @@ class HeatPump(HeatSource):
 
     The heat pump shuts off (COP = 0) below ``min_outdoor_temp`` to prevent
     defrost damage.
+
+    When operating in cooling mode (dry/dehumidify), the heat pump removes
+    heat from the room with an assumed efficiency of 1.0 (conservative estimate).
     """
 
     def __init__(
@@ -158,6 +161,7 @@ class HeatPump(HeatSource):
         max_temp_offset: float = 5.0,
         turn_off_deadband: float = 1.0,
         heater_entity: Optional[str] = None,
+        cooling_efficiency: float = 1.0,
     ) -> None:
         super().__init__(name, room, max_power, heater_entity)
         self.cop_rated = cop_rated
@@ -166,6 +170,7 @@ class HeatPump(HeatSource):
         self.min_power = min_power
         self.max_temp_offset = max_temp_offset
         self.turn_off_deadband = turn_off_deadband
+        self.cooling_efficiency = cooling_efficiency
 
     def cop(self, outdoor_temp: float) -> float:
         """Return the estimated COP at the given outdoor temperature."""
@@ -190,6 +195,22 @@ class HeatPump(HeatSource):
         if 0.0 < power < self.min_power:
             return 0.0
         return power
+
+    def cooling_power(self, outdoor_temp: float = 0.0) -> float:
+        """
+        Compute the cooling (heat removal) power when operating in dry/dehumidify mode.
+
+        When in cooling mode, the heat pump removes heat from the room. We assume
+        a conservative efficiency of 1.0 (cooling_efficiency parameter).
+
+        Returns
+        -------
+        float
+            Negative thermal power (heat removal) [W].
+        """
+        # Return a negative value to indicate heat removal
+        # Use a fraction of max_power as the cooling capacity
+        return -self.max_power * self.cooling_efficiency
 
     def target_temperature(
         self, setpoint_fraction: float, internal_temp: float,

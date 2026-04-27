@@ -231,6 +231,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Latest control actions (source_name → fraction 0‑1)
         self.actions: Dict[str, float] = {}
 
+        # Track which heat sources are in cooling mode (source_name → bool)
+        self._cooling_active: Dict[str, bool] = {}
+
         # Visualization data
         self.solar_gains: Dict[str, float] = {}
         self.outdoor_temp: float = 5.0
@@ -594,6 +597,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         # HP's own sensor reading to prevent any residual
                         # heating.  The offset grows with the degree to which
                         # the room exceeds the desired setpoint.
+                        #
+                        # When in cooling mode, we apply the cooling power to
+                        # the heat source so the thermal model accounts for
+                        # heat removal.
                         overshoot = max(0.0, room_temp - room_setpoint)
                         idle_offset = DEFAULT_IDLE_OFFSET + overshoot
 
@@ -628,6 +635,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
+
+                        # Apply cooling power to the heat source for thermal modeling
+                        cooling_power = src.cooling_power(outdoor_temp)
+                        src.set_power(0.0, outdoor_temp)  # Clear heating power
+                        src._current_power = cooling_power  # Set to negative (cooling)
+                        self._cooling_active[src.name] = True
                     elif fraction > 0.0:
                         # Active heating: keep on with offset-based setpoint
                         await self.hass.services.async_call(
@@ -652,6 +665,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
+
+                        # Not in cooling mode - clear flag
+                        self._cooling_active[src.name] = False
                     else:
                         # Idle: room at or below setpoint, keep HP on but
                         # set target below internal temp so the device
@@ -676,6 +692,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
+
+                        # Not in cooling mode - clear flag
+                        self._cooling_active[src.name] = False
                 else:
                     # Non-heat-pump climate entity (e.g. electric heater
                     # with a built-in thermostat).

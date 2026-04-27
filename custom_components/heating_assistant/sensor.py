@@ -3,12 +3,12 @@ Heating Assistant – Sensor platform.
 
 For each room the following sensor entities are created:
 - Predicted temperature  (model's 1-step-ahead prediction) [°C]
-- Heating power          (sum of active heater outputs for the room) [W]
+- Heating power          (sum of active heater outputs for the room; negative for cooling) [W]
 - Solar gain             (current solar heat gain through windows) [W]
 - Temperature forecast   (MPC prediction trajectory) [°C]
 - Heat loss              (instantaneous heat loss breakdown) [W]
 - Energy balance         (net energy flow in the room) [W]
-- Heating plan           (planned heating power over MPC horizon) [W]
+- Heating plan           (planned heating/cooling power over MPC horizon; negative for cooling) [W]
 - Solar forecast         (predicted solar gain over MPC horizon) [W]
 
 For each heat source:
@@ -125,7 +125,11 @@ class PredictedTemperatureSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 class HeatingPowerSensor(CoordinatorEntity, SensorEntity):
-    """Sensor reporting the total active heating power for a room."""
+    """Sensor reporting the total active heating/cooling power for a room.
+
+    Positive values indicate heating, negative values indicate cooling
+    (heat removal when heat pumps operate in dry/dehumidify mode).
+    """
 
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -703,11 +707,12 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
 
 class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
     """
-    Sensor reporting the planned heating power over the MPC horizon for a room.
+    Sensor reporting the planned heating/cooling power over the MPC horizon for a room.
 
-    The state is the current planned heating power [W].  The full schedule
-    is exposed as a timestamped ``forecast`` attribute so it can be plotted
-    in dashboard cards like ``apexcharts-card``.
+    The state is the current planned heating power [W]. Negative values indicate
+    cooling (heat removal) when heat pumps operate in dry/dehumidify mode.
+    The full schedule is exposed as a timestamped ``forecast`` attribute so it
+    can be plotted in dashboard cards like ``apexcharts-card``.
     """
 
     _attr_device_class = SensorDeviceClass.POWER

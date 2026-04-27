@@ -444,6 +444,10 @@ where `max_temp_offset` (default 5 °C) is the maximum temperature differential 
 
 This means the heat pump compressor keeps running (but produces minimal heat) when the room is near the setpoint, and only shuts down once the room is well above the target.  This dramatically reduces wear from short-cycling.
 
+**Cooling mode (dry/dehumidify):** when the room temperature exceeds the setpoint, the heat pump automatically switches to a gentle cooling mode to help bring the temperature down. The integration prefers "dry" (dehumidify) mode if available, which provides passive cooling without running the compressor at full cooling capacity. If "dry" mode is not supported, it falls back to "fan_only" mode.
+
+When in cooling mode, the heat pump actively removes heat from the room. The thermal model accounts for this heat removal with an assumed efficiency of 1.0 (conservative estimate). This ensures accurate temperature predictions and proper energy accounting. Cooling power is represented as negative heating power in the visualization sensors.
+
 **Example COP curve** (COP_rated = 3.5, T_ref = 7 °C):
 
 | Outdoor temp | COP (approx.) |
