@@ -236,7 +236,11 @@ Look for:
 
 ### 2. Monitoring in Dashboards
 
-Add the diagnostic sensors to your Lovelace dashboard:
+Add the diagnostic sensors to your Lovelace dashboard. The following examples use the popular **ApexCharts card** (available via HACS) for rich visualizations, but basic entity cards work too.
+
+#### Basic Diagnostic Overview
+
+Simple entity card showing current fit metrics:
 
 ```yaml
 type: entities
@@ -249,6 +253,476 @@ entities:
   - entity: sensor.heating_assistant_living_room_parameter_confidence
     name: Parameter Confidence
 ```
+
+#### Temperature Forecast with MPC Constraints
+
+Visualize the predicted temperature trajectory, setpoint, and constraint bounds:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Temperature Forecast - Living Room
+  show_states: true
+graph_span: 4h
+span:
+  start: minute
+now:
+  show: true
+  label: Now
+series:
+  # Historical temperature (from recorder)
+  - entity: sensor.living_room_temperature
+    name: Measured
+    type: line
+    stroke_width: 2
+    color: blue
+    data_generator: |
+      return entity.attributes.forecast.map((entry) => {
+        return [new Date(entry.time).getTime(), entry.temperature];
+      });
+    show:
+      in_header: before_now
+
+  # MPC predicted trajectory
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Predicted
+    type: line
+    stroke_width: 2
+    color: orange
+    data_generator: |
+      return entity.attributes.forecast.map((entry) => {
+        return [new Date(entry.time).getTime(), entry.temperature];
+      });
+    show:
+      in_header: after_now
+
+  # Setpoint line
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Setpoint
+    type: line
+    stroke_width: 1
+    color: green
+    curve: stepline
+    data_generator: |
+      return entity.attributes.forecast.map((entry) => {
+        return [new Date(entry.time).getTime(), entry.setpoint];
+      });
+
+  # Upper constraint bound (setpoint + offset)
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Max Constraint
+    type: line
+    stroke_width: 1
+    color: red
+    opacity: 0.3
+    curve: stepline
+    data_generator: |
+      const offset = entity.attributes.constraint_offset || 2.0;
+      return entity.attributes.forecast.map((entry) => {
+        return [new Date(entry.time).getTime(), entry.setpoint + offset];
+      });
+
+  # Lower constraint bound (setpoint - offset)
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Min Constraint
+    type: line
+    stroke_width: 1
+    color: red
+    opacity: 0.3
+    curve: stepline
+    data_generator: |
+      const offset = entity.attributes.constraint_offset || 2.0;
+      return entity.attributes.forecast.map((entry) => {
+        return [new Date(entry.time).getTime(), entry.setpoint - offset];
+      });
+```
+
+This card shows:
+- **Blue line**: Historical measured temperature
+- **Orange line**: MPC predicted trajectory
+- **Green line**: Setpoint
+- **Red lines**: MPC constraint bounds (setpoint ± constraint_offset)
+
+**What to look for:**
+- ✓ Predicted trajectory should stay within constraint bounds
+- ✓ Prediction should track setpoint without excessive overshoot
+- ⚠ Trajectory exceeding constraints → increase `constraint_offset`
+- ⚠ Slow convergence to setpoint → decrease `energy_weight`
+
+---
+
+#### Heating Power Plan
+
+Visualize the MPC's planned heating schedule:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Heating Power Plan - Living Room
+  show_states: true
+graph_span: 4h
+span:
+  start: minute
+now:
+  show: true
+  label: Now
+series:
+  # Current/historical heating power
+  - entity: sensor.heating_assistant_living_room_heating_power
+    name: Current Power
+    type: column
+    color: orange
+    show:
+      in_header: before_now
+
+  # Planned heating power
+  - entity: sensor.heating_assistant_living_room_heating_plan
+    name: Planned Power
+    type: column
+    color: red
+    opacity: 0.6
+    data_generator: |
+      return entity.attributes.forecast.map((entry) => {
+        return [new Date(entry.time).getTime(), entry.heating_power];
+      });
+    show:
+      in_header: after_now
+```
+
+**What to look for:**
+- ✓ Smooth power transitions → good `smoothing_weight`
+- ⚠ Rapid on/off cycling → increase `smoothing_weight`
+- ⚠ Consistently zero power when below setpoint → check parameters or increase heater `max_power`
+
+---
+
+#### Prediction Error History
+
+Monitor prediction errors over time to assess model fit quality:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Prediction Error - Living Room
+  show_states: true
+graph_span: 2h
+series:
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    name: Prediction Error
+    type: line
+    stroke_width: 2
+    color: purple
+    show:
+      in_header: raw
+
+  # Zero reference line
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    name: Zero Error
+    type: line
+    stroke_width: 1
+    color: gray
+    transform: return 0;
+```
+
+Add attribute indicators:
+
+```yaml
+type: entities
+title: Prediction Error Statistics - Living Room
+entities:
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    type: attribute
+    attribute: rmse
+    name: RMSE
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    type: attribute
+    attribute: mae
+    name: MAE
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    type: attribute
+    attribute: bias
+    name: Bias
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    type: attribute
+    attribute: max_error
+    name: Max Error
+    suffix: " °C"
+```
+
+**What to look for:**
+- ✓ Errors centered around zero (no systematic bias)
+- ✓ RMSE < 0.3°C → excellent fit
+- ⚠ Consistent positive/negative bias → parameter estimation issue
+- ⚠ RMSE > 0.5°C → poor fit, re-estimate parameters
+
+---
+
+#### Model Fit Quality Overview
+
+Create a glance card for quick fit assessment:
+
+```yaml
+type: glance
+title: Model Fit Quality
+columns: 3
+entities:
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    name: R² Score
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    name: Current Error
+  - entity: sensor.heating_assistant_living_room_parameter_confidence
+    name: Parameter Confidence
+```
+
+Or a more detailed metrics card:
+
+```yaml
+type: entities
+title: Model Fit Metrics - Living Room
+entities:
+  - type: section
+    label: Fit Quality
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    name: R² Score
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    type: attribute
+    attribute: rmse
+    name: RMSE
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    type: attribute
+    attribute: mae
+    name: MAE
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    type: attribute
+    attribute: bias
+    name: Bias
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    type: attribute
+    attribute: residual_autocorr_lag1
+    name: Autocorrelation
+  - type: section
+    label: Parameters
+  - entity: sensor.heating_assistant_living_room_parameter_confidence
+    name: Confidence
+  - entity: sensor.heating_assistant_living_room_predicted_temperature
+    type: attribute
+    attribute: thermal_mass
+    name: Thermal Mass
+    suffix: " J/K"
+  - entity: sensor.heating_assistant_living_room_predicted_temperature
+    type: attribute
+    attribute: r_external
+    name: R External
+    suffix: " K/W"
+  - entity: sensor.heating_assistant_living_room_parameter_confidence
+    type: attribute
+    attribute: time_constant_hours
+    name: Time Constant
+    suffix: " hours"
+```
+
+---
+
+#### Multi-Room Performance Comparison
+
+Compare model fit quality across all rooms:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Model Fit Quality - All Rooms
+graph_span: 12h
+series:
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    name: Living Room
+    type: line
+    stroke_width: 2
+  - entity: sensor.heating_assistant_bedroom_model_fit_quality
+    name: Bedroom
+    type: line
+    stroke_width: 2
+  - entity: sensor.heating_assistant_kitchen_model_fit_quality
+    name: Kitchen
+    type: line
+    stroke_width: 2
+```
+
+Or a bar chart for current R² scores:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Current R² Scores by Room
+chart_type: bar
+series:
+  - entity: sensor.heating_assistant_living_room_model_fit_quality
+    name: Living Room
+    color: blue
+  - entity: sensor.heating_assistant_bedroom_model_fit_quality
+    name: Bedroom
+    color: green
+  - entity: sensor.heating_assistant_kitchen_model_fit_quality
+    name: Kitchen
+    color: orange
+```
+
+---
+
+#### Complete Dashboard Example
+
+Here's a full dashboard view combining all elements:
+
+```yaml
+title: Heating Assistant - Model Diagnostics
+path: heating-diagnostics
+cards:
+  # Row 1: Overview
+  - type: glance
+    title: System Overview
+    columns: 4
+    entities:
+      - entity: sensor.heating_assistant_living_room_model_fit_quality
+        name: Living Room R²
+      - entity: sensor.heating_assistant_bedroom_model_fit_quality
+        name: Bedroom R²
+      - entity: sensor.heating_assistant_kitchen_model_fit_quality
+        name: Kitchen R²
+      - entity: sensor.heating_assistant_outdoor_temperature
+        name: Outdoor Temp
+
+  # Row 2: Living Room Detailed Analysis
+  - type: horizontal-stack
+    cards:
+      # Temperature forecast
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Living Room - Temperature
+        graph_span: 4h
+        span:
+          start: minute
+        now:
+          show: true
+          label: Now
+        series:
+          - entity: sensor.living_room_temperature
+            name: Measured
+            type: line
+            stroke_width: 2
+            color: blue
+            show:
+              in_header: before_now
+          - entity: sensor.heating_assistant_living_room_temperature_forecast
+            name: Predicted
+            type: line
+            stroke_width: 2
+            color: orange
+            data_generator: |
+              return entity.attributes.forecast.map((entry) => {
+                return [new Date(entry.time).getTime(), entry.temperature];
+              });
+            show:
+              in_header: after_now
+          - entity: sensor.heating_assistant_living_room_temperature_forecast
+            name: Setpoint
+            type: line
+            stroke_width: 1
+            color: green
+            curve: stepline
+            data_generator: |
+              return entity.attributes.forecast.map((entry) => {
+                return [new Date(entry.time).getTime(), entry.setpoint];
+              });
+
+      # Heating plan
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Living Room - Heating Plan
+        graph_span: 4h
+        span:
+          start: minute
+        now:
+          show: true
+          label: Now
+        series:
+          - entity: sensor.heating_assistant_living_room_heating_power
+            name: Current
+            type: column
+            color: orange
+            show:
+              in_header: before_now
+          - entity: sensor.heating_assistant_living_room_heating_plan
+            name: Planned
+            type: column
+            color: red
+            opacity: 0.6
+            data_generator: |
+              return entity.attributes.forecast.map((entry) => {
+                return [new Date(entry.time).getTime(), entry.heating_power];
+              });
+            show:
+              in_header: after_now
+
+  # Row 3: Model Fit Details
+  - type: horizontal-stack
+    cards:
+      # Prediction error
+      - type: custom:apexcharts-card
+        header:
+          show: true
+          title: Living Room - Prediction Error
+        graph_span: 2h
+        series:
+          - entity: sensor.heating_assistant_living_room_prediction_error
+            name: Error
+            type: line
+            stroke_width: 2
+            color: purple
+          - entity: sensor.heating_assistant_living_room_prediction_error
+            name: Zero
+            type: line
+            stroke_width: 1
+            color: gray
+            transform: return 0;
+
+      # Fit metrics
+      - type: entities
+        title: Living Room - Fit Metrics
+        entities:
+          - entity: sensor.heating_assistant_living_room_model_fit_quality
+            name: R² Score
+          - entity: sensor.heating_assistant_living_room_model_fit_quality
+            type: attribute
+            attribute: rmse
+            name: RMSE
+            suffix: " °C"
+          - entity: sensor.heating_assistant_living_room_model_fit_quality
+            type: attribute
+            attribute: bias
+            name: Bias
+            suffix: " °C"
+          - entity: sensor.heating_assistant_living_room_parameter_confidence
+            name: Parameter Confidence
+          - entity: sensor.heating_assistant_living_room_parameter_confidence
+            type: attribute
+            attribute: time_constant_hours
+            name: Time Constant
+            suffix: " h"
+```
+
+---
 
 Create alert automations:
 
