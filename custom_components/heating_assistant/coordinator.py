@@ -640,6 +640,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         cooling_power = src.cooling_power(outdoor_temp)
                         src.set_power(0.0, outdoor_temp)  # Clear heating power
                         src._current_power = cooling_power  # Set to negative (cooling)
+                        if not hasattr(self, '_cooling_active'):
+                            self._cooling_active = {}
                         self._cooling_active[src.name] = True
                     elif fraction > 0.0:
                         # Active heating: keep on with offset-based setpoint
@@ -667,6 +669,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
 
                         # Not in cooling mode - clear flag
+                        if not hasattr(self, '_cooling_active'):
+                            self._cooling_active = {}
                         self._cooling_active[src.name] = False
                     else:
                         # Idle: room at or below setpoint, keep HP on but
@@ -694,6 +698,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
 
                         # Not in cooling mode - clear flag
+                        if not hasattr(self, '_cooling_active'):
+                            self._cooling_active = {}
                         self._cooling_active[src.name] = False
                 else:
                     # Non-heat-pump climate entity (e.g. electric heater
