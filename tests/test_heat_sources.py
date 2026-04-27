@@ -161,3 +161,15 @@ class TestHeatPump:
         """Custom turn_off_deadband is stored correctly."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, turn_off_deadband=2.5)
         assert hp.turn_off_deadband == 2.5
+
+    def test_cooling_power_default(self):
+        """Cooling power should be negative (heat removal) with default efficiency."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        cooling = hp.cooling_power(outdoor_temp=20.0)
+        assert cooling == pytest.approx(-5000.0)  # Negative indicates heat removal
+
+    def test_cooling_power_custom_efficiency(self):
+        """Cooling power respects custom cooling_efficiency parameter."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, cooling_efficiency=0.8)
+        cooling = hp.cooling_power(outdoor_temp=20.0)
+        assert cooling == pytest.approx(-4000.0)  # 5000 * 0.8, negative
