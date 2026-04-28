@@ -334,12 +334,29 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.heating_schedule = self.controller.heating_schedule
 
             # 6. Record observation in the rolling history buffer for ML
-            #    parameter estimation.
+            #    parameter estimation and model fit analysis.
+            # Extract one-step-ahead prediction from MPC predictions
+            y_pred = []
+            if self.predictions and len(self.predictions) > 0:
+                # First prediction step contains one-step-ahead predictions
+                first_pred = self.predictions[0]
+                y_pred = [
+                    first_pred.get(name, self.model.rooms[name].temperature)
+                    for name in self.model.room_names
+                ]
+            else:
+                # Fallback: use current temperatures if no predictions available
+                y_pred = [
+                    self.model.rooms[name].temperature
+                    for name in self.model.room_names
+                ]
+
             self._history_buffer.append({
                 "y": [
                     self.model.rooms[name].temperature
                     for name in self.model.room_names
                 ],
+                "y_pred": y_pred,
                 "u": [
                     self.actions.get(src.name, 0.0)
                     for src in self.heat_sources
