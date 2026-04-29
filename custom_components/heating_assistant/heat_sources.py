@@ -150,8 +150,21 @@ class HeatPump(HeatSource):
     The heat pump shuts off (COP = 0) below ``min_outdoor_temp`` to prevent
     defrost damage.
 
-    When operating in cooling mode (dry/dehumidify), the heat pump removes
-    heat from the room with an assumed efficiency of 1.0 (conservative estimate).
+    Cooling mode
+    ------------
+    When operating in cooling mode (dry / fan-only / cool), the heat pump
+    removes heat from the room.  The cooling capacity must NOT be derived
+    from the heating thermal output ``max_power`` — that value already
+    incorporates the heating COP and would overstate cooling capability.
+    Instead the cooling capacity is computed from the rated electrical
+    input multiplied by the *cooling* coefficient of performance (EER):
+
+        electric_max = max_power / cop_rated         [rated electrical input]
+        cooling_capacity_max = electric_max * cooling_cop
+
+    The optional ``cooling_efficiency`` parameter (default 1.0) lets
+    integrators throttle the cooling capacity below the rated maximum
+    (e.g. for dehumidify / dry mode which is gentler than full cooling).
     """
 
     def __init__(
@@ -166,6 +179,7 @@ class HeatPump(HeatSource):
         max_temp_offset: float = 5.0,
         turn_off_deadband: float = 1.0,
         heater_entity: Optional[str] = None,
+        cooling_cop: float = 2.5,
         cooling_efficiency: float = 1.0,
         power_scale: float = 1.0,
     ) -> None:
@@ -176,6 +190,7 @@ class HeatPump(HeatSource):
         self.min_power = min_power
         self.max_temp_offset = max_temp_offset
         self.turn_off_deadband = turn_off_deadband
+        self.cooling_cop = cooling_cop
         self.cooling_efficiency = cooling_efficiency
 
     def cop(self, outdoor_temp: float) -> float:
@@ -204,19 +219,32 @@ class HeatPump(HeatSource):
 
     def cooling_power(self, outdoor_temp: float = 0.0) -> float:
         """
-        Compute the cooling (heat removal) power when operating in dry/dehumidify mode.
+        Compute the cooling (heat removal) power for the current cooling cycle.
 
-        When in cooling mode, the heat pump removes heat from the room. We assume
-        a conservative efficiency of 1.0 (cooling_efficiency parameter).
+        Cooling capacity is derived from the rated electrical input multiplied
+        by the cooling coefficient of performance (EER), then scaled by
+        ``cooling_efficiency`` and ``power_scale``.  This avoids the common
+        bug of inheriting the heating thermal max as the cooling capacity,
+        which would overstate the heat-removal rate by a factor of
+        ``cop_rated / cooling_cop`` (typically ≈ 1.4×).
+
+        Parameters
+        ----------
+        outdoor_temp : float
+            Outdoor temperature [°C].  Reserved for future temperature-
+            dependent cooling COP corrections; unused by the current linear
+            model.
 
         Returns
         -------
         float
             Negative thermal power (heat removal) [W].
         """
-        # Return a negative value to indicate heat removal
-        # Use a fraction of max_power as the cooling capacity
-        return -self.max_power * self.cooling_efficiency
+        if self.cop_rated <= 0:
+            return 0.0
+        electric_max = self.max_power / self.cop_rated
+        cooling_capacity_max = electric_max * self.cooling_cop
+        return -cooling_capacity_max * self.cooling_efficiency * self.power_scale
 
     def target_temperature(
         self, setpoint_fraction: float, internal_temp: float,

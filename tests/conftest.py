@@ -89,20 +89,35 @@ for _attr in [
     "CONF_NAME", "CONF_LATITUDE", "CONF_LONGITUDE",
     "STATE_UNAVAILABLE", "STATE_UNKNOWN",
     "TEMP_CELSIUS", "PERCENTAGE", "Platform",
+    "ATTR_TEMPERATURE",
 ]:
     setattr(_const, _attr, _attr)
 
 _const.UnitOfTemperature = _FakeEnum  # type: ignore[attr-defined]
+_const.UnitOfPower = _FakeEnum  # type: ignore[attr-defined]
 
 # homeassistant.helpers.entity
 _entity = sys.modules["homeassistant.helpers.entity"]
 _entity.Entity = object  # type: ignore[attr-defined]
 
 # homeassistant.helpers.update_coordinator
+class _DataUpdateCoordinatorStub:
+    pass
+
+
+class _CoordinatorEntityStub:
+    def __init__(self, coordinator=None):
+        self._coordinator_stub = coordinator
+
+
 _coord = sys.modules["homeassistant.helpers.update_coordinator"]
-_coord.DataUpdateCoordinator = object  # type: ignore[attr-defined]
-_coord.CoordinatorEntity = object  # type: ignore[attr-defined]
+_coord.DataUpdateCoordinator = _DataUpdateCoordinatorStub  # type: ignore[attr-defined]
+_coord.CoordinatorEntity = _CoordinatorEntityStub  # type: ignore[attr-defined]
 _coord.UpdateFailed = Exception  # type: ignore[attr-defined]
+
+# homeassistant.helpers.entity_platform
+_ep = sys.modules["homeassistant.helpers.entity_platform"]
+_ep.AddEntitiesCallback = object  # type: ignore[attr-defined]
 
 # homeassistant.helpers.config_validation – simple passthrough stubs
 _cv = sys.modules["homeassistant.helpers.config_validation"]
@@ -123,9 +138,40 @@ _sensor.SensorStateClass = _FakeEnum  # type: ignore[attr-defined]
 
 # homeassistant.components.climate
 _climate = sys.modules["homeassistant.components.climate"]
-_climate.ClimateEntity = object  # type: ignore[attr-defined]
-_climate.ClimateEntityFeature = _FakeEnum  # type: ignore[attr-defined]
-_climate.HVACMode = _FakeEnum  # type: ignore[attr-defined]
+class _ClimateEntityBase:
+    """Distinct base class so multi-inheritance with CoordinatorEntity works."""
+
+_climate.ClimateEntity = _ClimateEntityBase  # type: ignore[attr-defined]
+
+
+class _ClimateEntityFeatureStub:
+    """Minimal HA ClimateEntityFeature stub with bit-flag-like values."""
+    TARGET_TEMPERATURE = 1
+    TARGET_TEMPERATURE_RANGE = 2
+
+
+class _HVACModeStub:
+    """Minimal HA HVACMode stub exposing the values used by the integration."""
+    OFF = "off"
+    HEAT = "heat"
+    COOL = "cool"
+    HEAT_COOL = "heat_cool"
+    AUTO = "auto"
+    DRY = "dry"
+    FAN_ONLY = "fan_only"
+
+
+class _HVACActionStub:
+    """Minimal HA HVACAction stub used by the climate entity."""
+    OFF = "off"
+    IDLE = "idle"
+    HEATING = "heating"
+    COOLING = "cooling"
+
+
+_climate.ClimateEntityFeature = _ClimateEntityFeatureStub  # type: ignore[attr-defined]
+_climate.HVACMode = _HVACModeStub  # type: ignore[attr-defined]
+_climate.HVACAction = _HVACActionStub  # type: ignore[attr-defined]
 
 # homeassistant.components.button
 _button = sys.modules["homeassistant.components.button"]

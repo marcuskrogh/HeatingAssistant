@@ -33,6 +33,8 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
+    CONF_SOURCE_COOLING_COP,
+    CONF_SOURCE_COOLING_EFFICIENCY,
     CONF_SOURCE_COP_RATED,
     CONF_SOURCE_COP_TEMP_REF,
     CONF_SOURCE_EFFICIENCY,
@@ -58,6 +60,8 @@ from .const import (
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
     DEFAULT_CONSTRAINT_OFFSET,
+    DEFAULT_COOLING_COP,
+    DEFAULT_COOLING_EFFICIENCY,
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
     DEFAULT_DT,
@@ -156,6 +160,8 @@ def build_heat_sources(
                     min_power=sc.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER),
                     max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
                     turn_off_deadband=sc.get(CONF_SOURCE_TURN_OFF_DEADBAND, DEFAULT_TURN_OFF_DEADBAND),
+                    cooling_cop=sc.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP),
+                    cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
                     heater_entity=entity,
                 )
             )

@@ -163,13 +163,54 @@ class TestHeatPump:
         assert hp.turn_off_deadband == 2.5
 
     def test_cooling_power_default(self):
-        """Cooling power should be negative (heat removal) with default efficiency."""
+        """Cooling power = -(max_power / cop_rated) × cooling_cop × cooling_efficiency.
+
+        With defaults cop_rated=3.5, cooling_cop=2.5, cooling_efficiency=1.0:
+            cooling = -(5000 / 3.5) × 2.5 ≈ -3571.4 W
+        """
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
         cooling = hp.cooling_power(outdoor_temp=20.0)
-        assert cooling == pytest.approx(-5000.0)  # Negative indicates heat removal
+        assert cooling == pytest.approx(-(5000.0 / 3.5) * 2.5, rel=1e-3)
 
     def test_cooling_power_custom_efficiency(self):
-        """Cooling power respects custom cooling_efficiency parameter."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, cooling_efficiency=0.8)
+        """``cooling_efficiency`` modulates the cooling output (0–1)."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000.0, cooling_efficiency=0.8,
+        )
         cooling = hp.cooling_power(outdoor_temp=20.0)
-        assert cooling == pytest.approx(-4000.0)  # 5000 * 0.8, negative
+        # -(5000/3.5) × 2.5 × 0.8
+        assert cooling == pytest.approx(-(5000.0 / 3.5) * 2.5 * 0.8, rel=1e-3)
+
+    def test_cooling_power_custom_cop(self):
+        """``cooling_cop`` (EER) sets the rated cooling capacity."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000.0,
+            cop_rated=3.5, cooling_cop=3.0,
+        )
+        cooling = hp.cooling_power(outdoor_temp=20.0)
+        # -(5000/3.5) × 3.0
+        assert cooling == pytest.approx(-(5000.0 / 3.5) * 3.0, rel=1e-3)
+
+    def test_cooling_capacity_lower_than_heating_max(self):
+        """Cooling capacity must NOT inherit heating ``max_power`` — it should
+        be derived from electrical input × cooling COP, which gives a
+        smaller magnitude than the heating thermal max for typical EERs.
+        """
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6600.0,
+            cop_rated=3.5, cooling_cop=2.5,
+        )
+        cooling = hp.cooling_power(outdoor_temp=20.0)
+        # |cooling| should be strictly less than heating max_power
+        assert abs(cooling) < hp.max_power
+        # And should equal -(electric_max × cooling_cop)
+        assert cooling == pytest.approx(-(6600.0 / 3.5) * 2.5, rel=1e-3)
+
+    def test_cooling_power_respects_power_scale(self):
+        """``power_scale`` applies to cooling capacity as well as heating."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000.0,
+            cooling_cop=2.5, power_scale=0.5,
+        )
+        cooling = hp.cooling_power(outdoor_temp=20.0)
+        assert cooling == pytest.approx(-(5000.0 / 3.5) * 2.5 * 0.5, rel=1e-3)

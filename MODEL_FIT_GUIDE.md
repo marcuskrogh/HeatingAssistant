@@ -395,12 +395,20 @@ header:
   title: Open-Loop RMSE - Living Room
   show_states: true
 graph_span: 12h
+yaxis:
+  - id: rmse
+    min: 0
+    apex_config:
+      title:
+        text: RMSE (°C)
+      decimalsInFloat: 3
 series:
   - entity: sensor.heating_assistant_living_room_open_loop_rmse
     name: Open-loop RMSE
     type: line
     stroke_width: 2
     color: "#FF9800"
+    yaxis_id: rmse
     show:
       in_header: raw
 ```
@@ -416,26 +424,37 @@ header:
   title: Open-Loop Simulation - Living Room
   show_states: true
 graph_span: 2h
+yaxis:
+  - id: temp
+    apex_config:
+      title:
+        text: Temperature (°C)
 series:
   - entity: sensor.heating_assistant_living_room_open_loop_rmse
     name: Measured
     color: "#2196F3"
     stroke_width: 2
+    yaxis_id: temp
     data_generator: |
-      return entity.attributes.simulation.map(e => [
-        new Date(e.time * 1000).getTime(), e.measured
-      ]);
+      // simulation entries use ISO-8601 strings under "time"
+      const sim = entity.attributes.simulation || [];
+      return sim.map(e => [new Date(e.time).getTime(), e.measured]);
 
   - entity: sensor.heating_assistant_living_room_open_loop_rmse
     name: Open-loop predicted
     color: "#FF9800"
     stroke_width: 2
     opacity: 0.85
+    yaxis_id: temp
     data_generator: |
-      return entity.attributes.simulation.map(e => [
-        new Date(e.time * 1000).getTime(), e.predicted
-      ]);
+      const sim = entity.attributes.simulation || [];
+      return sim.map(e => [new Date(e.time).getTime(), e.predicted]);
 ```
+
+> **Note:** prior versions of this card multiplied `e.time * 1000` because
+> the sensor used to emit Unix-epoch seconds; the open-loop sensor now
+> emits ISO-8601 strings directly, so the multiplication has been
+> removed.
 
 ---
 
@@ -448,21 +467,28 @@ header:
   title: Kalman Innovation - Living Room
   show_states: true
 graph_span: 2h
+yaxis:
+  - id: innov
+    apex_config:
+      title:
+        text: Innovation ν (°C)
+      decimalsInFloat: 3
 series:
   - entity: sensor.heating_assistant_living_room_kalman_innovation
     name: Innovation ν
     type: line
     stroke_width: 2
     color: "#9C27B0"
+    yaxis_id: innov
     data_generator: |
-      return entity.attributes.innovations.map(e => [
-        new Date(e.time * 1000).getTime(), e.value
-      ]);
+      const ts = entity.attributes.innovations || [];
+      return ts.map(e => [new Date(e.time).getTime(), e.value]);
   - entity: sensor.heating_assistant_living_room_kalman_innovation
     name: Zero
     type: line
     stroke_width: 1
     color: grey
+    yaxis_id: innov
     transform: return 0;
 ```
 
@@ -498,6 +524,168 @@ entities:
 - ✓ Mean innovation ≈ 0 → no systematic model bias
 - ✓ `is_consistent = true` → Kalman noise covariances are well-tuned
 - ⚠ |autocorr_lag1| > 0.3 → model is missing some dynamics; re-estimate or reconfigure
+
+---
+
+### Apex Charts card: Residual autocorrelation function (ACF)
+
+The `ResidualACFSensor` exposes the lag-0…20 autocorrelation of the
+one-step prediction residuals together with a 95 % white-noise confidence
+band (`confidence_bound`).  Plotting these as a stem-and-band chart turns
+the abstract Ljung-Box statistic into something a user can read at a
+glance: bars within the band are statistically indistinguishable from
+zero (a healthy model); bars poking outside the band indicate the model
+is leaving structure on the table and parameter estimation should be
+re-run.
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Residual ACF - Living Room
+  show_states: true
+chart_type: bar
+graph_span: 1m   # ACF is lag-indexed, not time-indexed
+yaxis:
+  - id: rho
+    min: -1
+    max: 1
+    apex_config:
+      title:
+        text: Autocorrelation ρ(k)
+series:
+  - entity: sensor.heating_assistant_living_room_residual_acf
+    name: ACF
+    yaxis_id: rho
+    data_generator: |
+      const acf = entity.attributes.acf || [];
+      const lags = entity.attributes.lags || acf.map((_, i) => i);
+      // Use the lag index as the (categorical-equivalent) timestamp so
+      // apexcharts plots one bar per lag.
+      return acf.map((v, i) => [lags[i], v]);
+  - entity: sensor.heating_assistant_living_room_residual_acf
+    name: Upper 95% CI
+    type: line
+    color: red
+    stroke_width: 1
+    yaxis_id: rho
+    data_generator: |
+      const lags = entity.attributes.lags || [];
+      const ci = entity.attributes.confidence_bound ?? 0;
+      return lags.map(k => [k, ci]);
+  - entity: sensor.heating_assistant_living_room_residual_acf
+    name: Lower 95% CI
+    type: line
+    color: red
+    stroke_width: 1
+    yaxis_id: rho
+    data_generator: |
+      const lags = entity.attributes.lags || [];
+      const ci = entity.attributes.confidence_bound ?? 0;
+      return lags.map(k => [k, -ci]);
+```
+
+Companion attribute card:
+
+```yaml
+type: entities
+title: Residual whiteness - Living Room
+entities:
+  - entity: sensor.heating_assistant_living_room_residual_acf
+    name: Lag-1 autocorrelation ρ(1)
+  - entity: sensor.heating_assistant_living_room_residual_acf
+    type: attribute
+    attribute: confidence_bound
+    name: 95 % white-noise band
+  - entity: sensor.heating_assistant_living_room_residual_acf
+    type: attribute
+    attribute: ljung_box_stat
+    name: Ljung-Box Q
+```
+
+**What to look for:**
+- ✓ All bars (except lag-0, which is always 1) sit between ±confidence_bound → residuals are white noise
+- ⚠ One or more bars escape the band → re-run `estimate_parameters_ml`
+- ⚠ Ljung-Box Q growing over time → systematic model mismatch
+
+---
+
+### Apex Charts card: Controller tuning live view
+
+Combine the planned heating power, the room temperature, and the
+prediction error in a single time-aligned card to quickly judge whether
+controller cost weights need adjustment.  This is the most useful chart
+when interactively tuning `energy_weight`, `smoothing_weight`, and the
+prediction `horizon`.
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Controller Tuning - Living Room
+  show_states: true
+graph_span: 6h
+span:
+  start: minute
+  offset: '-4h'
+now:
+  show: true
+  label: Now
+yaxis:
+  - id: temp
+    apex_config:
+      title:
+        text: Temperature (°C)
+  - id: err
+    opposite: true
+    apex_config:
+      title:
+        text: Prediction error (°C)
+      decimalsInFloat: 3
+  - id: power
+    show: false
+series:
+  - entity: sensor.heating_assistant_living_room_predicted_temperature
+    name: Measured / model temp
+    yaxis_id: temp
+    color: '#1E88E5'
+    stroke_width: 2
+    extend_to: now
+    group_by: { func: raw, fill: last }
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: MPC prediction
+    yaxis_id: temp
+    color: '#0D47A1'
+    stroke_width: 2
+    data_generator: |
+      const fc = entity.attributes.forecast || [];
+      return fc.map(e => [new Date(e.time).getTime(), e.temperature]);
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
+    name: Setpoint
+    yaxis_id: temp
+    color: '#43A047'
+    stroke_width: 1
+    curve: stepline
+    data_generator: |
+      const fc = entity.attributes.forecast || [];
+      return fc.map(e => [new Date(e.time).getTime(), e.setpoint]);
+  - entity: sensor.heating_assistant_living_room_prediction_error
+    name: Prediction error
+    yaxis_id: err
+    color: '#9C27B0'
+    stroke_width: 1
+    extend_to: now
+    group_by: { func: raw, fill: last }
+```
+
+**Tuning interpretation:**
+| Symptom on chart | Suggested change |
+|------------------|------------------|
+| MPC prediction always below setpoint by a fixed bias | ↓ `energy_weight` |
+| Planned power swings between 0 and 100 % each step | ↑ `smoothing_weight` |
+| Setpoint reached only at the very end of the horizon | ↑ `horizon` |
+| Temperature oscillates around setpoint with > 0.5 °C swings | ↑ `smoothing_weight`, then ↑ `horizon` |
+| Prediction error consistently > ±0.3 °C | Re-run `estimate_parameters_ml` (model issue, not controller) |
 
 ---
 
@@ -564,7 +752,11 @@ entities:
 
 #### Temperature Forecast with MPC Constraints
 
-Visualize the predicted temperature trajectory, setpoint, and constraint bounds:
+Visualize the predicted temperature trajectory, setpoint, and constraint bounds.
+The historical (left of *Now*) trace is plotted directly from the HA recorder
+for the room temperature sensor — **no `data_generator` is needed** for that
+series, otherwise apexcharts will try to read a `forecast` attribute that does
+not exist on a plain temperature sensor.
 
 ```yaml
 type: custom:apexcharts-card
@@ -578,32 +770,34 @@ span:
 now:
   show: true
   label: Now
+yaxis:
+  - id: temp
+    apex_config:
+      title:
+        text: Temperature (°C)
 series:
-  # Historical temperature (from recorder)
+  # Historical temperature (from recorder, plotted directly — no data_generator)
   - entity: sensor.living_room_temperature
     name: Measured
     type: line
     stroke_width: 2
     color: blue
-    data_generator: |
-      return entity.attributes.forecast.map((entry) => {
-        return [new Date(entry.time).getTime(), entry.temperature];
-      });
-    show:
-      in_header: before_now
+    extend_to: now
+    yaxis_id: temp
+    group_by:
+      func: raw
+      fill: last
 
-  # MPC predicted trajectory
+  # MPC predicted trajectory (from forecast attribute, future-only)
   - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Predicted
     type: line
     stroke_width: 2
     color: orange
+    yaxis_id: temp
     data_generator: |
-      return entity.attributes.forecast.map((entry) => {
-        return [new Date(entry.time).getTime(), entry.temperature];
-      });
-    show:
-      in_header: after_now
+      const fc = entity.attributes.forecast || [];
+      return fc.map(e => [new Date(e.time).getTime(), e.temperature]);
 
   # Setpoint line
   - entity: sensor.heating_assistant_living_room_temperature_forecast
@@ -612,10 +806,10 @@ series:
     stroke_width: 1
     color: green
     curve: stepline
+    yaxis_id: temp
     data_generator: |
-      return entity.attributes.forecast.map((entry) => {
-        return [new Date(entry.time).getTime(), entry.setpoint];
-      });
+      const fc = entity.attributes.forecast || [];
+      return fc.map(e => [new Date(e.time).getTime(), e.setpoint]);
 
   # Upper constraint bound (setpoint + offset)
   - entity: sensor.heating_assistant_living_room_temperature_forecast
@@ -625,11 +819,11 @@ series:
     color: red
     opacity: 0.3
     curve: stepline
+    yaxis_id: temp
     data_generator: |
-      const offset = entity.attributes.constraint_offset || 2.0;
-      return entity.attributes.forecast.map((entry) => {
-        return [new Date(entry.time).getTime(), entry.setpoint + offset];
-      });
+      const fc = entity.attributes.forecast || [];
+      const offset = entity.attributes.constraint_offset ?? 2.0;
+      return fc.map(e => [new Date(e.time).getTime(), e.setpoint + offset]);
 
   # Lower constraint bound (setpoint - offset)
   - entity: sensor.heating_assistant_living_room_temperature_forecast
@@ -639,11 +833,11 @@ series:
     color: red
     opacity: 0.3
     curve: stepline
+    yaxis_id: temp
     data_generator: |
-      const offset = entity.attributes.constraint_offset || 2.0;
-      return entity.attributes.forecast.map((entry) => {
-        return [new Date(entry.time).getTime(), entry.setpoint - offset];
-      });
+      const fc = entity.attributes.forecast || [];
+      const offset = entity.attributes.constraint_offset ?? 2.0;
+      return fc.map(e => [new Date(e.time).getTime(), e.setpoint - offset]);
 ```
 
 This card shows:
@@ -660,9 +854,11 @@ This card shows:
 
 ---
 
-#### Heating Power Plan
+#### Heating / Cooling Power Plan
 
-Visualize the MPC's planned heating schedule:
+Visualize the MPC's planned schedule.  Heating power is positive; cooling
+(heat removal) is plotted as a negative value, so this single card shows
+both modes with a zero-line reference.
 
 ```yaml
 type: custom:apexcharts-card
@@ -676,33 +872,52 @@ span:
 now:
   show: true
   label: Now
+yaxis:
+  - id: power
+    apex_config:
+      title:
+        text: Power (W) — negative = cooling
 series:
-  # Current/historical heating power
+  # Current / historical heating (or cooling, signed) power
   - entity: sensor.heating_assistant_living_room_heating_power
-    name: Current Power
-    type: column
+    name: Actual
+    type: area
+    curve: stepline
     color: orange
-    show:
-      in_header: before_now
+    opacity: 0.25
+    yaxis_id: power
+    extend_to: now
+    group_by:
+      func: raw
+      fill: last
 
-  # Planned heating power
+  # Planned heating power (signed: positive = heat, negative = cool)
   - entity: sensor.heating_assistant_living_room_heating_plan
-    name: Planned Power
-    type: column
+    name: Planned
+    type: area
+    curve: stepline
     color: red
-    opacity: 0.6
+    opacity: 0.4
+    yaxis_id: power
     data_generator: |
-      return entity.attributes.forecast.map((entry) => {
-        return [new Date(entry.time).getTime(), entry.heating_power];
-      });
-    show:
-      in_header: after_now
+      const fc = entity.attributes.forecast || [];
+      return fc.map(e => [new Date(e.time).getTime(), e.heating_power]);
+
+  # Zero reference line
+  - entity: sensor.heating_assistant_living_room_heating_power
+    name: Zero
+    type: line
+    color: grey
+    stroke_width: 1
+    yaxis_id: power
+    transform: return 0;
 ```
 
 **What to look for:**
 - ✓ Smooth power transitions → good `smoothing_weight`
 - ⚠ Rapid on/off cycling → increase `smoothing_weight`
 - ⚠ Consistently zero power when below setpoint → check parameters or increase heater `max_power`
+- ⚠ Negative-going planned power means cooling is being engaged (only when a heat-pump source is configured for the room)
 
 ---
 
