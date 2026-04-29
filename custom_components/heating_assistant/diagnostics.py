@@ -71,6 +71,15 @@ async def async_get_config_entry_diagnostics(
                     src.cop(coordinator.outdoor_temp), 2
                 ),
                 "min_power": src.min_power,
+                "cooling_cop": src.cooling_cop,
+                "cooling_efficiency": src.cooling_efficiency,
+                # Negative value: heat-removal capacity at full cooling
+                "cooling_capacity_max": round(
+                    src.cooling_power(coordinator.outdoor_temp), 1
+                ),
+                "cooling_active": getattr(coordinator, "_cooling_active", {}).get(
+                    src.name, False
+                ),
             })
         sources_diag[src.name] = info
 

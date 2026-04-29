@@ -42,6 +42,8 @@ CONF_SOURCE_MIN_POWER = "min_power"    # W (minimum thermal output for heat pump
 CONF_SOURCE_HEATER_ENTITY = "heater_entity"  # HA entity_id for the heater
 CONF_SOURCE_MAX_TEMP_OFFSET = "max_temp_offset"  # °C max temperature offset for heat pump power control
 CONF_SOURCE_TURN_OFF_DEADBAND = "turn_off_deadband"  # °C above setpoint before heat pump turns off
+CONF_SOURCE_COOLING_COP = "cooling_cop"  # cooling COP (EER) for heat pumps in cooling mode
+CONF_SOURCE_COOLING_EFFICIENCY = "cooling_efficiency"  # fraction of max cooling capacity (0–1) used in dry/cool mode
 
 # Controller configuration keys
 CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
@@ -65,6 +67,8 @@ DEFAULT_MIN_POWER = 0.0                # W (no minimum by default)
 DEFAULT_MAX_TEMP_OFFSET = 5.0          # °C (heat pump offset at full power)
 DEFAULT_TURN_OFF_DEADBAND = 1.0        # °C above setpoint before heat pump turns off
 DEFAULT_IDLE_OFFSET = 1.0              # °C below internal temp for idle setpoint
+DEFAULT_COOLING_COP = 2.5              # rated cooling COP (EER) for heat pumps
+DEFAULT_COOLING_EFFICIENCY = 1.0       # fraction of max cooling capacity used (0–1)
 DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint offset
 DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)

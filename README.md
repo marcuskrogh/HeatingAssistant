@@ -103,6 +103,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
         - 14.5.3 [Step-by-step detuning procedure](#1453-step-by-step-detuning-procedure)
         - 14.5.4 [Effect of `smoothing_weight` on heat pump short-cycling](#1454-effect-of-smoothing_weight-on-heat-pump-short-cycling)
         - 14.5.5 [Quick reference — tuning cheat sheet](#1455-quick-reference--tuning-cheat-sheet)
+        - 14.5.6 [Live tuning chart](#1456-live-tuning-chart)
 15. [Developer Guide](#15-developer-guide)
     - 15.1 [Repository layout](#151-repository-layout)
     - 15.2 [Running the tests](#152-running-the-tests)
@@ -127,7 +128,8 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Receding-horizon MPC** | Each control cycle the controller solves a quadratic program over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error, energy use, and input rate-of-change (Δu smoothing).  Inputs are applied via zero-order hold. |
 | **Kalman filter state estimation** | A discrete-time Kalman filter fuses model predictions with sensor measurements, providing the minimum-variance state estimate under Gaussian noise assumptions. |
 | **Generic MPC framework** | The controller is built on a generic framework (`LinearDiscreteModel`, `KalmanFilter`, `OptimalControlProblem`, `MPCController`) that can be reused for any linear discrete-time system. |
-| **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface. |
+| **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface.  Heat-pump-equipped rooms additionally advertise `heat_cool` mode and report `cooling` as the HVAC action while the integration drives the heat pump in dry / fan-only mode. |
+| **Cooling-aware visualisation** | Cooling capacity is derived from a separate `cooling_cop` (EER) so the advanced visualisation no longer treats the rated *heating* output as the cooling capability.  Per-room Heating Power, Heating Plan, and Energy Balance sensors expose signed power (positive = heating, negative = cooling) so a single ApexCharts series shows both modes. |
 | **HA sensor entities** | Predicted temperature and active heating power sensors per room, with model metadata exposed as state attributes. |
 | **Advanced visualisation sensors** | Temperature forecast trajectory, heat loss breakdown, energy balance, and system efficiency sensors provide deep insight into system operation.  Forecast data includes a "now" bridge point for seamless connection between recorder history and MPC predictions, and setpoints are included in every forecast entry. |
 | **Weather forecast integration** | Optionally configure a HA weather entity (e.g. Met.no, OpenWeatherMap) to provide outdoor temperature forecasts.  The controller interpolates the forecast to each MPC horizon step for improved prediction accuracy during temperature transitions. |
@@ -446,7 +448,24 @@ This means the heat pump compressor keeps running (but produces minimal heat) wh
 
 **Cooling mode (dry/dehumidify):** when the room temperature exceeds the setpoint, the heat pump automatically switches to a gentle cooling mode to help bring the temperature down. The integration prefers "dry" (dehumidify) mode if available, which provides passive cooling without running the compressor at full cooling capacity. If "dry" mode is not supported, it falls back to "fan_only" mode.
 
-When in cooling mode, the heat pump actively removes heat from the room. The thermal model accounts for this heat removal with an assumed efficiency of 1.0 (conservative estimate). This ensures accurate temperature predictions and proper energy accounting. Cooling power is represented as negative heating power in the visualization sensors.
+When in cooling mode, the heat pump actively removes heat from the room. The cooling capacity exposed to the thermal model and the advanced visualisation sensors is **derived from the cooling COP (EER), not from the heating thermal max**. Specifically:
+
+```
+electric_max          = max_power / cop_rated         [rated electrical input, W]
+cooling_capacity_max  = electric_max × cooling_cop    [rated heat removal, W]
+cooling_power         = − cooling_capacity_max × cooling_efficiency × power_scale
+```
+
+This corrects an earlier bug where a 6.6 kW *heating* heat pump was reported as having 6.6 kW of cooling capability — the cooling capacity is now the physically correct value (typically ≈ 70 % of the heating max for a heat pump where `cop_rated = 3.5` and `cooling_cop = 2.5`).
+
+Two new heat-source configuration keys control the cooling cycle:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `cooling_cop` | `2.5` | Rated cooling coefficient of performance (EER) used when the heat pump is in dry / fan-only / cool mode. |
+| `cooling_efficiency` | `1.0` | Fraction (0–1) of the rated cooling capacity actually delivered.  Lower the value (e.g. `0.4`) when relying on `dry` mode for gentle dehumidification. |
+
+The signed cooling power is exposed as a negative value on the per-room **Heating Power**, **Heating Plan**, and **Energy Balance** sensors, and the per-room **Climate** entity reports `HVACAction.COOLING` (instead of `idle`) whenever a heat pump in the room is removing heat.  Heat-pump-equipped rooms also advertise `HVACMode.HEAT_COOL` so the HA frontend renders the cooling state with the correct icon.
 
 **Example COP curve** (COP_rated = 3.5, T_ref = 7 °C):
 
@@ -1104,6 +1123,8 @@ heat_sources:
     min_power: 800              # W thermal – optional (heat_pump only)
     max_temp_offset: 5.0        # °C – optional (heat_pump only)
     turn_off_deadband: 1.0      # °C – optional (heat_pump only)
+    cooling_cop: 2.5            # rated EER for cooling – optional (heat_pump only)
+    cooling_efficiency: 1.0     # 0–1, fraction of cooling capacity actually used – optional
 ```
 
 **Common keys (all types)**
@@ -1131,6 +1152,8 @@ heat_sources:
 | `min_power` | float | No | `0.0` | Minimum thermal output [W] below which the heat pump shuts off entirely.  Real inverter-driven heat pumps have a lower modulation limit (often 20–30 % of rated capacity); if the optimal control signal would produce a positive output below this threshold the integration forces the unit off instead.  Set this to your unit's minimum continuous output to prevent short-cycling. |
 | `max_temp_offset` | float | No | `5.0` | Maximum temperature offset [°C] added to the heat pump's internal temperature at full power.  When the heat pump is controlled via a `climate.*` entity, the integration sets `target = T_internal + fraction × max_temp_offset`.  Larger values give the heat pump a bigger temperature gap to ramp up against; smaller values limit maximum output.  The default of 5 °C works well for most underfloor and radiator systems. |
 | `turn_off_deadband` | float | No | `1.0` | Temperature [°C] above the room setpoint before the heat pump actually turns off.  When the MPC outputs zero heating demand but the room is still within this deadband of the setpoint, the heat pump stays in heat mode at idle (target = internal temperature, no offset) instead of turning off.  This prevents aggressive compressor short-cycling.  Increase this value if you notice the compressor toggling frequently. |
+| `cooling_cop` | float | No | `2.5` | Rated cooling COP / EER used to compute cooling capacity in dry / fan-only / cool mode.  The heat-removal capacity is `(max_power / cop_rated) × cooling_cop`, i.e. it scales with the **electrical** input rather than the heating thermal max.  Typical air-source heat pumps: 2.5–3.5.  Look up the value at the EN 14511 cooling test point (A35/W18 or A35/W7). |
+| `cooling_efficiency` | float | No | `1.0` | Fraction (0–1) of the rated cooling capacity actually delivered when the integration switches the heat pump to cooling.  Use values around 0.3–0.5 if you rely on `dry` (dehumidify) mode for gentle cooling, or leave at 1.0 if the device runs at full cooling capacity. |
 
 ---
 
@@ -1807,19 +1830,27 @@ This section describes the advanced visualisation sensors and setup assistance s
 
 ### 13.1 Visualisation sensors overview
 
-In addition to the basic sensors (predicted temperature, heating power, solar gain), the integration creates seven advanced sensor types that provide deep insight into system operation:
+In addition to the basic sensors (predicted temperature, heating power, solar gain), the integration creates a family of advanced sensors that provide deep insight into system operation:
 
 | Sensor | Per-room | Purpose |
 |--------|:--------:|---------|
 | **Temperature Forecast** | ✓ | MPC-predicted temperature trajectory over the prediction horizon, plus a timestamped `forecast` attribute for charting |
 | **Heat Loss** | ✓ | Instantaneous heat-loss breakdown (external + inter-room components) |
-| **Energy Balance** | ✓ | Net energy flow: heating + solar − losses |
-| **Heating Plan** | ✓ | Planned heating power schedule over the full MPC horizon, as a timestamped `forecast` attribute |
+| **Energy Balance** | ✓ | Net energy flow: heating + solar − losses (signed: positive = warming, negative = cooling) |
+| **Heating Plan** | ✓ | Planned signed power schedule over the full MPC horizon (positive = heating, negative = cooling), as a timestamped `forecast` attribute |
 | **Solar Forecast** | ✓ | Predicted solar heat gain over the full MPC horizon, as a timestamped `forecast` attribute |
 | **Outdoor Temperature Forecast** | ✗ (1 total) | Outdoor temperature forecast over the full MPC horizon — uses weather entity when configured, falls back to persistence otherwise |
 | **System Summary** | ✗ (1 total) | Aggregate system metrics: total power, COP, active sources |
+| **Prediction Error** | ✓ | One-step Kalman residual (signed °C) with rolling RMSE / MAE / bias attributes |
+| **Model Fit Quality** | ✓ | R² of the one-step prediction; full residual statistics in attributes |
+| **Parameter Confidence** | ✓ | 0–100 score covering thermal-mass / R-external / time-constant validity |
+| **Open-Loop RMSE** | ✓ | Multi-step free-run prediction RMSE — the genuine model-quality metric |
+| **Kalman Innovation** | ✓ | Innovation series with consistency flag for filter tuning |
+| **Residual ACF** | ✓ | Lag-0…20 autocorrelation of residuals + 95 % confidence band + Ljung-Box Q |
 
 All sensors update every coordinator cycle (default 60 seconds) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
+
+The diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) are documented in detail — including ready-to-paste ApexCharts cards — in [`MODEL_FIT_GUIDE.md`](MODEL_FIT_GUIDE.md).  The previous data-generator examples for the Open-Loop and Kalman cards used `e.time * 1000` and have been corrected to use the ISO-8601 timestamps now emitted by the sensors; copy the updated card YAML if you set those charts up earlier.
 
 ### 13.2 Temperature forecast trajectory
 
@@ -1867,15 +1898,16 @@ The **System Summary** sensor provides aggregate metrics for the entire heating 
 
 ### 13.6 Heating plan forecast
 
-The **Heating Plan** sensor shows the controller's *intended* heating schedule for each room over the full MPC horizon.
+The **Heating Plan** sensor shows the controller's *intended* schedule for each room over the full MPC horizon.
 
-- **State:** planned heating power for the current step [W]
-- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `heating_power` (W).  The first entry is at "now" with the current actual heating power, providing a seamless connection to the HA recorder history.
+- **State:** planned signed power for the current step [W]
+- **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `heating_power` (W).  Positive = heating, negative = cooling (heat removal when a heat pump is in dry / fan-only / cool mode).  The first entry is at "now" with the current actual signed power, providing a seamless connection to the HA recorder history.
 
 This is useful for:
 - Seeing in advance whether the controller intends to pre-heat a room before the setpoint is needed
 - Comparing the planned heating schedule against actual solar gain to understand how the controller balances the two
 - Verifying that the `energy_weight` is not making the controller too reluctant to heat
+- Verifying that the cooling capacity reported in the forecast is consistent with `cooling_cop × (max_power / cop_rated)` rather than the heating thermal max (the previous-version bug was that cooling traces went all the way down to `−max_power`)
 
 ### 13.7 Solar gain forecast
 
@@ -2780,6 +2812,12 @@ If the compressor still short-cycles after increasing `smoothing_weight`, also i
 | Heat pump compressor short-cycling | ↑ `smoothing_weight` + ↑ `turn_off_deadband` | ↑ `horizon` |
 | Sluggish response / room heats too slowly | ↓ `energy_weight` or ↓ `smoothing_weight` | — |
 | Temperature tracks setpoint but with slow drift | Correct `r_external` or `thermal_mass` | — |
+| Climate entity stuck on `idle` while room is being cooled | Update to the latest version — the entity now reports `cooling` and supports `heat_cool` mode for heat-pump rooms | — |
+| Cooling power on the Heating Plan sensor reaches `−max_power` | Update — cooling capacity is now derived from `cooling_cop × (max_power / cop_rated)` and the per-source `cooling_efficiency` further modulates it | Set `cooling_efficiency` to 0.3–0.5 if you only use `dry` mode |
+
+#### 14.5.6 Live tuning chart
+
+The Controller-Tuning ApexCharts card in [`MODEL_FIT_GUIDE.md`](MODEL_FIT_GUIDE.md#apex-charts-card-controller-tuning-live-view) overlays the measured temperature, the MPC prediction, the setpoint, and the prediction error in a single time-aligned figure.  Add it to a room subview while iterating on the cost weights — the chart instantly reveals whether a tweak improved tracking or just hid an underlying model-fit problem.
 
 ---
 
