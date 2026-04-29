@@ -23,11 +23,15 @@ class HeatSource(ABC):
         room: str,
         max_power: float,
         heater_entity: Optional[str] = None,
+        power_scale: float = 1.0,
     ) -> None:
         self.name = name
         self.room = room                     # name of the room this source heats
         self.max_power = max_power           # W (maximum *thermal* output)
         self.heater_entity = heater_entity   # optional HA entity_id
+        # Multiplicative correction on actual delivered thermal power.
+        # Identified jointly with thermal-mass and resistance parameters.
+        self.power_scale = power_scale
         self._current_power: float = 0.0    # W
 
     # ------------------------------------------------------------------
@@ -92,15 +96,16 @@ class ElectricHeater(HeatSource):
         max_power: float,
         efficiency: float = 1.0,
         heater_entity: Optional[str] = None,
+        power_scale: float = 1.0,
     ) -> None:
-        super().__init__(name, room, max_power, heater_entity)
+        super().__init__(name, room, max_power, heater_entity, power_scale)
         if not 0.0 < efficiency <= 1.0:
             raise ValueError(f"efficiency must be in (0, 1]; got {efficiency}")
         self.efficiency = efficiency
 
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
-        """Thermal power = electrical power × efficiency (outdoor_temp ignored)."""
-        return self.max_power * setpoint_fraction * self.efficiency
+        """Thermal power = electrical power × efficiency × power_scale."""
+        return self.max_power * setpoint_fraction * self.efficiency * self.power_scale
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +167,9 @@ class HeatPump(HeatSource):
         turn_off_deadband: float = 1.0,
         heater_entity: Optional[str] = None,
         cooling_efficiency: float = 1.0,
+        power_scale: float = 1.0,
     ) -> None:
-        super().__init__(name, room, max_power, heater_entity)
+        super().__init__(name, room, max_power, heater_entity, power_scale)
         self.cop_rated = cop_rated
         self.cop_temp_ref = cop_temp_ref
         self.min_outdoor_temp = min_outdoor_temp
@@ -191,7 +197,7 @@ class HeatPump(HeatSource):
         """
         electric_max = self.max_power / self.cop_rated  # rated electrical input [W]
         actual_cop = self.cop(outdoor_temp)
-        power = electric_max * setpoint_fraction * actual_cop
+        power = electric_max * setpoint_fraction * actual_cop * self.power_scale
         if 0.0 < power < self.min_power:
             return 0.0
         return power

@@ -583,11 +583,11 @@ def generate_model_fit_report(
 
         for record in history_buffer:
             y = record.get("y", [])
-            y_pred = record.get("y_pred", [])
+            y_pred = record.get("y_pred")  # may be None for the first record
 
             if i < len(y):
                 measurements.append(y[i])
-            if i < len(y_pred):
+            if y_pred is not None and i < len(y_pred):
                 predictions.append(y_pred[i])
 
         # Skip if no prediction data available
@@ -645,6 +645,7 @@ def generate_model_fit_report(
                     if fit_metrics.residual_autocorr_lag1 is not None
                     else None
                 ),
+                "n_samples": fit_metrics.n_samples,
             }
 
         if param_validation:
@@ -672,3 +673,250 @@ def generate_model_fit_report(
         report["rooms"][room_name] = room_report
 
     return report
+
+
+# ── Open-loop simulation diagnostic ──────────────────────────────────────────
+
+
+def compute_open_loop_predictions(
+    history: List[Dict[str, Any]],
+    system: Any,
+    room_names: List[str],
+    n_rooms: int,
+    dt: float,
+    segment_length: int = 30,
+) -> Dict[str, Any]:
+    """
+    Evaluate model quality by running open-loop (no Kalman correction)
+    simulations over sliding windows of the history buffer.
+
+    For each window of ``segment_length`` steps the model is initialised from
+    the first measurement in the window and then propagated forward purely
+    using the recorded control inputs and disturbances — no state correction.
+    This reveals the true multi-step prediction quality of the thermal model,
+    which is what the MPC actually relies on.
+
+    Parameters
+    ----------
+    history : list of dicts
+        History buffer entries, each with keys ``y``, ``u``, ``d_outdoor``,
+        ``d_solar``, ``timestamp``.
+    system : HouseThermalSystem
+        Thermal system object used to compute discrete-time matrices via
+        ``system.discretize(d_cvx)`` and to build disturbance vectors.
+        Passed as ``Any`` to avoid a circular import; only ``discretize``,
+        ``n_d``, ``_room_idx``, ``n_u`` are accessed.
+    room_names : list of str
+        Ordered room names (must match the ``y`` index order).
+    n_rooms : int
+        Number of rooms (= len(room_names)).
+    dt : float
+        Sampling interval [s] – must match the history buffer step.
+    segment_length : int
+        Number of steps per open-loop segment (default 30, i.e. 30 min at
+        60 s / step).
+
+    Returns
+    -------
+    dict with:
+        ``per_room``    : {room_name: {rmse, mae, simulation}}
+            ``simulation``  : list of {time, measured, predicted}
+        ``overall_rmse``    : {room_name: float}
+        ``n_segments``      : int
+        ``segment_length``  : int
+        ``error``           : str (only present on failure)
+    """
+    n = n_rooms
+    if len(history) < segment_length + 1:
+        return {
+            "error": (
+                f"Insufficient history: need ≥ {segment_length + 1} steps, "
+                f"have {len(history)}."
+            ),
+            "per_room": {},
+            "overall_rmse": {},
+            "n_segments": 0,
+            "segment_length": segment_length,
+        }
+
+    # Import helpers lazily to avoid loading cvxopt at module level
+    try:
+        from .controller import _np_to_cvx, _cvx_to_np  # type: ignore[import]
+    except ImportError:
+        return {
+            "error": "Cannot import controller helpers (cvxopt not available).",
+            "per_room": {},
+            "overall_rmse": {},
+            "n_segments": 0,
+            "segment_length": segment_length,
+        }
+
+    def _make_d(record: Dict[str, Any]) -> np.ndarray:
+        p = system.n_d
+        d = np.zeros(p)
+        d[0] = float(record.get("d_outdoor", 0.0))
+        d_solar = record.get("d_solar", {})
+        for name, gain in d_solar.items():
+            if name in system._room_idx:
+                d[1 + system._room_idx[name]] = float(gain)
+        return d
+
+    per_room_preds: Dict[str, List[float]] = {name: [] for name in room_names}
+    per_room_meas: Dict[str, List[float]] = {name: [] for name in room_names}
+    simulation: Dict[str, List[Dict[str, Any]]] = {name: [] for name in room_names}
+
+    n_segments = 0
+
+    for start in range(0, len(history) - segment_length, segment_length):
+        seg = history[start: start + segment_length]
+        y0 = seg[0].get("y", [])
+        if len(y0) < n:
+            continue
+
+        x = np.array(y0[:n], dtype=float)
+        d_prev = _make_d(seg[0])
+
+        valid_segment = True
+        for record in seg[1:]:
+            d = _make_d(record)
+            try:
+                A_cvx, B_cvx, E_cvx = system.discretize(_np_to_cvx(d_prev))
+            except Exception:
+                valid_segment = False
+                break
+            A = _cvx_to_np(A_cvx)
+            B_mat = _cvx_to_np(B_cvx)
+
+            u_raw = record.get("u", [])
+            n_u = B_mat.shape[1]
+            u = np.zeros(n_u)
+            for k, v in enumerate(u_raw):
+                if k < n_u:
+                    u[k] = float(v)
+
+            # Open-loop propagation – no measurement correction
+            x = A @ x + B_mat @ u
+
+            y_meas = record.get("y", [])
+            ts = record.get("timestamp", 0.0)
+
+            for room_idx, room_name in enumerate(room_names):
+                if room_idx < len(y_meas):
+                    pred_val = float(x[room_idx])
+                    meas_val = float(y_meas[room_idx])
+                    per_room_preds[room_name].append(pred_val)
+                    per_room_meas[room_name].append(meas_val)
+                    simulation[room_name].append({
+                        "time": ts,
+                        "measured": round(meas_val, 3),
+                        "predicted": round(pred_val, 3),
+                    })
+            d_prev = d
+
+        if valid_segment:
+            n_segments += 1
+
+    if n_segments == 0:
+        return {
+            "error": "No valid segments found.",
+            "per_room": {},
+            "overall_rmse": {},
+            "n_segments": 0,
+            "segment_length": segment_length,
+        }
+
+    per_room_results: Dict[str, Any] = {}
+    overall_rmse: Dict[str, float] = {}
+
+    for room_name in room_names:
+        preds = np.array(per_room_preds[room_name])
+        meas = np.array(per_room_meas[room_name])
+        if len(preds) == 0:
+            per_room_results[room_name] = {
+                "rmse": None,
+                "mae": None,
+                "simulation": [],
+            }
+            continue
+        residuals = preds - meas
+        rmse = float(np.sqrt(np.mean(residuals ** 2)))
+        mae = float(np.mean(np.abs(residuals)))
+        per_room_results[room_name] = {
+            "rmse": round(rmse, 4),
+            "mae": round(mae, 4),
+            "simulation": simulation[room_name],
+        }
+        overall_rmse[room_name] = round(rmse, 4)
+
+    return {
+        "per_room": per_room_results,
+        "overall_rmse": overall_rmse,
+        "n_segments": n_segments,
+        "segment_length": segment_length,
+    }
+
+
+def compute_autocorrelation_function(
+    residuals: List[float],
+    max_lag: int = 20,
+) -> Dict[str, Any]:
+    """
+    Compute the sample autocorrelation function (ACF) of *residuals* up to
+    *max_lag*, together with approximate 95 % confidence bounds and the
+    Ljung-Box test statistic.
+
+    Parameters
+    ----------
+    residuals : list of float
+        Sequence of residuals (prediction errors) in time order.
+    max_lag : int
+        Maximum lag to include (inclusive).  Default 20.
+
+    Returns
+    -------
+    dict with:
+        ``acf``              : list[float] – ACF at lags 0, 1, …, max_lag
+                               (acf[0] = 1.0 by definition)
+        ``lags``             : list[int]  – [0, 1, …, max_lag]
+        ``confidence_bound`` : float      – approximate ±95 % CI width
+                               (= 1.96 / sqrt(n))
+        ``ljung_box_stat``   : float      – Q = n(n+2) Σ ρ_k²/(n−k)
+        ``n_samples``        : int
+    """
+    n = len(residuals)
+    if n < 4:
+        return {
+            "acf": [1.0],
+            "lags": [0],
+            "confidence_bound": 1.0,
+            "ljung_box_stat": 0.0,
+            "n_samples": n,
+        }
+
+    r = np.array(residuals, dtype=float)
+    r -= r.mean()
+    var = float(np.dot(r, r))
+
+    effective_max_lag = min(max_lag, n - 2)
+    acf = [1.0]
+    for lag in range(1, effective_max_lag + 1):
+        c = float(np.dot(r[lag:], r[:-lag]))
+        acf.append(c / var if var > 0 else 0.0)
+
+    lags = list(range(len(acf)))
+    ci = 1.96 / math.sqrt(n)
+
+    # Ljung-Box: Q = n(n+2) Σ_{k=1}^{K} ρ_k² / (n-k)
+    lb = sum(
+        (acf[k] ** 2) / (n - k)
+        for k in range(1, len(acf))
+    )
+    lb_stat = float(n * (n + 2) * lb)
+
+    return {
+        "acf": [round(v, 5) for v in acf],
+        "lags": lags,
+        "confidence_bound": round(ci, 4),
+        "ljung_box_stat": round(lb_stat, 3),
+        "n_samples": n,
+    }

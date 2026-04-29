@@ -333,20 +333,37 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.solar_forecast = self.controller.solar_forecast
             self.heating_schedule = self.controller.heating_schedule
 
+            # Capture Kalman innovation for diagnostics (may be None on first step)
+            try:
+                kalman_innovation: Optional[List[float]] = (
+                    self.controller._mpc._estimator.last_innovation
+                )
+            except AttributeError:
+                kalman_innovation = None
+
             # 6. Record observation in the rolling history buffer for ML
             #    parameter estimation and model fit analysis.
-            # Extract one-step-ahead prediction from MPC predictions
-            y_pred = []
+            #
+            # y_pred alignment: the MPC predictions[0] is the one-step-ahead
+            # prediction for time k+1 (not time k).  To get a properly aligned
+            # diagnostic (prediction vs measurement at the *same* timestep) we
+            # store that forward prediction as "y_pred_for_next" and retrieve
+            # the *previous* record's "y_pred_for_next" as the aligned y_pred
+            # for the current step.
+            y_pred_aligned = None
+            if len(self._history_buffer) > 0:
+                y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
+
+            # Compute the one-step-ahead prediction for the NEXT cycle.
+            y_pred_for_next: List[float]
             if self.predictions and len(self.predictions) > 0:
-                # First prediction step contains one-step-ahead predictions
                 first_pred = self.predictions[0]
-                y_pred = [
+                y_pred_for_next = [
                     first_pred.get(name, self.model.rooms[name].temperature)
                     for name in self.model.room_names
                 ]
             else:
-                # Fallback: use current temperatures if no predictions available
-                y_pred = [
+                y_pred_for_next = [
                     self.model.rooms[name].temperature
                     for name in self.model.room_names
                 ]
@@ -356,7 +373,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     self.model.rooms[name].temperature
                     for name in self.model.room_names
                 ],
-                "y_pred": y_pred,
+                # y_pred: prediction made at k-1 FOR step k — aligned with y.
+                # None for the very first record (no prior prediction exists yet).
+                "y_pred": y_pred_aligned,
+                # y_pred_for_next: prediction made NOW (at k) FOR step k+1.
+                # Retrieved by the next cycle as y_pred_aligned.
+                "y_pred_for_next": y_pred_for_next,
                 "u": [
                     self.actions.get(src.name, 0.0)
                     for src in self.heat_sources
@@ -364,6 +386,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "d_outdoor": outdoor_temp,
                 "d_solar": dict(self.solar_gains),
                 "timestamp": now.timestamp(),
+                # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
+                "kalman_innovation": kalman_innovation,
             })
 
             # 7. Write set-points to heater entities
@@ -998,7 +1022,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=self._dt,
+            dt=UPDATE_INTERVAL,  # must match history buffer sampling interval, not MPC horizon
         )
 
         history = list(self._history_buffer)
@@ -1009,12 +1033,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         if result["success"] and apply_params:
-            self._apply_estimated_parameters(result["estimated_params"])
+            self._apply_estimated_parameters(
+                result["estimated_params"],
+                result.get("estimated_inter_room_r", {}),
+            )
 
         return result
 
     def _apply_estimated_parameters(
-        self, estimated_params: Dict[str, Dict[str, float]]
+        self,
+        estimated_params: Dict[str, Dict[str, float]],
+        estimated_inter_room_r: Optional[Dict[str, float]] = None,
     ) -> None:
         """
         Apply estimated parameters to the house model and rebuild the
@@ -1029,6 +1058,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             room = self.model.rooms[room_name]
             room.thermal_mass = float(params["thermal_mass"])
             room.r_external = float(params["r_external"])
+
+        # Apply inter-room resistances if estimated (Stage 2 result)
+        if estimated_inter_room_r:
+            for key, r_val in estimated_inter_room_r.items():
+                parts = key.split(":")
+                if len(parts) != 2:
+                    continue
+                room_a, room_b = parts
+                for name in (room_a, room_b):
+                    if name not in self.model.rooms:
+                        continue
+                    other = room_b if name == room_a else room_a
+                    for conn in self.model.rooms[name].connections:
+                        if conn.connected_room == other:
+                            conn.r_value = float(r_val)
+            _LOGGER.info(
+                "Applied estimated inter-room resistances: %s", estimated_inter_room_r
+            )
 
         # Rebuild the internal model matrices (A, B_ext, C_cap)
         (

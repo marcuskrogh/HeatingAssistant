@@ -41,7 +41,7 @@ Notation
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 from cvxopt import matrix
 
@@ -125,6 +125,9 @@ class KalmanFilter:
 
         self._first: bool = True
 
+        # Last Kalman innovation ν = y − C x̂⁻  (set after each filtering step)
+        self._last_innovation: Optional[matrix] = None
+
     # ── Public properties ────────────────────────────────────────────────
 
     @property
@@ -136,6 +139,19 @@ class KalmanFilter:
     def P(self) -> matrix:
         """Current covariance P[k] ∈ ℝⁿˣⁿ (copy)."""
         return matrix(self._P)
+
+    @property
+    def last_innovation(self) -> Optional[List[float]]:
+        """
+        Most recent Kalman innovation ν = y − C x̂⁻ as a plain Python list.
+
+        Returns ``None`` until the first filtering step has been completed
+        (i.e. until the second call to :meth:`update`).
+        """
+        if self._last_innovation is None:
+            return None
+        n = self._last_innovation.size[0]
+        return [float(self._last_innovation[i]) for i in range(n)]
 
     # ── Prediction step ──────────────────────────────────────────────────
 
@@ -214,6 +230,9 @@ class KalmanFilter:
         I_KC = I_n - K * C
         P = I_KC * P_pred * I_KC.T + K * self._R * K.T
         P = _symmetrise(P)
+
+        # Store innovation for external inspection (e.g. diagnostics sensors)
+        self._last_innovation = matrix(nu)
 
         return x_hat, P
 

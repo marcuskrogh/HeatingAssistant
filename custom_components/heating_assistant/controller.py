@@ -395,13 +395,21 @@ class HouseThermalSystem(LinearDiscreteModel):
         outdoor_temp: float,
         solar_gains: Dict[str, float],
     ) -> matrix:
-        """Pack outdoor temperature and per-room solar gains into d ∈ ℝᵖ."""
+        """Pack outdoor temperature and per-room (solar + internal) gains into d ∈ ℝᵖ.
+
+        ``Room.internal_gain`` is folded into the same disturbance slot as
+        solar gain — both are constant heat injections [W] mapped through
+        the same column of E_d, so the controller / Kalman filter cannot
+        tell them apart and does not need to.
+        """
         p = self.n_d
         d = matrix(0.0, (p, 1))
         d[0] = outdoor_temp
-        for name, gain in solar_gains.items():
-            if name in self._room_idx:
-                d[1 + self._room_idx[name]] = gain
+        for i, name in enumerate(self._room_list):
+            slot = 1 + i
+            gain = float(solar_gains.get(name, 0.0))
+            gain += float(self._model.rooms[name].internal_gain)
+            d[slot] = gain
         return d
 
     def heating_powers(

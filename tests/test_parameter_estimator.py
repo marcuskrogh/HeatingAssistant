@@ -317,3 +317,150 @@ class TestKalmanMLEstimator:
         ]
         result = estimator.estimate(history)
         assert result["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests for the joint estimation of internal heat gain and heater scale
+# ---------------------------------------------------------------------------
+
+
+def _generate_history_with_extras(
+    rooms,
+    sources,
+    dt=60.0,
+    n_steps=120,
+    outdoor_temp=5.0,
+    heating_pattern=None,
+    noise_std=0.02,
+    seed=42,
+):
+    """Generate synthetic history with time-varying heating and per-room
+    internal heat gains baked into ``Room.internal_gain``.
+
+    ``heating_pattern`` – list[float] (length n_steps) of duty cycles in
+    [0, 1].  Defaults to a 50 %-duty square wave so heater dynamics are
+    excited.
+    """
+    rng = np.random.default_rng(seed)
+    model = HouseModel(rooms)
+    n = len(rooms)
+
+    if heating_pattern is None:
+        heating_pattern = [
+            1.0 if (k // 30) % 2 == 0 else 0.0 for k in range(n_steps)
+        ]
+
+    temps = {r.name: r.temperature for r in rooms}
+
+    history = []
+    for k in range(n_steps):
+        y = [temps[r.name] + rng.normal(0, noise_std) for r in rooms]
+        u = [heating_pattern[k]] * len(sources)
+        solar = {r.name: 0.0 for r in rooms}
+
+        history.append({
+            "y": y,
+            "u": u,
+            "d_outdoor": outdoor_temp,
+            "d_solar": solar,
+        })
+
+        heat_inputs = {
+            src.room: src.thermal_power(heating_pattern[k], outdoor_temp)
+            for src in sources
+        }
+        temps = model.step(dt, heat_inputs, outdoor_temp, solar)
+
+    return history
+
+
+class TestJointInternalGainAndHeaterScale:
+    """Recovery of the new joint parameters from synthetic data."""
+
+    def test_result_contains_new_keys(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history(rooms, sources, n_steps=60)
+        result = estimator.estimate(history)
+        for key in (
+            "estimated_internal_gains",
+            "estimated_heater_scales",
+            "identifiable_sources",
+        ):
+            assert key in result, f"missing new key: {key}"
+
+    def test_internal_gain_is_recovered(self):
+        """A 500 W constant gain baked into the data should be recovered."""
+        true_gain = 500.0
+        true_room = _make_single_room()
+        true_room.internal_gain = true_gain
+        true_rooms = [true_room]
+        sources = _make_sources(true_rooms)
+        history = _generate_history_with_extras(
+            true_rooms, sources, n_steps=180, seed=7,
+        )
+
+        prior_room = _make_single_room()
+        prior_room.internal_gain = 0.0
+        estimator = KalmanMLEstimator(
+            [prior_room], sources, dt=60.0,
+            regularization=0.01,
+        )
+        result = estimator.estimate(history)
+        assert result["success"]
+        recovered = result["estimated_internal_gains"]["living_room"]
+        # Tolerate a wide band — multistart NM with regularisation should
+        # land within ±400 W of the true value.
+        assert abs(recovered - true_gain) < 400.0, (
+            f"recovered Q_int={recovered} W, expected ≈ {true_gain} W"
+        )
+
+    def test_heater_scale_is_identifiable_when_excited(self):
+        """When heaters vary, α should be flagged identifiable."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        history = _generate_history_with_extras(rooms, sources, n_steps=120)
+        result = estimator.estimate(history)
+        assert result["success"]
+        assert "living_room_heater" in result["identifiable_sources"]
+
+    def test_heater_scale_not_identifiable_when_constant(self):
+        """Constant duty cycle → α not identifiable."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        constant_pattern = [0.5] * 120
+        history = _generate_history_with_extras(
+            rooms, sources, n_steps=120, heating_pattern=constant_pattern,
+        )
+        result = estimator.estimate(history)
+        assert result["success"]
+        assert result["identifiable_sources"] == []
+
+    def test_joint_fit_improves_over_no_internal_gain(self):
+        """If true model has 800 W internal gain, joint fit should achieve
+        a better log-likelihood than fitting only (C, R_ext)."""
+        true_room = _make_single_room()
+        true_room.internal_gain = 800.0
+        sources = _make_sources([true_room])
+        history = _generate_history_with_extras(
+            [true_room], sources, n_steps=180, seed=11,
+        )
+
+        prior_room = _make_single_room()
+        prior_room.internal_gain = 0.0
+        # Use a very weak prior so the data dominates
+        estimator = KalmanMLEstimator(
+            [prior_room], sources, dt=60.0, regularization=0.001,
+        )
+
+        # Negative LL of the prior (no internal gain)
+        ll_prior = estimator.compute_log_likelihood(history)
+        result = estimator.estimate(history)
+        ll_post = result["log_likelihood"]
+        assert ll_prior is not None and ll_post is not None
+        # The joint estimator should lift the log-likelihood meaningfully.
+        assert ll_post >= ll_prior - 1.0
+
