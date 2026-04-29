@@ -16,16 +16,12 @@ from custom_components.heating_assistant.thermal_model import (
     RoomConnection,
 )
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
+from mbc import LinearDiscreteModel, KalmanFilter, OptimalControlProblem, MPCController
+from mbc._utils import _cvx_to_np, _cvx_col_to_np
 from custom_components.heating_assistant.controller import (
-    LinearDiscreteModel,
-    KalmanFilter,
     StateEstimator,
-    OptimalControlProblem,
-    MPCController,
     HouseThermalSystem,
     HeatingMPCController,
-    _cvx_to_np,
-    _cvx_col_to_np,
 )
 
 
