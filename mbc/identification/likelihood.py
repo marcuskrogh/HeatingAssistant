@@ -3,7 +3,7 @@ Prediction-error decomposition (PED) Kalman-filter log-likelihood.
 
 For a linear discrete-time system
 
-    x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k] + offset(d)
+    x[k+1] = A x[k] + B u[k] + E d[k] + offset
     y[k]   = C x[k]      (C = I assumed for efficiency)
 
 the prediction-error decomposition negative log-likelihood is
@@ -17,7 +17,9 @@ where:
 The model is provided via a *factory* callable
 ``model_factory(θ) → model`` that returns any object exposing the
 ``LinearDiscreteModel`` interface (``n_x``, ``n_u``, ``n_d``,
-``discretize(d_cvx)``, ``predict_offset(d_np)``).
+``discretize(d_cvx)``, ``predict_offset(d_np)``).  The ``d`` argument
+passed to ``discretize`` is the recorded disturbance from the history; LTI
+model implementations may ignore it.
 
 History format
 --------------
@@ -117,30 +119,36 @@ def ped_neg_log_likelihood(
     n_d = model.n_d
 
     # Bootstrap state estimate from first measurement
-    first = history[0]
-    x_hat = np.asarray(first["y"][:n], dtype=float).copy()
-    P = np.eye(n)
+    try:
+        first = history[0]
+        x_hat = np.asarray(first["y"][:n], dtype=float).copy()
+        P = np.eye(n)
 
-    u_prev = np.zeros(n_u)
-    raw_u = np.asarray(first["u"], dtype=float)
-    u_prev[:min(n_u, len(raw_u))] = raw_u[:n_u]
+        u_prev = np.zeros(n_u)
+        raw_u = np.asarray(first["u"], dtype=float)
+        u_prev[:min(n_u, len(raw_u))] = raw_u[:n_u]
 
-    d_prev = np.zeros(n_d)
-    raw_d = np.asarray(first["d"], dtype=float)
-    d_prev[:min(n_d, len(raw_d))] = raw_d[:n_d]
+        d_prev = np.zeros(n_d)
+        raw_d = np.asarray(first["d"], dtype=float)
+        d_prev[:min(n_d, len(raw_d))] = raw_d[:n_d]
+    except (KeyError, TypeError, ValueError):
+        return _INVALID_LIKELIHOOD
 
     neg_ll = 0.0
 
     for record in history[1:]:
-        y = np.asarray(record["y"][:n], dtype=float)
+        try:
+            y = np.asarray(record["y"][:n], dtype=float)
 
-        d_cur = np.zeros(n_d)
-        raw_d_cur = np.asarray(record["d"], dtype=float)
-        d_cur[:min(n_d, len(raw_d_cur))] = raw_d_cur[:n_d]
+            d_cur = np.zeros(n_d)
+            raw_d_cur = np.asarray(record["d"], dtype=float)
+            d_cur[:min(n_d, len(raw_d_cur))] = raw_d_cur[:n_d]
 
-        u_cur = np.zeros(n_u)
-        raw_u_cur = np.asarray(record["u"], dtype=float)
-        u_cur[:min(n_u, len(raw_u_cur))] = raw_u_cur[:n_u]
+            u_cur = np.zeros(n_u)
+            raw_u_cur = np.asarray(record["u"], dtype=float)
+            u_cur[:min(n_u, len(raw_u_cur))] = raw_u_cur[:n_u]
+        except (KeyError, TypeError, ValueError):
+            return _INVALID_LIKELIHOOD
 
         # Discretise at the previous disturbance
         try:

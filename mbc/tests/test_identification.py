@@ -1,8 +1,9 @@
 """
 Generic system-identification tests using a synthetic first-order linear model.
 
-All tests in this module use **only** NumPy and the public ``mbc``
-API — there is no dependency on the HeatingAssistant domain code.
+All tests in this module use **only** the public ``mbc`` API (plus cvxopt,
+which mbc already depends on) — there is no dependency on the HeatingAssistant
+domain code.
 
 Synthetic model
 ---------------
@@ -18,13 +19,9 @@ parametrisation for positive parameters.
 from __future__ import annotations
 
 import math
-import sys
-import os
 
 import numpy as np
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mbc.identification import (
     ParameterEstimator,
@@ -333,7 +330,9 @@ class TestParameterEstimator:
         # the sentinel value but not crash.
         history = _generate_history(n_steps=30)
         result = est.estimate(history)
-        assert math.isfinite(result.neg_log_likelihood) or result.neg_log_likelihood >= 1e9
+        # The result should be finite and equal to the sentinel (bounds barrier),
+        # not inf which would indicate an unhandled exception path.
+        assert math.isfinite(result.neg_log_likelihood)
 
     def test_log_likelihood_at_theta0(self):
         history = _generate_history(n_steps=60)

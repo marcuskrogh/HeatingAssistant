@@ -44,7 +44,6 @@ import numpy as np
 
 from .likelihood import (
     ped_neg_log_likelihood,
-    ped_neg_log_likelihood_gradient,
     _INVALID_LIKELIHOOD,
 )
 from ._nelder_mead import nelder_mead
@@ -139,6 +138,11 @@ class ParameterEstimator:
     ) -> None:
         self._model_factory = model_factory
         self._theta0 = np.asarray(theta0, dtype=float)
+        if bounds is not None and len(bounds) != len(self._theta0):
+            raise ValueError(
+                f"bounds length ({len(bounds)}) must equal theta0 length "
+                f"({len(self._theta0)})"
+            )
         self._bounds = bounds
         self._Q = Q
         self._R = R
@@ -278,10 +282,20 @@ class ParameterEstimator:
         try:
             from scipy.optimize import minimize  # optional dependency
 
+            # Always use finite-difference gradient of the *full* objective
+            # (likelihood + regularization + bounds guard) so the gradient is
+            # consistent with the function being minimized, regardless of
+            # whether a regularization_fn is set.
+            h = 1e-5
+
             def grad(theta: np.ndarray) -> np.ndarray:
-                return ped_neg_log_likelihood_gradient(
-                    self._model_factory, theta, history, self._Q, self._R
-                )
+                f0 = objective(theta)
+                g = np.zeros(len(theta), dtype=float)
+                for i in range(len(theta)):
+                    th = theta.copy()
+                    th[i] += h
+                    g[i] = (objective(th) - f0) / h
+                return g
 
             bounds_scipy = self._bounds  # list of (lo, hi) or None
             res = minimize(

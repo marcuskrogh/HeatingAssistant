@@ -55,7 +55,7 @@ from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
 from mbc.identification import ParameterEstimator as _MbcEstimator
 from mbc.identification import ped_neg_log_likelihood as _ped_neg_ll
-from mbc.identification._nelder_mead import nelder_mead as _nelder_mead  # backward compat
+from mbc.identification import nelder_mead as _nelder_mead  # backward compat
 
 _LOGGER = logging.getLogger(__name__)
 

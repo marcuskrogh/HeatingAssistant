@@ -142,11 +142,14 @@ class LinearDiscreteModel(ABC):
     """
     Abstract interface for a linear discrete-time system:
 
-      x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k] + offset(d),   y[k] = C x[k]
+      x[k+1] = A x[k] + B u[k] + E d[k] + offset,   y[k] = C x[k]
 
-    Matrices A, B, E may depend on the current disturbance d (LPV model);
-    C is time-invariant.  Subclasses implement ``discretize`` to return
-    the ZOH-discretised matrices (as cvxopt dense matrices) for a given d.
+    C is time-invariant.  Subclasses implement ``discretize(d)`` to return
+    the ZOH-discretised matrices as cvxopt dense matrices.  The ``d``
+    argument is passed as operating-point context: LTI implementations may
+    ignore it (A, B, E are constant), while LPV implementations use it to
+    schedule the matrices (e.g. when actuator gain depends on an exogenous
+    signal such as outdoor temperature).
 
     Parameter-identification interface
     -----------------------------------
@@ -201,7 +204,13 @@ class LinearDiscreteModel(ABC):
     def discretize(self, d: matrix) -> Tuple[matrix, matrix, matrix]:
         """
         Return ZOH-discretised matrices (A_d, B_d, E_d) as cvxopt dense
-        matrices for disturbance column vector d.
+        matrices.
+
+        The ``d`` argument is passed as operating-point context so that
+        LPV implementations can schedule matrices on the current disturbance
+        (e.g. heat-pump COP that varies with outdoor temperature).  Pure
+        LTI implementations may ignore ``d`` and always return constant
+        matrices.
         """
 
     # ── Parameter-identification interface (non-abstract, overridable) ────
@@ -595,6 +604,10 @@ class HouseThermalSystem(LinearDiscreteModel):
         from .thermal_model import Room
 
         n = self.n_x
+        if len(theta) != 2 * n:
+            raise ValueError(
+                f"theta must have length 2*n_x = {2 * n}; got {len(theta)}"
+            )
         log_masses = theta[:n]
         log_rs = theta[n:2 * n]
 
