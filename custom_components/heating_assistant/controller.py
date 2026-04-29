@@ -142,11 +142,22 @@ class LinearDiscreteModel(ABC):
     """
     Abstract interface for a linear discrete-time system:
 
-      x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k],   y[k] = C x[k]
+      x[k+1] = A x[k] + B u[k] + E d[k] + offset,   y[k] = C x[k]
 
-    Matrices A, B, E may depend on the current disturbance d (LPV model);
-    C is time-invariant.  Subclasses implement ``discretize`` to return
-    the ZOH-discretised matrices (as cvxopt dense matrices) for a given d.
+    C is time-invariant.  Subclasses implement ``discretize(d)`` to return
+    the ZOH-discretised matrices as cvxopt dense matrices.  The ``d``
+    argument is passed as operating-point context: LTI implementations may
+    ignore it (A, B, E are constant), while LPV implementations use it to
+    schedule the matrices (e.g. when actuator gain depends on an exogenous
+    signal such as outdoor temperature).
+
+    Parameter-identification interface
+    -----------------------------------
+    Subclasses that support system identification should additionally
+    implement ``params`` and ``with_params``.  The concrete
+    ``discretize_jacobian`` method provides finite-difference Jacobians by
+    default; subclasses may override it with an analytic implementation for
+    improved efficiency.
     """
 
     @property
@@ -193,8 +204,133 @@ class LinearDiscreteModel(ABC):
     def discretize(self, d: matrix) -> Tuple[matrix, matrix, matrix]:
         """
         Return ZOH-discretised matrices (A_d, B_d, E_d) as cvxopt dense
-        matrices for disturbance column vector d.
+        matrices.
+
+        The ``d`` argument is passed as operating-point context so that
+        LPV implementations can schedule matrices on the current disturbance
+        (e.g. heat-pump COP that varies with outdoor temperature).  Pure
+        LTI implementations may ignore ``d`` and always return constant
+        matrices.
         """
+
+    # ── Parameter-identification interface (non-abstract, overridable) ────
+
+    def predict_offset(self, d_np: np.ndarray) -> np.ndarray:
+        """
+        Additive constant term for the one-step prediction:
+
+            x_pred = A x + B u + E d + predict_offset(d)
+
+        The default implementation returns a zero vector.  Subclasses that
+        model a known constant disturbance or an estimated bias term
+        (e.g. internal heat gains that are not captured in *d*) should
+        override this method.
+
+        Parameters
+        ----------
+        d_np : (p,) ndarray  — current disturbance vector (numpy).
+
+        Returns
+        -------
+        offset : (n,) ndarray
+        """
+        return np.zeros(self.n_x)
+
+    @property
+    def params(self) -> np.ndarray:
+        """
+        Current parameter vector *θ* as a flat numpy array.
+
+        The default implementation returns an empty array, indicating that
+        this model does not expose identifiable parameters via this
+        interface.  Subclasses should override to return the natural
+        parameter vector for system identification.
+        """
+        return np.array([], dtype=float)
+
+    def with_params(self, theta: np.ndarray) -> "LinearDiscreteModel":
+        """
+        Return a **new** model instance constructed from parameter vector *θ*.
+
+        This is the model factory used by
+        ``discretize_jacobian`` for finite-difference perturbation.
+
+        The default implementation raises :class:`NotImplementedError`.
+        Subclasses that expose ``params`` should override this method.
+
+        Parameters
+        ----------
+        theta : (p,) ndarray — parameter vector (same layout as ``params``).
+
+        Returns
+        -------
+        LinearDiscreteModel
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement with_params."
+        )
+
+    def discretize_jacobian(
+        self,
+        d: np.ndarray,
+        h: float = 1e-5,
+    ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
+        """
+        Jacobians of the discretised matrices w.r.t. the parameter vector.
+
+        Returns lists ``(dA, dB, dE)`` each of length ``len(self.params)``,
+        where ``dA[i]``, ``dB[i]``, ``dE[i]`` are (n×n), (n×m), (n×p)
+        numpy arrays representing
+
+            ∂A_d/∂θ_i,  ∂B_d/∂θ_i,  ∂E_d/∂θ_i
+
+        evaluated at the current ``self.params``.
+
+        The default implementation uses forward finite differences via
+        ``with_params``.  If ``params`` is empty or ``with_params`` is not
+        implemented, empty lists are returned.  Subclasses may override
+        with an analytic implementation.
+
+        Parameters
+        ----------
+        d : (p,) ndarray — disturbance vector (numpy).
+        h : float        — finite-difference step size.
+
+        Returns
+        -------
+        dA : list of (n, n) ndarray
+        dB : list of (n, m) ndarray
+        dE : list of (n, p) ndarray
+        """
+        theta0 = self.params
+        if len(theta0) == 0:
+            return [], [], []
+
+        def _to_np(m: matrix) -> np.ndarray:
+            rows, cols = m.size
+            return np.array(list(m), dtype=float).reshape(
+                (rows, cols), order="F"
+            )
+
+        d_cvx = matrix(d.tolist(), (len(d), 1), tc="d")
+        A0, B0, E0 = self.discretize(d_cvx)
+        A0_np, B0_np, E0_np = _to_np(A0), _to_np(B0), _to_np(E0)
+
+        dA: List[np.ndarray] = []
+        dB: List[np.ndarray] = []
+        dE: List[np.ndarray] = []
+        for i in range(len(theta0)):
+            theta_h = theta0.copy()
+            theta_h[i] += h
+            try:
+                m_h = self.with_params(theta_h)
+            except NotImplementedError:
+                return [], [], []
+            Ah, Bh, Eh = m_h.discretize(d_cvx)
+            dA.append((_to_np(Ah) - A0_np) / h)
+            dB.append((_to_np(Bh) - B0_np) / h)
+            dE.append((_to_np(Eh) - E0_np) / h)
+        return dA, dB, dE
 
 
 class MPCController:
@@ -422,6 +558,78 @@ class HouseThermalSystem(LinearDiscreteModel):
         for j, src in enumerate(self._sources):
             powers[src.room] += src.thermal_power(float(u_vec[j]), outdoor_temp)
         return powers
+
+    # ── Parameter-identification interface ───────────────────────────────
+
+    @property
+    def params(self) -> np.ndarray:
+        """
+        Natural identifiable parameters as a flat array:
+
+            θ = [log(C₁), …, log(Cₙ), log(R₁_ext), …, log(Rₙ_ext)]
+
+        where Cᵢ is the thermal mass [J/K] and Rᵢ_ext is the external
+        thermal resistance [K/W] of room *i*.
+
+        This parametrisation is used by ``discretize_jacobian`` and
+        ``with_params`` for system identification of the core structural
+        parameters.  Extended parameters such as heater-power scales or
+        internal heat gains are handled separately in the application
+        layer.
+        """
+        import math
+        n = self.n_x
+        masses = [
+            self._model.rooms[name].thermal_mass for name in self._room_list
+        ]
+        rs = [
+            self._model.rooms[name].r_external for name in self._room_list
+        ]
+        return np.array(
+            [math.log(max(m, 1.0)) for m in masses]
+            + [math.log(max(r, 1e-12)) for r in rs],
+            dtype=float,
+        )
+
+    def with_params(self, theta: np.ndarray) -> "HouseThermalSystem":
+        """
+        Return a new :class:`HouseThermalSystem` with the structural
+        parameters given by *theta* = [log(C₁), …, log(Rₙ_ext)].
+
+        All other model attributes (connections, windows, setpoints,
+        heat sources, dt) are copied from the current instance.
+        """
+        import math
+        import copy
+        from .thermal_model import Room
+
+        n = self.n_x
+        if len(theta) != 2 * n:
+            raise ValueError(
+                f"theta must have length 2*n_x = {2 * n}; got {len(theta)}"
+            )
+        log_masses = theta[:n]
+        log_rs = theta[n:2 * n]
+
+        new_rooms = []
+        for i, name in enumerate(self._room_list):
+            old_room = self._model.rooms[name]
+            new_room = Room(
+                name=old_room.name,
+                thermal_mass=float(math.exp(log_masses[i])),
+                r_external=float(math.exp(log_rs[i])),
+                connections=copy.deepcopy(old_room.connections),
+                windows=copy.deepcopy(old_room.windows),
+                temperature=old_room.temperature,
+                setpoint=old_room.setpoint,
+                internal_gain=old_room.internal_gain,
+            )
+            new_rooms.append(new_room)
+
+        from .thermal_model import HouseModel
+        return HouseThermalSystem(
+            HouseModel(new_rooms), self._sources, self._dt
+        )
 
 
 class HeatingMPCController:
