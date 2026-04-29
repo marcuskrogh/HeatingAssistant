@@ -42,7 +42,11 @@ from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
-from .likelihood import ped_neg_log_likelihood, ped_neg_log_likelihood_gradient
+from .likelihood import (
+    ped_neg_log_likelihood,
+    ped_neg_log_likelihood_gradient,
+    _INVALID_LIKELIHOOD,
+)
 from ._nelder_mead import nelder_mead
 
 _LOGGER = logging.getLogger(__name__)
@@ -169,7 +173,7 @@ class ParameterEstimator:
         neg_ll = ped_neg_log_likelihood(
             self._model_factory, theta, history, self._Q, self._R
         )
-        if not np.isfinite(neg_ll) or neg_ll >= 1e9:
+        if not np.isfinite(neg_ll) or neg_ll >= _INVALID_LIKELIHOOD:
             return None
         return float(-neg_ll)
 
@@ -193,14 +197,14 @@ class ParameterEstimator:
             if self._bounds is not None:
                 for i, (lo, hi) in enumerate(self._bounds):
                     if lo is not None and theta[i] < lo:
-                        return 1e10
+                        return _INVALID_LIKELIHOOD
                     if hi is not None and theta[i] > hi:
-                        return 1e10
+                        return _INVALID_LIKELIHOOD
 
             neg_ll = ped_neg_log_likelihood(
                 self._model_factory, theta, history, self._Q, self._R
             )
-            if neg_ll >= 1e9:
+            if neg_ll >= _INVALID_LIKELIHOOD:
                 return neg_ll
 
             if self._reg_fn is not None:

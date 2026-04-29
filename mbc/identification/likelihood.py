@@ -57,6 +57,13 @@ def _cvx_to_np(m) -> np.ndarray:
     return np.array(list(m), dtype=float).reshape((rows, cols), order="F")
 
 
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+#: Sentinel value returned when the likelihood cannot be evaluated (numerical
+#: failure, invalid parameters, factory exception, etc.).
+_INVALID_LIKELIHOOD = 1e10
+
+
 # ── Core likelihood ───────────────────────────────────────────────────────────
 
 
@@ -76,8 +83,8 @@ def ped_neg_log_likelihood(
         Returns a model object exposing ``n_x``, ``n_u``, ``n_d``,
         ``discretize(d_cvx) → (A_cvx, B_cvx, E_cvx)``, and optionally
         ``predict_offset(d_np) → np.ndarray``.
-        May raise any exception for invalid θ; the sentinel ``1e10`` is
-        returned in that case.
+        May raise any exception for invalid θ; the sentinel ``_INVALID_LIKELIHOOD``
+        is returned in that case.
     theta : (p,) ndarray
         Parameter vector passed to *model_factory*.
     history : list of dicts
@@ -91,18 +98,19 @@ def ped_neg_log_likelihood(
     Returns
     -------
     neg_ll : float
-        Negative log-likelihood, or ``1e10`` on any numerical failure.
+        Negative log-likelihood, or ``_INVALID_LIKELIHOOD`` on any numerical
+        failure.
     """
     if len(history) < 2:
-        return 1e10
+        return _INVALID_LIKELIHOOD
 
     if not np.all(np.isfinite(theta)):
-        return 1e10
+        return _INVALID_LIKELIHOOD
 
     try:
         model = model_factory(theta)
     except Exception:
-        return 1e10
+        return _INVALID_LIKELIHOOD
 
     n = model.n_x
     n_u = model.n_u
@@ -138,7 +146,7 @@ def ped_neg_log_likelihood(
         try:
             A_cvx, B_cvx, E_cvx = model.discretize(_np_to_cvx(d_prev))
         except Exception:
-            return 1e10
+            return _INVALID_LIKELIHOOD
 
         A = _cvx_to_np(A_cvx)
         B = _cvx_to_np(B_cvx)
@@ -163,16 +171,16 @@ def ped_neg_log_likelihood(
         try:
             sign, logdet = np.linalg.slogdet(S)
             if sign <= 0:
-                return 1e10
+                return _INVALID_LIKELIHOOD
             neg_ll += 0.5 * (logdet + float(nu @ np.linalg.solve(S, nu)))
         except np.linalg.LinAlgError:
-            return 1e10
+            return _INVALID_LIKELIHOOD
 
         # Kalman update  (C = I → K = P_pred S⁻¹)
         try:
             K = np.linalg.solve(S.T, P_pred.T).T
         except np.linalg.LinAlgError:
-            return 1e10
+            return _INVALID_LIKELIHOOD
 
         IK = np.eye(n) - K
         x_hat = x_pred + K @ nu

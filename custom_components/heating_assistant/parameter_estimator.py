@@ -518,7 +518,7 @@ class KalmanMLEstimator:
         # ── Custom perturbation: scale q_int by 200 for physical restarts ──
         def _perturb(theta0: np.ndarray,
                      rng: np.random.Generator,
-                     restart_idx: int) -> np.ndarray:
+                     _restart_idx: int) -> np.ndarray:
             pert = rng.normal(0.0, _RESTART_PERT, size=theta0.size)
             a, b = layout.idx_q_int
             pert[a:b] *= 200.0   # std ≈ 100 W in linear space
