@@ -741,10 +741,10 @@ def compute_open_loop_predictions(
 
     # Import helpers lazily to avoid loading cvxopt at module level
     try:
-        from .controller import _np_to_cvx, _cvx_to_np  # type: ignore[import]
+        from mbc._utils import _np_to_cvx, _cvx_to_np  # type: ignore[import]
     except ImportError:
         return {
-            "error": "Cannot import controller helpers (cvxopt not available).",
+            "error": "Cannot import mbc utilities (cvxopt not available).",
             "per_room": {},
             "overall_rmse": {},
             "n_segments": 0,

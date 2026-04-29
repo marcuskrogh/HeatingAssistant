@@ -40,23 +40,7 @@ from typing import Callable, Dict, List
 
 import numpy as np
 
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _np_to_cvx(a: np.ndarray):
-    """Convert a 1-D or 2-D numpy array to a cvxopt dense column / matrix."""
-    from cvxopt import matrix as cvx_matrix  # lazy import
-    if a.ndim == 1:
-        return cvx_matrix(a.tolist(), (len(a), 1), tc="d")
-    rows, cols = a.shape
-    return cvx_matrix(a.tolist(), (rows, cols), tc="d")
-
-
-def _cvx_to_np(m) -> np.ndarray:
-    """Convert a cvxopt dense matrix to a 2-D numpy array (column-major)."""
-    rows, cols = m.size
-    return np.array(list(m), dtype=float).reshape((rows, cols), order="F")
+from .._utils import _np_to_cvx, _cvx_to_np
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────

@@ -1,31 +1,9 @@
 """
-Model Predictive Controller.
+Model Predictive Controller — House-Heating Application.
 
-Generic Framework
------------------
-LinearDiscreteModel (abstract)
-    x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k],   y[k] = C x[k]
-
-    x ∈ ℝⁿ  state,  u ∈ ℝᵐ  input (ZOH over each dt),
-    d ∈ ℝᵖ  disturbance,    y ∈ ℝˡ  output.
-
-    Matrices A, B, E may depend on d (LPV); C is time-invariant.
-
-KalmanFilter  (see state_estimator.py)
-    Discrete-time Kalman filter with Joseph stabilised covariance update.
-
-OptimalControlProblem  (see optimal_control.py)
-    Receding-horizon QP with setpoint tracking, Δu penalty, hard input
-    box-constraints, and soft output box-constraints.  Solved via
-    cvxopt.solvers.qp.
-
-MPCController (generic)
-    Composes KalmanFilter + OptimalControlProblem for any LinearDiscreteModel:
-
-      1. Estimate  x̂[k] ← estimator.update(y[k], d[k])
-      2. Optimise  U*    ← ocp.solve(x̂[k], D, r)
-      3. Apply     u[k]  = U*[0]                 (receding horizon)
-      4. Record    estimator.record_action(u[k])
+Generic model-based control components (LinearDiscreteModel, KalmanFilter,
+OptimalControlProblem, MPCController) live in the ``mbc`` package and are
+imported here for use by the application layer.
 
 House-Heating Application
 --------------------------
@@ -57,7 +35,7 @@ HeatingMPCController
     solar/outdoor forecasting, applies source set-points, and exposes the
     visualisation properties consumed by the coordinator.
 
-    Public API (unchanged from the previous implementation):
+    Public API:
         controller = HeatingMPCController(model, heat_sources, ...)
         actions    = controller.compute(outdoor_temp, solar_gains, now)
         # controller.predictions, .outdoor_forecast, .solar_forecast,
@@ -66,7 +44,6 @@ HeatingMPCController
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -76,323 +53,16 @@ from cvxopt import matrix
 from .thermal_model import HouseModel
 from .heat_sources import HeatSource
 from .solar_model import room_solar_gains
-from .state_estimator import KalmanFilter
-from .optimal_control import OptimalControlProblem
+
+# ── Import generic model-based control components from mbc ──────────────────
+from mbc.models import LinearDiscreteModel
+from mbc.estimation import KalmanFilter
+from mbc.control import OptimalControlProblem, MPCController
+from mbc._utils import _np_to_cvx, _cvx_to_np, _cvx_col_to_np, _expm, _zoh
 
 
 # ── Backward-compatible alias ────────────────────────────────────────────
 StateEstimator = KalmanFilter
-
-
-# ============================================================
-# Helpers
-# ============================================================
-
-def _np_to_cvx(a: np.ndarray) -> matrix:
-    """Convert a numpy array to a cvxopt dense matrix (column-major)."""
-    if a.ndim == 1:
-        return matrix(a.tolist(), (len(a), 1), tc="d")
-    rows, cols = a.shape
-    return matrix(a.tolist(), (rows, cols), tc="d")
-
-
-def _cvx_to_np(m: matrix) -> np.ndarray:
-    """Convert a cvxopt dense matrix to a 2-D numpy array."""
-    rows, cols = m.size
-    # cvxopt stores matrices in column-major (Fortran) order
-    return np.array(list(m), dtype=float).reshape((rows, cols), order="F")
-
-
-def _cvx_col_to_np(m: matrix) -> np.ndarray:
-    """Convert a cvxopt column vector to a 1-D numpy array."""
-    return np.array(list(m), dtype=float)
-
-
-def _expm(M: np.ndarray) -> np.ndarray:
-    """
-    Matrix exponential via eigendecomposition.
-
-    For a real matrix M with distinct eigenvalues this is exact.
-    Thermal state matrices have real, distinct, negative eigenvalues
-    (stable RC circuit), so this approach is numerically well-conditioned.
-    """
-    vals, vecs = np.linalg.eig(M)
-    return np.real(vecs @ np.diag(np.exp(vals)) @ np.linalg.inv(vecs))
-
-
-def _zoh(Fc: np.ndarray, Gc: np.ndarray, dt: float) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Zero-order hold discretisation of ẋ = Fc x + Gc u.
-
-    Returns (A_d, B_d) such that x[k+1] = A_d x[k] + B_d u[k].
-
-    Using:  A_d = expm(Fc dt),   B_d = Fc⁻¹ (A_d − I) Gc
-    """
-    n = Fc.shape[0]
-    A_d = _expm(Fc * dt)
-    B_d = np.linalg.solve(Fc, (A_d - np.eye(n)) @ Gc)
-    return A_d, B_d
-
-
-# ============================================================
-# Generic framework
-# ============================================================
-
-class LinearDiscreteModel(ABC):
-    """
-    Abstract interface for a linear discrete-time system:
-
-      x[k+1] = A x[k] + B u[k] + E d[k] + offset,   y[k] = C x[k]
-
-    C is time-invariant.  Subclasses implement ``discretize(d)`` to return
-    the ZOH-discretised matrices as cvxopt dense matrices.  The ``d``
-    argument is passed as operating-point context: LTI implementations may
-    ignore it (A, B, E are constant), while LPV implementations use it to
-    schedule the matrices (e.g. when actuator gain depends on an exogenous
-    signal such as outdoor temperature).
-
-    Parameter-identification interface
-    -----------------------------------
-    Subclasses that support system identification should additionally
-    implement ``params`` and ``with_params``.  The concrete
-    ``discretize_jacobian`` method provides finite-difference Jacobians by
-    default; subclasses may override it with an analytic implementation for
-    improved efficiency.
-    """
-
-    @property
-    @abstractmethod
-    def n_x(self) -> int:
-        """State dimension n."""
-
-    @property
-    @abstractmethod
-    def n_u(self) -> int:
-        """Input dimension m."""
-
-    @property
-    @abstractmethod
-    def n_d(self) -> int:
-        """Disturbance dimension p."""
-
-    @property
-    @abstractmethod
-    def C(self) -> matrix:
-        """Output matrix C ∈ ℝˡˣⁿ (cvxopt dense)."""
-
-    @property
-    @abstractmethod
-    def x(self) -> list[float]:
-        """Current state x as a plain list of floats."""
-
-    @x.setter
-    @abstractmethod
-    def x(self, val: list[float]) -> None:
-        ...
-
-    @property
-    @abstractmethod
-    def x_ref(self) -> matrix:
-        """Reference / setpoint x_ref ∈ ℝⁿ (cvxopt column vector)."""
-
-    @property
-    @abstractmethod
-    def u_bounds(self) -> Tuple[matrix, matrix]:
-        """Box constraint on inputs (u_min, u_max), each (m, 1) cvxopt."""
-
-    @abstractmethod
-    def discretize(self, d: matrix) -> Tuple[matrix, matrix, matrix]:
-        """
-        Return ZOH-discretised matrices (A_d, B_d, E_d) as cvxopt dense
-        matrices.
-
-        The ``d`` argument is passed as operating-point context so that
-        LPV implementations can schedule matrices on the current disturbance
-        (e.g. heat-pump COP that varies with outdoor temperature).  Pure
-        LTI implementations may ignore ``d`` and always return constant
-        matrices.
-        """
-
-    # ── Parameter-identification interface (non-abstract, overridable) ────
-
-    def predict_offset(self, d_np: np.ndarray) -> np.ndarray:
-        """
-        Additive constant term for the one-step prediction:
-
-            x_pred = A x + B u + E d + predict_offset(d)
-
-        The default implementation returns a zero vector.  Subclasses that
-        model a known constant disturbance or an estimated bias term
-        (e.g. internal heat gains that are not captured in *d*) should
-        override this method.
-
-        Parameters
-        ----------
-        d_np : (p,) ndarray  — current disturbance vector (numpy).
-
-        Returns
-        -------
-        offset : (n,) ndarray
-        """
-        return np.zeros(self.n_x)
-
-    @property
-    def params(self) -> np.ndarray:
-        """
-        Current parameter vector *θ* as a flat numpy array.
-
-        The default implementation returns an empty array, indicating that
-        this model does not expose identifiable parameters via this
-        interface.  Subclasses should override to return the natural
-        parameter vector for system identification.
-        """
-        return np.array([], dtype=float)
-
-    def with_params(self, theta: np.ndarray) -> "LinearDiscreteModel":
-        """
-        Return a **new** model instance constructed from parameter vector *θ*.
-
-        This is the model factory used by
-        ``discretize_jacobian`` for finite-difference perturbation.
-
-        The default implementation raises :class:`NotImplementedError`.
-        Subclasses that expose ``params`` should override this method.
-
-        Parameters
-        ----------
-        theta : (p,) ndarray — parameter vector (same layout as ``params``).
-
-        Returns
-        -------
-        LinearDiscreteModel
-        """
-        raise NotImplementedError(
-            f"{type(self).__name__} does not implement with_params."
-        )
-
-    def discretize_jacobian(
-        self,
-        d: np.ndarray,
-        h: float = 1e-5,
-    ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
-        """
-        Jacobians of the discretised matrices w.r.t. the parameter vector.
-
-        Returns lists ``(dA, dB, dE)`` each of length ``len(self.params)``,
-        where ``dA[i]``, ``dB[i]``, ``dE[i]`` are (n×n), (n×m), (n×p)
-        numpy arrays representing
-
-            ∂A_d/∂θ_i,  ∂B_d/∂θ_i,  ∂E_d/∂θ_i
-
-        evaluated at the current ``self.params``.
-
-        The default implementation uses forward finite differences via
-        ``with_params``.  If ``params`` is empty or ``with_params`` is not
-        implemented, empty lists are returned.  Subclasses may override
-        with an analytic implementation.
-
-        Parameters
-        ----------
-        d : (p,) ndarray — disturbance vector (numpy).
-        h : float        — finite-difference step size.
-
-        Returns
-        -------
-        dA : list of (n, n) ndarray
-        dB : list of (n, m) ndarray
-        dE : list of (n, p) ndarray
-        """
-        theta0 = self.params
-        if len(theta0) == 0:
-            return [], [], []
-
-        def _to_np(m: matrix) -> np.ndarray:
-            rows, cols = m.size
-            return np.array(list(m), dtype=float).reshape(
-                (rows, cols), order="F"
-            )
-
-        d_cvx = matrix(d.tolist(), (len(d), 1), tc="d")
-        A0, B0, E0 = self.discretize(d_cvx)
-        A0_np, B0_np, E0_np = _to_np(A0), _to_np(B0), _to_np(E0)
-
-        dA: List[np.ndarray] = []
-        dB: List[np.ndarray] = []
-        dE: List[np.ndarray] = []
-        for i in range(len(theta0)):
-            theta_h = theta0.copy()
-            theta_h[i] += h
-            try:
-                m_h = self.with_params(theta_h)
-            except NotImplementedError:
-                return [], [], []
-            Ah, Bh, Eh = m_h.discretize(d_cvx)
-            dA.append((_to_np(Ah) - A0_np) / h)
-            dB.append((_to_np(Bh) - B0_np) / h)
-            dE.append((_to_np(Eh) - E0_np) / h)
-        return dA, dB, dE
-
-
-class MPCController:
-    """
-    Generic model predictive controller.
-
-    Composes a KalmanFilter and an OptimalControlProblem for any
-    LinearDiscreteModel and implements the receding-horizon policy:
-
-      1. Estimate  x̂[k] ← estimator.update(y[k], d[k])
-      2. Optimise  U*    ← ocp.solve(x̂[k], D, r)
-      3. Apply     u[k]  = U*[0]   (receding horizon, discard rest)
-      4. Record    estimator.record_action(u[k])
-
-    Parameters
-    ----------
-    model     : LinearDiscreteModel
-    estimator : KalmanFilter
-    ocp       : OptimalControlProblem
-    """
-
-    def __init__(
-        self,
-        model: LinearDiscreteModel,
-        estimator: KalmanFilter,
-        ocp: OptimalControlProblem,
-    ) -> None:
-        self._model = model
-        self._estimator = estimator
-        self._ocp = ocp
-        self._u_prev: matrix = matrix(0.0, (model.n_u, 1))
-
-    def step(
-        self,
-        y: matrix,
-        D: matrix,
-    ) -> Tuple[matrix, matrix, matrix]:
-        """
-        Execute one MPC step.
-
-        Parameters
-        ----------
-        y : (l, 1) current measurement vector  (cvxopt column).
-        D : (N·p, 1) stacked disturbance forecast  (cvxopt column).
-
-        Returns
-        -------
-        u     : (m, 1) optimal input for the current step.
-        U_seq : (N·m, 1) full optimal input sequence.
-        X_seq : (N·n, 1) predicted state trajectory.
-        """
-        n_u = self._model.n_u
-        n_d = self._model.n_d
-        d0 = D[:n_d]
-        x_hat = self._estimator.update(y, d0)
-        U_seq, X_seq = self._ocp.solve(
-            x_hat, D, self._model.x_ref, u_prev=self._u_prev,
-        )
-        u = U_seq[:n_u]
-        self._u_prev = matrix(u)
-        self._estimator.record_action(u)
-        return u, U_seq, X_seq
 
 
 # ============================================================

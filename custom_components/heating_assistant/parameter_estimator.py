@@ -50,9 +50,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .controller import HouseThermalSystem, _np_to_cvx, _cvx_to_np
+from .controller import HouseThermalSystem
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
+from mbc._utils import _np_to_cvx, _cvx_to_np
 from mbc.identification import ParameterEstimator as _MbcEstimator
 from mbc.identification import ped_neg_log_likelihood as _ped_neg_ll
 from mbc.identification import nelder_mead as _nelder_mead  # backward compat
