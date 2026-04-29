@@ -53,6 +53,9 @@ import numpy as np
 from .controller import HouseThermalSystem, _np_to_cvx, _cvx_to_np
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
+from mbc.identification import ParameterEstimator as _MbcEstimator
+from mbc.identification import ped_neg_log_likelihood as _ped_neg_ll
+from mbc.identification._nelder_mead import nelder_mead as _nelder_mead  # backward compat
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,101 +95,95 @@ _N_RESTARTS = 3
 _RESTART_PERT = 0.5
 
 
-# ── Nelder–Mead (pure NumPy) ─────────────────────────────────────────────────
+# ── Nelder–Mead — now provided by mbc.identification ─────────────────────────
+# _nelder_mead is re-exported above from mbc.identification._nelder_mead for
+# backward compatibility with callers that import it from this module.
 
-def _nelder_mead(
-    objective,
-    x0: np.ndarray,
-    tol: float = 1e-4,
-    max_iter: Optional[int] = None,
-) -> Tuple[np.ndarray, float, bool]:
+
+# ── Augmented model wrapping HouseThermalSystem ───────────────────────────────
+
+
+class _AugmentedHouseModel:
     """
-    Minimise *objective* starting from *x0* using the Nelder–Mead simplex
-    method (pure NumPy, no external dependencies).
+    Wraps :class:`~controller.HouseThermalSystem` to absorb two
+    theta-dependent effects that are not captured in the ZOH matrices:
 
-    Parameters
-    ----------
-    objective : callable  f(x) → float
-    x0        : (n,) initial parameter vector
-    tol       : convergence tolerance on both function-value spread and
-                simplex diameter
-    max_iter  : maximum number of iterations; defaults to 200 × n
+    *  **Heater power-scale** (``alpha_full``) — scales each column of B_d
+       so that ``B_d_aug @ u_raw = B_d @ (alpha ⊙ u_raw)``.
+    *  **Internal heat gain** (``q_int``) — a per-room constant additive
+       heat source applied via :meth:`predict_offset`.
 
-    Returns
-    -------
-    x_best : (n,) best parameter vector found
-    f_best : float, objective value at x_best
-    converged : bool
+    The internal gain is pre-computed as ``E_d[:, 1:n+1] @ q_int_vec``
+    (a constant vector, since E_d is time-invariant in the RC model).
+
+    The wrapped model conforms to the duck-type interface expected by
+    :func:`mbc.identification.ped_neg_log_likelihood`.
     """
-    n = len(x0)
-    if max_iter is None:
-        max_iter = 200 * n
 
-    # Nelder–Mead coefficients (standard values)
-    alpha = 1.0   # reflection
-    gamma = 2.0   # expansion
-    rho = 0.5     # contraction
-    sigma = 0.5   # shrink
+    def __init__(
+        self,
+        system: HouseThermalSystem,
+        alpha_full: np.ndarray,
+        q_int_vec: np.ndarray,
+    ) -> None:
+        self._system = system
+        self._alpha = alpha_full
 
-    # Initialise simplex: x0 ± 5% perturbation along each axis
-    simplex = np.empty((n + 1, n))
-    simplex[0] = x0.copy()
-    for i in range(n):
-        s = x0.copy()
-        delta = 0.05 * abs(x0[i]) if x0[i] != 0.0 else 0.025
-        s[i] += delta
-        simplex[i + 1] = s
+        # Precompute E_d @ q_int correction (E_d is time-invariant)
+        from cvxopt import matrix as _cvx_mat
+        n_d = system.n_d
+        d_nominal = _cvx_mat([0.0] * n_d, (n_d, 1), tc="d")
+        _, _, E_cvx = system.discretize(d_nominal)
+        E_np = _cvx_to_np(E_cvx)
+        n = system.n_x
+        # q_int maps through columns 1..n of E_d (solar/internal gain slots)
+        self._q_int_bias: np.ndarray = E_np[:, 1:1 + n] @ q_int_vec
 
-    fvals = np.array([objective(s) for s in simplex])
+    # ── LinearDiscreteModel duck-type interface ───────────────────────────
 
-    converged = False
-    for _ in range(max_iter):
-        order = np.argsort(fvals)
-        simplex = simplex[order]
-        fvals = fvals[order]
+    @property
+    def n_x(self) -> int:
+        return self._system.n_x
 
-        f_spread = abs(fvals[-1] - fvals[0])
-        x_spread = np.max(np.abs(simplex[1:] - simplex[0]))
-        if f_spread < tol and x_spread < tol:
-            converged = True
-            break
+    @property
+    def n_u(self) -> int:
+        return self._system.n_u
 
-        x_bar = simplex[:-1].mean(axis=0)
+    @property
+    def n_d(self) -> int:
+        return self._system.n_d
 
-        x_r = x_bar + alpha * (x_bar - simplex[-1])
-        f_r = objective(x_r)
+    @property
+    def C(self):
+        return self._system.C
 
-        if fvals[0] <= f_r < fvals[-2]:
-            simplex[-1] = x_r
-            fvals[-1] = f_r
-        elif f_r < fvals[0]:
-            x_e = x_bar + gamma * (x_r - x_bar)
-            f_e = objective(x_e)
-            if f_e < f_r:
-                simplex[-1] = x_e
-                fvals[-1] = f_e
-            else:
-                simplex[-1] = x_r
-                fvals[-1] = f_r
-        else:
-            if f_r < fvals[-1]:
-                x_c = x_bar + rho * (x_r - x_bar)
-                f_c = objective(x_c)
-                if f_c <= f_r:
-                    simplex[-1] = x_c
-                    fvals[-1] = f_c
-                    continue
-            else:
-                x_c = x_bar + rho * (simplex[-1] - x_bar)
-                f_c = objective(x_c)
-                if f_c <= fvals[-1]:
-                    simplex[-1] = x_c
-                    fvals[-1] = f_c
-                    continue
-            simplex[1:] = simplex[0] + sigma * (simplex[1:] - simplex[0])
-            fvals[1:] = np.array([objective(s) for s in simplex[1:]])
+    @property
+    def x(self):
+        return self._system.x
 
-    return simplex[0], fvals[0], converged
+    @x.setter
+    def x(self, val) -> None:
+        self._system.x = val
+
+    @property
+    def x_ref(self):
+        return self._system.x_ref
+
+    @property
+    def u_bounds(self):
+        return self._system.u_bounds
+
+    def discretize(self, d):
+        """Return (A, B_alpha, E) where B_alpha columns are scaled by alpha."""
+        A, B, E = self._system.discretize(d)
+        B_np = _cvx_to_np(B)
+        for j, a in enumerate(self._alpha):
+            B_np[:, j] *= float(a)
+        return A, _np_to_cvx(B_np), E
+
+    def predict_offset(self, d_np: np.ndarray) -> np.ndarray:
+        """Constant q_int contribution: E_d[:, 1:n+1] @ q_int_vec."""
+        return self._q_int_bias
 
 
 # ── Identifiability gates ────────────────────────────────────────────────────
@@ -481,34 +478,70 @@ class KalmanMLEstimator:
             log_r_ij_prior,
         ])
 
-        def objective(theta: np.ndarray) -> float:
-            return self._neg_log_likelihood_full(theta, layout, history)
+        # ── Build per-parameter bounds ─────────────────────────────────────
+        n = self._n
+        bounds: List[Tuple[float, float]] = (
+            [(_LOG_MASS_LO, _LOG_MASS_HI)] * n
+            + [(_LOG_R_LO, _LOG_R_HI)] * n
+            + [(_Q_INT_LO, _Q_INT_HI)] * n
+            + [(_LOG_ALPHA_LO, _LOG_ALPHA_HI)] * len(identifiable_sources)
+            + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
+        )
 
-        # ── Multistart Nelder–Mead ─────────────────────────────────────────
-        rng = np.random.default_rng(0)
-        best_theta = theta_prior
-        best_f = float("inf")
-        best_converged = False
+        # ── Convert history to standardised format (fixed, theta-agnostic) ─
+        std_history = self._convert_history_std(history)
+
+        # ── Build model factory for mbc ────────────────────────────────────
+        def _model_factory(theta: np.ndarray):
+            lm, lr, qi, la, lrij = layout.unpack(theta)
+            lrij_map: Optional[Dict[Tuple[int, int], float]] = None
+            if len(lrij):
+                lrij_map = {
+                    pair: float(lrij[k])
+                    for k, pair in enumerate(layout.identifiable_pairs)
+                }
+            sys_ = self._build_system(lm, lr, log_r_ij=lrij_map)
+            if sys_ is None:
+                raise ValueError("Failed to build thermal system")
+            alpha_full = np.ones(self._n_u)
+            for k, s_idx in enumerate(layout.identifiable_sources):
+                alpha_full[s_idx] = float(math.exp(la[k]))
+            return _AugmentedHouseModel(sys_, alpha_full, qi)
+
+        # ── Build regularisation function ──────────────────────────────────
+        def _regularization_fn(theta: np.ndarray) -> float:
+            lm, lr, qi, la, lrij = layout.unpack(theta)
+            return self._compute_regularization(
+                lm, lr, qi, la, lrij, layout.identifiable_pairs
+            )
+
+        # ── Custom perturbation: scale q_int by 200 for physical restarts ──
+        def _perturb(theta0: np.ndarray,
+                     rng: np.random.Generator,
+                     restart_idx: int) -> np.ndarray:
+            pert = rng.normal(0.0, _RESTART_PERT, size=theta0.size)
+            a, b = layout.idx_q_int
+            pert[a:b] *= 200.0   # std ≈ 100 W in linear space
+            return theta0 + pert
+
+        # ── Delegate optimisation to mbc.ParameterEstimator ───────────────
+        Q_np = np.eye(n) * self._Q_var
+        R_np = np.eye(n) * self._R_var
+
+        mbc_est = _MbcEstimator(
+            model_factory=_model_factory,
+            theta0=theta_prior,
+            bounds=bounds,
+            Q=Q_np,
+            R=R_np,
+            regularization_fn=_regularization_fn,
+            n_restarts=_N_RESTARTS,
+            restart_perturbation=_RESTART_PERT,
+            perturbation_fn=_perturb,
+        )
+
         try:
-            for restart in range(_N_RESTARTS):
-                if restart == 0:
-                    x0 = theta_prior.copy()
-                else:
-                    pert = rng.normal(0.0, _RESTART_PERT, size=theta_prior.size)
-                    # Clamp linear-space q_int perturbation to a sensible scale
-                    a, b = layout.idx_q_int
-                    pert[a:b] *= 200.0   # std 100 W in linear space
-                    x0 = theta_prior + pert
-                x_best, f_best, converged = _nelder_mead(
-                    objective, x0,
-                    tol=1e-4,
-                    max_iter=400 * theta_prior.size,
-                )
-                if f_best < best_f:
-                    best_f = f_best
-                    best_theta = x_best
-                    best_converged = converged
-
+            mbc_result = mbc_est.estimate(std_history)
         except Exception as exc:
             _LOGGER.error("Parameter estimation failed: %s", exc)
             return {
@@ -538,6 +571,10 @@ class KalmanMLEstimator:
                 "log_likelihood": None,
                 "message": f"Estimation error: {exc}",
             }
+
+        best_theta = mbc_result.theta_best
+        best_f = mbc_result.neg_log_likelihood
+        best_converged = mbc_result.converged
 
         # ── Unpack and clip the best solution ──────────────────────────────
         log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(best_theta)
@@ -702,90 +739,58 @@ class KalmanMLEstimator:
                 d[1 + i] += float(q_int[i])
         return d
 
-    def _kalman_neg_ll(
+    def _convert_history_std(
+        self,
+        history: List[Dict[str, Any]],
+    ) -> List[Dict[str, np.ndarray]]:
+        """Convert the HA history buffer to the standardised mbc format.
+
+        Each record is converted to ``{"y": ndarray, "u": ndarray, "d": ndarray}``
+        where ``d = [T_out, solar_1, …, solar_n]`` (raw, without q_int).
+        The q_int contribution is absorbed by
+        :class:`_AugmentedHouseModel.predict_offset`.
+        """
+        n = self._n
+        n_u = self._n_u
+        room_idx = {name: i for i, name in enumerate(self._room_names)}
+        std: List[Dict[str, np.ndarray]] = []
+        for record in history:
+            y = np.array(record["y"][:n], dtype=float)
+            u = np.zeros(n_u)
+            for k, val in enumerate(record.get("u", [])):
+                if k < n_u:
+                    u[k] = float(val)
+            d = np.zeros(1 + n)
+            d[0] = float(record["d_outdoor"])
+            for name, gain in record.get("d_solar", {}).items():
+                if name in room_idx:
+                    d[1 + room_idx[name]] = float(gain)
+            std.append({"y": y, "u": u, "d": d})
+        return std
+
+    def _kalman_neg_ll_via_mbc(
         self,
         system: HouseThermalSystem,
         history: List[Dict[str, Any]],
         q_int: Optional[np.ndarray],
         alpha_full: Optional[np.ndarray],
     ) -> float:
-        """
-        Run the Kalman filter forward through history with optional
-        per-room internal gain ``q_int`` and per-source power scale
-        ``alpha_full`` (length n_u, defaults to ones).
+        """Evaluate the PED neg-log-likelihood via mbc, applying alpha and q_int.
 
-        Returns the negative PED log-likelihood, or 1e10 on numerical
-        failure.
+        Replaces the former ``_kalman_neg_ll`` implementation.  Builds an
+        :class:`_AugmentedHouseModel` and delegates to
+        :func:`mbc.identification.ped_neg_log_likelihood`.
         """
-        n = self._n
         if alpha_full is None:
             alpha_full = np.ones(self._n_u)
+        if q_int is None:
+            q_int = np.zeros(self._n)
 
-        Q = np.eye(n) * self._Q_var
-        R = np.eye(n) * self._R_var
-
-        first = history[0]
-        x_hat = np.array(first["y"][:n], dtype=float)
-        P = np.eye(n)
-
-        u_prev = np.zeros(self._n_u)
-        for k, val in enumerate(first.get("u", [])):
-            if k < self._n_u:
-                u_prev[k] = float(val)
-        d_prev = self._make_d_np(
-            system, first["d_outdoor"], first["d_solar"], q_int
-        )
-
-        neg_ll = 0.0
-
-        for record in history[1:]:
-            y = np.array(record["y"][:n], dtype=float)
-            d = self._make_d_np(
-                system, record["d_outdoor"], record["d_solar"], q_int
-            )
-
-            try:
-                A_cvx, B_cvx, E_cvx = system.discretize(_np_to_cvx(d_prev))
-            except Exception:
-                return 1e10
-            A = _cvx_to_np(A_cvx)
-            B = _cvx_to_np(B_cvx)
-            E = _cvx_to_np(E_cvx)
-
-            # Apply heater power scale (multiplicative on each source)
-            u_eff = u_prev * alpha_full
-
-            x_pred = A @ x_hat + B @ u_eff + E @ d_prev
-            P_pred = A @ P @ A.T + Q
-
-            nu = y - x_pred
-            S = P_pred + R
-
-            try:
-                sign, logdet = np.linalg.slogdet(S)
-                if sign <= 0:
-                    return 1e10
-                S_inv_nu = np.linalg.solve(S, nu)
-                neg_ll += 0.5 * (logdet + float(nu @ S_inv_nu))
-            except np.linalg.LinAlgError:
-                return 1e10
-
-            try:
-                K = np.linalg.solve(S.T, P_pred.T).T
-            except np.linalg.LinAlgError:
-                return 1e10
-            IKC = np.eye(n) - K
-            x_hat = x_pred + K @ nu
-            P = IKC @ P_pred @ IKC.T + K @ R @ K.T
-            P = (P + P.T) * 0.5
-
-            u_prev = np.zeros(self._n_u)
-            for k, val in enumerate(record.get("u", [])):
-                if k < self._n_u:
-                    u_prev[k] = float(val)
-            d_prev = d
-
-        return neg_ll
+        aug = _AugmentedHouseModel(system, alpha_full, q_int)
+        std_history = self._convert_history_std(history)
+        Q = np.eye(self._n) * self._Q_var
+        R = np.eye(self._n) * self._R_var
+        return _ped_neg_ll(lambda _: aug, np.array([]), std_history, Q, R)
 
     def _compute_regularization(
         self,
@@ -868,7 +873,7 @@ class KalmanMLEstimator:
         for k, s_idx in enumerate(layout.identifiable_sources):
             alpha_full[s_idx] = float(math.exp(log_alpha[k]))
 
-        neg_ll = self._kalman_neg_ll(
+        neg_ll = self._kalman_neg_ll_via_mbc(
             system, history,
             q_int=q_int,
             alpha_full=alpha_full,
@@ -909,7 +914,7 @@ class KalmanMLEstimator:
         if system is None:
             return 1e10
 
-        neg_ll = self._kalman_neg_ll(
+        neg_ll = self._kalman_neg_ll_via_mbc(
             system, history,
             q_int=None,
             alpha_full=None,
@@ -953,7 +958,7 @@ class KalmanMLEstimator:
         if system is None:
             return 1e10
 
-        neg_ll = self._kalman_neg_ll(
+        neg_ll = self._kalman_neg_ll_via_mbc(
             system, history,
             q_int=None,
             alpha_full=None,
