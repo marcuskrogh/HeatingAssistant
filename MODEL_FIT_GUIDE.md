@@ -87,9 +87,67 @@ Reports a confidence score [0-100]:
 
 ---
 
+### 4. Open-Loop RMSE Sensor
+
+**Entity:** `sensor.heating_assistant_<room_name>_open_loop_rmse`
+
+Reports the RMSE of multi-step open-loop (free-run) simulations [°C]:
+- **< 0.2°C** → excellent model accuracy
+- **0.2–0.5°C** → acceptable; consider re-estimating parameters
+- **> 0.5°C** → poor model; re-run `estimate_parameters_ml`
+
+**Attributes:**
+- `open_loop_rmse` — RMSE over all segments [°C]
+- `open_loop_mae` — MAE over all segments [°C]
+- `simulation` — list of `{time, measured, predicted}` for each step (Apex Charts ready)
+- `segment_length_steps` — steps per free-run window
+- `n_segments` — number of windows used
+
+**Use case:** Continuously monitor whether the model drifts over multi-step predictions.  Unlike the one-step Kalman predictions (which are trivially accurate because the filter drives innovations to zero), open-loop RMSE measures genuine model quality.
+
+---
+
+### 5. Kalman Innovation Sensor
+
+**Entity:** `sensor.heating_assistant_<room_name>_kalman_innovation`
+
+Reports the most recent Kalman innovation ν = y − Cŷ [°C]:
+- Near zero in a well-tuned filter
+- Large values indicate model mismatch or incorrect noise covariances
+
+**Attributes:**
+- `innovations` — list of `{time, value}` for the recent history
+- `mean` — sample mean of recent innovations (should ≈ 0)
+- `std` — standard deviation of recent innovations
+- `autocorr_lag1` — lag-1 autocorrelation (should ≈ 0 for a consistent filter)
+- `is_consistent` — `true` if the filter passes basic consistency checks
+
+**Use case:** Diagnose Kalman filter tuning.  Persistent non-zero mean indicates systematic model bias; high autocorrelation indicates missing dynamics.
+
+---
+
+### 6. Residual ACF Sensor
+
+**Entity:** `sensor.heating_assistant_<room_name>_residual_acf`
+
+Reports the lag-1 autocorrelation of aligned prediction residuals [dimensionless]:
+- **|ρ₁| < confidence bound** → residuals are white noise (good)
+- **|ρ₁| ≥ confidence bound** → residuals are autocorrelated (model missing dynamics)
+
+**Attributes:**
+- `acf` — full ACF at lags 0…20
+- `lags` — corresponding lag indices
+- `confidence_bound` — ±1.96/√n approximate 95% confidence interval
+- `ljung_box_stat` — Ljung-Box Q statistic (large values indicate non-whiteness)
+
+**Use case:** Formal statistical test for residual whiteness after parameter estimation.
+
+---
+
 ## Diagnostic Services
 
-Three new services provide detailed analysis reports via persistent notifications:
+Three existing services provide detailed analysis reports, and two new services
+cover inter-room resistance estimation and open-loop simulation:
 
 ### 1. `heating_assistant.analyze_model_fit`
 
@@ -190,6 +248,256 @@ data:
 | Slow to reach setpoint | Decrease `energy_weight` (default: 0.01) |
 | Overshoots setpoint | Decrease `constraint_offset` (default: 2.0) |
 | Undershoots setpoint | Increase heater `max_power` or check parameters |
+
+---
+
+### 4. `heating_assistant.estimate_inter_room_resistances`
+
+Extends parameter estimation with a second stage that fits the thermal
+resistance between adjacent rooms (R_ij).
+
+**Service data:**
+- `apply_parameters` (optional, default `true`) — apply estimated R_ij immediately
+- `min_temp_diff_std` (optional, default `0.3`) — identifiability threshold [°C]
+
+**How it works:**
+
+The service first checks each connected room pair for identifiability: if the
+standard deviation of their temperature difference over the history buffer
+exceeds `min_temp_diff_std`, the pair is included in the stage-2 fit.
+Room pairs with similar temperatures at all times carry no information about
+the resistance between them and are skipped.
+
+**Example usage:**
+```yaml
+service: heating_assistant.estimate_inter_room_resistances
+data:
+  apply_parameters: true
+  min_temp_diff_std: 0.3
+```
+
+**Interpreting results:**
+- `estimated_inter_room_r` — estimated R_ij [K/W] for each identified pair
+- `identifiable_connections` — which pairs were included in stage 2
+- `stage2_converged` — whether the Nelder-Mead optimisation converged
+
+**When to use:**
+Run after `estimate_parameters_ml` when two or more rooms maintain different
+temperatures (e.g., bedroom cooler than living room).  If rooms are always at
+the same temperature, R_ij is not identifiable and stage 2 will be skipped.
+
+---
+
+### 5. `heating_assistant.run_open_loop_simulation`
+
+Evaluates model quality using multi-step free-run simulation — the true test
+of whether the thermal model predicts temperature evolution correctly.
+
+**Service data:**
+- `room_name` (optional) — simulate a specific room; if omitted, all rooms
+- `segment_length` (optional, default `30`) — steps per free-run window
+
+**How it works:**
+
+The service slides non-overlapping windows of `segment_length` steps across
+the history buffer.  At each window start the model is initialised from the
+measured temperature; it is then propagated forward using the recorded control
+inputs and disturbances **without any Kalman correction**.  Open-loop errors
+accumulate over the window, exposing genuine model drift.
+
+**Example usage:**
+```yaml
+service: heating_assistant.run_open_loop_simulation
+data:
+  segment_length: 30  # 30 steps = 30 min at 60 s/step
+```
+
+**Interpreting results:**
+- Open-loop RMSE < 0.2°C over 30 steps → excellent model
+- Open-loop RMSE 0.2–0.5°C → acceptable; consider re-estimating parameters
+- Open-loop RMSE > 0.5°C → poor model; re-run `estimate_parameters_ml`
+
+Results are also exposed continuously on the `OpenLoopRMSESensor` entity for
+each room (see [Diagnostic Sensors](#diagnostic-sensors) below).
+
+---
+
+## Understanding Prediction Error Semantics
+
+The **Prediction Error Sensor** and the **Model Fit Quality Sensor** report
+*aligned* one-step-ahead prediction errors.  Understanding the alignment is
+important for correctly interpreting the numbers.
+
+### What "aligned" means
+
+At each control update (step k) the MPC computes a one-step-ahead temperature
+prediction *for the next step* (k+1).  This prediction is stored alongside the
+measurement that will arrive at step k+1, so that the residual
+
+    ε[k+1] = ŷ[k+1|k] − y[k+1]
+
+is always computed between a prediction and the measurement it refers to.
+
+An earlier (unaligned) implementation compared the prediction-for-k+1 against
+the measurement *at k*, which produces a spuriously small error and makes the
+diagnostics meaningless.
+
+### Implications
+
+- The first history record has no prior prediction, so `y_pred` is `None` for
+  that record.  Sensors skip `None` records when computing statistics.
+- After an HA restart the alignment resets; the first new record after
+  restart will again have `y_pred = None`.
+- The prediction error reflects the quality of the **discrete-time model used
+  by the Kalman filter**, not the quality of the MPC optimisation itself.
+
+---
+
+## Open-Loop Simulation
+
+### Why Kalman one-step errors are not enough
+
+The Kalman filter is specifically designed to minimise one-step prediction
+errors by continuously correcting the state estimate.  After a well-tuned
+filter is running, one-step errors will always be small regardless of whether
+the underlying thermal model is accurate.
+
+To test the model itself — which is what the MPC relies on for its multi-step
+planning horizon — you need to run the model **without Kalman corrections**
+for several steps and see how far the free-run prediction drifts from reality.
+
+### Open-loop simulation algorithm
+
+1. Slide non-overlapping windows of `segment_length` steps over the history.
+2. At each window start, initialise the model from the measured temperature.
+3. Propagate forward using recorded control inputs and disturbances, **no state
+   correction**.
+4. Collect `(predicted, measured)` pairs at each step.
+5. Compute RMSE and MAE over all windows and rooms.
+
+### Interpretation guide
+
+| Open-loop RMSE (30 steps = 30 min) | Interpretation |
+|------------------------------------|----------------|
+| < 0.2°C | Excellent — model accurately predicts temperature evolution |
+| 0.2–0.5°C | Acceptable — minor model uncertainty |
+| > 0.5°C | Poor — re-run `estimate_parameters_ml` |
+| > 1.0°C | Very poor — check sensor accuracy and room configuration |
+
+### Apex Charts card: Open-Loop RMSE history
+
+Monitor open-loop RMSE over time as parameters are re-estimated:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Open-Loop RMSE - Living Room
+  show_states: true
+graph_span: 12h
+series:
+  - entity: sensor.heating_assistant_living_room_open_loop_rmse
+    name: Open-loop RMSE
+    type: line
+    stroke_width: 2
+    color: "#FF9800"
+    show:
+      in_header: raw
+```
+
+### Apex Charts card: Open-loop simulation trajectory
+
+Visualise the free-run simulation vs measured for the most recent segment:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Open-Loop Simulation - Living Room
+  show_states: true
+graph_span: 2h
+series:
+  - entity: sensor.heating_assistant_living_room_open_loop_rmse
+    name: Measured
+    color: "#2196F3"
+    stroke_width: 2
+    data_generator: |
+      return entity.attributes.simulation.map(e => [
+        new Date(e.time * 1000).getTime(), e.measured
+      ]);
+
+  - entity: sensor.heating_assistant_living_room_open_loop_rmse
+    name: Open-loop predicted
+    color: "#FF9800"
+    stroke_width: 2
+    opacity: 0.85
+    data_generator: |
+      return entity.attributes.simulation.map(e => [
+        new Date(e.time * 1000).getTime(), e.predicted
+      ]);
+```
+
+---
+
+### Apex Charts card: Kalman innovation history
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Kalman Innovation - Living Room
+  show_states: true
+graph_span: 2h
+series:
+  - entity: sensor.heating_assistant_living_room_kalman_innovation
+    name: Innovation ν
+    type: line
+    stroke_width: 2
+    color: "#9C27B0"
+    data_generator: |
+      return entity.attributes.innovations.map(e => [
+        new Date(e.time * 1000).getTime(), e.value
+      ]);
+  - entity: sensor.heating_assistant_living_room_kalman_innovation
+    name: Zero
+    type: line
+    stroke_width: 1
+    color: grey
+    transform: return 0;
+```
+
+Add consistency indicators:
+
+```yaml
+type: entities
+title: Kalman Filter Status - Living Room
+entities:
+  - entity: sensor.heating_assistant_living_room_kalman_innovation
+    name: Latest innovation
+  - entity: sensor.heating_assistant_living_room_kalman_innovation
+    type: attribute
+    attribute: mean
+    name: Mean innovation
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_kalman_innovation
+    type: attribute
+    attribute: std
+    name: Innovation std
+    suffix: " °C"
+  - entity: sensor.heating_assistant_living_room_kalman_innovation
+    type: attribute
+    attribute: autocorr_lag1
+    name: Autocorr lag-1
+  - entity: sensor.heating_assistant_living_room_kalman_innovation
+    type: attribute
+    attribute: is_consistent
+    name: Filter consistent?
+```
+
+**What to look for:**
+- ✓ Mean innovation ≈ 0 → no systematic model bias
+- ✓ `is_consistent = true` → Kalman noise covariances are well-tuned
+- ⚠ |autocorr_lag1| > 0.3 → model is missing some dynamics; re-estimate or reconfigure
 
 ---
 
@@ -765,7 +1073,13 @@ If R² < 0.7:
    - Ensure sufficient data (30+ samples, ~30 minutes)
    - Perform estimation during stable weather
 
-5. **Check controller configuration:**
+5. **Check open-loop RMSE:**
+   - Run `heating_assistant.run_open_loop_simulation`
+   - Open-loop RMSE > 0.5°C → model parameters need re-estimation even if
+     one-step Kalman errors look small (Kalman corrections mask single-step errors)
+   - After re-estimating, verify open-loop RMSE has dropped
+
+6. **Check controller configuration:**
    - Verify `outdoor_temp_entity` is correct
    - Check `weather_entity` for forecast quality
    - Ensure solar gain modeling is accurate

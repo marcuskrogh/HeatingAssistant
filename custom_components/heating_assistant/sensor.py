@@ -71,6 +71,10 @@ async def async_setup_entry(
         entities.append(PredictionErrorSensor(coordinator, room_name))
         entities.append(ModelFitQualitySensor(coordinator, room_name))
         entities.append(ParameterConfidenceSensor(coordinator, room_name))
+        # Advanced model quality sensors
+        entities.append(OpenLoopRMSESensor(coordinator, room_name))
+        entities.append(KalmanInnovationSensor(coordinator, room_name))
+        entities.append(ResidualACFSensor(coordinator, room_name))
 
     # Per-source sensors
     for src in coordinator.heat_sources:
@@ -878,34 +882,36 @@ class PredictionErrorSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> Optional[float]:
-        """Return the current prediction error [°C]."""
-        # Get current predicted and measured temperatures
-        room = self._coordinator.model.rooms[self._room_name]
-        predicted_temp = room.temperature
+        """Return the most recent aligned prediction error [°C].
 
-        # Try to get actual measured temperature from the history buffer
-        if len(self._coordinator.history_buffer) > 0:
-            latest = self._coordinator.history_buffer[-1]
-            room_idx = self._coordinator.model.room_names.index(self._room_name)
-            measured = latest.get("y", [])[room_idx] if room_idx < len(latest.get("y", [])) else None
-
-            if measured is not None:
-                error = predicted_temp - measured
-                return round(error, 3)
-
+        Uses the ``y_pred`` field which is the prediction made at the previous
+        cycle *for* the current cycle — so y_pred and y refer to the same
+        timestep and their difference is a genuine forecast error.
+        """
+        room_idx = self._coordinator.model.room_names.index(self._room_name)
+        # Walk backwards to find the latest record with a valid aligned y_pred
+        for record in reversed(list(self._coordinator.history_buffer)):
+            y_pred = record.get("y_pred")
+            y = record.get("y", [])
+            if y_pred is None:
+                continue
+            if room_idx < len(y) and room_idx < len(y_pred):
+                return round(float(y_pred[room_idx]) - float(y[room_idx]), 3)
         return None
 
     @property
     def extra_state_attributes(self) -> dict:
         """Expose historical prediction errors and fit metrics."""
-        # Extract recent prediction errors from history buffer
         errors = []
         room_idx = self._coordinator.model.room_names.index(self._room_name)
 
         for record in self._coordinator.history_buffer[-50:]:  # Last 50 samples
             y = record.get("y", [])
-            y_pred = record.get("y_pred", [])
+            y_pred = record.get("y_pred")  # aligned: prediction made at k-1 for k
 
+            # Skip records without an aligned prediction (first record after start)
+            if y_pred is None:
+                continue
             if room_idx < len(y) and room_idx < len(y_pred):
                 error = y_pred[room_idx] - y[room_idx]
                 errors.append(round(error, 3))
@@ -1124,3 +1130,257 @@ class ParameterConfidenceSensor(CoordinatorEntity, SensorEntity):
             return {
                 "error": str(exc),
             }
+
+
+# ---------------------------------------------------------------------------
+# Open-loop RMSE sensor (per room) – direct model quality indicator
+# ---------------------------------------------------------------------------
+
+class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the open-loop prediction RMSE for a room.
+
+    Runs multi-step simulations (default 30 steps = 30 minutes) over the
+    history buffer without Kalman state correction.  The RMSE of these
+    open-loop predictions shows how much the thermal model drifts from
+    reality, which is the root cause of MPC overshoot.
+
+    Rule of thumb:
+        < 0.2 °C: excellent – MPC predictions are reliable
+        0.2–0.5 °C: acceptable
+        > 0.5 °C: likely contributing to overshoot; re-run parameter estimation
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:chart-timeline-variant"
+
+    SEGMENT_LENGTH = 30  # steps
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Open Loop RMSE"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_open_loop_rmse"
+
+    def _compute(self) -> dict:
+        from .model_diagnostics import compute_open_loop_predictions
+        from .const import UPDATE_INTERVAL
+
+        history = list(self._coordinator.history_buffer)
+        system = self._coordinator.controller._system  # HouseThermalSystem
+        room_names = self._coordinator.model.room_names
+        n_rooms = len(room_names)
+
+        return compute_open_loop_predictions(
+            history=history,
+            system=system,
+            room_names=room_names,
+            n_rooms=n_rooms,
+            dt=float(UPDATE_INTERVAL),
+            segment_length=self.SEGMENT_LENGTH,
+        )
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return open-loop RMSE [°C] for this room."""
+        try:
+            result = self._compute()
+            per_room = result.get("per_room", {})
+            room_data = per_room.get(self._room_name, {})
+            return room_data.get("rmse")
+        except Exception as exc:
+            _LOGGER.debug("OpenLoopRMSESensor compute error for %s: %s", self._room_name, exc)
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose open-loop simulation data for Apex Charts."""
+        try:
+            result = self._compute()
+            per_room = result.get("per_room", {})
+            room_data = per_room.get(self._room_name, {})
+            sim = room_data.get("simulation", [])
+            # Convert timestamps to ISO strings for Apex Charts
+            from datetime import datetime, timezone
+            formatted_sim = []
+            for entry in sim:
+                ts = entry.get("time", 0.0)
+                dt_iso = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+                formatted_sim.append({
+                    "time": dt_iso,
+                    "measured": entry.get("measured"),
+                    "predicted": entry.get("predicted"),
+                })
+            return {
+                "open_loop_rmse": room_data.get("rmse"),
+                "open_loop_mae": room_data.get("mae"),
+                "simulation": formatted_sim,
+                "segment_length_steps": result.get("segment_length"),
+                "n_segments": result.get("n_segments"),
+                "error": result.get("error"),
+            }
+        except Exception as exc:
+            _LOGGER.debug("OpenLoopRMSESensor attributes error for %s: %s", self._room_name, exc)
+            return {"error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Kalman innovation sensor (per room)
+# ---------------------------------------------------------------------------
+
+class KalmanInnovationSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the most recent Kalman filter innovation ν = y − C x̂⁻.
+
+    A well-tuned model/filter should have innovations that are:
+        - Zero-mean (no systematic bias)
+        - White noise (no autocorrelation)
+        - Consistent with the innovation covariance
+
+    Persistent non-zero mean or high autocorrelation indicates that the
+    thermal model is missing dynamics (e.g. inter-room coupling, solar,
+    or heat source dynamics).
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:waveform"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Kalman Innovation"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_kalman_innovation"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the most recent Kalman innovation [°C] for this room."""
+        room_idx = self._coordinator.model.room_names.index(self._room_name)
+        for record in reversed(list(self._coordinator.history_buffer)):
+            innov = record.get("kalman_innovation")
+            if innov is not None and room_idx < len(innov):
+                return round(float(innov[room_idx]), 4)
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose innovation time series and statistics."""
+        from datetime import datetime, timezone
+        import numpy as np
+
+        room_idx = self._coordinator.model.room_names.index(self._room_name)
+        innovations = []
+
+        for record in self._coordinator.history_buffer:
+            innov = record.get("kalman_innovation")
+            ts = record.get("timestamp", 0.0)
+            if innov is not None and room_idx < len(innov):
+                dt_iso = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+                innovations.append({
+                    "time": dt_iso,
+                    "value": round(float(innov[room_idx]), 4),
+                })
+
+        if not innovations:
+            return {"innovations": [], "n_samples": 0}
+
+        vals = np.array([e["value"] for e in innovations])
+        mean_v = float(np.mean(vals))
+        std_v = float(np.std(vals))
+
+        # Lag-1 autocorrelation
+        autocorr_lag1: Optional[float] = None
+        if len(vals) >= 4:
+            n_v = len(vals)
+            c0 = float(np.dot(vals - mean_v, vals - mean_v))
+            if c0 > 0:
+                c1 = float(np.dot((vals - mean_v)[1:], (vals - mean_v)[:-1]))
+                autocorr_lag1 = round(c1 / c0, 4)
+
+        # Consistency: |mean| < 2 * std/sqrt(n) (approximate 95% test)
+        n_samples = len(vals)
+        is_consistent = abs(mean_v) < 2.0 * (std_v / max(1.0, float(np.sqrt(n_samples))))
+
+        return {
+            "innovations": innovations[-100:],  # keep last 100 for attribute size
+            "mean": round(mean_v, 4),
+            "std": round(std_v, 4),
+            "autocorr_lag1": autocorr_lag1,
+            "is_consistent": is_consistent,
+            "n_samples": n_samples,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Residual ACF sensor (per room)
+# ---------------------------------------------------------------------------
+
+class ResidualACFSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the lag-1 autocorrelation of 1-step prediction residuals.
+
+    A lag-1 autocorrelation close to 0 indicates that the residuals are
+    white noise (good model).  High autocorrelation (> 0.3) means the model
+    is systematically missing dynamics — a signal to re-run parameter
+    estimation or check the model configuration.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:chart-bar"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Residual ACF"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_residual_acf"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return lag-1 residual autocorrelation."""
+        try:
+            acf_result = self._compute_acf()
+            acf = acf_result.get("acf", [])
+            return round(acf[1], 4) if len(acf) > 1 else None
+        except Exception:
+            return None
+
+    def _compute_acf(self) -> dict:
+        from .model_diagnostics import compute_autocorrelation_function
+
+        room_idx = self._coordinator.model.room_names.index(self._room_name)
+        residuals = []
+        for record in self._coordinator.history_buffer:
+            y = record.get("y", [])
+            y_pred = record.get("y_pred")
+            if y_pred is None:
+                continue
+            if room_idx < len(y) and room_idx < len(y_pred):
+                residuals.append(float(y_pred[room_idx]) - float(y[room_idx]))
+        return compute_autocorrelation_function(residuals)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose full ACF, confidence bounds, and Ljung-Box statistic."""
+        try:
+            return self._compute_acf()
+        except Exception as exc:
+            _LOGGER.debug("ResidualACFSensor error for %s: %s", self._room_name, exc)
+            return {"error": str(exc)}

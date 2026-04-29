@@ -210,3 +210,87 @@ controller_performance_report:
       example: "living_room"
       selector:
         text:
+
+estimate_inter_room_resistances:
+  name: Estimate inter-room thermal resistances
+  description: >
+    Run a second-stage parameter estimation pass that fits the thermal
+    resistance between adjacent rooms (R_ij) in addition to the per-room
+    thermal mass (C) and external resistance (R_ext) that are updated by
+    estimate_parameters_ml.
+
+    The stage-2 optimisation is only performed for pairs of rooms whose
+    temperature difference shows sufficient variance (std > min_temp_diff_std),
+    ensuring identifiability before attempting to estimate R_ij.  Results are
+    reported as a persistent notification.  Set apply_parameters to false for a
+    dry run that reports the estimated values without modifying the live model.
+  fields:
+    apply_parameters:
+      name: Apply parameters
+      description: >
+        When true (default) the estimated R_ij values are applied to the running
+        model immediately.  When false the service only reports the estimates
+        (dry run).
+      required: false
+      default: true
+      selector:
+        boolean:
+    min_temp_diff_std:
+      name: Minimum temperature-difference standard deviation
+      description: >
+        Minimum standard deviation of (T_i − T_j) required before a room pair is
+        considered identifiable and included in the stage-2 optimisation [°C].
+        Increase this to require a larger observed temperature gradient before
+        estimating the inter-room resistance.  Default: 0.3 °C.
+      required: false
+      default: 0.3
+      example: 0.3
+      selector:
+        number:
+          min: 0.1
+          max: 2.0
+          step: 0.1
+          unit_of_measurement: "°C"
+
+run_open_loop_simulation:
+  name: Run open-loop simulation diagnostic
+  description: >
+    Evaluate model quality by running a multi-step open-loop (free-run)
+    simulation over the recorded history buffer and comparing it against the
+    observed temperatures.  Unlike the one-step-ahead Kalman predictions that
+    are reported by the PredictionErrorSensor, this test does not correct the
+    model state at each step — errors therefore accumulate, exposing any
+    systematic model drift.
+
+    Results are exposed on the OpenLoopRMSESensor for each room and reported
+    as a persistent notification.  Use this service after parameter estimation
+    to verify that the updated model genuinely predicts temperature evolution
+    rather than merely fitting a one-step-ahead filter.
+
+    Rule of thumb: open-loop RMSE < 0.2 °C over 30 steps (30 min) is
+    excellent; > 0.5 °C indicates that the model should be re-estimated.
+  fields:
+    room_name:
+      name: Room name
+      description: >
+        Optional room name to run the simulation for.  If not specified,
+        simulates all rooms.
+      required: false
+      example: "living_room"
+      selector:
+        text:
+    segment_length:
+      name: Segment length (steps)
+      description: >
+        Number of history-buffer steps per open-loop simulation segment.
+        Each step is one UPDATE_INTERVAL (60 s), so the default of 30 steps
+        corresponds to a 30-minute free-run window.
+      required: false
+      default: 30
+      example: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          step: 5
+          unit_of_measurement: "steps"

@@ -22,6 +22,7 @@ so no additional runtime dependencies beyond numpy are required.
 
 from __future__ import annotations
 
+import copy
 import logging
 import math
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,6 +45,13 @@ _LOG_MASS_LO = math.log(1e4)    # ~10 kJ/K
 _LOG_MASS_HI = math.log(5e8)    # ~500 MJ/K
 _LOG_R_LO = math.log(1e-5)      # 0.00001 K/W
 _LOG_R_HI = math.log(10.0)      # 10 K/W
+
+#: Log-space bounds for inter-room resistances.
+_LOG_R_IJ_LO = math.log(1e-4)   # 0.0001 K/W (very thin interior partition)
+_LOG_R_IJ_HI = math.log(5.0)    # 5 K/W (well-insulated internal wall)
+
+#: Minimum std of inter-room temperature difference for R_ij identifiability.
+_MIN_TEMP_DIFF_STD = 0.3  # °C
 
 
 # ── Nelder–Mead (pure NumPy) ─────────────────────────────────────────────────
@@ -152,6 +160,52 @@ def _nelder_mead(
 
 # ── Main estimator class ─────────────────────────────────────────────────────
 
+
+def _check_identifiable_connections(
+    history: List[Dict[str, Any]],
+    room_names: List[str],
+    connections: List[Tuple[int, int]],
+    min_std: float = _MIN_TEMP_DIFF_STD,
+) -> List[Tuple[int, int]]:
+    """
+    Return the subset of room-index pairs (i, j) for which the inter-room
+    temperature difference has sufficient variance for R_ij to be identifiable.
+
+    A connection is identifiable when ``std(T_i − T_j)`` over the history
+    window exceeds *min_std* [°C].  With fewer than ``MIN_HISTORY_STEPS``
+    samples the list is always empty.
+
+    Parameters
+    ----------
+    history : list of dicts
+        Each record must contain ``"y"`` (list of temperatures in room_names
+        order).
+    room_names : list of str
+        Ordered room names matching the ``y`` vector.
+    connections : list of (int, int)
+        Unique pairs of room indices to test.  Each pair must appear only
+        once (i.e. both (i,j) and (j,i) should NOT both be included).
+    min_std : float
+        Minimum standard deviation threshold [°C].
+
+    Returns
+    -------
+    list of (int, int) – identifiable connections.
+    """
+    if len(history) < MIN_HISTORY_STEPS:
+        return []
+
+    identifiable = []
+    for i, j in connections:
+        diffs = []
+        for record in history:
+            y = record.get("y", [])
+            if i < len(y) and j < len(y):
+                diffs.append(float(y[i]) - float(y[j]))
+        if len(diffs) >= MIN_HISTORY_STEPS and float(np.std(diffs)) > min_std:
+            identifiable.append((i, j))
+    return identifiable
+
 class KalmanMLEstimator:
     """
     Maximum-likelihood estimator for house thermal model parameters.
@@ -170,7 +224,11 @@ class KalmanMLEstimator:
     sources : list of HeatSource
         Heat sources – kept fixed throughout estimation.
     dt : float
-        Sampling interval [s].
+        Sampling interval [s].  **Must match the history buffer sampling
+        interval** (``UPDATE_INTERVAL``, typically 60 s), NOT the MPC control
+        horizon step (``DEFAULT_DT``).  Using the wrong value causes the
+        discrete-time model matrices to be built for the wrong step length,
+        making estimated parameters systematically wrong.
     Q_var : float
         Diagonal process-noise variance used in the Kalman filter [°C²].
         A larger value makes the filter trust the model less.
@@ -209,6 +267,27 @@ class KalmanMLEstimator:
             [math.log(max(r.r_external, 1e-9)) for r in rooms]
         )
 
+        # Build unique inter-room connection pairs (i, j) with i < j.
+        # We only add each physical connection once even though RoomConnection
+        # objects are stored in both directions.
+        room_idx = {r.name: k for k, r in enumerate(rooms)}
+        seen: set = set()
+        self._connection_pairs: List[Tuple[int, int]] = []  # (i, j) with i < j
+        self._connection_r_priors: List[float] = []
+        for room in rooms:
+            i = room_idx[room.name]
+            for conn in room.connections:
+                j = room_idx.get(conn.connected_room)
+                if j is None:
+                    continue
+                pair = (min(i, j), max(i, j))
+                if pair not in seen:
+                    seen.add(pair)
+                    self._connection_pairs.append(pair)
+                    self._connection_r_priors.append(
+                        math.log(max(conn.r_value, 1e-9))
+                    )
+
     # ── Public API ────────────────────────────────────────────────────────
 
     def compute_log_likelihood(self, history: List[Dict[str, Any]]) -> Optional[float]:
@@ -231,6 +310,17 @@ class KalmanMLEstimator:
         """
         Estimate thermal parameters from the accumulated history buffer.
 
+        Runs a two-stage optimisation:
+
+        * **Stage 1** (always): estimate per-room ``thermal_mass`` and
+          ``r_external`` using a Kalman-PED maximum-likelihood approach with
+          Nelder–Mead.
+
+        * **Stage 2** (conditional): if any inter-room connections are
+          identifiable (``std(T_i − T_j) > _MIN_TEMP_DIFF_STD``), extend
+          the parameter vector with ``log(R_ij)`` for those connections and
+          run a second Nelder–Mead warm-started from the Stage 1 result.
+
         Parameters
         ----------
         history : list of dict, each containing:
@@ -242,12 +332,15 @@ class KalmanMLEstimator:
         Returns
         -------
         dict with keys:
-            success          : bool
-            estimated_params : {room_name: {thermal_mass, r_external}}
-            current_params   : {room_name: {thermal_mass, r_external}}
-            n_steps          : int
-            log_likelihood   : float or None
-            message          : str
+            success                   : bool
+            estimated_params          : {room_name: {thermal_mass, r_external}}
+            current_params            : {room_name: {thermal_mass, r_external}}
+            n_steps                   : int
+            log_likelihood            : float or None
+            message                   : str
+            estimated_inter_room_r    : {\"room_i:room_j\": K/W, ...}  (may be {})
+            identifiable_connections  : [\"room_i:room_j\", ...]
+            stage2_converged          : bool
         """
         n_steps = len(history)
         current = {
@@ -270,19 +363,23 @@ class KalmanMLEstimator:
                     f"need ≥ {MIN_HISTORY_STEPS}.  Keep the system running "
                     "and try again when more observations have been collected."
                 ),
+                "estimated_inter_room_r": {},
+                "identifiable_connections": [],
+                "stage2_converged": False,
             }
 
-        x0 = np.concatenate([self._log_mass_prior, self._log_r_prior])
+        # ── Stage 1: estimate thermal_mass and r_external ────────────────
+        x0_s1 = np.concatenate([self._log_mass_prior, self._log_r_prior])
 
-        def objective(x: np.ndarray) -> float:
+        def objective_s1(x: np.ndarray) -> float:
             return self._neg_log_likelihood(x, history)
 
         try:
             x_best, f_best, converged = _nelder_mead(
-                objective,
-                x0,
+                objective_s1,
+                x0_s1,
                 tol=1e-4,
-                max_iter=300 * len(x0),
+                max_iter=300 * len(x0_s1),
             )
 
             n = self._n
@@ -299,11 +396,11 @@ class KalmanMLEstimator:
             # Negative log-likelihood (without regularisation) for reporting
             log_ll_val: Optional[float] = None
             try:
-                reg = self._regularization * float(
+                reg_s1 = self._regularization * float(
                     np.sum((log_masses - self._log_mass_prior) ** 2)
                     + np.sum((log_rs - self._log_r_prior) ** 2)
                 )
-                log_ll_val = round(float(-(f_best - reg)), 3)
+                log_ll_val = round(float(-(f_best - reg_s1)), 3)
             except Exception:
                 pass
 
@@ -313,6 +410,85 @@ class KalmanMLEstimator:
                 else "Optimisation reached iteration limit (result may be approximate)."
             )
 
+            # ── Stage 2: estimate inter-room resistances ─────────────────
+            estimated_r_ij: Dict[str, float] = {}
+            identifiable_names: List[str] = []
+            stage2_converged = False
+
+            identifiable_pairs = _check_identifiable_connections(
+                history, self._room_names, self._connection_pairs
+            )
+
+            if identifiable_pairs:
+                # Build extended warm-start from Stage 1 result
+                r_ij_priors = []
+                for k_pair, (pi, pj) in enumerate(self._connection_pairs):
+                    if (pi, pj) in identifiable_pairs:
+                        r_ij_priors.append(self._connection_r_priors[k_pair])
+
+                x0_s2 = np.concatenate([log_masses, log_rs, np.array(r_ij_priors)])
+
+                def objective_s2(x: np.ndarray) -> float:
+                    lm = x[:n]
+                    lr = x[n: 2 * n]
+                    lr_ij = x[2 * n:]
+                    return self._neg_log_likelihood_with_r_ij(
+                        lm, lr, lr_ij, identifiable_pairs, history
+                    )
+
+                try:
+                    x2_best, f2_best, s2_conv = _nelder_mead(
+                        objective_s2,
+                        x0_s2,
+                        tol=1e-4,
+                        max_iter=300 * len(x0_s2),
+                    )
+                    stage2_converged = s2_conv
+
+                    # Accept Stage 2 only if it improves the log-likelihood
+                    if f2_best < f_best:
+                        log_masses = np.clip(x2_best[:n], _LOG_MASS_LO, _LOG_MASS_HI)
+                        log_rs = np.clip(x2_best[n: 2 * n], _LOG_R_LO, _LOG_R_HI)
+                        log_rs_ij = x2_best[2 * n:]
+
+                        for i, room_name in enumerate(self._room_names):
+                            estimated[room_name] = {
+                                "thermal_mass": round(float(math.exp(log_masses[i])), 0),
+                                "r_external": round(float(math.exp(log_rs[i])), 6),
+                            }
+
+                        for k_ij, (pi, pj) in enumerate(identifiable_pairs):
+                            r_val = float(math.exp(
+                                float(np.clip(log_rs_ij[k_ij], _LOG_R_IJ_LO, _LOG_R_IJ_HI))
+                            ))
+                            key = f"{self._room_names[pi]}:{self._room_names[pj]}"
+                            estimated_r_ij[key] = round(r_val, 6)
+                            identifiable_names.append(key)
+
+                        # Update log-likelihood using Stage 2 result
+                        try:
+                            reg_s2 = self._regularization * (
+                                float(np.sum((log_masses - self._log_mass_prior) ** 2))
+                                + float(np.sum((log_rs - self._log_r_prior) ** 2))
+                                + float(np.sum(
+                                    (log_rs_ij - np.array(r_ij_priors)) ** 2
+                                ))
+                            )
+                            log_ll_val = round(float(-(f2_best - reg_s2)), 3)
+                        except Exception:
+                            pass
+
+                        msg += (
+                            f"  Stage 2 (inter-room R for "
+                            f"{len(identifiable_pairs)} connection(s)) "
+                            + ("converged." if s2_conv else "reached iteration limit.")
+                        )
+                    else:
+                        msg += "  Stage 2 did not improve fit; Stage 1 result retained."
+                except Exception as exc_s2:
+                    _LOGGER.debug("Stage 2 estimation failed: %s", exc_s2)
+                    msg += "  Stage 2 failed; Stage 1 result retained."
+
             return {
                 "success": True,
                 "estimated_params": estimated,
@@ -320,6 +496,9 @@ class KalmanMLEstimator:
                 "n_steps": n_steps,
                 "log_likelihood": log_ll_val,
                 "message": msg,
+                "estimated_inter_room_r": estimated_r_ij,
+                "identifiable_connections": identifiable_names,
+                "stage2_converged": stage2_converged,
             }
 
         except Exception as exc:
@@ -331,6 +510,9 @@ class KalmanMLEstimator:
                 "n_steps": n_steps,
                 "log_likelihood": None,
                 "message": f"Estimation error: {exc}",
+                "estimated_inter_room_r": {},
+                "identifiable_connections": [],
+                "stage2_converged": False,
             }
 
     # ── Internal helpers ──────────────────────────────────────────────────
@@ -339,21 +521,43 @@ class KalmanMLEstimator:
         self,
         log_masses: np.ndarray,
         log_rs: np.ndarray,
+        log_r_ij: Optional[Dict[Tuple[int, int], float]] = None,
     ) -> Optional[HouseThermalSystem]:
-        """Build a :class:`HouseThermalSystem` from log-transformed parameters."""
+        """Build a :class:`HouseThermalSystem` from log-transformed parameters.
+
+        Parameters
+        ----------
+        log_masses : (n,) log thermal masses
+        log_rs     : (n,) log external resistances
+        log_r_ij   : optional {(i, j): log_r_value} for inter-room connections
+                     that should override configured values.
+        """
         try:
-            new_rooms = [
-                Room(
+            room_idx = {r.name: k for k, r in enumerate(self._rooms)}
+            new_rooms = []
+            for i, r in enumerate(self._rooms):
+                # Deep-copy connections so we can modify r_value without
+                # affecting the original room objects stored in the coordinator
+                new_conns = copy.deepcopy(r.connections)
+                if log_r_ij:
+                    j_idx = room_idx.get
+                    for conn in new_conns:
+                        j = j_idx(conn.connected_room)
+                        if j is not None:
+                            pair = (min(i, j), max(i, j))
+                            if pair in log_r_ij:
+                                conn.r_value = float(math.exp(
+                                    float(np.clip(log_r_ij[pair], _LOG_R_IJ_LO, _LOG_R_IJ_HI))
+                                ))
+                new_rooms.append(Room(
                     name=r.name,
                     thermal_mass=float(math.exp(log_masses[i])),
                     r_external=float(math.exp(log_rs[i])),
-                    connections=r.connections,
+                    connections=new_conns,
                     windows=r.windows,
                     temperature=r.temperature,
                     setpoint=r.setpoint,
-                )
-                for i, r in enumerate(self._rooms)
-            ]
+                ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(model, self._sources, self._dt)
         except Exception:
@@ -470,6 +674,110 @@ class KalmanMLEstimator:
         reg = self._regularization * float(
             np.sum((log_masses - self._log_mass_prior) ** 2)
             + np.sum((log_rs - self._log_r_prior) ** 2)
+        )
+
+        return neg_ll + reg
+
+    def _neg_log_likelihood_with_r_ij(
+        self,
+        log_masses: np.ndarray,
+        log_rs: np.ndarray,
+        log_rs_ij: np.ndarray,
+        identifiable_pairs: List[Tuple[int, int]],
+        history: List[Dict[str, Any]],
+    ) -> float:
+        """
+        Like :meth:`_neg_log_likelihood` but also includes inter-room
+        resistance parameters ``log_rs_ij`` for *identifiable_pairs*.
+
+        The ``log_rs_ij`` vector must be in the same order as
+        ``identifiable_pairs``.
+        """
+        n = self._n
+
+        if np.any(~np.isfinite(log_masses)) or np.any(~np.isfinite(log_rs)):
+            return 1e10
+        if np.any(~np.isfinite(log_rs_ij)):
+            return 1e10
+        if np.any(log_masses < _LOG_MASS_LO) or np.any(log_masses > _LOG_MASS_HI):
+            return 1e10
+        if np.any(log_rs < _LOG_R_LO) or np.any(log_rs > _LOG_R_HI):
+            return 1e10
+
+        log_r_ij_map: Dict[Tuple[int, int], float] = {
+            pair: float(log_rs_ij[k])
+            for k, pair in enumerate(identifiable_pairs)
+        }
+
+        system = self._build_system(log_masses, log_rs, log_r_ij=log_r_ij_map)
+        if system is None:
+            return 1e10
+
+        Q = np.eye(n) * self._Q_var
+        R_noise = np.eye(n) * self._R_var
+
+        first = history[0]
+        x_hat = np.array(first["y"][:n], dtype=float)
+        P = np.eye(n)
+        u_prev = np.zeros(self._n_u)
+        raw_u = first.get("u", [])
+        for k, val in enumerate(raw_u):
+            if k < self._n_u:
+                u_prev[k] = float(val)
+        d_prev = self._make_d_np(system, first["d_outdoor"], first["d_solar"])
+
+        neg_ll = 0.0
+
+        for record in history[1:]:
+            y = np.array(record["y"][:n], dtype=float)
+            d = self._make_d_np(system, record["d_outdoor"], record["d_solar"])
+
+            try:
+                A_cvx, B_cvx, E_cvx = system.discretize(_np_to_cvx(d_prev))
+            except Exception:
+                return 1e10
+            A = _cvx_to_np(A_cvx)
+            B = _cvx_to_np(B_cvx)
+
+            x_pred = A @ x_hat + B @ u_prev
+            P_pred = A @ P @ A.T + Q
+
+            nu = y - x_pred
+            S = P_pred + R_noise
+
+            try:
+                sign, logdet = np.linalg.slogdet(S)
+                if sign <= 0:
+                    return 1e10
+                S_inv_nu = np.linalg.solve(S, nu)
+                neg_ll += 0.5 * (logdet + float(nu @ S_inv_nu))
+            except np.linalg.LinAlgError:
+                return 1e10
+
+            try:
+                K = np.linalg.solve(S.T, P_pred.T).T
+            except np.linalg.LinAlgError:
+                return 1e10
+            IKC = np.eye(n) - K
+            x_hat = x_pred + K @ nu
+            P = IKC @ P_pred @ IKC.T + K @ R_noise @ K.T
+            P = (P + P.T) * 0.5
+
+            u_prev = np.zeros(self._n_u)
+            raw_u = record.get("u", [])
+            for k, val in enumerate(raw_u):
+                if k < self._n_u:
+                    u_prev[k] = float(val)
+            d_prev = d
+
+        # Regularisation includes prior on R_ij
+        r_ij_priors_arr = np.array([self._connection_r_priors[
+            self._connection_pairs.index(pair)
+        ] for pair in identifiable_pairs])
+        reg = self._regularization * float(
+            np.sum((log_masses - self._log_mass_prior) ** 2)
+            + np.sum((log_rs - self._log_r_prior) ** 2)
+            + np.sum((log_rs_ij - r_ij_priors_arr) ** 2)
         )
 
         return neg_ll + reg
