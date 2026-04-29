@@ -52,6 +52,10 @@ class Room:
     windows: List[Window] = field(default_factory=list)
     temperature: float = 20.0                   # °C, current state
     setpoint: float = 21.0                      # °C, desired temperature
+    internal_gain: float = 0.0                  # W, constant background heat
+                                                # gain (occupants, electronics,
+                                                # appliances).  Identified
+                                                # jointly with C and R_ext.
 
 
 class HouseModel:
@@ -180,6 +184,10 @@ class HouseModel:
         for name, gain in solar_gains.items():
             if name in self._rooms:
                 Q[self._room_list.index(name)] += gain
+
+        # Constant per-room internal gains (occupants, electronics, ...)
+        for i, name in enumerate(self._room_list):
+            Q[i] += self._rooms[name].internal_gain
 
         # dT/dt = C^{-1} * (A*T + B_ext*T_outdoor + Q)
         dT_dt = (self._A @ T + self._B_ext * outdoor_temp + Q) / self._C

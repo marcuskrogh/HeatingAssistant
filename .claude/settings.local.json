@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python tests/plot_model_fit.py --save-dir plots --n-steps 240 --seg-len 30 --mass-factor 2.0)",
+      "Bash(python -m pip install cvxopt)",
+      "Bash(python -m pip install pytest)",
+      "Bash(python -m pytest tests/ -x --tb=short)",
+      "Bash(python -m pytest tests/ --tb=line -q --no-header)",
+      "Bash(python -m pytest tests/test_model_diagnostics.py tests/test_parameter_estimator.py tests/test_thermal_model.py tests/test_controller.py tests/test_heat_sources.py tests/test_solar_model.py tests/test_visualisation.py --tb=short -q)",
+      "Bash(python -m pytest tests/test_model_diagnostics.py::test_generate_model_fit_report_single_room tests/test_model_diagnostics.py::test_analyze_innovations_consistent --tb=long)",
+      "Bash(python -c \"import numpy as np; rng=np.random.default_rng\\(42\\); x=rng.normal\\(0,1.0,100\\); print\\('mean\\(x^2\\)=', float\\(np.mean\\(x**2\\)\\), ' var=', float\\(np.var\\(x\\)\\)\\)\")",
+      "Bash(python -m pytest tests/test_coordinator_apply_actions.py --tb=short -q)",
+      "Bash(python -m pytest tests/test_coordinator_apply_actions.py::TestApplyActionsClimate::test_heat_pump_uses_internal_temp_plus_offset --tb=short)",
+      "Bash(python -m pip install pytest-asyncio)",
+      "Bash(python -m pytest tests/test_coordinator_apply_actions.py --tb=short -q -p asyncio_mode=auto)",
+      "Bash(python -m pytest tests/test_coordinator_apply_actions.py --tb=line -q -o asyncio_mode=auto)",
+      "Bash(python -m pytest tests/ --tb=short -q)",
+      "Bash(python -m pytest tests/test_parameter_estimator.py::TestJointInternalGainAndHeaterScale -v --tb=short)",
+      "Bash(python tests/bench_user_scenario.py)",
+      "Bash(python -u tests/bench_user_scenario.py)",
+      "Bash(echo \"EXIT $?\")",
+      "Read(//tmp/**)",
+      "Bash(tasklist)",
+      "Bash(taskkill //F //IM python3.13.exe)",
+      "Bash(rm -f \"C:/Documents/projects/HeatingAssistant/tests/bench_user_scenario.py\" /tmp/bench.log)",
+      "Bash(python -m pytest tests/ --tb=line -q)"
+    ]
+  }
+}

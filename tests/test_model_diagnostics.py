@@ -298,9 +298,11 @@ def test_compute_controller_performance_empty():
 def test_analyze_innovations_consistent():
     """Test innovation analysis for a well-tuned filter."""
     rng = np.random.default_rng(42)
-    # Consistent filter: innovations ~ N(0, 1)
-    innovations = list(rng.normal(0, 1.0, 100))
-    innovation_variances = [1.0] * 100
+    # Consistent filter: innovations ~ N(0, 1).  Use a large sample so the
+    # empirical variance is tight around the theoretical value (the seed-42
+    # 100-sample draw happens to be 4 σ low and would fail the bounds).
+    innovations = list(rng.normal(0, 1.0, 1000))
+    innovation_variances = [1.0] * 1000
 
     analysis = analyze_innovations(innovations, innovation_variances)
 

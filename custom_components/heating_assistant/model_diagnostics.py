@@ -645,6 +645,7 @@ def generate_model_fit_report(
                     if fit_metrics.residual_autocorr_lag1 is not None
                     else None
                 ),
+                "n_samples": fit_metrics.n_samples,
             }
 
         if param_validation:
