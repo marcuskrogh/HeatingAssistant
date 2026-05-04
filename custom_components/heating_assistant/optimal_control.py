@@ -1,10 +1,11 @@
 """
-Optimal Control Problem — backward-compatibility shim.
+Optimal control problem re-exports.
 
-The OptimalControlProblem implementation has moved to ``mbc.control``.
-This module re-exports it for backward compatibility.
+CDTrackingOptimalControlProblem is the nonlinear NLP-based OCP used by
+HeatingMPCController.  The linear OptimalControlProblem is also
+re-exported for reference.
 """
 
-from mbc.control import OptimalControlProblem
+from mbc.control import CDTrackingOptimalControlProblem, OptimalControlProblem
 
-__all__ = ["OptimalControlProblem"]
+__all__ = ["CDTrackingOptimalControlProblem", "OptimalControlProblem"]

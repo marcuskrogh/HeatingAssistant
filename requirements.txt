@@ -1,13 +1,10 @@
 # Runtime dependencies for the HeatingAssistant custom component.
 #
-# The mbc (model-based control) package provides the generic model abstractions,
-# state estimation, and optimal control algorithms used by this integration.
-# Install it from its public GitHub repository:
+# The mbc (model-based control) package provides the generic nonlinear
+# model abstractions, state estimation (CD-EKF), and optimal control
+# algorithms (CDTrackingOptimalControlProblem, CDNMPCController).
+# The local copy under mbc/ is used directly.
 #
-#   pip install git+https://github.com/marcuskrogh/mbc
-#
-mbc @ git+https://github.com/marcuskrogh/mbc
-
-# Other runtime dependencies
 numpy
+scipy
 cvxopt
