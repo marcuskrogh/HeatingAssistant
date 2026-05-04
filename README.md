@@ -1997,33 +1997,61 @@ An event `heating_assistant_simulation_result` is also fired, which automations 
 
 Service: `heating_assistant.estimate_parameters`
 
-This service back-calculates `thermal_mass` and `r_external` from an observed heating experiment.  You heat a room with known power and known outdoor temperature, record the start and end temperatures and the duration, and the service estimates the thermal parameters.
+This service uses **maximum likelihood estimation (MLE)** to identify thermal model parameters from historical operational data collected by the MPC controller.  The estimator jointly optimizes:
+
+- **Thermal mass** `thermal_mass` [J/K] for each room
+- **External thermal resistance** `r_external` [K/W] for each room
+- **Internal heat gain** `internal_gain` [W] for each room (constant sources like appliances, occupants, etc.)
+- **Heater power-scale** correction factors for each heat source (to account for miscalibration or efficiency degradation)
+- **Inter-room thermal resistance** `r_value` [K/W] for connections with sufficient temperature-difference variation
+
+The estimator uses a **Kalman filter prediction-error decomposition (PED)** to evaluate the Gaussian log-likelihood of each candidate parameter set.  A multi-start Nelder–Mead optimizer searches the parameter space, with automatic **identifiability gating** to exclude parameters that the data cannot constrain (e.g., heater scales when heating fraction is constant, inter-room resistances when adjacent rooms track each other closely).
+
+**When to use:**
+
+- After the system has been running for at least **8–12 hours** with normal heating activity (the more data, the better).
+- When you suspect your initial parameter guesses are significantly wrong (the MPC predictions consistently deviate from measured temperatures).
+- To refine parameters after major changes (new insulation, furniture rearrangement, heater replacement).
+
+**How it works:**
+
+1. The service reads the accumulated **history buffer** (up to 480 time-steps = 8 hours at 1-minute sampling).
+2. For each candidate parameter set, the Kalman filter forward-propagates the state estimate through the history, computing the innovation log-likelihood at each measurement.
+3. The optimizer searches for the parameter set that maximizes this likelihood, subject to:
+   - Physical bounds (thermal masses in [10 kJ/K, 500 MJ/K], resistances in [10 µK/W, 10 K/W], etc.)
+   - Gaussian regularization shrinking parameters toward their prior (the current configured values) to prevent overfitting when data quality is poor.
+4. The service returns the optimized parameters as a persistent notification (copy-paste into `configuration.yaml` to apply them).
 
 **Service data:**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `room_name` | string | Room name |
-| `heating_power` | float | Power applied during the experiment [W] |
-| `outdoor_temp` | float | Outdoor temperature during the experiment [°C] |
-| `initial_temp` | float | Room temperature at the start [°C] |
-| `final_temp` | float | Room temperature at the end [°C] |
-| `duration_seconds` | float | Duration of the experiment [s] |
+The service accepts optional parameters to control the estimation:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `regularization` | float | `1.0` | Weight of the Gaussian prior shrinking parameters toward their current values.  Increase (e.g. `10.0`) if estimates are unstable; decrease (e.g. `0.1`) if you want the data to dominate. |
 
 **Example call:**
 
 ```yaml
 service: heating_assistant.estimate_parameters
 data:
-  room_name: "bedroom"
-  heating_power: 1500
-  outdoor_temp: 3.0
-  initial_temp: 14.0
-  final_temp: 18.0
-  duration_seconds: 7200
+  regularization: 1.0
 ```
 
-**Result:** A persistent notification with estimated `thermal_mass` and `r_external`, compared to the current configuration values.
+**Result:** A persistent notification listing:
+
+- **Estimated parameters** for each room: `thermal_mass`, `r_external`, `internal_gain`
+- **Estimated heater scales** for sources whose duty-cycle varied enough during the window
+- **Estimated inter-room resistances** for connections with sufficient temperature-difference variation
+- **Log-likelihood** of the optimized model (higher is better; compare before/after to assess improvement)
+- **Convergence status** and identifiability diagnostics
+
+**Tips for good results:**
+
+- **Excite the system**: ensure heaters turn on and off during the observation window (vary setpoints or let the MPC cycle naturally).
+- **Vary outdoor conditions**: estimation works best when outdoor temperature changes by at least 5–10 °C over the window.
+- **Check identifiability**: if a parameter is flagged as "not identifiable", it means the data didn't contain enough information to constrain it—keep the system running longer or manually vary the relevant input.
+- **Start with weak regularization** (`0.1`) if you have high-quality data (12+ hours, lots of heating cycles); use strong regularization (`10.0`) if data is noisy or sparse.
 
 ### 13.12 Lovelace dashboard – board and card reference
 
