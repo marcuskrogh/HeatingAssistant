@@ -262,6 +262,60 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     # ── Application-layer helpers ────────────────────────────────────────
 
+    def discretize(self, d_cvx):
+        """
+        Zero-order-hold discretization of the linearized system.
+
+        This method is provided for compatibility with the discrete-time
+        parameter estimator. It returns cvxopt matrices (A_d, B_d, E_d).
+
+        The system is linearized around the current state with the given
+        disturbance vector d. The continuous-time linearization is:
+            dx/dt = F x + G_u(d[0]) u + G_d d
+
+        where F = dfdx is constant (doesn't depend on x or u).
+
+        The ZOH discretization gives:
+            x[k+1] = A_d x[k] + B_d u[k] + E_d d[k]
+        where:
+            A_d = exp(F * dt)
+            B_d = F^{-1} (A_d - I) G_u
+            E_d = F^{-1} (A_d - I) G_d
+
+        For the special case where F is singular (which it never is for
+        RC networks since F has full rank), we would use the series expansion.
+        """
+        from scipy.linalg import expm
+        import cvxopt
+
+        # Extract disturbance vector as numpy array
+        d_np = np.array(d_cvx).flatten()
+        outdoor_temp = float(d_np[0])
+
+        # Get the continuous-time matrices
+        F = self._F  # Constant system matrix
+        G_u = self._build_G_u(outdoor_temp)  # Input matrix (depends on T_out)
+        G_d = self._G_d  # Disturbance matrix
+
+        # Compute ZOH discretization
+        dt = self._dt
+        A_d = expm(F * dt)
+
+        # B_d = F^{-1} (A_d - I) G_u
+        # Since F is invertible for RC networks, we can compute this directly
+        F_inv_Ad_minus_I = np.linalg.solve(F, A_d - np.eye(self.nx))
+        B_d = F_inv_Ad_minus_I @ G_u
+
+        # E_d = F^{-1} (A_d - I) G_d
+        E_d = F_inv_Ad_minus_I @ G_d
+
+        # Convert to cvxopt matrices
+        A_cvx = cvxopt.matrix(A_d, tc='d')
+        B_cvx = cvxopt.matrix(B_d, tc='d')
+        E_cvx = cvxopt.matrix(E_d, tc='d')
+
+        return A_cvx, B_cvx, E_cvx
+
     @property
     def x(self) -> list[float]:
         """Current room temperatures as a list of floats."""

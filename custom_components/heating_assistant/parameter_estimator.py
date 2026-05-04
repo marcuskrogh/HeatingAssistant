@@ -408,9 +408,7 @@ class KalmanMLEstimator:
         Evaluate the Kalman PED log-likelihood at the *current* configured
         parameter values (without regularisation).
         """
-        print(f"DEBUG: compute_log_likelihood called with history length {len(history)}")
         if len(history) < MIN_HISTORY_STEPS:
-            print(f"DEBUG: Returning None because history too short")
             return None
 
         # Build a minimal layout with no identifiable sources/pairs for the prior evaluation
@@ -426,11 +424,9 @@ class KalmanMLEstimator:
             self._log_r_prior,
             self._q_int_prior,
         ])
-        print(f"DEBUG: theta_prior shape: {theta_prior.shape}")
 
         # Convert history to standardised format
         std_history = self._convert_history_std(history)
-        print(f"DEBUG: std_history length: {len(std_history)}")
 
         # Build model factory
         def _model_factory(theta: np.ndarray):
@@ -453,7 +449,6 @@ class KalmanMLEstimator:
         R_np = np.eye(n) * self._R_var
 
         # Create temporary mbc estimator without regularization
-        print(f"DEBUG: Creating mbc estimator...")
         mbc_est = _MbcEstimator(
             model_factory=_model_factory,
             theta0=theta_prior,
@@ -465,14 +460,11 @@ class KalmanMLEstimator:
         )
 
         try:
-            print(f"DEBUG: Calling mbc_est.log_likelihood...")
             ll = mbc_est.log_likelihood(std_history, theta_prior)
-            print(f"DEBUG: Got ll = {ll}")
             return ll
         except Exception as exc:
-            print(f"DEBUG: Exception caught: {exc}")
-            _LOGGER.error("compute_log_likelihood failed: %s", exc, exc_info=True)
-            raise  # Temporary: re-raise for debugging
+            _LOGGER.debug("compute_log_likelihood failed: %s", exc, exc_info=True)
+            return None
 
     def estimate(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
