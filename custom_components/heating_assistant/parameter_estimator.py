@@ -50,7 +50,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .controller import HouseThermalSystem
+from .controller import HouseThermalSDE as HouseThermalSystem
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
 from mbc._utils import _np_to_cvx, _cvx_to_np

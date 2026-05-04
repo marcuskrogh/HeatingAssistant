@@ -1,39 +1,41 @@
 """
-Model Predictive Controller — House-Heating Application.
+Model Predictive Controller — House-Heating Application (Nonlinear CD-NMPC).
 
-Generic model-based control components (LinearDiscreteModel, KalmanFilter,
-OptimalControlProblem, MPCController) live in the ``mbc`` package and are
-imported here for use by the application layer.
+The house thermal model is formulated as a nonlinear continuous-discrete SDE
+and solved using a CD-EKF + CDTrackingOptimalControlProblem from the ``mbc``
+toolbox.  No discretisation, no LPV, no linear approximations.
 
 House-Heating Application
 --------------------------
-HouseThermalSystem(LinearDiscreteModel)
-    Wraps HouseModel + list of HeatSource objects.
+HouseThermalSDE(ContinuousDiscreteModel)
+    Wraps HouseModel + list of HeatSource objects as a nonlinear
+    continuous-discrete SDE.
 
-    State        x = [T₁, …, Tₙ]            (room temperatures, °C)
-    Input        u = [f₁, …, fₘ]            (setpoint fractions, ∈ [0, 1])
+    State        x = [T₁, …, Tₙ]                   (room temperatures, °C)
+    Input        u = [f₁, …, fₘ]                   (setpoint fractions, ∈ [0, 1])
     Disturbance  d = [T_out, Q_sol,1, …, Q_sol,n]  (°C and W)
-    Output       y = x                      (full-state observation, C = Iₙ)
+    Output       z = ym = x                         (full-state observation)
 
-    The continuous-time RC model is ZOH-discretised at each step:
+    Itô SDE:
+        dx(t) = f(x, u, d, p, t) dt + σ_w I dw(t),  dw ~ N(0, I dt)
+        ym(tₖ) = x(tₖ) + v(tₖ),                      v ~ N(0, σ_v² I)
 
-      Ṫ = F T + G_u u + G_d d
-      F   = C_cap⁻¹ Aᶜ           (state matrix, n × n)
-      G_u = C_cap⁻¹ Φ(T_out)     (input matrix, n × m; LPV for heat-pump COP)
-      G_d = C_cap⁻¹ [b_ext | Iₙ] (disturbance matrix, n × (1+n))
+    Drift:
+        f(x, u, d, p, t) = F x + G_u(d₀) u + G_d d
+        F        = C_cap⁻¹ Aᶜ              (n × n, structural)
+        G_u[:,j] = φⱼ(d₀) / C_cap[rⱼ]    (n × m, nonlinear via heat-pump COP)
+        G_d      = C_cap⁻¹ [b_ext | Iₙ]   (n × (1+n), structural)
+        d₀       = d[0] = T_out
 
-      A_d = expm(F dt)
-      B_d = F⁻¹(A_d − I) G_u
-      E_d = F⁻¹(A_d − I) G_d
-
-    On-off sources (e.g. connected to a switch entity) are treated as
-    continuous actuators; the fraction u ∈ [0, 1] is interpreted as the
-    duty cycle within each sampling interval dt.
+    The nonlinearity arises from the heat-pump COP which depends on the
+    outdoor temperature d₀.  The drift is affine in (x, u) for a fixed d,
+    but the coefficient G_u depends on d nonlinearly.
 
 HeatingMPCController
-    Application facade: builds HouseThermalSystem + MPCController, adds
-    solar/outdoor forecasting, applies source set-points, and exposes the
-    visualisation properties consumed by the coordinator.
+    Application facade: builds HouseThermalSDE + ContinuousDiscreteEKF +
+    CDTrackingOptimalControlProblem, adds solar/outdoor forecasting, applies
+    source set-points, and exposes the visualisation properties consumed by
+    the coordinator.
 
     Public API:
         controller = HeatingMPCController(model, heat_sources, ...)
@@ -48,56 +50,53 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from cvxopt import matrix
 
 from .thermal_model import HouseModel
 from .heat_sources import HeatSource
 from .solar_model import room_solar_gains
 
-# ── Import generic model-based control components from mbc ──────────────────
-from mbc.models import LinearDiscreteModel
-from mbc.estimation import KalmanFilter
-from mbc.control import OptimalControlProblem, MPCController
-from mbc._utils import _np_to_cvx, _cvx_to_np, _cvx_col_to_np, _expm, _zoh
-
-
-# ── Backward-compatible alias ────────────────────────────────────────────
-StateEstimator = KalmanFilter
+# ── Import nonlinear model-based control components from mbc ─────────────────
+from mbc.models import ContinuousDiscreteModel
+from mbc.estimation import ContinuousDiscreteEKF
+from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
 
 
 # ============================================================
-# House-heating application
+# House-heating SDE model
 # ============================================================
 
-class HouseThermalSystem(LinearDiscreteModel):
+class HouseThermalSDE(ContinuousDiscreteModel):
     """
-    House thermal model as a linear discrete-time system.
+    House thermal model as a nonlinear continuous-discrete SDE.
 
     Continuous-time RC circuit per room i:
 
-      Cᵢ Ṫᵢ = Σⱼ∈adj(i) (Tⱼ − Tᵢ)/Rᵢⱼ + (T_out − Tᵢ)/Rᵢ,ext
-              + Q_heat,i + Q_sol,i
+        Cᵢ dTᵢ/dt = Σⱼ∈adj(i) (Tⱼ − Tᵢ)/Rᵢⱼ + (T_out − Tᵢ)/Rᵢ,ext
+                   + Q_heat,i(u, T_out) + Q_sol,i + Q_int,i
 
-    In matrix form: Ṫ = F T + G_u(T_out) u + G_d d
+    In Itô SDE form:
+        dx(t) = f(x, u, d, p, t) dt + sigma(x, u, d, p, t) dw(t)
 
-      F        = C_cap⁻¹ Aᶜ              (n × n, time-invariant)
-      G_u[:,j] = φⱼ(T_out) / Cᵢ         (n × m, LPV via heat-pump COP)
-      G_d      = C_cap⁻¹ [b_ext | Iₙ]   (n × (1+n), time-invariant)
-      d        = [T_out, Q_sol,1, …, Q_sol,n]
+    where
+        f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d
+        sigma             = sigma_w * I_n   (isotropic process noise)
 
-    ZOH discretisation (exact for piecewise-constant inputs):
-      A_d = expm(F dt),   B_d = F⁻¹(A_d − I) G_u,   E_d = F⁻¹(A_d − I) G_d
+    and the observation model is:
+        ym(tₖ) = hm(x) = x   (full-state measurement)
+        Rm = sigma_v² * I_n
 
-    On-off sources are modelled with a duty-cycle relaxation: the MPC
-    optimises the continuous fraction u ∈ [0, 1], representing the
-    fraction of dt for which the source is active.  The coordinator
-    maps this fraction to on/off commands for switch-type entities.
+    The nonlinearity comes from G_u(T_out): for heat pumps the delivered
+    thermal power depends on the outdoor temperature through the COP.
 
     Parameters
     ----------
-    model   : HouseModel
-    sources : list of HeatSource (index j → source j)
-    dt      : sampling interval [s]
+    model      : HouseModel
+    sources    : list of HeatSource
+    dt         : measurement sampling interval [s]
+    sigma_w    : process-noise standard deviation [K/√s].  Default: 0.1.
+    sigma_v    : measurement-noise standard deviation [K].  Default: 0.5.
+    n_int_steps: Euler sub-steps per sampling interval for EKF/OCP.
+                 Default: 10.
     """
 
     def __init__(
@@ -105,10 +104,17 @@ class HouseThermalSystem(LinearDiscreteModel):
         model: HouseModel,
         sources: List[HeatSource],
         dt: float,
+        sigma_w: float = 0.1,
+        sigma_v: float = 0.5,
+        n_int_steps: int = 10,
     ) -> None:
         self._model = model
         self._sources = sources
         self._dt = dt
+        self._sigma_w = sigma_w
+        self._sigma_v = sigma_v
+        self._n_int_steps = n_int_steps
+
         self._room_list: List[str] = model.room_names
         self._room_idx: Dict[str, int] = {
             name: i for i, name in enumerate(self._room_list)
@@ -124,36 +130,141 @@ class HouseThermalSystem(LinearDiscreteModel):
         self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]
 
         # Continuous disturbance matrix G_d = C_cap⁻¹ [b_ext | Iₙ]
+        # d = [T_out, Q_sol,1+Q_int,1, …, Q_sol,n+Q_int,n]
         self._G_d: np.ndarray = np.zeros((n, 1 + n))
         self._G_d[:, 0] = model._B_ext / self._C_cap
         for i in range(n):
             self._G_d[i, 1 + i] = 1.0 / self._C_cap[i]
 
-        # Full-state observation: C = Iₙ (cvxopt)
-        self._C_mat: matrix = matrix(0.0, (n, n))
-        for i in range(n):
-            self._C_mat[i, i] = 1.0
+        # Cached measurement noise covariance
+        self._Rm: np.ndarray = (sigma_v ** 2) * np.eye(n)
 
-    # ── LinearDiscreteModel interface ────────────────────────────────────
+    # ── ContinuousDiscreteModel abstract dimensions ───────────────────────
 
     @property
-    def n_x(self) -> int:
+    def nx(self) -> int:
         return len(self._room_list)
 
     @property
-    def n_u(self) -> int:
+    def nu(self) -> int:
         return len(self._sources)
 
     @property
-    def n_d(self) -> int:
+    def nd(self) -> int:
         return 1 + len(self._room_list)
 
     @property
-    def C(self) -> matrix:
-        return self._C_mat
+    def nw(self) -> int:
+        return self.nx
+
+    @property
+    def nz(self) -> int:
+        return self.nx
+
+    @property
+    def nym(self) -> int:
+        return self.nx
+
+    @property
+    def Rm(self) -> np.ndarray:
+        return self._Rm
+
+    # ── ContinuousDiscreteModel abstract functions ────────────────────────
+
+    def _build_G_u(self, outdoor_temp: float) -> np.ndarray:
+        """Input gain matrix G_u(T_out) ∈ ℝⁿˣᵐ."""
+        n, m = self.nx, self.nu
+        G_u = np.zeros((n, m))
+        for j, src in enumerate(self._sources):
+            i = self._room_idx[src.room]
+            G_u[i, j] = src.thermal_power(1.0, outdoor_temp) / self._C_cap[i]
+        return G_u
+
+    def f(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """
+        Drift f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d.
+
+        The nonlinearity is in G_u which depends on the outdoor temperature
+        d[0] through the heat-pump COP.
+        """
+        outdoor_temp = float(d[0])
+        G_u = self._build_G_u(outdoor_temp)
+        return self._F @ x + G_u @ u + self._G_d @ d
+
+    def sigma(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """
+        Diffusion sigma(x, u, d, p, t) = sigma_w * I_n.
+
+        The CD-EKF computes G @ Gᵀ = sigma_w² * I for the continuous
+        Riccati equation.
+        """
+        return self._sigma_w * np.eye(self.nx)
+
+    def g(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Controlled output z = x (room temperatures)."""
+        return x.copy()
+
+    def hm(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float = 0.0,
+    ) -> np.ndarray:
+        """Measurement function ym = x (full-state observation)."""
+        return x.copy()
+
+    # ── Analytic Jacobians (override default FD for efficiency) ──────────
+
+    def dfdx(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """∂f/∂x = F (constant; does not depend on state or inputs)."""
+        return self._F.copy()
+
+    def dhmdx(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float = 0.0,
+    ) -> np.ndarray:
+        """∂hm/∂x = I (full-state observation)."""
+        return np.eye(self.nx)
+
+    # ── Application-layer helpers ────────────────────────────────────────
 
     @property
     def x(self) -> list[float]:
+        """Current room temperatures as a list of floats."""
         return [self._model.rooms[name].temperature
                 for name in self._room_list]
 
@@ -163,53 +274,31 @@ class HouseThermalSystem(LinearDiscreteModel):
             self._model.rooms[name].temperature = float(val[i])
 
     @property
-    def x_ref(self) -> matrix:
-        n = self.n_x
-        ref = matrix(0.0, (n, 1))
-        for i, name in enumerate(self._room_list):
-            ref[i] = self._model.rooms[name].setpoint
-        return ref
+    def x_ref(self) -> np.ndarray:
+        """Room setpoints as a (nx,) ndarray."""
+        return np.array(
+            [self._model.rooms[name].setpoint for name in self._room_list]
+        )
 
     @property
-    def u_bounds(self) -> Tuple[matrix, matrix]:
-        m = self.n_u
-        return matrix(0.0, (m, 1)), matrix(1.0, (m, 1))
-
-    def discretize(self, d: matrix) -> Tuple[matrix, matrix, matrix]:
-        """
-        ZOH-discretise the RC model at outdoor temperature d[0].
-
-        The input matrix G_u depends on T_out because heat-pump COP is
-        temperature-dependent (LPV update at each controller step).
-        """
-        outdoor_temp = float(d[0])
-        n, m = self.n_x, self.n_u
-
-        G_u = np.zeros((n, m))
-        for j, src in enumerate(self._sources):
-            i = self._room_idx[src.room]
-            G_u[i, j] = src.thermal_power(1.0, outdoor_temp) / self._C_cap[i]
-
-        A_d_np, B_d_np = _zoh(self._F, G_u, self._dt)
-        _, E_d_np = _zoh(self._F, self._G_d, self._dt)
-        return _np_to_cvx(A_d_np), _np_to_cvx(B_d_np), _np_to_cvx(E_d_np)
-
-    # ── Convenience helpers for the application layer ────────────────────
+    def u_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Input box: u ∈ [0, 1]ᵐ."""
+        return np.zeros(self.nu), np.ones(self.nu)
 
     def disturbance_vector(
         self,
         outdoor_temp: float,
         solar_gains: Dict[str, float],
-    ) -> matrix:
-        """Pack outdoor temperature and per-room (solar + internal) gains into d ∈ ℝᵖ.
+    ) -> np.ndarray:
+        """
+        Pack outdoor temperature and per-room gains into d ∈ ℝᵖ.
 
         ``Room.internal_gain`` is folded into the same disturbance slot as
         solar gain — both are constant heat injections [W] mapped through
-        the same column of E_d, so the controller / Kalman filter cannot
-        tell them apart and does not need to.
+        the same column of G_d, so the EKF/OCP cannot tell them apart and
+        does not need to.
         """
-        p = self.n_d
-        d = matrix(0.0, (p, 1))
+        d = np.zeros(self.nd)
         d[0] = outdoor_temp
         for i, name in enumerate(self._room_list):
             slot = 1 + i
@@ -220,7 +309,7 @@ class HouseThermalSystem(LinearDiscreteModel):
 
     def heating_powers(
         self,
-        u_vec: matrix,
+        u_vec: np.ndarray,
         outdoor_temp: float,
     ) -> Dict[str, float]:
         """Convert fractions u to per-room total thermal power [W]."""
@@ -229,87 +318,32 @@ class HouseThermalSystem(LinearDiscreteModel):
             powers[src.room] += src.thermal_power(float(u_vec[j]), outdoor_temp)
         return powers
 
-    # ── Parameter-identification interface ───────────────────────────────
 
-    @property
-    def params(self) -> np.ndarray:
-        """
-        Natural identifiable parameters as a flat array:
-
-            θ = [log(C₁), …, log(Cₙ), log(R₁_ext), …, log(Rₙ_ext)]
-
-        where Cᵢ is the thermal mass [J/K] and Rᵢ_ext is the external
-        thermal resistance [K/W] of room *i*.
-
-        This parametrisation is used by ``discretize_jacobian`` and
-        ``with_params`` for system identification of the core structural
-        parameters.  Extended parameters such as heater-power scales or
-        internal heat gains are handled separately in the application
-        layer.
-        """
-        import math
-        n = self.n_x
-        masses = [
-            self._model.rooms[name].thermal_mass for name in self._room_list
-        ]
-        rs = [
-            self._model.rooms[name].r_external for name in self._room_list
-        ]
-        return np.array(
-            [math.log(max(m, 1.0)) for m in masses]
-            + [math.log(max(r, 1e-12)) for r in rs],
-            dtype=float,
-        )
-
-    def with_params(self, theta: np.ndarray) -> "HouseThermalSystem":
-        """
-        Return a new :class:`HouseThermalSystem` with the structural
-        parameters given by *theta* = [log(C₁), …, log(Rₙ_ext)].
-
-        All other model attributes (connections, windows, setpoints,
-        heat sources, dt) are copied from the current instance.
-        """
-        import math
-        import copy
-        from .thermal_model import Room
-
-        n = self.n_x
-        if len(theta) != 2 * n:
-            raise ValueError(
-                f"theta must have length 2*n_x = {2 * n}; got {len(theta)}"
-            )
-        log_masses = theta[:n]
-        log_rs = theta[n:2 * n]
-
-        new_rooms = []
-        for i, name in enumerate(self._room_list):
-            old_room = self._model.rooms[name]
-            new_room = Room(
-                name=old_room.name,
-                thermal_mass=float(math.exp(log_masses[i])),
-                r_external=float(math.exp(log_rs[i])),
-                connections=copy.deepcopy(old_room.connections),
-                windows=copy.deepcopy(old_room.windows),
-                temperature=old_room.temperature,
-                setpoint=old_room.setpoint,
-                internal_gain=old_room.internal_gain,
-            )
-            new_rooms.append(new_room)
-
-        from .thermal_model import HouseModel
-        return HouseThermalSystem(
-            HouseModel(new_rooms), self._sources, self._dt
-        )
-
+# ============================================================
+# House-heating NMPC facade
+# ============================================================
 
 class HeatingMPCController:
     """
-    Application facade for house-heating MPC.
+    Application facade for house-heating NMPC.
 
-    Builds a HouseThermalSystem, KalmanFilter, OptimalControlProblem, and
-    the generic MPCController, then provides the coordinator-facing API:
+    Builds a HouseThermalSDE, ContinuousDiscreteEKF, and
+    CDTrackingOptimalControlProblem, then provides the coordinator-facing API:
 
       actions = controller.compute(outdoor_temp, solar_gains, now, outdoor_forecast)
+
+    The control loop at each step:
+      1. EKF predict+update: fuse the current room-temperature measurement.
+      2. CDTrackingOCP solve: minimise the NLP over the horizon.
+      3. Apply the first optimal action to all heat sources.
+
+    The CDTrackingOptimalControlProblem uses SLSQP (via scipy) to solve the
+    finite-horizon NLP with:
+        - Quadratic output-tracking cost  ‖z − z_ref‖²_Q
+        - Quadratic input cost            ‖u‖²_R
+        - Optional ROM penalty            ‖Δu‖²_S
+        - Soft output constraints         z_min ≤ z ≤ z_max  (penalty ρ_z)
+        - Hard input bounds               0 ≤ u ≤ 1
 
     Forecasts
     ---------
@@ -319,19 +353,19 @@ class HeatingMPCController:
 
     Parameters
     ----------
-    model         : HouseModel
-    heat_sources  : list of HeatSource
-    horizon       : prediction horizon N (number of time steps)
-    dt            : sampling interval [s]
-    latitude      : site latitude [°]
-    longitude     : site longitude [°]
-    energy_weight : scalar weight on ‖u‖² in the cost (favours energy saving)
-    smoothing_weight : scalar weight on ‖Δu‖² in the cost (penalises rapid
-                       input changes for smoother actuator behaviour).
-                       Set to 0.0 to disable.
-    constraint_offset : symmetric offset δ around the setpoint for soft
-                        output constraints:  SP − δ ≤ y ≤ SP + δ.
-                        Default: 2.0 °C.
+    model             : HouseModel
+    heat_sources      : list of HeatSource
+    horizon           : prediction horizon N (number of time steps)
+    dt                : sampling interval [s]
+    latitude          : site latitude [°]
+    longitude         : site longitude [°]
+    energy_weight     : weight on ‖u‖²_R (input energy cost)
+    smoothing_weight  : weight on ‖Δu‖²_S (ROM penalty; 0 disables)
+    constraint_offset : symmetric half-width δ for soft output constraints
+                        SP − δ ≤ z ≤ SP + δ.  Default: 2.0 °C.
+    sigma_w           : process-noise std dev for the SDE / EKF [K/√s].
+    sigma_v           : measurement-noise std dev [K].
+    n_int_steps       : Euler sub-steps per interval in EKF / OCP.
     """
 
     def __init__(
@@ -345,47 +379,71 @@ class HeatingMPCController:
         energy_weight: float = 0.01,
         smoothing_weight: float = 0.1,
         constraint_offset: float = 2.0,
+        sigma_w: float = 0.1,
+        sigma_v: float = 0.5,
+        n_int_steps: int = 10,
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
         self._dt = dt
         self._latitude = latitude
         self._longitude = longitude
+        self._constraint_offset = constraint_offset
 
         if smoothing_weight < 0.0:
             raise ValueError(
                 f"smoothing_weight must be >= 0; got {smoothing_weight}"
             )
 
-        # Build the linear discrete-time model
-        self._system = HouseThermalSystem(model, heat_sources, dt)
-
-        # Cost matrices (cvxopt dense)
-        n_x, n_u = self._system.n_x, self._system.n_u
-
-        Q = matrix(0.0, (n_x, n_x))
-        for i in range(n_x):
-            Q[i, i] = 1.0
-
-        R = matrix(0.0, (n_u, n_u))
-        for i in range(n_u):
-            R[i, i] = energy_weight
-
-        S: matrix | None = None
-        if smoothing_weight > 0.0:
-            S = matrix(0.0, (n_u, n_u))
-            for i in range(n_u):
-                S[i, i] = smoothing_weight
-
-        self._constraint_offset = constraint_offset
-
-        # Assemble generic MPC
-        estimator = KalmanFilter(self._system)
-        ocp = OptimalControlProblem(
-            self._system, horizon, Q, R, S=S,
-            y_offset=constraint_offset,
+        # Build the nonlinear continuous-discrete model
+        self._system = HouseThermalSDE(
+            model, heat_sources, dt,
+            sigma_w=sigma_w, sigma_v=sigma_v,
+            n_int_steps=n_int_steps,
         )
-        self._mpc = MPCController(self._system, estimator, ocp)
+        n_x = self._system.nx
+        n_u = self._system.nu
+
+        # ── EKF: initialise from current room temperatures ──────────────
+        x0 = np.array(self._system.x)
+        P0 = np.eye(n_x)  # initial state uncertainty [K²]
+        self._ekf = ContinuousDiscreteEKF(
+            self._system, x0, P0, dt, n_steps=n_int_steps
+        )
+
+        # ── OCP cost matrices ───────────────────────────────────────────
+        Q = np.eye(n_x)                      # stage output tracking
+        R = energy_weight * np.eye(n_u)      # input cost
+        S = (smoothing_weight * np.eye(n_u)
+             if smoothing_weight > 0.0 else None)  # ROM penalty
+
+        # Reference and soft constraints (updated before each solve)
+        z_ref = self._system.x_ref.copy()
+        z_min = z_ref - constraint_offset
+        z_max = z_ref + constraint_offset
+        u_min, u_max = self._system.u_bounds
+
+        # ── CDTrackingOptimalControlProblem ─────────────────────────────
+        self._ocp = CDTrackingOptimalControlProblem(
+            self._system,
+            N=horizon,
+            Q=Q,
+            R=R,
+            S=S,
+            z_ref=z_ref,
+            u_min=u_min,
+            u_max=u_max,
+            z_min=z_min,
+            z_max=z_max,
+            rho_z=1e4,
+            n_steps=n_int_steps,
+            dt=dt,
+            solver="L-BFGS-B",
+        )
+
+        # ── Warm-start storage ──────────────────────────────────────────
+        self._u_prev: np.ndarray = np.zeros(n_u)
+        self._u_seq_prev: Optional[np.ndarray] = None
 
         # Visualisation data (populated after each compute())
         self._predictions:      List[Dict[str, float]] = []
@@ -442,9 +500,8 @@ class HeatingMPCController:
         now : datetime, optional
             Current time (UTC).  Required when solar_gains is None.
         outdoor_forecast : list of float, optional
-            External outdoor temperature forecast for each horizon step
-            (e.g. from a weather integration).  If provided, replaces
-            the default persistence forecast.  Must have length >= horizon.
+            External outdoor temperature forecast for each horizon step.
+            If provided, must have length >= horizon.
 
         Returns
         -------
@@ -457,55 +514,77 @@ class HeatingMPCController:
             solar_gains = self._current_solar(now)
 
         N = self._horizon
-        n_x = self._system.n_x
-        n_u = self._system.n_u
-        n_d = self._system.n_d
+        p = np.array([], dtype=float)  # no estimated parameters
 
-        # ── Build disturbance forecast D ∈ ℝ^{N·p × 1} ──────────────────
+        # ── Disturbance forecast D ∈ ℝ^{N × nd} ─────────────────────────
         if outdoor_forecast is not None and len(outdoor_forecast) >= N:
             outdoor_seq = list(outdoor_forecast[:N])
         else:
             outdoor_seq = self._forecast_outdoor(outdoor_temp)
         solar_seq = self._forecast_solar(now)
 
-        D = matrix(0.0, (N * n_d, 1))
+        d_traj = np.zeros((N, self._system.nd))
         for k in range(N):
-            dk = self._system.disturbance_vector(outdoor_seq[k], solar_seq[k])
-            D[k * n_d:(k + 1) * n_d] = dk
+            d_traj[k] = self._system.disturbance_vector(
+                outdoor_seq[k], solar_seq[k]
+            )
 
         # Store forecasts for visualisation
         self._outdoor_forecast = list(outdoor_seq)
         self._solar_forecast = [dict(s) for s in solar_seq]
 
         # ── Current measurement y = room temperatures ────────────────────
-        x_vals = self._system.x
-        y = matrix(x_vals, (n_x, 1))
+        y = np.array(self._system.x)
 
-        # ── MPC step ─────────────────────────────────────────────────────
-        u_opt, U_seq, X_seq = self._mpc.step(y, D)
+        # ── Update setpoint reference in OCP (setpoints may have changed) ──
+        z_ref = self._system.x_ref
+        self._ocp._z_ref = z_ref.copy()
+        self._ocp._z_min = z_ref - self._constraint_offset
+        self._ocp._z_max = z_ref + self._constraint_offset
+
+        # ── Step 1: EKF predict+update ───────────────────────────────────
+        x_hat, _ = self._ekf.step(y, self._u_prev, d_traj[0], p, 0.0)
+
+        # ── Step 2: OCP solve ────────────────────────────────────────────
+        u_opt, _ = self._ocp.solve(
+            x_hat, d_traj, u_prev=self._u_seq_prev, p=p, t0=0.0
+        )
+
+        # ── Step 3: Apply first action ───────────────────────────────────
+        u0 = u_opt[0]
+
+        # Update warm-start for next call
+        self._u_seq_prev = u_opt.copy()
+        self._u_prev = u0.copy()
 
         # ── Apply actions to heat sources ────────────────────────────────
         actions: Dict[str, float] = {}
         for j, src in enumerate(self._sources):
-            frac = max(0.0, min(1.0, float(u_opt[j])))
+            frac = float(np.clip(u0[j], 0.0, 1.0))
             actions[src.name] = frac
             src.set_power(frac, outdoor_temp)
 
-        # ── Store visualisation data ─────────────────────────────────────
+        # ── Reconstruct predicted trajectory for visualisation ───────────
         room_list = self._system._room_list
-        self._predictions = []
-        for k in range(N):
-            step_pred: Dict[str, float] = {}
-            for i, name in enumerate(room_list):
-                step_pred[name] = float(X_seq[k * n_x + i])
-            self._predictions.append(step_pred)
+        n_x = self._system.nx
+        h = self._dt / self._system._n_int_steps
 
-        self._heating_schedule = []
+        self._predictions = []
+        x_pred = x_hat.copy()
         for k in range(N):
-            u_k = U_seq[k * n_u:(k + 1) * n_u]
-            self._heating_schedule.append(
-                self._system.heating_powers(u_k, outdoor_seq[k])
+            # Euler integration over one sampling interval
+            x_cur = x_pred.copy()
+            for _ in range(self._system._n_int_steps):
+                x_cur = x_cur + self._system.f(x_cur, u_opt[k], d_traj[k], p, 0.0) * h
+            x_pred = x_cur
+            self._predictions.append(
+                {name: float(x_pred[i]) for i, name in enumerate(room_list)}
             )
+
+        self._heating_schedule = [
+            self._system.heating_powers(u_opt[k], outdoor_seq[k])
+            for k in range(N)
+        ]
 
         return actions
 
