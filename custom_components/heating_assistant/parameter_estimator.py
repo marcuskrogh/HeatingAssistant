@@ -132,27 +132,40 @@ class _AugmentedHouseModel:
 
         # Precompute E_d @ q_int correction (E_d is time-invariant)
         from cvxopt import matrix as _cvx_mat
-        n_d = system.n_d
+        n_d = system.nd
         d_nominal = _cvx_mat([0.0] * n_d, (n_d, 1), tc="d")
         _, _, E_cvx = system.discretize(d_nominal)
         E_np = _cvx_to_np(E_cvx)
-        n = system.n_x
+        n = system.nx
         # q_int maps through columns 1..n of E_d (solar/internal gain slots)
         self._q_int_bias: np.ndarray = E_np[:, 1:1 + n] @ q_int_vec
 
     # ── LinearDiscreteModel duck-type interface ───────────────────────────
 
     @property
+    def nx(self) -> int:
+        return self._system.nx
+
+    @property
+    def nu(self) -> int:
+        return self._system.nu
+
+    @property
+    def nd(self) -> int:
+        return self._system.nd
+
+    # Legacy aliases for compatibility
+    @property
     def n_x(self) -> int:
-        return self._system.n_x
+        return self.nx
 
     @property
     def n_u(self) -> int:
-        return self._system.n_u
+        return self.nu
 
     @property
     def n_d(self) -> int:
-        return self._system.n_d
+        return self.nd
 
     @property
     def C(self):
@@ -395,11 +408,71 @@ class KalmanMLEstimator:
         Evaluate the Kalman PED log-likelihood at the *current* configured
         parameter values (without regularisation).
         """
-        x0 = np.concatenate([self._log_mass_prior, self._log_r_prior])
-        neg_ll = self._neg_log_likelihood(x0, history)
-        if not math.isfinite(neg_ll) or neg_ll >= 1e9:
+        print(f"DEBUG: compute_log_likelihood called with history length {len(history)}")
+        if len(history) < MIN_HISTORY_STEPS:
+            print(f"DEBUG: Returning None because history too short")
             return None
-        return float(-neg_ll)
+
+        # Build a minimal layout with no identifiable sources/pairs for the prior evaluation
+        layout = _ThetaLayout(
+            n_rooms=self._n,
+            identifiable_sources=[],
+            identifiable_pairs=[],
+        )
+
+        # Theta is just [log_mass, log_r, q_int] at the prior
+        theta_prior = np.concatenate([
+            self._log_mass_prior,
+            self._log_r_prior,
+            self._q_int_prior,
+        ])
+        print(f"DEBUG: theta_prior shape: {theta_prior.shape}")
+
+        # Convert history to standardised format
+        std_history = self._convert_history_std(history)
+        print(f"DEBUG: std_history length: {len(std_history)}")
+
+        # Build model factory
+        def _model_factory(theta: np.ndarray):
+            lm, lr, qi, _, _ = layout.unpack(theta)
+            sys_ = self._build_system(lm, lr, log_r_ij=None)
+            if sys_ is None:
+                raise ValueError("Failed to build thermal system")
+            alpha_full = np.ones(self._n_u)
+            return _AugmentedHouseModel(sys_, alpha_full, qi)
+
+        # Build bounds
+        n = self._n
+        bounds: List[Tuple[float, float]] = (
+            [(_LOG_MASS_LO, _LOG_MASS_HI)] * n
+            + [(_LOG_R_LO, _LOG_R_HI)] * n
+            + [(_Q_INT_LO, _Q_INT_HI)] * n
+        )
+
+        Q_np = np.eye(n) * self._Q_var
+        R_np = np.eye(n) * self._R_var
+
+        # Create temporary mbc estimator without regularization
+        print(f"DEBUG: Creating mbc estimator...")
+        mbc_est = _MbcEstimator(
+            model_factory=_model_factory,
+            theta0=theta_prior,
+            bounds=bounds,
+            Q=Q_np,
+            R=R_np,
+            regularization_fn=None,  # No regularization for likelihood eval
+            n_restarts=1,
+        )
+
+        try:
+            print(f"DEBUG: Calling mbc_est.log_likelihood...")
+            ll = mbc_est.log_likelihood(std_history, theta_prior)
+            print(f"DEBUG: Got ll = {ll}")
+            return ll
+        except Exception as exc:
+            print(f"DEBUG: Exception caught: {exc}")
+            _LOGGER.error("compute_log_likelihood failed: %s", exc, exc_info=True)
+            raise  # Temporary: re-raise for debugging
 
     def estimate(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
