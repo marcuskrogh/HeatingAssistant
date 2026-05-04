@@ -3,8 +3,8 @@
 # The mbc (model-based control) package provides the generic nonlinear
 # model abstractions, state estimation (CD-EKF), and optimal control
 # algorithms (CDTrackingOptimalControlProblem, CDNMPCController).
-# The local copy under mbc/ is used directly.
 #
 numpy
 scipy
 cvxopt
+mbc @ git+https://github.com/marcuskrogh/mbc.git
