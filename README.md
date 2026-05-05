@@ -125,9 +125,9 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Air-source heat pump support** | Temperature-dependent COP based on Carnot scaling.  The pump shuts off automatically below a configurable outdoor temperature floor to prevent defrost damage.  Offset-based setpoint control (`max_temp_offset`) lets the heat pump modulate output via the gap between its internal sensor and the target temperature. |
 | **Multiple heat sources per room** | Any number of heaters and/or heat pumps can be assigned to the same room; the controller optimises them jointly. |
 | **Turn-off deadband** | Heat pumps stay in heat mode (idling at the internal temperature) when the MPC says "no heat needed" but the room is still within a configurable deadband of the setpoint.  Only when the room exceeds *setpoint + deadband* does the unit actually turn off — dramatically reducing compressor short-cycling. |
-| **Receding-horizon MPC** | Each control cycle the controller solves a quadratic program over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error, energy use, and input rate-of-change (Δu smoothing).  Inputs are applied via zero-order hold. |
-| **Kalman filter state estimation** | A discrete-time Kalman filter fuses model predictions with sensor measurements, providing the minimum-variance state estimate under Gaussian noise assumptions. |
-| **Generic MPC framework** | The controller is built on a generic framework (`LinearDiscreteModel`, `KalmanFilter`, `OptimalControlProblem`, `MPCController`) that can be reused for any linear discrete-time system. |
+| **Receding-horizon NMPC** | Each control cycle the controller solves a nonlinear program (NLP) over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error, energy use, and input rate-of-change (Δu smoothing).  Inputs are applied via zero-order hold. |
+| **CD-EKF state estimation** | A continuous-discrete Extended Kalman Filter (CD-EKF) integrates the nonlinear thermal SDE and linearised Riccati ODE between measurements, providing the minimum-variance state estimate for the nonlinear house thermal model. |
+| **Generic MBC framework** | The controller is built on the `mbc` (model-based control) package, providing `ContinuousDiscreteModel`, `ContinuousDiscreteEKF`, and `CDTrackingOptimalControlProblem` components that can be reused for any continuous-discrete nonlinear system. |
 | **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface.  Heat-pump-equipped rooms additionally advertise `heat_cool` mode and report `cooling` as the HVAC action while the integration drives the heat pump in dry / fan-only mode. |
 | **Cooling-aware visualisation** | Cooling capacity is derived from a separate `cooling_cop` (EER) so the advanced visualisation no longer treats the rated *heating* output as the cooling capability.  Per-room Heating Power, Heating Plan, and Energy Balance sensors expose signed power (positive = heating, negative = cooling) so a single ApexCharts series shows both modes. |
 | **HA sensor entities** | Predicted temperature and active heating power sensors per room, with model metadata exposed as state attributes. |
@@ -182,13 +182,13 @@ custom_components/heating_assistant/
 │                          • HeatSource (ABC), ElectricHeater, HeatPump
 │                          • _cop_at_temp() helper (Carnot COP correction)
 │
-├── controller.py          MPC controller (generic framework + heating application)
-│                          • LinearDiscreteModel (ABC): x[k+1] = A x[k] + B u[k] + E d[k]
-│                          • KalmanFilter: discrete-time Kalman filter (state estimator)
-│                          • OptimalControlProblem: batch QP over receding horizon
-│                          • MPCController: generic MPC (KalmanFilter + OCP)
-│                          • HouseThermalSystem: ZOH-discretised RC thermal model
+├── controller.py          MPC controller (application classes wrapping mbc framework)
+│                          • HouseThermalSDE(ContinuousDiscreteModel): nonlinear CD-SDE
+│                          •   f(x,u,d,p,t): drift with heat-pump COP nonlinearity
+│                          •   Analytic Jacobians dfdx, dhmdx for EKF efficiency
 │                          • HeatingMPCController: application facade (coordinator API)
+│                          •   → uses ContinuousDiscreteEKF from mbc.estimation
+│                          •   → uses CDTrackingOptimalControlProblem from mbc.control
 │
 ├── diagnostics.py         HA diagnostics platform
 │                          • async_get_config_entry_diagnostics(): full system state dump
@@ -249,20 +249,22 @@ Inside HeatingMPCController.compute():
   solar_model ──► solar_gain[room, k]  for k = 0…N-1
   weather/persistence ──► outdoor_temp[k]  for k = 0…N-1
 
-  D = disturbance forecast matrix (N × p)
+  D = disturbance forecast matrix (N × nd)
   y = current room temperatures (measurement vector)
 
-  ┌─ KalmanFilter.update(y, d[0])  →  x̂ (state estimate)
-  │    predict: x̂⁻ = A x̂ + B u + E d,  P⁻ = A P Aᵀ + Q_w
-  │    update:  K = P⁻ Cᵀ (C P⁻ Cᵀ + R_v)⁻¹
-  │             x̂ = x̂⁻ + K (y − C x̂⁻),  P = (I − K C) P⁻
+  ┌─ ContinuousDiscreteEKF.step(y, u, d, p, t)  →  x̂ (state estimate)
+  │    predict: integrate dx/dt = f(x,u,d,p,t) and dP/dt = FP + PFᵀ + σσᵀ
+  │             over [tₖ₋₁, tₖ] using Euler sub-steps
+  │    update:  K = P⁻ Hᵀ (H P⁻ Hᵀ + Rₘ)⁻¹
+  │             x̂ = x̂⁻ + K (y − hm(x̂⁻)),  P = (I − K H) P⁻
   │
-  ├─ OptimalControlProblem.solve(x̂, D, x_ref)
-  │    batch lift: X = Ψ x̂ + Γ U + Λ D
-  │    QP:  min  Uᵀ H U + 2 fᵀ U   s.t.  0 ≤ u ≤ 1
-  │    solve via projected gradient descent
+  ├─ CDTrackingOptimalControlProblem.solve(x̂, D)
+  │    NLP:  min  Σ ‖z[k] − z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S
+  │               + ρ_z (soft constraint violation penalty)
+  │          s.t.  0 ≤ u ≤ 1  (hard input box)
+  │    solve via L-BFGS-B (scipy.optimize)
   │
-  └─ apply u[0] to heat sources (receding horizon)
+  └─ apply u*[0] to heat sources (receding horizon)
 ```
 
 ---
@@ -306,25 +308,21 @@ where:
 
 This representation makes each `step()` call a simple vector-matrix multiply — fast even for large houses.
 
-### 3.3 Discretisation
+### 3.3 Continuous-discrete integration
 
-The MPC controller uses **exact zero-order hold (ZOH) discretisation** of the continuous-time thermal model.  Given the continuous state-space form
+The MPC controller treats the thermal model as a **continuous-discrete stochastic differential equation (CD-SDE)** and integrates it using **explicit Euler with sub-steps** (the *n_int_steps* parameter, default 10 sub-steps per sampling interval).  Given the nonlinear continuous-time drift:
 
-$$\dot{\mathbf{T}} = \mathbf{F}\,\mathbf{T} + \mathbf{G}_u\,\mathbf{u} + \mathbf{G}_d\,\mathbf{d}$$
+$$\dot{\mathbf{x}}(t) = \mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, t) = \mathbf{F}\,\mathbf{x} + \mathbf{G}_u(T_{\text{out}})\,\mathbf{u} + \mathbf{G}_d\,\mathbf{d}$$
 
-with $\mathbf{F} = \mathbf{C}_{\text{cap}}^{-1}\,\mathbf{A}$ (state matrix) and $\mathbf{G}_u$, $\mathbf{G}_d$ the input and disturbance matrices, the discrete-time matrices are computed as:
+with $\mathbf{F} = \mathbf{C}_{\text{cap}}^{-1}\,\mathbf{A}$, the state is propagated over each sub-step $h = dt / n_{\text{int\_steps}}$ as:
 
-$$\mathbf{A}_d = \text{expm}(\mathbf{F} \cdot dt)$$
+$$\mathbf{x}(t + h) \approx \mathbf{x}(t) + h\,\mathbf{f}(\mathbf{x}(t), \mathbf{u}, \mathbf{d}, t)$$
 
-$$\mathbf{B}_d = \mathbf{F}^{-1}(\mathbf{A}_d - \mathbf{I}) \cdot \mathbf{G}_u$$
+This handles the nonlinearity in $\mathbf{G}_u(T_{\text{out}})$ (heat-pump COP varying with outdoor temperature) correctly without linearising or discretising the model into a fixed matrix form.  The CD-EKF propagates both the mean state and the error covariance matrix using the same Euler sub-stepping approach.
 
-$$\mathbf{E}_d = \mathbf{F}^{-1}(\mathbf{A}_d - \mathbf{I}) \cdot \mathbf{G}_d$$
+The `HouseModel.step()` and `HouseModel.predict()` methods also use forward Euler and are used for the `simulate_thermal_response` service and diagnostics.
 
-This gives the exact solution $\mathbf{T}[k{+}1] = \mathbf{A}_d\,\mathbf{T}[k] + \mathbf{B}_d\,\mathbf{u}[k] + \mathbf{E}_d\,\mathbf{d}[k]$ for piecewise-constant inputs held over each sampling interval $dt$.  Unlike forward Euler, ZOH discretisation is unconditionally stable and introduces no discretisation error for the assumed piecewise-constant input profile.
-
-The `HouseModel.step()` and `HouseModel.predict()` methods still use forward Euler for fast multi-step rollouts (e.g. the `simulate_thermal_response` service).  The MPC controller exclusively uses ZOH for its prediction model.
-
-For typical residential buildings (large thermal masses, slow dynamics) a step size `dt ≤ 900 s` (15 minutes) gives accurate results.  The default `dt = 900 s` is a good balance between accuracy and computational load.
+For typical residential buildings (large thermal masses, slow dynamics) a step size `dt ≤ 900 s` (15 minutes) gives accurate results with the default 10 sub-steps.  The default `dt = 900 s` is a good balance between accuracy and computational load.
 
 ### 3.4 Solar heat gain model
 
@@ -484,98 +482,91 @@ The signed cooling power is exposed as a negative value on the per-room **Heatin
 
 ### 4.1 Overview
 
-The controller (`controller.py`) implements a **generic model predictive control (MPC) framework** built on four composable components:
+The controller (`controller.py`) implements a **nonlinear model predictive control (NMPC)** architecture built on the `mbc` (model-based control) package:
 
-| Component | Class | Role |
+| Component | Class (from `mbc`) | Role |
 |-----------|-------|------|
-| **System model** | `LinearDiscreteModel` (ABC) | Defines the discrete-time dynamics `x[k+1] = A(d) x[k] + B(d) u[k] + E(d) d[k]`, `y[k] = C x[k]`.  Matrices may depend on disturbances (LPV). |
-| **State estimator** | `KalmanFilter` | Discrete-time Kalman filter.  Fuses model predictions with sensor measurements to produce the minimum-variance state estimate. |
-| **Optimal control** | `OptimalControlProblem` | Batch QP formulation of the receding-horizon regulator.  Lifts the problem to U-space and solves via projected gradient descent. |
-| **MPC policy** | `MPCController` | Orchestrates estimate → optimise → apply at each step. |
+| **System model** | `ContinuousDiscreteModel` (ABC) | Defines the continuous-discrete SDE: `dx = f(x,u,d,p,t)dt + σdw`, `ym = hm(x,...)`. |
+| **State estimator** | `ContinuousDiscreteEKF` | CD-EKF: integrates the nonlinear drift and linearised Riccati ODE between measurement steps using Euler sub-stepping. |
+| **Optimal control** | `CDTrackingOptimalControlProblem` | NLP formulation of the receding-horizon tracking problem.  Propagates the predicted trajectory via Euler integration and solves via L-BFGS-B (scipy). |
+| **MPC policy** | `CDNMPCController` | Orchestrates estimate → optimise → apply at each step. |
 
-The house-heating application provides two additional classes:
+The house-heating application provides two classes in `controller.py`:
 
 | Class | Role |
 |-------|------|
-| `HouseThermalSystem` | Concrete `LinearDiscreteModel` wrapping `HouseModel` and `HeatSource` objects.  ZOH-discretises the RC thermal model with LPV input matrix (heat-pump COP varies with outdoor temperature). |
-| `HeatingMPCController` | Application facade.  Builds the system, estimator, and OCP; adds solar/outdoor forecasting; applies source set-points; exposes visualisation properties for the coordinator. |
+| `HouseThermalSDE` | Concrete `ContinuousDiscreteModel` wrapping `HouseModel` and `HeatSource` objects.  The nonlinearity arises from the heat-pump COP varying with outdoor temperature through `G_u(T_out)`. |
+| `HeatingMPCController` | Application facade.  Builds `HouseThermalSDE`, `ContinuousDiscreteEKF`, and `CDTrackingOptimalControlProblem`; adds solar/outdoor forecasting; applies source set-points; exposes visualisation properties for the coordinator. |
 
 At each control step the `HeatingMPCController`:
 
 1. Reads room temperatures from HA sensors (measurement vector **y**).
 2. Builds an *N*-step disturbance forecast **D** (outdoor temperature + solar gains).
-3. Runs the Kalman filter to obtain the state estimate **x̂**.
-4. Solves the quadratic program to find the optimal continuous input sequence **U***.
+3. Runs the CD-EKF to obtain the state estimate **x̂**.
+4. Solves the NLP to find the optimal continuous input sequence **U***.
 5. Applies only the **first step** u*[0] of the optimal sequence (receding horizon).
 
-### 4.2 State estimation — Kalman filter
+### 4.2 State estimation — Continuous-Discrete EKF
 
-The state estimator is a standard **discrete-time Kalman filter**.  At each time step *k*:
+The state estimator is a **Continuous-Discrete Extended Kalman Filter (CD-EKF)** from the `mbc` package (`mbc.estimation.ContinuousDiscreteEKF`).  Between consecutive measurement times $t_{k-1}$ and $t_k$ the filter integrates the continuous-time mean and covariance using Euler sub-steps:
 
-**Prediction:**
+**Prediction (continuous-time integration over $[t_{k-1}, t_k]$):**
 
-$$\hat{\mathbf{x}}^{-}[k] = \mathbf{A}\,\hat{\mathbf{x}}[k{-}1] + \mathbf{B}\,\mathbf{u}[k{-}1] + \mathbf{E}\,\mathbf{d}[k{-}1]$$
+$$\frac{d\hat{\mathbf{x}}}{dt} = \mathbf{f}(\hat{\mathbf{x}}, \mathbf{u}, \mathbf{d}, \mathbf{p}, t)$$
 
-$$\mathbf{P}^{-}[k] = \mathbf{A}\,\mathbf{P}[k{-}1]\,\mathbf{A}^\top + \mathbf{Q}_w$$
+$$\frac{d\mathbf{P}}{dt} = \mathbf{F}\,\mathbf{P} + \mathbf{P}\,\mathbf{F}^\top + \boldsymbol{\sigma}\,\boldsymbol{\sigma}^\top \qquad \text{(continuous Riccati ODE)}$$
 
-**Update (correction):**
+where $\mathbf{F} = \partial\mathbf{f}/\partial\mathbf{x}$ is the analytic state Jacobian (constant for the linear drift, so this reduces to a Lyapunov ODE).
 
-$$\mathbf{S}[k] = \mathbf{C}\,\mathbf{P}^{-}[k]\,\mathbf{C}^\top + \mathbf{R}_v \qquad \text{(innovation covariance)}$$
+**Update (at measurement time $t_k$):**
 
-$$\mathbf{K}[k] = \mathbf{P}^{-}[k]\,\mathbf{C}^\top\,\mathbf{S}[k]^{-1} \qquad \text{(Kalman gain)}$$
+$$\mathbf{S}[k] = \mathbf{H}\,\mathbf{P}^{-}[k]\,\mathbf{H}^\top + \mathbf{R}_m \qquad \text{(innovation covariance)}$$
 
-$$\hat{\mathbf{x}}[k] = \hat{\mathbf{x}}^{-}[k] + \mathbf{K}[k]\bigl(\mathbf{y}[k] - \mathbf{C}\,\hat{\mathbf{x}}^{-}[k]\bigr) \qquad \text{(corrected state estimate)}$$
+$$\mathbf{K}[k] = \mathbf{P}^{-}[k]\,\mathbf{H}^\top\,\mathbf{S}[k]^{-1} \qquad \text{(Kalman gain)}$$
 
-$$\mathbf{P}[k] = \bigl(\mathbf{I} - \mathbf{K}[k]\,\mathbf{C}\bigr)\,\mathbf{P}^{-}[k] \qquad \text{(posterior covariance)}$$
+$$\hat{\mathbf{x}}[k] = \hat{\mathbf{x}}^{-}[k] + \mathbf{K}[k]\bigl(\mathbf{y}[k] - \mathbf{h}_m(\hat{\mathbf{x}}^{-}[k])\bigr) \qquad \text{(corrected estimate)}$$
+
+$$\mathbf{P}[k] = \bigl(\mathbf{I} - \mathbf{K}[k]\,\mathbf{H}\bigr)\,\mathbf{P}^{-}[k] \qquad \text{(posterior covariance)}$$
 
 | Symbol | Meaning |
 |--------|---------|
-| $\mathbf{Q}_w$ | Process noise covariance — models unmodelled disturbances and model mismatch (default: $0.01 \cdot \mathbf{I}$). |
-| $\mathbf{R}_v$ | Measurement noise covariance — models sensor noise (default: $0.1 \cdot \mathbf{I}$). |
-| $\mathbf{P}$ | State error covariance — propagated at every step; determines the time-varying Kalman gain. |
-| $\mathbf{K}[k]$ | Kalman gain — automatically balances trust in the model vs. the sensors. |
+| $\boldsymbol{\sigma}$ | Diffusion matrix — $\sigma_w \mathbf{I}$ for isotropic process noise (default $\sigma_w = 0.1$ K/√s). |
+| $\mathbf{R}_m$ | Measurement noise covariance — $\sigma_v^2 \mathbf{I}$ (default $\sigma_v = 0.5$ K). |
+| $\mathbf{P}$ | State error covariance — propagated at every step; determines the Kalman gain. |
+| $\mathbf{H} = \partial\mathbf{h}_m/\partial\mathbf{x}$ | Observation Jacobian — identity matrix for full-state observation. |
 
-For the house thermal system with full-state observation ($\mathbf{C} = \mathbf{I}$, one temperature sensor per room), the Kalman gain converges quickly to a steady-state value that weights measurements heavily relative to the model prediction.  The filter provides robustness against temporary sensor noise and gradual model drift.
+For the house thermal system with full-state observation ($\mathbf{h}_m = \mathbf{I}$, one temperature sensor per room), the Kalman gain converges quickly to a value that weights measurements heavily relative to the model prediction.  The filter provides robustness against temporary sensor noise and gradual model drift.
 
-### 4.3 Optimal control problem — batch QP
+### 4.3 Optimal control problem — nonlinear tracking NLP
 
 The cost function over the prediction horizon *N* is:
 
-$$J(\mathbf{U}) = \sum_{k=0}^{N-1} \left\lVert \mathbf{x}[k{+}1] - \mathbf{r} \right\rVert_{\mathbf{Q}}^2 + \left\lVert \mathbf{u}[k] \right\rVert_{\mathbf{R}}^2 + \left\lVert \Delta\mathbf{u}[k] \right\rVert_{\mathbf{S}}^2 + \left\lVert \mathbf{x}[N] - \mathbf{r} \right\rVert_{\mathbf{P}}^2$$
+$$J(\mathbf{U}) = \sum_{k=0}^{N-1} \left\lVert \mathbf{z}[k{+}1] - \mathbf{z}_{\text{ref}} \right\rVert_{\mathbf{Q}}^2 + \left\lVert \mathbf{u}[k] \right\rVert_{\mathbf{R}}^2 + \left\lVert \Delta\mathbf{u}[k] \right\rVert_{\mathbf{S}}^2 + \rho_z \sum_{k=1}^{N} \left\lVert \max(0, \mathbf{z}[k] - \mathbf{z}_{\max}) \right\rVert^2 + \left\lVert \max(0, \mathbf{z}_{\min} - \mathbf{z}[k]) \right\rVert^2$$
 
 where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u}[-1]$ equal to the previous step's applied input):
 
 | Symbol | Value / meaning |
 |--------|----------------|
-| $\mathbf{x}[k]$ | Predicted state (room temperatures) at step *k* |
-| $\mathbf{r}$ | Reference (room setpoints) |
-| $\mathbf{Q}$ | State tracking cost (default: $\mathbf{I}$) |
-| $\mathbf{R}$ | Input cost — $\text{energy weight} \cdot \mathbf{I}$ (default: $0.01 \cdot \mathbf{I}$) |
-| $\mathbf{S}$ | Input rate-of-change cost — $\text{smoothing weight} \cdot \mathbf{I}$ (default: $0.1 \cdot \mathbf{I}$).  Penalises rapid input changes, producing smoother actuator behaviour.  Set `smoothing_weight` to `0.0` to disable. |
-| $\mathbf{P}$ | Terminal cost (default: $\mathbf{Q}$) |
+| $\mathbf{z}[k] = \mathbf{g}(\mathbf{x}[k])$ | Controlled output — room temperatures — at step *k* |
+| $\mathbf{z}_{\text{ref}}$ | Reference (room setpoints) |
+| $\mathbf{Q}$ | Output tracking cost (default: $\mathbf{I}$) |
+| $\mathbf{R}$ | Input cost (`energy_weight` × $\mathbf{I}$, default: $0.01 \cdot \mathbf{I}$) |
+| $\mathbf{S}$ | Input rate-of-change cost (`smoothing_weight` × $\mathbf{I}$, default: $0.1 \cdot \mathbf{I}$).  Set `smoothing_weight` to `0.0` to disable. |
+| $\mathbf{z}_{\min}, \mathbf{z}_{\max}$ | Soft output constraint bounds: $\mathbf{z}_{\text{ref}} \pm \delta$ where $\delta$ = `constraint_offset` (default 2.0 °C) |
+| $\rho_z$ | Soft constraint penalty weight (default: $10^4$) |
 | $\mathbf{u}[k]$ | Input vector (continuous fractions $\in [0, 1]$) |
 
-The problem is lifted to the **batch form** using prediction matrices:
-
-$$\mathbf{X} = \boldsymbol{\Psi}\,\mathbf{x}_0 + \boldsymbol{\Gamma}\,\mathbf{U} + \boldsymbol{\Lambda}\,\mathbf{D} \qquad \text{(predicted state trajectory)}$$
-
-$$J = \mathbf{U}^\top \mathbf{H}\,\mathbf{U} + 2\,\mathbf{f}^\top \mathbf{U} + \text{const}$$
-
-$$\mathbf{H} = \boldsymbol{\Gamma}^\top \bar{\mathbf{Q}}\,\boldsymbol{\Gamma} + \bar{\mathbf{R}} + \mathbf{D}_{\text{diff}}^\top \bar{\mathbf{S}}\,\mathbf{D}_{\text{diff}}, \qquad \mathbf{f} = \boldsymbol{\Gamma}^\top \bar{\mathbf{Q}}\bigl(\boldsymbol{\Psi}\,\mathbf{x}_0 + \boldsymbol{\Lambda}\,\mathbf{D} - \bar{\mathbf{r}}\bigr) + \mathbf{D}_{\text{diff}}^\top \bar{\mathbf{S}}\,\mathbf{d}_0$$
-
-where $\mathbf{D}_{\text{diff}}$ is the block first-difference matrix and $\mathbf{d}_0 = [-\mathbf{u}_{\text{prev}}, 0, \ldots, 0]^\top$ encodes the previous applied input.
-
-Subject to the box constraint $0 \le \mathbf{u}[k] \le 1$ (actuator limits), the QP is solved via **projected gradient descent** with step size $\alpha = 1 / \lambda_{\max}(\mathbf{H})$.
+The predicted state trajectory is propagated using Euler sub-stepping of the nonlinear drift $\mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, \mathbf{p}, t)$ over each sampling interval.  The NLP is solved via **L-BFGS-B** (from `scipy.optimize`) with box constraints $0 \le \mathbf{u}[k] \le 1$.
 
 The input cost $\mathbf{R}$ softly discourages running heaters when the room is close to setpoint.  Increasing `energy_weight` makes the controller more energy-conservative at the expense of tighter temperature tracking.
 
 The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
 
-**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the MPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval $dt$ for which the source is active.  The coordinator maps this fraction to on/off commands.
+**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the NMPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval $dt$ for which the source is active.  The coordinator maps this fraction to on/off commands.
 
 ### 4.4 Disturbance forecasts
 
-The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{N \times p}$ before solving the QP:
+The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{N \times n_d}$ before solving the NLP:
 
 | Disturbance | Forecast method |
 |-------------|----------------|
@@ -593,16 +584,16 @@ compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
 ├─ if outdoor_forecast provided: use weather forecast
 │  else: _forecast_outdoor(outdoor_temp)  → list of N floats (persistence)
 ├─ _forecast_solar(now)                → list of N {room: W} dicts
-├─ Build D ∈ ℝ^(N × p) from forecasts
+├─ Build D ∈ ℝ^(N × nd) from forecasts
 │
-├─ KalmanFilter.update(y, d[0])        → x̂  (state estimate)
-│   ├─ predict:  x̂⁻ = A x̂ + B u + E d,  P⁻ = A P Aᵀ + Q_w
-│   └─ update:   K = P⁻ Cᵀ S⁻¹,  x̂ = x̂⁻ + K (y − C x̂⁻)
+├─ ContinuousDiscreteEKF.step(y, u, d, p, t)  → x̂  (state estimate)
+│   ├─ predict: integrate dx/dt = f(x,u,d,p,t) and dP/dt = FP+PFᵀ+σσᵀ
+│   └─ update:  K = P⁻Hᵀ(HP⁻Hᵀ+Rm)⁻¹,  x̂ = x̂⁻ + K(y − hm(x̂⁻))
 │
-├─ OptimalControlProblem.solve(x̂, D, x_ref)
-│   ├─ batch lift:  X = Ψ x̂ + Γ U + Λ D
-│   ├─ QP:  min Uᵀ H U + 2 fᵀ U  s.t. 0 ≤ u ≤ 1
-│   └─ solve via projected gradient descent
+├─ CDTrackingOptimalControlProblem.solve(x̂, D)
+│   ├─ propagate: x[k+1] = x[k] + h·f(x[k],u[k],d[k],p,t)  (Euler sub-steps)
+│   ├─ NLP:  min Σ ‖z[k]-z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S + ρ_z·violation
+│   └─ solve via L-BFGS-B (scipy.optimize)  s.t.  0 ≤ u ≤ 1
 │
 └─ Apply u*[0] to heat sources (receding horizon)
    Return {source_name: fraction}
@@ -703,8 +694,11 @@ Every 60 seconds:
 | Home Assistant | 2023.1 |
 | Python | 3.10 |
 | numpy | 1.21.0 |
+| scipy | 1.9.0 |
+| cvxopt | 1.3.0 |
+| mbc | latest (from GitHub) |
 
-`numpy` is the only third-party Python dependency.  It is listed in `manifest.json` under `requirements` and Home Assistant will install it automatically into the HA virtual environment on first load.
+All Python dependencies are listed in `manifest.json` under `requirements` and Home Assistant will install them automatically into the HA virtual environment on first load.  The `mbc` package is installed directly from GitHub (`git+https://github.com/marcuskrogh/mbc.git`) as it is not yet published on PyPI.
 
 No cloud connectivity is required.  The integration is classified as `iot_class: local_push` — it pushes commands directly to local HA entities.
 
@@ -2859,12 +2853,15 @@ HeatingAssistant/
 │   └── heating_assistant/     ← HA integration (described above)
 ├── tests/
 │   ├── __init__.py
-│   ├── test_thermal_model.py  ← 11 tests: construction, step, predict, inter-room flow
-│   ├── test_solar_model.py    ← 13 tests: angles, DNI, incidence, window gain
-│   ├── test_heat_sources.py   ← 20 tests: electric, heat pump, COP curve, deadband
-│   ├── test_controller.py     ← 16 tests: actions, fractions, heating/off, smoothing
-│   ├── test_coordinator_apply_actions.py ← 13 tests: climate/switch/number dispatch, deadband
-│   └── test_visualisation.py  ← 27 tests: heat flows, time constant, steady state, predictions, forecast sensors
+│   ├── test_thermal_model.py     ← 11 tests: construction, step, predict, inter-room flow
+│   ├── test_solar_model.py       ← 13 tests: angles, DNI, incidence, window gain
+│   ├── test_heat_sources.py      ← 31 tests: electric, heat pump, COP curve, cooling, deadband
+│   ├── test_controller.py        ← 44 tests: HouseThermalSDE, CD-EKF, CDTrackingOCP, HeatingMPCController
+│   ├── test_climate.py           ←  9 tests: HVAC mode/action, heat pump cooling
+│   ├── test_coordinator_apply_actions.py ← 31 tests: climate/switch/number dispatch, deadband, cooling
+│   ├── test_model_diagnostics.py ← 25 tests: fit metrics, residuals, parameter validation, performance
+│   ├── test_parameter_estimator.py ← 21 tests: Nelder-Mead, KalmanMLEstimator, joint identification
+│   └── test_visualisation.py     ← 47 tests: heat flows, time constant, predictions, forecast sensors
 ├── .gitignore
 └── README.md
 ```
@@ -2874,7 +2871,8 @@ HeatingAssistant/
 Install the required packages once:
 
 ```bash
-pip install numpy homeassistant pytest voluptuous pytest-asyncio
+pip install numpy scipy cvxopt homeassistant pytest voluptuous pytest-asyncio
+pip install mbc @ git+https://github.com/marcuskrogh/mbc.git
 ```
 
 Run the full test suite:
@@ -2883,7 +2881,7 @@ Run the full test suite:
 python -m pytest tests/ -v
 ```
 
-Expected output: **122 tests pass**.
+Expected output: **232 tests pass**.
 
 Run a single test module:
 
@@ -2892,7 +2890,10 @@ python -m pytest tests/test_thermal_model.py -v
 python -m pytest tests/test_solar_model.py -v
 python -m pytest tests/test_heat_sources.py -v
 python -m pytest tests/test_controller.py -v
+python -m pytest tests/test_climate.py -v
 python -m pytest tests/test_coordinator_apply_actions.py -v
+python -m pytest tests/test_model_diagnostics.py -v
+python -m pytest tests/test_parameter_estimator.py -v
 python -m pytest tests/test_visualisation.py -v
 ```
 
@@ -2940,7 +2941,7 @@ To use a measured irradiance sensor instead of a computed one:
 **Integration does not appear in the Add Integration search**
 
 - Confirm the `custom_components/heating_assistant/` directory exists inside your HA config folder and contains `manifest.json`.
-- Check the HA log (Settings → System → Logs) for import errors.  The most common cause is a missing `numpy` installation; HA should install it automatically but this can fail on restricted environments.
+- Check the HA log (Settings → System → Logs) for import errors.  The most common cause is a dependency installation failure (`numpy`, `scipy`, `cvxopt`, or the `mbc` package); HA should install them automatically on first load but this can fail on restricted environments or if the system lacks internet access to GitHub (required for the `mbc` package).  In such cases, pre-install the dependencies manually: `pip install numpy scipy cvxopt` and `pip install git+https://github.com/marcuskrogh/mbc.git`.
 
 **Rooms show no entities after adding the integration**
 
@@ -2985,13 +2986,13 @@ To use a measured irradiance sensor instead of a computed one:
 ## 17. Roadmap
 
 - [x] **Weather-API outdoor temperature forecast** — the controller can use a HA weather entity (e.g. Met.no, OpenWeatherMap) for multi-hour outdoor temperature forecasts instead of the persistence assumption.  Configure `weather_entity` in YAML or the UI wizard.
+- [x] **Cooling mode** — heat pumps automatically switch to `dry` (dehumidify) or `fan_only` mode when the room exceeds the setpoint, providing gentle passive cooling without full compressor cycling.  The cooling capacity is correctly modelled using `cooling_cop` (EER) and exposed on visualisation sensors as negative power.
+- [x] **Adaptive parameter estimation** — `heating_assistant.estimate_parameters` service uses CD-EKF maximum likelihood estimation to jointly identify `thermal_mass`, `r_external`, `internal_gain`, heater power-scale factors, and inter-room resistances from operational data.
 - [ ] **Comfort schedule support** — define day/night/away setpoint profiles per room on a weekly timetable.
 - [ ] **Energy price optimisation** — weight the energy cost term in the MPC by the time-of-use electricity tariff so the controller pre-heats the house before peak pricing periods.
 - [ ] **GUI room editor** — add config-flow steps for defining rooms and heat sources through the UI, eliminating the YAML requirement.
-- [ ] **Cooling mode** — extend heat pump entities to support `cool` HVAC mode for reversible (air-conditioning) heat pumps.
 - [ ] **Measured irradiance override** — allow a solar irradiance sensor to replace the clear-sky model for greater accuracy on cloudy days.
 - [ ] **HACS integration** — publish to the HACS default repository for one-click installation.
-- [ ] **Adaptive parameter estimation** — implement a recursive least-squares estimator to fine-tune `thermal_mass` and `r_external` from measured temperature trajectories.
 
 ---
 
@@ -3005,4 +3006,6 @@ To use a measured irradiance sensor instead of a computed one:
 6. Cooper, P. I. (1969) — "The absorption of radiation in solar stills", *Solar Energy*, 12(3), 333–346.
 7. Liu, B. Y. H. & Jordan, R. C. (1960) — "The interrelationship and characteristic distribution of direct, diffuse and total solar radiation", *Solar Energy*, 4(3), 1–19.
 8. Mayne, D. Q. et al. (2000) — "Constrained model predictive control: Stability and optimality", *Automatica*, 36(6), 789–814.
+9. Jazwinski, A. H. (1970) — *Stochastic Processes and Filtering Theory*, Academic Press.  (Continuous-Discrete Kalman filtering theory.)
+10. Kristensen, N. R. et al. (2004) — "Parameter estimation in stochastic grey-box models", *Automatica*, 40(2), 225–237.  (CD-EKF prediction-error decomposition / ML identification.)
 
