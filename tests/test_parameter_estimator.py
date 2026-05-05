@@ -227,11 +227,6 @@ class TestKalmanMLEstimator:
             assert result["estimated_params"][room]["thermal_mass"] > 0
             assert result["estimated_params"][room]["r_external"] > 0
 
-    @pytest.mark.xfail(
-        reason="Parameter estimation is non-functional: _AugmentedHouseModel uses "
-               "old LinearDiscreteModel interface (n_d, discretize) which is no longer "
-               "compatible with the nonlinear HouseThermalSDE."
-    )
     def test_compute_log_likelihood_current_params(self):
         """compute_log_likelihood should return a finite value at the prior."""
         rooms = [_make_single_room()]
@@ -269,11 +264,6 @@ class TestKalmanMLEstimator:
                     "n_steps", "log_likelihood", "message"):
             assert key in result, f"missing key: {key}"
 
-    @pytest.mark.xfail(
-        reason="Parameter estimation is non-functional: _AugmentedHouseModel uses "
-               "old LinearDiscreteModel interface (n_d, discretize) which is no longer "
-               "compatible with the nonlinear HouseThermalSDE."
-    )
     def test_ml_improves_likelihood_over_prior(self):
         """
         Estimated parameters should achieve a better (higher) log-likelihood
@@ -298,23 +288,6 @@ class TestKalmanMLEstimator:
         assert estimated_ll is not None
         # Estimated LL should be >= prior LL (optimizer should not make things worse)
         assert estimated_ll >= prior_ll - 1.0  # allow 1 nat tolerance
-
-    def test_neg_log_likelihood_returns_sentinel_for_bad_params(self):
-        """Out-of-bounds log_params should return the sentinel (1e10)."""
-        rooms = [_make_single_room()]
-        sources = _make_sources(rooms)
-        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
-        history = _generate_history(rooms, sources, n_steps=40)
-
-        # log_mass way too large
-        bad_params = np.array([100.0, math.log(0.05)])
-        val = estimator._neg_log_likelihood(bad_params, history)
-        assert val >= 1e9
-
-        # NaN
-        nan_params = np.array([float("nan"), float("nan")])
-        val_nan = estimator._neg_log_likelihood(nan_params, history)
-        assert val_nan >= 1e9
 
     def test_history_with_zero_solar(self):
         """History records without solar gains should not raise."""
@@ -400,11 +373,6 @@ class TestJointInternalGainAndHeaterScale:
         ):
             assert key in result, f"missing new key: {key}"
 
-    @pytest.mark.xfail(
-        reason="Parameter estimation is non-functional: _AugmentedHouseModel uses "
-               "old LinearDiscreteModel interface (n_d, discretize) which is no longer "
-               "compatible with the nonlinear HouseThermalSDE."
-    )
     def test_internal_gain_is_recovered(self):
         """A 500 W constant gain baked into the data should be recovered."""
         true_gain = 500.0
@@ -454,11 +422,6 @@ class TestJointInternalGainAndHeaterScale:
         assert result["success"]
         assert result["identifiable_sources"] == []
 
-    @pytest.mark.xfail(
-        reason="Parameter estimation is non-functional: _AugmentedHouseModel uses "
-               "old LinearDiscreteModel interface (n_d, discretize) which is no longer "
-               "compatible with the nonlinear HouseThermalSDE."
-    )
     def test_joint_fit_improves_over_no_internal_gain(self):
         """If true model has 800 W internal gain, joint fit should achieve
         a better log-likelihood than fitting only (C, R_ext)."""

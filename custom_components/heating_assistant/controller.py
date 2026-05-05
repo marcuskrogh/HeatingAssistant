@@ -97,6 +97,13 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     sigma_v    : measurement-noise standard deviation [K].  Default: 0.5.
     n_int_steps: Euler sub-steps per sampling interval for EKF/OCP.
                  Default: 10.
+    identifiable_sources: list of int, optional
+        Indices of heat sources whose power-scale factors are being estimated.
+        Used to unpack the parameter vector p in f(). If None (default),
+        no heater scaling is applied.
+    theta: np.ndarray, optional
+        Parameter vector for this model instance (fixed for CD-EKF evaluation).
+        If provided, f() will extract q_int and heater scales from this vector.
     """
 
     def __init__(
@@ -107,6 +114,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
         n_int_steps: int = 10,
+        identifiable_sources: Optional[List[int]] = None,
+        theta: Optional[np.ndarray] = None,
     ) -> None:
         self._model = model
         self._sources = sources
@@ -114,6 +123,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._sigma_w = sigma_w
         self._sigma_v = sigma_v
         self._n_int_steps = n_int_steps
+
+        # Store identifiable source indices and theta for parameter extraction
+        self._identifiable_sources = identifiable_sources if identifiable_sources is not None else []
+        self._theta = theta if theta is not None else np.array([])
 
         self._room_list: List[str] = model.room_names
         self._room_idx: Dict[str, int] = {
@@ -189,14 +202,51 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         t: float,
     ) -> np.ndarray:
         """
-        Drift f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d.
+        Drift f(x, u, d, p, t) = F x + G_u(d[0]) (alpha ⊙ u) + G_d (d + [0, q_int]).
 
         The nonlinearity is in G_u which depends on the outdoor temperature
         d[0] through the heat-pump COP.
+
+        For parameter estimation, the parameter vector p (or self._theta if p is empty)
+        contains theta with structure:
+            theta = [log_mass_1..n, log_r_1..n, q_int_1..n, log_alpha_k, log_r_ij_k]
+
+        We extract q_int and alpha (heater scales) from the parameter vector and apply them.
         """
         outdoor_temp = float(d[0])
         G_u = self._build_G_u(outdoor_temp)
-        return self._F @ x + G_u @ u + self._G_d @ d
+
+        # Use p if provided, otherwise fall back to self._theta
+        theta = p if len(p) > 0 else self._theta
+
+        # Extract internal gains and heater scales from parameter vector
+        n = self.nx
+        if len(theta) >= 3 * n:
+            # theta structure: [log_mass (n), log_r (n), q_int (n), log_alpha (...), log_r_ij (...)]
+            q_int = theta[2*n : 3*n]
+
+            # Extract heater scales for identifiable sources
+            heater_scales = np.ones(self.nu)
+            if len(self._identifiable_sources) > 0 and len(theta) >= 3*n + len(self._identifiable_sources):
+                log_alpha = theta[3*n : 3*n + len(self._identifiable_sources)]
+                for k, s_idx in enumerate(self._identifiable_sources):
+                    heater_scales[s_idx] = np.exp(log_alpha[k])
+
+            # Apply heater power-scale factors
+            u_scaled = heater_scales * u
+
+            # Apply internal gains to disturbance
+            # d = [T_out, Q_sol,1, ..., Q_sol,n]
+            # We add q_int to the solar gain channels
+            d_augmented = d.copy()
+            for i in range(n):
+                d_augmented[1 + i] += q_int[i]
+        else:
+            # No parameter estimation - use defaults (no scaling, no internal gains)
+            u_scaled = u
+            d_augmented = d
+
+        return self._F @ x + G_u @ u_scaled + self._G_d @ d_augmented
 
     def sigma(
         self,
