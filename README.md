@@ -2005,7 +2005,7 @@ This service uses **maximum likelihood estimation (MLE)** to identify thermal mo
 - **Heater power-scale** correction factors for each heat source (to account for miscalibration or efficiency degradation)
 - **Inter-room thermal resistance** `r_value` [K/W] for connections with sufficient temperature-difference variation
 
-The estimator uses a **Kalman filter prediction-error decomposition (PED)** to evaluate the Gaussian log-likelihood of each candidate parameter set.  A multi-start Nelder–Mead optimizer searches the parameter space, with automatic **identifiability gating** to exclude parameters that the data cannot constrain (e.g., heater scales when heating fraction is constant, inter-room resistances when adjacent rooms track each other closely).
+The estimator uses a **continuous-discrete Extended Kalman Filter (CD-EKF)** prediction-error decomposition (PED) to evaluate the Gaussian log-likelihood of each candidate parameter set.  The CD-EKF handles the nonlinear heat-pump COP dynamics directly in continuous time, integrating the state and covariance between discrete measurements using forward Euler with sub-stepping.  A multi-start Nelder–Mead optimizer searches the parameter space, with automatic **identifiability gating** to exclude parameters that the data cannot constrain (e.g., heater scales when heating fraction is constant, inter-room resistances when adjacent rooms track each other closely).
 
 **When to use:**
 
@@ -2016,7 +2016,7 @@ The estimator uses a **Kalman filter prediction-error decomposition (PED)** to e
 **How it works:**
 
 1. The service reads the accumulated **history buffer** (up to 480 time-steps = 8 hours at 1-minute sampling).
-2. For each candidate parameter set, the Kalman filter forward-propagates the state estimate through the history, computing the innovation log-likelihood at each measurement.
+2. For each candidate parameter set, the **continuous-discrete Extended Kalman filter (CD-EKF)** forward-propagates the state estimate and covariance through the history by integrating the continuous-time drift ODE and linearised Riccati ODE between discrete measurements, computing the innovation log-likelihood at each measurement step.
 3. The optimizer searches for the parameter set that maximizes this likelihood, subject to:
    - Physical bounds (thermal masses in [10 kJ/K, 500 MJ/K], resistances in [10 µK/W, 10 K/W], etc.)
    - Gaussian regularization shrinking parameters toward their prior (the current configured values) to prevent overfitting when data quality is poor.

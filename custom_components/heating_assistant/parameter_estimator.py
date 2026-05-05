@@ -57,6 +57,8 @@ from mbc._utils import _np_to_cvx, _cvx_to_np
 from mbc.identification import ParameterEstimator as _MbcEstimator
 from mbc.identification import ped_neg_log_likelihood as _ped_neg_ll
 from mbc.identification import nelder_mead as _nelder_mead  # backward compat
+from mbc.identification import CDParameterEstimator as _CDParameterEstimator
+from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,6 +101,236 @@ _RESTART_PERT = 0.5
 # ── Nelder–Mead — now provided by mbc.identification ─────────────────────────
 # _nelder_mead is re-exported above from mbc.identification._nelder_mead for
 # backward compatibility with callers that import it from this module.
+
+
+# ── Parametric nonlinear HouseThermalSDE for CD-EKF parameter estimation ─────
+
+
+class _ParametricHouseThermalSDE:
+    """
+    Parametric version of HouseThermalSDE for use with CDParameterEstimator.
+
+    This model accepts a theta parameter vector and exposes it via the `params`
+    property. The theta vector contains:
+        - log_mass: log of thermal masses (J/K)
+        - log_r: log of external resistances (K/W)
+        - q_int: internal gains (W, linear space)
+        - log_alpha: log of heater power scales (for identifiable sources)
+        - log_r_ij: log of inter-room resistances (for identifiable pairs)
+
+    The model rebuilds the HouseThermalSDE dynamically based on theta, and
+    applies the heater scales and internal gains through the input and
+    disturbance channels.
+    """
+
+    def __init__(
+        self,
+        rooms: List[Room],
+        sources: List[HeatSource],
+        dt: float,
+        sigma_w: float,
+        sigma_v: float,
+        n_int_steps: int,
+        layout: _ThetaLayout,
+        theta: np.ndarray,
+    ) -> None:
+        self._rooms = rooms
+        self._sources = sources
+        self._dt = dt
+        self._sigma_w = sigma_w
+        self._sigma_v = sigma_v
+        self._n_int_steps = n_int_steps
+        self._layout = layout
+        self._theta = theta.copy()
+
+        # Unpack theta
+        log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(theta)
+
+        # Build the underlying HouseThermalSDE with theta parameters
+        log_r_ij_map: Optional[Dict[Tuple[int, int], float]] = None
+        if len(log_r_ij):
+            log_r_ij_map = {
+                pair: float(log_r_ij[k])
+                for k, pair in enumerate(layout.identifiable_pairs)
+            }
+
+        self._system = self._build_system(log_mass, log_r, log_r_ij_map)
+        if self._system is None:
+            raise ValueError("Failed to build thermal system from theta")
+
+        # Store heater scales (alpha) and internal gains (q_int)
+        self._alpha_full = np.ones(len(sources))
+        for k, s_idx in enumerate(layout.identifiable_sources):
+            self._alpha_full[s_idx] = float(math.exp(log_alpha[k]))
+        self._q_int = q_int
+
+        # Precompute measurement covariance
+        self._Rm = (sigma_v ** 2) * np.eye(self._system.nx)
+
+    def _build_system(
+        self,
+        log_masses: np.ndarray,
+        log_rs: np.ndarray,
+        log_r_ij: Optional[Dict[Tuple[int, int], float]] = None,
+    ) -> Optional[HouseThermalSystem]:
+        """Build HouseThermalSDE with the given parameters."""
+        try:
+            room_idx = {r.name: k for k, r in enumerate(self._rooms)}
+            new_rooms = []
+            for i, r in enumerate(self._rooms):
+                new_conns = copy.deepcopy(r.connections)
+                if log_r_ij:
+                    for conn in new_conns:
+                        j = room_idx.get(conn.connected_room)
+                        if j is not None:
+                            pair = (min(i, j), max(i, j))
+                            if pair in log_r_ij:
+                                conn.r_value = float(math.exp(
+                                    float(np.clip(
+                                        log_r_ij[pair],
+                                        _LOG_R_IJ_LO, _LOG_R_IJ_HI,
+                                    ))
+                                ))
+                new_rooms.append(Room(
+                    name=r.name,
+                    thermal_mass=float(math.exp(log_masses[i])),
+                    r_external=float(math.exp(log_rs[i])),
+                    connections=new_conns,
+                    windows=r.windows,
+                    temperature=r.temperature,
+                    setpoint=r.setpoint,
+                    internal_gain=0.0,  # Applied separately
+                ))
+            model = HouseModel(new_rooms)
+            return HouseThermalSystem(
+                model, self._sources, self._dt,
+                sigma_w=self._sigma_w, sigma_v=self._sigma_v,
+                n_int_steps=self._n_int_steps
+            )
+        except Exception:
+            return None
+
+    # ── ContinuousDiscreteModel interface for CD-EKF ───────────────────────
+
+    @property
+    def params(self) -> np.ndarray:
+        """Parameter vector theta (required by CDParameterEstimator)."""
+        return self._theta
+
+    @property
+    def nx(self) -> int:
+        return self._system.nx
+
+    @property
+    def nu(self) -> int:
+        return self._system.nu
+
+    @property
+    def nd(self) -> int:
+        return self._system.nd
+
+    @property
+    def nw(self) -> int:
+        return self._system.nw
+
+    @property
+    def nz(self) -> int:
+        return self._system.nz
+
+    @property
+    def nym(self) -> int:
+        return self._system.nym
+
+    @property
+    def Rm(self) -> np.ndarray:
+        return self._Rm
+
+    def f(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """
+        Drift function with heater scaling and internal gains applied.
+
+        The heater scales are applied to the input: u_scaled = alpha ⊙ u
+        The internal gains are added to the disturbance vector.
+        """
+        # Scale inputs by alpha
+        u_scaled = self._alpha_full * u
+
+        # Add internal gains to disturbance
+        # d = [T_out, Q_sol,1, ..., Q_sol,n]
+        # We add q_int to the solar gain channels
+        d_augmented = d.copy()
+        n = self._system.nx
+        for i in range(n):
+            d_augmented[1 + i] += self._q_int[i]
+
+        return self._system.f(x, u_scaled, d_augmented, p, t)
+
+    def sigma(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Diffusion coefficient (isotropic process noise)."""
+        return self._system.sigma(x, u, d, p, t)
+
+    def g(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Controlled output z = x."""
+        return self._system.g(x, u, d, p, t)
+
+    def hm(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float = 0.0,
+    ) -> np.ndarray:
+        """Measurement function ym = x."""
+        return self._system.hm(x, u, d, p, t)
+
+    def dfdx(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Jacobian ∂f/∂x (constant matrix F)."""
+        u_scaled = self._alpha_full * u
+        d_augmented = d.copy()
+        n = self._system.nx
+        for i in range(n):
+            d_augmented[1 + i] += self._q_int[i]
+        return self._system.dfdx(x, u_scaled, d_augmented, p, t)
+
+    def dhmdx(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float = 0.0,
+    ) -> np.ndarray:
+        """Jacobian ∂hm/∂x = I."""
+        return self._system.dhmdx(x, u, d, p, t)
 
 
 # ── Augmented model wrapping HouseThermalSystem ───────────────────────────────
@@ -405,8 +637,11 @@ class KalmanMLEstimator:
 
     def compute_log_likelihood(self, history: List[Dict[str, Any]]) -> Optional[float]:
         """
-        Evaluate the Kalman PED log-likelihood at the *current* configured
+        Evaluate the CD-EKF PED log-likelihood at the *current* configured
         parameter values (without regularisation).
+
+        Uses CDParameterEstimator with the fully nonlinear continuous-discrete
+        approach via CD-EKF.
         """
         if len(history) < MIN_HISTORY_STEPS:
             return None
@@ -425,43 +660,40 @@ class KalmanMLEstimator:
             self._q_int_prior,
         ])
 
-        # Convert history to standardised format
-        std_history = self._convert_history_std(history)
+        # Convert history to CD-EKF format (use "ym" key)
+        std_history = self._convert_history_std(history, use_ym=True)
 
-        # Build model factory
+        # Build model factory for CDParameterEstimator
         def _model_factory(theta: np.ndarray):
-            lm, lr, qi, _, _ = layout.unpack(theta)
-            sys_ = self._build_system(lm, lr, log_r_ij=None)
-            if sys_ is None:
-                raise ValueError("Failed to build thermal system")
-            alpha_full = np.ones(self._n_u)
-            return _AugmentedHouseModel(sys_, alpha_full, qi)
+            return _ParametricHouseThermalSDE(
+                rooms=self._rooms,
+                sources=self._sources,
+                dt=self._dt,
+                sigma_w=math.sqrt(self._Q_var),
+                sigma_v=math.sqrt(self._R_var),
+                n_int_steps=10,
+                layout=layout,
+                theta=theta,
+            )
 
-        # Build bounds
-        n = self._n
-        bounds: List[Tuple[float, float]] = (
-            [(_LOG_MASS_LO, _LOG_MASS_HI)] * n
-            + [(_LOG_R_LO, _LOG_R_HI)] * n
-            + [(_Q_INT_LO, _Q_INT_HI)] * n
-        )
-
-        Q_np = np.eye(n) * self._Q_var
-        R_np = np.eye(n) * self._R_var
-
-        # Create temporary mbc estimator without regularization
-        mbc_est = _MbcEstimator(
-            model_factory=_model_factory,
-            theta0=theta_prior,
-            bounds=bounds,
-            Q=Q_np,
-            R=R_np,
-            regularization_fn=None,  # No regularization for likelihood eval
-            n_restarts=1,
-        )
+        # Initial state estimate (use first measurement)
+        x0 = std_history[0]["ym"]
+        P0 = np.eye(self._n) * self._R_var * 10.0  # Initial uncertainty
 
         try:
-            ll = mbc_est.log_likelihood(std_history, theta_prior)
-            return ll
+            # Evaluate negative log-likelihood using CD-EKF
+            neg_ll = _cd_ped_neg_ll(
+                model_factory=_model_factory,
+                theta=theta_prior,
+                history=std_history,
+                x0=x0,
+                P0=P0,
+                dt=self._dt,
+                n_steps=10,
+            )
+            if not np.isfinite(neg_ll):
+                return None
+            return float(-neg_ll)
         except Exception as exc:
             _LOGGER.debug("compute_log_likelihood failed: %s", exc, exc_info=True)
             return None
@@ -554,25 +786,21 @@ class KalmanMLEstimator:
             + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
         )
 
-        # ── Convert history to standardised format (fixed, theta-agnostic) ─
-        std_history = self._convert_history_std(history)
+        # ── Convert history to CD-EKF format (use "ym" key) ────────────────
+        std_history = self._convert_history_std(history, use_ym=True)
 
-        # ── Build model factory for mbc ────────────────────────────────────
+        # ── Build model factory for CDParameterEstimator ───────────────────
         def _model_factory(theta: np.ndarray):
-            lm, lr, qi, la, lrij = layout.unpack(theta)
-            lrij_map: Optional[Dict[Tuple[int, int], float]] = None
-            if len(lrij):
-                lrij_map = {
-                    pair: float(lrij[k])
-                    for k, pair in enumerate(layout.identifiable_pairs)
-                }
-            sys_ = self._build_system(lm, lr, log_r_ij=lrij_map)
-            if sys_ is None:
-                raise ValueError("Failed to build thermal system")
-            alpha_full = np.ones(self._n_u)
-            for k, s_idx in enumerate(layout.identifiable_sources):
-                alpha_full[s_idx] = float(math.exp(la[k]))
-            return _AugmentedHouseModel(sys_, alpha_full, qi)
+            return _ParametricHouseThermalSDE(
+                rooms=self._rooms,
+                sources=self._sources,
+                dt=self._dt,
+                sigma_w=math.sqrt(self._Q_var),
+                sigma_v=math.sqrt(self._R_var),
+                n_int_steps=10,
+                layout=layout,
+                theta=theta,
+            )
 
         # ── Build regularisation function ──────────────────────────────────
         def _regularization_fn(theta: np.ndarray) -> float:
@@ -590,16 +818,19 @@ class KalmanMLEstimator:
             pert[a:b] *= 200.0   # std ≈ 100 W in linear space
             return theta0 + pert
 
-        # ── Delegate optimisation to mbc.ParameterEstimator ───────────────
-        Q_np = np.eye(n) * self._Q_var
-        R_np = np.eye(n) * self._R_var
+        # ── Initial state estimate for CD-EKF ──────────────────────────────
+        x0 = std_history[0]["ym"]
+        P0 = np.eye(n) * self._R_var * 10.0  # Initial uncertainty
 
-        mbc_est = _MbcEstimator(
+        # ── Delegate optimisation to CDParameterEstimator ──────────────────
+        mbc_est = _CDParameterEstimator(
             model_factory=_model_factory,
             theta0=theta_prior,
             bounds=bounds,
-            Q=Q_np,
-            R=R_np,
+            x0=x0,
+            P0=P0,
+            dt=self._dt,
+            n_steps=10,
             regularization_fn=_regularization_fn,
             n_restarts=_N_RESTARTS,
             restart_perturbation=_RESTART_PERT,
@@ -808,18 +1039,31 @@ class KalmanMLEstimator:
     def _convert_history_std(
         self,
         history: List[Dict[str, Any]],
+        use_ym: bool = False,
     ) -> List[Dict[str, np.ndarray]]:
         """Convert the HA history buffer to the standardised mbc format.
 
         Each record is converted to ``{"y": ndarray, "u": ndarray, "d": ndarray}``
+        for discrete-time estimator, or ``{"ym": ndarray, "u": ndarray, "d": ndarray}``
+        for continuous-discrete estimator.
+
         where ``d = [T_out, solar_1, …, solar_n]`` (raw, without q_int).
-        The q_int contribution is absorbed by
+        The q_int contribution is absorbed by the parametric model or
         :class:`_AugmentedHouseModel.predict_offset`.
+
+        Parameters
+        ----------
+        history : list of dicts
+            HA history buffer records.
+        use_ym : bool, optional
+            If True, use "ym" key for measurements (CD-EKF convention).
+            If False, use "y" key (discrete-time convention). Default: False.
         """
         n = self._n
         n_u = self._n_u
         room_idx = {name: i for i, name in enumerate(self._room_names)}
         std: List[Dict[str, np.ndarray]] = []
+        meas_key = "ym" if use_ym else "y"
         for record in history:
             y = np.array(record["y"][:n], dtype=float)
             u = np.zeros(n_u)
@@ -831,7 +1075,7 @@ class KalmanMLEstimator:
             for name, gain in record.get("d_solar", {}).items():
                 if name in room_idx:
                     d[1 + room_idx[name]] = float(gain)
-            std.append({"y": y, "u": u, "d": d})
+            std.append({meas_key: y, "u": u, "d": d})
         return std
 
     def _kalman_neg_ll_via_mbc(
