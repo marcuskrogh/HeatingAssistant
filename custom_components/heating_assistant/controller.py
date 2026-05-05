@@ -107,6 +107,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
         n_int_steps: int = 10,
+        params: Optional[np.ndarray] = None,
+        heater_scales: Optional[np.ndarray] = None,
+        internal_gains: Optional[np.ndarray] = None,
     ) -> None:
         self._model = model
         self._sources = sources
@@ -114,6 +117,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._sigma_w = sigma_w
         self._sigma_v = sigma_v
         self._n_int_steps = n_int_steps
+        self._params = params if params is not None else np.array([])
+
+        # Optional heater power-scale factors (alpha) and internal gains (q_int)
+        # Used for parameter estimation to apply theta-dependent corrections
+        self._heater_scales = heater_scales if heater_scales is not None else np.ones(len(sources))
+        self._internal_gains = internal_gains if internal_gains is not None else np.zeros(len(model.room_names))
 
         self._room_list: List[str] = model.room_names
         self._room_idx: Dict[str, int] = {
@@ -169,6 +178,16 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     def Rm(self) -> np.ndarray:
         return self._Rm
 
+    @property
+    def params(self) -> np.ndarray:
+        """
+        Parameter vector theta (for CDParameterEstimator compatibility).
+
+        Returns the theta vector if provided during construction, otherwise
+        returns an empty array for non-parametric use (MPC control).
+        """
+        return self._params
+
     # ── ContinuousDiscreteModel abstract functions ────────────────────────
 
     def _build_G_u(self, outdoor_temp: float) -> np.ndarray:
@@ -189,14 +208,28 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         t: float,
     ) -> np.ndarray:
         """
-        Drift f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d.
+        Drift f(x, u, d, p, t) = F x + G_u(d[0]) (alpha ⊙ u) + G_d (d + [0, q_int]).
 
         The nonlinearity is in G_u which depends on the outdoor temperature
         d[0] through the heat-pump COP.
+
+        For parameter estimation, heater_scales (alpha) and internal_gains (q_int)
+        are applied to scale inputs and augment disturbances respectively.
         """
         outdoor_temp = float(d[0])
         G_u = self._build_G_u(outdoor_temp)
-        return self._F @ x + G_u @ u + self._G_d @ d
+
+        # Apply heater power-scale factors (for parameter estimation)
+        u_scaled = self._heater_scales * u
+
+        # Apply internal gains to disturbance (for parameter estimation)
+        # d = [T_out, Q_sol,1, ..., Q_sol,n]
+        # We add q_int to the solar gain channels
+        d_augmented = d.copy()
+        for i in range(self.nx):
+            d_augmented[1 + i] += self._internal_gains[i]
+
+        return self._F @ x + G_u @ u_scaled + self._G_d @ d_augmented
 
     def sigma(
         self,
