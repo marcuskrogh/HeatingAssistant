@@ -107,8 +107,9 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 15. [Developer Guide](#15-developer-guide)
     - 15.1 [Repository layout](#151-repository-layout)
     - 15.2 [Running the tests](#152-running-the-tests)
-    - 15.3 [Adding a new heat source type](#153-adding-a-new-heat-source-type)
-    - 15.4 [Extending the solar model](#154-extending-the-solar-model)
+    - 15.3 [Performance benchmarks](#153-performance-benchmarks)
+    - 15.4 [Adding a new heat source type](#154-adding-a-new-heat-source-type)
+    - 15.5 [Extending the solar model](#155-extending-the-solar-model)
 16. [Troubleshooting](#16-troubleshooting)
 17. [Roadmap](#17-roadmap)
 18. [References](#18-references)
@@ -2861,7 +2862,9 @@ HeatingAssistant/
 │   ├── test_coordinator_apply_actions.py ← 31 tests: climate/switch/number dispatch, deadband, cooling
 │   ├── test_model_diagnostics.py ← 25 tests: fit metrics, residuals, parameter validation, performance
 │   ├── test_parameter_estimator.py ← 21 tests: Nelder-Mead, KalmanMLEstimator, joint identification
-│   └── test_visualisation.py     ← 47 tests: heat flows, time constant, predictions, forecast sensors
+│   ├── test_visualisation.py     ← 47 tests: heat flows, time constant, predictions, forecast sensors
+│   └── test_performance.py       ←  6 benchmarks: MPC and parameter-estimation run-times (3 slow)
+├── BENCHMARKS.md              ← Latest performance benchmark results (auto-generated)
 ├── .gitignore
 └── README.md
 ```
@@ -2875,13 +2878,13 @@ pip install numpy scipy cvxopt homeassistant pytest voluptuous pytest-asyncio
 pip install mbc @ git+https://github.com/marcuskrogh/mbc.git
 ```
 
-Run the full test suite:
+Run the full test suite (skipping slow benchmarks):
 
 ```bash
-python -m pytest tests/ -v
+python -m pytest tests/ -v -m "not slow"
 ```
 
-Expected output: **232 tests pass**.
+Expected output: **235 tests pass** (3 slow parameter-estimation benchmarks deselected).
 
 Run a single test module:
 
@@ -2897,7 +2900,20 @@ python -m pytest tests/test_parameter_estimator.py -v
 python -m pytest tests/test_visualisation.py -v
 ```
 
-### 15.3 Adding a new heat source type
+### 15.3 Performance benchmarks
+
+Run-time benchmarks for the active control step and parameter estimation routines are in `tests/test_performance.py`.  They cover three representative house configurations (studio, two-bedroom flat, full five-room house) and write results to `BENCHMARKS.md` in the repository root.
+
+```bash
+# Run all six benchmarks and regenerate BENCHMARKS.md
+python -m pytest tests/test_performance.py -v -s
+```
+
+The three parameter-estimation benchmarks (Nelder-Mead + Kalman filter) are marked `@pytest.mark.slow` because they take 14–500 seconds each.  They are excluded from the normal test run by `-m "not slow"`.
+
+Latest results are in [`BENCHMARKS.md`](BENCHMARKS.md).
+
+### 15.4 Adding a new heat source type
 
 1. **Add a new constant** in `const.py`:
    ```python
@@ -2921,7 +2937,7 @@ python -m pytest tests/test_visualisation.py -v
 
 5. **Write tests** for the new class in `tests/test_heat_sources.py`.
 
-### 15.4 Extending the solar model
+### 15.5 Extending the solar model
 
 The solar model in `solar_model.py` uses a **clear-sky** approximation (no clouds).  To add cloud cover correction:
 
