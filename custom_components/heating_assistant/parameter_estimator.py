@@ -722,7 +722,7 @@ class KalmanMLEstimator:
                     windows=r.windows,
                     temperature=r.temperature,
                     setpoint=r.setpoint,
-                    internal_gain=0.0,  # Applied via internal_gains parameter
+                    internal_gain=0.0,  # Applied via theta parameter in f()
                 ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(
@@ -730,9 +730,8 @@ class KalmanMLEstimator:
                 sigma_w=math.sqrt(self._Q_var),
                 sigma_v=math.sqrt(self._R_var),
                 n_int_steps=10,
-                params=theta,
-                heater_scales=heater_scales,
-                internal_gains=q_int,
+                identifiable_sources=layout.identifiable_sources,
+                theta=theta,
             )
         except Exception as exc:
             _LOGGER.debug("Failed to build parametric system: %s", exc, exc_info=True)

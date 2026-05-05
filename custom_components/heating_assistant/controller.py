@@ -97,6 +97,13 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     sigma_v    : measurement-noise standard deviation [K].  Default: 0.5.
     n_int_steps: Euler sub-steps per sampling interval for EKF/OCP.
                  Default: 10.
+    identifiable_sources: list of int, optional
+        Indices of heat sources whose power-scale factors are being estimated.
+        Used to unpack the parameter vector p in f(). If None (default),
+        no heater scaling is applied.
+    theta: np.ndarray, optional
+        Parameter vector for this model instance (fixed for CD-EKF evaluation).
+        If provided, f() will extract q_int and heater scales from this vector.
     """
 
     def __init__(
@@ -107,9 +114,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
         n_int_steps: int = 10,
-        params: Optional[np.ndarray] = None,
-        heater_scales: Optional[np.ndarray] = None,
-        internal_gains: Optional[np.ndarray] = None,
+        identifiable_sources: Optional[List[int]] = None,
+        theta: Optional[np.ndarray] = None,
     ) -> None:
         self._model = model
         self._sources = sources
@@ -117,12 +123,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._sigma_w = sigma_w
         self._sigma_v = sigma_v
         self._n_int_steps = n_int_steps
-        self._params = params if params is not None else np.array([])
 
-        # Optional heater power-scale factors (alpha) and internal gains (q_int)
-        # Used for parameter estimation to apply theta-dependent corrections
-        self._heater_scales = heater_scales if heater_scales is not None else np.ones(len(sources))
-        self._internal_gains = internal_gains if internal_gains is not None else np.zeros(len(model.room_names))
+        # Store identifiable source indices and theta for parameter extraction
+        self._identifiable_sources = identifiable_sources if identifiable_sources is not None else []
+        self._theta = theta if theta is not None else np.array([])
 
         self._room_list: List[str] = model.room_names
         self._room_idx: Dict[str, int] = {
@@ -178,16 +182,6 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     def Rm(self) -> np.ndarray:
         return self._Rm
 
-    @property
-    def params(self) -> np.ndarray:
-        """
-        Parameter vector theta (for CDParameterEstimator compatibility).
-
-        Returns the theta vector if provided during construction, otherwise
-        returns an empty array for non-parametric use (MPC control).
-        """
-        return self._params
-
     # ── ContinuousDiscreteModel abstract functions ────────────────────────
 
     def _build_G_u(self, outdoor_temp: float) -> np.ndarray:
@@ -213,21 +207,44 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         The nonlinearity is in G_u which depends on the outdoor temperature
         d[0] through the heat-pump COP.
 
-        For parameter estimation, heater_scales (alpha) and internal_gains (q_int)
-        are applied to scale inputs and augment disturbances respectively.
+        For parameter estimation, the parameter vector p (or self._theta if p is empty)
+        contains theta with structure:
+            theta = [log_mass_1..n, log_r_1..n, q_int_1..n, log_alpha_k, log_r_ij_k]
+
+        We extract q_int and alpha (heater scales) from the parameter vector and apply them.
         """
         outdoor_temp = float(d[0])
         G_u = self._build_G_u(outdoor_temp)
 
-        # Apply heater power-scale factors (for parameter estimation)
-        u_scaled = self._heater_scales * u
+        # Use p if provided, otherwise fall back to self._theta
+        theta = p if len(p) > 0 else self._theta
 
-        # Apply internal gains to disturbance (for parameter estimation)
-        # d = [T_out, Q_sol,1, ..., Q_sol,n]
-        # We add q_int to the solar gain channels
-        d_augmented = d.copy()
-        for i in range(self.nx):
-            d_augmented[1 + i] += self._internal_gains[i]
+        # Extract internal gains and heater scales from parameter vector
+        n = self.nx
+        if len(theta) >= 3 * n:
+            # theta structure: [log_mass (n), log_r (n), q_int (n), log_alpha (...), log_r_ij (...)]
+            q_int = theta[2*n : 3*n]
+
+            # Extract heater scales for identifiable sources
+            heater_scales = np.ones(self.nu)
+            if len(self._identifiable_sources) > 0 and len(theta) >= 3*n + len(self._identifiable_sources):
+                log_alpha = theta[3*n : 3*n + len(self._identifiable_sources)]
+                for k, s_idx in enumerate(self._identifiable_sources):
+                    heater_scales[s_idx] = np.exp(log_alpha[k])
+
+            # Apply heater power-scale factors
+            u_scaled = heater_scales * u
+
+            # Apply internal gains to disturbance
+            # d = [T_out, Q_sol,1, ..., Q_sol,n]
+            # We add q_int to the solar gain channels
+            d_augmented = d.copy()
+            for i in range(n):
+                d_augmented[1 + i] += q_int[i]
+        else:
+            # No parameter estimation - use defaults (no scaling, no internal gains)
+            u_scaled = u
+            d_augmented = d
 
         return self._F @ x + G_u @ u_scaled + self._G_d @ d_augmented
 
@@ -294,60 +311,6 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         return np.eye(self.nx)
 
     # ── Application-layer helpers ────────────────────────────────────────
-
-    def discretize(self, d_cvx):
-        """
-        Zero-order-hold discretization of the linearized system.
-
-        This method is provided for compatibility with the discrete-time
-        parameter estimator. It returns cvxopt matrices (A_d, B_d, E_d).
-
-        The system is linearized around the current state with the given
-        disturbance vector d. The continuous-time linearization is:
-            dx/dt = F x + G_u(d[0]) u + G_d d
-
-        where F = dfdx is constant (doesn't depend on x or u).
-
-        The ZOH discretization gives:
-            x[k+1] = A_d x[k] + B_d u[k] + E_d d[k]
-        where:
-            A_d = exp(F * dt)
-            B_d = F^{-1} (A_d - I) G_u
-            E_d = F^{-1} (A_d - I) G_d
-
-        For the special case where F is singular (which it never is for
-        RC networks since F has full rank), we would use the series expansion.
-        """
-        from scipy.linalg import expm
-        import cvxopt
-
-        # Extract disturbance vector as numpy array
-        d_np = np.array(d_cvx).flatten()
-        outdoor_temp = float(d_np[0])
-
-        # Get the continuous-time matrices
-        F = self._F  # Constant system matrix
-        G_u = self._build_G_u(outdoor_temp)  # Input matrix (depends on T_out)
-        G_d = self._G_d  # Disturbance matrix
-
-        # Compute ZOH discretization
-        dt = self._dt
-        A_d = expm(F * dt)
-
-        # B_d = F^{-1} (A_d - I) G_u
-        # Since F is invertible for RC networks, we can compute this directly
-        F_inv_Ad_minus_I = np.linalg.solve(F, A_d - np.eye(self.nx))
-        B_d = F_inv_Ad_minus_I @ G_u
-
-        # E_d = F^{-1} (A_d - I) G_d
-        E_d = F_inv_Ad_minus_I @ G_d
-
-        # Convert to cvxopt matrices
-        A_cvx = cvxopt.matrix(A_d, tc='d')
-        B_cvx = cvxopt.matrix(B_d, tc='d')
-        E_cvx = cvxopt.matrix(E_d, tc='d')
-
-        return A_cvx, B_cvx, E_cvx
 
     @property
     def x(self) -> list[float]:
