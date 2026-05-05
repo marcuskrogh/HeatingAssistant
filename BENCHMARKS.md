@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-05 20:15 UTC*
+*Generated: 2026-05-05 20:18 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,9 +18,9 @@ One control step consists of:
 
 | Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|-------------|----------|-----|
-| studio-1room           |        4.8 |         4.7 |      4.9 |  15 |
-| two-bedroom-2room      |        8.5 |         8.5 |      8.7 |  15 |
-| full-house-5room       |     1083.4 |      1083.9 |   1087.3 |  15 |
+| studio-1room           |       4.9 |         4.8 |      6.2 |   15 |
+| two-bedroom-2room      |       8.5 |         8.4 |      8.7 |   15 |
+| full-house-5room       |    1077.0 |      1076.5 |   1080.3 |   15 |
 
 **Configurations:**
 
@@ -43,9 +43,7 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 | Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|-------------|----------|-----|
-| studio-1room           |    13 751  |    13 751   |  13 751  |   1 |
-| two-bedroom-2room      |    43 901  |    43 901   |  43 901  |   1 |
-| full-house-5room       |   487 673  |   487 673   | 487 673  |   1 |
+
 
 **Configurations:**
 
@@ -59,15 +57,15 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 ## Notes
 
-- Timings include Python overhead (numpy, scipy) but not module import time
-  (the module is already loaded when benchmarks run).
-- The L-BFGS-B solver convergence time depends on the warm-start; the first
-  call (warm-up) is typically the slowest and is excluded from MPC timings.
-- Parameter estimation timing scales with the number of identifiable
-  parameters, which the estimator detects automatically from data variance.
-- Parameter estimation tests are marked `@pytest.mark.slow` and are excluded
-  from quick CI passes (`pytest -m "not slow"`).
-- Run all benchmarks and regenerate this file:
+- Timings include Python runtime overhead (numpy, scipy) but not module
+  import time (the module is already loaded).
+- The L-BFGS-B solver convergence time depends on the warm-start; the
+  first call (warm-up) is typically the slowest and is excluded.
+- Parameter estimation timing depends heavily on the number of identifiable
+  parameters (which the estimator detects automatically from the data).
+- Parameter estimation tests are marked `slow` and can be skipped in
+  quick CI passes with `pytest -m "not slow"`.
+- Run all benchmarks yourself:
   ```bash
   python -m pytest tests/test_performance.py -v -s
   ```

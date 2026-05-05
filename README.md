@@ -2884,7 +2884,7 @@ Run the full test suite (skipping slow benchmarks):
 python -m pytest tests/ -v -m "not slow"
 ```
 
-Expected output: **235 tests pass** (3 slow parameter-estimation benchmarks deselected).
+Expected output: **235 tests pass** (3 slow parameter-estimation benchmarks deselected; 238 total including them).
 
 Run a single test module:
 

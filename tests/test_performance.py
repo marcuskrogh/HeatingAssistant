@@ -60,6 +60,9 @@ _REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 _BENCHMARKS_FILE = os.path.join(_REPO_ROOT, "BENCHMARKS.md")
 
 # Number of repetitions for each benchmark routine.
+# 15 reps gives stable mean/median/p95 estimates for the fast MPC call while
+# keeping each benchmark run under a few seconds for the 1-room and 2-room
+# cases.  The 5-room case takes ~1.1s per call, so 15 reps ≈ 17s total.
 _MPC_REPS = 15
 # Parameter estimation is slow (multi-start Nelder-Mead with a Kalman filter
 # in the objective); a single timed call is sufficient to track regressions.
@@ -80,7 +83,9 @@ def _time_it(fn, n_repeats: int) -> Tuple[float, float, float]:
     times_ms.sort()
     mean_ms = float(np.mean(times_ms))
     median_ms = float(np.median(times_ms))
-    p95_ms = times_ms[max(0, int(0.95 * len(times_ms)) - 1)]
+    # P95: index = min(floor(0.95 * n), n-1); safe for n=1 and n=15.
+    p95_idx = min(int(0.95 * len(times_ms)), len(times_ms) - 1)
+    p95_ms = times_ms[p95_idx]
     return mean_ms, median_ms, p95_ms
 
 
@@ -305,6 +310,7 @@ class TestParameterEstimationPerformance:
 
     @pytest.mark.slow
     def test_two_bedroom_2room(self):
+        """2-room flat: Kalman ML estimation (Nelder-Mead, ~7 params)."""
         rooms_cfg = [
             Room(name="living_room", thermal_mass=5_000_000.0, r_external=0.05,
                  connections=[RoomConnection("bedroom", 0.3)],
@@ -455,7 +461,7 @@ def _write_benchmarks_md() -> None:
         "",
         "## Notes",
         "",
-        "- Timings include Python overhead (numpy, scipy import) but not module",
+        "- Timings include Python runtime overhead (numpy, scipy) but not module",
         "  import time (the module is already loaded).",
         "- The L-BFGS-B solver convergence time depends on the warm-start; the",
         "  first call (warm-up) is typically the slowest and is excluded.",
