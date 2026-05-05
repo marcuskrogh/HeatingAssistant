@@ -314,7 +314,7 @@ The MPC controller treats the thermal model as a **continuous-discrete stochasti
 
 $$\dot{\mathbf{x}}(t) = \mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, t) = \mathbf{F}\,\mathbf{x} + \mathbf{G}_u(T_{\text{out}})\,\mathbf{u} + \mathbf{G}_d\,\mathbf{d}$$
 
-with $\mathbf{F} = \mathbf{C}_{\text{cap}}^{-1}\,\mathbf{A}$, the state is propagated over each sub-step $h = dt / n\_int\_steps$ as:
+with $\mathbf{F} = \mathbf{C}_{\text{cap}}^{-1}\,\mathbf{A}$, the state is propagated over each sub-step $h = dt / n_{\text{int\_steps}}$ as:
 
 $$\mathbf{x}(t + h) \approx \mathbf{x}(t) + h\,\mathbf{f}(\mathbf{x}(t), \mathbf{u}, \mathbf{d}, t)$$
 
@@ -550,8 +550,8 @@ where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u
 | $\mathbf{z}[k] = \mathbf{g}(\mathbf{x}[k])$ | Controlled output — room temperatures — at step *k* |
 | $\mathbf{z}_{\text{ref}}$ | Reference (room setpoints) |
 | $\mathbf{Q}$ | Output tracking cost (default: $\mathbf{I}$) |
-| $\mathbf{R}$ | Input cost — $\text{energy\_weight} \cdot \mathbf{I}$ (default: $0.01 \cdot \mathbf{I}$) |
-| $\mathbf{S}$ | Input rate-of-change cost — $\text{smoothing\_weight} \cdot \mathbf{I}$ (default: $0.1 \cdot \mathbf{I}$).  Set `smoothing_weight` to `0.0` to disable. |
+| $\mathbf{R}$ | Input cost (`energy_weight` × $\mathbf{I}$, default: $0.01 \cdot \mathbf{I}$) |
+| $\mathbf{S}$ | Input rate-of-change cost (`smoothing_weight` × $\mathbf{I}$, default: $0.1 \cdot \mathbf{I}$).  Set `smoothing_weight` to `0.0` to disable. |
 | $\mathbf{z}_{\min}, \mathbf{z}_{\max}$ | Soft output constraint bounds: $\mathbf{z}_{\text{ref}} \pm \delta$ where $\delta$ = `constraint_offset` (default 2.0 °C) |
 | $\rho_z$ | Soft constraint penalty weight (default: $10^4$) |
 | $\mathbf{u}[k]$ | Input vector (continuous fractions $\in [0, 1]$) |
