@@ -572,6 +572,9 @@ class HeatingMPCController:
 
         # ── Solve-time rolling statistics ───────────────────────────────
         self._solve_times: deque = deque(maxlen=MPC_STATS_BUFFER_SIZE)
+        # Monotonically increasing counter; never capped by the rolling-window
+        # maxlen so it always advances and can be used as a live-sensor state.
+        self._total_computes: int = 0
 
         # Visualisation data (populated after each compute())
         self._predictions:      List[Dict[str, float]] = []
@@ -629,6 +632,11 @@ class HeatingMPCController:
     def n_solves(self) -> int:
         """Total number of OCP solves recorded in the rolling history."""
         return len(self._solve_times)
+
+    @property
+    def total_computes(self) -> int:
+        """Monotonically increasing count of all compute() calls (never resets)."""
+        return self._total_computes
 
     # ── Main entry point ─────────────────────────────────────────────────
 
@@ -703,6 +711,7 @@ class HeatingMPCController:
             x_hat, d_traj, u_prev=self._u_seq_prev, p=p, t0=0.0
         )
         self._solve_times.append(time.perf_counter() - _t0)
+        self._total_computes += 1
 
         # ── Step 3: Apply first action ───────────────────────────────────
         u0 = u_opt[0]
@@ -781,10 +790,22 @@ class HeatingMPCController:
         return [current] * self._horizon
 
     def _forecast_solar(self, now: datetime) -> List[Dict[str, float]]:
-        """Solar gain forecast using the geometric solar model."""
+        """Solar gain forecast using the geometric solar model.
+
+        ``solar_seq[k]`` represents the solar gains at the *start* of horizon
+        step k, i.e. at ``now + k * dt``.  Step 0 therefore maps to the
+        current solar gains, which is the correct disturbance for both:
+
+        * The EKF predict step (propagating from ``now − dt`` to ``now``).
+        * The OCP's first prediction step (interval ``[now, now + dt]``).
+
+        Using ``now + (k + 1) * dt`` (an off-by-one) would feed the EKF a
+        *future* disturbance and shift all OCP predictions one step ahead,
+        causing the visualised forecast to diverge from the actual trajectory.
+        """
         schedules = []
         for k in range(self._horizon):
-            t = now + timedelta(seconds=self._dt * (k + 1))
+            t = now + timedelta(seconds=self._dt * k)
             schedules.append({
                 name: room_solar_gains(
                     self._system._model.rooms[name].windows,
