@@ -426,6 +426,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     return float(state.state)
                 except ValueError:
                     pass
+        # No dedicated outdoor-temp entity — try the weather entity's current
+        # temperature attribute (weather entities expose the current observation
+        # via attributes["temperature"]).
+        if self._weather_entity:
+            state = self.hass.states.get(self._weather_entity)
+            if state and state.state not in ("unknown", "unavailable"):
+                temp = state.attributes.get("temperature")
+                if temp is not None:
+                    try:
+                        return float(temp)
+                    except (ValueError, TypeError):
+                        pass
         # Fall back to a benign default
         return 5.0
 
