@@ -621,3 +621,125 @@ class TestHeatingMPCController:
         assert actions["hp"] >= 0.0, (
             "Heating-only heat pump must not receive a negative (cooling) fraction"
         )
+
+
+class TestTotalComputes:
+    """total_computes increments on every compute() call and never saturates."""
+
+    def test_starts_at_zero(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        assert ctrl.total_computes == 0
+
+    def test_increments_each_call(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        for expected in range(1, 5):
+            ctrl.compute(outdoor_temp=0.0, now=now)
+            assert ctrl.total_computes == expected, (
+                f"Expected total_computes={expected}, got {ctrl.total_computes}"
+            )
+
+    def test_exceeds_rolling_window(self):
+        """total_computes must exceed MPC_STATS_BUFFER_SIZE (rolling deque cap)."""
+        from custom_components.heating_assistant.controller import MPC_STATS_BUFFER_SIZE
+
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        # Run one more than the buffer size
+        for _ in range(MPC_STATS_BUFFER_SIZE + 1):
+            ctrl.compute(outdoor_temp=0.0, now=now)
+        assert ctrl.total_computes == MPC_STATS_BUFFER_SIZE + 1, (
+            "total_computes should grow beyond the rolling-window cap"
+        )
+        assert ctrl.n_solves == MPC_STATS_BUFFER_SIZE, (
+            "n_solves is capped at MPC_STATS_BUFFER_SIZE"
+        )
+
+
+class TestSolarForecastIndexing:
+    """_forecast_solar must start at k=0 (current solar) not k=1 (one step ahead)."""
+
+    _NOW = datetime(2024, 6, 21, 12, 0, tzinfo=timezone.utc)  # Summer solstice noon
+
+    def test_solar_seq_zero_uses_current_time(self):
+        """solar_seq[0] must equal the solar gain computed at *now* (not now+dt)."""
+        from custom_components.heating_assistant.controller import (
+            HeatingMPCController, HouseThermalSDE,
+        )
+        from custom_components.heating_assistant.solar_model import room_solar_gains
+        from datetime import timedelta
+
+        room = Room(
+            "living_room", 5_000_000.0, 0.05,
+            temperature=15.0, setpoint=21.0,
+        )
+        model = HouseModel([room])
+        heater = ElectricHeater("h", "living_room", 2000)
+        ctrl = HeatingMPCController(
+            model, [heater], horizon=4, dt=900,
+            latitude=55.0, longitude=12.0,
+        )
+
+        solar_seq = ctrl._forecast_solar(self._NOW)
+
+        # Expected: solar at exactly _NOW (k=0 → t = _NOW + 0*dt)
+        expected_k0 = room_solar_gains(
+            model.rooms["living_room"].windows,
+            self._NOW,
+            55.0, 12.0,
+        )
+        # Wrong (old) value would be solar at _NOW + dt
+        wrong_k0 = room_solar_gains(
+            model.rooms["living_room"].windows,
+            self._NOW + timedelta(seconds=900),
+            55.0, 12.0,
+        )
+
+        assert solar_seq[0]["living_room"] == pytest.approx(expected_k0, rel=1e-6), (
+            "solar_seq[0] should use solar at now, not now+dt"
+        )
+        # Sanity-check: the wrong value actually differs (summer noon, gains change)
+        if abs(wrong_k0 - expected_k0) > 1e-3:
+            assert solar_seq[0]["living_room"] != pytest.approx(wrong_k0, rel=1e-3), (
+                "solar_seq[0] must not equal the old (k+1) value"
+            )
+
+    def test_solar_forecast_length_unchanged(self):
+        """_forecast_solar must still return horizon entries."""
+        room = Room("r", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
+        model = HouseModel([room])
+        ctrl = HeatingMPCController(
+            model, [ElectricHeater("h", "r", 1000)], horizon=6, dt=900,
+        )
+        solar_seq = ctrl._forecast_solar(self._NOW)
+        assert len(solar_seq) == 6
+
+    def test_d_traj_zero_uses_current_disturbance(self):
+        """After fix, d_traj[0] must use current solar (not future solar)."""
+        from custom_components.heating_assistant.solar_model import room_solar_gains
+
+        room = Room(
+            "living_room", 5_000_000.0, 0.05,
+            temperature=15.0, setpoint=21.0,
+        )
+        model = HouseModel([room])
+        ctrl = HeatingMPCController(
+            model, [ElectricHeater("h", "living_room", 2000)],
+            horizon=4, dt=900, latitude=55.0, longitude=12.0,
+        )
+
+        # Compute with a fixed 'now' and check stored solar_forecast
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+
+        expected_solar_0 = room_solar_gains(
+            model.rooms["living_room"].windows,
+            self._NOW,
+            55.0, 12.0,
+        )
+        # ctrl.solar_forecast[0] = solar_seq[0] = solar at _NOW (after fix)
+        assert ctrl.solar_forecast[0]["living_room"] == pytest.approx(
+            expected_solar_0, rel=1e-6
+        ), "solar_forecast[0] must reflect current (now) solar gains"

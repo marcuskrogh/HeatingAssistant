@@ -1395,18 +1395,19 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     """
     System-wide sensor reporting MPC solver performance statistics.
 
-    The state is the most recent OCP solve time [s].  Statistical summaries
-    (mean, max, count) and a time-series of recent solve times are exposed
-    as state attributes so they can be displayed on a Home Assistant dashboard.
+    The state is the total number of completed OCP solves.  It is a
+    monotonically-increasing integer so the entity state always advances on
+    every coordinator cycle, making it easy to spot if the MPC has stopped
+    running.  Detailed statistics (solve times, tracking errors) are exposed
+    as state attributes.
 
-    Understanding the solve time helps users:
-    - Verify that the MPC runs well within the update interval.
-    - Detect regressions (e.g., after model updates) that increase solve time.
-    - Tune the horizon / solver options if computation becomes a bottleneck.
+    Previously the state was the most-recent solve time [s], but after the
+    initial warm-up the L-BFGS-B solver converges in near-constant time, so
+    that value appeared frozen even when the controller was running normally.
     """
 
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "s"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = None
     _attr_icon = "mdi:timer-outline"
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
@@ -1416,10 +1417,9 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_mpc_performance"
 
     @property
-    def native_value(self) -> Optional[float]:
-        """Return the most recent OCP solve time [s]."""
-        t = self._coordinator.controller.last_solve_time
-        return round(t, 4) if t is not None else None
+    def native_value(self) -> Optional[int]:
+        """Return the total number of completed OCP solves."""
+        return self._coordinator.controller.total_computes
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -1435,6 +1435,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         n = controller.n_solves
 
         attrs: Dict[str, Any] = {
+            "total_computes": controller.total_computes,
             "last_solve_time_s": round(last_t, 4) if last_t is not None else None,
             "mean_solve_time_s": round(mean_t, 4) if mean_t is not None else None,
             "max_solve_time_s": round(max_t, 4) if max_t is not None else None,
@@ -1445,20 +1446,23 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 
         # Tracking error per room (absolute deviation from setpoint)
         room_names = self._coordinator.model.room_names
-        current_tracking_errors = {
-            name: round(abs(
+        tracking_error_values = [
+            abs(
                 self._coordinator.model.rooms[name].temperature
                 - self._coordinator.model.rooms[name].setpoint
-            ), 3)
+            )
             for name in room_names
+        ]
+        attrs["current_tracking_errors"] = {
+            name: round(v, 3) for name, v in zip(room_names, tracking_error_values)
         }
-        tracking_errors = list(current_tracking_errors.values())
-        attrs["current_tracking_errors"] = current_tracking_errors
         attrs["mean_tracking_error"] = (
-            round(float(np.mean(tracking_errors)), 3) if tracking_errors else None
+            round(float(np.mean(tracking_error_values)), 3)
+            if tracking_error_values else None
         )
         attrs["max_tracking_error"] = (
-            round(float(np.max(tracking_errors)), 3) if tracking_errors else None
+            round(float(np.max(tracking_error_values)), 3)
+            if tracking_error_values else None
         )
 
         # Terminal-weight in effect (for reference)
