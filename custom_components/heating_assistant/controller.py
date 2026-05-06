@@ -320,6 +320,17 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """Controlled output z = x (room temperatures)."""
         return x.copy()
 
+    def gm(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Continuous-time output gm = x (room temperatures, same as hm)."""
+        return x.copy()
+
     def hm(
         self,
         x: np.ndarray,
@@ -469,7 +480,14 @@ class HeatingMPCController:
     model             : HouseModel
     heat_sources      : list of HeatSource
     horizon           : prediction horizon N (number of time steps)
-    dt                : sampling interval [s]
+    dt                : OCP step size — the zero-order-hold duration for
+                        each step in the optimisation horizon [s].
+    measurement_dt    : EKF measurement interval — the actual wall-clock
+                        time between successive ``compute()`` calls [s].
+                        Must match the coordinator's update period.  If
+                        ``None`` (default) it falls back to ``dt``, which
+                        is correct only when compute() is called exactly
+                        once every ``dt`` seconds.
     latitude          : site latitude [°]
     longitude         : site longitude [°]
     energy_weight     : weight on ‖u‖²_R (input energy cost)
@@ -487,6 +505,7 @@ class HeatingMPCController:
         heat_sources: List[HeatSource],
         horizon: int = 6,
         dt: float = 900.0,
+        measurement_dt: Optional[float] = None,
         latitude: float = 55.0,
         longitude: float = 12.0,
         energy_weight: float = 0.01,
@@ -503,6 +522,14 @@ class HeatingMPCController:
         self._latitude = latitude
         self._longitude = longitude
         self._constraint_offset = constraint_offset
+
+        # The EKF must integrate over the actual wall-clock interval between
+        # compute() calls, NOT the OCP horizon step size.  Using dt (e.g.
+        # 900 s) when compute() is called every UPDATE_INTERVAL (e.g. 60 s)
+        # causes the EKF predict step to overshoot by dt/UPDATE_INTERVAL and
+        # incorrectly accumulates 840 extra seconds of thermal drift and
+        # input effect on every call.
+        ekf_dt = measurement_dt if measurement_dt is not None else dt
 
         if smoothing_weight < 0.0:
             raise ValueError(
@@ -526,7 +553,7 @@ class HeatingMPCController:
         x0 = np.array(self._system.x)
         P0 = np.eye(n_x)  # initial state uncertainty [K²]
         self._ekf = ContinuousDiscreteEKF(
-            self._system, x0, P0, dt, n_steps=n_int_steps
+            self._system, x0, P0, ekf_dt, n_steps=n_int_steps
         )
 
         # ── OCP cost matrices ───────────────────────────────────────────

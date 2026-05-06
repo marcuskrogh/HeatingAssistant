@@ -30,6 +30,7 @@ from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
@@ -80,6 +81,7 @@ from .const import (
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
+    DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
     HISTORY_BUFFER_SIZE,
@@ -195,6 +197,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
         self._dt: float = data.get(CONF_DT, DEFAULT_DT)
+        # The update interval drives both how often the coordinator ticks and
+        # the EKF measurement step.  Options take precedence over initial data
+        # so that a user can reconfigure it via the UI without re-creating the
+        # entry.  Falls back to DEFAULT_UPDATE_INTERVAL (60 s) when absent.
+        self._update_interval: int = int(
+            options.get(CONF_UPDATE_INTERVAL)
+            or data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+        )
         self._horizon: int = data.get(CONF_HORIZON, DEFAULT_HORIZON)
         self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
@@ -227,6 +237,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             heat_sources=self.heat_sources,
             horizon=self._horizon,
             dt=self._dt,
+            measurement_dt=float(self._update_interval),
             latitude=self._latitude,
             longitude=self._longitude,
             energy_weight=self._energy_weight,
@@ -264,7 +275,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            update_interval=timedelta(seconds=self._update_interval),
         )
 
     # ------------------------------------------------------------------
@@ -273,8 +284,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     @property
     def dt(self) -> float:
-        """Return the time step in seconds."""
+        """Return the OCP time step (ZOH duration) in seconds."""
         return self._dt
+
+    @property
+    def update_interval_seconds(self) -> int:
+        """Return the coordinator / EKF update period in seconds."""
+        return self._update_interval
 
     @property
     def history_buffer(self) -> deque:
@@ -1110,7 +1126,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=UPDATE_INTERVAL,  # must match history buffer sampling interval, not MPC horizon
+            dt=self._update_interval,  # must match history buffer sampling interval, not MPC horizon
         )
 
         history = list(self._history_buffer)
@@ -1178,6 +1194,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             heat_sources=self.heat_sources,
             horizon=self._horizon,
             dt=self._dt,
+            measurement_dt=float(self._update_interval),
             latitude=self._latitude,
             longitude=self._longitude,
             energy_weight=self._energy_weight,

@@ -48,7 +48,8 @@ CONF_SOURCE_HEATING_EFFICIENCY = "heating_efficiency"  # fraction of max heating
 
 # Controller configuration keys
 CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
-CONF_DT = "dt"                         # time step in seconds
+CONF_DT = "dt"                         # OCP time step / ZOH duration (seconds)
+CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = EKF step (seconds)
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
 CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output constraints
@@ -61,7 +62,8 @@ DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
 DEFAULT_R_EXTERNAL = 0.05              # K/W
 DEFAULT_SETPOINT = 21.0                # °C
 DEFAULT_HORIZON = 6                    # 6 steps ahead
-DEFAULT_DT = 900                       # 15-minute steps (seconds)
+DEFAULT_DT = 900                       # 15-minute OCP steps (seconds)
+DEFAULT_UPDATE_INTERVAL = 60          # coordinator / EKF update period (seconds)
 DEFAULT_EFFICIENCY = 1.0
 DEFAULT_COP_RATED = 3.5
 DEFAULT_COP_TEMP_REF = 7.0             # °C
@@ -88,11 +90,13 @@ SUFFIX_PREDICTED_TEMP = "predicted_temperature"
 SUFFIX_HEATING_POWER = "heating_power"
 
 # Update interval (seconds)
-UPDATE_INTERVAL = 60
+# This constant is kept for backward compatibility. The live value is read
+# from the config entry (CONF_UPDATE_INTERVAL) at coordinator start-up.
+UPDATE_INTERVAL = DEFAULT_UPDATE_INTERVAL
 
 # Parameter estimation
 #: Number of update steps to keep in the rolling history buffer.
-#: At UPDATE_INTERVAL=60 s this is ≈8 hours of data.
+#: At DEFAULT_UPDATE_INTERVAL=60 s this is ≈8 hours of data.
 HISTORY_BUFFER_SIZE = 480
 #: Number of MPC solve-time samples to retain for rolling statistics.
 MPC_STATS_BUFFER_SIZE = 100

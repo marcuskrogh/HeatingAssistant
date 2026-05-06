@@ -1172,7 +1172,6 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
 
     def _compute(self) -> dict:
         from .model_diagnostics import compute_open_loop_predictions
-        from .const import UPDATE_INTERVAL
 
         history = list(self._coordinator.history_buffer)
         system = self._coordinator.controller._system  # HouseThermalSystem
@@ -1184,7 +1183,7 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
             system=system,
             room_names=room_names,
             n_rooms=n_rooms,
-            dt=float(UPDATE_INTERVAL),
+            dt=float(self._coordinator.update_interval_seconds),
             segment_length=self.SEGMENT_LENGTH,
         )
 
