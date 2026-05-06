@@ -328,7 +328,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """Continuous output gm = x (room temperatures, same as z)."""
+        """Continuous-time output gm = x (room temperatures, same as hm)."""
         return x.copy()
 
     def hm(
