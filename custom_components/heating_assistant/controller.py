@@ -91,6 +91,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     The nonlinearity comes from G_u(T_out): for heat pumps the delivered
     thermal power depends on the outdoor temperature through the COP.
 
+    For cooling-capable heat pumps, the thermal contribution is computed via
+    a smooth, asymmetric sigmoid (see ``HeatPump.smooth_thermal_power``) that
+    maps u ∈ [−1, 1] continuously to the range [−Q_cool_max, +Q_heat_max].
+    This eliminates the non-differentiable kink at u = 0 that a piecewise
+    model would produce, giving the L-BFGS-B optimiser smooth gradients.
+
     Parameters
     ----------
     model      : HouseModel
@@ -100,6 +106,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     sigma_v    : measurement-noise standard deviation [K].  Default: 0.5.
     n_int_steps: Euler sub-steps per sampling interval for EKF/OCP.
                  Default: 10.
+    k_sigmoid  : Base sharpness of the smooth sigmoid activation used for
+                 cooling-capable sources.  The effective sharpness is
+                 automatically increased for asymmetric heating/cooling
+                 capacities.  Default: 5.0.
     identifiable_sources: list of int, optional
         Indices of heat sources whose power-scale factors are being estimated.
         Used to unpack the parameter vector p in f(). If None (default),
@@ -119,6 +129,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         n_int_steps: int = 10,
         identifiable_sources: Optional[List[int]] = None,
         theta: Optional[np.ndarray] = None,
+        k_sigmoid: float = 5.0,
     ) -> None:
         self._model = model
         self._sources = sources
@@ -126,6 +137,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._sigma_w = sigma_w
         self._sigma_v = sigma_v
         self._n_int_steps = n_int_steps
+        self._k_sigmoid = k_sigmoid
 
         # Store identifiable source indices and theta for parameter extraction
         self._identifiable_sources = identifiable_sources if identifiable_sources is not None else []
@@ -205,10 +217,15 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         t: float,
     ) -> np.ndarray:
         """
-        Drift f(x, u, d, p, t) = F x + G_u(d[0]) (alpha ⊙ u) + G_d (d + [0, q_int]).
+        Drift f(x, u, d, p, t) = F x + heat_contrib(u, d[0]) + G_d (d + [0, q_int]).
 
-        The nonlinearity is in G_u which depends on the outdoor temperature
-        d[0] through the heat-pump COP.
+        The thermal contribution of each source is computed piecewise:
+          * u_j ≥ 0 (heating): src.thermal_power(u_j, T_out) / C_cap[i]
+          * u_j < 0 (cooling): |u_j| × src.cooling_power(T_out) / C_cap[i]
+            (cooling_power is negative, so the product is also negative)
+
+        This correctly models the heat removal by cooling-capable sources
+        when the MPC schedules a negative control input.
 
         For parameter estimation, the parameter vector p (or self._theta if p is empty)
         contains theta with structure:
@@ -217,7 +234,6 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         We extract q_int and alpha (heater scales) from the parameter vector and apply them.
         """
         outdoor_temp = float(d[0])
-        G_u = self._build_G_u(outdoor_temp)
 
         # Use p if provided, otherwise fall back to self._theta
         theta = p if len(p) > 0 else self._theta
@@ -249,7 +265,27 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             u_scaled = u
             d_augmented = d
 
-        return self._F @ x + G_u @ u_scaled + self._G_d @ d_augmented
+        # Per-room thermal contribution.
+        # * Cooling-capable sources (can_cool=True): smooth asymmetric sigmoid
+        #   that maps u ∈ [-1, 1] → [-Q_cool_max, +Q_heat_max] with no kink.
+        # * Heating-only sources: standard linear thermal_power(u, T_out),
+        #   with u clamped to [0, 1] so that negative OCP values (which the
+        #   bounds prevent in practice) never produce spurious cooling.
+        heat_contrib = np.zeros(self.nx)
+        for j, src in enumerate(self._sources):
+            i = self._room_idx[src.room]
+            u_j = float(u_scaled[j])
+            if src.can_cool:
+                heat_contrib[i] += (
+                    src.smooth_thermal_power(u_j, outdoor_temp, self._k_sigmoid)
+                    / self._C_cap[i]
+                )
+            else:
+                heat_contrib[i] += (
+                    src.thermal_power(max(0.0, u_j), outdoor_temp) / self._C_cap[i]
+                )
+
+        return self._F @ x + heat_contrib + self._G_d @ d_augmented
 
     def sigma(
         self,
@@ -335,8 +371,15 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def u_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
-        """Input box: u ∈ [0, 1]ᵐ."""
-        return np.zeros(self.nu), np.ones(self.nu)
+        """
+        Input box constraints.
+
+        For cooling-capable sources (``src.can_cool is True``) the lower
+        bound is −1 (full cooling); for heating-only sources it is 0.
+        The upper bound is always 1 (full heating).
+        """
+        u_min = np.array([-1.0 if src.can_cool else 0.0 for src in self._sources])
+        return u_min, np.ones(self.nu)
 
     def disturbance_vector(
         self,
@@ -365,10 +408,21 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         u_vec: np.ndarray,
         outdoor_temp: float,
     ) -> Dict[str, float]:
-        """Convert fractions u to per-room total thermal power [W]."""
+        """Convert fractions u to per-room total thermal power [W].
+
+        Cooling-capable sources use the smooth asymmetric sigmoid (same as
+        ``f()``); heating-only sources use the linear ``thermal_power``.
+        Negative power values represent active heat removal (cooling).
+        """
         powers: Dict[str, float] = {name: 0.0 for name in self._room_list}
         for j, src in enumerate(self._sources):
-            powers[src.room] += src.thermal_power(float(u_vec[j]), outdoor_temp)
+            u_j = float(u_vec[j])
+            if src.can_cool:
+                powers[src.room] += src.smooth_thermal_power(
+                    u_j, outdoor_temp, self._k_sigmoid,
+                )
+            else:
+                powers[src.room] += src.thermal_power(u_j, outdoor_temp)
         return powers
 
 
@@ -654,9 +708,17 @@ class HeatingMPCController:
         # ── Apply actions to heat sources ────────────────────────────────
         actions: Dict[str, float] = {}
         for j, src in enumerate(self._sources):
-            frac = float(np.clip(u0[j], 0.0, 1.0))
+            u_lo = -1.0 if src.can_cool else 0.0
+            frac = float(np.clip(u0[j], u_lo, 1.0))
             actions[src.name] = frac
-            src.set_power(frac, outdoor_temp)
+            if src.can_cool:
+                # Track the smooth-sigmoid power so sensors and the EKF are
+                # consistent with the model function f().
+                src._current_power = src.smooth_thermal_power(
+                    frac, outdoor_temp, self._system._k_sigmoid,
+                )
+            else:
+                src.set_power(frac, outdoor_temp)
 
         # ── Reconstruct predicted trajectory for visualisation ───────────
         room_list = self._system._room_list
