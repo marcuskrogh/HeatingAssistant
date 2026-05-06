@@ -199,8 +199,71 @@ class TestHouseThermalSDE:
         np.testing.assert_array_equal(lb, [0.0, 0.0])
         np.testing.assert_array_equal(ub, [1.0, 1.0])
 
+    def test_u_bounds_heat_pump_cooling_capable(self):
+        """A HeatPump with cooling_cop > 0 should have lower bound -1."""
+        living = Room("living_room", 5_000_000.0, 0.05, temperature=22.0, setpoint=21.0)
+        model = HouseModel([living])
+        sources = [HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)]
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        lb, ub = sde.u_bounds
+        assert lb[0] == pytest.approx(-1.0)
+        assert ub[0] == pytest.approx(1.0)
 
-# -- ContinuousDiscreteEKF tests ----------------------------------------------
+    def test_u_bounds_heat_pump_no_cooling(self):
+        """A HeatPump with cooling_cop=0 should have lower bound 0 (no cooling)."""
+        living = Room("living_room", 5_000_000.0, 0.05, temperature=22.0, setpoint=21.0)
+        model = HouseModel([living])
+        sources = [HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=0.0)]
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        lb, ub = sde.u_bounds
+        assert lb[0] == pytest.approx(0.0)
+        assert ub[0] == pytest.approx(1.0)
+
+    def test_drift_cooling_decreases_temperature(self):
+        """With u = -1 (full cooling via smooth sigmoid), drift must be negative
+        for a warm room even when the outdoor temperature is also warm."""
+        living = Room("living_room", 5_000_000.0, 0.05, temperature=25.0, setpoint=21.0)
+        model = HouseModel([living])
+        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
+        sde = HouseThermalSDE(model, [hp], dt=900.0)
+        x = np.array([25.0])
+        u = np.array([-1.0])   # full cooling
+        d = sde.disturbance_vector(25.0, {})   # warm outside – no natural cooling
+        p = np.array([])
+        f = sde.f(x, u, d, p, 0.0)
+        assert f[0] < 0.0, f"Expected negative drift with full cooling, got {f}"
+
+    def test_drift_smooth_zero_at_u_zero(self):
+        """At u = 0, a cooling-capable source must contribute zero thermal power
+        to the drift (smooth_thermal_power(0) = 0)."""
+        living = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
+        model = HouseModel([living])
+        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
+        sde = HouseThermalSDE(model, [hp], dt=900.0)
+        x = np.array([20.0])
+        u_zero = np.array([0.0])
+        d = sde.disturbance_vector(20.0, {})   # same inside/outside → no heat exchange
+        p = np.array([])
+        f = sde.f(x, u_zero, d, p, 0.0)
+        assert f[0] == pytest.approx(0.0, abs=1e-4), (
+            f"Expected ~0 drift at u=0 with no temperature differential, got {f}"
+        )
+
+    def test_drift_no_cooling_when_not_capable(self):
+        """A heating-only source must not produce cooling drift when u < 0."""
+        model, sources = _make_model_and_sources()  # ElectricHeaters, can_cool=False
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = np.array([25.0, 24.0])
+        u = np.array([-1.0, -1.0])   # negative, but sources can't cool
+        d = sde.disturbance_vector(25.0, {})
+        p = np.array([])
+        f = sde.f(x, u, d, p, 0.0)
+        # thermal_power clamps negative fraction to give some value, but
+        # since can_cool=False the model uses thermal_power(u_j) directly;
+        # the drift should equal the no-input drift
+        f_noinput = sde.f(x, np.zeros(2), d, p, 0.0)
+        np.testing.assert_array_almost_equal(f, f_noinput)
+
 
 class TestContinuousDiscreteEKF:
     """Tests for the continuous-discrete EKF with HouseThermalSDE."""
@@ -514,3 +577,47 @@ class TestHeatingMPCController:
         with pytest.raises(ValueError, match="smoothing_weight"):
             HeatingMPCController(model, sources, horizon=2, dt=900,
                                  smoothing_weight=-0.1)
+
+    def test_mpc_requests_cooling_when_above_setpoint(self):
+        """When a cooling-capable heat pump room is well above setpoint, the
+        MPC should output a negative fraction (active cooling request)."""
+        living = Room(
+            "living_room", 5_000_000.0, 0.05, temperature=27.0, setpoint=21.0,
+        )
+        model = HouseModel([living])
+        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
+        ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
+        now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=25.0, now=now)
+        assert actions["hp"] < 0.0, (
+            f"Expected negative fraction (cooling) when room is well above "
+            f"setpoint, got {actions['hp']}"
+        )
+
+    def test_mpc_cooling_source_power_is_negative(self):
+        """After a cooling step, the source's current_power should be negative."""
+        living = Room(
+            "living_room", 5_000_000.0, 0.05, temperature=27.0, setpoint=21.0,
+        )
+        model = HouseModel([living])
+        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
+        ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
+        now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=25.0, now=now)
+        assert hp.current_power < 0.0, (
+            "Expected negative current_power on heat pump in cooling mode"
+        )
+
+    def test_no_cooling_when_cooling_cop_zero(self):
+        """A heat pump with cooling_cop=0 must not receive negative fractions."""
+        living = Room(
+            "living_room", 5_000_000.0, 0.05, temperature=27.0, setpoint=21.0,
+        )
+        model = HouseModel([living])
+        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=0.0)
+        ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
+        now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=25.0, now=now)
+        assert actions["hp"] >= 0.0, (
+            "Heating-only heat pump must not receive a negative (cooling) fraction"
+        )

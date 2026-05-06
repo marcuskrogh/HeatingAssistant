@@ -2,6 +2,7 @@
 
 import sys
 import os
+import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -214,3 +215,94 @@ class TestHeatPump:
         )
         cooling = hp.cooling_power(outdoor_temp=20.0)
         assert cooling == pytest.approx(-(5000.0 / 3.5) * 2.5 * 0.5, rel=1e-3)
+
+    # -- can_cool property -------------------------------------------------
+
+    def test_can_cool_true_by_default(self):
+        """Default cooling_cop=2.5 means the pump can cool."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.can_cool is True
+
+    def test_can_cool_false_when_cooling_cop_zero(self):
+        """Setting cooling_cop=0 disables active cooling."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, cooling_cop=0.0)
+        assert hp.can_cool is False
+
+    def test_can_cool_electric_heater_false(self):
+        """Electric heaters never support cooling."""
+        heater = ElectricHeater("h1", "living_room", max_power=2000.0)
+        assert heater.can_cool is False
+
+    # -- target_temperature_cooling ----------------------------------------
+
+    def test_target_temperature_cooling_full(self):
+        """At cooling_fraction=1.0 the full max_temp_offset is subtracted."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        assert hp.target_temperature_cooling(1.0, 23.0) == pytest.approx(18.0)
+
+    def test_target_temperature_cooling_zero(self):
+        """At cooling_fraction=0.0 the target equals the internal temperature."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        assert hp.target_temperature_cooling(0.0, 23.0) == pytest.approx(23.0)
+
+    def test_target_temperature_cooling_half(self):
+        """At cooling_fraction=0.5 half the max_temp_offset is subtracted."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=4.0)
+        assert hp.target_temperature_cooling(0.5, 24.0) == pytest.approx(22.0)
+
+    def test_target_temperature_cooling_clamps_fraction(self):
+        """Fractions outside [0, 1] are clamped."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        assert hp.target_temperature_cooling(1.5, 20.0) == pytest.approx(15.0)
+        assert hp.target_temperature_cooling(-0.5, 20.0) == pytest.approx(20.0)
+
+    # -- smooth_thermal_power ----------------------------------------------
+
+    def test_smooth_thermal_power_zero_at_u_zero(self):
+        """φ(0) must be exactly 0."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.smooth_thermal_power(0.0, outdoor_temp=7.0) == pytest.approx(0.0, abs=1e-6)
+
+    def test_smooth_thermal_power_positive_at_u_one(self):
+        """φ(+1) should be close to the max heating capacity (≥ 98 %)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        q_heat = hp.thermal_power(1.0, outdoor_temp=7.0)
+        phi = hp.smooth_thermal_power(1.0, outdoor_temp=7.0)
+        # Should be ≥ 98 % of max heating capacity
+        assert phi >= 0.98 * q_heat
+
+    def test_smooth_thermal_power_negative_at_u_minus_one(self):
+        """φ(−1) should be close to the negative max cooling capacity (≥ 98 %)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        q_cool = abs(hp.cooling_power(outdoor_temp=7.0))
+        phi = hp.smooth_thermal_power(-1.0, outdoor_temp=7.0)
+        # Should be ≥ 98 % of max cooling capacity (in magnitude)
+        assert phi <= -0.98 * q_cool
+
+    def test_smooth_thermal_power_monotone(self):
+        """φ must be strictly increasing with u."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        us = np.linspace(-1.0, 1.0, 21)
+        powers = [hp.smooth_thermal_power(u, outdoor_temp=7.0) for u in us]
+        diffs = [powers[i + 1] - powers[i] for i in range(len(powers) - 1)]
+        assert all(d > 0 for d in diffs), "smooth_thermal_power must be monotone increasing"
+
+    def test_smooth_thermal_power_asymmetric(self):
+        """Heating capacity (φ at +1) should exceed cooling capacity (|φ at -1|)
+        when typical COP values make heating output larger than cooling output."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6600.0,
+            cop_rated=3.5, cooling_cop=2.5,
+        )
+        phi_heat = hp.smooth_thermal_power(1.0, outdoor_temp=7.0)
+        phi_cool = abs(hp.smooth_thermal_power(-1.0, outdoor_temp=7.0))
+        assert phi_heat > phi_cool, "Heating capacity should exceed cooling capacity"
+
+    def test_smooth_thermal_power_fallback_when_no_cooling(self):
+        """When cooling_cop=0 (no cooling), smooth_thermal_power falls back to
+        the linear heating model and returns 0 for u ≤ 0."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, cooling_cop=0.0)
+        assert hp.smooth_thermal_power(0.0, outdoor_temp=7.0) == pytest.approx(0.0, abs=1e-6)
+        assert hp.smooth_thermal_power(-0.5, outdoor_temp=7.0) == pytest.approx(0.0)
+        phi = hp.smooth_thermal_power(0.5, outdoor_temp=7.0)
+        assert phi == pytest.approx(hp.thermal_power(0.5, outdoor_temp=7.0), rel=1e-6)

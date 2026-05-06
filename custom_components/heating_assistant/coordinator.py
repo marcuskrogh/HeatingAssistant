@@ -648,13 +648,65 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         except (ValueError, TypeError):
                             pass
 
-                    if room_temp > room_setpoint:
-                        # Room is above setpoint – activate a passive/gentle
-                        # cooling mode.  "dry" (dehumidify) is preferred as it
-                        # provides a slight cooling effect without running the
-                        # compressor in full cooling mode; fall back to
-                        # "fan_only" if "dry" is not listed in the entity's
-                        # supported modes.
+                    if fraction < 0.0:
+                        # MPC-requested active cooling (fraction ∈ [-1, 0)).
+                        # Use "cool" mode when available; fall back to "dry"
+                        # then "fan_only".  The temperature setpoint is
+                        # placed below the HP's internal sensor by an amount
+                        # proportional to the requested cooling intensity.
+                        cooling_fraction = abs(fraction)
+                        supported_modes = attrs.get("hvac_modes", [])
+                        if "cool" in supported_modes:
+                            cooling_mode = "cool"
+                        elif "dry" in supported_modes:
+                            cooling_mode = "dry"
+                        elif "fan_only" in supported_modes or not supported_modes:
+                            cooling_mode = "fan_only"
+                        else:
+                            _LOGGER.warning(
+                                "Heat pump %r supports neither 'cool', 'dry' nor "
+                                "'fan_only' modes (%r); defaulting to 'fan_only'",
+                                entity_id, supported_modes,
+                            )
+                            cooling_mode = "fan_only"
+
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": cooling_mode},
+                            blocking=False,
+                        )
+
+                        if hp_internal_temp is not None:
+                            target_temp = src.target_temperature_cooling(
+                                cooling_fraction, hp_internal_temp,
+                            )
+                        else:
+                            target_temp = src.target_temperature_cooling(
+                                cooling_fraction, room_temp,
+                            )
+
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {"entity_id": entity_id, "temperature": target_temp},
+                            blocking=False,
+                        )
+
+                        # _current_power is already set by controller.compute()
+                        # via smooth_thermal_power — no override needed here.
+                        if not hasattr(self, '_cooling_active'):
+                            self._cooling_active = {}
+                        self._cooling_active[src.name] = True
+                    elif room_temp > room_setpoint:
+                        # Room is above setpoint but the MPC did not request
+                        # active cooling (e.g. cooling-capable source already
+                        # at u=0, or heating-only source).  Activate a
+                        # passive/gentle cooling mode.  "dry" (dehumidify) is
+                        # preferred as it provides a slight cooling effect
+                        # without running the compressor in full cooling mode;
+                        # fall back to "fan_only" if "dry" is not listed in
+                        # the entity's supported modes.
                         #
                         # The temperature setpoint is also placed below the
                         # HP's own sensor reading to prevent any residual
