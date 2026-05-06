@@ -1195,8 +1195,8 @@ A two-bedroom apartment with an open-plan living/kitchen area and one separate b
 ```yaml
 heating_assistant:
   outdoor_temp_entity: sensor.netatmo_outdoor_temperature
-  dt: 900       # 15-minute MPC steps (legacy key ignored — use update_interval)
-  horizon: 8    # 2-hour lookahead
+  update_interval: 900  # 15-minute control step (OCP ZOH = EKF step = coordinator period)
+  horizon: 8            # 2-hour lookahead
 
   rooms:
     - name: living_kitchen

@@ -94,7 +94,7 @@ UPDATE_INTERVAL = DEFAULT_UPDATE_INTERVAL
 
 # Parameter estimation
 #: Number of update steps to keep in the rolling history buffer.
-#: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is ≈120 hours of data.
+#: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is exactly 120 hours of data.
 HISTORY_BUFFER_SIZE = 480
 #: Number of MPC solve-time samples to retain for rolling statistics.
 MPC_STATS_BUFFER_SIZE = 100
