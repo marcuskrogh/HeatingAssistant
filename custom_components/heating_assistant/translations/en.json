@@ -8,7 +8,8 @@
           "latitude": "Latitude (degrees, positive = North)",
           "longitude": "Longitude (degrees, positive = East)",
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID (leave blank to use HA default)",
-          "dt": "Control time step (seconds, 60–3600)",
+          "update_interval": "Update interval (seconds, 10–300) — how often the MPC and state estimator run",
+          "dt": "Control time step (seconds, 60–3600) — ZOH duration for each MPC horizon step",
           "horizon": "MPC prediction horizon (steps)"
         }
       }
@@ -21,7 +22,8 @@
         "title": "Heating Assistant – Options",
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID",
-          "dt": "Control time step (seconds, 60–3600)",
+          "update_interval": "Update interval (seconds, 10–300) — how often the MPC and state estimator run",
+          "dt": "Control time step (seconds, 60–3600) — ZOH duration for each MPC horizon step",
           "horizon": "MPC prediction horizon (steps)"
         }
       }

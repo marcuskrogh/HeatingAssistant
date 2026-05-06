@@ -320,6 +320,17 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """Controlled output z = x (room temperatures)."""
         return x.copy()
 
+    def gm(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Continuous output gm = x (room temperatures, same as z)."""
+        return x.copy()
+
     def hm(
         self,
         x: np.ndarray,
