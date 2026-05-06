@@ -888,3 +888,154 @@ class TestScaledIdleOffsetNonHP:
         assert calls[0].args[2]["hvac_mode"] == "heat"
         # overshoot = 0 → offset = 1.0; 22.0 - 1.0 = 21.0
         assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _read_outdoor_temp
+# ---------------------------------------------------------------------------
+
+
+def _make_coordinator_for_outdoor_temp(outdoor_entity, weather_entity, entity_states):
+    """Build a bare-minimum coordinator object for _read_outdoor_temp tests."""
+    from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+
+    coord = object.__new__(HeatingAssistantCoordinator)
+    coord._outdoor_entity = outdoor_entity
+    coord._weather_entity = weather_entity
+
+    hass = MagicMock()
+
+    def _get_state(entity_id):
+        if entity_id in entity_states:
+            raw = entity_states[entity_id]
+            s = MagicMock()
+            if isinstance(raw, dict):
+                s.state = raw.get("state", "unknown")
+                s.attributes = raw.get("attributes", {})
+            else:
+                s.state = raw
+                s.attributes = {}
+            return s
+        return None
+
+    hass.states.get = _get_state
+    coord.hass = hass
+    return coord
+
+
+class TestReadOutdoorTemp:
+    """Tests for HeatingAssistantCoordinator._read_outdoor_temp."""
+
+    def test_reads_from_outdoor_entity_when_configured(self):
+        """Reads temperature from the dedicated outdoor-temp sensor."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity=None,
+            entity_states={"sensor.outdoor_temp": "-3.5"},
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(-3.5)
+
+    def test_falls_back_to_weather_entity_temperature_attribute(self):
+        """When no outdoor entity is set, reads from weather entity's temperature attribute."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={
+                "weather.home": {
+                    "state": "sunny",
+                    "attributes": {"temperature": 7.3},
+                }
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(7.3)
+
+    def test_prefers_outdoor_entity_over_weather_entity(self):
+        """Outdoor-temp sensor takes priority over weather entity attribute."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity="weather.home",
+            entity_states={
+                "sensor.outdoor_temp": "2.0",
+                "weather.home": {
+                    "state": "cloudy",
+                    "attributes": {"temperature": 99.0},
+                },
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(2.0)
+
+    def test_falls_back_to_weather_when_outdoor_entity_unavailable(self):
+        """Falls back to weather entity when the outdoor sensor is unavailable."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity="weather.home",
+            entity_states={
+                "sensor.outdoor_temp": "unavailable",
+                "weather.home": {
+                    "state": "cloudy",
+                    "attributes": {"temperature": 4.5},
+                },
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(4.5)
+
+    def test_falls_back_to_weather_when_outdoor_entity_unknown(self):
+        """Falls back to weather entity when the outdoor sensor is unknown."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity="weather.home",
+            entity_states={
+                "sensor.outdoor_temp": "unknown",
+                "weather.home": {
+                    "state": "rainy",
+                    "attributes": {"temperature": 11.0},
+                },
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(11.0)
+
+    def test_falls_back_to_default_when_no_entities_configured(self):
+        """Returns 5.0 when neither outdoor entity nor weather entity is configured."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity=None,
+            entity_states={},
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+
+    def test_falls_back_to_default_when_weather_entity_unavailable(self):
+        """Returns 5.0 when weather entity is unavailable and no outdoor entity exists."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={
+                "weather.home": {
+                    "state": "unavailable",
+                    "attributes": {},
+                }
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+
+    def test_falls_back_to_default_when_weather_entity_missing(self):
+        """Returns 5.0 when weather entity is configured but does not exist in HA states."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={},  # entity not present
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+
+    def test_falls_back_to_default_when_weather_temperature_attribute_missing(self):
+        """Returns 5.0 when weather entity has no temperature attribute."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={
+                "weather.home": {
+                    "state": "sunny",
+                    "attributes": {},  # no temperature key
+                }
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)
