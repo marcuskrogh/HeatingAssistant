@@ -2,6 +2,7 @@
 
 import sys
 import os
+import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -280,7 +281,6 @@ class TestHeatPump:
 
     def test_smooth_thermal_power_monotone(self):
         """φ must be strictly increasing with u."""
-        import numpy as np
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
         us = np.linspace(-1.0, 1.0, 21)
         powers = [hp.smooth_thermal_power(u, outdoor_temp=7.0) for u in us]

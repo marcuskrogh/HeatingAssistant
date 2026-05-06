@@ -9,6 +9,7 @@ Supported types
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
@@ -366,8 +367,6 @@ class HeatPump(HeatSource):
             Thermal power [W].  Positive values represent heat addition;
             negative values represent heat removal (cooling).
         """
-        import math
-
         q_heat = self.thermal_power(1.0, outdoor_temp)
         q_cool = abs(self.cooling_power(outdoor_temp))
 

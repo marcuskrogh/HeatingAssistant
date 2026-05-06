@@ -219,13 +219,19 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """
         Drift f(x, u, d, p, t) = F x + heat_contrib(u, d[0]) + G_d (d + [0, q_int]).
 
-        The thermal contribution of each source is computed piecewise:
-          * u_j ≥ 0 (heating): src.thermal_power(u_j, T_out) / C_cap[i]
-          * u_j < 0 (cooling): |u_j| × src.cooling_power(T_out) / C_cap[i]
-            (cooling_power is negative, so the product is also negative)
+        The thermal contribution of each source is computed as follows:
 
-        This correctly models the heat removal by cooling-capable sources
-        when the MPC schedules a negative control input.
+        * **Cooling-capable sources** (``src.can_cool is True``): a smooth,
+          asymmetric shifted-logistic sigmoid (see
+          ``HeatPump.smooth_thermal_power``) maps u_j ∈ [−1, 1] continuously
+          to [−Q_cool_max, +Q_heat_max].  Positive u contributes heating;
+          negative u contributes cooling (negative power).  The function is
+          C∞-smooth everywhere, providing well-defined gradients for the
+          L-BFGS-B optimiser even at u = 0.
+
+        * **Heating-only sources** (``src.can_cool is False``): the standard
+          linear ``thermal_power(max(0, u_j), T_out)`` is used, with a
+          zero-floor to prevent spurious cooling from negative inputs.
 
         For parameter estimation, the parameter vector p (or self._theta if p is empty)
         contains theta with structure:
