@@ -23,7 +23,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     CONF_CONSTRAINT_OFFSET,
-    CONF_DT,
     CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -68,7 +67,6 @@ from .const import (
     DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
-    DEFAULT_DT,
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
@@ -196,11 +194,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._longitude: float = data.get(CONF_LONGITUDE, hass.config.longitude)
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
-        self._dt: float = data.get(CONF_DT, DEFAULT_DT)
-        # The update interval drives both how often the coordinator ticks and
-        # the EKF measurement step.  Options take precedence over initial data
-        # so that a user can reconfigure it via the UI without re-creating the
-        # entry.  Falls back to DEFAULT_UPDATE_INTERVAL (60 s) when absent.
+        # The update interval drives how often the coordinator ticks, the EKF
+        # measurement step, and the OCP ZOH step — all three must be equal for
+        # the MPC predictions to match physical reality.  Options take precedence
+        # over initial data so that the user can reconfigure via the UI without
+        # re-creating the entry.  Falls back to DEFAULT_UPDATE_INTERVAL when absent.
+        # Old config entries that stored a separate "dt" key are silently ignored;
+        # the update_interval is the single source of truth.
         self._update_interval: int = int(
             options.get(CONF_UPDATE_INTERVAL)
             or data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
@@ -236,7 +236,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             model=self.model,
             heat_sources=self.heat_sources,
             horizon=self._horizon,
-            dt=self._dt,
+            dt=float(self._update_interval),
             measurement_dt=float(self._update_interval),
             latitude=self._latitude,
             longitude=self._longitude,
@@ -284,8 +284,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     @property
     def dt(self) -> float:
-        """Return the OCP time step (ZOH duration) in seconds."""
-        return self._dt
+        """Return the OCP/EKF time step (= update interval) in seconds."""
+        return float(self._update_interval)
 
     @property
     def update_interval_seconds(self) -> int:
@@ -495,7 +495,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     forecast_data = response[self._weather_entity].get("forecast", [])
                     if forecast_data:
                         return self._parse_weather_forecast(
-                            forecast_data, self._horizon, self._dt
+                            forecast_data, self._horizon, float(self._update_interval)
                         )
             except Exception as exc:
                 _LOGGER.debug(
@@ -514,7 +514,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if not forecast_data:
             return None
 
-        return self._parse_weather_forecast(forecast_data, self._horizon, self._dt)
+        return self._parse_weather_forecast(forecast_data, self._horizon, float(self._update_interval))
 
     @staticmethod
     def _parse_weather_forecast(
@@ -1193,7 +1193,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             model=self.model,
             heat_sources=self.heat_sources,
             horizon=self._horizon,
-            dt=self._dt,
+            dt=float(self._update_interval),
             measurement_dt=float(self._update_interval),
             latitude=self._latitude,
             longitude=self._longitude,

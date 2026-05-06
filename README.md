@@ -162,8 +162,8 @@ custom_components/heating_assistant/
 │                          • async_unload_entry()– tears down on removal
 │
 ├── config_flow.py         UI wizard (HeatingAssistantConfigFlow)
-│                          • Step "user": latitude, longitude, outdoor sensor, dt, horizon
-│                          • Options flow: outdoor sensor, dt, horizon (post-install edit)
+│                          • Step "user": latitude, longitude, outdoor sensor, update_interval, horizon
+│                          • Options flow: outdoor sensor, update_interval, horizon (post-install edit)
 │
 ├── coordinator.py         HeatingAssistantCoordinator (DataUpdateCoordinator)
 │                          • Builds HouseModel and heat sources from config
@@ -324,7 +324,7 @@ This handles the nonlinearity in $\mathbf{G}_u(T_{\text{out}})$ (heat-pump COP v
 
 The `HouseModel.step()` and `HouseModel.predict()` methods also use forward Euler and are used for the `simulate_thermal_response` service and diagnostics.
 
-For typical residential buildings (large thermal masses, slow dynamics) a step size `dt ≤ 900 s` (15 minutes) gives accurate results with the default 10 sub-steps.  The default `dt = 900 s` is a good balance between accuracy and computational load.
+For typical residential buildings (large thermal masses, slow dynamics) a control time step `update_interval ≤ 900 s` (15 minutes) gives accurate results with the default 10 integration sub-steps.  The default `update_interval = 900 s` is a good balance between prediction accuracy and computational load.
 
 ### 3.4 Solar heat gain model
 
@@ -567,7 +567,7 @@ The input cost $\mathbf{R}$ softly discourages running heaters when the room is 
 
 The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
 
-**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the NMPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval $dt$ for which the source is active.  The coordinator maps this fraction to on/off commands.
+**On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the NMPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval `update_interval` for which the source is active.  The coordinator maps this fraction to on/off commands.
 
 ### 4.4 Disturbance forecasts
 
@@ -576,7 +576,7 @@ The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{
 | Disturbance | Forecast method |
 |-------------|----------------|
 | **Outdoor temperature** | If a `weather_entity` is configured (e.g. the Met.no integration), the controller uses the weather forecast temperatures interpolated to each horizon step.  Otherwise, it falls back to persistence: the current measured value is held constant for all horizon steps.  Configure `outdoor_temp_entity` for the current measurement and `weather_entity` for the forecast. |
-| **Solar gains** | The solar position model is evaluated at times `now + (k+1)·dt` for each horizon step `k = 0, …, N−1`, matching the end of each prediction interval.  This uses the deterministic orbital equations and produces an accurate prediction of how solar irradiance through each window will evolve over the next `N·dt` seconds.  The same time convention is used for the outdoor temperature forecast so that both disturbance components are evaluated consistently. |
+| **Solar gains** | The solar position model is evaluated at times `now + (k+1)·update_interval` for each horizon step `k = 0, …, N−1`, matching the end of each prediction interval.  This uses the deterministic orbital equations and produces an accurate prediction of how solar irradiance through each window will evolve over the next `N·update_interval` seconds.  The same time convention is used for the outdoor temperature forecast so that both disturbance components are evaluated consistently. |
 
 ### 4.5 Control cycle
 
@@ -792,8 +792,8 @@ Before you begin, confirm the following are in place:
    | **Longitude** | Your site longitude (pre-filled from HA settings — verify it is correct). |
    | **Outdoor temperature sensor entity ID** | The entity ID of your outdoor sensor, e.g. `sensor.openweathermap_temperature`.  Leave blank to use the 5 °C fallback (not recommended for real use). |
    | **Weather entity ID** | The entity ID of a HA weather entity, e.g. `weather.forecast_home`.  Leave blank to use the persistence forecast (current outdoor temperature assumed constant).  Recommended for improved prediction accuracy. |
-   | **Control time step (dt)** | Leave at `900` (15 minutes) unless you have a specific reason to change it. |
-   | **MPC prediction horizon** | Leave at `6` (90-minute lookahead at dt = 900 s).  Increase to `8`–`12` for buildings with high thermal mass. |
+   | **Control time step (update_interval)** | Leave at `900` (15 minutes) unless you have a specific reason to change it. This is both the OCP ZOH duration and the EKF/coordinator update period. |
+   | **MPC prediction horizon** | Leave at `6` (90-minute lookahead at update_interval = 900 s).  Increase to `8`–`12` for buildings with high thermal mass. |
 
 5. Click **Submit**.
 
@@ -989,12 +989,12 @@ After installation, navigate to **Settings → Devices & Services → + Add Inte
 | **Longitude** | HA configured longitude | Site longitude in decimal degrees (positive = East). Used to compute solar position. |
 | **Outdoor temperature sensor entity ID** | *(empty)* | The entity ID of a HA temperature sensor that measures outdoor air temperature (e.g. `sensor.openweathermap_temperature`, `sensor.netatmo_outdoor_temperature`).  If left blank the controller uses a fallback of 5 °C — configure this for accurate operation. |
 | **Weather entity ID** | *(empty)* | The entity ID of a HA weather entity (e.g. `weather.forecast_home` from the Met.no integration).  When configured, the controller uses the weather forecast to predict outdoor temperature changes over the MPC horizon instead of assuming the current temperature stays constant.  This significantly improves prediction accuracy during temperature transitions (e.g. overnight cooling, morning warm-up). |
-| **Control time step (dt)** | 900 | Interval in seconds at which the MPC controller advances its simulation.  Range: 60–3600.  Default 900 s = 15 minutes. |
-| **MPC prediction horizon** | 6 | Number of dt steps to look ahead.  At dt=900 s, horizon=6 means 90 minutes of prediction. Range: 1–24. |
+| **Control time step (update_interval)** | 900 | Interval in seconds at which the MPC controller re-solves and applies actions; serves as the OCP ZOH duration, the EKF measurement step, and the coordinator update period.  Range: 60–3600.  Default 900 s = 15 minutes. |
+| **MPC prediction horizon** | 6 | Number of update_interval steps to look ahead.  At update_interval=900 s, horizon=6 means 90 minutes of prediction. Range: 1–24. |
 
 After saving, the integration entry is created.  The room topology and heat-source configuration still need to be added to `configuration.yaml`.
 
-To **edit** the outdoor sensor, weather entity, dt, or horizon after installation:  
+To **edit** the outdoor sensor, weather entity, update_interval, or horizon after installation:  
 Settings → Devices & Services → Heating Assistant → Configure.
 
 ---
@@ -1009,7 +1009,7 @@ heating_assistant:
   weather_entity: ...
   latitude: ...
   longitude: ...
-  dt: ...
+  update_interval: ...
   horizon: ...
   rooms:
     - ...
@@ -1025,7 +1025,7 @@ heating_assistant:
 | `weather_entity` | string | No | — | Entity ID of a HA weather entity (e.g. `weather.forecast_home`) providing temperature forecasts.  When set, the controller uses the weather forecast for outdoor temperature predictions over the MPC horizon instead of assuming the current value is constant.  Works with any HA weather integration that exposes a `forecast` attribute (Met.no, OpenWeatherMap, AccuWeather, etc.). |
 | `latitude` | float | No | HA / wizard setting | Site latitude [°].  Overrides the wizard value. |
 | `longitude` | float | No | HA / wizard setting | Site longitude [°].  Overrides the wizard value. |
-| `dt` | int | No | `900` | Control time step [s].  Range 60–3600. |
+| `update_interval` | int | No | `900` | Control time step [s]: sets the OCP ZOH duration, the EKF measurement step, and how often the coordinator re-solves.  Range 60–3600. |
 | `horizon` | int | No | `6` | MPC prediction horizon [steps].  Range 1–24. |
 | `energy_weight` | float | No | `0.01` | Weight on the input cost ‖**u**‖² in the MPC objective.  Higher values make the controller more conservative about running heaters, reducing overshoot at the expense of slightly slower heating.  Typical range: `0.001`–`0.5`.  See [Section 14.5](#145-mpc-regulator-tuning). |
 | `smoothing_weight` | float | No | `0.1` | Weight on the input rate-of-change cost ‖Δ**u**‖² in the MPC objective.  Higher values strongly penalise rapid changes in heater output between consecutive time steps, dampening oscillations and reducing actuator wear.  Set to `0.0` to disable.  Typical range: `0.0`–`2.0`.  See [Section 14.5](#145-mpc-regulator-tuning). |
@@ -1195,7 +1195,7 @@ A two-bedroom apartment with an open-plan living/kitchen area and one separate b
 ```yaml
 heating_assistant:
   outdoor_temp_entity: sensor.netatmo_outdoor_temperature
-  dt: 900       # 15-minute MPC steps
+  dt: 900       # 15-minute MPC steps (legacy key ignored — use update_interval)
   horizon: 8    # 2-hour lookahead
 
   rooms:
@@ -1262,7 +1262,7 @@ heating_assistant:
   outdoor_temp_entity: sensor.weather_station_outdoor
   latitude: 55.68    # Copenhagen
   longitude: 12.57
-  dt: 900
+  update_interval: 900
   horizon: 6
 
   rooms:
@@ -1413,7 +1413,7 @@ heating_assistant:
   outdoor_temp_entity: sensor.weather_station_outdoor
   latitude: 55.68
   longitude: 12.57
-  dt: 900
+  update_interval: 900
   horizon: 6
 
   rooms:
@@ -1954,7 +1954,7 @@ The diagnostics dump includes:
 - **Prediction trajectory:** MPC-predicted temperatures for each future step
 - **Solar gains:** current solar heat gain per room
 - **Steady-state analysis:** predicted steady-state temperatures at −10 °C, 0 °C, and 5 °C outdoor temperature using maximum heating power
-- **Controller parameters:** horizon, dt, latitude, longitude
+- **Controller parameters:** horizon, update_interval, latitude, longitude
 
 This is invaluable for troubleshooting or sharing your system configuration with others.
 
@@ -2769,7 +2769,7 @@ Oscillations appear as repeated undershoot/overshoot cycles around the setpoint 
 
 When `horizon` is small (e.g. 2–4 steps at 15-minute intervals = only 30–60 minutes of lookahead), the controller does not see far enough ahead to account for the building's thermal lag.  It heats aggressively to hit the setpoint within the short window, overshoots, then cuts off heating, undershoots, and repeats.
 
-*Fix:* Increase `horizon`.  Start with 6–8 steps (90–120 min at `dt = 900 s`).  The computational cost scales roughly as O(N²), so avoid very large horizons (> 24).
+*Fix:* Increase `horizon`.  Start with 6–8 steps (90–120 min at `update_interval = 900 s`).  The computational cost scales roughly as O(N²), so avoid very large horizons (> 24).
 
 ```yaml
 heating_assistant:
@@ -2866,7 +2866,7 @@ The **MPC Performance** sensor (`sensor.heating_assistant_mpc_performance`) expo
 | `terminal_weight` | Terminal cost multiplier λ currently in effect |
 | `recent_solve_times_s` | List of the last 50 solve times [s] for sparkline charts |
 
-**Typical solve times** at the default settings (`horizon = 6`, `dt = 900 s`, `n_int_steps = 10`) are 0.05–0.3 s depending on the number of rooms and CPU speed.  If `max_solve_time_s` approaches the coordinator `UPDATE_INTERVAL` (60 s), consider reducing `horizon` or `n_int_steps`.
+**Typical solve times** at the default settings (`horizon = 6`, `update_interval = 900 s`, `n_int_steps = 10`) are 0.05–0.3 s depending on the number of rooms and CPU speed.  If `max_solve_time_s` approaches the `update_interval` (e.g. 900 s), consider reducing `horizon` or `n_int_steps`.
 
 **Example ApexCharts card for MPC performance:**
 
@@ -2882,10 +2882,10 @@ series:
     type: bar
     name: Solve time [s]
     data_generator: |
-      // Assumes coordinator UPDATE_INTERVAL = 60 s (one solve per minute).
-      // Adjust 60000 to match your dt if you changed UPDATE_INTERVAL.
+      // Assumes coordinator update_interval = 900 s (one solve per 15 minutes).
+      // Adjust 900000 to match your update_interval if you changed it.
       return entity.attributes.recent_solve_times_s.map((v, i) => [
-        new Date(Date.now() - (entity.attributes.recent_solve_times_s.length - 1 - i) * 60000).getTime(),
+        new Date(Date.now() - (entity.attributes.recent_solve_times_s.length - 1 - i) * 900000).getTime(),
         v
       ]);
 ```
@@ -3065,7 +3065,7 @@ To use a measured irradiance sensor instead of a computed one:
 - Increase `smoothing_weight` (default `0.1`) — a higher value penalises rapid changes in the control input, dampening oscillations.  Try `0.5`, then `1.0`.  See [Section 14.5.2](#1452-diagnosing-and-correcting-oscillations) for a step-by-step guide.
 - Increase `horizon` — a longer prediction horizon helps the controller anticipate the thermal inertia of the room and reduces overcorrection.
 - Check `energy_weight` — if the energy penalty is too high, the controller heats too little, causing undershoot followed by overcorrection.  Try reducing from `0.01` to `0.005`.
-- Reduce `dt` — finer time steps give the controller more opportunities to correct.
+- Reduce `update_interval` — a shorter time step gives the controller more opportunities to correct.
 
 **Heat pump turns on and off too frequently (short-cycling)**
 

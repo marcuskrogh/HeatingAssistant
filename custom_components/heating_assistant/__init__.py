@@ -71,7 +71,6 @@ from .const import (
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
     CONF_CONSTRAINT_OFFSET,
-    CONF_DT,
     CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -113,7 +112,6 @@ from .const import (
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
     DEFAULT_CONSTRAINT_OFFSET,
-    DEFAULT_DT,
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HEATING_EFFICIENCY,
@@ -212,11 +210,8 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_WEATHER_ENTITY): str,
                 vol.Optional(CONF_LATITUDE): vol.Coerce(float),
                 vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
-                vol.Optional(CONF_DT, default=DEFAULT_DT): vol.All(
-                    vol.Coerce(int), vol.Range(min=60, max=3600)
-                ),
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
-                    vol.Coerce(int), vol.Range(min=10, max=300)
+                    vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
                     vol.Coerce(int), vol.Range(min=1, max=24)
@@ -275,7 +270,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_data[CONF_WEATHER_ENTITY] = yaml_cfg.get(
                 CONF_WEATHER_ENTITY, ""
             )
-        entry_data.setdefault(CONF_DT, yaml_cfg.get(CONF_DT, DEFAULT_DT))
         entry_data.setdefault(CONF_UPDATE_INTERVAL, yaml_cfg.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
         entry_data.setdefault(CONF_HORIZON, yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON))
         if CONF_LATITUDE not in entry_data and CONF_LATITUDE in yaml_cfg:
