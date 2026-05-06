@@ -1446,17 +1446,16 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 
         # Tracking error per room (absolute deviation from setpoint)
         room_names = self._coordinator.model.room_names
-        raw_tracking_errors = {
-            name: abs(
+        tracking_error_values = [
+            abs(
                 self._coordinator.model.rooms[name].temperature
                 - self._coordinator.model.rooms[name].setpoint
             )
             for name in room_names
-        }
+        ]
         attrs["current_tracking_errors"] = {
-            name: round(v, 3) for name, v in raw_tracking_errors.items()
+            name: round(v, 3) for name, v in zip(room_names, tracking_error_values)
         }
-        tracking_error_values = list(raw_tracking_errors.values())
         attrs["mean_tracking_error"] = (
             round(float(np.mean(tracking_error_values)), 3)
             if tracking_error_values else None
