@@ -35,6 +35,7 @@ from .const import (
     CONF_SMOOTHING_WEIGHT,
     CONF_SOURCE_COOLING_COP,
     CONF_SOURCE_COOLING_EFFICIENCY,
+    CONF_SOURCE_HEATING_EFFICIENCY,
     CONF_SOURCE_COP_RATED,
     CONF_SOURCE_COP_TEMP_REF,
     CONF_SOURCE_EFFICIENCY,
@@ -63,6 +64,7 @@ from .const import (
     DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_COOLING_COP,
     DEFAULT_COOLING_EFFICIENCY,
+    DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
     DEFAULT_DT,
@@ -164,6 +166,7 @@ def build_heat_sources(
                     turn_off_deadband=sc.get(CONF_SOURCE_TURN_OFF_DEADBAND, DEFAULT_TURN_OFF_DEADBAND),
                     cooling_cop=sc.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP),
                     cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
+                    heating_efficiency=sc.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY),
                     heater_entity=entity,
                 )
             )
@@ -628,12 +631,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # thermal output.
                 #
                 # Heat pump climate entities use a three-state strategy:
-                #   - fraction > 0  → heat mode, offset-based setpoint
+                #   - fraction < 0  → cool mode (active cooling), with
+                #     "cool" preferred, then "dry", then "fan_only"
                 #   - fraction == 0 AND room_temp > setpoint
-                #     → fan_only mode to recirculate / gently cool air
+                #     → cool mode to remove heat (same mode preference order)
                 #   - fraction == 0 AND room_temp ≤ setpoint
                 #     → stay in heat mode, set target below internal temp
                 #       (HP idles with no temperature gap)
+                #   - fraction > 0  → heat mode, offset-based setpoint
                 if isinstance(src, HeatPump):
                     room_temp = self.model.rooms[src.room].temperature
                     room_setpoint = self.get_room_setpoint(src.room)
@@ -702,32 +707,34 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         # Room is above setpoint but the MPC did not request
                         # active cooling (e.g. cooling-capable source already
                         # at u=0, or heating-only source).  Activate a
-                        # passive/gentle cooling mode.  "dry" (dehumidify) is
-                        # preferred as it provides a slight cooling effect
-                        # without running the compressor in full cooling mode;
-                        # fall back to "fan_only" if "dry" is not listed in
-                        # the entity's supported modes.
+                        # cooling mode.  "cool" (compressor cooling) is
+                        # preferred; fall back to "dry" (dehumidify) if
+                        # "cool" is not listed, then "fan_only".
                         #
                         # The temperature setpoint is also placed below the
                         # HP's own sensor reading to prevent any residual
                         # heating.  The offset grows with the degree to which
                         # the room exceeds the desired setpoint.
                         #
-                        # When in cooling mode, we apply the cooling power to
-                        # the heat source so the thermal model accounts for
-                        # heat removal.
+                        # We also notify the controller so the EKF uses the
+                        # correct previous input on the next compute() call,
+                        # preventing state-estimate drift from the mismatch
+                        # between the OCP output (u=0) and the actually
+                        # applied cooling.
                         overshoot = max(0.0, room_temp - room_setpoint)
                         idle_offset = DEFAULT_IDLE_OFFSET + overshoot
 
                         supported_modes = attrs.get("hvac_modes", [])
-                        if "dry" in supported_modes:
+                        if "cool" in supported_modes:
+                            cooling_mode = "cool"
+                        elif "dry" in supported_modes:
                             cooling_mode = "dry"
                         elif "fan_only" in supported_modes or not supported_modes:
                             cooling_mode = "fan_only"
                         else:
                             _LOGGER.warning(
-                                "Heat pump %r supports neither 'dry' nor 'fan_only' "
-                                "modes (%r); defaulting to 'fan_only'",
+                                "Heat pump %r supports neither 'cool', 'dry' nor "
+                                "'fan_only' modes (%r); defaulting to 'fan_only'",
                                 entity_id, supported_modes,
                             )
                             cooling_mode = "fan_only"
@@ -751,10 +758,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             blocking=False,
                         )
 
-                        # Apply cooling power to the heat source for thermal modeling
+                        # Apply cooling power to the heat source so the
+                        # thermal model accounts for heat removal.
                         cooling_power = src.cooling_power(outdoor_temp)
                         src.set_power(0.0, outdoor_temp)  # Clear heating power
                         src._current_power = cooling_power  # Set to negative (cooling)
+
+                        # Notify the controller that full cooling was applied
+                        # so the EKF uses the correct u_prev on the next step.
+                        if hasattr(self, 'controller'):
+                            self.controller.notify_applied_u(src.name, -1.0)
+
                         if not hasattr(self, '_cooling_active'):
                             self._cooling_active = {}
                         self._cooling_active[src.name] = True

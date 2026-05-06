@@ -187,6 +187,7 @@ class HeatPump(HeatSource):
         heater_entity: Optional[str] = None,
         cooling_cop: float = 2.5,
         cooling_efficiency: float = 1.0,
+        heating_efficiency: float = 1.0,
         power_scale: float = 1.0,
     ) -> None:
         super().__init__(name, room, max_power, heater_entity, power_scale)
@@ -198,6 +199,7 @@ class HeatPump(HeatSource):
         self.turn_off_deadband = turn_off_deadband
         self.cooling_cop = cooling_cop
         self.cooling_efficiency = cooling_efficiency
+        self.heating_efficiency = heating_efficiency
 
     @property
     def can_cool(self) -> bool:
@@ -223,7 +225,7 @@ class HeatPump(HeatSource):
         """
         electric_max = self.max_power / self.cop_rated  # rated electrical input [W]
         actual_cop = self.cop(outdoor_temp)
-        power = electric_max * setpoint_fraction * actual_cop * self.power_scale
+        power = electric_max * setpoint_fraction * actual_cop * self.heating_efficiency * self.power_scale
         if 0.0 < power < self.min_power:
             return 0.0
         return power

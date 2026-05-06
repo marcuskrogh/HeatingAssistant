@@ -306,3 +306,40 @@ class TestHeatPump:
         assert hp.smooth_thermal_power(-0.5, outdoor_temp=7.0) == pytest.approx(0.0)
         phi = hp.smooth_thermal_power(0.5, outdoor_temp=7.0)
         assert phi == pytest.approx(hp.thermal_power(0.5, outdoor_temp=7.0), rel=1e-6)
+
+    # -- heating_efficiency -----------------------------------------------
+
+    def test_heating_efficiency_default_is_one(self):
+        """Default heating_efficiency should be 1.0 (no scaling)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.heating_efficiency == pytest.approx(1.0)
+
+    def test_heating_efficiency_scales_thermal_power(self):
+        """heating_efficiency=0.8 should reduce thermal_power by 20 %."""
+        hp_base = HeatPump("hp1", "living_room", max_power=5000.0)
+        hp_eff = HeatPump("hp1", "living_room", max_power=5000.0, heating_efficiency=0.8)
+        p_base = hp_base.thermal_power(1.0, outdoor_temp=7.0)
+        p_eff = hp_eff.thermal_power(1.0, outdoor_temp=7.0)
+        assert p_eff == pytest.approx(0.8 * p_base, rel=1e-6)
+
+    def test_heating_efficiency_does_not_affect_cooling_power(self):
+        """heating_efficiency must NOT scale the cooling capacity."""
+        hp_base = HeatPump("hp1", "living_room", max_power=5000.0)
+        hp_eff = HeatPump("hp1", "living_room", max_power=5000.0, heating_efficiency=0.5)
+        assert hp_base.cooling_power() == pytest.approx(hp_eff.cooling_power(), rel=1e-6)
+
+    def test_heating_efficiency_propagates_to_smooth_thermal_power(self):
+        """smooth_thermal_power at u=+1 should reflect heating_efficiency."""
+        hp_base = HeatPump("hp1", "living_room", max_power=5000.0)
+        hp_eff = HeatPump("hp1", "living_room", max_power=5000.0, heating_efficiency=0.7)
+        phi_base = hp_base.smooth_thermal_power(1.0, outdoor_temp=7.0)
+        phi_eff = hp_eff.smooth_thermal_power(1.0, outdoor_temp=7.0)
+        # With reduced heating capacity the sigmoid at +1 saturates to a lower value
+        assert phi_eff < phi_base
+
+    def test_heating_efficiency_partial_fraction(self):
+        """heating_efficiency scales linearly with setpoint_fraction."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, heating_efficiency=0.6)
+        p_half = hp.thermal_power(0.5, outdoor_temp=7.0)
+        p_full = hp.thermal_power(1.0, outdoor_temp=7.0)
+        assert p_full == pytest.approx(2.0 * p_half, rel=1e-6)
