@@ -46,6 +46,8 @@ HeatingMPCController
 
 from __future__ import annotations
 
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -429,6 +431,7 @@ class HeatingMPCController:
         energy_weight: float = 0.01,
         smoothing_weight: float = 0.1,
         constraint_offset: float = 2.0,
+        terminal_weight: float = 100.0,
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
         n_int_steps: int = 10,
@@ -443,6 +446,10 @@ class HeatingMPCController:
         if smoothing_weight < 0.0:
             raise ValueError(
                 f"smoothing_weight must be >= 0; got {smoothing_weight}"
+            )
+        if terminal_weight < 1.0:
+            raise ValueError(
+                f"terminal_weight must be >= 1; got {terminal_weight}"
             )
 
         # Build the nonlinear continuous-discrete model
@@ -466,6 +473,12 @@ class HeatingMPCController:
         R = energy_weight * np.eye(n_u)      # input cost
         S = (smoothing_weight * np.eye(n_u)
              if smoothing_weight > 0.0 else None)  # ROM penalty
+        # Terminal cost: P = terminal_weight × Q
+        # A large terminal_weight strongly incentivises the controller to
+        # drive the predicted state to the setpoint by the end of the
+        # horizon, improving steady-state tracking without increasing the
+        # stage cost (which would sacrifice energy efficiency mid-horizon).
+        P = terminal_weight * Q
 
         # Reference and soft constraints (updated before each solve)
         z_ref = self._system.x_ref.copy()
@@ -479,6 +492,7 @@ class HeatingMPCController:
             N=horizon,
             Q=Q,
             R=R,
+            P=P,
             S=S,
             z_ref=z_ref,
             u_min=u_min,
@@ -494,6 +508,9 @@ class HeatingMPCController:
         # ── Warm-start storage ──────────────────────────────────────────
         self._u_prev: np.ndarray = np.zeros(n_u)
         self._u_seq_prev: Optional[np.ndarray] = None
+
+        # ── Solve-time rolling statistics ───────────────────────────────
+        self._solve_times: deque = deque(maxlen=100)
 
         # Visualisation data (populated after each compute())
         self._predictions:      List[Dict[str, float]] = []
@@ -527,6 +544,30 @@ class HeatingMPCController:
     def heating_schedule(self) -> List[Dict[str, float]]:
         """Planned heating power schedule from the last compute()."""
         return self._heating_schedule
+
+    @property
+    def last_solve_time(self) -> Optional[float]:
+        """Wall-clock time [s] consumed by the most recent OCP solve, or None."""
+        return self._solve_times[-1] if self._solve_times else None
+
+    @property
+    def mean_solve_time(self) -> Optional[float]:
+        """Mean OCP solve time [s] over the rolling history, or None."""
+        if not self._solve_times:
+            return None
+        return float(np.mean(list(self._solve_times)))
+
+    @property
+    def max_solve_time(self) -> Optional[float]:
+        """Maximum OCP solve time [s] observed in the rolling history, or None."""
+        if not self._solve_times:
+            return None
+        return float(np.max(list(self._solve_times)))
+
+    @property
+    def n_solves(self) -> int:
+        """Total number of OCP solves recorded in the rolling history."""
+        return len(self._solve_times)
 
     # ── Main entry point ─────────────────────────────────────────────────
 
@@ -595,10 +636,12 @@ class HeatingMPCController:
         # ── Step 1: EKF predict+update ───────────────────────────────────
         x_hat, _ = self._ekf.step(y, self._u_prev, d_traj[0], p, 0.0)
 
-        # ── Step 2: OCP solve ────────────────────────────────────────────
+        # ── Step 2: OCP solve (timed) ────────────────────────────────────
+        _t0 = time.perf_counter()
         u_opt, _ = self._ocp.solve(
             x_hat, d_traj, u_prev=self._u_seq_prev, p=p, t0=0.0
         )
+        self._solve_times.append(time.perf_counter() - _t0)
 
         # ── Step 3: Apply first action ───────────────────────────────────
         u0 = u_opt[0]

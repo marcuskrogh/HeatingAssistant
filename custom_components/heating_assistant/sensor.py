@@ -86,6 +86,7 @@ async def async_setup_entry(
     entities.append(OutdoorTemperatureSensor(coordinator))
     entities.append(OutdoorForecastSensor(coordinator))
     entities.append(SystemEfficiencySensor(coordinator))
+    entities.append(MPCPerformanceSensor(coordinator))
 
     async_add_entities(entities)
 
@@ -1384,3 +1385,96 @@ class ResidualACFSensor(CoordinatorEntity, SensorEntity):
         except Exception as exc:
             _LOGGER.debug("ResidualACFSensor error for %s: %s", self._room_name, exc)
             return {"error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# MPC performance sensor (system-wide)
+# ---------------------------------------------------------------------------
+
+class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
+    """
+    System-wide sensor reporting MPC solver performance statistics.
+
+    The state is the most recent OCP solve time [s].  Statistical summaries
+    (mean, max, count) and a time-series of recent solve times are exposed
+    as state attributes so they can be displayed on a Home Assistant dashboard.
+
+    Understanding the solve time helps users:
+    - Verify that the MPC runs well within the update interval.
+    - Detect regressions (e.g., after model updates) that increase solve time.
+    - Tune the horizon / solver options if computation becomes a bottleneck.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "s"
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – MPC Performance"
+        self._attr_unique_id = f"{DOMAIN}_mpc_performance"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the most recent OCP solve time [s]."""
+        t = self._coordinator.controller.last_solve_time
+        return round(t, 4) if t is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose rolling solve-time statistics and recent history."""
+        import numpy as np
+
+        controller = self._coordinator.controller
+        solve_times = list(controller._solve_times)
+
+        last_t = controller.last_solve_time
+        mean_t = controller.mean_solve_time
+        max_t = controller.max_solve_time
+        n = controller.n_solves
+
+        attrs: Dict[str, Any] = {
+            "last_solve_time_s": round(last_t, 4) if last_t is not None else None,
+            "mean_solve_time_s": round(mean_t, 4) if mean_t is not None else None,
+            "max_solve_time_s": round(max_t, 4) if max_t is not None else None,
+            "n_solves": n,
+            "horizon": self._coordinator.controller._horizon,
+            "dt_s": self._coordinator.dt,
+        }
+
+        # Mean tracking error (mean absolute deviation from setpoint across
+        # all rooms and recent history steps)
+        tracking_errors: list = []
+        room_names = self._coordinator.model.room_names
+        for room_name in room_names:
+            room = self._coordinator.model.rooms[room_name]
+            err = abs(room.temperature - room.setpoint)
+            tracking_errors.append(round(err, 3))
+
+        attrs["current_tracking_errors"] = {
+            name: round(abs(
+                self._coordinator.model.rooms[name].temperature
+                - self._coordinator.model.rooms[name].setpoint
+            ), 3)
+            for name in room_names
+        }
+        attrs["mean_tracking_error"] = (
+            round(float(np.mean(tracking_errors)), 3) if tracking_errors else None
+        )
+        attrs["max_tracking_error"] = (
+            round(float(np.max(tracking_errors)), 3) if tracking_errors else None
+        )
+
+        # Terminal-weight in effect (for reference)
+        if hasattr(controller, "_ocp") and hasattr(controller._ocp, "_P"):
+            p_diag = float(np.mean(np.diag(controller._ocp._P)))
+            q_diag = float(np.mean(np.diag(controller._ocp._Q)))
+            attrs["terminal_weight"] = round(p_diag / q_diag, 1) if q_diag > 0 else None
+        else:
+            attrs["terminal_weight"] = None
+
+        # Rolling solve time history (last 50 samples) for sparkline charts
+        attrs["recent_solve_times_s"] = [round(t, 4) for t in solve_times[-50:]]
+
+        return attrs

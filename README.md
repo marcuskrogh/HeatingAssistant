@@ -104,6 +104,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
         - 14.5.4 [Effect of `smoothing_weight` on heat pump short-cycling](#1454-effect-of-smoothing_weight-on-heat-pump-short-cycling)
         - 14.5.5 [Quick reference — tuning cheat sheet](#1455-quick-reference--tuning-cheat-sheet)
         - 14.5.6 [Live tuning chart](#1456-live-tuning-chart)
+        - 14.5.7 [Monitoring MPC performance with the performance sensor](#1457-monitoring-mpc-performance-with-the-performance-sensor)
 15. [Developer Guide](#15-developer-guide)
     - 15.1 [Repository layout](#151-repository-layout)
     - 15.2 [Running the tests](#152-running-the-tests)
@@ -542,7 +543,7 @@ For the house thermal system with full-state observation ($\mathbf{h}_m = \mathb
 
 The cost function over the prediction horizon *N* is:
 
-$$J(\mathbf{U}) = \sum_{k=0}^{N-1} \left\lVert \mathbf{z}[k{+}1] - \mathbf{z}_{\text{ref}} \right\rVert_{\mathbf{Q}}^2 + \left\lVert \mathbf{u}[k] \right\rVert_{\mathbf{R}}^2 + \left\lVert \Delta\mathbf{u}[k] \right\rVert_{\mathbf{S}}^2 + \rho_z \sum_{k=1}^{N} \left\lVert \max(0, \mathbf{z}[k] - \mathbf{z}_{\max}) \right\rVert^2 + \left\lVert \max(0, \mathbf{z}_{\min} - \mathbf{z}[k]) \right\rVert^2$$
+$$J(\mathbf{U}) = \sum_{k=0}^{N-2} \left\lVert \mathbf{z}[k{+}1] - \mathbf{z}_{\text{ref}} \right\rVert_{\mathbf{Q}}^2 + \left\lVert \mathbf{z}[N] - \mathbf{z}_{\text{ref}} \right\rVert_{\mathbf{P}}^2 + \sum_{k=0}^{N-1} \left( \left\lVert \mathbf{u}[k] \right\rVert_{\mathbf{R}}^2 + \left\lVert \Delta\mathbf{u}[k] \right\rVert_{\mathbf{S}}^2 \right) + \rho_z \sum_{k=1}^{N} \left\lVert \max(0, \mathbf{z}[k] - \mathbf{z}_{\max}) \right\rVert^2 + \left\lVert \max(0, \mathbf{z}_{\min} - \mathbf{z}[k]) \right\rVert^2$$
 
 where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u}[-1]$ equal to the previous step's applied input):
 
@@ -550,7 +551,8 @@ where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u
 |--------|----------------|
 | $\mathbf{z}[k] = \mathbf{g}(\mathbf{x}[k])$ | Controlled output — room temperatures — at step *k* |
 | $\mathbf{z}_{\text{ref}}$ | Reference (room setpoints) |
-| $\mathbf{Q}$ | Output tracking cost (default: $\mathbf{I}$) |
+| $\mathbf{Q}$ | Stage output tracking cost (default: $\mathbf{I}$) |
+| $\mathbf{P}$ | Terminal output tracking cost (`terminal_weight` × $\mathbf{Q}$, default: $100 \cdot \mathbf{I}$).  A large value strongly encourages the predicted trajectory to reach the setpoint by the end of the horizon, significantly improving steady-state tracking. |
 | $\mathbf{R}$ | Input cost (`energy_weight` × $\mathbf{I}$, default: $0.01 \cdot \mathbf{I}$) |
 | $\mathbf{S}$ | Input rate-of-change cost (`smoothing_weight` × $\mathbf{I}$, default: $0.1 \cdot \mathbf{I}$).  Set `smoothing_weight` to `0.0` to disable. |
 | $\mathbf{z}_{\min}, \mathbf{z}_{\max}$ | Soft output constraint bounds: $\mathbf{z}_{\text{ref}} \pm \delta$ where $\delta$ = `constraint_offset` (default 2.0 °C) |
@@ -559,9 +561,13 @@ where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u
 
 The predicted state trajectory is propagated using Euler sub-stepping of the nonlinear drift $\mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, \mathbf{p}, t)$ over each sampling interval.  The NLP is solved via **L-BFGS-B** (from `scipy.optimize`) with box constraints $0 \le \mathbf{u}[k] \le 1$.
 
+The **terminal cost** $\mathbf{P}$ is the key mechanism for achieving setpoint tracking.  Without a large terminal weight the optimizer has weak incentive to drive the state to the reference by the end of the horizon — it can minimise total cost by spreading the error across all stages without converging.  Setting $\mathbf{P} = \lambda \mathbf{Q}$ with $\lambda \gg 1$ (default $\lambda = 100$) is equivalent to approximating the infinite-horizon cost and forces the optimal trajectory to converge to the setpoint well within the horizon.
+
 The input cost $\mathbf{R}$ softly discourages running heaters when the room is close to setpoint.  Increasing `energy_weight` makes the controller more energy-conservative at the expense of tighter temperature tracking.
 
 The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
+
+The terminal cost $\mathbf{P} = \lambda \mathbf{Q}$ (controlled by `terminal_weight`, default 100) is the primary mechanism for setpoint tracking: a large $\lambda$ ensures the optimal trajectory must reach the reference by the end of the horizon.  Without it the controller may under-heat early in the horizon and cross the setpoint near its end, producing a persistent steady-state offset.  Increasing `terminal_weight` beyond 100 further tightens tracking at the cost of slightly less energy-aware behaviour over the horizon.
 
 **On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the NMPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval $dt$ for which the source is active.  The coordinator maps this fraction to on/off commands.
 
@@ -920,6 +926,7 @@ Once HA has restarted:
    | `sensor.heating_assistant_<room_name>_heating_plan` | Planned heating schedule [W] |
    | `sensor.heating_assistant_<room_name>_solar_forecast` | Predicted solar gain schedule [W] |
    | `sensor.heating_assistant_outdoor_temperature_forecast` | Outdoor temperature forecast over the MPC horizon [°C] |
+   | `sensor.heating_assistant_mpc_performance` | MPC solver performance statistics (solve time, tracking error) |
 
 3. If entities are **missing**, check the HA log for errors under the `heating_assistant` integration.  The most common cause is a room or heat source configuration error in `configuration.yaml`.
 
@@ -1025,6 +1032,7 @@ heating_assistant:
 | `energy_weight` | float | No | `0.01` | Weight on the input cost ‖**u**‖² in the MPC objective.  Higher values make the controller more conservative about running heaters, reducing overshoot at the expense of slightly slower heating.  Typical range: `0.001`–`0.5`.  See [Section 14.5](#145-mpc-regulator-tuning). |
 | `smoothing_weight` | float | No | `0.1` | Weight on the input rate-of-change cost ‖Δ**u**‖² in the MPC objective.  Higher values strongly penalise rapid changes in heater output between consecutive time steps, dampening oscillations and reducing actuator wear.  Set to `0.0` to disable.  Typical range: `0.0`–`2.0`.  See [Section 14.5](#145-mpc-regulator-tuning). |
 | `constraint_offset` | float | No | `2.0` | Symmetric soft output constraint band [°C] around the setpoint: the controller keeps predicted room temperatures within `[setpoint − δ, setpoint + δ]`.  Violations are penalised but not forbidden.  Decrease for tighter tracking; increase if the QP solver reports infeasibility. |
+| `terminal_weight` | float | No | `100.0` | Terminal cost multiplier λ: **P** = λ × **Q**.  A large value forces the predicted trajectory to converge to the setpoint by the end of the horizon, dramatically improving steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint; decrease toward 10–20 if you prefer softer convergence with more energy-aware shaping over the horizon.  Must be ≥ 1. |
 | `rooms` | list | No | `[]` | List of room definitions (see below). |
 | `heat_sources` | list | No | `[]` | List of heat source definitions (see below). |
 
@@ -2748,11 +2756,12 @@ The MPC controller solves a quadratic program at each update cycle.  Its behavio
 | Parameter | Config key | Default | Effect |
 |-----------|-----------|---------|--------|
 | **Prediction horizon** | `horizon` | `6` steps | How many time steps ahead the controller plans.  Longer horizons give the controller more room to "see" the thermal inertia of the building and act proactively. |
+| **Terminal weight** | `terminal_weight` | `100` | Multiplier λ on the terminal tracking cost **P** = λ**Q**.  A large value (≥ 50) forces the predicted trajectory to reach the setpoint by the end of the horizon, which is the primary mechanism for steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint. |
 | **Energy weight** | `energy_weight` | `0.01` | Weight on ‖**u**‖² — penalises running heaters.  Increase to make the controller more conservative (less aggressive heating). |
 | **Smoothing weight** | `smoothing_weight` | `0.1` | Weight on ‖Δ**u**‖² — penalises changing the heater output from one step to the next.  Increase to dampen oscillations and reduce actuator wear. |
 | **Constraint offset** | `constraint_offset` | `2.0 °C` | Half-width of the soft temperature band around the setpoint.  Does not directly affect oscillations but controls how strictly the constraint is enforced. |
 
-All four parameters are set under the top-level `heating_assistant:` key in `configuration.yaml`.  Restart Home Assistant after any change.
+All parameters are set under the top-level `heating_assistant:` key in `configuration.yaml`.  Restart Home Assistant after any change.
 
 #### 14.5.2 Diagnosing and correcting oscillations
 
@@ -2829,9 +2838,10 @@ If the compressor still short-cycles after increasing `smoothing_weight`, also i
 
 | Symptom | Primary fix | Secondary fix |
 |---------|-------------|---------------|
+| MPC trajectory does not reach setpoint over the horizon | ↑ `terminal_weight` (try 200 → 500) | ↑ `horizon` (try 8 → 10) |
 | Oscillating temperature (repeated undershoot/overshoot) | ↑ `smoothing_weight` (try 0.5 → 1.0 → 2.0) | ↑ `horizon` (try 8 → 10) |
 | Heater runs at 100 % then cuts off abruptly | ↑ `energy_weight` (try 0.02 → 0.05) | ↑ `horizon` |
-| Room never quite reaches setpoint | ↓ `energy_weight` (try 0.005 → 0.001) | ↑ `horizon` |
+| Room never quite reaches setpoint | ↑ `terminal_weight` (try 200 → 500) | ↓ `energy_weight` (try 0.005 → 0.001) |
 | Heat pump compressor short-cycling | ↑ `smoothing_weight` + ↑ `turn_off_deadband` | ↑ `horizon` |
 | Sluggish response / room heats too slowly | ↓ `energy_weight` or ↓ `smoothing_weight` | — |
 | Temperature tracks setpoint but with slow drift | Correct `r_external` or `thermal_mass` | — |
@@ -2841,6 +2851,71 @@ If the compressor still short-cycles after increasing `smoothing_weight`, also i
 #### 14.5.6 Live tuning chart
 
 The Controller-Tuning ApexCharts card in [`MODEL_FIT_GUIDE.md`](MODEL_FIT_GUIDE.md#apex-charts-card-controller-tuning-live-view) overlays the measured temperature, the MPC prediction, the setpoint, and the prediction error in a single time-aligned figure.  Add it to a room subview while iterating on the cost weights — the chart instantly reveals whether a tweak improved tracking or just hid an underlying model-fit problem.
+
+#### 14.5.7 Monitoring MPC performance with the performance sensor
+
+The **MPC Performance** sensor (`sensor.heating_assistant_mpc_performance`) exposes key computational and control-quality metrics that you can display on your dashboard:
+
+| Attribute | Description |
+|-----------|-------------|
+| `last_solve_time_s` | Wall-clock time [s] of the most recent OCP solve |
+| `mean_solve_time_s` | Rolling mean solve time [s] over the last 100 solves |
+| `max_solve_time_s` | Maximum solve time [s] in the rolling history |
+| `n_solves` | Number of solves recorded in the rolling buffer |
+| `mean_tracking_error` | Mean absolute deviation of all rooms from their setpoints [°C] |
+| `max_tracking_error` | Maximum absolute deviation across all rooms [°C] |
+| `current_tracking_errors` | Per-room absolute tracking error [°C] |
+| `terminal_weight` | Terminal cost multiplier λ currently in effect |
+| `recent_solve_times_s` | List of the last 50 solve times [s] for sparkline charts |
+
+**Typical solve times** at the default settings (`horizon = 6`, `dt = 900 s`, `n_int_steps = 10`) are 0.05–0.3 s depending on the number of rooms and CPU speed.  If `max_solve_time_s` approaches the coordinator `UPDATE_INTERVAL` (60 s), consider reducing `horizon` or `n_int_steps`.
+
+**Example ApexCharts card for MPC performance:**
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: MPC Solver Performance
+graph_span: 2h
+series:
+  - entity: sensor.heating_assistant_mpc_performance
+    attribute: recent_solve_times_s
+    type: bar
+    name: Solve time [s]
+    data_generator: |
+      return entity.attributes.recent_solve_times_s.map((v, i) => [
+        new Date(Date.now() - (entity.attributes.recent_solve_times_s.length - 1 - i) * 60000).getTime(),
+        v
+      ]);
+```
+
+**Example entities card for tracking quality:**
+
+```yaml
+type: entities
+title: MPC Tracking Quality
+entities:
+  - entity: sensor.heating_assistant_mpc_performance
+    name: Last solve time
+    attribute: last_solve_time_s
+    suffix: s
+  - entity: sensor.heating_assistant_mpc_performance
+    name: Mean solve time
+    attribute: mean_solve_time_s
+    suffix: s
+  - entity: sensor.heating_assistant_mpc_performance
+    name: Max solve time
+    attribute: max_solve_time_s
+    suffix: s
+  - entity: sensor.heating_assistant_mpc_performance
+    name: Mean tracking error
+    attribute: mean_tracking_error
+    suffix: °C
+  - entity: sensor.heating_assistant_mpc_performance
+    name: Terminal weight (λ)
+    attribute: terminal_weight
+```
 
 ---
 
