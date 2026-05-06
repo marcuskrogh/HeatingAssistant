@@ -699,12 +699,39 @@ class TestElectricHeaterCoolingProtection:
         assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
 
 
-class TestHeatPumpDryMode:
-    """Heat pump dry/fan mode selection and scaled temperature offset."""
+class TestHeatPumpCoolingModeSelection:
+    """Heat pump cool/dry/fan mode selection and scaled temperature offset."""
 
     @pytest.mark.asyncio
-    async def test_dry_mode_preferred_when_available(self):
-        """When the HP entity supports 'dry' mode, it is chosen over 'fan_only'."""
+    async def test_cool_mode_preferred_over_dry_when_available(self):
+        """When the HP entity supports 'cool' mode, it is chosen over 'dry'."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 26.0,
+                        "hvac_modes": ["heat", "cool", "dry", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "cool"
+        # overshoot = 1.0 → offset = 2.0; target = 26.0 - 2.0 = 24.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+
+    @pytest.mark.asyncio
+    async def test_dry_mode_preferred_when_cool_unavailable(self):
+        """When 'cool' is not listed but 'dry' is, 'dry' is chosen over 'fan_only'."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
@@ -730,8 +757,8 @@ class TestHeatPumpDryMode:
         assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
 
     @pytest.mark.asyncio
-    async def test_fan_only_fallback_when_no_dry(self):
-        """When 'dry' is not listed in hvac_modes, fall back to 'fan_only'."""
+    async def test_fan_only_fallback_when_no_dry_or_cool(self):
+        """When neither 'cool' nor 'dry' is listed, fall back to 'fan_only'."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
@@ -779,7 +806,7 @@ class TestHeatPumpDryMode:
         )
 
         calls = hass.services.async_call.call_args_list
-        # Should switch to dry mode, not heat
+        # Should switch to dry mode (no 'cool' available), not heat
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "dry"
         # overshoot = 1.0 → offset = 2.0; target = 27.0 - 2.0 = 25.0
@@ -832,6 +859,7 @@ class TestHeatPumpDryMode:
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
         # fallback: room_temp=23.0; overshoot=2.0 → offset=3.0; 23.0-3.0=20.0
         assert calls[1].args[2]["temperature"] == pytest.approx(20.0)
+
 
 
 class TestScaledIdleOffsetNonHP:

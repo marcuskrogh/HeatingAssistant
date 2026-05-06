@@ -750,6 +750,30 @@ class HeatingMPCController:
 
         return actions
 
+    def notify_applied_u(self, source_name: str, u_applied: float) -> None:
+        """
+        Notify the controller that a specific control action was applied
+        externally (outside of the OCP solve), so the EKF uses the correct
+        previous input on the next compute() call.
+
+        This must be called after any out-of-band action is applied to a
+        heat source (e.g. passive cooling that bypasses the OCP), otherwise
+        the EKF predict step will use the stale OCP output as u_prev and
+        produce inaccurate state estimates.
+
+        Parameters
+        ----------
+        source_name : str
+            Name of the heat source whose action was overridden.
+        u_applied : float
+            The fraction actually applied, in [−1, 1].
+        """
+        for j, src in enumerate(self._sources):
+            if src.name == source_name:
+                u_lo = -1.0 if src.can_cool else 0.0
+                self._u_prev[j] = float(np.clip(u_applied, u_lo, 1.0))
+                break
+
     # ── Disturbance forecasts ────────────────────────────────────────────
 
     def _forecast_outdoor(self, current: float) -> List[float]:
