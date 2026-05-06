@@ -567,8 +567,6 @@ The input cost $\mathbf{R}$ softly discourages running heaters when the room is 
 
 The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from one step to the next.  This prevents the controller from toggling heaters on and off aggressively, resulting in more stable actuator commands and less wear on compressor-based heat sources.  Increasing `smoothing_weight` makes the controller more reluctant to change its actions between time steps.
 
-The terminal cost $\mathbf{P} = \lambda \mathbf{Q}$ (controlled by `terminal_weight`, default 100) is the primary mechanism for setpoint tracking: a large $\lambda$ ensures the optimal trajectory must reach the reference by the end of the horizon.  Without it the controller may under-heat early in the horizon and cross the setpoint near its end, producing a persistent steady-state offset.  Increasing `terminal_weight` beyond 100 further tightens tracking at the cost of slightly less energy-aware behaviour over the horizon.
-
 **On-off sources** (e.g. `switch.*` entities) are modelled with a duty-cycle relaxation: the NMPC optimises the continuous fraction $u \in [0, 1]$, interpreted as the proportion of the sampling interval $dt$ for which the source is active.  The coordinator maps this fraction to on/off commands.
 
 ### 4.4 Disturbance forecasts
@@ -2884,6 +2882,8 @@ series:
     type: bar
     name: Solve time [s]
     data_generator: |
+      // Assumes coordinator UPDATE_INTERVAL = 60 s (one solve per minute).
+      // Adjust 60000 to match your dt if you changed UPDATE_INTERVAL.
       return entity.attributes.recent_solve_times_s.map((v, i) => [
         new Date(Date.now() - (entity.attributes.recent_solve_times_s.length - 1 - i) * 60000).getTime(),
         v

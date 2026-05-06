@@ -56,6 +56,7 @@ import numpy as np
 from .thermal_model import HouseModel
 from .heat_sources import HeatSource
 from .solar_model import room_solar_gains
+from .const import MPC_STATS_BUFFER_SIZE
 
 # ── Import nonlinear model-based control components from mbc ─────────────────
 from mbc.models import ContinuousDiscreteModel
@@ -449,7 +450,7 @@ class HeatingMPCController:
             )
         if terminal_weight < 1.0:
             raise ValueError(
-                f"terminal_weight must be >= 1; got {terminal_weight}"
+                f"terminal_weight must be at least 1.0; got {terminal_weight}"
             )
 
         # Build the nonlinear continuous-discrete model
@@ -510,7 +511,7 @@ class HeatingMPCController:
         self._u_seq_prev: Optional[np.ndarray] = None
 
         # ── Solve-time rolling statistics ───────────────────────────────
-        self._solve_times: deque = deque(maxlen=100)
+        self._solve_times: deque = deque(maxlen=MPC_STATS_BUFFER_SIZE)
 
         # Visualisation data (populated after each compute())
         self._predictions:      List[Dict[str, float]] = []
