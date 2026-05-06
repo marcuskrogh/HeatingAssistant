@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-06 09:06 UTC*
+*Generated: 2026-05-06 20:49 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,9 +18,9 @@ One control step consists of:
 
 | Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|-------------|----------|-----|
-| studio-1room           |       3.9 |         3.9 |      4.0 |   15 |
-| two-bedroom-2room      |       7.3 |         7.3 |      7.4 |   15 |
-| full-house-5room       |    2745.6 |      2724.9 |   3052.4 |   15 |
+| studio-1room           |       4.3 |         4.3 |      4.5 |   15 |
+| two-bedroom-2room      |       8.2 |         8.0 |     10.3 |   15 |
+| full-house-5room       |    3335.4 |      3305.8 |   3708.6 |   15 |
 
 **Configurations:**
 
