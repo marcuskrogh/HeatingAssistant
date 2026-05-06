@@ -54,6 +54,7 @@ from .const import (
     CONF_SETPOINT,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_TERMINAL_WEIGHT,
     CONF_THERMAL_MASS,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
@@ -71,6 +72,7 @@ from .const import (
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
     DEFAULT_R_EXTERNAL,
@@ -194,6 +196,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._constraint_offset: float = data.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)
+        self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
 
         rooms_cfg: List[Dict[str, Any]] = data.get(CONF_ROOMS, [])
         sources_cfg: List[Dict[str, Any]] = data.get(CONF_HEAT_SOURCES, [])
@@ -226,6 +229,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
+            terminal_weight=self._terminal_weight,
         )
 
         # Per-room enabled state (True = active, False = off).
@@ -1113,6 +1117,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
+            terminal_weight=self._terminal_weight,
         )
 
         _LOGGER.info(

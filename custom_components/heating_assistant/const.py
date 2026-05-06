@@ -53,6 +53,7 @@ CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for fo
 CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output constraints
 CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (energy saving vs. tracking)
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (dampens rapid input changes)
+CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -72,6 +73,7 @@ DEFAULT_COOLING_EFFICIENCY = 1.0       # fraction of max cooling capacity used (
 DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint offset
 DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
+DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 
 # Source types
@@ -90,5 +92,7 @@ UPDATE_INTERVAL = 60
 #: Number of update steps to keep in the rolling history buffer.
 #: At UPDATE_INTERVAL=60 s this is ≈8 hours of data.
 HISTORY_BUFFER_SIZE = 480
+#: Number of MPC solve-time samples to retain for rolling statistics.
+MPC_STATS_BUFFER_SIZE = 100
 #: Service name for ML parameter estimation
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"

@@ -96,6 +96,7 @@ from .const import (
     CONF_SOURCE_TYPE,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_TERMINAL_WEIGHT,
     CONF_THERMAL_MASS,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
@@ -112,6 +113,7 @@ from .const import (
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_THERMAL_MASS,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
@@ -198,6 +200,9 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(
                     CONF_CONSTRAINT_OFFSET, default=DEFAULT_CONSTRAINT_OFFSET
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                vol.Optional(
+                    CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
             }
         )
     },
@@ -257,6 +262,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry_data.setdefault(
             CONF_CONSTRAINT_OFFSET,
             yaml_cfg.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET),
+        )
+        entry_data.setdefault(
+            CONF_TERMINAL_WEIGHT,
+            yaml_cfg.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
         )
 
     # Build a temporary entry-like object with merged data for the coordinator
