@@ -729,6 +729,15 @@ class HeatingMPCController:
         _eocp = self._ocp._eocp
         _M = _eocp._N * _eocp._n_steps
         _eocp._z_ref = np.tile(z_ref, (_M + 1, 1))
+        # Also update the Mayer (terminal cost) function's captured _zref.
+        # CDTrackingOptimalControlProblem defines _mayer as:
+        #   def _mayer(x, y, theta, _P=P_arr, _zref=z_ref_arr, _model=model, ...)
+        # The _zref default arg (index 1) is the same numpy array that was
+        # passed at OCP construction.  Updating it in-place keeps the terminal
+        # cost consistent with the stage cost whenever setpoints change.
+        if _eocp._mayer is not None:
+            # index 1 → _zref (see CDTrackingOptimalControlProblem._mayer signature)
+            _eocp._mayer.__defaults__[1][:] = z_ref
 
         # ── Step 1: EKF predict+update ───────────────────────────────────
         x_hat, _ = self._ekf.step(y, self._u_prev, d_traj[0], p, 0.0)
