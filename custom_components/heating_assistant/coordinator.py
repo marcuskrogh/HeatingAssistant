@@ -416,7 +416,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "kalman_innovation": kalman_innovation,
             })
 
-            # 7. Write set-points to heater entities.  Keep the latest
+            # 7. Write set-points to heater entities. Keep the latest
             # forecast/prediction entities available even if HA service calls
             # fail for a specific heater entity.
             try:
