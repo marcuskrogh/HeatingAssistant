@@ -749,7 +749,7 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         if schedule:
             return round(schedule[0].get(self._room_name, 0.0), 1)
         current_heating = sum(
-            s.current_power
+            getattr(s, "current_power", 0.0)
             for s in self._coordinator.heat_sources
             if s.room == self._room_name
         )
