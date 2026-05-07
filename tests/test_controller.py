@@ -763,10 +763,12 @@ class TestSolarForecastIndexing:
             horizon=4, dt=900,
         )
 
-        # Sanity-check: initial Mayer _zref matches initial setpoint
+        # Sanity-check: initial Mayer _zref matches initial setpoint.
+        # _mayer signature: def _mayer(x, y, theta, _P=P_arr, _zref=z_ref_arr, ...)
+        # __defaults__[1] is the _zref default argument (the captured z_ref_arr array).
         mayer = ctrl._ocp._eocp._mayer
         assert mayer is not None, "Mayer function must be present when terminal_weight > 0"
-        assert mayer.__defaults__[1][0] == pytest.approx(21.0), (
+        assert mayer.__defaults__[1][0] == pytest.approx(21.0), (  # index 1 → _zref
             "Initial Mayer _zref must equal the initial setpoint"
         )
 
@@ -778,6 +780,6 @@ class TestSolarForecastIndexing:
         assert ctrl._ocp._eocp._z_ref[0][0] == pytest.approx(25.0), (
             "_eocp._z_ref (stage cost) must be updated to the new setpoint"
         )
-        assert mayer.__defaults__[1][0] == pytest.approx(25.0), (
+        assert mayer.__defaults__[1][0] == pytest.approx(25.0), (  # index 1 → _zref
             "Mayer _zref (terminal cost) must be updated to the new setpoint"
         )
