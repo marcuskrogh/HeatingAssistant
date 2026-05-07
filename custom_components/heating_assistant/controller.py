@@ -600,6 +600,13 @@ class HeatingMPCController:
         # maxlen so it always advances and can be used as a live-sensor state.
         self._total_computes: int = 0
 
+        # ── Terminal weight (stored for sensor access) ───────────────────
+        self._terminal_weight: float = terminal_weight
+
+        # ── Kalman innovation (populated after each compute()) ───────────
+        # ν = y − hm(x̂⁻)  (measurement residual at the update step)
+        self._last_innovation: Optional[List[float]] = None
+
         # Visualisation data (populated after each compute())
         self._predictions:      List[Dict[str, float]] = []
         self._outdoor_forecast: List[float]            = []
@@ -612,6 +619,22 @@ class HeatingMPCController:
     def constraint_offset(self) -> float:
         """Symmetric offset δ around the setpoint for soft output constraints [°C]."""
         return self._constraint_offset
+
+    @property
+    def terminal_weight(self) -> float:
+        """Terminal cost weight (P = terminal_weight × Q) in effect for this controller."""
+        return self._terminal_weight
+
+    @property
+    def last_innovation(self) -> Optional[List[float]]:
+        """Kalman filter innovation ν = y − hm(x̂⁻) from the most recent compute() call.
+
+        One value per room (in room_names order).  None if compute() has not
+        been called yet.  This is the raw measurement residual at the update
+        step — a well-tuned filter should produce zero-mean, low-autocorrelation
+        innovations.
+        """
+        return self._last_innovation
 
     @property
     def predictions(self) -> List[Dict[str, float]]:
@@ -739,8 +762,17 @@ class HeatingMPCController:
             # index 1 → _zref (see CDTrackingOptimalControlProblem._mayer signature)
             _eocp._mayer.__defaults__[1][:] = z_ref
 
-        # ── Step 1: EKF predict+update ───────────────────────────────────
-        x_hat, _ = self._ekf.step(y, self._u_prev, d_traj[0], p, 0.0)
+        # ── Step 1: EKF predict + innovation capture + update ───────────
+        # Split the EKF step() into predict() + update() so we can capture
+        # the innovation ν = y − hm(x̂⁻) between the two phases.  This is
+        # needed by KalmanInnovationSensor (stored in the history buffer by
+        # the coordinator).
+        self._ekf.predict(self._u_prev, d_traj[0], p, 0.0)
+        x_prior = self._ekf.x_hat.copy()  # x̂⁻ (prior before measurement fusion)
+        # Innovation: ν = y − hm(x̂⁻)
+        y_hat_prior = self._system.hm(x_prior, self._u_prev, d_traj[0], p, 0.0)
+        self._last_innovation = (y - y_hat_prior).tolist()
+        x_hat, _ = self._ekf.update(y, self._u_prev, d_traj[0], p)
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
         _t0 = time.perf_counter()

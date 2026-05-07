@@ -739,7 +739,7 @@ def compute_open_loop_predictions(
         }
 
     def _make_d(record: Dict[str, Any]) -> np.ndarray:
-        p = system.n_d
+        p = system.nd
         d = np.zeros(p)
         d[0] = float(record.get("d_outdoor", 0.0))
         d_solar = record.get("d_solar", {})
@@ -768,7 +768,7 @@ def compute_open_loop_predictions(
             d = _make_d(record)
 
             u_raw = record.get("u", [])
-            n_u = system.n_u
+            n_u = system.nu
             u = np.zeros(n_u)
             for k, v in enumerate(u_raw):
                 if k < n_u:

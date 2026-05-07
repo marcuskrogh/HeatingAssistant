@@ -456,3 +456,54 @@ def test_generate_model_fit_report_no_predictions():
     room_data = report["rooms"]["living_room"]
     assert "error" in room_data
     assert "No prediction data" in room_data["error"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: compute_open_loop_predictions (attribute name regression test)
+# ---------------------------------------------------------------------------
+
+def test_compute_open_loop_predictions_uses_correct_attribute_names():
+    """compute_open_loop_predictions must use system.nd / system.nu (not n_d / n_u).
+
+    This is a regression test for a bug where the code accessed ``system.n_d``
+    and ``system.n_u`` which do not exist on HouseThermalSDE (the correct names
+    are ``system.nd`` and ``system.nu``).  The bug caused OpenLoopRMSESensor to
+    always fail with an AttributeError.
+    """
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+    from custom_components.heating_assistant.controller import HouseThermalSDE
+    from custom_components.heating_assistant.thermal_model import HouseModel, Room
+    from custom_components.heating_assistant.heat_sources import ElectricHeater
+    from custom_components.heating_assistant.model_diagnostics import (
+        compute_open_loop_predictions,
+    )
+
+    room = Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0)
+    model = HouseModel([room])
+    heater = ElectricHeater("h", "studio", 3000.0)
+    system = HouseThermalSDE(model, [heater], 900.0)
+
+    # Build a minimal history of 35 steps (> default segment_length of 30)
+    history = [
+        {
+            "y": [20.0 + 0.01 * i],
+            "u": [0.3],
+            "d_outdoor": 5.0,
+            "d_solar": {"studio": 50.0},
+            "timestamp": 1000.0 + 900.0 * i,
+        }
+        for i in range(35)
+    ]
+
+    result = compute_open_loop_predictions(
+        history, system, ["studio"], 1, 900.0, segment_length=30
+    )
+
+    assert "error" not in result or result.get("error") is None, (
+        f"compute_open_loop_predictions raised an error: {result.get('error')}"
+    )
+    assert result["n_segments"] >= 1
+    assert "studio" in result["per_room"]
+    assert result["per_room"]["studio"]["rmse"] is not None
