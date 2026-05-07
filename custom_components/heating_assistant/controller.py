@@ -608,9 +608,9 @@ class HeatingMPCController:
         self._last_innovation: Optional[List[float]] = None
 
         # Visualisation data (populated after each compute())
-        self._predictions:      List[Dict[str, float]] = []
-        self._outdoor_forecast: List[float]            = []
-        self._solar_forecast:   List[Dict[str, float]] = []
+        self._predictions: List[Dict[str, float]] = []
+        self._outdoor_forecast: List[float] = []
+        self._solar_forecast: List[Dict[str, float]] = []
         self._heating_schedule: List[Dict[str, float]] = []
 
     # ── Visualisation properties ─────────────────────────────────────────

@@ -470,9 +470,6 @@ def test_compute_open_loop_predictions_uses_correct_attribute_names():
     are ``system.nd`` and ``system.nu``).  The bug caused OpenLoopRMSESensor to
     always fail with an AttributeError.
     """
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
     from custom_components.heating_assistant.controller import HouseThermalSDE
     from custom_components.heating_assistant.thermal_model import HouseModel, Room
     from custom_components.heating_assistant.heat_sources import ElectricHeater
