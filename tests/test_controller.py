@@ -783,3 +783,70 @@ class TestSolarForecastIndexing:
         assert mayer.__defaults__[1][0] == pytest.approx(25.0), (  # index 1 → _zref
             "Mayer _zref (terminal cost) must be updated to the new setpoint"
         )
+
+
+class TestKalmanInnovation:
+    """HeatingMPCController.last_innovation is populated after each compute()."""
+
+    _NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+    def test_innovation_none_before_compute(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        assert ctrl.last_innovation is None
+
+    def test_innovation_populated_after_compute(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+        innov = ctrl.last_innovation
+        assert innov is not None, "last_innovation must be populated after compute()"
+        assert isinstance(innov, list), "last_innovation must be a list"
+        assert len(innov) == len(model.room_names), (
+            "last_innovation length must equal number of rooms"
+        )
+
+    def test_innovation_contains_floats(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+        for v in ctrl.last_innovation:
+            assert isinstance(v, float)
+
+    def test_innovation_updates_each_call(self):
+        """Innovation should reflect the current measurement residual."""
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+        innov_1 = list(ctrl.last_innovation)
+
+        # Change temperatures so measurement changes
+        model.rooms["living_room"].temperature = 25.0
+        model.rooms["bedroom"].temperature = 24.0
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+        innov_2 = list(ctrl.last_innovation)
+
+        # Innovations should differ after a large temperature jump
+        assert innov_1 != innov_2, (
+            "Innovation must reflect the new measurement residual after a temperature change"
+        )
+
+
+class TestTerminalWeight:
+    """HeatingMPCController.terminal_weight exposes the configured weight."""
+
+    def test_default_terminal_weight(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        assert ctrl.terminal_weight == pytest.approx(100.0)
+
+    def test_custom_terminal_weight(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900,
+                                    terminal_weight=50.0)
+        assert ctrl.terminal_weight == pytest.approx(50.0)
+
+    def test_terminal_weight_is_float(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        assert isinstance(ctrl.terminal_weight, float)

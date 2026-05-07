@@ -1851,7 +1851,7 @@ In addition to the basic sensors (predicted temperature, heating power, solar ga
 
 All sensors update every coordinator cycle (default 60 seconds) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
 
-The diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) are documented in detail — including ready-to-paste ApexCharts cards — in [`MODEL_FIT_GUIDE.md`](MODEL_FIT_GUIDE.md).  The previous data-generator examples for the Open-Loop and Kalman cards used `e.time * 1000` and have been corrected to use the ISO-8601 timestamps now emitted by the sensors; copy the updated card YAML if you set those charts up earlier.
+The diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) are documented in detail — including ready-to-paste ApexCharts cards — in [`MODEL_FIT_GUIDE.md`](MODEL_FIT_GUIDE.md).  All forecast and diagnostic attributes emit ISO-8601 timestamp strings; use `new Date(e.time).getTime()` (not `e.time * 1000`) in your `data_generator` expressions.
 
 ### 13.2 Temperature forecast trajectory
 

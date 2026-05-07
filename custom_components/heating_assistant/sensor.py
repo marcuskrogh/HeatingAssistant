@@ -981,8 +981,11 @@ class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
 
         for record in self._coordinator.history_buffer:
             y = record.get("y", [])
-            y_pred = record.get("y_pred", [])
+            y_pred = record.get("y_pred")  # may be None for the first record
 
+            # Skip records where no aligned prediction was stored yet
+            if y_pred is None:
+                continue
             if room_idx < len(y) and room_idx < len(y_pred):
                 predictions.append(y_pred[room_idx])
                 measurements.append(y[room_idx])
@@ -1009,8 +1012,11 @@ class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
 
         for record in self._coordinator.history_buffer:
             y = record.get("y", [])
-            y_pred = record.get("y_pred", [])
+            y_pred = record.get("y_pred")  # may be None for the first record
 
+            # Skip records where no aligned prediction was stored yet
+            if y_pred is None:
+                continue
             if room_idx < len(y) and room_idx < len(y_pred):
                 predictions.append(y_pred[room_idx])
                 measurements.append(y[room_idx])
@@ -1174,7 +1180,7 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
         from .model_diagnostics import compute_open_loop_predictions
 
         history = list(self._coordinator.history_buffer)
-        system = self._coordinator.controller._system  # HouseThermalSystem
+        system = self._coordinator.controller._system  # HouseThermalSDE
         room_names = self._coordinator.model.room_names
         n_rooms = len(room_names)
 
@@ -1465,12 +1471,11 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         )
 
         # Terminal-weight in effect (for reference)
-        if hasattr(controller, "_ocp") and hasattr(controller._ocp, "_P"):
-            p_diag = float(np.mean(np.diag(controller._ocp._P)))
-            q_diag = float(np.mean(np.diag(controller._ocp._Q)))
-            attrs["terminal_weight"] = round(p_diag / q_diag, 1) if q_diag > 0 else None
-        else:
-            attrs["terminal_weight"] = None
+        attrs["terminal_weight"] = (
+            controller.terminal_weight
+            if hasattr(controller, "terminal_weight")
+            else None
+        )
 
         # Rolling solve time history (last 50 samples) for sparkline charts
         attrs["recent_solve_times_s"] = [round(t, 4) for t in solve_times[-50:]]

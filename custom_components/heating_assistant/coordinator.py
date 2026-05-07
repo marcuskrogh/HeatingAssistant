@@ -363,12 +363,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.heating_schedule = self.controller.heating_schedule
 
             # Capture Kalman innovation for diagnostics (may be None on first step)
-            try:
-                kalman_innovation: Optional[List[float]] = (
-                    self.controller._mpc._estimator.last_innovation
-                )
-            except AttributeError:
-                kalman_innovation = None
+            # controller.last_innovation is populated by compute() after splitting
+            # the EKF predict/update steps to record ν = y − hm(x̂⁻).
+            kalman_innovation: Optional[List[float]] = self.controller.last_innovation
 
             # 6. Record observation in the rolling history buffer for ML
             #    parameter estimation and model fit analysis.
