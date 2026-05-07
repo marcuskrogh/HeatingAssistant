@@ -568,10 +568,8 @@ class HeatingMPCController:
         # stage cost (which would sacrifice energy efficiency mid-horizon).
         P = terminal_weight * Q
 
-        # Reference and soft constraints (updated before each solve)
+        # Reference and bounds for the OCP
         z_ref = self._system.x_ref.copy()
-        z_min = z_ref - constraint_offset
-        z_max = z_ref + constraint_offset
         u_min, u_max = self._system.u_bounds
 
         # ── CDTrackingOptimalControlProblem ─────────────────────────────
@@ -585,17 +583,16 @@ class HeatingMPCController:
             z_ref=z_ref,
             u_min=u_min,
             u_max=u_max,
-            z_min=z_min,
-            z_max=z_max,
-            rho_z=1e4,
             n_steps=n_int_steps,
             dt=dt,
-            solver="L-BFGS-B",
+            solver="SLSQP",
         )
 
         # ── Warm-start storage ──────────────────────────────────────────
         self._u_prev: np.ndarray = np.zeros(n_u)
         self._u_seq_prev: Optional[np.ndarray] = None
+        self._x_seq_prev: Optional[np.ndarray] = None
+        self._y_seq_prev: Optional[np.ndarray] = None
 
         # ── Solve-time rolling statistics ───────────────────────────────
         self._solve_times: deque = deque(maxlen=MPC_STATS_BUFFER_SIZE)
@@ -725,17 +722,25 @@ class HeatingMPCController:
 
         # ── Update setpoint reference in OCP (setpoints may have changed) ──
         z_ref = self._system.x_ref
-        self._ocp._z_ref = z_ref.copy()
-        self._ocp._z_min = z_ref - self._constraint_offset
-        self._ocp._z_max = z_ref + self._constraint_offset
+        # NOTE: mbc's CDTrackingOptimalControlProblem has no public API for
+        # updating the reference trajectory after construction, so we reach
+        # into the internal EconomicOptimalControlProblem.  This is technical
+        # debt — if the mbc internals change, this line must be updated.
+        _eocp = self._ocp._eocp
+        _M = _eocp._N * _eocp._n_steps
+        _eocp._z_ref = np.tile(z_ref, (_M + 1, 1))
 
         # ── Step 1: EKF predict+update ───────────────────────────────────
         x_hat, _ = self._ekf.step(y, self._u_prev, d_traj[0], p, 0.0)
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
         _t0 = time.perf_counter()
-        u_opt, _ = self._ocp.solve(
-            x_hat, d_traj, u_prev=self._u_seq_prev, p=p, t0=0.0
+        u_opt, _, _info = self._ocp.solve(
+            x_hat, d_traj,
+            u_prev=self._u_seq_prev,
+            x_prev=self._x_seq_prev,
+            y_prev=self._y_seq_prev,
+            p=p, t0=0.0
         )
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1
@@ -745,6 +750,8 @@ class HeatingMPCController:
 
         # Update warm-start for next call
         self._u_seq_prev = u_opt.copy()
+        self._x_seq_prev = _info.get("X")
+        self._y_seq_prev = _info.get("Y")
         self._u_prev = u0.copy()
 
         # ── Apply actions to heat sources ────────────────────────────────

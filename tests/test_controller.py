@@ -356,7 +356,7 @@ class TestCDTrackingOCP:
         x0 = np.array(sde.x)
         d = sde.disturbance_vector(5.0, {})
         d_traj = np.tile(d, (3, 1))
-        u_opt, cost = ocp.solve(x0, d_traj)
+        u_opt, cost, _ = ocp.solve(x0, d_traj)
         assert u_opt.shape == (3, 2)
         assert isinstance(cost, float)
 
@@ -365,7 +365,7 @@ class TestCDTrackingOCP:
         x0 = np.array(sde.x)
         d = sde.disturbance_vector(-10.0, {})
         d_traj = np.tile(d, (3, 1))
-        u_opt, _ = ocp.solve(x0, d_traj)
+        u_opt, _, _ = ocp.solve(x0, d_traj)
         assert np.all(u_opt >= -1e-9)
         assert np.all(u_opt <= 1.0 + 1e-9)
 
@@ -375,7 +375,7 @@ class TestCDTrackingOCP:
         x0 = np.array([15.0, 14.0])  # below setpoints
         d = sde.disturbance_vector(-10.0, {})
         d_traj = np.tile(d, (4, 1))
-        u_opt, _ = ocp.solve(x0, d_traj)
+        u_opt, _, _ = ocp.solve(x0, d_traj)
         assert u_opt[0].sum() > 0.0, "Expected positive heating when below setpoint"
 
     def test_no_heat_above_setpoint(self):
@@ -396,7 +396,7 @@ class TestCDTrackingOCP:
         d = sde.disturbance_vector(22.0, {})
         d_traj = np.tile(d, (3, 1))
         x0 = np.array([25.0, 24.0])
-        u_opt, _ = ocp.solve(x0, d_traj)
+        u_opt, _, _ = ocp.solve(x0, d_traj)
         np.testing.assert_array_almost_equal(u_opt[0], np.zeros(2), decimal=4)
 
 
