@@ -422,7 +422,9 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> Optional[float]:
         predictions = self._coordinator.predictions
         if not predictions:
-            room = self._coordinator.model.rooms[self._room_name]
+            room = self._coordinator.model.rooms.get(self._room_name)
+            if room is None:
+                return None
             return round(room.temperature, 2)
         last = predictions[-1]
         temp = last.get(self._room_name)
@@ -456,7 +458,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
 
         # Current heating power for this room (actual, not planned)
         current_heating = sum(
-            s.current_power
+            getattr(s, "current_power", 0.0)
             for s in self._coordinator.heat_sources
             if s.room == self._room_name
         )
