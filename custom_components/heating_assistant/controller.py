@@ -722,6 +722,10 @@ class HeatingMPCController:
 
         # ── Update setpoint reference in OCP (setpoints may have changed) ──
         z_ref = self._system.x_ref
+        # NOTE: mbc's CDTrackingOptimalControlProblem has no public API for
+        # updating the reference trajectory after construction, so we reach
+        # into the internal EconomicOptimalControlProblem.  This is technical
+        # debt — if the mbc internals change, this line must be updated.
         _eocp = self._ocp._eocp
         _M = _eocp._N * _eocp._n_steps
         _eocp._z_ref = np.tile(z_ref, (_M + 1, 1))
