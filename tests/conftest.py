@@ -59,8 +59,10 @@ for _pkg in _HA_PACKAGES:
 class _FakeEnum:
     """Stand-in for HA string-enum classes."""
     CELSIUS = "°C"
+    WATT = "W"
     MEASUREMENT = "measurement"
     TOTAL = "total"
+    TOTAL_INCREASING = "total_increasing"
     HUMIDITY = "humidity"
     TEMPERATURE = "temperature"
     POWER = "power"
