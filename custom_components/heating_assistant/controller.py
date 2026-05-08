@@ -867,19 +867,23 @@ class HeatingMPCController:
     def _forecast_solar(self, now: datetime) -> List[Dict[str, float]]:
         """Solar gain forecast using the geometric solar model.
 
-        ``solar_seq[k]`` represents the solar gains at the *start* of horizon
-        step k, i.e. at ``now + k * dt``.  Step 0 therefore maps to the
-        current solar gains, which is the correct disturbance for both:
+        Returns N+1 entries where ``solar_seq[k]`` = solar at ``now + k * dt``
+        for k = 0, …, N.
 
-        * The EKF predict step (propagating from ``now − dt`` to ``now``).
-        * The OCP's first prediction step (interval ``[now, now + dt]``).
+        * k = 0 maps to the current solar gains — the correct disturbance for
+          the EKF predict step (propagating from ``now − dt`` to ``now``) and
+          for the OCP's first prediction step (interval ``[now, now + dt]``).
+        * k = 1 … N−1 supply the OCP horizon steps 1 … N−1.
+        * k = N is one step beyond the OCP horizon, stored so the visualised
+          forecast trace can cover the full prediction window from ``now`` to
+          ``now + N·dt`` without truncating the final step.
 
-        Using ``now + (k + 1) * dt`` (an off-by-one) would feed the EKF a
-        *future* disturbance and shift all OCP predictions one step ahead,
-        causing the visualised forecast to diverge from the actual trajectory.
+        Only the first N entries (k = 0 … N−1) are used to build ``d_traj``
+        for the OCP.  All N+1 entries are stored in ``_solar_forecast`` and
+        exposed via the ``solar_forecast`` property for sensor visualisation.
         """
         schedules = []
-        for k in range(self._horizon):
+        for k in range(self._horizon + 1):  # N+1 entries: k = 0 … N
             t = now + timedelta(seconds=self._dt * k)
             schedules.append({
                 name: room_solar_gains(

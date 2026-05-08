@@ -829,26 +829,33 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
-        # Current actual solar gain for this room
-        current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
-
+        # solar_forecast has N+1 entries: solar_forecast[k] = solar at now + k*dt
+        # for k = 0, …, N.  Entry k=0 is at "now" and acts as the bridge point
+        # that connects the forecast trace to the HA recorder history.
         forecast = []
-        # Entry at t=now: bridge between history and prediction
-        forecast.append({
-            "time": now.isoformat(),
-            "solar_gain": round(current_solar, 1),
-        })
         for i, step in enumerate(solar_forecast):
-            step_time = now + timedelta(seconds=dt * (i + 1))
+            step_time = now + timedelta(seconds=dt * i)
             forecast.append({
                 "time": step_time.isoformat(),
                 "solar_gain": round(step.get(self._room_name, 0.0), 1),
             })
 
+        # Fallback: if solar_forecast is empty (before first compute), provide
+        # a single bridge point using the coordinator's current solar_gains.
+        if not forecast:
+            current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
+            forecast.append({
+                "time": now.isoformat(),
+                "solar_gain": round(current_solar, 1),
+            })
+
         room = self._coordinator.model.rooms[self._room_name]
+        # horizon_steps is N (the OCP horizon), which is len(solar_forecast) - 1
+        # when solar_forecast is populated (N+1 entries), or 0 when empty.
+        horizon_steps = max(0, len(solar_forecast) - 1)
         return {
             "forecast": forecast,
-            "horizon_steps": len(solar_forecast),
+            "horizon_steps": horizon_steps,
             "step_seconds": dt,
             "window_count": len(room.windows),
             "total_window_area": round(sum(w.area for w in room.windows), 2),
