@@ -281,7 +281,7 @@ class TestControllerForecastData:
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
         ctrl.compute(outdoor_temp=5.0, now=now)
 
-        assert len(ctrl.solar_forecast) == 4
+        assert len(ctrl.solar_forecast) == 5  # N+1: covers now through now+N*dt
         for step in ctrl.solar_forecast:
             assert "studio" in step
             assert isinstance(step["studio"], (int, float))
@@ -319,7 +319,7 @@ class TestControllerForecastData:
 
         assert len(ctrl.predictions) == 6
         assert len(ctrl.heating_schedule) == 6
-        assert len(ctrl.solar_forecast) == 6
+        assert len(ctrl.solar_forecast) == 7  # N+1: covers now through now+N*dt
         assert len(ctrl.outdoor_forecast) == 6
 
     def test_heating_schedule_covers_all_rooms(self):
@@ -512,6 +512,236 @@ class TestVisualisationSensorFallbacks:
         sensor = SolarForecastSensor(coordinator, "living_room")
 
         assert sensor.native_value == pytest.approx(87.6)
+
+
+# ---------------------------------------------------------------------------
+# Tests: forecast sensor timestamp correctness
+# ---------------------------------------------------------------------------
+
+class TestForecastSensorTimestamps:
+    """Verify that forecast attribute timestamps match the solar forecast values."""
+
+    _DT = 900  # seconds per step
+
+    def _make_coordinator(self, horizon: int, solar_values: list):
+        """Create a minimal coordinator stub with populated solar_forecast."""
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        # solar_forecast has N+1 entries (k=0...N), one per time step from now
+        return SimpleNamespace(
+            solar_forecast=solar_values,
+            solar_gains={"studio": solar_values[0].get("studio", 0.0)},
+            outdoor_forecast=[5.0] * horizon,
+            heating_schedule=[{"studio": 1000.0}] * horizon,
+            predictions=[{"studio": 21.0}] * horizon,
+            model=SimpleNamespace(rooms={"studio": room}),
+            heat_sources=[],
+            outdoor_temp=5.0,
+            dt=self._DT,
+            controller=SimpleNamespace(constraint_offset=2.0),
+        )
+
+    def test_solar_forecast_entry_count(self):
+        """SolarForecastSensor forecast list must have N+1 entries (bridge + N steps)."""
+        solar = [{"studio": float(k * 100)} for k in range(5)]  # N+1 = 5 → N=4
+        coordinator = self._make_coordinator(horizon=4, solar_values=solar)
+        sensor = SolarForecastSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        assert len(attrs["forecast"]) == 5  # N+1 entries
+
+    def test_solar_forecast_first_entry_at_now(self):
+        """First forecast entry must be at 'now' (the bridge point)."""
+        solar = [{"studio": 50.0}]
+        coordinator = self._make_coordinator(horizon=0, solar_values=solar)
+        sensor = SolarForecastSensor(coordinator, "studio")
+
+        before = datetime.now(tz=timezone.utc)
+        attrs = sensor.extra_state_attributes
+        after = datetime.now(tz=timezone.utc)
+
+        t0 = datetime.fromisoformat(attrs["forecast"][0]["time"])
+        assert before <= t0 <= after
+
+    def test_solar_forecast_timestamps_spaced_by_dt(self):
+        """Each consecutive forecast entry must be exactly dt seconds apart."""
+        dt = self._DT
+        solar = [{"studio": float(k * 10)} for k in range(5)]  # N+1 = 5
+        coordinator = self._make_coordinator(horizon=4, solar_values=solar)
+        sensor = SolarForecastSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        fc = attrs["forecast"]
+        for i in range(1, len(fc)):
+            t_prev = datetime.fromisoformat(fc[i - 1]["time"])
+            t_curr = datetime.fromisoformat(fc[i]["time"])
+            gap = (t_curr - t_prev).total_seconds()
+            assert gap == pytest.approx(dt, abs=1.0)
+
+    def test_solar_forecast_values_match_source(self):
+        """Each entry's solar_gain must come from the corresponding solar_forecast slot."""
+        solar = [{"studio": float(k * 10)} for k in range(5)]
+        coordinator = self._make_coordinator(horizon=4, solar_values=solar)
+        sensor = SolarForecastSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        fc = attrs["forecast"]
+        for i, expected in enumerate(solar):
+            assert fc[i]["solar_gain"] == pytest.approx(expected["studio"], abs=0.11)
+
+    def test_solar_forecast_horizon_steps_attribute(self):
+        """horizon_steps must equal N (the OCP horizon), not N+1."""
+        solar = [{"studio": 0.0}] * 7  # N+1 = 7 → N = 6
+        coordinator = self._make_coordinator(horizon=6, solar_values=solar)
+        sensor = SolarForecastSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        assert attrs["horizon_steps"] == 6
+
+    def test_solar_forecast_fallback_when_empty(self):
+        """When solar_forecast is empty, a single bridge entry at now is returned."""
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        coordinator = SimpleNamespace(
+            solar_forecast=[],
+            solar_gains={"studio": 123.4},
+            model=SimpleNamespace(rooms={"studio": room}),
+            heat_sources=[],
+            predictions=[],
+            outdoor_forecast=[],
+            heating_schedule=[],
+            outdoor_temp=5.0,
+            dt=self._DT,
+        )
+        sensor = SolarForecastSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        assert len(attrs["forecast"]) == 1
+        assert attrs["forecast"][0]["solar_gain"] == pytest.approx(123.4, abs=0.1)
+
+
+# ---------------------------------------------------------------------------
+# Tests: heating plan forecast timestamp correctness
+# ---------------------------------------------------------------------------
+
+class TestHeatingPlanForecastTimestamps:
+    """Verify that HeatingPlanSensor forecast timestamps use start-of-interval labelling."""
+
+    _DT = 900  # seconds per step
+
+    def _make_coordinator(self, horizon: int, power: float = 1000.0):
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        return SimpleNamespace(
+            heating_schedule=[{"studio": power}] * horizon,
+            heat_sources=[SimpleNamespace(room="studio", current_power=power)],
+            model=SimpleNamespace(rooms={"studio": room}),
+            solar_forecast=[],
+            solar_gains={},
+            predictions=[],
+            outdoor_forecast=[],
+            outdoor_temp=5.0,
+            dt=self._DT,
+        )
+
+    def test_heating_plan_entry_count_equals_horizon(self):
+        """forecast list must have exactly N entries for an N-step schedule."""
+        coordinator = self._make_coordinator(horizon=6)
+        sensor = HeatingPlanSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        assert len(attrs["forecast"]) == 6
+
+    def test_heating_plan_first_entry_at_now(self):
+        """First forecast entry must be labelled at 'now' (bridges history)."""
+        coordinator = self._make_coordinator(horizon=4)
+        sensor = HeatingPlanSensor(coordinator, "studio")
+
+        before = datetime.now(tz=timezone.utc)
+        attrs = sensor.extra_state_attributes
+        after = datetime.now(tz=timezone.utc)
+
+        t0 = datetime.fromisoformat(attrs["forecast"][0]["time"])
+        assert before <= t0 <= after
+
+    def test_heating_plan_timestamps_spaced_by_dt(self):
+        """Consecutive forecast entries must be exactly dt seconds apart."""
+        coordinator = self._make_coordinator(horizon=5)
+        sensor = HeatingPlanSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        fc = attrs["forecast"]
+        for i in range(1, len(fc)):
+            t_prev = datetime.fromisoformat(fc[i - 1]["time"])
+            t_curr = datetime.fromisoformat(fc[i]["time"])
+            gap = (t_curr - t_prev).total_seconds()
+            assert gap == pytest.approx(self._DT, abs=1.0)
+
+    def test_heating_plan_values_match_schedule(self):
+        """Each entry's heating_power must come from the corresponding schedule slot."""
+        powers = [100.0 * (i + 1) for i in range(4)]
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        coordinator = SimpleNamespace(
+            heating_schedule=[{"studio": p} for p in powers],
+            heat_sources=[],
+            model=SimpleNamespace(rooms={"studio": room}),
+            solar_forecast=[],
+            solar_gains={},
+            predictions=[],
+            outdoor_forecast=[],
+            outdoor_temp=5.0,
+            dt=self._DT,
+        )
+        sensor = HeatingPlanSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        fc = attrs["forecast"]
+        for i, expected in enumerate(powers):
+            assert fc[i]["heating_power"] == pytest.approx(expected, abs=0.11)
+
+    def test_heating_plan_horizon_steps_attribute(self):
+        """horizon_steps must equal N (the OCP horizon length)."""
+        coordinator = self._make_coordinator(horizon=8)
+        sensor = HeatingPlanSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        assert attrs["horizon_steps"] == 8
+
+    def test_heating_plan_fallback_when_empty(self):
+        """When schedule is empty, a single bridge entry from current_power is returned."""
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        coordinator = SimpleNamespace(
+            heating_schedule=[],
+            heat_sources=[SimpleNamespace(room="studio", current_power=432.0)],
+            model=SimpleNamespace(rooms={"studio": room}),
+            solar_forecast=[],
+            solar_gains={},
+            predictions=[],
+            outdoor_forecast=[],
+            outdoor_temp=5.0,
+            dt=self._DT,
+        )
+        sensor = HeatingPlanSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        assert len(attrs["forecast"]) == 1
+        assert attrs["forecast"][0]["heating_power"] == pytest.approx(432.0, abs=0.1)
+
+    def test_heating_plan_fallback_missing_current_power(self):
+        """Fallback must use getattr guard — missing current_power defaults to 0."""
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        coordinator = SimpleNamespace(
+            heating_schedule=[],
+            heat_sources=[SimpleNamespace(room="studio")],  # no current_power attr
+            model=SimpleNamespace(rooms={"studio": room}),
+            solar_forecast=[],
+            solar_gains={},
+            predictions=[],
+            outdoor_forecast=[],
+            outdoor_temp=5.0,
+            dt=self._DT,
+        )
+        sensor = HeatingPlanSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        assert attrs["forecast"][0]["heating_power"] == pytest.approx(0.0, abs=0.1)
 
 
 # ---------------------------------------------------------------------------

@@ -475,7 +475,7 @@ class TestHeatingMPCController:
         ctrl.compute(outdoor_temp=5.0, now=now)
         assert len(ctrl.predictions) == 3
         assert len(ctrl.outdoor_forecast) == 3
-        assert len(ctrl.solar_forecast) == 3
+        assert len(ctrl.solar_forecast) == 4  # N+1: covers now through now+N*dt
         assert len(ctrl.heating_schedule) == 3
 
     def test_predictions_contain_all_rooms(self):
@@ -707,15 +707,15 @@ class TestSolarForecastIndexing:
                 "solar_seq[0] must not equal the old (k+1) value"
             )
 
-    def test_solar_forecast_length_unchanged(self):
-        """_forecast_solar must still return horizon entries."""
+    def test_solar_forecast_length_is_horizon_plus_one(self):
+        """_forecast_solar must return N+1 entries to cover now through now+N*dt."""
         room = Room("r", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
         model = HouseModel([room])
         ctrl = HeatingMPCController(
             model, [ElectricHeater("h", "r", 1000)], horizon=6, dt=900,
         )
         solar_seq = ctrl._forecast_solar(self._NOW)
-        assert len(solar_seq) == 6
+        assert len(solar_seq) == 7  # horizon + 1
 
     def test_d_traj_zero_uses_current_disturbance(self):
         """After fix, d_traj[0] must use current solar (not future solar)."""

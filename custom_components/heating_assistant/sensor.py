@@ -761,24 +761,26 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
-        # Current actual heating power for this room
-        current_heating = sum(
-            s.current_power
-            for s in self._coordinator.heat_sources
-            if s.room == self._room_name
-        )
-
         forecast = []
-        # Entry at t=now: bridge between history and prediction
-        forecast.append({
-            "time": now.isoformat(),
-            "heating_power": round(current_heating, 1),
-        })
-        for i, step in enumerate(schedule):
-            step_time = now + timedelta(seconds=dt * (i + 1))
+        if schedule:
+            # heating_schedule[i] = planned power for [now + i*dt, now + (i+1)*dt]
+            # Label at start of interval (now + i*dt); i=0 bridges history to plan
+            for i, step in enumerate(schedule):
+                step_time = now + timedelta(seconds=dt * i)
+                forecast.append({
+                    "time": step_time.isoformat(),
+                    "heating_power": round(step.get(self._room_name, 0.0), 1),
+                })
+        else:
+            # Fallback: bridge from current actual power when no schedule is available
+            current_heating = sum(
+                getattr(s, "current_power", 0.0)
+                for s in self._coordinator.heat_sources
+                if s.room == self._room_name
+            )
             forecast.append({
-                "time": step_time.isoformat(),
-                "heating_power": round(step.get(self._room_name, 0.0), 1),
+                "time": now.isoformat(),
+                "heating_power": round(current_heating, 1),
             })
 
         return {
@@ -829,26 +831,33 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
-        # Current actual solar gain for this room
-        current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
-
+        # solar_forecast has N+1 entries: solar_forecast[k] = solar at now + k*dt
+        # for k = 0, …, N.  Entry k=0 is at "now" and acts as the bridge point
+        # that connects the forecast trace to the HA recorder history.
         forecast = []
-        # Entry at t=now: bridge between history and prediction
-        forecast.append({
-            "time": now.isoformat(),
-            "solar_gain": round(current_solar, 1),
-        })
         for i, step in enumerate(solar_forecast):
-            step_time = now + timedelta(seconds=dt * (i + 1))
+            step_time = now + timedelta(seconds=dt * i)
             forecast.append({
                 "time": step_time.isoformat(),
                 "solar_gain": round(step.get(self._room_name, 0.0), 1),
             })
 
+        # Fallback: if solar_forecast is empty (before first compute), provide
+        # a single bridge point using the coordinator's current solar_gains.
+        if not forecast:
+            current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
+            forecast.append({
+                "time": now.isoformat(),
+                "solar_gain": round(current_solar, 1),
+            })
+
         room = self._coordinator.model.rooms[self._room_name]
+        # horizon_steps is N (the OCP horizon), which is len(solar_forecast) - 1
+        # when solar_forecast is populated (N+1 entries), or 0 when empty.
+        horizon_steps = max(0, len(solar_forecast) - 1)
         return {
             "forecast": forecast,
-            "horizon_steps": len(solar_forecast),
+            "horizon_steps": horizon_steps,
             "step_seconds": dt,
             "window_count": len(room.windows),
             "total_window_area": round(sum(w.area for w in room.windows), 2),
