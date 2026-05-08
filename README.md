@@ -2242,13 +2242,6 @@ now:
   show: true
   label: Now
   color: '#424242'
-# fill_areas shades the region between the two constraint series.
-# series_1 is the upper bound, series_2 is the lower bound.
-fill_areas:
-  - series_1: Constraint Upper
-    series_2: Constraint Lower
-    opacity: 0.15
-    color: '#1565C0'
 yaxis:
   - id: temp
     apex_config:
@@ -2573,11 +2566,6 @@ cards:
       show: true
       label: Now
       color: '#424242'
-    fill_areas:
-      - series_1: Constraint Upper
-        series_2: Constraint Lower
-        opacity: 0.15
-        color: '#1565C0'
     yaxis:
       - id: temp
         apex_config:
