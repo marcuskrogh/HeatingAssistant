@@ -99,7 +99,6 @@ class PredictedTemperatureSensor(CoordinatorEntity, SensorEntity):
     """Sensor reporting the model-predicted temperature for a room."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     def __init__(
@@ -345,7 +344,6 @@ class OutdoorForecastSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_icon = "mdi:thermometer-lines"
 
@@ -403,7 +401,6 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_icon = "mdi:chart-line"
 
@@ -728,7 +725,6 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_device_class = SensorDeviceClass.POWER
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:radiator"
 
@@ -803,7 +799,6 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_device_class = SensorDeviceClass.POWER
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:weather-sunny-alert"
 
