@@ -83,15 +83,20 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 13.9 [Diagnostics panel](#139-diagnostics-panel)
     - 13.10 [Setup service – simulate thermal response](#1310-setup-service--simulate-thermal-response)
     - 13.11 [Setup service – estimate parameters](#1311-setup-service--estimate-parameters)
-    - 13.12 [Lovelace dashboard – board and card reference](#1312-lovelace-dashboard--board-and-card-reference)
-        - 13.12.1 [Prerequisites](#13121-prerequisites)
-        - 13.12.2 [Dashboard structure – board with room subboards](#13122-dashboard-structure--board-with-room-subboards)
-        - 13.12.3 [MPC predicted temperature card](#13123-mpc-predicted-temperature-card)
-        - 13.12.4 [MPC control input card](#13124-mpc-control-input-card)
-        - 13.12.5 [Disturbance forecast card](#13125-disturbance-forecast-card)
-        - 13.12.6 [Room performance card](#13126-room-performance-card)
-        - 13.12.7 [System overview card](#13127-system-overview-card)
-        - 13.12.8 [Complete room subboard example](#13128-complete-room-subboard-example)
+    - 13.12 [Setup service – estimate parameters (ML)](#1312-setup-service--estimate-parameters-ml)
+    - 13.13 [Diagnostic service – analyze model fit](#1313-diagnostic-service--analyze-model-fit)
+    - 13.14 [Diagnostic service – validate parameters](#1314-diagnostic-service--validate-parameters)
+    - 13.15 [Diagnostic service – controller performance report](#1315-diagnostic-service--controller-performance-report)
+    - 13.16 [Diagnostic service – run open-loop simulation](#1316-diagnostic-service--run-open-loop-simulation)
+    - 13.17 [Lovelace dashboard – board and card reference](#1317-lovelace-dashboard--board-and-card-reference)
+        - 13.17.1 [Prerequisites](#13171-prerequisites)
+        - 13.17.2 [Dashboard structure – board with room subboards](#13172-dashboard-structure--board-with-room-subboards)
+        - 13.17.3 [MPC predicted temperature card](#13173-mpc-predicted-temperature-card)
+        - 13.17.4 [MPC control input card](#13174-mpc-control-input-card)
+        - 13.17.5 [Disturbance forecast card](#13175-disturbance-forecast-card)
+        - 13.17.6 [Room performance card](#13176-room-performance-card)
+        - 13.17.7 [System overview card](#13177-system-overview-card)
+        - 13.17.8 [Complete room subboard example](#13178-complete-room-subboard-example)
 14. [Thermal Model Parameter Estimation Guide](#14-thermal-model-parameter-estimation-guide)
     - 14.1 [Thermal mass `thermal_mass`](#141-thermal-mass-thermal_mass)
     - 14.2 [External thermal resistance `r_external`](#142-external-thermal-resistance-r_external)
@@ -126,7 +131,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Electric heater support** | Resistive heaters and infrared panels modelled as `Q_thermal = P_electrical × η`.  Efficiency is configurable. |
 | **Air-source heat pump support** | Temperature-dependent COP based on Carnot scaling.  The pump shuts off automatically below a configurable outdoor temperature floor to prevent defrost damage.  Offset-based setpoint control (`max_temp_offset`) lets the heat pump modulate output via the gap between its internal sensor and the target temperature. |
 | **Multiple heat sources per room** | Any number of heaters and/or heat pumps can be assigned to the same room; the controller optimises them jointly. |
-| **Turn-off deadband** | Heat pumps stay in heat mode (idling at the internal temperature) when the MPC says "no heat needed" but the room is still within a configurable deadband of the setpoint.  Only when the room exceeds *setpoint + deadband* does the unit actually turn off — dramatically reducing compressor short-cycling. |
+| **Turn-off deadband** | Two-threshold Schmitt-trigger hysteresis around the setpoint (width = 2 × `turn_off_deadband`).  Passive cooling engages only when `room_temp > setpoint + deadband`, and disengages only when `room_temp < setpoint − deadband`.  Between the thresholds the current mode is held, preventing rapid toggling. |
 | **Receding-horizon NMPC** | Each control cycle the controller solves a nonlinear program (NLP) over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error, energy use, and input rate-of-change (Δu smoothing).  Inputs are applied via zero-order hold. |
 | **CD-EKF state estimation** | A continuous-discrete Extended Kalman Filter (CD-EKF) integrates the nonlinear thermal SDE and linearised Riccati ODE between measurements, providing the minimum-variance state estimate for the nonlinear house thermal model. |
 | **Generic MBC framework** | The controller is built on the `mbc` (model-based control) package, providing `ContinuousDiscreteModel`, `ContinuousDiscreteEKF`, and `CDTrackingOptimalControlProblem` components that can be reused for any continuous-discrete nonlinear system. |
@@ -192,29 +197,52 @@ custom_components/heating_assistant/
 │                          •   → uses ContinuousDiscreteEKF from mbc.estimation
 │                          •   → uses CDTrackingOptimalControlProblem from mbc.control
 │
+├── parameter_estimator.py ML thermal parameter estimation
+│                          • KalmanMLEstimator: maximum-likelihood thermal parameter fitting
+│                          • Uses Nelder–Mead optimisation over Kalman PED log-likelihood
+│                          • estimate(): returns {room: {thermal_mass, r_external}}
+│
+├── model_diagnostics.py   Analysis tools for tuning and validation
+│                          • Prediction-error analysis (RMSE, MAE, R², bias)
+│                          • Residual autocorrelation (Ljung–Box Q test)
+│                          • Open-loop multi-step simulation
+│                          • Controller performance report
+│
 ├── diagnostics.py         HA diagnostics platform
 │                          • async_get_config_entry_diagnostics(): full system state dump
 │
-├── services.yaml          Service definitions for setup assistance
+├── services.yaml          Service definitions (simulate, estimate, analyze, validate, …)
 │
 ├── climate.py             HA climate platform
 │                          • RoomClimateEntity per room
+│                          • Modes: heat_cool (heat-pump rooms) / heat / off
+│                          • Actions: heating / cooling / idle
 │                          • Setpoint range: 5 °C – 30 °C, step 0.5 °C
 │
+├── button.py              HA button platform
+│                          • EstimateParametersButton: triggers ML parameter estimation
+│                            with one press; applies results and posts a notification
+│
 └── sensor.py              HA sensor platform
-                           • PredictedTemperatureSensor per room   [°C]
-                           • HeatingPowerSensor per room           [W]
-                           • SolarGainSensor per room              [W]
-                           • TemperatureForecastSensor per room    [°C] (MPC trajectory + timestamped forecast)
-                           • HeatLossSensor per room               [W]
-                           • EnergyBalanceSensor per room          [W]
-                           • HeatingPlanSensor per room            [W] (planned heating schedule)
-                           • SolarForecastSensor per room          [W] (predicted solar gains)
-                           • ControlActionSensor per heat source   [%]
-                           • HeatPumpCOPSensor per heat pump
-                           • OutdoorTemperatureSensor system-wide  [°C]
-                           • OutdoorForecastSensor system-wide     [°C] (outdoor temp forecast)
-                           • SystemEfficiencySensor system-wide    [W]
+                           • PredictedTemperatureSensor per room         [°C]
+                           • HeatingPowerSensor per room                 [W]
+                           • SolarGainSensor per room                    [W]
+                           • TemperatureForecastSensor per room          [°C]
+                           • HeatLossSensor per room                     [W]
+                           • EnergyBalanceSensor per room                [W]
+                           • HeatingPlanSensor per room                  [W]
+                           • SolarForecastSensor per room                [W]
+                           • PredictionErrorSensor per room              [°C]
+                           • ModelFitQualitySensor per room              [–]
+                           • ParameterConfidenceSensor per room          [–]
+                           • OpenLoopRMSESensor per room                 [°C]
+                           • KalmanInnovationSensor per room             [°C]
+                           • ResidualACFSensor per room                  [–]
+                           • ControlActionSensor per heat source         [%]
+                           • HeatPumpCOPSensor per heat pump             [–]
+                           • OutdoorTemperatureSensor system-wide        [°C]
+                           • OutdoorForecastSensor system-wide           [°C]
+                           • SystemEfficiencySensor system-wide          [W]
 ```
 
 ### 2.2 Data flow
@@ -428,7 +456,7 @@ $$\text{COP}_{\text{Carnot}}(T) = \frac{T_{\text{supply}}}{\max(T_{\text{supply}
 
 The `max(…, 1)` guard ensures the COP never falls below 1.0 (even in extreme cold, a heat pump is at least as efficient as direct electric heating).
 
-**Minimum outdoor temperature:** if `T_outdoor < min_outdoor_temp` (default −20 °C) the heat pump shuts off completely (`COP = 0`) to represent the compressor lock-out that real units implement to avoid defrost damage.
+**Minimum outdoor temperature:** if `T_outdoor < −20 °C` the heat pump shuts off completely (`COP = 0`) to represent the compressor lock-out that real units implement to avoid defrost damage.  This threshold is hardcoded and not currently configurable via YAML.
 
 **Offset-based setpoint control:** when the heat pump is connected via a `climate.*` entity, Heating Assistant reads the heat pump's own internal temperature sensor (`current_temperature` attribute) and sets the heat pump's target temperature to:
 
@@ -436,15 +464,25 @@ $$T_{\text{target}} = T_{\text{hp,internal}} + \text{fraction} \times \text{max 
 
 where `max_temp_offset` (default 5 °C) is the maximum temperature differential at full power.  This makes the heat pump modulate its own output based on the gap between the setpoint it receives and its own temperature reading.  If the heat pump's internal temperature is unavailable, the HA room temperature is used as a fallback.
 
-**Turn-off deadband:** to prevent aggressive on/off cycling of the compressor, heat pumps use a three-state control strategy based on the configurable `turn_off_deadband` parameter (default 1.0 °C):
+**Hysteresis deadband:** the integration tracks a per-heat-pump cooling/heating state and uses separate thresholds for mode transitions, so a small temperature fluctuation near the setpoint cannot cause rapid toggling:
 
-| MPC fraction | Room temperature condition | Action |
-|:---:|:---|:---|
-| `> 0` | — | **Heat mode:** target = T_hp_internal + fraction × max_temp_offset |
-| `= 0` | `room_temp ≤ setpoint + deadband` | **Idle:** stay in heat mode, set target = T_hp_internal (no offset — HP idles with minimal output) |
-| `= 0` | `room_temp > setpoint + deadband` | **Off:** set HVAC mode to "off" |
+| Transition | Temperature condition | Result |
+|:---|:---|:---|
+| heating/idle → cooling | `room_temp > setpoint + turn_off_deadband` | Enter cooling mode |
+| cooling → heating/idle | `room_temp < setpoint − turn_off_deadband` | Exit cooling mode |
+| (no transition) | `setpoint − deadband ≤ room_temp ≤ setpoint + deadband` | **Hold** current mode |
 
-This means the heat pump compressor keeps running (but produces minimal heat) when the room is near the setpoint, and only shuts down once the room is well above the target.  This dramatically reduces wear from short-cycling.
+Once in either mode, the unit stays there until the temperature crosses the opposite threshold.  Within the dead-band window (width = 2 × `turn_off_deadband`) the mode is locked.
+
+**Dispatch inside each mode** (checked only after hysteresis resolves the mode):
+
+| Mode | MPC fraction | Action |
+|:---|:---:|:---|
+| Cooling | any | Switch to `dry` (or `fan_only`); target = T_hp_internal − (1 °C + overshoot) |
+| Heating/idle | `> 0` | Heat mode; target = T_hp_internal + fraction × max_temp_offset |
+| Heating/idle | `= 0` | Idle heat mode; target = T_hp_internal (no offset — HP produces near-zero heat) |
+
+The heat pump **never turns fully off** via HVAC mode in normal operation.  When cooling, the idle setpoint offset grows with overshoot: `target = T_hp_internal − (1.0 + overshoot)` where `overshoot = max(0, room_temp − setpoint)`.  This keeps the cooling effect proportional to how far above the setpoint the room is.
 
 **Cooling mode (dry/dehumidify):** when the room temperature exceeds the setpoint, the heat pump automatically switches to a gentle cooling mode to help bring the temperature down. The integration prefers "dry" (dehumidify) mode if available, which provides passive cooling without running the compressor at full cooling capacity. If "dry" mode is not supported, it falls back to "fan_only" mode.
 
@@ -610,13 +648,13 @@ compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
 
 ### 5.1 Platforms and entities
 
-Heating Assistant registers two HA platforms: **climate** and **sensor**.
+Heating Assistant registers three HA platforms: **climate**, **sensor**, and **button**.
 
 For each room declared in `configuration.yaml` the integration creates:
 
 | Entity ID | Platform | State | Attributes |
 |-----------|----------|-------|------------|
-| `climate.heating_assistant_<room_name>` | climate | HVAC mode (`heat` / `off`) | current_temperature, target_temperature |
+| `climate.heating_assistant_<room_name>` | climate | HVAC mode (`heat_cool` / `heat` / `off`) | current_temperature, target_temperature, hvac_action |
 | `sensor.heating_assistant_<room_name>_predicted_temperature` | sensor | Temperature in °C | setpoint, thermal_mass, r_external |
 | `sensor.heating_assistant_<room_name>_heating_power` | sensor | Total heating power in W | Per-source breakdown by source name |
 | `sensor.heating_assistant_<room_name>_solar_gain` | sensor | Current solar heat gain in W | window_count, total_window_area |
@@ -627,11 +665,18 @@ For each room declared in `configuration.yaml` the integration creates:
 | `sensor.heating_assistant_<room_name>_solar_forecast` | sensor | Current predicted solar gain in W | forecast (timestamped), horizon_steps, window_count |
 | `sensor.heating_assistant_outdoor_temperature_forecast` | sensor | Current outdoor temperature in °C | forecast (timestamped), horizon_steps |
 
+One system-wide button entity is also created:
+
+| Entity ID | Platform | Action |
+|-----------|----------|--------|
+| `button.heating_assistant_estimate_parameters` | button | Triggers ML thermal parameter estimation; applies results and posts a persistent notification |
+
 **Climate entity behaviour:**
 
 - **`target_temperature`** — the room setpoint.  Updated via `async_set_temperature()`.  Adjustable range: 5 °C – 30 °C in 0.5 °C steps.
 - **`current_temperature`** — the latest room temperature (measured via `temp_sensor` if configured, otherwise the model's internal state).
-- **`hvac_mode` = `heat`** when at least one heater in the room has `current_power > 0`; otherwise `off`.
+- **`hvac_modes`** — rooms served by a heat pump advertise `[heat_cool, heat, off]`; heat-only rooms advertise `[heat, off]`.
+- **`hvac_action`** — `heating` when any heater in the room is producing heat; `cooling` when a heat pump is actively removing heat; `idle` otherwise.
 - **Setting mode to `off`** immediately sets the room setpoint to 5 °C (frost protection).
 - **Setting mode to `heat`** restores the default setpoint (21 °C) if the current setpoint is at the frost-protection floor.
 
@@ -654,9 +699,9 @@ Heat pumps connected via `climate.*` entities use an offset-based control strate
 |:---:|:---|:---:|:---|
 | `> 0` | — | `heat` | `T_hp_internal + fraction × max_temp_offset` |
 | `= 0` | `≤ setpoint` | `heat` | `T_hp_internal − idle_offset` (idle — setpoint below internal temp to prevent heating) |
-| `= 0` | `> setpoint` | `fan_only` | — (fan recirculates air without engaging compressor cooling) |
+| `= 0` | `> setpoint` | `dry` (preferred) or `fan_only` (fallback) | — (gentle dehumidification / air recirculation without full compressor cooling) |
 
-When the room temperature exceeds the setpoint and no heating is required, the heat pump is placed in **fan-only mode** (`fan_only`).  This gently recirculates and mixes the room air without engaging the compressor in active cooling mode.  This avoids unnecessary energy use from the compressor while still promoting air movement to help even out temperature.
+When the room temperature exceeds the setpoint and no heating is required, the heat pump is switched to a gentle cooling mode.  The integration prefers `dry` (dehumidify) mode, which provides passive cooling without running the compressor at full capacity.  If the heat pump entity does not support `dry`, it falls back to `fan_only`.  Either way the compressor does not engage at full cooling power, avoiding unnecessary energy use while promoting air movement.
 
 The heat pump's own internal temperature (`current_temperature` attribute on the climate entity) is read each cycle.  If unavailable, the HA room temperature from the configured `temp_sensor` is used as a fallback.
 
@@ -740,8 +785,13 @@ No cloud connectivity is required.  The integration is classified as `iot_class:
            ├── solar_model.py
            ├── heat_sources.py
            ├── controller.py
+           ├── optimal_control.py
+           ├── state_estimator.py
+           ├── parameter_estimator.py
+           ├── model_diagnostics.py
            ├── climate.py
            ├── sensor.py
+           ├── button.py
            ├── diagnostics.py
            ├── services.yaml
            └── translations/
@@ -924,6 +974,7 @@ Once HA has restarted:
    | `sensor.heating_assistant_<room_name>_heating_plan` | Planned heating schedule [W] |
    | `sensor.heating_assistant_<room_name>_solar_forecast` | Predicted solar gain schedule [W] |
    | `sensor.heating_assistant_outdoor_temperature_forecast` | Outdoor temperature forecast over the MPC horizon [°C] |
+   | `button.heating_assistant_estimate_parameters` | One-press ML parameter estimation |
    | `sensor.heating_assistant_mpc_performance` | MPC solver performance statistics (solve time, tracking error) |
 
 3. If entities are **missing**, check the HA log for errors under the `heating_assistant` integration.  The most common cause is a room or heat source configuration error in `configuration.yaml`.
@@ -968,7 +1019,7 @@ Over the first few days of operation, observe the system and refine your paramet
 |-------------|-------------|--------|
 | Room consistently undershoots setpoint | `r_external` too high (overestimates heat loss) **or** `thermal_mass` too low | Decrease `r_external` or increase `thermal_mass` |
 | Room consistently overshoots setpoint | `r_external` too low **or** `thermal_mass` too high | Increase `r_external` or decrease `thermal_mass` |
-| Predicted temperature diverges quickly from actual | Wrong `thermal_mass` or `r_external` | Compare steady-state heat loss empirically (see [Section 13.2](#132-external-thermal-resistance-r_external)) |
+| Predicted temperature diverges quickly from actual | Wrong `thermal_mass` or `r_external` | Compare steady-state heat loss empirically (see [Section 14.2](#142-external-thermal-resistance-r_external)) |
 | Temperature oscillates (undershoot then overshoot) | Horizon too short or `smoothing_weight` too low | Increase `horizon` (e.g. from `6` to `8`) and/or increase `smoothing_weight` |
 | Heater runs at full power then cuts out abruptly | `energy_weight` too low | Increase `energy_weight` (e.g. from `0.01` to `0.05`) |
 | Solar gain is always zero | Wrong `latitude`/`longitude` or wrong window `orientation` | Verify coordinates; remember `orientation: 0` = North, `180` = South |
@@ -1058,8 +1109,8 @@ rooms:
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `name` | string | **Yes** | — | Unique identifier for the room.  Used to match heat sources, connections, and HA entity IDs.  Use only letters, digits, and underscores (no spaces). |
-| `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 13.1](#131-thermal-mass-thermal_mass) for guidance. |
-| `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 13.2](#132-external-thermal-resistance-r_external) for guidance. |
+| `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 14.1](#141-thermal-mass-thermal_mass) for guidance. |
+| `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 14.2](#142-external-thermal-resistance-r_external) for guidance. |
 | `setpoint` | float | No | `21.0` | Initial desired temperature [°C].  Can be overridden at runtime by the `climate.*` entity. |
 | `temp_sensor` | string | No | — | Entity ID of a single HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode.  Cannot be combined with `temp_sensors`. |
 | `temp_sensors` | list of strings | No | — | List of HA sensor entity IDs for the room.  The coordinator reads all of them at each update cycle and uses their **arithmetic mean** as the measured room temperature.  Useful when the room is large or has significant temperature gradients.  Cannot be combined with `temp_sensor`. |
@@ -1079,7 +1130,7 @@ connections:
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `room` | string | **Yes** | — | The `name` of the adjacent room.  Connections are directional in the YAML but the thermal model treats them symmetrically — you do NOT need to repeat the entry in both rooms.  (The matrix is built correctly even if only one side is declared, but declaring both sides is also harmless.) |
-| `r_value` | float | **Yes** | — | Thermal resistance between the two rooms [K/W].  See [Section 13.3](#133-inter-room-thermal-resistance-r_value) for guidance. |
+| `r_value` | float | **Yes** | — | Thermal resistance between the two rooms [K/W].  See [Section 14.3](#143-inter-room-thermal-resistance-r_value) for guidance. |
 
 ### 10.4 Window block (`windows`)
 
@@ -1152,7 +1203,7 @@ heat_sources:
 | `cop_temp_ref` | float | No | `7.0` | Outdoor temperature [°C] at which `cop_rated` was measured.  Default matches the EN 14511 A7/W35 test condition. |
 | `min_power` | float | No | `0.0` | Minimum thermal output [W] below which the heat pump shuts off entirely.  Real inverter-driven heat pumps have a lower modulation limit (often 20–30 % of rated capacity); if the optimal control signal would produce a positive output below this threshold the integration forces the unit off instead.  Set this to your unit's minimum continuous output to prevent short-cycling. |
 | `max_temp_offset` | float | No | `5.0` | Maximum temperature offset [°C] added to the heat pump's internal temperature at full power.  When the heat pump is controlled via a `climate.*` entity, the integration sets `target = T_internal + fraction × max_temp_offset`.  Larger values give the heat pump a bigger temperature gap to ramp up against; smaller values limit maximum output.  The default of 5 °C works well for most underfloor and radiator systems. |
-| `turn_off_deadband` | float | No | `1.0` | Temperature [°C] above the room setpoint before the heat pump actually turns off.  When the MPC outputs zero heating demand but the room is still within this deadband of the setpoint, the heat pump stays in heat mode at idle (target = internal temperature, no offset) instead of turning off.  This prevents aggressive compressor short-cycling.  Increase this value if you notice the compressor toggling frequently. |
+| `turn_off_deadband` | float | No | `1.0` | Half-width [°C] of the hysteresis dead-band around the setpoint.  The heat pump switches to passive cooling (`dry` / `fan_only`) only when `room_temp > setpoint + turn_off_deadband`, and exits cooling only when `room_temp < setpoint − turn_off_deadband`.  Within the dead-band (width = 2 × this value) the current mode is held, preventing toggling from small temperature fluctuations.  The compressor never cycles fully off during normal operation — when not in cooling mode it idles in heat mode.  Increase this value if you observe nuisance mode switching near the setpoint. |
 | `cooling_cop` | float | No | `2.5` | Rated cooling COP / EER used to compute cooling capacity in dry / fan-only / cool mode.  The heat-removal capacity is `(max_power / cop_rated) × cooling_cop`, i.e. it scales with the **electrical** input rather than the heating thermal max.  Typical air-source heat pumps: 2.5–3.5.  Look up the value at the EN 14511 cooling test point (A35/W18 or A35/W7). |
 | `cooling_efficiency` | float | No | `1.0` | Fraction (0–1) of the rated cooling capacity actually delivered when the integration switches the heat pump to cooling.  Use values around 0.3–0.5 if you rely on `dry` (dehumidify) mode for gentle cooling, or leave at 1.0 if the device runs at full cooling capacity. |
 
@@ -1237,7 +1288,7 @@ heating_assistant:
       cop_temp_ref: 7.0
       min_power: 900          # unit cannot modulate below 20 % of rated capacity
       max_temp_offset: 5.0    # °C offset at full power
-      turn_off_deadband: 1.0  # °C above setpoint before actual turn-off
+      turn_off_deadband: 1.0  # °C above setpoint before switching to cooling mode
       heater_entity: climate.mitsubishi_hp
 
     - name: backup_heater_living
@@ -1348,7 +1399,7 @@ heating_assistant:
       cop_temp_ref: 7.0
       min_power: 1400         # ~20 % of rated – prevents short-cycling
       max_temp_offset: 5.0    # °C offset at full power
-      turn_off_deadband: 1.0  # °C above setpoint before actual turn-off
+      turn_off_deadband: 1.0  # °C above setpoint before switching to cooling mode
       heater_entity: climate.daikin_hp
 
     - name: bedroom1_heater
@@ -1533,10 +1584,10 @@ heating_assistant:
 
 | Attribute | Value | Notes |
 |-----------|-------|-------|
-| `state` | `heat` or `off` | `heat` when any heater in the room has `current_power > 0` |
+| `state` (`hvac_mode`) | `heat_cool`, `heat`, or `off` | `heat_cool` is advertised for rooms with a heat pump; `heat` for heat-only rooms; `off` for frost-protection mode |
 | `current_temperature` | float [°C] | Latest room temperature from sensor or model |
 | `temperature` | float [°C] | Current setpoint (read by Lovelace thermostat cards) |
-| `hvac_action` | `heating` or `idle` | Mirrors the HVAC mode |
+| `hvac_action` | `heating`, `cooling`, or `idle` | `heating` when any source in the room is producing heat; `cooling` when a heat pump is actively removing heat; `idle` otherwise |
 | `min_temp` | 5.0 | Frost-protection floor |
 | `max_temp` | 30.0 | Maximum allowed setpoint |
 | `target_temp_step` | 0.5 | Resolution for the thermostat dial |
@@ -1719,7 +1770,7 @@ data:
 | `cop_temp_ref` | float | Reference outdoor temperature [°C] |
 | `min_power` | float | Minimum thermal output before shutdown [W] |
 | `max_temp_offset` | float | Maximum temperature offset at full power [°C] |
-| `turn_off_deadband` | float | Temperature above setpoint before actual turn-off [°C] |
+| `turn_off_deadband` | float | Hysteresis dead-band half-width [°C] (enter cooling above setpoint + deadband, exit below setpoint − deadband) |
 | `outdoor_temp` | float | Current outdoor temperature [°C] |
 
 ### 12.10 Sensor entities – outdoor temperature
@@ -1938,7 +1989,7 @@ When no weather entity is configured, a persistence forecast is used: the curren
 This sensor is useful for:
 - Verifying that the weather forecast is being picked up correctly — the `outdoor_temp` values in the `forecast` attribute should vary over time when a weather entity is configured, not be constant
 - Understanding why the controller is pre-heating (or not) in anticipation of a cold front
-- Showing the outdoor forecast alongside the room temperature forecast and solar gain on the disturbance card (§ 13.12.5)
+- Showing the outdoor forecast alongside the room temperature forecast and solar gain on the disturbance card (§ 13.18.5)
 
 ### 13.9 Diagnostics panel
 
@@ -2054,7 +2105,80 @@ data:
 - **Check identifiability**: if a parameter is flagged as "not identifiable", it means the data didn't contain enough information to constrain it—keep the system running longer or manually vary the relevant input.
 - **Start with weak regularization** (`0.1`) if you have high-quality data (12+ hours, lots of heating cycles); use strong regularization (`10.0`) if data is noisy or sparse.
 
-### 13.12 Lovelace dashboard – board and card reference
+### 13.12 Setup service – estimate parameters (ML)
+
+Service: `heating_assistant.estimate_parameters_ml`
+
+This service fits `thermal_mass` and `r_external` for all rooms simultaneously using **maximum-likelihood optimisation** of the Kalman-filter prediction-error decomposition (PED) log-likelihood.  Unlike the manual `estimate_parameters` service, this approach uses the automatically accumulated rolling history buffer so no separate heating experiment is needed.  At least 30 history steps (~30 minutes of operation) must be present for meaningful estimates.
+
+**Service data:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `apply_parameters` | bool | `true` | When `true` the estimated values are applied to the running model immediately.  Set `false` for a dry-run report without modifying anything. |
+
+**Example call:**
+
+```yaml
+service: heating_assistant.estimate_parameters_ml
+data:
+  apply_parameters: true
+```
+
+**Result:** A persistent notification with per-room estimated `thermal_mass` and `r_external`, log-likelihood improvement, and — for room pairs with sufficient temperature-difference variance — estimated inter-room thermal resistances $R_{ij}$.  Inter-room resistances are fitted in the same joint optimisation as the per-room parameters; no separate service call is needed.
+
+### 13.13 Diagnostic service – analyze model fit
+
+Service: `heating_assistant.analyze_model_fit`
+
+Runs a comprehensive model-fit analysis using the history buffer.  Computes RMSE, MAE, R², bias, residual autocorrelation (Ljung–Box Q test), and identifies whether model parameters need adjustment.
+
+**Service data:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `room_name` | string | Optional room name.  If omitted, all rooms are analysed. |
+
+### 13.14 Diagnostic service – validate parameters
+
+Service: `heating_assistant.validate_parameters`
+
+Validates the physical reasonableness of the current `thermal_mass` and `r_external` values: checks that they are within expected ranges, computes thermal time constants, and warns about extreme or potentially invalid values.
+
+**Service data:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `room_name` | string | Optional room name.  If omitted, all rooms are validated. |
+
+### 13.15 Diagnostic service – controller performance report
+
+Service: `heating_assistant.controller_performance_report`
+
+Generates a detailed setpoint-tracking report: tracking errors, overshoot/undershoot statistics, time spent above/below setpoint, and an overall control quality score.  Useful for deciding whether `energy_weight`, `smoothing_weight`, or `constraint_offset` need adjustment.
+
+**Service data:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `room_name` | string | Optional room name.  If omitted, all rooms are included. |
+
+### 13.16 Diagnostic service – run open-loop simulation
+
+Service: `heating_assistant.run_open_loop_simulation`
+
+Evaluates model quality by running a free-run (open-loop) multi-step simulation over the history buffer — without Kalman correction at each step — and comparing predictions against observed temperatures.  This is a much stricter test than one-step-ahead Kalman prediction error because accumulated drift is exposed.
+
+**Service data:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `room_name` | string | — | Optional room name.  If omitted, all rooms are simulated. |
+| `segment_length` | int | `30` | Number of history steps per segment (each step ≈ 60 s).  Default 30 = 30-minute free-run window. |
+
+**Rule of thumb:** open-loop RMSE < 0.2 °C over 30 steps is excellent; > 0.5 °C suggests the model should be re-estimated.
+
+### 13.17 Lovelace dashboard – board and card reference
 
 This section provides a complete set of Lovelace card configurations for building an MPC-style monitoring dashboard.  The cards follow the standard model predictive control visualisation layout used in industry and academia:
 
@@ -2066,11 +2190,11 @@ Each chart displays **historical recorder data** to the left of the "Now" line a
 
 Together, these three panels give a complete picture of what the controller sees, what it plans to do, and why.
 
-#### 13.12.1 Prerequisites
+#### 13.17.1 Prerequisites
 
 All forecast charts below use [apexcharts-card](https://github.com/RomRider/apexcharts-card), a popular HACS community card.  Install it via **HACS → Frontend → Search "apexcharts-card" → Install** and refresh your browser before using the examples.
 
-#### 13.12.2 Dashboard structure – board with room subboards
+#### 13.17.2 Dashboard structure – board with room subboards
 
 Create a top-level **Heating Assistant** dashboard with a navigation view for the system overview and one subview for each room.  This mirrors the MPC structure: the overview shows system-wide metrics while each room subview shows the full MPC triplet (output, input, disturbances).
 
@@ -2082,7 +2206,7 @@ Create a top-level **Heating Assistant** dashboard with a navigation view for th
 
 **Step 2 – Add the system overview view** (default view):
 
-Add the system overview card (§ 13.12.7) and one compact status card per room.
+Add the system overview card (§ 13.18.7) and one compact status card per room.
 
 **Step 3 – Add a subview for each room:**
 
@@ -2092,11 +2216,11 @@ Add the system overview card (§ 13.12.7) and one compact status card per room.
 > - Icon: `mdi:sofa` / `mdi:bed` / etc.
 > - Toggle **Subview** on – this makes the view accessible via navigation cards on the overview
 
-In each room subview, add the three MPC cards below (§ 13.12.3 – § 13.12.5) arranged vertically so the time axes align, plus the room performance card (§ 13.12.6).
+In each room subview, add the three MPC cards below (§ 13.18.3 – § 13.18.5) arranged vertically so the time axes align, plus the room performance card (§ 13.18.6).
 
 **Step 4 – Add navigation cards** to the overview view so you can click through to each room subview.
 
-#### 13.12.3 MPC predicted temperature card
+#### 13.17.3 MPC predicted temperature card
 
 This is the primary MPC output visualisation.  It shows:
 - **History** (left of Now): the measured room temperature from the HA recorder (solid line)
@@ -2118,6 +2242,13 @@ now:
   show: true
   label: Now
   color: '#424242'
+# fill_areas shades the region between the two constraint series.
+# series_1 is the upper bound, series_2 is the lower bound.
+fill_areas:
+  - series_1: Constraint Upper
+    series_2: Constraint Lower
+    opacity: 0.15
+    color: '#1565C0'
 yaxis:
   - id: temp
     apex_config:
@@ -2139,7 +2270,7 @@ series:
       fill: last
     show:
       in_header: true
-  # ── Forecast: constraint upper (invisible, forms band top) ───────────
+  # ── Forecast: constraint upper bound ─────────────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Constraint Upper
     data_generator: |
@@ -2149,14 +2280,16 @@ series:
       if (!fc || sp == null || co == null) return [];
       return fc.map(f => [new Date(f.time).getTime(), sp + co]);
     yaxis_id: temp
-    color: transparent
-    stroke_width: 0
+    color: '#90CAF9'
+    stroke_width: 1
+    curve: stepline
+    opacity: 0.5
     show:
       legend_value: false
       in_header: false
-  # ── Forecast: constraint band (shaded area) ─────────────────────────
+  # ── Forecast: constraint lower bound ─────────────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
-    name: Constraint Band
+    name: Constraint Lower
     data_generator: |
       const fc = entity.attributes.forecast;
       const sp = entity.attributes.setpoint;
@@ -2164,16 +2297,13 @@ series:
       if (!fc || sp == null || co == null) return [];
       return fc.map(f => [new Date(f.time).getTime(), sp - co]);
     yaxis_id: temp
-    type: area
-    color: '#E3F2FD'
-    opacity: 0.4
-    stroke_width: 0
+    color: '#90CAF9'
+    stroke_width: 1
+    curve: stepline
+    opacity: 0.5
     show:
       legend_value: false
       in_header: false
-    group_by:
-      func: raw
-      fill: last
   # ── Forecast: setpoint reference ─────────────────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Setpoint
@@ -2207,7 +2337,7 @@ series:
 
 > **Tip:** Replace `living_room` with your room's entity suffix throughout.
 
-#### 13.12.4 MPC control input card
+#### 13.17.4 MPC control input card
 
 Shows the controller's planned heating power as a step chart – the standard control input representation for zero-order-hold MPC.  Historical actual heating power from the recorder is shown to the left of the "Now" line for comparison.
 
@@ -2267,7 +2397,7 @@ series:
       in_header: true
 ```
 
-#### 13.12.5 Disturbance forecast card
+#### 13.17.5 Disturbance forecast card
 
 Shows the external disturbances the MPC controller accounts for: outdoor temperature and solar heat gain through windows.  Dual y-axes keep both signals readable.  Actual recorder history is shown to the left of the "Now" line alongside the forecasts to the right.
 
@@ -2361,7 +2491,7 @@ series:
 
 > **Tip:** Replace `living_room` with your room's entity suffix in the solar gain series.
 
-#### 13.12.6 Room performance card
+#### 13.17.6 Room performance card
 
 An entities card summarising the room's current state – useful at the top of each room subview.
 
@@ -2383,7 +2513,7 @@ entities:
     name: Net Energy Balance
 ```
 
-#### 13.12.7 System overview card
+#### 13.17.7 System overview card
 
 Place this on the main overview view for a system-wide summary.
 
@@ -2411,7 +2541,7 @@ entities:
     name: COP
 ```
 
-#### 13.12.8 Complete room subboard example
+#### 13.17.8 Complete room subboard example
 
 Below is a complete vertical-stack card that combines all MPC panels for a single room.  Add this as the only card in a room subview configured with *Panel* view type for a clean full-width layout.
 
@@ -2443,6 +2573,11 @@ cards:
       show: true
       label: Now
       color: '#424242'
+    fill_areas:
+      - series_1: Constraint Upper
+        series_2: Constraint Lower
+        opacity: 0.15
+        color: '#1565C0'
     yaxis:
       - id: temp
         apex_config:
@@ -2464,7 +2599,7 @@ cards:
           fill: last
         show:
           in_header: true
-      # ── Forecast: constraint upper (invisible, forms band top) ───────
+      # ── Forecast: constraint upper bound ─────────────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
         name: Constraint Upper
         data_generator: |
@@ -2474,14 +2609,14 @@ cards:
           if (!fc || sp == null || co == null) return [];
           return fc.map(f => [new Date(f.time).getTime(), sp + co]);
         yaxis_id: temp
-        color: transparent
-        stroke_width: 0
+        color: '#1565C0'
+        stroke_width: 1
         show:
           legend_value: false
           in_header: false
-      # ── Forecast: constraint band (shaded area) ─────────────────────
+      # ── Forecast: constraint lower bound ─────────────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
-        name: Constraint Band
+        name: Constraint Lower
         data_generator: |
           const fc = entity.attributes.forecast;
           const sp = entity.attributes.setpoint;
@@ -2489,16 +2624,11 @@ cards:
           if (!fc || sp == null || co == null) return [];
           return fc.map(f => [new Date(f.time).getTime(), sp - co]);
         yaxis_id: temp
-        type: area
-        color: '#E3F2FD'
-        opacity: 0.4
-        stroke_width: 0
+        color: '#1565C0'
+        stroke_width: 1
         show:
           legend_value: false
           in_header: false
-        group_by:
-          func: raw
-          fill: last
       # ── Forecast: setpoint reference ─────────────────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_forecast
         name: Setpoint
@@ -2640,7 +2770,7 @@ cards:
         show:
           in_header: true
       # ── Forecast: outdoor temperature ────────────────────────────────
-      - entity: sensor.heating_assistant_living_room_temperature_forecast
+      - entity: sensor.heating_assistant_outdoor_temperature_forecast
         name: Outdoor (forecast)
         data_generator: |
           const fc = entity.attributes.forecast;
@@ -2670,7 +2800,7 @@ cards:
           in_header: true
 ```
 
-> **Adapting for other rooms:** Duplicate this vertical-stack card for each room subview and replace every occurrence of `living_room` with the room's entity suffix (e.g. `bedroom`, `kitchen`).  The default `graph_span` of `9h` shows 6 h of recorder history plus the 3 h MPC prediction horizon.  If you have configured a longer prediction horizon, increase `graph_span` and the `offset` accordingly (history = 2 × horizon, total = 3 × horizon).
+> **Adapting for other rooms:** Duplicate this vertical-stack card for each room subview and replace every occurrence of `living_room` with the room's entity suffix (e.g. `bedroom`, `kitchen`).  The example uses `graph_span: 9h` with `offset: '-6h'`, giving 6 h of recorder history before *Now*.  The MPC forecast appears after *Now*: with the default settings (`dt: 900`, `horizon: 6`) the prediction spans **90 minutes**.  To size the window exactly to your horizon, use **history = 2 × horizon** and **total span = 3 × horizon** — for the defaults that gives `graph_span: 4h30m` with `offset: '-3h'`; for `horizon: 12` use `graph_span: 9h` with `offset: '-6h'`.
 
 ---
 
@@ -2802,7 +2932,7 @@ heating_assistant:
 
 If `thermal_mass` is underestimated the model predicts the room heats and cools faster than it actually does, leading to oscillatory corrections.  If `r_external` is wrong the steady-state balance is off, producing drift.
 
-*Fix:* Re-estimate `thermal_mass` and `r_external` using the empirical method in [Section 14.1](#141-thermal-mass-thermal_mass) and [Section 14.2](#142-external-thermal-resistance-r_external), or run the `estimate_parameters` service (see [Section 13.11](#1311-setup-service--estimate-parameters)).
+*Fix:* Re-estimate `thermal_mass` and `r_external` using the empirical method in [Section 14.1](#141-thermal-mass-thermal_mass) and [Section 14.2](#142-external-thermal-resistance-r_external), or run the `estimate_parameters` service (see [Section 13.11](#1311-setup-service--estimate-parameters)) or the automatic ML estimation service (see [Section 13.12](#1312-setup-service--estimate-parameters-ml)).
 
 #### 14.5.3 Step-by-step detuning procedure
 
@@ -2973,6 +3103,9 @@ python -m pytest tests/test_coordinator_apply_actions.py -v
 python -m pytest tests/test_model_diagnostics.py -v
 python -m pytest tests/test_parameter_estimator.py -v
 python -m pytest tests/test_visualisation.py -v
+python -m pytest tests/test_climate.py -v
+python -m pytest tests/test_parameter_estimator.py -v
+python -m pytest tests/test_model_diagnostics.py -v
 ```
 
 ### 15.3 Performance benchmarks
@@ -3077,8 +3210,9 @@ To use a measured irradiance sensor instead of a computed one:
 ## 17. Roadmap
 
 - [x] **Weather-API outdoor temperature forecast** — the controller can use a HA weather entity (e.g. Met.no, OpenWeatherMap) for multi-hour outdoor temperature forecasts instead of the persistence assumption.  Configure `weather_entity` in YAML or the UI wizard.
-- [x] **Cooling mode** — heat pumps automatically switch to `dry` (dehumidify) or `fan_only` mode when the room exceeds the setpoint, providing gentle passive cooling without full compressor cycling.  The cooling capacity is correctly modelled using `cooling_cop` (EER) and exposed on visualisation sensors as negative power.
-- [x] **Adaptive parameter estimation** — `heating_assistant.estimate_parameters` service uses CD-EKF maximum likelihood estimation to jointly identify `thermal_mass`, `r_external`, `internal_gain`, heater power-scale factors, and inter-room resistances from operational data.
+- [x] **Cooling mode** — heat-pump rooms expose `heat_cool` HVAC mode; two-threshold hysteresis (`turn_off_deadband`) governs mode switching.  MPC-requested active cooling (`fraction < 0`) uses `cool`/`dry`/`fan_only` with `target_temperature_cooling()`; passive cooling activates above `setpoint + deadband` and exits below `setpoint − deadband`.  Signed heating power (positive = heating, negative = cooling) is tracked throughout.
+- [x] **Adaptive parameter estimation** — `estimate_parameters_ml` service uses CD-EKF maximum-likelihood estimation to jointly identify `thermal_mass`, `r_external`, `internal_gain`, heater power-scale factors, and inter-room resistances from accumulated operating history.  A one-press button entity triggers the full ML estimation pipeline.
+- [x] **Model diagnostics** — `analyze_model_fit`, `validate_parameters`, `controller_performance_report`, and `run_open_loop_simulation` services provide comprehensive insight into model quality and controller behaviour.  Per-room diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) update every cycle.
 - [ ] **Comfort schedule support** — define day/night/away setpoint profiles per room on a weekly timetable.
 - [ ] **Energy price optimisation** — weight the energy cost term in the MPC by the time-of-use electricity tariff so the controller pre-heats the house before peak pricing periods.
 - [ ] **GUI room editor** — add config-flow steps for defining rooms and heat sources through the UI, eliminating the YAML requirement.

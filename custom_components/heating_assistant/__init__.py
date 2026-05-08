@@ -189,7 +189,9 @@ _SOURCE_SCHEMA = vol.Schema(
         vol.Optional(CONF_SOURCE_TURN_OFF_DEADBAND, default=DEFAULT_TURN_OFF_DEADBAND): vol.All(
             vol.Coerce(float), vol.Range(min=0.0)
         ),
-        vol.Optional(CONF_SOURCE_COOLING_COP, default=DEFAULT_COOLING_COP): vol.Coerce(float),
+        vol.Optional(CONF_SOURCE_COOLING_COP, default=DEFAULT_COOLING_COP): vol.All(
+            vol.Coerce(float), vol.Range(min=0.0)
+        ),
         vol.Optional(CONF_SOURCE_COOLING_EFFICIENCY, default=DEFAULT_COOLING_EFFICIENCY): vol.All(
             vol.Coerce(float), vol.Range(min=0.0, max=1.0)
         ),
@@ -524,6 +526,79 @@ def _register_services(hass: HomeAssistant) -> None:
         ),
     )
 
+    async def handle_run_open_loop_simulation(call: ServiceCall) -> None:
+        """Run open-loop simulation diagnostic and report RMSE per room."""
+        from .model_diagnostics import compute_open_loop_predictions
+
+        coordinator = _get_coordinator(hass)
+        room_name_filter = call.data.get("room_name")
+        segment_length = int(call.data.get("segment_length", 30))
+
+        history = list(coordinator.history_buffer)
+        system = coordinator.controller._system
+        room_names = coordinator.model.room_names
+        n_rooms = len(room_names)
+
+        try:
+            result = await hass.async_add_executor_job(
+                compute_open_loop_predictions,
+                history,
+                system,
+                room_names,
+                n_rooms,
+                float(UPDATE_INTERVAL),
+                segment_length,
+            )
+
+            if "error" in result:
+                message = f"**Error:** {result['error']}"
+            else:
+                lines = [
+                    f"**Segment length:** {result['segment_length']} steps "
+                    f"({result['segment_length']} min)\n"
+                    f"**Segments evaluated:** {result['n_segments']}\n"
+                ]
+                per_room = result.get("per_room", {})
+                rooms_to_report = (
+                    [room_name_filter]
+                    if room_name_filter and room_name_filter in per_room
+                    else list(per_room.keys())
+                )
+                for room in rooms_to_report:
+                    data = per_room.get(room, {})
+                    rmse = data.get("rmse")
+                    mae = data.get("mae")
+                    if rmse is None:
+                        lines.append(f"**{room}:** no data")
+                        continue
+                    quality = (
+                        "excellent" if rmse < 0.2
+                        else "acceptable" if rmse < 0.5
+                        else "poor – re-run parameter estimation"
+                    )
+                    lines.append(
+                        f"**{room}**\n"
+                        f"  Open-loop RMSE: {rmse:.3f} °C ({quality})\n"
+                        f"  Open-loop MAE:  {mae:.3f} °C"
+                    )
+
+                message = "\n\n".join(lines)
+
+        except Exception as exc:
+            _LOGGER.error("Open-loop simulation failed: %s", exc, exc_info=True)
+            message = f"**Error:** {exc}"
+
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – Open-Loop Simulation",
+                "message": message,
+                "notification_id": f"{DOMAIN}_open_loop_sim",
+            },
+            blocking=False,
+        )
+
     async def handle_analyze_model_fit(call: ServiceCall) -> None:
         """Analyze model fit quality for all or specific room."""
         from .model_diagnostics import generate_model_fit_report
@@ -748,6 +823,20 @@ def _register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema(
             {
                 vol.Optional("room_name"): cv.string,
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "run_open_loop_simulation",
+        handle_run_open_loop_simulation,
+        schema=vol.Schema(
+            {
+                vol.Optional("room_name"): cv.string,
+                vol.Optional("segment_length", default=30): vol.All(
+                    vol.Coerce(int), vol.Range(min=5, max=120)
+                ),
             }
         ),
     )
