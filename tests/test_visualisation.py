@@ -3,7 +3,10 @@
 import sys
 import os
 import pytest
+from collections import deque
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -15,6 +18,12 @@ from custom_components.heating_assistant.thermal_model import (
 )
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
 from custom_components.heating_assistant.controller import HeatingMPCController as MPCController
+from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+from custom_components.heating_assistant.sensor import (
+    HeatingPlanSensor,
+    SolarForecastSensor,
+    TemperatureForecastSensor,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +448,118 @@ class TestOutdoorForecast:
         assert ctrl.outdoor_forecast[0] == pytest.approx(3.0)
         assert ctrl.outdoor_forecast[1] == pytest.approx(2.5)
         assert ctrl.outdoor_forecast[2] == pytest.approx(2.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: visualisation sensor fallback values
+# ---------------------------------------------------------------------------
+
+class TestVisualisationSensorFallbacks:
+    def test_temperature_forecast_uses_current_temperature_before_first_plan(self):
+        room = SimpleNamespace(temperature=20.37, setpoint=21.0, windows=[])
+        coordinator = SimpleNamespace(
+            predictions=[],
+            model=SimpleNamespace(rooms={"living_room": room}),
+            heat_sources=[],
+            solar_gains={},
+            outdoor_forecast=[],
+            solar_forecast=[],
+            heating_schedule=[],
+            outdoor_temp=5.0,
+            dt=900,
+            controller=SimpleNamespace(constraint_offset=2.0),
+        )
+
+        sensor = TemperatureForecastSensor(coordinator, "living_room")
+
+        assert sensor.native_value == pytest.approx(20.37)
+
+    def test_heating_plan_uses_current_heating_before_first_plan(self):
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        coordinator = SimpleNamespace(
+            heating_schedule=[],
+            heat_sources=[
+                SimpleNamespace(room="living_room", current_power=432.14),
+                SimpleNamespace(room="bedroom", current_power=999.0),
+            ],
+            model=SimpleNamespace(rooms={"living_room": room}),
+            solar_gains={},
+            predictions=[],
+            outdoor_forecast=[],
+            solar_forecast=[],
+            outdoor_temp=5.0,
+            dt=900,
+        )
+
+        sensor = HeatingPlanSensor(coordinator, "living_room")
+
+        assert sensor.native_value == pytest.approx(432.1)
+
+    def test_solar_forecast_uses_current_solar_gain_before_first_plan(self):
+        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        coordinator = SimpleNamespace(
+            solar_forecast=[],
+            solar_gains={"living_room": 87.64},
+            model=SimpleNamespace(rooms={"living_room": room}),
+            heat_sources=[],
+            predictions=[],
+            outdoor_forecast=[],
+            heating_schedule=[],
+            outdoor_temp=5.0,
+            dt=900,
+        )
+
+        sensor = SolarForecastSensor(coordinator, "living_room")
+
+        assert sensor.native_value == pytest.approx(87.6)
+
+
+# ---------------------------------------------------------------------------
+# Tests: coordinator update resilience
+# ---------------------------------------------------------------------------
+
+class TestCoordinatorUpdateResilience:
+    @pytest.mark.asyncio
+    async def test_apply_action_failure_keeps_visualisation_data(self):
+        model = make_single_room_model()
+        source = ElectricHeater("heater", "studio", 2000)
+
+        coordinator = object.__new__(HeatingAssistantCoordinator)
+        coordinator.hass = MagicMock()
+        coordinator._temp_sensors = {}
+        coordinator._latitude = 0.0
+        coordinator._longitude = 0.0
+        coordinator._update_interval = 900
+        coordinator.model = model
+        coordinator.heat_sources = [source]
+        coordinator.actions = {}
+        coordinator.solar_gains = {}
+        coordinator.outdoor_temp = 5.0
+        coordinator.heat_flows = {}
+        coordinator.predictions = []
+        coordinator.outdoor_forecast = []
+        coordinator.solar_forecast = []
+        coordinator.heating_schedule = []
+        coordinator._history_buffer = deque(maxlen=10)
+        coordinator._read_outdoor_temp = MagicMock(return_value=4.0)
+        coordinator._async_read_weather_forecast = AsyncMock(return_value=None)
+        coordinator._apply_actions = AsyncMock(side_effect=RuntimeError("service failed"))
+        coordinator.controller = MagicMock()
+        coordinator.controller.compute.return_value = {"heater": 0.5}
+        coordinator.controller.predictions = [{"studio": 21.25}]
+        coordinator.controller.outdoor_forecast = [3.5]
+        coordinator.controller.solar_forecast = [{"studio": 12.0}]
+        coordinator.controller.heating_schedule = [{"studio": 900.0}]
+        coordinator.controller.last_innovation = [0.0]
+
+        result = await coordinator._async_update_data()
+
+        assert result["actions"] == {"heater": 0.5}
+        assert result["predictions"] == [{"studio": 21.25}]
+        assert result["outdoor_forecast"] == [3.5]
+        assert result["solar_forecast"] == [{"studio": 12.0}]
+        assert result["heating_schedule"] == [{"studio": 900.0}]
+        assert len(coordinator.history_buffer) == 1
 
 
 # ---------------------------------------------------------------------------

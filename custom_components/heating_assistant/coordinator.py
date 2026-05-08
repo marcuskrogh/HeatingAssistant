@@ -416,8 +416,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "kalman_innovation": kalman_innovation,
             })
 
-            # 7. Write set-points to heater entities
-            await self._apply_actions(outdoor_temp)
+            # 7. Write set-points to heater entities. Keep the latest
+            # forecast/prediction entities available even if HA service calls
+            # fail for a specific heater entity.
+            try:
+                await self._apply_actions(outdoor_temp)
+            except Exception:
+                _LOGGER.warning(
+                    "Failed to apply computed heater actions; keeping forecast "
+                    "and prediction entities available",
+                    exc_info=True,
+                )
 
             return {
                 "temperatures": dict(self.model.temperatures),

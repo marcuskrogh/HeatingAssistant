@@ -422,7 +422,10 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> Optional[float]:
         predictions = self._coordinator.predictions
         if not predictions:
-            return None
+            room = self._coordinator.model.rooms.get(self._room_name)
+            if room is None:
+                return None
+            return round(room.temperature, 2)
         last = predictions[-1]
         temp = last.get(self._room_name)
         return round(temp, 2) if temp is not None else None
@@ -455,7 +458,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
 
         # Current heating power for this room (actual, not planned)
         current_heating = sum(
-            s.current_power
+            getattr(s, "current_power", 0.0)
             for s in self._coordinator.heat_sources
             if s.room == self._room_name
         )
@@ -745,7 +748,12 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         schedule = self._coordinator.heating_schedule
         if schedule:
             return round(schedule[0].get(self._room_name, 0.0), 1)
-        return 0.0
+        current_heating = sum(
+            getattr(s, "current_power", 0.0)
+            for s in self._coordinator.heat_sources
+            if s.room == self._room_name
+        )
+        return round(current_heating, 1)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -813,7 +821,7 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
         solar_forecast = self._coordinator.solar_forecast
         if solar_forecast:
             return round(solar_forecast[0].get(self._room_name, 0.0), 1)
-        return 0.0
+        return round(self._coordinator.solar_gains.get(self._room_name, 0.0), 1)
 
     @property
     def extra_state_attributes(self) -> dict:
