@@ -791,6 +791,50 @@ class TestCoordinatorUpdateResilience:
         assert result["heating_schedule"] == [{"studio": 900.0}]
         assert len(coordinator.history_buffer) == 1
 
+    @pytest.mark.asyncio
+    async def test_compute_failure_keeps_forecast_entities_available(self):
+        model = make_single_room_model()
+        source = ElectricHeater("heater", "studio", 2000)
+
+        coordinator = object.__new__(HeatingAssistantCoordinator)
+        coordinator.hass = MagicMock()
+        coordinator._temp_sensors = {}
+        coordinator._latitude = 0.0
+        coordinator._longitude = 0.0
+        coordinator._update_interval = 900
+        coordinator._horizon = 3
+        coordinator.model = model
+        coordinator.heat_sources = [source]
+        coordinator.actions = {}
+        coordinator.solar_gains = {}
+        coordinator.outdoor_temp = 5.0
+        coordinator.heat_flows = {}
+        coordinator.predictions = []
+        coordinator.outdoor_forecast = []
+        coordinator.solar_forecast = []
+        coordinator.heating_schedule = []
+        coordinator._history_buffer = deque(maxlen=10)
+        coordinator._read_outdoor_temp = MagicMock(return_value=4.0)
+        coordinator._async_read_weather_forecast = AsyncMock(
+            return_value=[3.0, 2.5, 2.0]
+        )
+        coordinator._apply_actions = AsyncMock()
+        coordinator.controller = MagicMock()
+        coordinator.controller.compute.side_effect = RuntimeError("OCP failed")
+
+        result = await coordinator._async_update_data()
+
+        assert result["actions"] == {"heater": 0.0}
+        assert result["predictions"] == []
+        assert result["outdoor_forecast"] == [3.0, 2.5, 2.0]
+        assert len(result["solar_forecast"]) == coordinator._horizon + 1
+        assert all(
+            step["studio"] == pytest.approx(0.0, abs=0.1)
+            for step in result["solar_forecast"]
+        )
+        assert result["heating_schedule"] == []
+        assert len(coordinator.history_buffer) == 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: coordinator weather forecast interpolation
