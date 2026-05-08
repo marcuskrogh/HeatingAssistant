@@ -377,11 +377,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # Fallback visualisation data so forecast entities stay available.
                 self.predictions = []
                 self.heating_schedule = []
-                if outdoor_forecast is not None and len(outdoor_forecast) >= self._horizon:
+                if outdoor_forecast:
                     self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
-                elif not self.outdoor_forecast:
+                    if len(self.outdoor_forecast) < self._horizon:
+                        self.outdoor_forecast.extend(
+                            [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
+                        )
+                else:
                     self.outdoor_forecast = [outdoor_temp] * self._horizon
-                self.solar_forecast = [dict(self.solar_gains)]
+                self.solar_forecast = [
+                    dict(self.solar_gains) for _ in range(self._horizon + 1)
+                ]
                 kalman_innovation = None
 
             # 5. Store heat-flow breakdown (independent of MPC solve success)

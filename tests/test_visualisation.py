@@ -820,14 +820,18 @@ class TestCoordinatorUpdateResilience:
         )
         coordinator._apply_actions = AsyncMock()
         coordinator.controller = MagicMock()
-        coordinator.controller.compute.side_effect = RuntimeError("ocp failed")
+        coordinator.controller.compute.side_effect = RuntimeError("OCP failed")
 
         result = await coordinator._async_update_data()
 
         assert result["actions"] == {"heater": 0.0}
         assert result["predictions"] == []
         assert result["outdoor_forecast"] == [3.0, 2.5, 2.0]
-        assert result["solar_forecast"] == [{"studio": pytest.approx(0.0, abs=0.1)}]
+        assert len(result["solar_forecast"]) == coordinator._horizon + 1
+        assert all(
+            step["studio"] == pytest.approx(0.0, abs=0.1)
+            for step in result["solar_forecast"]
+        )
         assert result["heating_schedule"] == []
         assert len(coordinator.history_buffer) == 1
 
