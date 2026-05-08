@@ -699,12 +699,39 @@ class TestElectricHeaterCoolingProtection:
         assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
 
 
-class TestHeatPumpDryMode:
-    """Heat pump dry/fan mode selection and scaled temperature offset."""
+class TestHeatPumpCoolingModeSelection:
+    """Heat pump cool/dry/fan mode selection and scaled temperature offset."""
 
     @pytest.mark.asyncio
-    async def test_dry_mode_preferred_when_available(self):
-        """When the HP entity supports 'dry' mode, it is chosen over 'fan_only'."""
+    async def test_cool_mode_preferred_over_dry_when_available(self):
+        """When the HP entity supports 'cool' mode, it is chosen over 'dry'."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 26.0,
+                        "hvac_modes": ["heat", "cool", "dry", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "cool"
+        # overshoot = 1.0 → offset = 2.0; target = 26.0 - 2.0 = 24.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+
+    @pytest.mark.asyncio
+    async def test_dry_mode_preferred_when_cool_unavailable(self):
+        """When 'cool' is not listed but 'dry' is, 'dry' is chosen over 'fan_only'."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
@@ -730,8 +757,8 @@ class TestHeatPumpDryMode:
         assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
 
     @pytest.mark.asyncio
-    async def test_fan_only_fallback_when_no_dry(self):
-        """When 'dry' is not listed in hvac_modes, fall back to 'fan_only'."""
+    async def test_fan_only_fallback_when_no_dry_or_cool(self):
+        """When neither 'cool' nor 'dry' is listed, fall back to 'fan_only'."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
         hass = await _run_apply_actions(
@@ -779,7 +806,7 @@ class TestHeatPumpDryMode:
         )
 
         calls = hass.services.async_call.call_args_list
-        # Should switch to dry mode, not heat
+        # Should switch to dry mode (no 'cool' available), not heat
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "dry"
         # overshoot = 1.0 → offset = 2.0; target = 27.0 - 2.0 = 25.0
@@ -832,6 +859,7 @@ class TestHeatPumpDryMode:
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
         # fallback: room_temp=23.0; overshoot=2.0 → offset=3.0; 23.0-3.0=20.0
         assert calls[1].args[2]["temperature"] == pytest.approx(20.0)
+
 
 
 class TestScaledIdleOffsetNonHP:
@@ -888,3 +916,297 @@ class TestScaledIdleOffsetNonHP:
         assert calls[0].args[2]["hvac_mode"] == "heat"
         # overshoot = 0 → offset = 1.0; 22.0 - 1.0 = 21.0
         assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: _read_outdoor_temp
+# ---------------------------------------------------------------------------
+
+
+def _make_coordinator_for_outdoor_temp(outdoor_entity, weather_entity, entity_states):
+    """Build a bare-minimum coordinator object for _read_outdoor_temp tests."""
+    from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+
+    coord = object.__new__(HeatingAssistantCoordinator)
+    coord._outdoor_entity = outdoor_entity
+    coord._weather_entity = weather_entity
+
+    hass = MagicMock()
+
+    def _get_state(entity_id):
+        if entity_id in entity_states:
+            raw = entity_states[entity_id]
+            s = MagicMock()
+            if isinstance(raw, dict):
+                s.state = raw.get("state", "unknown")
+                s.attributes = raw.get("attributes", {})
+            else:
+                s.state = raw
+                s.attributes = {}
+            return s
+        return None
+
+    hass.states.get = _get_state
+    coord.hass = hass
+    return coord
+
+
+class TestMPCDrivenCooling:
+    """MPC-driven active cooling via negative control fractions."""
+
+    @pytest.mark.asyncio
+    async def test_negative_fraction_activates_cool_mode(self):
+        """When MPC outputs fraction < 0, the coordinator switches to 'cool' mode."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -0.5},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 26.0,
+                        "hvac_modes": ["heat", "cool", "dry", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 26.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[:2] == ("climate", "set_hvac_mode")
+        assert calls[0].args[2]["hvac_mode"] == "cool"
+        # target = 26.0 − 0.5 × 5.0 = 23.5
+        assert calls[1].args[:2] == ("climate", "set_temperature")
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.5)
+
+    @pytest.mark.asyncio
+    async def test_negative_fraction_falls_back_to_dry_when_no_cool(self):
+        """When 'cool' is not available but 'dry' is, fall back to 'dry'."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -1.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 28.0,
+                        "hvac_modes": ["heat", "dry", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 28.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "dry"
+        # target = 28.0 − 1.0 × 5.0 = 23.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+
+    @pytest.mark.asyncio
+    async def test_negative_fraction_falls_back_to_fan_only(self):
+        """When neither 'cool' nor 'dry' is available, use 'fan_only'."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -0.8},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 27.0,
+                        "hvac_modes": ["heat", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 27.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        # target = 27.0 − 0.8 × 5.0 = 23.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+
+    @pytest.mark.asyncio
+    async def test_negative_fraction_uses_room_temp_fallback(self):
+        """When HP has no current_temperature, fall back to room_temp."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -0.6},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {},  # no current_temperature
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 25.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        # Fallback to room_temp: 25.0 − 0.6 × 5.0 = 22.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+
+    @pytest.mark.asyncio
+    async def test_negative_fraction_takes_priority_over_passive_cooling(self):
+        """When MPC requests fraction < 0, the active cooling path is taken,
+        not the passive room_temp > setpoint path."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        hass = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -0.4},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 26.0,
+                        "hvac_modes": ["heat", "cool", "fan_only"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 26.0},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        # Must enter MPC-driven cool path ("cool" is preferred over "dry"/"fan_only")
+        assert calls[0].args[2]["hvac_mode"] == "cool"
+        # target = 26.0 − 0.4 × 5.0 = 24.0 (not the passive-cooling overshoot formula)
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+
+
+class TestReadOutdoorTemp:
+    """Tests for HeatingAssistantCoordinator._read_outdoor_temp."""
+
+    def test_reads_from_outdoor_entity_when_configured(self):
+        """Reads temperature from the dedicated outdoor-temp sensor."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity=None,
+            entity_states={"sensor.outdoor_temp": "-3.5"},
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(-3.5)
+
+    def test_falls_back_to_weather_entity_temperature_attribute(self):
+        """When no outdoor entity is set, reads from weather entity's temperature attribute."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={
+                "weather.home": {
+                    "state": "sunny",
+                    "attributes": {"temperature": 7.3},
+                }
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(7.3)
+
+    def test_prefers_outdoor_entity_over_weather_entity(self):
+        """Outdoor-temp sensor takes priority over weather entity attribute."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity="weather.home",
+            entity_states={
+                "sensor.outdoor_temp": "2.0",
+                "weather.home": {
+                    "state": "cloudy",
+                    "attributes": {"temperature": 99.0},
+                },
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(2.0)
+
+    def test_falls_back_to_weather_when_outdoor_entity_unavailable(self):
+        """Falls back to weather entity when the outdoor sensor is unavailable."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity="weather.home",
+            entity_states={
+                "sensor.outdoor_temp": "unavailable",
+                "weather.home": {
+                    "state": "cloudy",
+                    "attributes": {"temperature": 4.5},
+                },
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(4.5)
+
+    def test_falls_back_to_weather_when_outdoor_entity_unknown(self):
+        """Falls back to weather entity when the outdoor sensor is unknown."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity="sensor.outdoor_temp",
+            weather_entity="weather.home",
+            entity_states={
+                "sensor.outdoor_temp": "unknown",
+                "weather.home": {
+                    "state": "rainy",
+                    "attributes": {"temperature": 11.0},
+                },
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(11.0)
+
+    def test_falls_back_to_default_when_no_entities_configured(self):
+        """Returns 5.0 when neither outdoor entity nor weather entity is configured."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity=None,
+            entity_states={},
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+
+    def test_falls_back_to_default_when_weather_entity_unavailable(self):
+        """Returns 5.0 when weather entity is unavailable and no outdoor entity exists."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={
+                "weather.home": {
+                    "state": "unavailable",
+                    "attributes": {},
+                }
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+
+    def test_falls_back_to_default_when_weather_entity_missing(self):
+        """Returns 5.0 when weather entity is configured but does not exist in HA states."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={},  # entity not present
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+
+    def test_falls_back_to_default_when_weather_temperature_attribute_missing(self):
+        """Returns 5.0 when weather entity has no temperature attribute."""
+        coord = _make_coordinator_for_outdoor_temp(
+            outdoor_entity=None,
+            weather_entity="weather.home",
+            entity_states={
+                "weather.home": {
+                    "state": "sunny",
+                    "attributes": {},  # no temperature key
+                }
+            },
+        )
+        assert coord._read_outdoor_temp() == pytest.approx(5.0)

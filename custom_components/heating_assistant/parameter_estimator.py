@@ -50,13 +50,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .controller import HouseThermalSystem
+from .controller import HouseThermalSDE as HouseThermalSystem
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
-from mbc._utils import _np_to_cvx, _cvx_to_np
-from mbc.identification import ParameterEstimator as _MbcEstimator
-from mbc.identification import ped_neg_log_likelihood as _ped_neg_ll
-from mbc.identification import nelder_mead as _nelder_mead  # backward compat
+from mbc.identification import CDParameterEstimator as _CDParameterEstimator
+from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
+from mbc.identification import nelder_mead as _nelder_mead  # for test compatibility
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,92 +98,6 @@ _RESTART_PERT = 0.5
 # ── Nelder–Mead — now provided by mbc.identification ─────────────────────────
 # _nelder_mead is re-exported above from mbc.identification._nelder_mead for
 # backward compatibility with callers that import it from this module.
-
-
-# ── Augmented model wrapping HouseThermalSystem ───────────────────────────────
-
-
-class _AugmentedHouseModel:
-    """
-    Wraps :class:`~controller.HouseThermalSystem` to absorb two
-    theta-dependent effects that are not captured in the ZOH matrices:
-
-    *  **Heater power-scale** (``alpha_full``) — scales each column of B_d
-       so that ``B_d_aug @ u_raw = B_d @ (alpha ⊙ u_raw)``.
-    *  **Internal heat gain** (``q_int``) — a per-room constant additive
-       heat source applied via :meth:`predict_offset`.
-
-    The internal gain is pre-computed as ``E_d[:, 1:n+1] @ q_int_vec``
-    (a constant vector, since E_d is time-invariant in the RC model).
-
-    The wrapped model conforms to the duck-type interface expected by
-    :func:`mbc.identification.ped_neg_log_likelihood`.
-    """
-
-    def __init__(
-        self,
-        system: HouseThermalSystem,
-        alpha_full: np.ndarray,
-        q_int_vec: np.ndarray,
-    ) -> None:
-        self._system = system
-        self._alpha = alpha_full
-
-        # Precompute E_d @ q_int correction (E_d is time-invariant)
-        from cvxopt import matrix as _cvx_mat
-        n_d = system.n_d
-        d_nominal = _cvx_mat([0.0] * n_d, (n_d, 1), tc="d")
-        _, _, E_cvx = system.discretize(d_nominal)
-        E_np = _cvx_to_np(E_cvx)
-        n = system.n_x
-        # q_int maps through columns 1..n of E_d (solar/internal gain slots)
-        self._q_int_bias: np.ndarray = E_np[:, 1:1 + n] @ q_int_vec
-
-    # ── LinearDiscreteModel duck-type interface ───────────────────────────
-
-    @property
-    def n_x(self) -> int:
-        return self._system.n_x
-
-    @property
-    def n_u(self) -> int:
-        return self._system.n_u
-
-    @property
-    def n_d(self) -> int:
-        return self._system.n_d
-
-    @property
-    def C(self):
-        return self._system.C
-
-    @property
-    def x(self):
-        return self._system.x
-
-    @x.setter
-    def x(self, val) -> None:
-        self._system.x = val
-
-    @property
-    def x_ref(self):
-        return self._system.x_ref
-
-    @property
-    def u_bounds(self):
-        return self._system.u_bounds
-
-    def discretize(self, d):
-        """Return (A, B_alpha, E) where B_alpha columns are scaled by alpha."""
-        A, B, E = self._system.discretize(d)
-        B_np = _cvx_to_np(B)
-        for j, a in enumerate(self._alpha):
-            B_np[:, j] *= float(a)
-        return A, _np_to_cvx(B_np), E
-
-    def predict_offset(self, d_np: np.ndarray) -> np.ndarray:
-        """Constant q_int contribution: E_d[:, 1:n+1] @ q_int_vec."""
-        return self._q_int_bias
 
 
 # ── Identifiability gates ────────────────────────────────────────────────────
@@ -392,14 +305,57 @@ class KalmanMLEstimator:
 
     def compute_log_likelihood(self, history: List[Dict[str, Any]]) -> Optional[float]:
         """
-        Evaluate the Kalman PED log-likelihood at the *current* configured
+        Evaluate the CD-EKF PED log-likelihood at the *current* configured
         parameter values (without regularisation).
+
+        Uses CDParameterEstimator with the fully nonlinear continuous-discrete
+        approach via CD-EKF.
         """
-        x0 = np.concatenate([self._log_mass_prior, self._log_r_prior])
-        neg_ll = self._neg_log_likelihood(x0, history)
-        if not math.isfinite(neg_ll) or neg_ll >= 1e9:
+        if len(history) < MIN_HISTORY_STEPS:
             return None
-        return float(-neg_ll)
+
+        # Build a minimal layout with no identifiable sources/pairs for the prior evaluation
+        layout = _ThetaLayout(
+            n_rooms=self._n,
+            identifiable_sources=[],
+            identifiable_pairs=[],
+        )
+
+        # Theta is just [log_mass, log_r, q_int] at the prior
+        theta_prior = np.concatenate([
+            self._log_mass_prior,
+            self._log_r_prior,
+            self._q_int_prior,
+        ])
+
+        # Convert history to CD-EKF format (use "ym" key)
+        std_history = self._convert_history_std(history, use_ym=True)
+
+        # Build model factory for CDParameterEstimator
+        def _model_factory(theta: np.ndarray):
+            return self._build_parametric_system(layout, theta)
+
+        # Initial state estimate (use first measurement)
+        x0 = std_history[0]["ym"]
+        P0 = np.eye(self._n) * self._R_var * 10.0  # Initial uncertainty
+
+        try:
+            # Evaluate negative log-likelihood using CD-EKF
+            neg_ll = _cd_ped_neg_ll(
+                model_factory=_model_factory,
+                theta=theta_prior,
+                history=std_history,
+                x0=x0,
+                P0=P0,
+                dt=self._dt,
+                n_steps=10,
+            )
+            if not np.isfinite(neg_ll):
+                return None
+            return float(-neg_ll)
+        except Exception as exc:
+            _LOGGER.debug("compute_log_likelihood failed: %s", exc, exc_info=True)
+            return None
 
     def estimate(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -489,25 +445,12 @@ class KalmanMLEstimator:
             + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
         )
 
-        # ── Convert history to standardised format (fixed, theta-agnostic) ─
-        std_history = self._convert_history_std(history)
+        # ── Convert history to CD-EKF format (use "ym" key) ────────────────
+        std_history = self._convert_history_std(history, use_ym=True)
 
-        # ── Build model factory for mbc ────────────────────────────────────
+        # ── Build model factory for CDParameterEstimator ───────────────────
         def _model_factory(theta: np.ndarray):
-            lm, lr, qi, la, lrij = layout.unpack(theta)
-            lrij_map: Optional[Dict[Tuple[int, int], float]] = None
-            if len(lrij):
-                lrij_map = {
-                    pair: float(lrij[k])
-                    for k, pair in enumerate(layout.identifiable_pairs)
-                }
-            sys_ = self._build_system(lm, lr, log_r_ij=lrij_map)
-            if sys_ is None:
-                raise ValueError("Failed to build thermal system")
-            alpha_full = np.ones(self._n_u)
-            for k, s_idx in enumerate(layout.identifiable_sources):
-                alpha_full[s_idx] = float(math.exp(la[k]))
-            return _AugmentedHouseModel(sys_, alpha_full, qi)
+            return self._build_parametric_system(layout, theta)
 
         # ── Build regularisation function ──────────────────────────────────
         def _regularization_fn(theta: np.ndarray) -> float:
@@ -525,16 +468,19 @@ class KalmanMLEstimator:
             pert[a:b] *= 200.0   # std ≈ 100 W in linear space
             return theta0 + pert
 
-        # ── Delegate optimisation to mbc.ParameterEstimator ───────────────
-        Q_np = np.eye(n) * self._Q_var
-        R_np = np.eye(n) * self._R_var
+        # ── Initial state estimate for CD-EKF ──────────────────────────────
+        x0 = std_history[0]["ym"]
+        P0 = np.eye(n) * self._R_var * 10.0  # Initial uncertainty
 
-        mbc_est = _MbcEstimator(
+        # ── Delegate optimisation to CDParameterEstimator ──────────────────
+        mbc_est = _CDParameterEstimator(
             model_factory=_model_factory,
             theta0=theta_prior,
             bounds=bounds,
-            Q=Q_np,
-            R=R_np,
+            x0=x0,
+            P0=P0,
+            dt=self._dt,
+            n_steps=10,
             regularization_fn=_regularization_fn,
             n_restarts=_N_RESTARTS,
             restart_perturbation=_RESTART_PERT,
@@ -714,7 +660,81 @@ class KalmanMLEstimator:
                 ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(model, self._sources, self._dt)
-        except Exception:
+        except Exception as exc:
+            _LOGGER.debug("Failed to build thermal system: %s", exc, exc_info=True)
+            return None
+
+    def _build_parametric_system(
+        self,
+        layout: _ThetaLayout,
+        theta: np.ndarray,
+    ) -> Optional[HouseThermalSystem]:
+        """
+        Build a parametric HouseThermalSDE from theta for CD-EKF estimation.
+
+        Unpacks theta to get thermal parameters, heater scales, and internal gains,
+        then constructs a HouseThermalSDE with these values.
+        """
+        try:
+            log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(theta)
+
+            # Build inter-room resistance map
+            log_r_ij_map: Optional[Dict[Tuple[int, int], float]] = None
+            if len(log_r_ij):
+                log_r_ij_map = {
+                    pair: float(log_r_ij[k])
+                    for k, pair in enumerate(layout.identifiable_pairs)
+                }
+
+            # Build the underlying system with theta-dependent thermal parameters
+            system = self._build_system(log_mass, log_r, log_r_ij_map)
+            if system is None:
+                return None
+
+            # Construct heater scales vector (alpha)
+            heater_scales = np.ones(self._n_u)
+            for k, s_idx in enumerate(layout.identifiable_sources):
+                heater_scales[s_idx] = float(math.exp(log_alpha[k]))
+
+            # Create a new parametric instance with heater_scales and internal_gains
+            # We need to rebuild to pass the params, heater_scales, and internal_gains
+            room_idx = {r.name: k for k, r in enumerate(self._rooms)}
+            new_rooms = []
+            for i, r in enumerate(self._rooms):
+                new_conns = copy.deepcopy(r.connections)
+                if log_r_ij_map:
+                    for conn in new_conns:
+                        j = room_idx.get(conn.connected_room)
+                        if j is not None:
+                            pair = (min(i, j), max(i, j))
+                            if pair in log_r_ij_map:
+                                conn.r_value = float(math.exp(
+                                    float(np.clip(
+                                        log_r_ij_map[pair],
+                                        _LOG_R_IJ_LO, _LOG_R_IJ_HI,
+                                    ))
+                                ))
+                new_rooms.append(Room(
+                    name=r.name,
+                    thermal_mass=float(math.exp(log_mass[i])),
+                    r_external=float(math.exp(log_r[i])),
+                    connections=new_conns,
+                    windows=r.windows,
+                    temperature=r.temperature,
+                    setpoint=r.setpoint,
+                    internal_gain=0.0,  # Applied via theta parameter in f()
+                ))
+            model = HouseModel(new_rooms)
+            return HouseThermalSystem(
+                model, self._sources, self._dt,
+                sigma_w=math.sqrt(self._Q_var),
+                sigma_v=math.sqrt(self._R_var),
+                n_int_steps=10,
+                identifiable_sources=layout.identifiable_sources,
+                theta=theta,
+            )
+        except Exception as exc:
+            _LOGGER.debug("Failed to build parametric system: %s", exc, exc_info=True)
             return None
 
     def _make_d_np(
@@ -743,18 +763,31 @@ class KalmanMLEstimator:
     def _convert_history_std(
         self,
         history: List[Dict[str, Any]],
+        use_ym: bool = False,
     ) -> List[Dict[str, np.ndarray]]:
         """Convert the HA history buffer to the standardised mbc format.
 
         Each record is converted to ``{"y": ndarray, "u": ndarray, "d": ndarray}``
+        for discrete-time estimator, or ``{"ym": ndarray, "u": ndarray, "d": ndarray}``
+        for continuous-discrete estimator.
+
         where ``d = [T_out, solar_1, …, solar_n]`` (raw, without q_int).
-        The q_int contribution is absorbed by
-        :class:`_AugmentedHouseModel.predict_offset`.
+        The q_int contribution is absorbed by the parametric model through
+        the ``internal_gains`` parameter in HouseThermalSDE.
+
+        Parameters
+        ----------
+        history : list of dicts
+            HA history buffer records.
+        use_ym : bool, optional
+            If True, use "ym" key for measurements (CD-EKF convention).
+            If False, use "y" key (discrete-time convention). Default: False.
         """
         n = self._n
         n_u = self._n_u
         room_idx = {name: i for i, name in enumerate(self._room_names)}
         std: List[Dict[str, np.ndarray]] = []
+        meas_key = "ym" if use_ym else "y"
         for record in history:
             y = np.array(record["y"][:n], dtype=float)
             u = np.zeros(n_u)
@@ -766,32 +799,8 @@ class KalmanMLEstimator:
             for name, gain in record.get("d_solar", {}).items():
                 if name in room_idx:
                     d[1 + room_idx[name]] = float(gain)
-            std.append({"y": y, "u": u, "d": d})
+            std.append({meas_key: y, "u": u, "d": d})
         return std
-
-    def _kalman_neg_ll_via_mbc(
-        self,
-        system: HouseThermalSystem,
-        history: List[Dict[str, Any]],
-        q_int: Optional[np.ndarray],
-        alpha_full: Optional[np.ndarray],
-    ) -> float:
-        """Evaluate the PED neg-log-likelihood via mbc, applying alpha and q_int.
-
-        Replaces the former ``_kalman_neg_ll`` implementation.  Builds an
-        :class:`_AugmentedHouseModel` and delegates to
-        :func:`mbc.identification.ped_neg_log_likelihood`.
-        """
-        if alpha_full is None:
-            alpha_full = np.ones(self._n_u)
-        if q_int is None:
-            q_int = np.zeros(self._n)
-
-        aug = _AugmentedHouseModel(system, alpha_full, q_int)
-        std_history = self._convert_history_std(history)
-        Q = np.eye(self._n) * self._Q_var
-        R = np.eye(self._n) * self._R_var
-        return _ped_neg_ll(lambda _: aug, np.array([]), std_history, Q, R)
 
     def _compute_regularization(
         self,
@@ -833,147 +842,3 @@ class KalmanMLEstimator:
                 np.sum((log_r_ij - r_ij_priors) ** 2)
             )
         return reg
-
-    def _neg_log_likelihood_full(
-        self,
-        theta: np.ndarray,
-        layout: _ThetaLayout,
-        history: List[Dict[str, Any]],
-    ) -> float:
-        """Negative PED log-likelihood for the joint parameter vector."""
-        if np.any(~np.isfinite(theta)):
-            return 1e10
-
-        log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(theta)
-
-        if (np.any(log_mass < _LOG_MASS_LO) or np.any(log_mass > _LOG_MASS_HI)
-                or np.any(log_r < _LOG_R_LO) or np.any(log_r > _LOG_R_HI)
-                or np.any(q_int < _Q_INT_LO) or np.any(q_int > _Q_INT_HI)):
-            return 1e10
-        if len(log_alpha) and (np.any(log_alpha < _LOG_ALPHA_LO)
-                               or np.any(log_alpha > _LOG_ALPHA_HI)):
-            return 1e10
-        if len(log_r_ij) and (np.any(log_r_ij < _LOG_R_IJ_LO)
-                              or np.any(log_r_ij > _LOG_R_IJ_HI)):
-            return 1e10
-
-        # Build the system with current C, R_ext, R_ij
-        log_r_ij_map: Optional[Dict[Tuple[int, int], float]] = None
-        if len(log_r_ij):
-            log_r_ij_map = {
-                pair: float(log_r_ij[k])
-                for k, pair in enumerate(layout.identifiable_pairs)
-            }
-        system = self._build_system(log_mass, log_r, log_r_ij=log_r_ij_map)
-        if system is None:
-            return 1e10
-
-        # Build full alpha vector (unit for non-identifiable sources, exp for
-        # identifiable ones)
-        alpha_full = np.ones(self._n_u)
-        for k, s_idx in enumerate(layout.identifiable_sources):
-            alpha_full[s_idx] = float(math.exp(log_alpha[k]))
-
-        neg_ll = self._kalman_neg_ll_via_mbc(
-            system, history,
-            q_int=q_int,
-            alpha_full=alpha_full,
-        )
-        if neg_ll >= 1e9:
-            return neg_ll
-
-        reg = self._compute_regularization(
-            log_mass, log_r, q_int, log_alpha, log_r_ij,
-            layout.identifiable_pairs,
-        )
-        return neg_ll + reg
-
-    # ── Backward-compatible 2-parameter likelihood (used by tests) ────────
-
-    def _neg_log_likelihood(
-        self,
-        log_params: np.ndarray,
-        history: List[Dict[str, Any]],
-    ) -> float:
-        """Compute neg-LL using only (log_mass, log_r) — no Q_int, no α.
-
-        Preserved for backward compatibility with existing unit tests.  The
-        full joint likelihood is :meth:`_neg_log_likelihood_full`.
-        """
-        n = self._n
-        log_masses = log_params[:n]
-        log_rs = log_params[n:]
-
-        if np.any(~np.isfinite(log_params)):
-            return 1e10
-        if np.any(log_masses < _LOG_MASS_LO) or np.any(log_masses > _LOG_MASS_HI):
-            return 1e10
-        if np.any(log_rs < _LOG_R_LO) or np.any(log_rs > _LOG_R_HI):
-            return 1e10
-
-        system = self._build_system(log_masses, log_rs)
-        if system is None:
-            return 1e10
-
-        neg_ll = self._kalman_neg_ll_via_mbc(
-            system, history,
-            q_int=None,
-            alpha_full=None,
-        )
-        if neg_ll >= 1e9:
-            return neg_ll
-
-        reg = self._regularization * float(
-            np.sum((log_masses - self._log_mass_prior) ** 2)
-            + np.sum((log_rs - self._log_r_prior) ** 2)
-        )
-        return neg_ll + reg
-
-    def _neg_log_likelihood_with_r_ij(
-        self,
-        log_masses: np.ndarray,
-        log_rs: np.ndarray,
-        log_rs_ij: np.ndarray,
-        identifiable_pairs: List[Tuple[int, int]],
-        history: List[Dict[str, Any]],
-    ) -> float:
-        """Backward-compatible neg-LL with R_ij but no Q_int / α."""
-        n = self._n
-
-        if (np.any(~np.isfinite(log_masses)) or np.any(~np.isfinite(log_rs))
-                or np.any(~np.isfinite(log_rs_ij))):
-            return 1e10
-        if np.any(log_masses < _LOG_MASS_LO) or np.any(log_masses > _LOG_MASS_HI):
-            return 1e10
-        if np.any(log_rs < _LOG_R_LO) or np.any(log_rs > _LOG_R_HI):
-            return 1e10
-        if len(log_rs_ij) and (np.any(log_rs_ij < _LOG_R_IJ_LO)
-                               or np.any(log_rs_ij > _LOG_R_IJ_HI)):
-            return 1e10
-
-        log_r_ij_map = {
-            pair: float(log_rs_ij[k])
-            for k, pair in enumerate(identifiable_pairs)
-        }
-        system = self._build_system(log_masses, log_rs, log_r_ij=log_r_ij_map)
-        if system is None:
-            return 1e10
-
-        neg_ll = self._kalman_neg_ll_via_mbc(
-            system, history,
-            q_int=None,
-            alpha_full=None,
-        )
-        if neg_ll >= 1e9:
-            return neg_ll
-
-        r_ij_priors_arr = np.array([
-            self._connection_r_priors[self._connection_pairs.index(pair)]
-            for pair in identifiable_pairs
-        ])
-        reg = self._regularization * float(
-            np.sum((log_masses - self._log_mass_prior) ** 2)
-            + np.sum((log_rs - self._log_r_prior) ** 2)
-            + np.sum((log_rs_ij - r_ij_priors_arr) ** 2)
-        )
-        return neg_ll + reg

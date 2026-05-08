@@ -9,6 +9,7 @@ Supported types
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
@@ -69,6 +70,11 @@ class HeatSource(ABC):
         power = self.thermal_power(setpoint_fraction, outdoor_temp)
         self._current_power = power
         return power
+
+    @property
+    def can_cool(self) -> bool:
+        """Returns True if this source can actively remove heat from the room."""
+        return False
 
     def __repr__(self) -> str:
         return (
@@ -181,6 +187,7 @@ class HeatPump(HeatSource):
         heater_entity: Optional[str] = None,
         cooling_cop: float = 2.5,
         cooling_efficiency: float = 1.0,
+        heating_efficiency: float = 1.0,
         power_scale: float = 1.0,
     ) -> None:
         super().__init__(name, room, max_power, heater_entity, power_scale)
@@ -192,6 +199,12 @@ class HeatPump(HeatSource):
         self.turn_off_deadband = turn_off_deadband
         self.cooling_cop = cooling_cop
         self.cooling_efficiency = cooling_efficiency
+        self.heating_efficiency = heating_efficiency
+
+    @property
+    def can_cool(self) -> bool:
+        """Returns True if this heat pump supports active cooling (EER > 0)."""
+        return self.cooling_cop > 0
 
     def cop(self, outdoor_temp: float) -> float:
         """Return the estimated COP at the given outdoor temperature."""
@@ -212,7 +225,7 @@ class HeatPump(HeatSource):
         """
         electric_max = self.max_power / self.cop_rated  # rated electrical input [W]
         actual_cop = self.cop(outdoor_temp)
-        power = electric_max * setpoint_fraction * actual_cop * self.power_scale
+        power = electric_max * setpoint_fraction * actual_cop * self.heating_efficiency * self.power_scale
         if 0.0 < power < self.min_power:
             return 0.0
         return power
@@ -278,3 +291,98 @@ class HeatPump(HeatSource):
         """
         setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
         return internal_temp + setpoint_fraction * self.max_temp_offset
+
+    def target_temperature_cooling(
+        self, cooling_fraction: float, internal_temp: float,
+    ) -> float:
+        """
+        Compute the temperature setpoint to send to the heat pump's climate
+        entity when operating in cooling mode.
+
+        The heat pump is driven to cool by setting its target below its own
+        internal sensor reading.  This method returns::
+
+            T_target = T_hp − cooling_fraction × max_temp_offset
+
+        where a *cooling_fraction* of 0 means no cooling and 1 means maximum
+        cooling intensity.
+
+        Parameters
+        ----------
+        cooling_fraction : float
+            Desired cooling intensity as a fraction of maximum [0, 1].
+        internal_temp : float
+            The heat pump's own internal temperature reading [°C].
+
+        Returns
+        -------
+        float
+            Target temperature [°C] to set on the heat pump climate entity.
+        """
+        cooling_fraction = max(0.0, min(1.0, cooling_fraction))
+        return internal_temp - cooling_fraction * self.max_temp_offset
+
+    def smooth_thermal_power(
+        self, u: float, outdoor_temp: float, k_base: float = 5.0,
+    ) -> float:
+        """
+        Smooth, asymmetric sigmoid mapping of the MPC control input
+        *u* ∈ [−1, 1] to instantaneous thermal power [W].
+
+        The function is the unique shifted logistic that satisfies:
+
+        * φ(0) = 0  (zero control → zero power)
+        * φ(u) → +Q_heat  as u → +1  (positive control → heating)
+        * φ(u) → −Q_cool  as u → −1  (negative control → cooling)
+
+        Concretely::
+
+            Q_heat = thermal_power(1, T_out)       # max heating capacity [W]
+            Q_cool = |cooling_power(T_out)|        # max cooling capacity [W]
+            offset = ln(Q_cool / Q_heat)           # ensures φ(0) = 0
+            k      = k_base + max(0, ln(Q_heat / Q_cool))
+                    # adaptive sharpness: guarantees ≥ σ(k_base) saturation
+                    # (≈ 99 % for k_base = 5) at u = ±1
+            φ(u)   = (Q_heat + Q_cool) · σ(k · u + offset) − Q_cool
+
+        where σ is the standard logistic sigmoid.
+
+        The function is smooth (C∞) everywhere and has continuous gradients
+        that the L-BFGS-B optimiser can exploit without needing to handle
+        a non-differentiable kink at u = 0.
+
+        Parameters
+        ----------
+        u : float
+            MPC control input in [−1, 1]; positive → heating, negative → cooling.
+        outdoor_temp : float
+            Current outdoor temperature [°C] for COP calculation.
+        k_base : float, optional
+            Base sharpness parameter.  The effective sharpness is automatically
+            increased to compensate for asymmetric heating/cooling capacities so
+            that both extremes saturate to ≥ σ(k_base) of their capacity within
+            u ∈ [−1, 1].  Default is 5.0.
+
+        Returns
+        -------
+        float
+            Thermal power [W].  Positive values represent heat addition;
+            negative values represent heat removal (cooling).
+        """
+        q_heat = self.thermal_power(1.0, outdoor_temp)
+        q_cool = abs(self.cooling_power(outdoor_temp))
+
+        if q_heat <= 0.0 or q_cool <= 0.0:
+            # Degenerate case: fall back to linear heating-only model
+            return self.thermal_power(max(0.0, u), outdoor_temp)
+
+        # Adaptive sharpness: compensates for capacity asymmetry so that
+        # both u=+1 (heating) and u=-1 (cooling) saturate to ~σ(k_base)
+        # of their respective maximum capacities.
+        k = k_base + max(0.0, math.log(q_heat / q_cool))
+
+        # Offset that shifts the sigmoid so φ(0) = 0 exactly.
+        offset = math.log(q_cool / q_heat)
+
+        sigmoid_val = 1.0 / (1.0 + math.exp(-(k * u + offset)))
+        return (q_heat + q_cool) * sigmoid_val - q_cool

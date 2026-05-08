@@ -86,6 +86,7 @@ async def async_setup_entry(
     entities.append(OutdoorTemperatureSensor(coordinator))
     entities.append(OutdoorForecastSensor(coordinator))
     entities.append(SystemEfficiencySensor(coordinator))
+    entities.append(MPCPerformanceSensor(coordinator))
 
     async_add_entities(entities)
 
@@ -421,7 +422,10 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> Optional[float]:
         predictions = self._coordinator.predictions
         if not predictions:
-            return None
+            room = self._coordinator.model.rooms.get(self._room_name)
+            if room is None:
+                return None
+            return round(room.temperature, 2)
         last = predictions[-1]
         temp = last.get(self._room_name)
         return round(temp, 2) if temp is not None else None
@@ -454,7 +458,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
 
         # Current heating power for this room (actual, not planned)
         current_heating = sum(
-            s.current_power
+            getattr(s, "current_power", 0.0)
             for s in self._coordinator.heat_sources
             if s.room == self._room_name
         )
@@ -744,7 +748,12 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         schedule = self._coordinator.heating_schedule
         if schedule:
             return round(schedule[0].get(self._room_name, 0.0), 1)
-        return 0.0
+        current_heating = sum(
+            getattr(s, "current_power", 0.0)
+            for s in self._coordinator.heat_sources
+            if s.room == self._room_name
+        )
+        return round(current_heating, 1)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -752,24 +761,26 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
-        # Current actual heating power for this room
-        current_heating = sum(
-            s.current_power
-            for s in self._coordinator.heat_sources
-            if s.room == self._room_name
-        )
-
         forecast = []
-        # Entry at t=now: bridge between history and prediction
-        forecast.append({
-            "time": now.isoformat(),
-            "heating_power": round(current_heating, 1),
-        })
-        for i, step in enumerate(schedule):
-            step_time = now + timedelta(seconds=dt * (i + 1))
+        if schedule:
+            # heating_schedule[i] = planned power for [now + i*dt, now + (i+1)*dt]
+            # Label at start of interval (now + i*dt); i=0 bridges history to plan
+            for i, step in enumerate(schedule):
+                step_time = now + timedelta(seconds=dt * i)
+                forecast.append({
+                    "time": step_time.isoformat(),
+                    "heating_power": round(step.get(self._room_name, 0.0), 1),
+                })
+        else:
+            # Fallback: bridge from current actual power when no schedule is available
+            current_heating = sum(
+                getattr(s, "current_power", 0.0)
+                for s in self._coordinator.heat_sources
+                if s.room == self._room_name
+            )
             forecast.append({
-                "time": step_time.isoformat(),
-                "heating_power": round(step.get(self._room_name, 0.0), 1),
+                "time": now.isoformat(),
+                "heating_power": round(current_heating, 1),
             })
 
         return {
@@ -812,7 +823,7 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
         solar_forecast = self._coordinator.solar_forecast
         if solar_forecast:
             return round(solar_forecast[0].get(self._room_name, 0.0), 1)
-        return 0.0
+        return round(self._coordinator.solar_gains.get(self._room_name, 0.0), 1)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -820,26 +831,33 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
-        # Current actual solar gain for this room
-        current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
-
+        # solar_forecast has N+1 entries: solar_forecast[k] = solar at now + k*dt
+        # for k = 0, …, N.  Entry k=0 is at "now" and acts as the bridge point
+        # that connects the forecast trace to the HA recorder history.
         forecast = []
-        # Entry at t=now: bridge between history and prediction
-        forecast.append({
-            "time": now.isoformat(),
-            "solar_gain": round(current_solar, 1),
-        })
         for i, step in enumerate(solar_forecast):
-            step_time = now + timedelta(seconds=dt * (i + 1))
+            step_time = now + timedelta(seconds=dt * i)
             forecast.append({
                 "time": step_time.isoformat(),
                 "solar_gain": round(step.get(self._room_name, 0.0), 1),
             })
 
+        # Fallback: if solar_forecast is empty (before first compute), provide
+        # a single bridge point using the coordinator's current solar_gains.
+        if not forecast:
+            current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
+            forecast.append({
+                "time": now.isoformat(),
+                "solar_gain": round(current_solar, 1),
+            })
+
         room = self._coordinator.model.rooms[self._room_name]
+        # horizon_steps is N (the OCP horizon), which is len(solar_forecast) - 1
+        # when solar_forecast is populated (N+1 entries), or 0 when empty.
+        horizon_steps = max(0, len(solar_forecast) - 1)
         return {
             "forecast": forecast,
-            "horizon_steps": len(solar_forecast),
+            "horizon_steps": horizon_steps,
             "step_seconds": dt,
             "window_count": len(room.windows),
             "total_window_area": round(sum(w.area for w in room.windows), 2),
@@ -980,8 +998,11 @@ class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
 
         for record in self._coordinator.history_buffer:
             y = record.get("y", [])
-            y_pred = record.get("y_pred", [])
+            y_pred = record.get("y_pred")  # may be None for the first record
 
+            # Skip records where no aligned prediction was stored yet
+            if y_pred is None:
+                continue
             if room_idx < len(y) and room_idx < len(y_pred):
                 predictions.append(y_pred[room_idx])
                 measurements.append(y[room_idx])
@@ -1008,8 +1029,11 @@ class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
 
         for record in self._coordinator.history_buffer:
             y = record.get("y", [])
-            y_pred = record.get("y_pred", [])
+            y_pred = record.get("y_pred")  # may be None for the first record
 
+            # Skip records where no aligned prediction was stored yet
+            if y_pred is None:
+                continue
             if room_idx < len(y) and room_idx < len(y_pred):
                 predictions.append(y_pred[room_idx])
                 measurements.append(y[room_idx])
@@ -1171,10 +1195,9 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
 
     def _compute(self) -> dict:
         from .model_diagnostics import compute_open_loop_predictions
-        from .const import UPDATE_INTERVAL
 
         history = list(self._coordinator.history_buffer)
-        system = self._coordinator.controller._system  # HouseThermalSystem
+        system = self._coordinator.controller._system  # HouseThermalSDE
         room_names = self._coordinator.model.room_names
         n_rooms = len(room_names)
 
@@ -1183,7 +1206,7 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
             system=system,
             room_names=room_names,
             n_rooms=n_rooms,
-            dt=float(UPDATE_INTERVAL),
+            dt=float(self._coordinator.update_interval_seconds),
             segment_length=self.SEGMENT_LENGTH,
         )
 
@@ -1384,3 +1407,94 @@ class ResidualACFSensor(CoordinatorEntity, SensorEntity):
         except Exception as exc:
             _LOGGER.debug("ResidualACFSensor error for %s: %s", self._room_name, exc)
             return {"error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# MPC performance sensor (system-wide)
+# ---------------------------------------------------------------------------
+
+class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
+    """
+    System-wide sensor reporting MPC solver performance statistics.
+
+    The state is the total number of completed OCP solves.  It is a
+    monotonically-increasing integer so the entity state always advances on
+    every coordinator cycle, making it easy to spot if the MPC has stopped
+    running.  Detailed statistics (solve times, tracking errors) are exposed
+    as state attributes.
+
+    Previously the state was the most-recent solve time [s], but after the
+    initial warm-up the L-BFGS-B solver converges in near-constant time, so
+    that value appeared frozen even when the controller was running normally.
+    """
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = None
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – MPC Performance"
+        self._attr_unique_id = f"{DOMAIN}_mpc_performance"
+
+    @property
+    def native_value(self) -> Optional[int]:
+        """Return the total number of completed OCP solves."""
+        return self._coordinator.controller.total_computes
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose rolling solve-time statistics and recent history."""
+        import numpy as np
+
+        controller = self._coordinator.controller
+        solve_times = list(controller._solve_times)
+
+        last_t = controller.last_solve_time
+        mean_t = controller.mean_solve_time
+        max_t = controller.max_solve_time
+        n = controller.n_solves
+
+        attrs: Dict[str, Any] = {
+            "total_computes": controller.total_computes,
+            "last_solve_time_s": round(last_t, 4) if last_t is not None else None,
+            "mean_solve_time_s": round(mean_t, 4) if mean_t is not None else None,
+            "max_solve_time_s": round(max_t, 4) if max_t is not None else None,
+            "n_solves": n,
+            "horizon": self._coordinator.controller._horizon,
+            "dt_s": self._coordinator.dt,
+        }
+
+        # Tracking error per room (absolute deviation from setpoint)
+        room_names = self._coordinator.model.room_names
+        tracking_error_values = [
+            abs(
+                self._coordinator.model.rooms[name].temperature
+                - self._coordinator.model.rooms[name].setpoint
+            )
+            for name in room_names
+        ]
+        attrs["current_tracking_errors"] = {
+            name: round(v, 3) for name, v in zip(room_names, tracking_error_values)
+        }
+        attrs["mean_tracking_error"] = (
+            round(float(np.mean(tracking_error_values)), 3)
+            if tracking_error_values else None
+        )
+        attrs["max_tracking_error"] = (
+            round(float(np.max(tracking_error_values)), 3)
+            if tracking_error_values else None
+        )
+
+        # Terminal-weight in effect (for reference)
+        attrs["terminal_weight"] = (
+            controller.terminal_weight
+            if hasattr(controller, "terminal_weight")
+            else None
+        )
+
+        # Rolling solve time history (last 50 samples) for sparkline charts
+        attrs["recent_solve_times_s"] = [round(t, 4) for t in solve_times[-50:]]
+
+        return attrs

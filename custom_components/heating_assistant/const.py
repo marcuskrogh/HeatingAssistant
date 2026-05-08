@@ -44,22 +44,24 @@ CONF_SOURCE_MAX_TEMP_OFFSET = "max_temp_offset"  # °C max temperature offset fo
 CONF_SOURCE_TURN_OFF_DEADBAND = "turn_off_deadband"  # °C above setpoint before heat pump turns off
 CONF_SOURCE_COOLING_COP = "cooling_cop"  # cooling COP (EER) for heat pumps in cooling mode
 CONF_SOURCE_COOLING_EFFICIENCY = "cooling_efficiency"  # fraction of max cooling capacity (0–1) used in dry/cool mode
+CONF_SOURCE_HEATING_EFFICIENCY = "heating_efficiency"  # fraction of max heating capacity (0–1) used in heat mode
 
 # Controller configuration keys
 CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
-CONF_DT = "dt"                         # time step in seconds
+CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = OCP step = EKF step (seconds)
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
 CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output constraints
 CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (energy saving vs. tracking)
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (dampens rapid input changes)
+CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
 DEFAULT_R_EXTERNAL = 0.05              # K/W
 DEFAULT_SETPOINT = 21.0                # °C
 DEFAULT_HORIZON = 6                    # 6 steps ahead
-DEFAULT_DT = 900                       # 15-minute steps (seconds)
+DEFAULT_UPDATE_INTERVAL = 900          # OCP step / ZOH duration = coordinator / EKF update period (seconds)
 DEFAULT_EFFICIENCY = 1.0
 DEFAULT_COP_RATED = 3.5
 DEFAULT_COP_TEMP_REF = 7.0             # °C
@@ -69,9 +71,11 @@ DEFAULT_TURN_OFF_DEADBAND = 1.0        # °C above setpoint before heat pump tur
 DEFAULT_IDLE_OFFSET = 1.0              # °C below internal temp for idle setpoint
 DEFAULT_COOLING_COP = 2.5              # rated cooling COP (EER) for heat pumps
 DEFAULT_COOLING_EFFICIENCY = 1.0       # fraction of max cooling capacity used (0–1)
+DEFAULT_HEATING_EFFICIENCY = 1.0       # fraction of max heating capacity used (0–1)
 DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint offset
 DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
+DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 
 # Source types
@@ -84,11 +88,15 @@ SUFFIX_PREDICTED_TEMP = "predicted_temperature"
 SUFFIX_HEATING_POWER = "heating_power"
 
 # Update interval (seconds)
-UPDATE_INTERVAL = 60
+# This constant is kept for backward compatibility. The live value is read
+# from the config entry (CONF_UPDATE_INTERVAL) at coordinator start-up.
+UPDATE_INTERVAL = DEFAULT_UPDATE_INTERVAL
 
 # Parameter estimation
 #: Number of update steps to keep in the rolling history buffer.
-#: At UPDATE_INTERVAL=60 s this is ≈8 hours of data.
+#: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is exactly 120 hours of data.
 HISTORY_BUFFER_SIZE = 480
+#: Number of MPC solve-time samples to retain for rolling statistics.
+MPC_STATS_BUFFER_SIZE = 100
 #: Service name for ML parameter estimation
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"

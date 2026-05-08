@@ -13,16 +13,16 @@ from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
-    CONF_DT,
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     CONF_ROOMS,
     CONF_HEAT_SOURCES,
-    DEFAULT_DT,
     DEFAULT_HORIZON,
+    DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     NAME,
 )
@@ -63,7 +63,7 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
                 vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): str,
                 vol.Optional(CONF_WEATHER_ENTITY, default=""): str,
-                vol.Optional(CONF_DT, default=DEFAULT_DT): vol.All(
+                vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
@@ -113,8 +113,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     default=current.get(CONF_WEATHER_ENTITY, ""),
                 ): str,
                 vol.Optional(
-                    CONF_DT,
-                    default=current.get(CONF_DT, DEFAULT_DT),
+                    CONF_UPDATE_INTERVAL,
+                    default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
                 ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
                 vol.Optional(
                     CONF_HORIZON,

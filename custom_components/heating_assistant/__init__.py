@@ -71,7 +71,6 @@ from .const import (
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
     CONF_CONSTRAINT_OFFSET,
-    CONF_DT,
     CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -85,12 +84,13 @@ from .const import (
     CONF_ROOMS,
     CONF_SETPOINT,
     CONF_SMOOTHING_WEIGHT,
-    CONF_SOURCE_COP_RATED,
-    CONF_SOURCE_COP_TEMP_REF,
     CONF_SOURCE_COOLING_COP,
     CONF_SOURCE_COOLING_EFFICIENCY,
+    CONF_SOURCE_COP_RATED,
+    CONF_SOURCE_COP_TEMP_REF,
     CONF_SOURCE_EFFICIENCY,
     CONF_SOURCE_HEATER_ENTITY,
+    CONF_SOURCE_HEATING_EFFICIENCY,
     CONF_SOURCE_MAX_POWER,
     CONF_SOURCE_MAX_TEMP_OFFSET,
     CONF_SOURCE_MIN_POWER,
@@ -100,7 +100,9 @@ from .const import (
     CONF_SOURCE_TYPE,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_TERMINAL_WEIGHT,
     CONF_THERMAL_MASS,
+    CONF_UPDATE_INTERVAL,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
@@ -110,17 +112,19 @@ from .const import (
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
     DEFAULT_CONSTRAINT_OFFSET,
-    DEFAULT_DT,
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
+    DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_HORIZON,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_THERMAL_MASS,
     DEFAULT_TURN_OFF_DEADBAND,
+    DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
     SOURCE_TYPE_ELECTRIC,
@@ -191,6 +195,9 @@ _SOURCE_SCHEMA = vol.Schema(
         vol.Optional(CONF_SOURCE_COOLING_EFFICIENCY, default=DEFAULT_COOLING_EFFICIENCY): vol.All(
             vol.Coerce(float), vol.Range(min=0.0, max=1.0)
         ),
+        vol.Optional(CONF_SOURCE_HEATING_EFFICIENCY, default=DEFAULT_HEATING_EFFICIENCY): vol.All(
+            vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+        ),
         vol.Optional(CONF_SOURCE_HEATER_ENTITY): str,
     }
 )
@@ -205,8 +212,12 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_WEATHER_ENTITY): str,
                 vol.Optional(CONF_LATITUDE): vol.Coerce(float),
                 vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
-                vol.Optional(CONF_DT, default=DEFAULT_DT): vol.Coerce(int),
-                vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.Coerce(int),
+                vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
+                    vol.Coerce(int), vol.Range(min=60, max=3600)
+                ),
+                vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=24)
+                ),
                 vol.Optional(
                     CONF_ENERGY_WEIGHT, default=DEFAULT_ENERGY_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
@@ -216,6 +227,9 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(
                     CONF_CONSTRAINT_OFFSET, default=DEFAULT_CONSTRAINT_OFFSET
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                vol.Optional(
+                    CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
             }
         )
     },
@@ -258,7 +272,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_data[CONF_WEATHER_ENTITY] = yaml_cfg.get(
                 CONF_WEATHER_ENTITY, ""
             )
-        entry_data.setdefault(CONF_DT, yaml_cfg.get(CONF_DT, DEFAULT_DT))
+        entry_data.setdefault(CONF_UPDATE_INTERVAL, yaml_cfg.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
         entry_data.setdefault(CONF_HORIZON, yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON))
         if CONF_LATITUDE not in entry_data and CONF_LATITUDE in yaml_cfg:
             entry_data[CONF_LATITUDE] = yaml_cfg[CONF_LATITUDE]
@@ -275,6 +289,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry_data.setdefault(
             CONF_CONSTRAINT_OFFSET,
             yaml_cfg.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET),
+        )
+        entry_data.setdefault(
+            CONF_TERMINAL_WEIGHT,
+            yaml_cfg.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
         )
 
     # Build a temporary entry-like object with merged data for the coordinator

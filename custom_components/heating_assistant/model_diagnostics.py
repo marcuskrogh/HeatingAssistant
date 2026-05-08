@@ -702,10 +702,9 @@ def compute_open_loop_predictions(
         History buffer entries, each with keys ``y``, ``u``, ``d_outdoor``,
         ``d_solar``, ``timestamp``.
     system : HouseThermalSystem
-        Thermal system object used to compute discrete-time matrices via
-        ``system.discretize(d_cvx)`` and to build disturbance vectors.
-        Passed as ``Any`` to avoid a circular import; only ``discretize``,
-        ``n_d``, ``_room_idx``, ``n_u`` are accessed.
+        Thermal system object used for continuous-time integration.
+        Passed as ``Any`` to avoid a circular import; only ``f``,
+        ``n_d``, ``_room_idx``, ``n_u``, ``_dt`` are accessed.
     room_names : list of str
         Ordered room names (must match the ``y`` index order).
     n_rooms : int
@@ -739,20 +738,8 @@ def compute_open_loop_predictions(
             "segment_length": segment_length,
         }
 
-    # Import helpers lazily to avoid loading cvxopt at module level
-    try:
-        from mbc._utils import _np_to_cvx, _cvx_to_np  # type: ignore[import]
-    except ImportError:
-        return {
-            "error": "Cannot import mbc utilities (cvxopt not available).",
-            "per_room": {},
-            "overall_rmse": {},
-            "n_segments": 0,
-            "segment_length": segment_length,
-        }
-
     def _make_d(record: Dict[str, Any]) -> np.ndarray:
-        p = system.n_d
+        p = system.nd
         d = np.zeros(p)
         d[0] = float(record.get("d_outdoor", 0.0))
         d_solar = record.get("d_solar", {})
@@ -779,23 +766,30 @@ def compute_open_loop_predictions(
         valid_segment = True
         for record in seg[1:]:
             d = _make_d(record)
-            try:
-                A_cvx, B_cvx, E_cvx = system.discretize(_np_to_cvx(d_prev))
-            except Exception:
-                valid_segment = False
-                break
-            A = _cvx_to_np(A_cvx)
-            B_mat = _cvx_to_np(B_cvx)
 
             u_raw = record.get("u", [])
-            n_u = B_mat.shape[1]
+            n_u = system.nu
             u = np.zeros(n_u)
             for k, v in enumerate(u_raw):
                 if k < n_u:
                     u[k] = float(v)
 
-            # Open-loop propagation – no measurement correction
-            x = A @ x + B_mat @ u
+            # Continuous-time integration using forward Euler
+            # This matches the approach used in CD-EKF
+            dt = system._dt
+            n_steps = 10  # Sub-steps for numerical stability
+            dt_sub = dt / n_steps
+
+            try:
+                for _ in range(n_steps):
+                    # Use previous disturbance (zero-order hold)
+                    dx = system.f(x, u, d_prev, np.array([]), 0.0)
+                    x = x + dx * dt_sub
+            except Exception:
+                valid_segment = False
+                break
+
+            d_prev = d
 
             y_meas = record.get("y", [])
             ts = record.get("timestamp", 0.0)
