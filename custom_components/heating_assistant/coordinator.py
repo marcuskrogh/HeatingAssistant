@@ -632,22 +632,34 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         except (ValueError, TypeError):
                             pass
 
-                    if room_temp > room_setpoint:
-                        # Room is above setpoint – activate a passive/gentle
-                        # cooling mode.  "dry" (dehumidify) is preferred as it
-                        # provides a slight cooling effect without running the
-                        # compressor in full cooling mode; fall back to
-                        # "fan_only" if "dry" is not listed in the entity's
-                        # supported modes.
-                        #
-                        # The temperature setpoint is also placed below the
-                        # HP's own sensor reading to prevent any residual
-                        # heating.  The offset grows with the degree to which
-                        # the room exceeds the desired setpoint.
-                        #
-                        # When in cooling mode, we apply the cooling power to
-                        # the heat source so the thermal model accounts for
-                        # heat removal.
+                    # Hysteresis: resolve the current cooling state using two
+                    # separate thresholds so mode changes only occur when the
+                    # temperature crosses the deadband boundary from the correct
+                    # direction.
+                    #
+                    #   upper threshold = setpoint + deadband  → enter cooling
+                    #   lower threshold = setpoint - deadband  → exit  cooling
+                    #
+                    # Between the two thresholds the previous state is kept,
+                    # which prevents rapid toggling when the temperature is
+                    # hovering near the setpoint.
+                    currently_cooling = self._cooling_active.get(src.name, False)
+                    if currently_cooling:
+                        # Exit cooling only when room drops below lower threshold
+                        if room_temp < room_setpoint - src.turn_off_deadband:
+                            currently_cooling = False
+                    else:
+                        # Enter cooling only when room rises above upper threshold
+                        if room_temp > room_setpoint + src.turn_off_deadband:
+                            currently_cooling = True
+                    self._cooling_active[src.name] = currently_cooling
+
+                    if currently_cooling:
+                        # Passive/gentle cooling mode.  "dry" (dehumidify) is
+                        # preferred; fall back to "fan_only" if unsupported.
+                        # The HP setpoint is placed below its own reading by an
+                        # offset that grows with overshoot to prevent residual
+                        # heating.
                         overshoot = max(0.0, room_temp - room_setpoint)
                         idle_offset = DEFAULT_IDLE_OFFSET + overshoot
 
@@ -683,15 +695,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             blocking=False,
                         )
 
-                        # Apply cooling power to the heat source for thermal modeling
+                        # Apply cooling power to the heat source for thermal modelling
                         cooling_power = src.cooling_power(outdoor_temp)
-                        src.set_power(0.0, outdoor_temp)  # Clear heating power
-                        src._current_power = cooling_power  # Set to negative (cooling)
-                        if not hasattr(self, '_cooling_active'):
-                            self._cooling_active = {}
-                        self._cooling_active[src.name] = True
+                        src.set_power(0.0, outdoor_temp)
+                        src._current_power = cooling_power  # negative = heat removal
                     elif fraction > 0.0:
-                        # Active heating: keep on with offset-based setpoint
+                        # Active heating: offset-based setpoint
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
@@ -714,17 +723,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
-
-                        # Not in cooling mode - clear flag
-                        if not hasattr(self, '_cooling_active'):
-                            self._cooling_active = {}
-                        self._cooling_active[src.name] = False
                     else:
-                        # Idle: room at or below setpoint, keep HP on but
-                        # set target below internal temp so the device
-                        # stops heating.  The offset is re-applied every
-                        # update cycle to track any drift in the internal
-                        # sensor.
+                        # Idle: MPC demands no heat and room is inside the
+                        # deadband.  Keep the HP in heat mode but set the
+                        # target below the HP's own reading so it produces
+                        # near-zero output while keeping the refrigerant
+                        # circuit warm for fast response.
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
@@ -743,11 +747,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "temperature": target_temp},
                             blocking=False,
                         )
-
-                        # Not in cooling mode - clear flag
-                        if not hasattr(self, '_cooling_active'):
-                            self._cooling_active = {}
-                        self._cooling_active[src.name] = False
                 else:
                     # Non-heat-pump climate entity (e.g. electric heater
                     # with a built-in thermostat).
