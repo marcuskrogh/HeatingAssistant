@@ -65,6 +65,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -355,9 +356,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not new_rooms:
         _LOGGER.warning(
-            "Heating Assistant: no rooms are configured.  Add a "
+            "Heating Assistant: no rooms are configured. Add a "
             "'heating_assistant:' block with at least one 'rooms' entry "
-            "to your configuration.yaml and restart Home Assistant.  "
+            "to your configuration.yaml and restart Home Assistant. "
             "Per-room entities (heating plans, forecasts, etc.) will not "
             "be created until rooms are defined."
         )
@@ -373,7 +374,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # automatically on the next update interval.
     try:
         await coordinator.async_config_entry_first_refresh()
-    except Exception:  # noqa: BLE001
+    except ConfigEntryNotReady:
         _LOGGER.warning(
             "Heating Assistant: initial data fetch failed; entities will be "
             "unavailable until the next successful update",
