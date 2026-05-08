@@ -9,7 +9,7 @@ from custom_components.heating_assistant.sensor import (
 )
 
 
-def test_prediction_entities_do_not_expose_measurement_state_class():
+def test_prediction_entities_have_no_state_class():
     assert getattr(PredictedTemperatureSensor, "_attr_state_class", None) is None
     assert getattr(OutdoorForecastSensor, "_attr_state_class", None) is None
     assert getattr(TemperatureForecastSensor, "_attr_state_class", None) is None
