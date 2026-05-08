@@ -35,8 +35,8 @@ def test_merge_uses_yaml_when_entry_has_empty_room_and_source_lists():
 def test_merge_yaml_always_wins_when_yaml_defines_rooms():
     """YAML rooms always replace entry.data rooms so YAML edits take effect immediately."""
     entry_data = {
-        CONF_ROOMS: [{"name": "stale_room"}],
-        CONF_HEAT_SOURCES: [{"name": "stale_source"}],
+        CONF_ROOMS: [{"name": "entry_room"}],
+        CONF_HEAT_SOURCES: [{"name": "entry_source"}],
     }
     yaml_cfg = {
         CONF_ROOMS: [{"name": "living_room"}, {"name": "bedroom"}],
