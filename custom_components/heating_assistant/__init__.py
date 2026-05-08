@@ -250,6 +250,56 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     return True
 
 
+def _merge_yaml_into_entry_data(
+    entry_data: Dict[str, Any],
+    yaml_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Merge YAML-backed defaults into config-entry data."""
+    merged = dict(entry_data)
+
+    # Prefer YAML room/source definitions when the entry has placeholders
+    # (missing or empty lists). This keeps room-based entities available.
+    if not merged.get(CONF_ROOMS):
+        merged[CONF_ROOMS] = yaml_cfg.get(CONF_ROOMS, [])
+    if not merged.get(CONF_HEAT_SOURCES):
+        merged[CONF_HEAT_SOURCES] = yaml_cfg.get(CONF_HEAT_SOURCES, [])
+
+    # Use YAML outdoor entity if the config entry value is empty/missing.
+    # setdefault would not overwrite the empty-string default from the
+    # config-flow, so we need an explicit check here.
+    if not merged.get(CONF_OUTDOOR_TEMP_ENTITY):
+        merged[CONF_OUTDOOR_TEMP_ENTITY] = yaml_cfg.get(
+            CONF_OUTDOOR_TEMP_ENTITY, ""
+        )
+    if not merged.get(CONF_WEATHER_ENTITY):
+        merged[CONF_WEATHER_ENTITY] = yaml_cfg.get(
+            CONF_WEATHER_ENTITY, ""
+        )
+    merged.setdefault(CONF_UPDATE_INTERVAL, yaml_cfg.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
+    merged.setdefault(CONF_HORIZON, yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON))
+    if CONF_LATITUDE not in merged and CONF_LATITUDE in yaml_cfg:
+        merged[CONF_LATITUDE] = yaml_cfg[CONF_LATITUDE]
+    if CONF_LONGITUDE not in merged and CONF_LONGITUDE in yaml_cfg:
+        merged[CONF_LONGITUDE] = yaml_cfg[CONF_LONGITUDE]
+    merged.setdefault(
+        CONF_ENERGY_WEIGHT,
+        yaml_cfg.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT),
+    )
+    merged.setdefault(
+        CONF_SMOOTHING_WEIGHT,
+        yaml_cfg.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT),
+    )
+    merged.setdefault(
+        CONF_CONSTRAINT_OFFSET,
+        yaml_cfg.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET),
+    )
+    merged.setdefault(
+        CONF_TERMINAL_WEIGHT,
+        yaml_cfg.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
+    )
+    return merged
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Heating Assistant from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -259,41 +309,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data = dict(entry.data)
     yaml_cfg = hass.data[DOMAIN].get("yaml_config", {})
     if yaml_cfg:
-        entry_data.setdefault(CONF_ROOMS, yaml_cfg.get(CONF_ROOMS, []))
-        entry_data.setdefault(CONF_HEAT_SOURCES, yaml_cfg.get(CONF_HEAT_SOURCES, []))
-        # Use YAML outdoor entity if the config entry value is empty/missing.
-        # setdefault would not overwrite the empty-string default from the
-        # config-flow, so we need an explicit check here.
-        if not entry_data.get(CONF_OUTDOOR_TEMP_ENTITY):
-            entry_data[CONF_OUTDOOR_TEMP_ENTITY] = yaml_cfg.get(
-                CONF_OUTDOOR_TEMP_ENTITY, ""
-            )
-        if not entry_data.get(CONF_WEATHER_ENTITY):
-            entry_data[CONF_WEATHER_ENTITY] = yaml_cfg.get(
-                CONF_WEATHER_ENTITY, ""
-            )
-        entry_data.setdefault(CONF_UPDATE_INTERVAL, yaml_cfg.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
-        entry_data.setdefault(CONF_HORIZON, yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON))
-        if CONF_LATITUDE not in entry_data and CONF_LATITUDE in yaml_cfg:
-            entry_data[CONF_LATITUDE] = yaml_cfg[CONF_LATITUDE]
-        if CONF_LONGITUDE not in entry_data and CONF_LONGITUDE in yaml_cfg:
-            entry_data[CONF_LONGITUDE] = yaml_cfg[CONF_LONGITUDE]
-        entry_data.setdefault(
-            CONF_ENERGY_WEIGHT,
-            yaml_cfg.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT),
-        )
-        entry_data.setdefault(
-            CONF_SMOOTHING_WEIGHT,
-            yaml_cfg.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT),
-        )
-        entry_data.setdefault(
-            CONF_CONSTRAINT_OFFSET,
-            yaml_cfg.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET),
-        )
-        entry_data.setdefault(
-            CONF_TERMINAL_WEIGHT,
-            yaml_cfg.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
-        )
+        entry_data = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
 
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)
