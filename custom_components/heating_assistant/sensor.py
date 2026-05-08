@@ -761,24 +761,26 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         dt = self._coordinator.dt
         now = datetime.now(tz=timezone.utc)
 
-        # Current actual heating power for this room
-        current_heating = sum(
-            s.current_power
-            for s in self._coordinator.heat_sources
-            if s.room == self._room_name
-        )
-
         forecast = []
-        # Entry at t=now: bridge between history and prediction
-        forecast.append({
-            "time": now.isoformat(),
-            "heating_power": round(current_heating, 1),
-        })
-        for i, step in enumerate(schedule):
-            step_time = now + timedelta(seconds=dt * (i + 1))
+        if schedule:
+            # heating_schedule[i] = planned power for [now + i*dt, now + (i+1)*dt]
+            # Label at start of interval (now + i*dt); i=0 bridges history to plan
+            for i, step in enumerate(schedule):
+                step_time = now + timedelta(seconds=dt * i)
+                forecast.append({
+                    "time": step_time.isoformat(),
+                    "heating_power": round(step.get(self._room_name, 0.0), 1),
+                })
+        else:
+            # Fallback: bridge from current actual power when no schedule is available
+            current_heating = sum(
+                getattr(s, "current_power", 0.0)
+                for s in self._coordinator.heat_sources
+                if s.room == self._room_name
+            )
             forecast.append({
-                "time": step_time.isoformat(),
-                "heating_power": round(step.get(self._room_name, 0.0), 1),
+                "time": now.isoformat(),
+                "heating_power": round(current_heating, 1),
             })
 
         return {
