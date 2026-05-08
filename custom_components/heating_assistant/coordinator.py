@@ -348,24 +348,44 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             }
 
             # 4. Run MPC controller
-            self.actions = self.controller.compute(
-                outdoor_temp=outdoor_temp,
-                solar_gains=self.solar_gains,
-                now=now,
-                outdoor_forecast=outdoor_forecast,
-            )
+            try:
+                self.actions = self.controller.compute(
+                    outdoor_temp=outdoor_temp,
+                    solar_gains=self.solar_gains,
+                    now=now,
+                    outdoor_forecast=outdoor_forecast,
+                )
+                self.predictions = self.controller.predictions
+                self.outdoor_forecast = self.controller.outdoor_forecast
+                self.solar_forecast = self.controller.solar_forecast
+                self.heating_schedule = self.controller.heating_schedule
 
-            # 5. Store prediction trajectory and heat-flow breakdown
-            self.predictions = self.controller.predictions
+                # Capture Kalman innovation for diagnostics (may be None on first step)
+                # controller.last_innovation is populated by compute() after splitting
+                # the EKF predict/update steps to record ν = y − hm(x̂⁻).
+                kalman_innovation: Optional[List[float]] = self.controller.last_innovation
+            except Exception:
+                _LOGGER.warning(
+                    "Failed to compute MPC actions; keeping entities available with "
+                    "fallback visualisation data",
+                    exc_info=True,
+                )
+                # Keep previous actions if available; otherwise default to all-off.
+                if not self.actions:
+                    self.actions = {src.name: 0.0 for src in self.heat_sources}
+
+                # Fallback visualisation data so forecast entities stay available.
+                self.predictions = []
+                self.heating_schedule = []
+                if outdoor_forecast is not None and len(outdoor_forecast) >= self._horizon:
+                    self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
+                elif not self.outdoor_forecast:
+                    self.outdoor_forecast = [outdoor_temp] * self._horizon
+                self.solar_forecast = [dict(self.solar_gains)]
+                kalman_innovation = None
+
+            # 5. Store heat-flow breakdown (independent of MPC solve success)
             self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
-            self.outdoor_forecast = self.controller.outdoor_forecast
-            self.solar_forecast = self.controller.solar_forecast
-            self.heating_schedule = self.controller.heating_schedule
-
-            # Capture Kalman innovation for diagnostics (may be None on first step)
-            # controller.last_innovation is populated by compute() after splitting
-            # the EKF predict/update steps to record ν = y − hm(x̂⁻).
-            kalman_innovation: Optional[List[float]] = self.controller.last_innovation
 
             # 6. Record observation in the rolling history buffer for ML
             #    parameter estimation and model fit analysis.
