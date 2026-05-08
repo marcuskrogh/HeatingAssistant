@@ -258,10 +258,13 @@ def _merge_yaml_into_entry_data(
     merged = dict(entry_data)
 
     # Prefer YAML room/source definitions when the entry has placeholders
-    # (missing or empty lists). This keeps room-based entities available.
-    if not merged.get(CONF_ROOMS):
+    # (missing key, None, or explicit empty list from older entries/options).
+    # This keeps room-based entities available after restart/reload.
+    rooms_cfg = merged.get(CONF_ROOMS)
+    if rooms_cfg is None or rooms_cfg == []:
         merged[CONF_ROOMS] = yaml_cfg.get(CONF_ROOMS, [])
-    if not merged.get(CONF_HEAT_SOURCES):
+    sources_cfg = merged.get(CONF_HEAT_SOURCES)
+    if sources_cfg is None or sources_cfg == []:
         merged[CONF_HEAT_SOURCES] = yaml_cfg.get(CONF_HEAT_SOURCES, [])
 
     # Use YAML outdoor entity if the config entry value is empty/missing.
@@ -275,28 +278,32 @@ def _merge_yaml_into_entry_data(
         merged[CONF_WEATHER_ENTITY] = yaml_cfg.get(
             CONF_WEATHER_ENTITY, ""
         )
-    merged.setdefault(CONF_UPDATE_INTERVAL, yaml_cfg.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
-    merged.setdefault(CONF_HORIZON, yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON))
+    if CONF_UPDATE_INTERVAL not in merged:
+        merged[CONF_UPDATE_INTERVAL] = yaml_cfg.get(
+            CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
+        )
+    if CONF_HORIZON not in merged:
+        merged[CONF_HORIZON] = yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON)
     if CONF_LATITUDE not in merged and CONF_LATITUDE in yaml_cfg:
         merged[CONF_LATITUDE] = yaml_cfg[CONF_LATITUDE]
     if CONF_LONGITUDE not in merged and CONF_LONGITUDE in yaml_cfg:
         merged[CONF_LONGITUDE] = yaml_cfg[CONF_LONGITUDE]
-    merged.setdefault(
-        CONF_ENERGY_WEIGHT,
-        yaml_cfg.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT),
-    )
-    merged.setdefault(
-        CONF_SMOOTHING_WEIGHT,
-        yaml_cfg.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT),
-    )
-    merged.setdefault(
-        CONF_CONSTRAINT_OFFSET,
-        yaml_cfg.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET),
-    )
-    merged.setdefault(
-        CONF_TERMINAL_WEIGHT,
-        yaml_cfg.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
-    )
+    if CONF_ENERGY_WEIGHT not in merged:
+        merged[CONF_ENERGY_WEIGHT] = yaml_cfg.get(
+            CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT
+        )
+    if CONF_SMOOTHING_WEIGHT not in merged:
+        merged[CONF_SMOOTHING_WEIGHT] = yaml_cfg.get(
+            CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT
+        )
+    if CONF_CONSTRAINT_OFFSET not in merged:
+        merged[CONF_CONSTRAINT_OFFSET] = yaml_cfg.get(
+            CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET
+        )
+    if CONF_TERMINAL_WEIGHT not in merged:
+        merged[CONF_TERMINAL_WEIGHT] = yaml_cfg.get(
+            CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT
+        )
     return merged
 
 
