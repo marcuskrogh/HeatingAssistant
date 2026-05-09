@@ -31,7 +31,7 @@ def test_merge_uses_yaml_when_entry_has_empty_room_and_source_lists():
     assert merged[CONF_WEATHER_ENTITY] == "weather.home"
 
 
-def test_merge_yaml_always_wins_when_yaml_defines_rooms_and_sources():
+def test_merge_yaml_takes_precedence_when_yaml_has_rooms_and_sources():
     entry_data = {
         CONF_ROOMS: [{"name": "entry_room"}],
         CONF_HEAT_SOURCES: [{"name": "entry_source"}],
