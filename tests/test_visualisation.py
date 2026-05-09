@@ -825,19 +825,76 @@ class TestCoordinatorUpdateResilience:
         result = await coordinator._async_update_data()
 
         assert result["actions"] == {"heater": 0.0}
-        assert result["predictions"] == []
         assert result["outdoor_forecast"] == [3.0, 2.5, 2.0]
         assert len(result["solar_forecast"]) == coordinator._horizon + 1
         assert all(
             step["studio"] == pytest.approx(0.0, abs=0.1)
             for step in result["solar_forecast"]
         )
-        assert result["heating_schedule"] == []
         assert len(coordinator.history_buffer) == 1
 
+        # With the thermal-model fallback, predictions and heating_schedule must
+        # be non-empty (N steps, one per horizon step) so that forecast entities
+        # show a meaningful trajectory even when the MPC solver fails.
+        assert len(result["predictions"]) == coordinator._horizon
+        assert all("studio" in step for step in result["predictions"])
+        assert len(result["heating_schedule"]) == coordinator._horizon
+        # Heater fraction was 0 → heating power is 0 W
+        assert all(
+            step["studio"] == pytest.approx(0.0, abs=0.1)
+            for step in result["heating_schedule"]
+        )
 
-# ---------------------------------------------------------------------------
-# Tests: coordinator weather forecast interpolation
+    @pytest.mark.asyncio
+    async def test_compute_failure_with_active_heater_shows_warming_trend(self):
+        """When MPC fails and a heater was previously active, the thermal-model fallback
+        should show a warming trend in the predicted temperature trajectory."""
+        model = make_single_room_model()  # studio room at a cold initial temperature
+        source = ElectricHeater("heater", "studio", 2000)
+
+        coordinator = object.__new__(HeatingAssistantCoordinator)
+        coordinator.hass = MagicMock()
+        coordinator._temp_sensors = {}
+        coordinator._latitude = 0.0
+        coordinator._longitude = 0.0
+        coordinator._update_interval = 900
+        coordinator._horizon = 4
+        coordinator.model = model
+        coordinator.heat_sources = [source]
+        # Heater was previously running at 80%
+        coordinator.actions = {"heater": 0.8}
+        coordinator.solar_gains = {}
+        coordinator.outdoor_temp = 5.0
+        coordinator.heat_flows = {}
+        coordinator.predictions = []
+        coordinator.outdoor_forecast = []
+        coordinator.solar_forecast = []
+        coordinator.heating_schedule = []
+        coordinator._history_buffer = deque(maxlen=10)
+        coordinator._read_outdoor_temp = MagicMock(return_value=0.0)
+        coordinator._async_read_weather_forecast = AsyncMock(return_value=None)
+        coordinator._apply_actions = AsyncMock()
+        coordinator.controller = MagicMock()
+        coordinator.controller.compute.side_effect = RuntimeError("OCP failed")
+
+        result = await coordinator._async_update_data()
+
+        assert result["actions"] == {"heater": 0.8}
+
+        # Predictions must cover the full horizon
+        assert len(result["predictions"]) == coordinator._horizon
+        assert all("studio" in p for p in result["predictions"])
+
+        # With 80% of a 2000W heater heating a cold room, temperature should rise
+        initial_temp = model.rooms["studio"].temperature  # 15°C
+        assert result["predictions"][0]["studio"] > initial_temp
+
+        # Heating schedule must reflect the active heater's thermal output
+        assert len(result["heating_schedule"]) == coordinator._horizon
+        for step in result["heating_schedule"]:
+            assert step["studio"] > 0.0  # heater is on, power > 0
+
+
 # ---------------------------------------------------------------------------
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
