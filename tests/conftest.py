@@ -34,6 +34,7 @@ _HA_PACKAGES = [
     "homeassistant.core",
     "homeassistant.config_entries",
     "homeassistant.const",
+    "homeassistant.exceptions",
     "homeassistant.helpers",
     "homeassistant.helpers.entity",
     "homeassistant.helpers.update_coordinator",
@@ -77,6 +78,11 @@ _ha_core = sys.modules["homeassistant.core"]
 _ha_core.HomeAssistant = object  # type: ignore[attr-defined]
 _ha_core.callback = lambda f: f  # type: ignore[attr-defined]
 _ha_core.ServiceCall = object  # type: ignore[attr-defined]
+
+# homeassistant.exceptions
+_exc = sys.modules["homeassistant.exceptions"]
+_exc.ConfigEntryNotReady = Exception  # type: ignore[attr-defined]
+_exc.ConfigEntryAuthFailed = Exception  # type: ignore[attr-defined]
 
 # homeassistant.config_entries
 _ce = sys.modules["homeassistant.config_entries"]
