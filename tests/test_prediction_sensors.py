@@ -79,6 +79,42 @@ def test_outdoor_temperature_prediction_unique_id_and_name():
     assert sensor._attr_name == "Heating Assistant – Outdoor Temperature Prediction"
 
 
+# ── Sensor metadata avoids HA's strict device_class/state_class rules ──
+#
+# Recent Home Assistant releases reject sensors that declare a
+# ``device_class`` (TEMPERATURE / POWER) without a matching
+# ``state_class``.  We cannot use ``state_class=MEASUREMENT`` because the
+# predictions are forward-looking values that would corrupt the long-term
+# statistics database, so the prediction sensors must drop both the
+# ``device_class`` and ``state_class``.
+
+
+@pytest.mark.parametrize(
+    "sensor_cls",
+    [
+        TemperaturePredictionSensor,
+        HeatingPlanPredictionSensor,
+        SolarPowerPredictionSensor,
+        OutdoorTemperaturePredictionSensor,
+    ],
+)
+def test_prediction_sensors_have_no_device_class(sensor_cls):
+    assert getattr(sensor_cls, "_attr_device_class", "missing") is None
+
+
+@pytest.mark.parametrize(
+    "sensor_cls",
+    [
+        TemperaturePredictionSensor,
+        HeatingPlanPredictionSensor,
+        SolarPowerPredictionSensor,
+        OutdoorTemperaturePredictionSensor,
+    ],
+)
+def test_prediction_sensors_have_no_state_class(sensor_cls):
+    assert getattr(sensor_cls, "_attr_state_class", "missing") is None
+
+
 # ── Availability is decoupled from coordinator.last_update_success ──────
 
 

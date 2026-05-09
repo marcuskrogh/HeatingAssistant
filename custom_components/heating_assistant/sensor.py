@@ -880,19 +880,47 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
 # Always-available prediction sensors
 # ---------------------------------------------------------------------------
 #
-# CoordinatorEntity.available defaults to ``coordinator.last_update_success``,
-# which means every prediction entity disappears from dashboards whenever the
-# coordinator's most recent refresh raised UpdateFailed — even though the
-# prediction data itself is still cached on the coordinator and remains
-# perfectly valid (the controller continues to apply set-points from that
-# cached plan).  The sensors below expose the *same* prediction data under
-# stable entity IDs that decouple availability from last_update_success, so
-# advanced dashboards keep rendering the trajectory across transient update
-# failures.  They are the entities that the README dashboards reference.
+# These entities expose the MPC prediction trajectory under stable entity
+# IDs that the advanced visualisation dashboards reference.  Two issues
+# stopped earlier "forecast" / "plan" sensors from rendering reliably in
+# Home Assistant:
+#
+# 1. Availability gating.  CoordinatorEntity.available returns
+#    coordinator.last_update_success, so every prediction entity flipped to
+#    "unavailable" whenever the coordinator raised UpdateFailed — even
+#    though the cached prediction data on the coordinator was still valid
+#    and the controller kept applying set-points from it.
+#
+# 2. Sensor validation.  Recent Home Assistant releases tightened the
+#    "device_class implies state_class" validation.  A SensorEntity that
+#    declares device_class=POWER or TEMPERATURE without a state_class is
+#    rejected by the validator and the integration is reported as "no
+#    longer delivering" the entity.  We cannot set state_class=MEASUREMENT
+#    because predictions are not measurements: doing so would feed
+#    forward-looking values into Home Assistant's long-term statistics.
+#
+# The classes below address both issues:
+#   • ``available`` is overridden to return True so dashboards keep
+#     rendering across transient coordinator update failures;
+#   • ``device_class`` and ``state_class`` are set to None so the
+#     validator treats them as plain unit-bearing sensors and accepts the
+#     definition at registration time.  The native unit of measurement
+#     and icon are preserved so the entities still display nicely in the
+#     UI, and the prediction trajectory continues to live on the
+#     ``forecast`` state attribute that the dashboards consume.
 
 
 class TemperaturePredictionSensor(TemperatureForecastSensor):
-    """Stable-availability variant of :class:`TemperatureForecastSensor`."""
+    """
+    Stable-availability variant of :class:`TemperatureForecastSensor`.
+
+    Exposes the same MPC predicted-temperature trajectory under a stable
+    entity ID, with sensor metadata that passes Home Assistant's strict
+    sensor validator (no ``device_class`` / ``state_class``).
+    """
+
+    _attr_device_class = None
+    _attr_state_class = None
 
     def __init__(
         self,
@@ -911,7 +939,16 @@ class TemperaturePredictionSensor(TemperatureForecastSensor):
 
 
 class HeatingPlanPredictionSensor(HeatingPlanSensor):
-    """Stable-availability variant of :class:`HeatingPlanSensor`."""
+    """
+    Stable-availability variant of :class:`HeatingPlanSensor`.
+
+    Exposes the same MPC heating-power schedule under a stable entity ID,
+    with sensor metadata that passes Home Assistant's strict sensor
+    validator (no ``device_class`` / ``state_class``).
+    """
+
+    _attr_device_class = None
+    _attr_state_class = None
 
     def __init__(
         self,
@@ -930,7 +967,16 @@ class HeatingPlanPredictionSensor(HeatingPlanSensor):
 
 
 class SolarPowerPredictionSensor(SolarForecastSensor):
-    """Stable-availability variant of :class:`SolarForecastSensor`."""
+    """
+    Stable-availability variant of :class:`SolarForecastSensor`.
+
+    Exposes the same predicted solar-gain trajectory under a stable
+    entity ID, with sensor metadata that passes Home Assistant's strict
+    sensor validator (no ``device_class`` / ``state_class``).
+    """
+
+    _attr_device_class = None
+    _attr_state_class = None
 
     def __init__(
         self,
@@ -949,7 +995,16 @@ class SolarPowerPredictionSensor(SolarForecastSensor):
 
 
 class OutdoorTemperaturePredictionSensor(OutdoorForecastSensor):
-    """Stable-availability variant of :class:`OutdoorForecastSensor`."""
+    """
+    Stable-availability variant of :class:`OutdoorForecastSensor`.
+
+    Exposes the same outdoor-temperature forecast under a stable entity
+    ID, with sensor metadata that passes Home Assistant's strict sensor
+    validator (no ``device_class`` / ``state_class``).
+    """
+
+    _attr_device_class = None
+    _attr_state_class = None
 
     def __init__(
         self,
