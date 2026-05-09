@@ -65,7 +65,6 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -255,34 +254,18 @@ def _merge_yaml_into_entry_data(
     entry_data: Dict[str, Any],
     yaml_cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Merge YAML-backed definitions into config-entry data.
-
-    YAML is always the authoritative source for rooms and heat sources: when
-    the YAML block defines any rooms or sources those definitions always
-    replace whatever is stored in the config entry (including stale values
-    from a previous YAML that the user has since updated).
-
-    When the YAML block has *no* rooms/sources (empty list) the function falls
-    back to whatever is already persisted in entry.data.  This means that if
-    the user temporarily removes the YAML block the entities created from the
-    previously-persisted definitions continue to be registered instead of
-    silently disappearing.
-    """
+    """Merge YAML-backed defaults into config-entry data."""
     merged = dict(entry_data)
 
-    # Rooms: YAML wins when YAML defines rooms; fall back to entry.data otherwise.
-    yaml_rooms = yaml_cfg.get(CONF_ROOMS) or []
-    if yaml_rooms:
-        merged[CONF_ROOMS] = yaml_rooms
-    elif not merged.get(CONF_ROOMS):
-        merged[CONF_ROOMS] = []
-
-    # Heat sources: same priority logic as rooms.
-    yaml_sources = yaml_cfg.get(CONF_HEAT_SOURCES) or []
-    if yaml_sources:
-        merged[CONF_HEAT_SOURCES] = yaml_sources
-    elif not merged.get(CONF_HEAT_SOURCES):
-        merged[CONF_HEAT_SOURCES] = []
+    # Prefer YAML room/source definitions when the entry has placeholders
+    # (missing key, None, or explicit empty list from older entries/options).
+    # This keeps room-based entities available after restart/reload.
+    rooms_cfg = merged.get(CONF_ROOMS)
+    if rooms_cfg is None or rooms_cfg == []:
+        merged[CONF_ROOMS] = yaml_cfg.get(CONF_ROOMS, [])
+    sources_cfg = merged.get(CONF_HEAT_SOURCES)
+    if sources_cfg is None or sources_cfg == []:
+        merged[CONF_HEAT_SOURCES] = yaml_cfg.get(CONF_HEAT_SOURCES, [])
 
     # Use YAML outdoor entity if the config entry value is empty/missing.
     # setdefault would not overwrite the empty-string default from the
@@ -335,51 +318,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if yaml_cfg:
         entry_data = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
 
-    # Persist merged rooms and heat sources back to entry.data so they are
-    # available even if the YAML block is later removed or temporarily absent.
-    # YAML always wins when it defines rooms (see _merge_yaml_into_entry_data),
-    # so this acts as a write-through cache: entry.data is always up-to-date
-    # with the last successful YAML load.
-    new_rooms = entry_data.get(CONF_ROOMS) or []
-    new_sources = entry_data.get(CONF_HEAT_SOURCES) or []
-    stored_rooms = entry.data.get(CONF_ROOMS) or []
-    stored_sources = entry.data.get(CONF_HEAT_SOURCES) or []
-    if new_rooms != stored_rooms or new_sources != stored_sources:
-        hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **dict(entry.data),
-                CONF_ROOMS: new_rooms,
-                CONF_HEAT_SOURCES: new_sources,
-            },
-        )
-
-    if not new_rooms:
-        _LOGGER.warning(
-            "Heating Assistant: no rooms are configured. Add a "
-            "'heating_assistant:' block with at least one 'rooms' entry "
-            "to your configuration.yaml and restart Home Assistant. "
-            "Per-room entities (heating plans, forecasts, etc.) will not "
-            "be created until rooms are defined."
-        )
-
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)
 
     coordinator = HeatingAssistantCoordinator(hass, merged_entry)  # type: ignore[arg-type]
-
-    # Perform the first data fetch.  If it fails, log the error but continue
-    # with platform setup so that any previously-registered entities are not
-    # dropped from the entity registry.  The coordinator will retry
-    # automatically on the next update interval.
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except ConfigEntryNotReady:
-        _LOGGER.warning(
-            "Heating Assistant: initial data fetch failed; entities will be "
-            "unavailable until the next successful update",
-            exc_info=True,
-        )
+    await coordinator.async_config_entry_first_refresh()
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
