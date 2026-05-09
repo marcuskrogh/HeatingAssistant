@@ -263,14 +263,14 @@ def _merge_yaml_into_entry_data(
     merged = dict(entry_data)
 
     # YAML wins when it defines rooms/sources, otherwise fall back to entry data.
-    yaml_rooms = yaml_cfg.get(CONF_ROOMS) or []
-    if yaml_rooms:
+    yaml_rooms = yaml_cfg.get(CONF_ROOMS, None)
+    if yaml_rooms not in (None, []):
         merged[CONF_ROOMS] = yaml_rooms
     elif not merged.get(CONF_ROOMS):
         merged[CONF_ROOMS] = []
 
-    yaml_sources = yaml_cfg.get(CONF_HEAT_SOURCES) or []
-    if yaml_sources:
+    yaml_sources = yaml_cfg.get(CONF_HEAT_SOURCES, None)
+    if yaml_sources not in (None, []):
         merged[CONF_HEAT_SOURCES] = yaml_sources
     elif not merged.get(CONF_HEAT_SOURCES):
         merged[CONF_HEAT_SOURCES] = []
@@ -348,7 +348,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
-        _LOGGER.info(
+        _LOGGER.debug(
             "Heating Assistant: initial data fetch failed; setup continues and "
             "entities will populate after the next successful update",
             exc_info=True,
