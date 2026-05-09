@@ -10,6 +10,9 @@ For each room the following sensor entities are created:
 - Energy balance         (net energy flow in the room) [W]
 - Heating plan           (planned heating/cooling power over MPC horizon; negative for cooling) [W]
 - Solar forecast         (predicted solar gain over MPC horizon) [W]
+- Temperature prediction (same data as Temperature forecast, stable availability) [°C]
+- Heating plan prediction (same data as Heating plan, stable availability) [W]
+- Solar power prediction (same data as Solar forecast, stable availability) [W]
 
 For each heat source:
 - Control action         (MPC controller output fraction) [%]
@@ -20,7 +23,13 @@ For each heat pump source:
 System-wide:
 - Outdoor temperature    (as read by the integration) [°C]
 - Outdoor temp forecast  (timestamped forecast over MPC horizon) [°C]
+- Outdoor temperature prediction (same data as Outdoor temp forecast, stable availability) [°C]
 - System efficiency      (aggregate system metrics)
+
+The "prediction" variants are the ones the advanced visualisation dashboards
+in the README reference.  They expose identical data to the matching forecast
+/ plan sensors but override ``available`` to True so dashboards keep
+rendering the trajectory across transient coordinator update failures.
 """
 
 from __future__ import annotations
@@ -67,6 +76,13 @@ async def async_setup_entry(
         entities.append(EnergyBalanceSensor(coordinator, room_name))
         entities.append(HeatingPlanSensor(coordinator, room_name))
         entities.append(SolarForecastSensor(coordinator, room_name))
+        # Always-available prediction entities (used by the advanced
+        # visualisation dashboards).  These mirror the data of the forecast/
+        # plan sensors above but stay available across coordinator update
+        # failures so dashboards never lose the trajectory.
+        entities.append(TemperaturePredictionSensor(coordinator, room_name))
+        entities.append(HeatingPlanPredictionSensor(coordinator, room_name))
+        entities.append(SolarPowerPredictionSensor(coordinator, room_name))
         # Model fit diagnostics sensors
         entities.append(PredictionErrorSensor(coordinator, room_name))
         entities.append(ModelFitQualitySensor(coordinator, room_name))
@@ -85,6 +101,7 @@ async def async_setup_entry(
     # System-wide sensors
     entities.append(OutdoorTemperatureSensor(coordinator))
     entities.append(OutdoorForecastSensor(coordinator))
+    entities.append(OutdoorTemperaturePredictionSensor(coordinator))
     entities.append(SystemEfficiencySensor(coordinator))
     entities.append(MPCPerformanceSensor(coordinator))
 
@@ -857,6 +874,96 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
             "window_count": len(room.windows),
             "total_window_area": round(sum(w.area for w in room.windows), 2),
         }
+
+
+# ---------------------------------------------------------------------------
+# Always-available prediction sensors
+# ---------------------------------------------------------------------------
+#
+# CoordinatorEntity.available defaults to ``coordinator.last_update_success``,
+# which means every prediction entity disappears from dashboards whenever the
+# coordinator's most recent refresh raised UpdateFailed — even though the
+# prediction data itself is still cached on the coordinator and remains
+# perfectly valid (the controller continues to apply set-points from that
+# cached plan).  The sensors below expose the *same* prediction data under
+# stable entity IDs that decouple availability from last_update_success, so
+# advanced dashboards keep rendering the trajectory across transient update
+# failures.  They are the entities that the README dashboards reference.
+
+
+class TemperaturePredictionSensor(TemperatureForecastSensor):
+    """Stable-availability variant of :class:`TemperatureForecastSensor`."""
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator, room_name)
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Temperature Prediction"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_temperature_prediction"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+
+class HeatingPlanPredictionSensor(HeatingPlanSensor):
+    """Stable-availability variant of :class:`HeatingPlanSensor`."""
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator, room_name)
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Heating Plan Prediction"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_heating_plan_prediction"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+
+class SolarPowerPredictionSensor(SolarForecastSensor):
+    """Stable-availability variant of :class:`SolarForecastSensor`."""
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator, room_name)
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Solar Power Prediction"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_solar_power_prediction"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+
+class OutdoorTemperaturePredictionSensor(OutdoorForecastSensor):
+    """Stable-availability variant of :class:`OutdoorForecastSensor`."""
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_name = (
+            "Heating Assistant – Outdoor Temperature Prediction"
+        )
+        self._attr_unique_id = f"{DOMAIN}_outdoor_temperature_prediction"
+
+    @property
+    def available(self) -> bool:
+        return True
 
 
 # ---------------------------------------------------------------------------
