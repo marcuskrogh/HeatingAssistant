@@ -31,7 +31,7 @@ def test_merge_uses_yaml_when_entry_has_empty_room_and_source_lists():
     assert merged[CONF_WEATHER_ENTITY] == "weather.home"
 
 
-def test_merge_yaml_always_wins_when_yaml_defines_rooms():
+def test_merge_yaml_always_wins_when_yaml_defines_rooms_and_sources():
     entry_data = {
         CONF_ROOMS: [{"name": "entry_room"}],
         CONF_HEAT_SOURCES: [{"name": "entry_source"}],
@@ -47,7 +47,7 @@ def test_merge_yaml_always_wins_when_yaml_defines_rooms():
     assert merged[CONF_HEAT_SOURCES] == yaml_cfg[CONF_HEAT_SOURCES]
 
 
-def test_merge_keeps_entry_rooms_when_yaml_has_no_rooms():
+def test_merge_keeps_entry_rooms_and_sources_when_yaml_has_none():
     entry_data = {
         CONF_ROOMS: [{"name": "persisted_room"}],
         CONF_HEAT_SOURCES: [{"name": "persisted_source"}],
@@ -64,7 +64,7 @@ def test_merge_keeps_entry_rooms_when_yaml_has_no_rooms():
     assert merged[CONF_HEAT_SOURCES] == entry_data[CONF_HEAT_SOURCES]
 
 
-def test_merge_returns_empty_when_both_have_no_rooms():
+def test_merge_returns_empty_when_both_have_no_rooms_or_sources():
     entry_data = {CONF_ROOMS: [], CONF_HEAT_SOURCES: []}
     yaml_cfg = {CONF_ROOMS: [], CONF_HEAT_SOURCES: []}
 
