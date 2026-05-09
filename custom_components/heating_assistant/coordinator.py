@@ -395,10 +395,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 }
                 for src in self.heat_sources:
                     frac = float(self.actions.get(src.name, 0.0))
-                    fallback_step[src.room] = (
-                        fallback_step.get(src.room, 0.0)
-                        + src.thermal_power(max(0.0, frac), outdoor_temp)
-                    )
+                    fallback_step[src.room] += src.thermal_power(max(0.0, frac), outdoor_temp)
                 self.heating_schedule = [
                     dict(fallback_step) for _ in range(self._horizon)
                 ]

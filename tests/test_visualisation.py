@@ -849,7 +849,7 @@ class TestCoordinatorUpdateResilience:
     async def test_compute_failure_with_active_heater_shows_warming_trend(self):
         """When MPC fails and a heater was previously active, the thermal-model fallback
         should show a warming trend in the predicted temperature trajectory."""
-        model = make_single_room_model()  # studio at 15°C, setpoint 21°C
+        model = make_single_room_model()  # studio room at a cold initial temperature
         source = ElectricHeater("heater", "studio", 2000)
 
         coordinator = object.__new__(HeatingAssistantCoordinator)
