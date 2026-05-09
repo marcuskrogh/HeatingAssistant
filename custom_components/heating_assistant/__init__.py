@@ -349,7 +349,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
         _LOGGER.debug(
-            "Heating Assistant: initial data fetch failed; setup continues and "
+            "Heating Assistant: initial data fetch failed. Setup continues and "
             "entities will populate after the next successful update",
             exc_info=True,
         )
