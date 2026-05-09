@@ -366,17 +366,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 kalman_innovation: Optional[List[float]] = self.controller.last_innovation
             except Exception:
                 _LOGGER.warning(
-                    "Failed to compute MPC actions; keeping entities available with "
-                    "fallback visualisation data",
+                    "Failed to compute MPC actions; using thermal-model fallback "
+                    "for visualisation data",
                     exc_info=True,
                 )
                 # Keep previous actions if available; otherwise default to all-off.
                 if not self.actions:
                     self.actions = {src.name: 0.0 for src in self.heat_sources}
 
-                # Fallback visualisation data so forecast entities stay available.
-                self.predictions = []
-                self.heating_schedule = []
+                # Build outdoor / solar forecasts so they are available for the
+                # thermal-model prediction below.
                 if outdoor_forecast:
                     self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
                     if len(self.outdoor_forecast) < self._horizon:
@@ -388,6 +387,41 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.solar_forecast = [
                     dict(self.solar_gains) for _ in range(self._horizon + 1)
                 ]
+
+                # Build a per-room heating schedule from the current (or fallback)
+                # actions so HeatingPlanSensor has meaningful data.
+                fallback_step: Dict[str, float] = {
+                    name: 0.0 for name in self.model.room_names
+                }
+                for src in self.heat_sources:
+                    frac = float(self.actions.get(src.name, 0.0))
+                    fallback_step[src.room] = (
+                        fallback_step.get(src.room, 0.0)
+                        + src.thermal_power(max(0.0, frac), outdoor_temp)
+                    )
+                self.heating_schedule = [
+                    dict(fallback_step) for _ in range(self._horizon)
+                ]
+
+                # Simulate a temperature trajectory with the simple RC thermal model
+                # so TemperatureForecastSensor shows a real trend instead of nothing.
+                solar_seq = [dict(self.solar_gains) for _ in range(self._horizon)]
+                try:
+                    self.predictions = self.model.predict(
+                        horizon=self._horizon,
+                        dt=float(self._update_interval),
+                        heat_schedule=self.heating_schedule,
+                        outdoor_temps=self.outdoor_forecast,
+                        solar_gain_schedule=solar_seq,
+                    )
+                except Exception:
+                    _LOGGER.debug(
+                        "Thermal-model fallback prediction failed; "
+                        "forecast entities will show no future trajectory",
+                        exc_info=True,
+                    )
+                    self.predictions = []
+
                 kalman_innovation = None
 
             # 5. Store heat-flow breakdown (independent of MPC solve success)
