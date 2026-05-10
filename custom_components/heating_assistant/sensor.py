@@ -1579,7 +1579,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     statistics (solve times, tracking errors) are exposed as state attributes.
 
     Some callers may provide legacy ``datetime.timedelta`` solve-time values.
-    Those are normalised to raw seconds so Home Assistant always receives a
+    Those are normalized to raw seconds so Home Assistant always receives a
     plain numeric state.
     """
 
@@ -1595,7 +1595,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 
     @staticmethod
     def _solve_time_seconds(value: Any) -> Optional[float]:
-        """Return ``None``, a numeric sample, or a ``timedelta`` as seconds."""
+        """Convert a solve-time value to seconds as ``float`` or return ``None``."""
         if value is None:
             return None
         if isinstance(value, timedelta):
