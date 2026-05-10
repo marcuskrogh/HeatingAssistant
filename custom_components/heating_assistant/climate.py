@@ -152,14 +152,15 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
         """
         Toggle the room on or off.
 
-        Switching to ``off`` disables the room and sets the setpoint to
-        MIN_TEMP (frost protection).  Switching to ``heat`` or
-        ``heat_cool`` re-enables the room and restores DEFAULT_SETPOINT
-        if the current setpoint is at the frost-protection level.
+        Switching to ``off`` disables heating control without touching the
+        configured setpoint, so the user's chosen value is preserved across
+        the toggle.  Switching to ``heat`` or ``heat_cool`` re-enables the
+        room and only restores DEFAULT_SETPOINT when the stored value is
+        below the frost-protection floor (legacy behaviour from earlier
+        versions that overwrote the setpoint on off).
         """
         if hvac_mode == HVACMode.OFF:
             self._coordinator.set_room_enabled(self._room_name, False)
-            self._coordinator.set_room_setpoint(self._room_name, MIN_TEMP)
         elif hvac_mode in (HVACMode.HEAT, HVACMode.HEAT_COOL):
             self._coordinator.set_room_enabled(self._room_name, True)
             if self._coordinator.get_room_setpoint(self._room_name) <= MIN_TEMP:

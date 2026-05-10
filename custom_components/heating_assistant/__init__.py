@@ -83,6 +83,14 @@ from .const import (
     CONF_R_VALUE,
     CONF_ROOM_NAME,
     CONF_ROOMS,
+    CONF_SCHEDULE,
+    CONF_SCHEDULE_DAYS,
+    CONF_SCHEDULE_END,
+    CONF_SCHEDULE_FROST_PROTECTION,
+    CONF_SCHEDULE_MODE,
+    CONF_SCHEDULE_NAME,
+    CONF_SCHEDULE_SETPOINT,
+    CONF_SCHEDULE_START,
     CONF_SETPOINT,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOURCE_COOLING_COP,
@@ -115,6 +123,7 @@ from .const import (
     DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
+    DEFAULT_FROST_PROTECTION,
     DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_HORIZON,
     DEFAULT_MAX_TEMP_OFFSET,
@@ -128,6 +137,9 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
+    SCHEDULE_MODE_COMFORT,
+    SCHEDULE_MODE_OFF,
+    SERVICE_SET_SCHEDULE_ENABLED,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
     UPDATE_INTERVAL,
@@ -141,6 +153,7 @@ PLATFORMS = ["climate", "sensor", "button"]
 SERVICE_SIMULATE_THERMAL_RESPONSE = "simulate_thermal_response"
 SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
+# SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
 
 # ---------------------------------------------------------------------------
 # YAML schema
@@ -161,6 +174,22 @@ _CONNECTION_SCHEMA = vol.Schema(
     }
 )
 
+_SCHEDULE_PERIOD_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_SCHEDULE_NAME): str,
+        vol.Required(CONF_SCHEDULE_START): str,
+        vol.Required(CONF_SCHEDULE_END): str,
+        vol.Optional(CONF_SCHEDULE_DAYS): [str],
+        vol.Optional(CONF_SCHEDULE_SETPOINT): vol.Coerce(float),
+        vol.Optional(CONF_SCHEDULE_MODE, default=SCHEDULE_MODE_COMFORT): vol.In(
+            [SCHEDULE_MODE_COMFORT, SCHEDULE_MODE_OFF]
+        ),
+        vol.Optional(
+            CONF_SCHEDULE_FROST_PROTECTION, default=DEFAULT_FROST_PROTECTION
+        ): vol.Coerce(float),
+    }
+)
+
 _ROOM_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_ROOM_NAME): str,
@@ -171,6 +200,7 @@ _ROOM_SCHEMA = vol.Schema(
         vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],
         vol.Optional(CONF_CONNECTIONS, default=[]): [_CONNECTION_SCHEMA],
         vol.Optional(CONF_WINDOWS, default=[]): [_WINDOW_SCHEMA],
+        vol.Optional(CONF_SCHEDULE, default=[]): [_SCHEDULE_PERIOD_SCHEMA],
     }
 )
 
@@ -890,6 +920,52 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("segment_length", default=30): vol.All(
                     vol.Coerce(int), vol.Range(min=5, max=120)
                 ),
+            }
+        ),
+    )
+
+    async def handle_set_schedule_enabled(call: ServiceCall) -> None:
+        """Suspend or resume the comfort schedule for one or more rooms."""
+        coordinator = _get_coordinator(hass)
+        enabled = bool(call.data["enabled"])
+        room_name = call.data.get("room_name")
+        if room_name:
+            targets = [room_name]
+        else:
+            targets = list(coordinator.model.room_names)
+
+        applied: list[str] = []
+        skipped: list[str] = []
+        for name in targets:
+            if name not in coordinator.model.rooms:
+                skipped.append(name)
+                continue
+            coordinator.set_schedule_enabled(name, enabled)
+            applied.append(name)
+
+        action = "resumed" if enabled else "suspended"
+        lines = [f"**Schedules {action} for:** {', '.join(applied) if applied else '(none)'}"]
+        if skipped:
+            lines.append(f"**Unknown rooms ignored:** {', '.join(skipped)}")
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – Comfort Schedule",
+                "message": "\n".join(lines),
+                "notification_id": f"{DOMAIN}_schedule_toggle",
+            },
+            blocking=False,
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_SCHEDULE_ENABLED,
+        handle_set_schedule_enabled,
+        schema=vol.Schema(
+            {
+                vol.Optional("room_name"): cv.string,
+                vol.Required("enabled"): cv.boolean,
             }
         ),
     )

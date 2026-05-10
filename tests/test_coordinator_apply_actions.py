@@ -89,6 +89,8 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
     coord._room_enabled = {name: True for name in room_setpoints}
     if room_enabled:
         coord._room_enabled.update(room_enabled)
+    # Comfort-schedule state: no schedules in the bare _apply_actions tests.
+    coord._schedule_disabled = {name: False for name in room_setpoints}
 
     # Initialise the Schmitt-trigger state dict (required by _apply_actions).
     # Caller may pre-seed individual sources to simulate a prior cycle.

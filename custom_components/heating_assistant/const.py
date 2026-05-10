@@ -21,6 +21,16 @@ CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_TEMP_SENSOR = "temp_sensor"       # HA entity_id for measured room temp
 CONF_TEMP_SENSORS = "temp_sensors"     # list of HA entity_ids for measured room temp
 
+# Comfort schedule (time-of-day setpoint / setback) keys
+CONF_SCHEDULE = "schedule"                       # list of schedule periods on a room
+CONF_SCHEDULE_NAME = "name"                      # period label (e.g. "night", "workday_eco")
+CONF_SCHEDULE_START = "start"                    # local time HH:MM (24h) inclusive
+CONF_SCHEDULE_END = "end"                        # local time HH:MM (24h) exclusive; may wrap past midnight
+CONF_SCHEDULE_DAYS = "days"                      # optional weekday list, defaults to all days
+CONF_SCHEDULE_SETPOINT = "setpoint"              # °C, optional override for active period
+CONF_SCHEDULE_MODE = "mode"                      # "comfort" (default) | "off"
+CONF_SCHEDULE_FROST_PROTECTION = "frost_protection"  # °C floor enforced while mode == "off"
+
 # Connection configuration keys
 CONF_CONNECTED_ROOM = "room"
 CONF_R_VALUE = "r_value"               # K/W
@@ -77,6 +87,11 @@ DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_WINDOW_TILT = 90.0             # vertical
+DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
+
+# Comfort schedule modes
+SCHEDULE_MODE_COMFORT = "comfort"      # apply the period's setpoint (default behaviour)
+SCHEDULE_MODE_OFF = "off"              # disable heat sources for the room during this period
 
 # Source types
 SOURCE_TYPE_ELECTRIC = "electric_heater"
@@ -100,3 +115,5 @@ HISTORY_BUFFER_SIZE = 480
 MPC_STATS_BUFFER_SIZE = 100
 #: Service name for ML parameter estimation
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
+#: Service name for runtime comfort-schedule suspend/resume
+SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"

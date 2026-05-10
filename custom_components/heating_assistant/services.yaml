@@ -211,6 +211,36 @@ controller_performance_report:
       selector:
         text:
 
+set_schedule_enabled:
+  name: Suspend or resume comfort schedule
+  description: >
+    Suspend or resume the comfort schedule (the time-of-day setback /
+    sleep periods configured under each room's ``schedule`` block).
+    Suspending a schedule restores the room's base setpoint and stops
+    enforcing any "off" periods, which is useful for one-off exceptions
+    such as staying up late or working from home.  When the room name is
+    omitted the change applies to every configured room.  The schedule
+    state is in-memory only and resets to enabled on restart.
+  fields:
+    room_name:
+      name: Room name
+      description: >
+        Optional room name to target.  When omitted the change applies to
+        every configured room.
+      required: false
+      example: "living_room"
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: >
+        ``true`` resumes the schedule (default at startup), ``false``
+        suspends it until re-enabled.
+      required: true
+      default: false
+      selector:
+        boolean:
+
 run_open_loop_simulation:
   name: Run open-loop simulation diagnostic
   description: >
