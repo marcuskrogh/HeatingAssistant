@@ -95,6 +95,13 @@ from .solar_model import room_solar_gains
 _LOGGER = logging.getLogger(__name__)
 
 
+def _coerce_interval_seconds(value: Any) -> float:
+    """Return a numeric interval in seconds from int/float/str/timedelta values."""
+    if isinstance(value, timedelta):
+        return float(value.total_seconds())
+    return float(value)
+
+
 def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
     """
     Construct a :class:`HouseModel` from the YAML / config-entry rooms list.
@@ -202,8 +209,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Old config entries that stored a separate "dt" key are silently ignored;
         # the update_interval is the single source of truth.
         self._update_interval: int = int(
-            options.get(CONF_UPDATE_INTERVAL)
-            or data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+            _coerce_interval_seconds(
+                options.get(CONF_UPDATE_INTERVAL)
+                or data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+            )
         )
         self._horizon: int = data.get(CONF_HORIZON, DEFAULT_HORIZON)
         self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
@@ -236,8 +245,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             model=self.model,
             heat_sources=self.heat_sources,
             horizon=self._horizon,
-            dt=float(self._update_interval),
-            measurement_dt=float(self._update_interval),
+            dt=self.dt,
+            measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
             energy_weight=self._energy_weight,
@@ -285,7 +294,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     @property
     def dt(self) -> float:
         """Return the OCP/EKF time step (= update interval) in seconds."""
-        return float(self._update_interval)
+        return _coerce_interval_seconds(self._update_interval)
 
     @property
     def update_interval_seconds(self) -> int:
@@ -406,7 +415,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 try:
                     self.predictions = self.model.predict(
                         horizon=self._horizon,
-                        dt=float(self._update_interval),
+                        dt=self.dt,
                         heat_schedule=self.heating_schedule,
                         outdoor_temps=self.outdoor_forecast,
                         solar_gain_schedule=solar_seq,
@@ -558,7 +567,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     forecast_data = response[self._weather_entity].get("forecast", [])
                     if forecast_data:
                         return self._parse_weather_forecast(
-                            forecast_data, self._horizon, float(self._update_interval)
+                            forecast_data, self._horizon, self.dt
                         )
             except Exception as exc:
                 _LOGGER.debug(
@@ -577,7 +586,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if not forecast_data:
             return None
 
-        return self._parse_weather_forecast(forecast_data, self._horizon, float(self._update_interval))
+        return self._parse_weather_forecast(forecast_data, self._horizon, self.dt)
 
     @staticmethod
     def _parse_weather_forecast(
@@ -1155,7 +1164,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=float(self._update_interval),  # must match history buffer sampling interval, not MPC horizon
+            dt=_coerce_interval_seconds(self._update_interval),  # must match history buffer sampling interval, not MPC horizon
         )
 
         history = list(self._history_buffer)
@@ -1222,8 +1231,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             model=self.model,
             heat_sources=self.heat_sources,
             horizon=self._horizon,
-            dt=float(self._update_interval),
-            measurement_dt=float(self._update_interval),
+            dt=self.dt,
+            measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
             energy_weight=self._energy_weight,
