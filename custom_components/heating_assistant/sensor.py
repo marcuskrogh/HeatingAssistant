@@ -44,7 +44,11 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfPower,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -1571,25 +1575,16 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     """
     System-wide sensor reporting MPC solver performance statistics.
 
-    The state is the total number of completed OCP solves.  It is a
-    monotonically-increasing integer so the entity state always advances on
-    every coordinator cycle, making it easy to spot if the MPC has stopped
-    running.  Detailed statistics (solve times, tracking errors) are exposed
-    as state attributes.
+    The state is the most recent OCP wall-clock solve duration [s].  Detailed
+    statistics (solve times, tracking errors) are exposed as state attributes.
 
-    Previously the state was the most-recent solve time [s], but after the
-    initial warm-up the L-BFGS-B solver converges in near-constant time, so
-    that value appeared frozen even when the controller was running normally.
-
-    Home Assistant's sensor validation rejects the entity if it advertises a
-    statistics-oriented ``state_class`` without a meaningful unit, so this
-    entity is kept as a plain numeric sensor.  The cached controller stats are
-    still useful even across transient coordinator update failures, so the
-    entity also stays available while exposing its last-known values.
+    Some callers may provide legacy ``datetime.timedelta`` solve-time values.
+    Those are normalized to raw seconds so Home Assistant always receives a
+    plain numeric state.
     """
 
     _attr_state_class = None
-    _attr_native_unit_of_measurement = None
+    _attr_native_unit_of_measurement = "s"
     _attr_icon = "mdi:timer-outline"
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
@@ -1598,10 +1593,23 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Heating Assistant – MPC Performance"
         self._attr_unique_id = f"{DOMAIN}_mpc_performance"
 
+    @staticmethod
+    def _solve_time_seconds(value: timedelta | float | int | None) -> Optional[float]:
+        """Convert a solve-time value in seconds to ``float`` or return ``None``."""
+        if value is None:
+            return None
+        if isinstance(value, timedelta):
+            return float(value.total_seconds())
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            _LOGGER.debug("Ignoring non-numeric MPC solve time value: %r", value)
+            return None
+
     @property
-    def native_value(self) -> Optional[int]:
-        """Return the total number of completed OCP solves."""
-        return self._coordinator.controller.total_computes
+    def native_value(self) -> Optional[float]:
+        """Return the most recent OCP solve duration in seconds."""
+        return self._solve_time_seconds(self._coordinator.controller.last_solve_time)
 
     @property
     def available(self) -> bool:
@@ -1614,11 +1622,15 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         import numpy as np
 
         controller = self._coordinator.controller
-        solve_times = list(controller._solve_times)
+        solve_times = []
+        for sample in controller._solve_times:
+            seconds = self._solve_time_seconds(sample)
+            if seconds is not None:
+                solve_times.append(seconds)
 
-        last_t = controller.last_solve_time
-        mean_t = controller.mean_solve_time
-        max_t = controller.max_solve_time
+        last_t = self._solve_time_seconds(controller.last_solve_time)
+        mean_t = self._solve_time_seconds(controller.mean_solve_time)
+        max_t = self._solve_time_seconds(controller.max_solve_time)
         n = controller.n_solves
 
         attrs: Dict[str, Any] = {
