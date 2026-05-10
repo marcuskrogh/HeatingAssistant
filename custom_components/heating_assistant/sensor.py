@@ -1594,13 +1594,16 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_mpc_performance"
 
     @staticmethod
-    def _solve_time_seconds(value: Any) -> Optional[float]:
+    def _solve_time_seconds(value: timedelta | float | int | None) -> Optional[float]:
         """Convert a solve-time value to seconds as ``float`` or return ``None``."""
         if value is None:
             return None
         if isinstance(value, timedelta):
             return float(value.total_seconds())
-        return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     @property
     def native_value(self) -> Optional[float]:
