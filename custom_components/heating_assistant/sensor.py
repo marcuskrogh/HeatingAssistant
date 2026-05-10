@@ -417,7 +417,6 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     automations.
     """
 
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_icon = "mdi:chart-line"
 
@@ -741,7 +740,6 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
     can be plotted in dashboard cards like ``apexcharts-card``.
     """
 
-    _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:radiator"
 
@@ -815,7 +813,6 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
     a timestamped ``forecast`` attribute for dashboard visualisation.
     """
 
-    _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:weather-sunny-alert"
 
@@ -1586,7 +1583,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_native_unit_of_measurement = None
+    _attr_native_unit_of_measurement = ""
     _attr_icon = "mdi:timer-outline"
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
