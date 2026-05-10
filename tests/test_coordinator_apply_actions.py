@@ -51,11 +51,15 @@ def _make_fake_hass(entity_states: dict):
 
 
 async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoints,
-                            room_temperatures=None, room_enabled=None):
+                            room_temperatures=None, room_enabled=None,
+                            initial_cooling_state=None):
     """
     Directly exercise the ``_apply_actions`` logic without spinning up
     a full coordinator.  We import the module and patch just enough to
     call the method.
+
+    ``initial_cooling_state`` is an optional dict mapping source name → bool
+    that pre-seeds the Schmitt-trigger state (simulates a previous cycle).
     """
     from custom_components.heating_assistant.coordinator import (
         HeatingAssistantCoordinator,
@@ -86,8 +90,12 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
     if room_enabled:
         coord._room_enabled.update(room_enabled)
 
+    # Initialise the Schmitt-trigger state dict (required by _apply_actions).
+    # Caller may pre-seed individual sources to simulate a prior cycle.
+    coord._cooling_active = dict(initial_cooling_state or {})
+
     await coord._apply_actions(outdoor_temp=5.0)
-    return hass
+    return hass, coord
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +115,7 @@ class TestApplyActionsClimate:
             heater_entity="climate.heat_pump",
         )
         # Heat pump's own sensor reads 23 °C  (distinct from HA room sensor)
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.6},
             entity_states={
@@ -139,7 +147,7 @@ class TestApplyActionsClimate:
             max_temp_offset=4.0,
             heater_entity="climate.heat_pump",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 1.0},
             entity_states={
@@ -164,7 +172,7 @@ class TestApplyActionsClimate:
             max_temp_offset=5.0,
             heater_entity="climate.heat_pump",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.5},
             entity_states={
@@ -188,7 +196,7 @@ class TestApplyActionsClimate:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        turn_off_deadband=1.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -217,7 +225,7 @@ class TestApplyActionsClimate:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        turn_off_deadband=1.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -246,7 +254,7 @@ class TestApplyActionsClimate:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        turn_off_deadband=1.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -266,14 +274,14 @@ class TestApplyActionsClimate:
         assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
 
     @pytest.mark.asyncio
-    async def test_heat_pump_custom_deadband(self):
-        """When room is above setpoint, cooling mode is used regardless of
-        deadband, and temperature is set below internal by scaled offset."""
+    async def test_heat_pump_custom_deadband_holds_idle_within_band(self):
+        """A wider deadband keeps the HP in idle mode when room_temp is above
+        the setpoint but still inside the dead band (below setpoint + deadband).
+        room=26.5, setpoint=25.0, deadband=2.0 → upper threshold=27.0 → idle."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        turn_off_deadband=2.0,
                        heater_entity="climate.heat_pump")
-        # Room at 26.5 with setpoint 25.0 → room_temp > setpoint → fan_only + temp
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -289,10 +297,166 @@ class TestApplyActionsClimate:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
+        # 26.5 < 25.0 + 2.0 = 27.0 → deadband prevents cooling → stays in heat/idle
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # idle: target = internal_temp - DEFAULT_IDLE_OFFSET = 26.0 - 1.0 = 25.0
+        assert calls[1].args[:2] == ("climate", "set_temperature")
+        assert calls[1].args[2]["temperature"] == pytest.approx(25.0)
+
+    @pytest.mark.asyncio
+    async def test_heat_pump_custom_deadband_enters_cooling_above_threshold(self):
+        """With deadband=2.0, cooling starts once room_temp exceeds setpoint + 2.0.
+        room=27.5, setpoint=25.0 → upper threshold=27.0 → passive cooling."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=2.0,
+                       heater_entity="climate.heat_pump")
+        hass, _coord = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.0},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 27.0},
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 27.5},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
-        # overshoot = 1.5 → offset = 2.5; target = 26.0 - 2.5 = 23.5
+        # overshoot = 2.5; offset = 1.0 + 2.5 = 3.5; target = 27.0 - 3.5 = 23.5
         assert calls[1].args[:2] == ("climate", "set_temperature")
         assert calls[1].args[2]["temperature"] == pytest.approx(23.5)
+
+    # ── Bidirectional dead-band / jitter tests ─────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_deadband_blocks_active_cooling_request_within_band(self):
+        """When MPC outputs fraction < 0 (active cooling) but room_temp has not
+        crossed the upper dead-band threshold, the HP must NOT switch to cooling.
+        It should stay in idle/heat mode to prevent heating→cooling jitter."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=1.0,
+                       heater_entity="climate.heat_pump")
+        # room=25.3, setpoint=25.0, deadband=1.0 → upper threshold=26.0
+        # room_temp (25.3) < threshold (26.0) → deadband blocks cooling
+        hass, coord = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -0.3},   # MPC says cool
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {"current_temperature": 24.0},
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 25.3},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        # Dead band prevents cooling → stays in heat/idle mode
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # idle: target = internal_temp − DEFAULT_IDLE_OFFSET = 24.0 − 1.0 = 23.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.0)
+        # Schmitt-trigger state must still be False
+        assert coord._cooling_active.get("hp1") is False
+
+    @pytest.mark.asyncio
+    async def test_deadband_allows_active_cooling_above_upper_threshold(self):
+        """When fraction < 0 AND room_temp > setpoint + deadband, active cooling
+        should proceed (deadband cleared, HP allowed to cool)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=1.0, max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        # room=26.5, setpoint=25.0, deadband=1.0 → upper threshold=26.0 → enters cooling
+        hass, coord = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -0.4},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "heat",
+                    "attributes": {
+                        "current_temperature": 25.0,
+                        "hvac_modes": ["heat", "cool"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 26.5},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        # Dead band crossed → active cooling
+        assert calls[0].args[2]["hvac_mode"] == "cool"
+        assert coord._cooling_active.get("hp1") is True
+
+    @pytest.mark.asyncio
+    async def test_deadband_holds_cooling_until_lower_threshold_when_heating_requested(self):
+        """While in cooling mode (previous cycle set _cooling_active=True), a
+        positive MPC fraction must NOT immediately switch to heating if room_temp
+        has not yet dropped below setpoint − deadband.  The HP stays in passive
+        cooling mode to prevent cooling→heating jitter."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=1.0,
+                       heater_entity="climate.heat_pump")
+        # room=24.8, setpoint=25.0, deadband=1.0 → lower threshold=24.0
+        # room_temp (24.8) > threshold (24.0) → deadband holds cooling
+        hass, coord = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.4},   # MPC says heat
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "cool",
+                    "attributes": {"current_temperature": 23.5},
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 24.8},
+            initial_cooling_state={"hp1": True},  # was cooling last cycle
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        # Dead band holds cooling despite positive fraction
+        assert calls[0].args[2]["hvac_mode"] == "fan_only"
+        # Schmitt-trigger state must still be True
+        assert coord._cooling_active.get("hp1") is True
+
+    @pytest.mark.asyncio
+    async def test_deadband_exits_cooling_once_below_lower_threshold(self):
+        """When cooling was active and room_temp drops below setpoint − deadband,
+        the Schmitt trigger clears and the HP switches to heating."""
+        hp = HeatPump("hp1", "living_room", max_power=5000,
+                       turn_off_deadband=1.0, max_temp_offset=5.0,
+                       heater_entity="climate.heat_pump")
+        # room=23.5, setpoint=25.0, deadband=1.0 → lower threshold=24.0
+        # room_temp (23.5) < threshold (24.0) → exits cooling → heats
+        hass, coord = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": 0.5},   # MPC says heat
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "cool",
+                    "attributes": {"current_temperature": 22.0},
+                },
+            },
+            room_setpoints={"living_room": 25.0},
+            room_temperatures={"living_room": 23.5},
+            initial_cooling_state={"hp1": True},  # was cooling last cycle
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 2
+        # Dropped below lower threshold → switches to heating
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # target = 22.0 + 0.5 × 5.0 = 24.5
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.5)
+        assert coord._cooling_active.get("hp1") is False
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_uses_room_setpoint(self):
@@ -301,7 +465,7 @@ class TestApplyActionsClimate:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.7},
             entity_states={
@@ -325,7 +489,7 @@ class TestApplyActionsClimate:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -354,7 +518,7 @@ class TestApplyActionsClimate:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -381,7 +545,7 @@ class TestApplyActionsClimate:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -407,7 +571,7 @@ class TestApplyActionsSwitch:
     @pytest.mark.asyncio
     async def test_switch_on(self):
         heater = ElectricHeater("e1", "kitchen", max_power=2000, heater_entity="switch.heater")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.8},
             entity_states={"switch.heater": "off"},
@@ -419,7 +583,7 @@ class TestApplyActionsSwitch:
     @pytest.mark.asyncio
     async def test_switch_off(self):
         heater = ElectricHeater("e1", "kitchen", max_power=2000, heater_entity="switch.heater")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.3},
             entity_states={"switch.heater": "on"},
@@ -435,7 +599,7 @@ class TestApplyActionsNumber:
     @pytest.mark.asyncio
     async def test_number_value(self):
         heater = ElectricHeater("e1", "office", max_power=1500, heater_entity="number.heater_power")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.75},
             entity_states={"number.heater_power": "0"},
@@ -453,7 +617,7 @@ class TestApplyActionsEdgeCases:
     async def test_no_entity_configured(self):
         """Heat source with no heater_entity should be silently skipped."""
         hp = HeatPump("hp1", "living_room", max_power=5000)
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 1.0},
             entity_states={},
@@ -465,7 +629,7 @@ class TestApplyActionsEdgeCases:
     async def test_unknown_entity(self):
         """If the entity doesn't exist in HA, skip it."""
         hp = HeatPump("hp1", "living_room", max_power=5000, heater_entity="climate.gone")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 1.0},
             entity_states={},  # entity not registered
@@ -478,12 +642,15 @@ class TestHeatPumpFanMode:
     """Heat pump fan_only mode when room is above setpoint."""
 
     @pytest.mark.asyncio
-    async def test_fan_mode_slightly_above_setpoint(self):
-        """When room is just above setpoint, fan_only mode is activated and a
-        temperature setpoint below the HP's internal sensor is applied."""
+    async def test_fan_mode_slightly_above_setpoint_stays_idle_within_deadband(self):
+        """When room is just above setpoint but still inside the dead band
+        (room < setpoint + deadband), the HP stays in idle/heat mode rather than
+        switching to a cooling mode.  This prevents jitter near the setpoint."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        # room=25.1, setpoint=25.0, deadband=1.0 → upper threshold=26.0
+        # 25.1 < 26.0 → Schmitt-trigger stays False → idle
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -499,17 +666,18 @@ class TestHeatPumpFanMode:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
-        assert calls[0].args[2]["hvac_mode"] == "fan_only"
-        # overshoot = 0.1 → offset = 1.1; target = 25.5 - 1.1 = 24.4
+        # Within deadband → HP stays in heat/idle mode, no cooling
+        assert calls[0].args[2]["hvac_mode"] == "heat"
+        # idle: target = internal_temp − DEFAULT_IDLE_OFFSET = 25.5 − 1.0 = 24.5
         assert calls[1].args[:2] == ("climate", "set_temperature")
-        assert calls[1].args[2]["temperature"] == pytest.approx(24.4)
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.5)
 
     @pytest.mark.asyncio
     async def test_fan_mode_not_applied_at_setpoint(self):
         """When room is exactly at setpoint, HP idles in heat mode."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -536,7 +704,7 @@ class TestHeatPumpFanMode:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -557,12 +725,14 @@ class TestHeatPumpFanMode:
 
     @pytest.mark.asyncio
     async def test_heat_pump_disabled_room_turns_off_not_fan(self):
-        """When room is disabled, fraction is forced to 0.  Because the room
-        temp is above setpoint the HP uses cooling mode (fan_only/dry) and
-        sets a temperature below its internal sensor."""
+        """When room is disabled, fraction is forced to 0.  If room_temp exceeds
+        the upper dead-band threshold (setpoint + deadband) the HP uses passive
+        cooling mode and sets a temperature below its internal sensor."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        # room=26.5, setpoint=25.0, deadband=1.0 → upper threshold=26.0
+        # 26.5 > 26.0 → enters passive cooling
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -572,16 +742,16 @@ class TestHeatPumpFanMode:
                 },
             },
             room_setpoints={"living_room": 25.0},
-            room_temperatures={"living_room": 26.0},
+            room_temperatures={"living_room": 26.5},
             room_enabled={"living_room": False},
         )
 
-        # room_temp (26) > setpoint (25) → cooling mode + temperature
+        # room_temp (26.5) > upper threshold (26.0) → cooling mode
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
-        # overshoot = 1.0 → offset = 2.0; target = 27.0 - 2.0 = 25.0
-        assert calls[1].args[2]["temperature"] == pytest.approx(25.0)
+        # overshoot = 1.5 → offset = 2.5; target = 27.0 - 2.5 = 24.5
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.5)
 
 
 class TestElectricHeaterCoolingProtection:
@@ -596,7 +766,7 @@ class TestElectricHeaterCoolingProtection:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -624,7 +794,7 @@ class TestElectricHeaterCoolingProtection:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.5},
             entity_states={
@@ -652,7 +822,7 @@ class TestElectricHeaterCoolingProtection:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -679,7 +849,7 @@ class TestElectricHeaterCoolingProtection:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.7},
             entity_states={
@@ -704,10 +874,11 @@ class TestHeatPumpCoolingModeSelection:
 
     @pytest.mark.asyncio
     async def test_cool_mode_preferred_over_dry_when_available(self):
-        """When the HP entity supports 'cool' mode, it is chosen over 'dry'."""
+        """When the HP entity supports 'cool' mode, it is chosen over 'dry'.
+        room=26.5 > setpoint(25.0) + deadband(1.0) = 26.0 → enters cooling."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -720,21 +891,22 @@ class TestHeatPumpCoolingModeSelection:
                 },
             },
             room_setpoints={"living_room": 25.0},
-            room_temperatures={"living_room": 26.0},
+            room_temperatures={"living_room": 26.5},
         )
 
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "cool"
-        # overshoot = 1.0 → offset = 2.0; target = 26.0 - 2.0 = 24.0
-        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+        # overshoot = 1.5 → offset = 2.5; target = 26.0 - 2.5 = 23.5
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.5)
 
     @pytest.mark.asyncio
     async def test_dry_mode_preferred_when_cool_unavailable(self):
-        """When 'cool' is not listed but 'dry' is, 'dry' is chosen over 'fan_only'."""
+        """When 'cool' is not listed but 'dry' is, 'dry' is chosen over 'fan_only'.
+        room=26.5 > setpoint(25.0) + deadband(1.0) = 26.0 → enters cooling."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -747,21 +919,22 @@ class TestHeatPumpCoolingModeSelection:
                 },
             },
             room_setpoints={"living_room": 25.0},
-            room_temperatures={"living_room": 26.0},
+            room_temperatures={"living_room": 26.5},
         )
 
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "dry"
-        # overshoot = 1.0 → offset = 2.0; target = 26.0 - 2.0 = 24.0
-        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+        # overshoot = 1.5 → offset = 2.5; target = 26.0 - 2.5 = 23.5
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.5)
 
     @pytest.mark.asyncio
     async def test_fan_only_fallback_when_no_dry_or_cool(self):
-        """When neither 'cool' nor 'dry' is listed, fall back to 'fan_only'."""
+        """When neither 'cool' nor 'dry' is listed, fall back to 'fan_only'.
+        room=26.5 > setpoint(25.0) + deadband(1.0) = 26.0 → enters cooling."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -774,24 +947,26 @@ class TestHeatPumpCoolingModeSelection:
                 },
             },
             room_setpoints={"living_room": 25.0},
-            room_temperatures={"living_room": 26.0},
+            room_temperatures={"living_room": 26.5},
         )
 
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "fan_only"
-        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+        # overshoot = 1.5 → offset = 2.5; target = 26.0 - 2.5 = 23.5
+        assert calls[1].args[2]["temperature"] == pytest.approx(23.5)
 
     @pytest.mark.asyncio
     async def test_hp_cooling_protection_overrides_positive_fraction(self):
-        """Even when MPC fraction > 0, if room is above setpoint the HP switches
-        to cooling mode instead of heating."""
+        """Even when MPC fraction > 0, if room is above the upper dead-band
+        threshold the HP switches to passive cooling instead of heating.
+        room=26.5 > setpoint(25.0) + deadband(1.0) = 26.0 → enters cooling."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        max_temp_offset=5.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
-            actions={"hp1": 0.8},  # MPC wants heating
+            actions={"hp1": 0.8},  # MPC wants heating but deadband forces cooling
             entity_states={
                 "climate.heat_pump": {
                     "state": "heat",
@@ -802,22 +977,22 @@ class TestHeatPumpCoolingModeSelection:
                 },
             },
             room_setpoints={"living_room": 25.0},
-            room_temperatures={"living_room": 26.0},
+            room_temperatures={"living_room": 26.5},
         )
 
         calls = hass.services.async_call.call_args_list
         # Should switch to dry mode (no 'cool' available), not heat
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "dry"
-        # overshoot = 1.0 → offset = 2.0; target = 27.0 - 2.0 = 25.0
-        assert calls[1].args[2]["temperature"] == pytest.approx(25.0)
+        # overshoot = 1.5 → offset = 2.5; target = 27.0 - 2.5 = 24.5
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.5)
 
     @pytest.mark.asyncio
     async def test_hp_cooling_scaled_offset_large_overshoot(self):
         """A larger room overshoot produces a proportionally lower HP setpoint."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -841,7 +1016,7 @@ class TestHeatPumpCoolingModeSelection:
         cooling setpoint calculation."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
             entity_states={
@@ -872,7 +1047,7 @@ class TestScaledIdleOffsetNonHP:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -898,7 +1073,7 @@ class TestScaledIdleOffsetNonHP:
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
         )
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[heater],
             actions={"e1": 0.0},
             entity_states={
@@ -960,7 +1135,7 @@ class TestMPCDrivenCooling:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        max_temp_offset=5.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": -0.5},
             entity_states={
@@ -990,7 +1165,7 @@ class TestMPCDrivenCooling:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        max_temp_offset=5.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": -1.0},
             entity_states={
@@ -1018,7 +1193,7 @@ class TestMPCDrivenCooling:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        max_temp_offset=5.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": -0.8},
             entity_states={
@@ -1046,7 +1221,7 @@ class TestMPCDrivenCooling:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        max_temp_offset=5.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": -0.6},
             entity_states={
@@ -1071,7 +1246,7 @@ class TestMPCDrivenCooling:
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        max_temp_offset=5.0,
                        heater_entity="climate.heat_pump")
-        hass = await _run_apply_actions(
+        hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": -0.4},
             entity_states={
