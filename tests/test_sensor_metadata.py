@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.heating_assistant.sensor import (
     HeatingPlanSensor,
     MPCPerformanceSensor,
@@ -25,9 +27,10 @@ def test_mpc_performance_sensor_avoids_strict_statistics_metadata():
     assert getattr(MPCPerformanceSensor, "_attr_native_unit_of_measurement", None) is None
 
 
-def test_mpc_performance_sensor_remains_available_on_update_failure():
+@pytest.mark.parametrize("last_update_success", [False, True])
+def test_mpc_performance_sensor_remains_available_with_controller(last_update_success):
     coordinator = SimpleNamespace(
-        last_update_success=False,
+        last_update_success=last_update_success,
         controller=SimpleNamespace(
             total_computes=12,
             _solve_times=[0.08, 0.09],

@@ -1606,7 +1606,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Keep the latest cached solver stats visible across update failures."""
-        return True
+        return getattr(self._coordinator, "controller", None) is not None
 
     @property
     def extra_state_attributes(self) -> dict:
