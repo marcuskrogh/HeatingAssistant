@@ -1595,7 +1595,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 
     @staticmethod
     def _solve_time_seconds(value: Any) -> Optional[float]:
-        """Return a solve-time sample as raw seconds."""
+        """Return ``None``, a numeric sample, or a ``timedelta`` as seconds."""
         if value is None:
             return None
         if isinstance(value, timedelta):
@@ -1618,11 +1618,11 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         import numpy as np
 
         controller = self._coordinator.controller
-        solve_times = [
-            seconds
-            for sample in controller._solve_times
-            if (seconds := self._solve_time_seconds(sample)) is not None
-        ]
+        solve_times = []
+        for sample in controller._solve_times:
+            seconds = self._solve_time_seconds(sample)
+            if seconds is not None:
+                solve_times.append(seconds)
 
         last_t = self._solve_time_seconds(controller.last_solve_time)
         mean_t = self._solve_time_seconds(controller.mean_solve_time)
