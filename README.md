@@ -51,11 +51,13 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
     - 10.3 [Connection block (`connections`)](#103-connection-block-connections)
     - 10.4 [Window block (`windows`)](#104-window-block-windows)
     - 10.5 [Heat source block (`heat_sources`)](#105-heat-source-block-heat_sources)
+    - 10.6 [Comfort schedule block (`schedule`)](#106-comfort-schedule-block-schedule)
 11. [Complete Configuration Examples](#11-complete-configuration-examples)
     - 11.1 [Studio apartment – single room, one electric heater](#111-studio-apartment--single-room-one-electric-heater)
     - 11.2 [Two-bedroom flat – rooms with heat pump and supplemental heater](#112-two-bedroom-flat--rooms-with-heat-pump-and-supplemental-heater)
     - 11.3 [Full house – five rooms, heat pump, and solar-facing windows](#113-full-house--five-rooms-heat-pump-and-solar-facing-windows)
     - 11.4 [Multiple temperature sensors per room](#114-multiple-temperature-sensors-per-room)
+    - 11.5 [Comfort schedules – sleep mode and weekday setback](#115-comfort-schedules--sleep-mode-and-weekday-setback)
 12. [Entity Reference](#12-entity-reference)
     - 12.1 [Climate entities](#121-climate-entities)
     - 12.2 [Sensor entities – predicted temperature](#122-sensor-entities--predicted-temperature)
@@ -140,6 +142,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **HA sensor entities** | Predicted temperature and active heating power sensors per room, with model metadata exposed as state attributes. |
 | **Advanced visualisation sensors** | Temperature forecast trajectory, heat loss breakdown, energy balance, and system efficiency sensors provide deep insight into system operation.  Forecast data includes a "now" bridge point for seamless connection between recorder history and MPC predictions, and setpoints are included in every forecast entry. |
 | **Weather forecast integration** | Optionally configure a HA weather entity (e.g. Met.no, OpenWeatherMap) to provide outdoor temperature forecasts.  The controller interpolates the forecast to each MPC horizon step for improved prediction accuracy during temperature transitions. |
+| **Comfort schedule (sleep / setback)** | Each room can declare time-of-day periods that lower the setpoint or completely switch off heat sources during the night, while the user is at work, etc.  The MPC's prediction horizon naturally produces preheat — the room is back at the comfort setpoint when the next period starts.  Optional frost-protection floor prevents pipes from freezing during off periods.  A runtime service can suspend or resume the schedule for one-off exceptions (e.g. staying up late). |
 | **Setup assistance services** | `simulate_thermal_response` and `estimate_parameters` services help you verify and tune your configuration by running simulations and back-calculating thermal parameters. |
 | **Diagnostics platform** | Full system state dump accessible via the HA diagnostics panel for troubleshooting — includes model matrices, predictions, heat flows, and steady-state analysis. |
 | **Flexible heater entity control** | Automatically dispatches to `switch.*`, `number.*`, or `climate.*` entities depending on the HA domain of each configured heater. |
@@ -1131,6 +1134,7 @@ rooms:
 | `temp_sensors` | list of strings | No | — | List of HA sensor entity IDs for the room.  The coordinator reads all of them at each update cycle and uses their **arithmetic mean** as the measured room temperature.  Useful when the room is large or has significant temperature gradients.  Cannot be combined with `temp_sensor`. |
 | `connections` | list | No | `[]` | List of thermal connections to adjacent rooms. |
 | `windows` | list | No | `[]` | List of window definitions for solar gain calculation. |
+| `schedule` | list | No | `[]` | Optional comfort schedule — a list of time-of-day periods that override the room's setpoint or switch its heat sources off (sleep / setback / away).  See [Section 10.6](#106-comfort-schedule-block-schedule). |
 
 ### 10.3 Connection block (`connections`)
 
@@ -1221,6 +1225,81 @@ heat_sources:
 | `turn_off_deadband` | float | No | `1.0` | Half-width [°C] of the hysteresis dead-band around the setpoint.  The heat pump switches to passive cooling (`dry` / `fan_only`) only when `room_temp > setpoint + turn_off_deadband`, and exits cooling only when `room_temp < setpoint − turn_off_deadband`.  Within the dead-band (width = 2 × this value) the current mode is held, preventing toggling from small temperature fluctuations.  The compressor never cycles fully off during normal operation — when not in cooling mode it idles in heat mode.  Increase this value if you observe nuisance mode switching near the setpoint. |
 | `cooling_cop` | float | No | `2.5` | Rated cooling COP / EER used to compute cooling capacity in dry / fan-only / cool mode.  The heat-removal capacity is `(max_power / cop_rated) × cooling_cop`, i.e. it scales with the **electrical** input rather than the heating thermal max.  Typical air-source heat pumps: 2.5–3.5.  Look up the value at the EN 14511 cooling test point (A35/W18 or A35/W7). |
 | `cooling_efficiency` | float | No | `1.0` | Fraction (0–1) of the rated cooling capacity actually delivered when the integration switches the heat pump to cooling.  Use values around 0.3–0.5 if you rely on `dry` (dehumidify) mode for gentle cooling, or leave at 1.0 if the device runs at full cooling capacity. |
+
+### 10.6 Comfort schedule block (`schedule`)
+
+Each room may declare a `schedule` list of named time-of-day periods.  Use this to lower the setpoint when nobody is home (setback) or to switch off the heat source entirely while you sleep, with the controller automatically warming the room back up before you wake.  A period is matched purely on the local clock — no presence sensor, no automation glue required.
+
+```yaml
+schedule:
+  - name: night
+    start: "22:00"
+    end: "04:00"
+    mode: off                # turn the room's heat sources off
+    frost_protection: 12.0   # never let it drop below this (°C)
+  - name: workday_eco
+    start: "08:30"
+    end: "16:00"
+    days: [mon, tue, wed, thu, fri]
+    setpoint: 18.0           # lower setpoint while at work
+```
+
+| Key | Type | Required | Default | Description |
+|-----|------|----------|---------|-------------|
+| `name` | string | No | `period_<n>` | Friendly label used in diagnostics and notifications. |
+| `start` | string | **Yes** | — | Local start time as `HH:MM` (24-hour) — inclusive. |
+| `end` | string | **Yes** | — | Local end time as `HH:MM` (24-hour) — exclusive.  When `end` is earlier than (or equal to) `start` the period **wraps past midnight** (e.g. `22:00` → `04:00` covers the night). |
+| `days` | list of strings | No | every day | Optional weekday filter using short names: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.  For wrapping periods the filter is applied to the **start** day, so a `sun` period from `23:00` → `08:00` covers Monday morning too. |
+| `mode` | string | No | `comfort` | `comfort` keeps the heat sources running and tracks the period's setpoint.  `off` turns the room's heat sources off for the duration of the period. |
+| `setpoint` | float | No | room base setpoint | Setpoint in °C while a `comfort` period is active.  Ignored when `mode: off`. |
+| `frost_protection` | float | No | `12.0` | Safety floor in °C enforced while a `mode: off` period is active.  When the measured room temperature drops to this value the heat is briefly re-enabled to defend the floor — pipes never freeze, even on the coldest nights. |
+
+**How it works**
+
+Every coordinator update tick the integration evaluates each room's schedule:
+
+1. The first matching period (in declaration order) wins, so list more specific rules (e.g. a workday-only eco period) before broader ones (e.g. an everyday night period).
+2. For `comfort` periods, the room's live setpoint becomes the period's `setpoint` (or the room's base setpoint if omitted).  The MPC tracks the new reference like any user-initiated change.
+3. For `off` periods, the room is marked disabled and any configured heaters are commanded off — exactly the same path used when you toggle the climate entity to OFF in the UI.  Frost protection re-enables heating only if the measurement drops to the configured floor.
+4. When no period matches, the room reverts to its **base setpoint** — the value last set via the climate entity (or the `setpoint` field in the room block).
+
+**Preheat is automatic**
+
+Because the controller is an MPC with a prediction horizon, it sees upcoming setpoint changes and starts heating **before** the next comfort period begins.  How early depends on the horizon (`horizon` × `update_interval`).  At the default settings (6 steps × 15 min = 1.5 h of look-ahead) the room is typically warm by the time the schedule transitions.  For longer preheat windows, increase `horizon` and/or shorten `update_interval`.
+
+If you need the room ready earlier than the horizon allows, declare an explicit "preheat" period that ends at the comfort time:
+
+```yaml
+schedule:
+  - name: night
+    start: "22:00"
+    end: "05:00"
+    mode: off
+  - name: morning_preheat
+    start: "05:00"
+    end: "07:00"
+    setpoint: 21.0          # treat preheat as the comfort target
+```
+
+**Manual overrides**
+
+Users keep full control of the schedule:
+
+* Adjusting the setpoint via the `climate.*` entity updates the room's **base setpoint** — the value used outside any active period.  During an active period the change still takes effect but is overwritten when the schedule re-evaluates on the next tick.
+* The `heating_assistant.set_schedule_enabled` service suspends or resumes the schedule for a single room (or every room) at runtime.  Use it for one-off exceptions like staying up late, working from home, or hosting guests.  Schedule state is in-memory and resets to enabled on Home Assistant restart.
+
+```yaml
+# Skip tonight's "off" period for the bedroom (e.g. an unwell child)
+service: heating_assistant.set_schedule_enabled
+data:
+  room_name: bedroom
+  enabled: false
+
+# Resume scheduling for the whole house
+service: heating_assistant.set_schedule_enabled
+data:
+  enabled: true
+```
 
 ---
 
@@ -1588,6 +1667,106 @@ heating_assistant:
       max_power: 800
       heater_entity: switch.bedroom2_heater
 ```
+
+### 11.5 Comfort schedules – sleep mode and weekday setback
+
+The same two-bedroom flat from [Section 11.2](#112-two-bedroom-flat--rooms-with-heat-pump-and-supplemental-heater), augmented with comfort schedules:
+
+* the **living room** runs an eco setback while the household is at work and switches off entirely overnight (heat returns automatically before the morning routine thanks to the MPC's preheat);
+* the **bedrooms** stay cool during the day and switch off during sleep hours;
+* the **bathroom** keeps a comfort temperature in the morning peak only.
+
+```yaml
+heating_assistant:
+  outdoor_temp_entity: sensor.openweathermap_temperature
+  weather_entity: weather.forecast_home
+  horizon: 8                # 8 × 15 min = 2 h preheat look-ahead
+
+  rooms:
+    - name: living_room
+      thermal_mass: 8000000
+      r_external: 0.04
+      setpoint: 21.0                   # comfort setpoint (used outside any period)
+      temp_sensor: sensor.living_room_temperature
+      schedule:
+        - name: workday_eco
+          start: "08:30"
+          end: "16:00"
+          days: [mon, tue, wed, thu, fri]
+          setpoint: 18.0               # gentle setback while at work
+        - name: night
+          start: "22:30"
+          end: "05:30"
+          mode: off                    # heat source completely off
+          frost_protection: 12.0
+
+    - name: bedroom_1
+      thermal_mass: 4000000
+      r_external: 0.05
+      setpoint: 19.0
+      temp_sensor: sensor.bedroom1_temperature
+      schedule:
+        - name: night
+          start: "22:00"
+          end: "06:00"
+          mode: off
+          frost_protection: 14.0       # bedrooms typically need a higher floor
+        - name: daytime_eco
+          start: "08:00"
+          end: "20:00"
+          setpoint: 17.0               # rarely used during the day
+
+    - name: bathroom
+      thermal_mass: 2500000
+      r_external: 0.06
+      setpoint: 19.0                   # gentle baseline, used outside the morning peak
+      temp_sensor: sensor.bathroom_temperature
+      schedule:
+        - name: morning_peak
+          start: "06:30"
+          end: "08:30"
+          setpoint: 22.0               # warm towel-rail temperature for showers
+        - name: night
+          start: "22:30"
+          end: "05:30"
+          mode: off
+          frost_protection: 12.0
+
+  heat_sources:
+    - name: living_room_hp
+      type: heat_pump
+      room: living_room
+      max_power: 5000
+      heater_entity: climate.living_room_heat_pump
+    - name: bedroom1_heater
+      type: electric_heater
+      room: bedroom_1
+      max_power: 1500
+      heater_entity: switch.bedroom1_heater
+    - name: bathroom_heater
+      type: electric_heater
+      room: bathroom
+      max_power: 800
+      heater_entity: switch.bathroom_heater
+```
+
+What this configuration achieves:
+
+* Between 22:30 and 05:30 the living-room heat pump and bathroom heater stop running — no electricity is drawn unless the indoor temperature drops to the frost-protection floor.
+* The MPC sees the upcoming 05:30 transition through its 2-hour horizon and starts heating around 03:30–04:00, so the room is back at 21 °C when the schedule wakes up.
+* Weekdays from 08:30–16:00 the living-room setpoint drops to 18 °C; the controller saves energy without letting the room cool past the eco target.
+* The bathroom is fully comfortable from 06:30–08:30 and idles around 19 °C the rest of the day.
+
+To override a schedule for a single evening — e.g. you decide to stay in the living room past 22:30 — call:
+
+```yaml
+service: heating_assistant.set_schedule_enabled
+data:
+  room_name: living_room
+  enabled: false
+```
+
+The schedule resumes at the next Home Assistant restart, or when you call the same service with `enabled: true`.
 
 ---
 

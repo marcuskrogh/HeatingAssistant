@@ -54,6 +54,20 @@
         }
       }
     },
+    "set_schedule_enabled": {
+      "name": "Suspend or resume comfort schedule",
+      "description": "Suspend or resume the comfort schedule for a room (or all rooms when none is specified). Useful for one-off exceptions to a sleep / setback schedule.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Optional room name. Leave blank to apply to all rooms."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "True to resume the schedule, false to suspend it."
+        }
+      }
+    },
     "estimate_parameters": {
       "name": "Estimate thermal parameters",
       "description": "Back-calculate thermal_mass and r_external from an observed heating experiment.",

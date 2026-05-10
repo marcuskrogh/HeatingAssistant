@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -52,6 +52,7 @@ from .const import (
     CONF_R_VALUE,
     CONF_R_EXTERNAL,
     CONF_ROOM_NAME,
+    CONF_SCHEDULE,
     CONF_SETPOINT,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
@@ -91,6 +92,13 @@ from .heat_sources import ElectricHeater, HeatPump, HeatSource
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import HeatingMPCController
 from .solar_model import room_solar_gains
+from .schedule import (
+    EffectiveSetpoint,
+    RoomSchedule,
+    build_schedule,
+    next_transition,
+    resolve_effective_setpoint,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -255,11 +263,39 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             terminal_weight=self._terminal_weight,
         )
 
-        # Per-room enabled state (True = active, False = off).
-        # Defaults to True so the system is active after (re)start.
+        # Per-room user toggle (True = on, False = manually disabled by the
+        # climate UI / automations).  ``is_room_enabled`` combines this with
+        # the schedule-imposed disable so the two concerns never clobber
+        # each other.  Defaults to True so the system is active after
+        # (re)start.
         self._room_enabled: Dict[str, bool] = {
             name: True for name in self.model.room_names
         }
+        # True while an "off" schedule period is currently disabling the room.
+        # Maintained by ``_apply_schedule`` and read by ``is_room_enabled``.
+        self._schedule_disabled: Dict[str, bool] = {
+            name: False for name in self.model.room_names
+        }
+
+        # Comfort schedules: per-room time-of-day setpoint / setback rules.
+        # ``_base_setpoint`` is the user's chosen setpoint when no schedule
+        # period is active (i.e. the value the climate UI restores to);
+        # ``_room_schedule`` holds the parsed schedule;
+        # ``_schedule_enabled`` lets the user suspend the schedule per room
+        # at runtime (e.g. "stay up late tonight") without losing the
+        # configured rules.
+        self._room_schedule: Dict[str, RoomSchedule] = {}
+        self._base_setpoint: Dict[str, float] = {}
+        self._schedule_enabled: Dict[str, bool] = {}
+        # Last applied effective setpoint per room — exposed for diagnostics.
+        self._effective_setpoint: Dict[str, EffectiveSetpoint] = {}
+        for rc in rooms_cfg:
+            room_name = rc[CONF_ROOM_NAME]
+            self._room_schedule[room_name] = build_schedule(rc.get(CONF_SCHEDULE))
+            self._base_setpoint[room_name] = float(
+                rc.get(CONF_SETPOINT, DEFAULT_SETPOINT)
+            )
+            self._schedule_enabled[room_name] = True
 
         # Latest control actions (source_name → fraction 0‑1)
         self.actions: Dict[str, float] = {}
@@ -336,6 +372,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     self.model.rooms[room_name].temperature = (
                         sum(readings) / len(readings)
                     )
+
+            # 1b. Apply comfort schedules: resolve the active period for each
+            #     room and update the live setpoint / enabled flag accordingly.
+            #     Done after measurements are read so frost-protection logic
+            #     sees the current temperature.
+            now_local = datetime.now()
+            self._apply_schedule(now_local)
 
             # 2. Read outdoor temperature
             outdoor_temp = self._read_outdoor_temp()
@@ -983,27 +1026,135 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def set_room_setpoint(self, room_name: str, setpoint: float) -> None:
-        """Update the temperature setpoint for a room."""
-        if room_name in self.model.rooms:
-            self.model.rooms[room_name].setpoint = setpoint
+        """Update the temperature setpoint for a room.
+
+        The change is recorded as the *base* setpoint (the value the user
+        wants when no schedule period is active).  When a schedule period
+        is currently active, the change still overrides the live setpoint
+        until the next coordinator tick re-applies the schedule.  This way
+        users can nudge the temperature mid-period without their request
+        being silently dropped.
+        """
+        if room_name not in self.model.rooms:
+            return
+        value = float(setpoint)
+        self._base_setpoint[room_name] = value
+        self.model.rooms[room_name].setpoint = value
 
     def get_room_setpoint(self, room_name: str) -> float:
-        """Return the current setpoint for a room."""
+        """Return the current (live) setpoint for a room."""
         if room_name in self.model.rooms:
             return self.model.rooms[room_name].setpoint
         return DEFAULT_SETPOINT
+
+    def get_base_setpoint(self, room_name: str) -> float:
+        """Return the user-chosen setpoint used outside any schedule period."""
+        if room_name in self._base_setpoint:
+            return self._base_setpoint[room_name]
+        return self.get_room_setpoint(room_name)
 
     # ------------------------------------------------------------------
     # Room enable/disable helpers (called by climate platform)
     # ------------------------------------------------------------------
 
     def set_room_enabled(self, room_name: str, enabled: bool) -> None:
-        """Enable or disable heating control for a room."""
+        """Enable or disable heating control for a room (user toggle)."""
         self._room_enabled[room_name] = enabled
 
     def is_room_enabled(self, room_name: str) -> bool:
-        """Return whether heating control is active for a room."""
-        return self._room_enabled.get(room_name, True)
+        """Return whether heating control should run for a room *right now*.
+
+        The room runs when the user has not switched it off **and** no
+        active comfort schedule period requests it to be off.  Schedule and
+        user toggle are tracked independently so toggling one cannot
+        silently override the other.
+        """
+        if not self._room_enabled.get(room_name, True):
+            return False
+        if self._schedule_disabled.get(room_name, False):
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Comfort schedule helpers
+    # ------------------------------------------------------------------
+
+    def _apply_schedule(self, now: datetime) -> None:
+        """Resolve the active schedule for every room and update live state.
+
+        Sets ``room.setpoint`` to the period's effective value and toggles
+        ``_schedule_disabled`` so heat sources stop running during ``off``
+        periods.  The user's manual on/off toggle (``_room_enabled``) is
+        preserved — both flags are AND'ed together by
+        :meth:`is_room_enabled`.
+
+        Rooms whose schedule has been suspended (``_schedule_enabled`` is
+        False) are left at their base setpoint and the schedule-disable is
+        cleared.
+        """
+        for room_name in self.model.room_names:
+            schedule = self._room_schedule.get(room_name)
+            base = self._base_setpoint.get(
+                room_name, self.model.rooms[room_name].setpoint
+            )
+            measured = self.model.rooms[room_name].temperature
+
+            if schedule is None or schedule.is_empty or not self._schedule_enabled.get(
+                room_name, True
+            ):
+                effective = EffectiveSetpoint(
+                    setpoint=base, enabled=True, period_name=None, mode=None,
+                )
+            else:
+                effective = resolve_effective_setpoint(
+                    schedule=schedule,
+                    base_setpoint=base,
+                    measured_temp=measured,
+                    now=now,
+                )
+
+            self.model.rooms[room_name].setpoint = effective.setpoint
+            self._schedule_disabled[room_name] = not effective.enabled
+            self._effective_setpoint[room_name] = effective
+
+    def has_schedule(self, room_name: str) -> bool:
+        """Return True when ``room_name`` has at least one schedule period."""
+        schedule = self._room_schedule.get(room_name)
+        return bool(schedule and not schedule.is_empty)
+
+    def is_schedule_enabled(self, room_name: str) -> bool:
+        """Return whether the comfort schedule is active for the room.
+
+        A True result with no configured periods means the schedule "would
+        run" if periods were defined; use :meth:`has_schedule` to test for
+        actual configuration.
+        """
+        return self._schedule_enabled.get(room_name, True)
+
+    def set_schedule_enabled(self, room_name: str, enabled: bool) -> None:
+        """Suspend or resume the comfort schedule for one room.
+
+        Suspending the schedule restores the room's base setpoint and
+        re-enables heating immediately, so e.g. an evening "off" period
+        can be skipped without editing YAML.  The configured periods are
+        preserved and resume control on the next call to ``set_schedule_enabled``
+        or after a Home Assistant restart.
+        """
+        self._schedule_enabled[room_name] = bool(enabled)
+        # Re-apply now so the next tick already reflects the change in the
+        # MPC reference; otherwise the user would have to wait one cycle.
+        self._apply_schedule(datetime.now())
+
+    def active_schedule_period(self, room_name: str) -> Optional[EffectiveSetpoint]:
+        """Return the most recently resolved effective setpoint for the room."""
+        return self._effective_setpoint.get(room_name)
+
+    def next_schedule_transition(self, room_name: str) -> Optional[datetime]:
+        """Return the timestamp of the next schedule boundary for the room."""
+        schedule = self._room_schedule.get(room_name)
+        if schedule is None or schedule.is_empty:
+            return None
+        return next_transition(schedule, datetime.now())
 
     # ------------------------------------------------------------------
     # Setup helpers (used by services)
