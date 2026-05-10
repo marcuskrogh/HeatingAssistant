@@ -48,7 +48,6 @@ from homeassistant.const import (
     PERCENTAGE,
     UnitOfPower,
     UnitOfTemperature,
-    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -1585,7 +1584,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_state_class = None
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_native_unit_of_measurement = "s"
     _attr_icon = "mdi:timer-outline"
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:

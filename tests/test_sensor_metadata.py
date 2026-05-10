@@ -4,7 +4,6 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from homeassistant.const import UnitOfTime
 
 from custom_components.heating_assistant.sensor import (
     HeatingPlanSensor,
@@ -26,10 +25,7 @@ def test_prediction_entities_have_no_state_class():
 
 def test_mpc_performance_sensor_avoids_strict_statistics_metadata():
     assert getattr(MPCPerformanceSensor, "_attr_state_class", None) is None
-    assert (
-        getattr(MPCPerformanceSensor, "_attr_native_unit_of_measurement", None)
-        == UnitOfTime.SECONDS
-    )
+    assert getattr(MPCPerformanceSensor, "_attr_native_unit_of_measurement", None) == "s"
 
 
 @pytest.mark.parametrize("last_update_success", [False, True])
