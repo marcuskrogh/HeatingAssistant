@@ -1595,7 +1595,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 
     @staticmethod
     def _solve_time_seconds(value: timedelta | float | int | None) -> Optional[float]:
-        """Convert a solve-time value to seconds as ``float`` or return ``None``."""
+        """Convert a solve-time value in seconds to ``float`` or return ``None``."""
         if value is None:
             return None
         if isinstance(value, timedelta):
@@ -1603,6 +1603,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         try:
             return float(value)
         except (TypeError, ValueError):
+            _LOGGER.debug("Ignoring non-numeric MPC solve time value: %r", value)
             return None
 
     @property
