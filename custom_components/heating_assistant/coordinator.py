@@ -1191,7 +1191,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=self._update_interval,  # must match history buffer sampling interval, not MPC horizon
+            dt=float(self._update_interval),  # must match history buffer sampling interval, not MPC horizon
         )
 
         history = list(self._history_buffer)
