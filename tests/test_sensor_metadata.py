@@ -21,8 +21,8 @@ def test_prediction_entities_have_no_state_class():
 
 
 def test_mpc_performance_sensor_avoids_strict_statistics_metadata():
-    assert getattr(MPCPerformanceSensor, "_attr_state_class", "missing") is None
-    assert getattr(MPCPerformanceSensor, "_attr_native_unit_of_measurement", "missing") is None
+    assert getattr(MPCPerformanceSensor, "_attr_state_class", None) is None
+    assert getattr(MPCPerformanceSensor, "_attr_native_unit_of_measurement", None) is None
 
 
 def test_mpc_performance_sensor_remains_available_on_update_failure():
