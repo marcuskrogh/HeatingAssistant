@@ -1580,10 +1580,16 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     Previously the state was the most-recent solve time [s], but after the
     initial warm-up the L-BFGS-B solver converges in near-constant time, so
     that value appeared frozen even when the controller was running normally.
+
+    Home Assistant's sensor validation rejects the entity if it advertises a
+    statistics-oriented ``state_class`` without a meaningful unit, so this
+    entity is kept as a plain numeric sensor.  The cached controller stats are
+    still useful even across transient coordinator update failures, so the
+    entity also stays available while exposing its last-known values.
     """
 
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_native_unit_of_measurement = ""
+    _attr_state_class = None
+    _attr_native_unit_of_measurement = None
     _attr_icon = "mdi:timer-outline"
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
@@ -1596,6 +1602,11 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> Optional[int]:
         """Return the total number of completed OCP solves."""
         return self._coordinator.controller.total_computes
+
+    @property
+    def available(self) -> bool:
+        """Keep the latest cached solver stats visible across update failures."""
+        return True
 
     @property
     def extra_state_attributes(self) -> dict:
