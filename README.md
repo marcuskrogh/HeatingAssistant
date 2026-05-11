@@ -2468,21 +2468,17 @@ series:
   # ── History: actual measurements y(k) (replace with your room sensor) ──
   - entity: sensor.living_room_temperature
     name: Actual measurement (y(k))
+    type: scatter
     yaxis_id: temp
     color: '#E53935'
     stroke_width: 0
-    curve: stepline
     float_precision: 2
     extend_to: now
     group_by:
       func: raw
-      fill: null
+      fill: 'null'
     show:
       in_header: false
-    apex_config:
-      markers:
-        size: 4
-        strokeWidth: 0
   # ── History: setpoint (dashed step) ───────────────────────────────────
   - entity: sensor.heating_assistant_living_room_predicted_temperature
     attribute: setpoint
@@ -2828,21 +2824,17 @@ cards:
       # ── History: actual measurements y(k) (replace with your room sensor)
       - entity: sensor.living_room_temperature
         name: Actual measurement (y(k))
+        type: scatter
         yaxis_id: temp
         color: '#E53935'
         stroke_width: 0
-        curve: stepline
         float_precision: 2
         extend_to: now
         group_by:
           func: raw
-          fill: null
+          fill: 'null'
         show:
           in_header: false
-        apex_config:
-          markers:
-            size: 4
-            strokeWidth: 0
       # ── History: setpoint (dashed step) ───────────────────────────────
       - entity: sensor.heating_assistant_living_room_predicted_temperature
         attribute: setpoint
