@@ -110,6 +110,137 @@ def _coerce_interval_seconds(value: Any) -> float:
     return float(value)
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    """Return ``float(value)`` or None when the value is missing or unparsable."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_cloud_cover_percent(value: Any) -> Optional[float]:
+    """Convert a cloud-cover percentage (0–100) to a fraction in [0, 1].
+
+    Returns ``None`` for missing or unparsable input.  Values outside the
+    [0, 100] range are clamped.
+    """
+    f = _coerce_float(value)
+    if f is None:
+        return None
+    return max(0.0, min(1.0, f / 100.0))
+
+
+# Representative cloud-cover fractions for the standard HA weather conditions.
+# Used when ``cloud_coverage`` is not available on the entity / forecast entry.
+# Values picked to be conservative: clearly clear vs clearly overcast, with
+# partlycloudy in the middle.  Conditions implying heavy precipitation map
+# to fully overcast.  See https://www.home-assistant.io/integrations/weather/
+# for the standardised condition strings.
+_CONDITION_CLOUD_COVER: Dict[str, float] = {
+    "sunny": 0.0,
+    "clear-night": 0.0,
+    "windy": 0.0,
+    "windy-variant": 0.3,
+    "partlycloudy": 0.3,
+    "cloudy": 0.85,
+    "fog": 1.0,
+    "hail": 1.0,
+    "lightning": 0.9,
+    "lightning-rainy": 1.0,
+    "pouring": 1.0,
+    "rainy": 0.95,
+    "snowy": 1.0,
+    "snowy-rainy": 1.0,
+    "exceptional": 0.85,
+}
+
+
+def _parse_forecast_field(
+    forecast_data: list,
+    horizon: int,
+    dt: float,
+    field: str,
+    coerce: Any,
+    fallback_field: Optional[str] = None,
+    fallback_coerce: Any = None,
+    now: Optional[datetime] = None,
+) -> Optional[List[float]]:
+    """Parse a forecast field into ``horizon`` values interpolated to MPC steps.
+
+    Parameters
+    ----------
+    forecast_data : list of dict
+        Raw forecast entries.  Each entry must have a ``datetime`` key
+        (ISO-8601 string or datetime object) plus the requested ``field``.
+    horizon : int
+        Number of MPC prediction steps.
+    dt : float
+        MPC time step in seconds.
+    field : str
+        Primary field name to read from each entry (e.g. ``"temperature"``,
+        ``"cloud_coverage"``).
+    coerce : callable
+        Function mapping the raw field value to a float in the desired unit,
+        or returning None when the value is missing / unparsable.
+    fallback_field, fallback_coerce : optional
+        When provided and the primary field is missing/unparsable for an
+        entry, the parser tries this fallback field with this coerce function
+        before discarding the entry.  Used to back ``cloud_coverage`` with
+        the per-entry ``condition`` string.
+    now : datetime, optional
+        Reference time for interpolation.  Defaults to current UTC.
+
+    Returns
+    -------
+    list of float or None
+        ``horizon`` values aligned to MPC steps, or None when no usable
+        entries are found.
+    """
+    if now is None:
+        now = datetime.now(tz=timezone.utc)
+
+    entries: List[tuple] = []
+    for entry in forecast_data:
+        dt_str = entry.get("datetime")
+        if dt_str is None:
+            continue
+        raw = entry.get(field)
+        value = coerce(raw)
+        if value is None and fallback_field is not None and fallback_coerce is not None:
+            value = fallback_coerce(entry.get(fallback_field))
+        if value is None:
+            continue
+        try:
+            if isinstance(dt_str, str):
+                if dt_str.endswith("Z"):
+                    dt_str = dt_str[:-1] + "+00:00"
+                fc_time = datetime.fromisoformat(dt_str)
+            elif isinstance(dt_str, datetime):
+                fc_time = dt_str
+            else:
+                continue
+            if fc_time.tzinfo is None:
+                fc_time = fc_time.replace(tzinfo=timezone.utc)
+            entries.append((fc_time.timestamp(), float(value)))
+        except (ValueError, TypeError):
+            continue
+
+    if not entries:
+        return None
+
+    entries.sort(key=lambda e: e[0])
+
+    now_ts = now.timestamp()
+    result: List[float] = []
+    for k in range(horizon):
+        target_ts = now_ts + dt * (k + 1)
+        result.append(HeatingAssistantCoordinator._interpolate_forecast(entries, target_ts))
+
+    return result
+
+
 def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
     """
     Construct a :class:`HouseModel` from the YAML / config-entry rooms list.
@@ -305,6 +436,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         # Visualization data
         self.solar_gains: Dict[str, float] = {}
+        # Current cloud-cover fraction in [0, 1], or None when unavailable.
+        # Used to attenuate the clear-sky solar model — see solar_model.cloud_attenuation_factor.
+        self.cloud_cover: Optional[float] = None
         self.outdoor_temp: float = 5.0
         self.heat_flows: Dict[str, Dict[str, float]] = {}
         self.predictions: list = []
@@ -385,16 +519,21 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.outdoor_temp = outdoor_temp
 
             # 2b. Read weather forecast for outdoor temperature prediction
+            #     and cloud-cover (used to attenuate the clear-sky solar model)
             outdoor_forecast = await self._async_read_weather_forecast()
+            cloud_cover_now = self._read_cloud_cover_now()
+            cloud_forecast = await self._async_read_cloud_forecast()
 
             # 3. Compute current solar gains for visualization
             now = datetime.now(tz=timezone.utc)
+            self.cloud_cover = cloud_cover_now
             self.solar_gains = {
                 name: room_solar_gains(
                     self.model.rooms[name].windows,
                     now,
                     self._latitude,
                     self._longitude,
+                    cloud_cover=cloud_cover_now,
                 )
                 for name in self.model.room_names
             }
@@ -406,6 +545,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     solar_gains=self.solar_gains,
                     now=now,
                     outdoor_forecast=outdoor_forecast,
+                    cloud_forecast=cloud_forecast,
+                    cloud_cover_now=cloud_cover_now,
                 )
                 self.predictions = self.controller.predictions
                 self.outdoor_forecast = self.controller.outdoor_forecast
@@ -520,6 +661,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 ],
                 "d_outdoor": outdoor_temp,
                 "d_solar": dict(self.solar_gains),
+                "cloud_cover": cloud_cover_now,
                 "timestamp": now.timestamp(),
                 # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
                 "kalman_innovation": kalman_innovation,
@@ -590,6 +732,32 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         horizon steps, or None if no weather entity is configured or
         no forecast data is available.
         """
+        forecast_data = await self._async_get_forecast_entries()
+        if not forecast_data:
+            return None
+        return self._parse_weather_forecast(forecast_data, self._horizon, self.dt)
+
+    async def _async_read_cloud_forecast(self) -> Optional[List[float]]:
+        """Read cloud-cover forecast (fraction in [0, 1]) from the weather entity.
+
+        Uses ``cloud_coverage`` percent values when present on the forecast
+        entries (populated by most modern HA weather integrations), and falls
+        back to mapping the per-entry ``condition`` string when the percentage
+        is missing.  Returns a list of N values aligned to the MPC horizon
+        steps, or None if no usable data is available.
+        """
+        forecast_data = await self._async_get_forecast_entries()
+        if not forecast_data:
+            return None
+        return self._parse_cloud_forecast(forecast_data, self._horizon, self.dt)
+
+    async def _async_get_forecast_entries(self) -> Optional[list]:
+        """Fetch raw forecast entries from the configured weather entity.
+
+        Shared by the temperature and cloud-cover readers so both signals come
+        from a single service call per cycle.  Tries ``weather.get_forecasts``
+        first, then falls back to the deprecated ``forecast`` state attribute.
+        """
         if not self._weather_entity:
             return None
 
@@ -609,9 +777,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 if response and self._weather_entity in response:
                     forecast_data = response[self._weather_entity].get("forecast", [])
                     if forecast_data:
-                        return self._parse_weather_forecast(
-                            forecast_data, self._horizon, self.dt
-                        )
+                        return forecast_data
             except Exception as exc:
                 _LOGGER.debug(
                     "weather.get_forecasts service call failed for %s, "
@@ -628,8 +794,31 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         forecast_data = state.attributes.get("forecast")
         if not forecast_data:
             return None
+        return forecast_data
 
-        return self._parse_weather_forecast(forecast_data, self._horizon, self.dt)
+    def _read_cloud_cover_now(self) -> Optional[float]:
+        """Read the current cloud-cover fraction in [0, 1] from the weather entity.
+
+        Prefers the numeric ``cloud_coverage`` attribute (percent) when
+        present, and falls back to mapping the entity's ``condition`` /
+        state string (``sunny``, ``partlycloudy``, ``cloudy``, ``rainy``, …)
+        to a representative fraction.  Returns ``None`` when no weather
+        entity is configured or neither signal is available, in which case
+        the solar model stays on its clear-sky default.
+        """
+        if not self._weather_entity:
+            return None
+        state = self.hass.states.get(self._weather_entity)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+
+        cc = state.attributes.get("cloud_coverage")
+        frac = _coerce_cloud_cover_percent(cc)
+        if frac is not None:
+            return frac
+
+        # Weather entities expose the condition as the entity state.
+        return _CONDITION_CLOUD_COVER.get(state.state)
 
     @staticmethod
     def _parse_weather_forecast(
@@ -638,97 +827,65 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         dt: float,
         now: Optional[datetime] = None,
     ) -> Optional[List[float]]:
-        """Parse raw weather forecast entries into interpolated MPC horizon temperatures.
+        """Parse raw weather forecast entries into interpolated horizon temperatures."""
+        return _parse_forecast_field(
+            forecast_data,
+            horizon,
+            dt,
+            field="temperature",
+            coerce=_coerce_float,
+            now=now,
+        )
 
-        Parameters
-        ----------
-        forecast_data : list of dict
-            Raw forecast entries from either the ``weather.get_forecasts``
-            service or the deprecated ``forecast`` state attribute.  Each
-            entry must have a ``datetime`` key (ISO-8601 string or datetime
-            object) and a ``temperature`` key (float, °C).
-        horizon : int
-            Number of MPC prediction steps.
-        dt : float
-            MPC time step in seconds.
-        now : datetime, optional
-            Reference time for interpolation.  Defaults to the current UTC
-            time when not provided.
+    @staticmethod
+    def _parse_cloud_forecast(
+        forecast_data: list,
+        horizon: int,
+        dt: float,
+        now: Optional[datetime] = None,
+    ) -> Optional[List[float]]:
+        """Parse raw weather forecast entries into interpolated horizon cloud-cover.
 
-        Returns
-        -------
-        list of float or None
-            List of ``horizon`` interpolated outdoor temperatures (one per MPC
-            step), or None if the data cannot be parsed into any valid entries.
+        Returns fractions in [0, 1].  Prefers the numeric ``cloud_coverage``
+        field; falls back to mapping the per-entry ``condition`` string when
+        the percentage is missing on individual entries.
         """
-        if now is None:
-            now = datetime.now(tz=timezone.utc)
-
-        entries: List[tuple] = []
-        for entry in forecast_data:
-            dt_str = entry.get("datetime")
-            temp = entry.get("temperature")
-            if dt_str is None or temp is None:
-                continue
-            try:
-                if isinstance(dt_str, str):
-                    # Handle ISO-8601 strings (with or without timezone)
-                    if dt_str.endswith("Z"):
-                        dt_str = dt_str[:-1] + "+00:00"
-                    fc_time = datetime.fromisoformat(dt_str)
-                elif isinstance(dt_str, datetime):
-                    fc_time = dt_str
-                else:
-                    continue
-                if fc_time.tzinfo is None:
-                    fc_time = fc_time.replace(tzinfo=timezone.utc)
-                entries.append((fc_time.timestamp(), float(temp)))
-            except (ValueError, TypeError):
-                continue
-
-        if not entries:
-            return None
-
-        entries.sort(key=lambda e: e[0])
-
-        now_ts = now.timestamp()
-        result: List[float] = []
-        for k in range(horizon):
-            target_ts = now_ts + dt * (k + 1)
-            result.append(HeatingAssistantCoordinator._interpolate_forecast(entries, target_ts))
-
-        return result
+        return _parse_forecast_field(
+            forecast_data,
+            horizon,
+            dt,
+            field="cloud_coverage",
+            coerce=_coerce_cloud_cover_percent,
+            fallback_field="condition",
+            fallback_coerce=lambda v: _CONDITION_CLOUD_COVER.get(v) if isinstance(v, str) else None,
+            now=now,
+        )
 
     @staticmethod
     def _interpolate_forecast(
         entries: List[tuple], target_ts: float,
     ) -> float:
-        """Linearly interpolate forecast temperature at a target timestamp.
+        """Linearly interpolate a forecast field at a target timestamp.
 
-        If the target is before all entries, returns the first entry's temp.
-        If after all entries, returns the last entry's temp.
+        If the target is before all entries, returns the first entry's value.
+        If after all entries, returns the last entry's value.
         """
         if not entries:
-            return 5.0  # fallback
+            return 5.0  # fallback (only reached via the temperature path)
 
-        # Before first entry
         if target_ts <= entries[0][0]:
             return entries[0][1]
-
-        # After last entry
         if target_ts >= entries[-1][0]:
             return entries[-1][1]
 
-        # Find the two surrounding entries
         for i in range(len(entries) - 1):
-            t0, temp0 = entries[i]
-            t1, temp1 = entries[i + 1]
+            t0, v0 = entries[i]
+            t1, v1 = entries[i + 1]
             if t0 <= target_ts <= t1:
-                # Linear interpolation
                 if t1 == t0:
-                    return temp0
+                    return v0
                 frac = (target_ts - t0) / (t1 - t0)
-                return temp0 + frac * (temp1 - temp0)
+                return v0 + frac * (v1 - v0)
 
         return entries[-1][1]
 
