@@ -2425,7 +2425,7 @@ In each room subview, add the three MPC cards below (§ 13.18.3 – § 13.18.5) 
 #### 13.17.3 MPC predicted temperature card
 
 This is the primary MPC output visualisation.  It shows:
-- **History** (left of Now): filtered estimate \(y_{k|k}\) (solid blue line) and actual measurements \(y_k\) (red dots, marker size 4)
+- **History** (left of Now): filtered estimate y(k|k) (solid blue line) and actual measurements y(k) (red dots, marker size 4)
 - **Prediction** (right of Now): the MPC-predicted temperature trajectory (solid line)
 - A dashed setpoint step line visible across both history and forecast windows
 - The soft constraint band `[setpoint − δ, setpoint + δ]` as a shaded region
@@ -2451,9 +2451,9 @@ yaxis:
         text: Temperature (°C)
       tickAmount: 5
 series:
-  # ── History: filtered estimate y_{k|k} (historical recorder values) ───
+  # ── History: filtered estimate y(k|k) (historical recorder values) ─────
   - entity: sensor.heating_assistant_living_room_predicted_temperature
-    name: Filtered estimate (y_{k|k})
+    name: Filtered estimate (y(k|k))
     yaxis_id: temp
     color: '#0D47A1'
     stroke_width: 2
@@ -2465,9 +2465,9 @@ series:
       fill: last
     show:
       in_header: true
-  # ── History: actual measurements y_k (replace with your room sensor) ──
+  # ── History: actual measurements y(k) (replace with your room sensor) ──
   - entity: sensor.living_room_temperature
-    name: Actual measurement (y_k)
+    name: Actual measurement (y(k))
     yaxis_id: temp
     color: '#E53935'
     stroke_width: 0
@@ -2810,9 +2810,9 @@ cards:
             text: Temperature (°C)
           tickAmount: 5
     series:
-      # ── History: filtered estimate y_{k|k} (historical recorder values)
+      # ── History: filtered estimate y(k|k) (historical recorder values) ─
       - entity: sensor.heating_assistant_living_room_predicted_temperature
-        name: Filtered estimate (y_{k|k})
+        name: Filtered estimate (y(k|k))
         yaxis_id: temp
         color: '#0D47A1'
         stroke_width: 2
@@ -2824,9 +2824,9 @@ cards:
           fill: last
         show:
           in_header: true
-      # ── History: actual measurements y_k (replace with your room sensor)
+      # ── History: actual measurements y(k) (replace with your room sensor)
       - entity: sensor.living_room_temperature
-        name: Actual measurement (y_k)
+        name: Actual measurement (y(k))
         yaxis_id: temp
         color: '#E53935'
         stroke_width: 0
