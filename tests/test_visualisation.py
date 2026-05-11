@@ -20,8 +20,8 @@ from custom_components.heating_assistant.heat_sources import ElectricHeater, Hea
 from custom_components.heating_assistant.controller import HeatingMPCController as MPCController
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from custom_components.heating_assistant.sensor import (
-    HeatingPlanSensor,
-    SolarForecastSensor,
+    HeatingPowerForecastSensor,
+    SolarGainForecastSensor,
     TemperatureForecastSensor,
 )
 
@@ -491,7 +491,7 @@ class TestVisualisationSensorFallbacks:
             dt=900,
         )
 
-        sensor = HeatingPlanSensor(coordinator, "living_room")
+        sensor = HeatingPowerForecastSensor(coordinator, "living_room")
 
         assert sensor.native_value == pytest.approx(432.1)
 
@@ -509,7 +509,7 @@ class TestVisualisationSensorFallbacks:
             dt=900,
         )
 
-        sensor = SolarForecastSensor(coordinator, "living_room")
+        sensor = SolarGainForecastSensor(coordinator, "living_room")
 
         assert sensor.native_value == pytest.approx(87.6)
 
@@ -541,10 +541,10 @@ class TestForecastSensorTimestamps:
         )
 
     def test_solar_forecast_entry_count(self):
-        """SolarForecastSensor forecast list must have N+1 entries (bridge + N steps)."""
+        """SolarGainForecastSensor forecast list must have N+1 entries (bridge + N steps)."""
         solar = [{"studio": float(k * 100)} for k in range(5)]  # N+1 = 5 → N=4
         coordinator = self._make_coordinator(horizon=4, solar_values=solar)
-        sensor = SolarForecastSensor(coordinator, "studio")
+        sensor = SolarGainForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         assert len(attrs["forecast"]) == 5  # N+1 entries
@@ -553,7 +553,7 @@ class TestForecastSensorTimestamps:
         """First forecast entry must be at 'now' (the bridge point)."""
         solar = [{"studio": 50.0}]
         coordinator = self._make_coordinator(horizon=0, solar_values=solar)
-        sensor = SolarForecastSensor(coordinator, "studio")
+        sensor = SolarGainForecastSensor(coordinator, "studio")
 
         before = datetime.now(tz=timezone.utc)
         attrs = sensor.extra_state_attributes
@@ -567,7 +567,7 @@ class TestForecastSensorTimestamps:
         dt = self._DT
         solar = [{"studio": float(k * 10)} for k in range(5)]  # N+1 = 5
         coordinator = self._make_coordinator(horizon=4, solar_values=solar)
-        sensor = SolarForecastSensor(coordinator, "studio")
+        sensor = SolarGainForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         fc = attrs["forecast"]
@@ -581,7 +581,7 @@ class TestForecastSensorTimestamps:
         """Each entry's solar_gain must come from the corresponding solar_forecast slot."""
         solar = [{"studio": float(k * 10)} for k in range(5)]
         coordinator = self._make_coordinator(horizon=4, solar_values=solar)
-        sensor = SolarForecastSensor(coordinator, "studio")
+        sensor = SolarGainForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         fc = attrs["forecast"]
@@ -592,7 +592,7 @@ class TestForecastSensorTimestamps:
         """horizon_steps must equal N (the OCP horizon), not N+1."""
         solar = [{"studio": 0.0}] * 7  # N+1 = 7 → N = 6
         coordinator = self._make_coordinator(horizon=6, solar_values=solar)
-        sensor = SolarForecastSensor(coordinator, "studio")
+        sensor = SolarGainForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         assert attrs["horizon_steps"] == 6
@@ -611,7 +611,7 @@ class TestForecastSensorTimestamps:
             outdoor_temp=5.0,
             dt=self._DT,
         )
-        sensor = SolarForecastSensor(coordinator, "studio")
+        sensor = SolarGainForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         assert len(attrs["forecast"]) == 1
@@ -623,7 +623,7 @@ class TestForecastSensorTimestamps:
 # ---------------------------------------------------------------------------
 
 class TestHeatingPlanForecastTimestamps:
-    """Verify that HeatingPlanSensor forecast timestamps use start-of-interval labelling."""
+    """Verify that HeatingPowerForecastSensor forecast timestamps use start-of-interval labelling."""
 
     _DT = 900  # seconds per step
 
@@ -644,7 +644,7 @@ class TestHeatingPlanForecastTimestamps:
     def test_heating_plan_entry_count_equals_horizon(self):
         """forecast list must have exactly N entries for an N-step schedule."""
         coordinator = self._make_coordinator(horizon=6)
-        sensor = HeatingPlanSensor(coordinator, "studio")
+        sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         assert len(attrs["forecast"]) == 6
@@ -652,7 +652,7 @@ class TestHeatingPlanForecastTimestamps:
     def test_heating_plan_first_entry_at_now(self):
         """First forecast entry must be labelled at 'now' (bridges history)."""
         coordinator = self._make_coordinator(horizon=4)
-        sensor = HeatingPlanSensor(coordinator, "studio")
+        sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
         before = datetime.now(tz=timezone.utc)
         attrs = sensor.extra_state_attributes
@@ -664,7 +664,7 @@ class TestHeatingPlanForecastTimestamps:
     def test_heating_plan_timestamps_spaced_by_dt(self):
         """Consecutive forecast entries must be exactly dt seconds apart."""
         coordinator = self._make_coordinator(horizon=5)
-        sensor = HeatingPlanSensor(coordinator, "studio")
+        sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         fc = attrs["forecast"]
@@ -689,7 +689,7 @@ class TestHeatingPlanForecastTimestamps:
             outdoor_temp=5.0,
             dt=self._DT,
         )
-        sensor = HeatingPlanSensor(coordinator, "studio")
+        sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         fc = attrs["forecast"]
@@ -699,7 +699,7 @@ class TestHeatingPlanForecastTimestamps:
     def test_heating_plan_horizon_steps_attribute(self):
         """horizon_steps must equal N (the OCP horizon length)."""
         coordinator = self._make_coordinator(horizon=8)
-        sensor = HeatingPlanSensor(coordinator, "studio")
+        sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         assert attrs["horizon_steps"] == 8
@@ -718,7 +718,7 @@ class TestHeatingPlanForecastTimestamps:
             outdoor_temp=5.0,
             dt=self._DT,
         )
-        sensor = HeatingPlanSensor(coordinator, "studio")
+        sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         assert len(attrs["forecast"]) == 1
@@ -738,7 +738,7 @@ class TestHeatingPlanForecastTimestamps:
             outdoor_temp=5.0,
             dt=self._DT,
         )
-        sensor = HeatingPlanSensor(coordinator, "studio")
+        sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
         attrs = sensor.extra_state_attributes
         assert attrs["forecast"][0]["heating_power"] == pytest.approx(0.0, abs=0.1)

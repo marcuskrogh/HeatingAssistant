@@ -645,14 +645,14 @@ yaxis:
   - id: power
     show: false
 series:
-  - entity: sensor.heating_assistant_living_room_predicted_temperature
+  - entity: sensor.heating_assistant_living_room_temperature_filtered
     name: Measured / model temp
     yaxis_id: temp
     color: '#1E88E5'
     stroke_width: 2
     extend_to: now
     group_by: { func: raw, fill: last }
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: MPC prediction
     yaxis_id: temp
     color: '#0D47A1'
@@ -660,7 +660,7 @@ series:
     data_generator: |
       const fc = entity.attributes.forecast || [];
       return fc.map(e => [new Date(e.time).getTime(), e.temperature]);
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Setpoint
     yaxis_id: temp
     color: '#43A047'
@@ -776,8 +776,8 @@ yaxis:
       title:
         text: Temperature (°C)
 series:
-  # Historical temperature (from recorder, plotted directly — no data_generator)
-  - entity: sensor.living_room_temperature
+  # Historical averaged measurement (no data_generator needed)
+  - entity: sensor.heating_assistant_living_room_temperature_measured
     name: Measured
     type: line
     stroke_width: 2
@@ -789,7 +789,7 @@ series:
       fill: last
 
   # MPC predicted trajectory (from forecast attribute, future-only)
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Predicted
     type: line
     stroke_width: 2
@@ -799,20 +799,21 @@ series:
       const fc = entity.attributes.forecast || [];
       return fc.map(e => [new Date(e.time).getTime(), e.temperature]);
 
-  # Setpoint line
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  # Setpoint (plain sensor — no data_generator)
+  - entity: sensor.heating_assistant_living_room_setpoint
     name: Setpoint
     type: line
     stroke_width: 1
     color: green
     curve: stepline
     yaxis_id: temp
-    data_generator: |
-      const fc = entity.attributes.forecast || [];
-      return fc.map(e => [new Date(e.time).getTime(), e.setpoint]);
+    extend_to: end
+    group_by:
+      func: raw
+      fill: last
 
-  # Upper constraint bound (setpoint + offset)
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  # Upper constraint bound (plain sensor — no data_generator)
+  - entity: sensor.heating_assistant_living_room_constraint_upper
     name: Max Constraint
     type: line
     stroke_width: 1
@@ -820,13 +821,13 @@ series:
     opacity: 0.3
     curve: stepline
     yaxis_id: temp
-    data_generator: |
-      const fc = entity.attributes.forecast || [];
-      const offset = entity.attributes.constraint_offset ?? 2.0;
-      return fc.map(e => [new Date(e.time).getTime(), e.setpoint + offset]);
+    extend_to: end
+    group_by:
+      func: raw
+      fill: last
 
-  # Lower constraint bound (setpoint - offset)
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  # Lower constraint bound (plain sensor — no data_generator)
+  - entity: sensor.heating_assistant_living_room_constraint_lower
     name: Min Constraint
     type: line
     stroke_width: 1
@@ -834,10 +835,10 @@ series:
     opacity: 0.3
     curve: stepline
     yaxis_id: temp
-    data_generator: |
-      const fc = entity.attributes.forecast || [];
-      const offset = entity.attributes.constraint_offset ?? 2.0;
-      return fc.map(e => [new Date(e.time).getTime(), e.setpoint - offset]);
+    extend_to: end
+    group_by:
+      func: raw
+      fill: last
 ```
 
 This card shows:
@@ -879,7 +880,7 @@ yaxis:
         text: Power (W) — negative = cooling
 series:
   # Current / historical heating (or cooling, signed) power
-  - entity: sensor.heating_assistant_living_room_heating_power
+  - entity: sensor.heating_assistant_living_room_heating_power_measured
     name: Actual
     type: area
     curve: stepline
@@ -892,7 +893,7 @@ series:
       fill: last
 
   # Planned heating power (signed: positive = heat, negative = cool)
-  - entity: sensor.heating_assistant_living_room_heating_plan_prediction
+  - entity: sensor.heating_assistant_living_room_heating_power_forecast
     name: Planned
     type: area
     curve: stepline
@@ -904,7 +905,7 @@ series:
       return fc.map(e => [new Date(e.time).getTime(), e.heating_power]);
 
   # Zero reference line
-  - entity: sensor.heating_assistant_living_room_heating_power
+  - entity: sensor.heating_assistant_living_room_heating_power_measured
     name: Zero
     type: line
     color: grey
@@ -1036,12 +1037,12 @@ entities:
     label: Parameters
   - entity: sensor.heating_assistant_living_room_parameter_confidence
     name: Confidence
-  - entity: sensor.heating_assistant_living_room_predicted_temperature
+  - entity: sensor.heating_assistant_living_room_temperature_filtered
     type: attribute
     attribute: thermal_mass
     name: Thermal Mass
     suffix: " J/K"
-  - entity: sensor.heating_assistant_living_room_predicted_temperature
+  - entity: sensor.heating_assistant_living_room_temperature_filtered
     type: attribute
     attribute: r_external
     name: R External
@@ -1121,7 +1122,7 @@ cards:
         name: Bedroom R²
       - entity: sensor.heating_assistant_kitchen_model_fit_quality
         name: Kitchen R²
-      - entity: sensor.heating_assistant_outdoor_temperature
+      - entity: sensor.heating_assistant_outdoor_temperature_measured
         name: Outdoor Temp
 
   # Row 2: Living Room Detailed Analysis
@@ -1139,14 +1140,14 @@ cards:
           show: true
           label: Now
         series:
-          - entity: sensor.living_room_temperature
+          - entity: sensor.heating_assistant_living_room_temperature_measured
             name: Measured
             type: line
             stroke_width: 2
             color: blue
             show:
               in_header: before_now
-          - entity: sensor.heating_assistant_living_room_temperature_prediction
+          - entity: sensor.heating_assistant_living_room_temperature_forecast
             name: Predicted
             type: line
             stroke_width: 2
@@ -1157,16 +1158,16 @@ cards:
               });
             show:
               in_header: after_now
-          - entity: sensor.heating_assistant_living_room_temperature_prediction
+          - entity: sensor.heating_assistant_living_room_setpoint
             name: Setpoint
             type: line
             stroke_width: 1
             color: green
             curve: stepline
-            data_generator: |
-              return entity.attributes.forecast.map((entry) => {
-                return [new Date(entry.time).getTime(), entry.setpoint];
-              });
+            extend_to: end
+            group_by:
+              func: raw
+              fill: last
 
       # Heating plan
       - type: custom:apexcharts-card
@@ -1180,13 +1181,13 @@ cards:
           show: true
           label: Now
         series:
-          - entity: sensor.heating_assistant_living_room_heating_power
+          - entity: sensor.heating_assistant_living_room_heating_power_measured
             name: Current
             type: column
             color: orange
             show:
               in_header: before_now
-          - entity: sensor.heating_assistant_living_room_heating_plan_prediction
+          - entity: sensor.heating_assistant_living_room_heating_power_forecast
             name: Planned
             type: column
             color: red

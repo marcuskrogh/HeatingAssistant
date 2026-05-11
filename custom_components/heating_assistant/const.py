@@ -97,11 +97,6 @@ SCHEDULE_MODE_OFF = "off"              # disable heat sources for the room durin
 SOURCE_TYPE_ELECTRIC = "electric_heater"
 SOURCE_TYPE_HEAT_PUMP = "heat_pump"
 
-# Entity suffixes
-SUFFIX_CLIMATE = "climate"
-SUFFIX_PREDICTED_TEMP = "predicted_temperature"
-SUFFIX_HEATING_POWER = "heating_power"
-
 # Update interval (seconds)
 # This constant is kept for backward compatibility. The live value is read
 # from the config entry (CONF_UPDATE_INTERVAL) at coordinator start-up.

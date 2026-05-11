@@ -658,26 +658,28 @@ For each room declared in `configuration.yaml` the integration creates:
 | Entity ID | Platform | State | Attributes |
 |-----------|----------|-------|------------|
 | `climate.heating_assistant_<room_name>` | climate | HVAC mode (`heat_cool` / `heat` / `off`) | current_temperature, target_temperature, hvac_action |
-| `sensor.heating_assistant_<room_name>_predicted_temperature` | sensor | Temperature in °C | setpoint, thermal_mass, r_external |
-| `sensor.heating_assistant_<room_name>_heating_power` | sensor | Total heating power in W | Per-source breakdown by source name |
-| `sensor.heating_assistant_<room_name>_solar_gain` | sensor | Current solar heat gain in W | window_count, total_window_area |
-| `sensor.heating_assistant_<room_name>_temperature_forecast` | sensor | End-of-horizon temperature in °C | trajectory, forecast (timestamped), setpoint, horizon_steps |
-| `sensor.heating_assistant_<room_name>_temperature_prediction` | sensor | Same data as `_temperature_forecast`; stable availability for dashboards | trajectory, forecast (timestamped), setpoint, horizon_steps |
+| `sensor.heating_assistant_<room_name>_temperature_measured` | sensor | Averaged room temperature measurement in °C | – |
+| `sensor.heating_assistant_<room_name>_temperature_filtered` | sensor | Kalman-filtered state estimate x̂⁺ in °C | thermal_mass, r_external |
+| `sensor.heating_assistant_<room_name>_setpoint` | sensor | Active setpoint in °C | – |
+| `sensor.heating_assistant_<room_name>_constraint_upper` | sensor | Soft-constraint upper bound (setpoint + offset) in °C | – |
+| `sensor.heating_assistant_<room_name>_constraint_lower` | sensor | Soft-constraint lower bound (setpoint − offset) in °C | – |
+| `sensor.heating_assistant_<room_name>_heating_power_measured` | sensor | Total active heating power in W | Per-source breakdown by source name |
+| `sensor.heating_assistant_<room_name>_solar_gain_measured` | sensor | Current solar heat gain in W | window_count, total_window_area |
+| `sensor.heating_assistant_<room_name>_temperature_forecast` | sensor | End-of-horizon MPC predicted temperature in °C | trajectory, forecast (timestamped), setpoint, horizon_steps |
+| `sensor.heating_assistant_<room_name>_heating_power_forecast` | sensor | Current planned heating power in W | forecast (timestamped), horizon_steps |
+| `sensor.heating_assistant_<room_name>_solar_gain_forecast` | sensor | Current predicted solar gain in W | forecast (timestamped), horizon_steps, window_count |
 | `sensor.heating_assistant_<room_name>_heat_loss` | sensor | Total heat loss in W | external_loss, per-room flows, outdoor_temp |
 | `sensor.heating_assistant_<room_name>_energy_balance` | sensor | Net energy flow in W | heating_power, solar_gain, losses breakdown |
-| `sensor.heating_assistant_<room_name>_heating_plan` | sensor | Current planned heating power in W | forecast (timestamped), horizon_steps |
-| `sensor.heating_assistant_<room_name>_heating_plan_prediction` | sensor | Same data as `_heating_plan`; stable availability for dashboards | forecast (timestamped), horizon_steps |
-| `sensor.heating_assistant_<room_name>_solar_forecast` | sensor | Current predicted solar gain in W | forecast (timestamped), horizon_steps, window_count |
-| `sensor.heating_assistant_<room_name>_solar_power_prediction` | sensor | Same data as `_solar_forecast`; stable availability for dashboards | forecast (timestamped), horizon_steps, window_count |
-| `sensor.heating_assistant_outdoor_temperature_forecast` | sensor | Current outdoor temperature in °C | forecast (timestamped), horizon_steps |
-| `sensor.heating_assistant_outdoor_temperature_prediction` | sensor | Same data as `_outdoor_temperature_forecast`; stable availability for dashboards | forecast (timestamped), horizon_steps |
+| `sensor.heating_assistant_outdoor_temperature_measured` | sensor | Current outdoor temperature in °C | – |
+| `sensor.heating_assistant_outdoor_temperature_forecast` | sensor | Outdoor temperature forecast over the MPC horizon in °C | forecast (timestamped), horizon_steps |
 
-> **Note – prediction vs. forecast/plan entities.**  The `_prediction`
-> entities expose identical data to their `_forecast` / `_heating_plan`
-> counterparts, but their availability is decoupled from the coordinator's
-> last-update status.  Use the `_prediction` variants in dashboards so the
-> trajectory keeps rendering even if a transient coordinator refresh
-> failure briefly flips the original sensors to `unavailable`.
+> **Sensor naming convention.**  All per-room and global sensors use the
+> suffix pattern `_measured` (raw scalar at "now"), `_filtered` (Kalman
+> state estimator output), or `_forecast` (future trajectory; state is the
+> end-of-horizon value, the full series is on the `forecast` attribute).
+> The forecast sensors override `available` to remain populated across
+> transient coordinator-update failures so dashboards keep rendering the
+> cached trajectory.
 
 One system-wide button entity is also created:
 
@@ -979,19 +981,20 @@ Once HA has restarted:
    | Entity ID pattern | What it is |
    |-------------------|------------|
    | `climate.heating_assistant_<room_name>` | Thermostat — set your target temperature here |
-   | `sensor.heating_assistant_<room_name>_predicted_temperature` | Model-predicted temperature [°C] |
-   | `sensor.heating_assistant_<room_name>_heating_power` | Current total heating power [W] |
-   | `sensor.heating_assistant_<room_name>_solar_gain` | Current solar heat gain [W] |
+   | `sensor.heating_assistant_<room_name>_temperature_measured` | Averaged room temperature measurement [°C] |
+   | `sensor.heating_assistant_<room_name>_temperature_filtered` | Kalman-filtered state estimate [°C] |
+   | `sensor.heating_assistant_<room_name>_setpoint` | Active setpoint [°C] |
+   | `sensor.heating_assistant_<room_name>_constraint_upper` | Soft-constraint upper bound [°C] |
+   | `sensor.heating_assistant_<room_name>_constraint_lower` | Soft-constraint lower bound [°C] |
+   | `sensor.heating_assistant_<room_name>_heating_power_measured` | Current total heating power [W] |
+   | `sensor.heating_assistant_<room_name>_solar_gain_measured` | Current solar heat gain [W] |
    | `sensor.heating_assistant_<room_name>_temperature_forecast` | MPC temperature trajectory [°C] |
-   | `sensor.heating_assistant_<room_name>_temperature_prediction` | Same data as `_temperature_forecast`, recommended for dashboards [°C] |
+   | `sensor.heating_assistant_<room_name>_heating_power_forecast` | Planned heating schedule [W] |
+   | `sensor.heating_assistant_<room_name>_solar_gain_forecast` | Predicted solar gain schedule [W] |
    | `sensor.heating_assistant_<room_name>_heat_loss` | Heat loss breakdown [W] |
    | `sensor.heating_assistant_<room_name>_energy_balance` | Net energy flow [W] |
-   | `sensor.heating_assistant_<room_name>_heating_plan` | Planned heating schedule [W] |
-   | `sensor.heating_assistant_<room_name>_heating_plan_prediction` | Same data as `_heating_plan`, recommended for dashboards [W] |
-   | `sensor.heating_assistant_<room_name>_solar_forecast` | Predicted solar gain schedule [W] |
-   | `sensor.heating_assistant_<room_name>_solar_power_prediction` | Same data as `_solar_forecast`, recommended for dashboards [W] |
+   | `sensor.heating_assistant_outdoor_temperature_measured` | Current outdoor temperature [°C] |
    | `sensor.heating_assistant_outdoor_temperature_forecast` | Outdoor temperature forecast over the MPC horizon [°C] |
-   | `sensor.heating_assistant_outdoor_temperature_prediction` | Same data as `_outdoor_temperature_forecast`, recommended for dashboards [°C] |
    | `button.heating_assistant_estimate_parameters` | One-press ML parameter estimation |
    | `sensor.heating_assistant_mpc_performance` | MPC solver performance statistics (solve time, tracking error) |
 
@@ -1017,7 +1020,7 @@ Setpoint range: 5 °C (frost protection) to 30 °C, adjustable in 0.5 °C steps.
 
 After the first full coordinator update cycle (up to 60 seconds after startup):
 
-1. Check `sensor.heating_assistant_<room_name>_heating_power`.  If the room is below setpoint it should show a positive value (W).
+1. Check `sensor.heating_assistant_<room_name>_heating_power_measured`.  If the room is below setpoint it should show a positive value (W).
 2. Verify the linked heater entity has changed state — e.g. a `switch.*` heater should be `on` if the controller decided to heat.
 3. If the room is already at or above setpoint, the controller may correctly output 0 W.  Temporarily raise the setpoint by a degree or two to test the response.
 
@@ -1804,28 +1807,40 @@ data:
   hvac_mode: "off"
 ```
 
-### 12.2 Sensor entities – predicted temperature
+### 12.2 Sensor entities – temperature (measured and filtered)
 
-**Entity ID format:** `sensor.heating_assistant_<room_name>_predicted_temperature`
+The integration exposes two temperature scalars per room:
+
+- `sensor.heating_assistant_<room_name>_temperature_measured` — the averaged raw measurement from the configured `temp_sensor`(s).  Use this on dashboards instead of your own room sensor entity so multi-sensor rooms don't need a template helper.
+- `sensor.heating_assistant_<room_name>_temperature_filtered` — the Kalman-filtered state estimate x̂⁺ after each coordinator cycle.  Smoother than the measurement and what the MPC actually sees.
 
 | Property | Value |
 |----------|-------|
 | Device class | `temperature` |
 | State class | `measurement` |
 | Unit | °C |
-| Value | Model temperature rounded to 2 decimal places |
+| Value | Averaged measurement (measured) / EKF estimate (filtered), rounded to 2 decimal places |
 
-**State attributes:**
+**State attributes** (filtered only): `thermal_mass` (J/K), `r_external` (K/W).
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `setpoint` | float | Current room setpoint [°C] |
-| `thermal_mass` | float | Configured thermal mass [J/K] |
-| `r_external` | float | Configured external thermal resistance [K/W] |
+### 12.3 Sensor entities – setpoint and constraint bounds
 
-### 12.3 Sensor entities – heating power
+The active setpoint and the MPC soft-constraint band are each exposed as their own per-room sensor so dashboards can plot them as ordinary series:
 
-**Entity ID format:** `sensor.heating_assistant_<room_name>_heating_power`
+- `sensor.heating_assistant_<room_name>_setpoint`
+- `sensor.heating_assistant_<room_name>_constraint_upper` (setpoint + `constraint_offset`)
+- `sensor.heating_assistant_<room_name>_constraint_lower` (setpoint − `constraint_offset`)
+
+| Property | Value |
+|----------|-------|
+| Device class | `temperature` |
+| State class | `measurement` |
+| Unit | °C |
+| Value | Setpoint, or setpoint ± soft-constraint offset, rounded to 2 decimal places |
+
+### 12.4 Sensor entities – heating power (measured)
+
+**Entity ID format:** `sensor.heating_assistant_<room_name>_heating_power_measured`
 
 | Property | Value |
 |----------|-------|
@@ -1836,9 +1851,9 @@ data:
 
 **State attributes:**  one attribute per heat source in the room, keyed by source `name`, giving that source's individual `current_power` [W].
 
-### 12.4 Sensor entities – solar gain
+### 12.4b Sensor entities – solar gain (measured)
 
-**Entity ID format:** `sensor.heating_assistant_<room_name>_solar_gain`
+**Entity ID format:** `sensor.heating_assistant_<room_name>_solar_gain_measured`
 
 | Property | Value |
 |----------|-------|
@@ -1859,12 +1874,12 @@ data:
 
 **Entity ID format:** `sensor.heating_assistant_<room_name>_temperature_forecast`
 
-> A second entity, `sensor.heating_assistant_<room_name>_temperature_prediction`, exposes the *same* trajectory data and is the entity used by the advanced visualisation dashboards in §14.  It overrides `available` to remain populated even when a transient coordinator update raises `UpdateFailed`, so dashboards never lose the predicted trace.
+This sensor stays `available` across transient coordinator-update failures so dashboards keep rendering the cached trajectory; it declares no `device_class` / `state_class` so HA's strict sensor validator accepts forecast values (predictions must not be ingested into long-term statistics).
 
 | Property | Value |
 |----------|-------|
-| Device class | `temperature` |
-| State class | `measurement` |
+| Device class | – |
+| State class | – |
 | Unit | °C |
 | Icon | `mdi:chart-line` |
 | Value | Predicted temperature at the end of the MPC horizon |
@@ -1969,9 +1984,9 @@ data:
 | `turn_off_deadband` | float | Hysteresis dead-band half-width [°C] (enter cooling above setpoint + deadband, exit below setpoint − deadband) |
 | `outdoor_temp` | float | Current outdoor temperature [°C] |
 
-### 12.10 Sensor entities – outdoor temperature
+### 12.10 Sensor entities – outdoor temperature (measured)
 
-**Entity ID format:** `sensor.heating_assistant_outdoor_temperature`
+**Entity ID format:** `sensor.heating_assistant_outdoor_temperature_measured`
 
 | Property | Value |
 |----------|-------|
@@ -2007,16 +2022,16 @@ data:
 | `room_heating_power` | dict | Per-room heating power breakdown |
 | `outdoor_temperature` | float | Current outdoor temperature [°C] |
 
-### 12.12 Sensor entities – heating plan
+### 12.12 Sensor entities – heating power forecast
 
-**Entity ID format:** `sensor.heating_assistant_<room_name>_heating_plan`
+**Entity ID format:** `sensor.heating_assistant_<room_name>_heating_power_forecast`
 
-> A second entity, `sensor.heating_assistant_<room_name>_heating_plan_prediction`, exposes the *same* schedule data and is the entity used by the advanced visualisation dashboards in §14.  It remains available across coordinator update failures.
+Stays `available` across transient coordinator-update failures; declares no `device_class` / `state_class` so HA's strict sensor validator accepts forecast values.
 
 | Property | Value |
 |----------|-------|
-| Device class | `power` |
-| State class | `measurement` |
+| Device class | – |
+| State class | – |
 | Unit | W |
 | Icon | `mdi:radiator` |
 | Value | Planned heating power for the first (current) MPC horizon step [W] |
@@ -2029,11 +2044,9 @@ data:
 | `horizon_steps` | int | Number of schedule steps |
 | `step_seconds` | float | Time step duration [s] |
 
-### 12.13 Sensor entities – solar forecast
+### 12.13 Sensor entities – solar gain forecast
 
-**Entity ID format:** `sensor.heating_assistant_<room_name>_solar_forecast`
-
-> A second entity, `sensor.heating_assistant_<room_name>_solar_power_prediction`, exposes the *same* solar forecast data and is the entity used by the advanced visualisation dashboards in §14.  It remains available across coordinator update failures.
+**Entity ID format:** `sensor.heating_assistant_<room_name>_solar_gain_forecast`
 
 | Property | Value |
 |----------|-------|
@@ -2057,12 +2070,12 @@ data:
 
 **Entity ID format:** `sensor.heating_assistant_outdoor_temperature_forecast`
 
-> A second entity, `sensor.heating_assistant_outdoor_temperature_prediction`, exposes the *same* outdoor temperature forecast data and is the entity used by the advanced visualisation dashboards in §14.  It remains available across coordinator update failures.
+Stays `available` across transient coordinator-update failures; declares no `device_class` / `state_class` so HA's strict sensor validator accepts forecast values.
 
 | Property | Value |
 |----------|-------|
-| Device class | `temperature` |
-| State class | `measurement` |
+| Device class | – |
+| State class | – |
 | Unit | °C |
 | Icon | `mdi:thermometer-lines` |
 | Value | Current outdoor temperature [°C] |
@@ -2179,7 +2192,7 @@ Because the solar position model is fully deterministic, this forecast is exact 
 
 The **Outdoor Temperature Forecast** sensor exposes the outdoor temperature prediction the MPC controller uses when planning ahead.  It is a system-wide (not per-room) sensor with entity ID `sensor.heating_assistant_outdoor_temperature_forecast`.
 
-- **State:** current outdoor temperature [°C] (same source as `sensor.heating_assistant_outdoor_temperature`)
+- **State:** current outdoor temperature [°C] (same source as `sensor.heating_assistant_outdoor_temperature_measured`)
 - **`forecast` attribute:** timestamped list of dicts — each entry contains `time` (ISO-8601 UTC) and `outdoor_temp` (°C).  The first entry is at "now" with the current measured outdoor temperature; subsequent entries cover each MPC horizon step.
 
 **How the forecast is populated:**
@@ -2452,7 +2465,7 @@ yaxis:
       tickAmount: 5
 series:
   # ── History: filtered estimate y(k|k) (historical recorder values) ─────
-  - entity: sensor.heating_assistant_living_room_predicted_temperature
+  - entity: sensor.heating_assistant_living_room_temperature_filtered
     name: Filtered estimate (y(k|k))
     yaxis_id: temp
     color: '#0D47A1'
@@ -2465,8 +2478,8 @@ series:
       fill: last
     show:
       in_header: true
-  # ── History: actual measurements y(k) (replace with your room sensor) ──
-  - entity: sensor.living_room_temperature
+  # ── History: actual averaged measurement y(k) ─────────────────────────
+  - entity: sensor.heating_assistant_living_room_temperature_measured
     name: Actual measurement (y(k))
     type: scatter
     yaxis_id: temp
@@ -2480,8 +2493,7 @@ series:
     show:
       in_header: false
   # ── History: setpoint (dashed step) ───────────────────────────────────
-  - entity: sensor.heating_assistant_living_room_predicted_temperature
-    attribute: setpoint
+  - entity: sensor.heating_assistant_living_room_setpoint
     name: Setpoint
     yaxis_id: temp
     color: '#F44336'
@@ -2496,58 +2508,37 @@ series:
     show:
       in_header: false
   # ── Forecast: constraint upper bound ─────────────────────────────────
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  - entity: sensor.heating_assistant_living_room_constraint_upper
     name: Constraint Upper
-    data_generator: |
-      const fc = entity.attributes.forecast;
-      const sp = entity.attributes.setpoint;
-      const co = entity.attributes.constraint_offset;
-      if (!fc || sp == null || co == null) return [];
-      return fc.map(f => [new Date(f.time).getTime(), sp + co]);
     yaxis_id: temp
     color: '#90CAF9'
     stroke_width: 1
     curve: stepline
     opacity: 0.5
+    extend_to: end
+    group_by:
+      func: raw
+      fill: last
     show:
       legend_value: false
       in_header: false
   # ── Forecast: constraint lower bound ─────────────────────────────────
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  - entity: sensor.heating_assistant_living_room_constraint_lower
     name: Constraint Lower
-    data_generator: |
-      const fc = entity.attributes.forecast;
-      const sp = entity.attributes.setpoint;
-      const co = entity.attributes.constraint_offset;
-      if (!fc || sp == null || co == null) return [];
-      return fc.map(f => [new Date(f.time).getTime(), sp - co]);
     yaxis_id: temp
     color: '#90CAF9'
     stroke_width: 1
     curve: stepline
     opacity: 0.5
+    extend_to: end
+    group_by:
+      func: raw
+      fill: last
     show:
       legend_value: false
       in_header: false
-  # ── Forecast: setpoint reference ─────────────────────────────────────
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
-    name: Setpoint (forecast)
-    data_generator: |
-      const fc = entity.attributes.forecast;
-      const fallbackSp = entity.attributes.setpoint;
-      // Use per-step setpoint when present; fall back to current setpoint.
-      if (!fc) return [];
-      return fc.map(f => [new Date(f.time).getTime(), f.setpoint ?? fallbackSp]);
-    yaxis_id: temp
-    color: '#F44336'
-    stroke_width: 2
-    stroke_dash: 5
-    curve: stepline
-    float_precision: 1
-    show:
-      in_header: true
   # ── Forecast: predicted temperature trajectory ───────────────────────
-  - entity: sensor.heating_assistant_living_room_temperature_prediction
+  - entity: sensor.heating_assistant_living_room_temperature_forecast
     name: Predicted
     data_generator: |
       const fc = entity.attributes.forecast;
@@ -2562,7 +2553,7 @@ series:
       in_header: true
 ```
 
-> **Tip:** Replace `living_room` with your room's entity suffix throughout, and replace `sensor.living_room_temperature` with your actual room temperature sensor entity.
+> **Tip:** Replace `living_room` with your room's entity suffix throughout — every series now references HeatingAssistant-owned sensors, so no per-installation entity substitutions are needed.
 
 #### 13.17.4 MPC control input card
 
@@ -2591,7 +2582,7 @@ yaxis:
       tickAmount: 4
 series:
   # ── History: actual heating power (from HA recorder) ─────────────────
-  - entity: sensor.heating_assistant_living_room_heating_power
+  - entity: sensor.heating_assistant_living_room_heating_power_measured
     name: Actual Heating
     yaxis_id: power
     type: area
@@ -2607,7 +2598,7 @@ series:
     show:
       in_header: true
   # ── Forecast: planned heating power ──────────────────────────────────
-  - entity: sensor.heating_assistant_living_room_heating_plan_prediction
+  - entity: sensor.heating_assistant_living_room_heating_power_forecast
     name: Planned Heating
     data_generator: |
       const fc = entity.attributes.forecast;
@@ -2628,7 +2619,7 @@ series:
 
 Shows the external disturbances the MPC controller accounts for: outdoor temperature and solar heat gain through windows.  Dual y-axes keep both signals readable.  Actual recorder history is shown to the left of the "Now" line alongside the forecasts to the right.
 
-The outdoor temperature forecast is read from `sensor.heating_assistant_outdoor_temperature_prediction` (see § 13.8), which exposes a dedicated `forecast` attribute.  When a weather entity is configured, this forecast varies over the horizon; otherwise it is a flat persistence forecast equal to the current outdoor temperature.
+The outdoor temperature forecast is read from `sensor.heating_assistant_outdoor_temperature_forecast` (see § 13.8), which exposes a dedicated `forecast` attribute.  When a weather entity is configured, this forecast varies over the horizon; otherwise it is a flat persistence forecast equal to the current outdoor temperature.
 
 ```yaml
 type: custom:apexcharts-card
@@ -2657,7 +2648,7 @@ yaxis:
         text: Solar Gain (W)
 series:
   # ── History: actual outdoor temperature (from HA recorder) ───────────
-  - entity: sensor.heating_assistant_outdoor_temperature
+  - entity: sensor.heating_assistant_outdoor_temperature_measured
     name: Outdoor (actual)
     yaxis_id: temp
     color: '#37474F'
@@ -2671,7 +2662,7 @@ series:
     show:
       in_header: true
   # ── History: actual solar gain (from HA recorder) ────────────────────
-  - entity: sensor.heating_assistant_living_room_solar_gain
+  - entity: sensor.heating_assistant_living_room_solar_gain_measured
     name: Solar (actual)
     yaxis_id: power
     type: area
@@ -2686,7 +2677,7 @@ series:
     show:
       in_header: true
   # ── Forecast: outdoor temperature ────────────────────────────────────
-  - entity: sensor.heating_assistant_outdoor_temperature_prediction
+  - entity: sensor.heating_assistant_outdoor_temperature_forecast
     name: Outdoor (forecast)
     data_generator: |
       const fc = entity.attributes.forecast;
@@ -2700,7 +2691,7 @@ series:
     show:
       in_header: true
   # ── Forecast: solar gain ─────────────────────────────────────────────
-  - entity: sensor.heating_assistant_living_room_solar_power_prediction
+  - entity: sensor.heating_assistant_living_room_solar_gain_forecast
     name: Solar (forecast)
     data_generator: |
       const fc = entity.attributes.forecast;
@@ -2728,11 +2719,11 @@ title: Living Room – Current State
 entities:
   - entity: climate.heating_assistant_living_room
     name: Thermostat
-  - entity: sensor.heating_assistant_living_room_predicted_temperature
+  - entity: sensor.heating_assistant_living_room_temperature_filtered
     name: Predicted Temperature
-  - entity: sensor.heating_assistant_living_room_heating_power
+  - entity: sensor.heating_assistant_living_room_heating_power_measured
     name: Heating Power
-  - entity: sensor.heating_assistant_living_room_solar_gain
+  - entity: sensor.heating_assistant_living_room_solar_gain_measured
     name: Solar Gain
   - entity: sensor.heating_assistant_living_room_heat_loss
     name: Heat Loss
@@ -2750,9 +2741,9 @@ title: Heating System Overview
 entities:
   - entity: sensor.heating_assistant_system_summary
     name: Total Heating Power
-  - entity: sensor.heating_assistant_outdoor_temperature
+  - entity: sensor.heating_assistant_outdoor_temperature_measured
     name: Outdoor Temperature (measured)
-  - entity: sensor.heating_assistant_outdoor_temperature_prediction
+  - entity: sensor.heating_assistant_outdoor_temperature_forecast
     name: Outdoor Temperature (forecast)
 ```
 
@@ -2781,7 +2772,7 @@ cards:
     entities:
       - entity: climate.heating_assistant_living_room
         name: Thermostat
-      - entity: sensor.heating_assistant_living_room_predicted_temperature
+      - entity: sensor.heating_assistant_living_room_temperature_filtered
         name: Predicted Temperature
       - entity: sensor.heating_assistant_living_room_energy_balance
         name: Net Energy Balance
@@ -2808,7 +2799,7 @@ cards:
           tickAmount: 5
     series:
       # ── History: filtered estimate y(k|k) (historical recorder values) ─
-      - entity: sensor.heating_assistant_living_room_predicted_temperature
+      - entity: sensor.heating_assistant_living_room_temperature_filtered
         name: Filtered estimate (y(k|k))
         yaxis_id: temp
         color: '#0D47A1'
@@ -2821,8 +2812,8 @@ cards:
           fill: last
         show:
           in_header: true
-      # ── History: actual measurements y(k) (replace with your room sensor)
-      - entity: sensor.living_room_temperature
+      # ── History: actual averaged measurement y(k) ────────────────────
+      - entity: sensor.heating_assistant_living_room_temperature_measured
         name: Actual measurement (y(k))
         type: scatter
         yaxis_id: temp
@@ -2836,8 +2827,7 @@ cards:
         show:
           in_header: false
       # ── History: setpoint (dashed step) ───────────────────────────────
-      - entity: sensor.heating_assistant_living_room_predicted_temperature
-        attribute: setpoint
+      - entity: sensor.heating_assistant_living_room_setpoint
         name: Setpoint
         yaxis_id: temp
         color: '#F44336'
@@ -2852,54 +2842,35 @@ cards:
         show:
           in_header: false
       # ── Forecast: constraint upper bound ─────────────────────────────
-      - entity: sensor.heating_assistant_living_room_temperature_prediction
+      - entity: sensor.heating_assistant_living_room_constraint_upper
         name: Constraint Upper
-        data_generator: |
-          const fc = entity.attributes.forecast;
-          const sp = entity.attributes.setpoint;
-          const co = entity.attributes.constraint_offset;
-          if (!fc || sp == null || co == null) return [];
-          return fc.map(f => [new Date(f.time).getTime(), sp + co]);
         yaxis_id: temp
         color: '#1565C0'
         stroke_width: 1
+        curve: stepline
+        extend_to: end
+        group_by:
+          func: raw
+          fill: last
         show:
           legend_value: false
           in_header: false
       # ── Forecast: constraint lower bound ─────────────────────────────
-      - entity: sensor.heating_assistant_living_room_temperature_prediction
+      - entity: sensor.heating_assistant_living_room_constraint_lower
         name: Constraint Lower
-        data_generator: |
-          const fc = entity.attributes.forecast;
-          const sp = entity.attributes.setpoint;
-          const co = entity.attributes.constraint_offset;
-          if (!fc || sp == null || co == null) return [];
-          return fc.map(f => [new Date(f.time).getTime(), sp - co]);
         yaxis_id: temp
         color: '#1565C0'
         stroke_width: 1
+        curve: stepline
+        extend_to: end
+        group_by:
+          func: raw
+          fill: last
         show:
           legend_value: false
           in_header: false
-      # ── Forecast: setpoint reference ─────────────────────────────────
-      - entity: sensor.heating_assistant_living_room_temperature_prediction
-        name: Setpoint (forecast)
-        data_generator: |
-          const fc = entity.attributes.forecast;
-          const fallbackSp = entity.attributes.setpoint;
-          // Use per-step setpoint when present; fall back to current setpoint.
-          if (!fc) return [];
-          return fc.map(f => [new Date(f.time).getTime(), f.setpoint ?? fallbackSp]);
-        yaxis_id: temp
-        color: '#F44336'
-        stroke_width: 2
-        stroke_dash: 5
-        curve: stepline
-        float_precision: 1
-        show:
-          in_header: true
       # ── Forecast: predicted temperature trajectory ───────────────────
-      - entity: sensor.heating_assistant_living_room_temperature_prediction
+      - entity: sensor.heating_assistant_living_room_temperature_forecast
         name: Predicted
         data_generator: |
           const fc = entity.attributes.forecast;
@@ -2936,7 +2907,7 @@ cards:
           tickAmount: 4
     series:
       # ── History: actual heating power (from HA recorder) ─────────────
-      - entity: sensor.heating_assistant_living_room_heating_power
+      - entity: sensor.heating_assistant_living_room_heating_power_measured
         name: Actual Heating
         yaxis_id: power
         type: area
@@ -2952,7 +2923,7 @@ cards:
         show:
           in_header: true
       # ── Forecast: planned heating power ──────────────────────────────
-      - entity: sensor.heating_assistant_living_room_heating_plan_prediction
+      - entity: sensor.heating_assistant_living_room_heating_power_forecast
         name: Planned Heating
         data_generator: |
           const fc = entity.attributes.forecast;
@@ -2995,7 +2966,7 @@ cards:
             text: Solar Gain (W)
     series:
       # ── History: actual outdoor temperature (from HA recorder) ───────
-      - entity: sensor.heating_assistant_outdoor_temperature
+      - entity: sensor.heating_assistant_outdoor_temperature_measured
         name: Outdoor (actual)
         yaxis_id: temp
         color: '#37474F'
@@ -3009,7 +2980,7 @@ cards:
         show:
           in_header: true
       # ── History: actual solar gain (from HA recorder) ────────────────
-      - entity: sensor.heating_assistant_living_room_solar_gain
+      - entity: sensor.heating_assistant_living_room_solar_gain_measured
         name: Solar (actual)
         yaxis_id: power
         type: area
@@ -3024,7 +2995,7 @@ cards:
         show:
           in_header: true
       # ── Forecast: outdoor temperature ────────────────────────────────
-      - entity: sensor.heating_assistant_outdoor_temperature_prediction
+      - entity: sensor.heating_assistant_outdoor_temperature_forecast
         name: Outdoor (forecast)
         data_generator: |
           const fc = entity.attributes.forecast;
@@ -3038,7 +3009,7 @@ cards:
         show:
           in_header: true
       # ── Forecast: solar gain ─────────────────────────────────────────
-      - entity: sensor.heating_assistant_living_room_solar_power_prediction
+      - entity: sensor.heating_assistant_living_room_solar_gain_forecast
         name: Solar (forecast)
         data_generator: |
           const fc = entity.attributes.forecast;
@@ -3192,7 +3163,7 @@ If `thermal_mass` is underestimated the model predicts the room heats and cools 
 
 If you are experiencing oscillations, follow these steps in order:
 
-1. **Check the predicted temperature sensor** (`sensor.heating_assistant_<room>_temperature_prediction`).  If the MPC prediction closely tracks the oscillation, the problem is in the controller weights.  If the prediction is smooth but the actual temperature oscillates, the issue is in the thermal model parameters.
+1. **Check the predicted temperature sensor** (`sensor.heating_assistant_<room>_temperature_forecast`).  If the MPC prediction closely tracks the oscillation, the problem is in the controller weights.  If the prediction is smooth but the actual temperature oscillates, the issue is in the thermal model parameters.
 
 2. **Increase `smoothing_weight` in steps** — try `0.5`, then `1.0`, then `2.0`.  After each change, restart HA and observe the system for one to two hours.  The oscillation amplitude should decrease.  Stop when the response is acceptably smooth.
 

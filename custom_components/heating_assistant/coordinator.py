@@ -445,6 +445,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.outdoor_forecast: List[float] = []
         self.solar_forecast: list = []
         self.heating_schedule: list = []
+        # Per-room averaged raw measurements (populated each cycle from
+        # configured temp_sensors); kept separate from filter output so the
+        # visualisation can show measurement vs. estimate.
+        self.measured_temperatures: Dict[str, float] = {}
+        # Per-room Kalman-filtered state x̂⁺ after each compute(). Falls back
+        # to measured_temperatures when the MPC solver fails.
+        self.filtered_temperatures: Dict[str, float] = {}
 
         # Rolling observation history for ML parameter estimation.
         # Each entry is a dict: {y, u, d_outdoor, d_solar, timestamp}.
@@ -503,9 +510,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                                 state.state,
                             )
                 if readings:
-                    self.model.rooms[room_name].temperature = (
-                        sum(readings) / len(readings)
-                    )
+                    averaged = sum(readings) / len(readings)
+                    self.model.rooms[room_name].temperature = averaged
+                    self.measured_temperatures[room_name] = averaged
 
             # 1b. Apply comfort schedules: resolve the active period for each
             #     room and update the live setpoint / enabled flag accordingly.
@@ -552,6 +559,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.outdoor_forecast = self.controller.outdoor_forecast
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
+                self.filtered_temperatures = self.controller.filtered_temperatures
 
                 # Capture Kalman innovation for diagnostics (may be None on first step)
                 # controller.last_innovation is populated by compute() after splitting
@@ -582,7 +590,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 ]
 
                 # Build a per-room heating schedule from the current (or fallback)
-                # actions so HeatingPlanSensor has meaningful data.
+                # actions so HeatingPowerForecastSensor has meaningful data.
                 fallback_step: Dict[str, float] = {
                     name: 0.0 for name in self.model.room_names
                 }
@@ -612,6 +620,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     )
                     self.predictions = []
 
+                # No EKF update happened — fall back to the raw measurements
+                # so the filtered sensor still tracks something sensible.
+                self.filtered_temperatures = dict(self.measured_temperatures)
                 kalman_innovation = None
 
             # 5. Store heat-flow breakdown (independent of MPC solve success)
