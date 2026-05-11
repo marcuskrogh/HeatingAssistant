@@ -1046,3 +1046,111 @@ class TestParseForecastData:
         # Should still return a result using the valid entry
         assert result is not None
         assert len(result) == 4
+
+
+# ---------------------------------------------------------------------------
+# Tests: _parse_cloud_forecast (coordinator static method)
+# ---------------------------------------------------------------------------
+
+class TestParseCloudForecast:
+    """Test cloud-cover forecast parsing from raw HA weather entries."""
+
+    def test_empty_returns_none(self):
+        assert HeatingAssistantCoordinator._parse_cloud_forecast([], 4, 900) is None
+
+    def test_percentage_converted_to_fraction(self):
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [
+            {
+                "datetime": (now + timedelta(seconds=900 * (k + 1))).isoformat(),
+                "cloud_coverage": 80.0,
+            }
+            for k in range(4)
+        ]
+        result = HeatingAssistantCoordinator._parse_cloud_forecast(data, 4, 900, now=now)
+        assert result is not None
+        for val in result:
+            assert val == pytest.approx(0.8)
+
+    def test_falls_back_to_condition_when_percentage_missing(self):
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [
+            {
+                "datetime": (now + timedelta(seconds=900 * (k + 1))).isoformat(),
+                "condition": "cloudy",
+            }
+            for k in range(4)
+        ]
+        result = HeatingAssistantCoordinator._parse_cloud_forecast(data, 4, 900, now=now)
+        assert result is not None
+        # "cloudy" maps to 0.85 in the condition table
+        for val in result:
+            assert val == pytest.approx(0.85)
+
+    def test_unknown_condition_entry_skipped(self):
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [
+            # Unknown condition + no percentage → entry is unusable.
+            {"datetime": (now + timedelta(seconds=900)).isoformat(), "condition": "moon-eclipse"},
+            # Valid entry as fallback
+            {
+                "datetime": (now + timedelta(seconds=1800)).isoformat(),
+                "cloud_coverage": 50.0,
+            },
+        ]
+        result = HeatingAssistantCoordinator._parse_cloud_forecast(data, 4, 900, now=now)
+        assert result is not None
+        assert len(result) == 4
+        # All steps fall back to the only valid entry (0.5).
+        for val in result:
+            assert val == pytest.approx(0.5)
+
+    def test_percentage_clamped_to_unit_interval(self):
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        data = [
+            {
+                "datetime": (now + timedelta(seconds=900 * (k + 1))).isoformat(),
+                "cloud_coverage": 250.0,  # nonsense > 100 %
+            }
+            for k in range(4)
+        ]
+        result = HeatingAssistantCoordinator._parse_cloud_forecast(data, 4, 900, now=now)
+        assert result is not None
+        for val in result:
+            assert val == pytest.approx(1.0)
+
+
+class TestCoerceCloudCoverPercent:
+    """Test the module-level cloud-cover percent → fraction coercion."""
+
+    def test_none_returns_none(self):
+        from custom_components.heating_assistant.coordinator import (
+            _coerce_cloud_cover_percent,
+        )
+        assert _coerce_cloud_cover_percent(None) is None
+
+    def test_unparsable_returns_none(self):
+        from custom_components.heating_assistant.coordinator import (
+            _coerce_cloud_cover_percent,
+        )
+        assert _coerce_cloud_cover_percent("partly") is None
+
+    def test_typical_values(self):
+        from custom_components.heating_assistant.coordinator import (
+            _coerce_cloud_cover_percent,
+        )
+        assert _coerce_cloud_cover_percent(0) == pytest.approx(0.0)
+        assert _coerce_cloud_cover_percent(50) == pytest.approx(0.5)
+        assert _coerce_cloud_cover_percent(100) == pytest.approx(1.0)
+
+    def test_clamps_negative(self):
+        from custom_components.heating_assistant.coordinator import (
+            _coerce_cloud_cover_percent,
+        )
+        assert _coerce_cloud_cover_percent(-10) == pytest.approx(0.0)
+
+    def test_clamps_above_hundred(self):
+        from custom_components.heating_assistant.coordinator import (
+            _coerce_cloud_cover_percent,
+        )
+        assert _coerce_cloud_cover_percent(150) == pytest.approx(1.0)

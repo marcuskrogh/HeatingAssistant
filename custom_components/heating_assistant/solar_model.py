@@ -212,12 +212,33 @@ def angle_of_incidence(
 DEFAULT_SHGC = 0.6
 
 
+def cloud_attenuation_factor(cloud_cover: float) -> float:
+    """
+    Empirical Kasten–Czeplak (1980) cloud attenuation of global irradiance.
+
+        GHI_cloudy / GHI_clear = 1 − 0.75 · c^3.4
+
+    where ``c ∈ [0, 1]`` is the cloud-cover fraction.  Returns ~1.0 for
+    clear sky, ~0.75 at 50 % cover, and ~0.25 fully overcast — a reasonable
+    match to measured GHI on overcast days, and the simplest single-factor
+    correction that captures the dominant effect.
+
+    Note: strictly, beam (DNI) and diffuse (DHI) attenuate at very different
+    rates under cloud — DNI collapses much faster than DHI.  We apply the
+    same GHI-equivalent factor to both components here as a first-order
+    approximation; the SHGC and ``DEFAULT_SHGC`` constant absorb the residual.
+    """
+    c = max(0.0, min(1.0, cloud_cover))
+    return max(0.0, 1.0 - 0.75 * (c ** 3.4))
+
+
 def window_solar_gain(
     window: Window,
     dt: datetime,
     latitude: float,
     longitude: float,
     shgc: float = DEFAULT_SHGC,
+    cloud_cover: float | None = None,
 ) -> float:
     """
     Compute the solar heat gain through a single window [W].
@@ -234,6 +255,11 @@ def window_solar_gain(
         Site longitude [degrees].
     shgc : float
         Solar heat gain coefficient (0–1).
+    cloud_cover : float, optional
+        Cloud-cover fraction in [0, 1].  When provided, the clear-sky
+        irradiance is multiplied by the Kasten–Czeplak attenuation factor
+        (see :func:`cloud_attenuation_factor`).  ``None`` (default) means
+        clear sky.
 
     Returns
     -------
@@ -256,6 +282,8 @@ def window_solar_gain(
     diffuse = dhi * (1.0 + math.cos(tilt_r)) / 2.0
 
     irradiance = direct + diffuse  # W/m²
+    if cloud_cover is not None:
+        irradiance *= cloud_attenuation_factor(cloud_cover)
     return shgc * window.area * irradiance
 
 
@@ -265,10 +293,15 @@ def room_solar_gains(
     latitude: float,
     longitude: float,
     shgc: float = DEFAULT_SHGC,
+    cloud_cover: float | None = None,
 ) -> float:
     """
     Total solar heat gain for a room [W] as the sum over all its windows.
+
+    When ``cloud_cover`` is provided (fraction in [0, 1]), the clear-sky
+    irradiance is attenuated by :func:`cloud_attenuation_factor`.
     """
     return sum(
-        window_solar_gain(w, dt, latitude, longitude, shgc) for w in windows
+        window_solar_gain(w, dt, latitude, longitude, shgc, cloud_cover)
+        for w in windows
     )
