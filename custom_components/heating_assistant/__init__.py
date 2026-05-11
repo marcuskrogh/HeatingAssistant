@@ -58,15 +58,19 @@ YAML configuration example
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import SERVICE_RELOAD
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.reload import async_integration_yaml_config
+from homeassistant.helpers.service import async_register_admin_service
 
 from .const import (
     CONF_CONNECTIONS,
@@ -278,7 +282,32 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     if DOMAIN in config:
         hass.data[DOMAIN]["yaml_config"] = config[DOMAIN]
 
+    async def _async_reload_service(call: ServiceCall) -> None:
+        """Re-read configuration.yaml and reload all Heating Assistant entries."""
+        new_conf = await async_integration_yaml_config(hass, DOMAIN)
+        if new_conf is None:
+            _LOGGER.warning(
+                "Heating Assistant: configuration.yaml failed validation; "
+                "keeping previous configuration"
+            )
+            return
+
+        hass.data[DOMAIN]["yaml_config"] = new_conf.get(DOMAIN, {})
+
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if entries:
+            await asyncio.gather(
+                *(hass.config_entries.async_reload(e.entry_id) for e in entries)
+            )
+
+    async_register_admin_service(hass, DOMAIN, SERVICE_RELOAD, _async_reload_service)
+
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when its options change via the UI."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def _merge_yaml_into_entry_data(
@@ -375,6 +404,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     merged_entry = _MergedEntry(entry, entry_data)
 
     coordinator = HeatingAssistantCoordinator(hass, merged_entry)  # type: ignore[arg-type]
+
+    # Restore runtime state stashed by a prior unload (in-memory only; survives
+    # a reload but not a full HA restart). Only keys still present in the new
+    # configuration are restored — rooms removed by the YAML edit drop their
+    # state, which is the right outcome.
+    reload_state = hass.data[DOMAIN].get("_reload_state", {}).pop(entry.entry_id, None)
+    if reload_state is not None:
+        coordinator._history_buffer.extend(reload_state.get("history_buffer", []))
+        for room, value in reload_state.get("room_enabled", {}).items():
+            if room in coordinator._room_enabled:
+                coordinator._room_enabled[room] = value
+        for room, value in reload_state.get("schedule_enabled", {}).items():
+            if room in coordinator._schedule_enabled:
+                coordinator._schedule_enabled[room] = value
+
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
@@ -390,6 +434,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_SIMULATE_THERMAL_RESPONSE):
         _register_services(hass)
 
+    # Auto-reload when the user changes options via the integration UI.
+    # Attached after the coordinator is stored so the persist-merged
+    # async_update_entry call above (which already short-circuits when nothing
+    # changed) cannot fire the listener during setup.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -398,6 +448,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
+        coordinator = hass.data[DOMAIN].get(entry.entry_id)
+        if isinstance(coordinator, HeatingAssistantCoordinator):
+            reload_state = hass.data[DOMAIN].setdefault("_reload_state", {})
+            reload_state[entry.entry_id] = {
+                "history_buffer": list(coordinator._history_buffer),
+                "room_enabled": dict(coordinator._room_enabled),
+                "schedule_enabled": dict(coordinator._schedule_enabled),
+            }
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unloaded
 

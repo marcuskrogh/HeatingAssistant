@@ -23,6 +23,8 @@ async def test_setup_entry_continues_on_first_refresh_failure(monkeypatch):
         options={},
         entry_id="entry-1",
         title="Heating Assistant",
+        add_update_listener=MagicMock(return_value=lambda: None),
+        async_on_unload=MagicMock(),
     )
 
     yaml_cfg = {
