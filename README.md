@@ -2539,6 +2539,7 @@ series:
     data_generator: |
       const fc = entity.attributes.forecast;
       const fallbackSp = entity.attributes.setpoint;
+      // Use per-step setpoint when present; fall back to current setpoint.
       if (!fc) return [];
       return fc.map(f => [new Date(f.time).getTime(), f.setpoint ?? fallbackSp]);
     yaxis_id: temp
@@ -2894,6 +2895,7 @@ cards:
         data_generator: |
           const fc = entity.attributes.forecast;
           const fallbackSp = entity.attributes.setpoint;
+          // Use per-step setpoint when present; fall back to current setpoint.
           if (!fc) return [];
           return fc.map(f => [new Date(f.time).getTime(), f.setpoint ?? fallbackSp]);
         yaxis_id: temp
