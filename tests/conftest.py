@@ -71,6 +71,8 @@ _HA_PACKAGES = [
     "homeassistant.helpers.storage",
     "homeassistant.helpers.config_validation",
     "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.reload",
+    "homeassistant.helpers.service",
     "homeassistant.components",
     "homeassistant.components.sensor",
     "homeassistant.components.climate",
@@ -127,6 +129,7 @@ for _attr in [
     "STATE_UNAVAILABLE", "STATE_UNKNOWN",
     "TEMP_CELSIUS", "PERCENTAGE", "Platform",
     "ATTR_TEMPERATURE",
+    "SERVICE_RELOAD",
 ]:
     setattr(_const, _attr, _attr)
 
@@ -155,6 +158,22 @@ _coord.UpdateFailed = Exception  # type: ignore[attr-defined]
 # homeassistant.helpers.entity_platform
 _ep = sys.modules["homeassistant.helpers.entity_platform"]
 _ep.AddEntitiesCallback = object  # type: ignore[attr-defined]
+
+# homeassistant.helpers.reload
+async def _async_integration_yaml_config_stub(hass, domain):
+    return None
+
+
+_reload_mod = sys.modules["homeassistant.helpers.reload"]
+_reload_mod.async_integration_yaml_config = _async_integration_yaml_config_stub  # type: ignore[attr-defined]
+
+# homeassistant.helpers.service
+def _async_register_admin_service_stub(hass, domain, service, handler, schema=None):
+    return None
+
+
+_service_mod = sys.modules["homeassistant.helpers.service"]
+_service_mod.async_register_admin_service = _async_register_admin_service_stub  # type: ignore[attr-defined]
 
 # homeassistant.helpers.config_validation – simple passthrough stubs
 _cv = sys.modules["homeassistant.helpers.config_validation"]
