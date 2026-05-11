@@ -2425,9 +2425,9 @@ In each room subview, add the three MPC cards below (§ 13.18.3 – § 13.18.5) 
 #### 13.17.3 MPC predicted temperature card
 
 This is the primary MPC output visualisation.  It shows:
-- **History** (left of Now): the measured room temperature from the HA recorder (solid line)
+- **History** (left of Now): filtered estimate y(k|k) (solid blue line) and actual measurements y(k) (red dots, marker size 4)
 - **Prediction** (right of Now): the MPC-predicted temperature trajectory (solid line)
-- The current setpoint as a step reference line
+- A dashed setpoint step line visible across both history and forecast windows
 - The soft constraint band `[setpoint − δ, setpoint + δ]` as a shaded region
 
 ```yaml
@@ -2451,9 +2451,9 @@ yaxis:
         text: Temperature (°C)
       tickAmount: 5
 series:
-  # ── History: measured temperature (from HA recorder) ─────────────────
+  # ── History: filtered estimate y(k|k) (historical recorder values) ─────
   - entity: sensor.heating_assistant_living_room_predicted_temperature
-    name: Measured
+    name: Filtered estimate (y(k|k))
     yaxis_id: temp
     color: '#0D47A1'
     stroke_width: 2
@@ -2465,6 +2465,40 @@ series:
       fill: last
     show:
       in_header: true
+  # ── History: actual measurements y(k) (replace with your room sensor) ──
+  - entity: sensor.living_room_temperature
+    name: Actual measurement (y(k))
+    yaxis_id: temp
+    color: '#E53935'
+    stroke_width: 0
+    curve: stepline
+    float_precision: 2
+    extend_to: now
+    group_by:
+      func: raw
+      fill: null
+    show:
+      in_header: false
+    apex_config:
+      markers:
+        size: 4
+        strokeWidth: 0
+  # ── History: setpoint (dashed step) ───────────────────────────────────
+  - entity: sensor.heating_assistant_living_room_predicted_temperature
+    attribute: setpoint
+    name: Setpoint
+    yaxis_id: temp
+    color: '#F44336'
+    stroke_width: 2
+    stroke_dash: 5
+    curve: stepline
+    float_precision: 1
+    extend_to: now
+    group_by:
+      func: raw
+      fill: last
+    show:
+      in_header: false
   # ── Forecast: constraint upper bound ─────────────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_prediction
     name: Constraint Upper
@@ -2501,15 +2535,17 @@ series:
       in_header: false
   # ── Forecast: setpoint reference ─────────────────────────────────────
   - entity: sensor.heating_assistant_living_room_temperature_prediction
-    name: Setpoint
+    name: Setpoint (forecast)
     data_generator: |
       const fc = entity.attributes.forecast;
-      const sp = entity.attributes.setpoint;
-      if (!fc || sp == null) return [];
-      return fc.map(f => [new Date(f.time).getTime(), sp]);
+      const fallbackSp = entity.attributes.setpoint;
+      // Use per-step setpoint when present; fall back to current setpoint.
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.setpoint ?? fallbackSp]);
     yaxis_id: temp
     color: '#F44336'
     stroke_width: 2
+    stroke_dash: 5
     curve: stepline
     float_precision: 1
     show:
@@ -2530,7 +2566,7 @@ series:
       in_header: true
 ```
 
-> **Tip:** Replace `living_room` with your room's entity suffix throughout.
+> **Tip:** Replace `living_room` with your room's entity suffix throughout, and replace `sensor.living_room_temperature` with your actual room temperature sensor entity.
 
 #### 13.17.4 MPC control input card
 
@@ -2775,9 +2811,9 @@ cards:
             text: Temperature (°C)
           tickAmount: 5
     series:
-      # ── History: measured temperature (from HA recorder) ─────────────
+      # ── History: filtered estimate y(k|k) (historical recorder values) ─
       - entity: sensor.heating_assistant_living_room_predicted_temperature
-        name: Measured
+        name: Filtered estimate (y(k|k))
         yaxis_id: temp
         color: '#0D47A1'
         stroke_width: 2
@@ -2789,6 +2825,40 @@ cards:
           fill: last
         show:
           in_header: true
+      # ── History: actual measurements y(k) (replace with your room sensor)
+      - entity: sensor.living_room_temperature
+        name: Actual measurement (y(k))
+        yaxis_id: temp
+        color: '#E53935'
+        stroke_width: 0
+        curve: stepline
+        float_precision: 2
+        extend_to: now
+        group_by:
+          func: raw
+          fill: null
+        show:
+          in_header: false
+        apex_config:
+          markers:
+            size: 4
+            strokeWidth: 0
+      # ── History: setpoint (dashed step) ───────────────────────────────
+      - entity: sensor.heating_assistant_living_room_predicted_temperature
+        attribute: setpoint
+        name: Setpoint
+        yaxis_id: temp
+        color: '#F44336'
+        stroke_width: 2
+        stroke_dash: 5
+        curve: stepline
+        float_precision: 1
+        extend_to: now
+        group_by:
+          func: raw
+          fill: last
+        show:
+          in_header: false
       # ── Forecast: constraint upper bound ─────────────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_prediction
         name: Constraint Upper
@@ -2821,15 +2891,17 @@ cards:
           in_header: false
       # ── Forecast: setpoint reference ─────────────────────────────────
       - entity: sensor.heating_assistant_living_room_temperature_prediction
-        name: Setpoint
+        name: Setpoint (forecast)
         data_generator: |
           const fc = entity.attributes.forecast;
-          const sp = entity.attributes.setpoint;
-          if (!fc || sp == null) return [];
-          return fc.map(f => [new Date(f.time).getTime(), sp]);
+          const fallbackSp = entity.attributes.setpoint;
+          // Use per-step setpoint when present; fall back to current setpoint.
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.setpoint ?? fallbackSp]);
         yaxis_id: temp
         color: '#F44336'
         stroke_width: 2
+        stroke_dash: 5
         curve: stepline
         float_precision: 1
         show:
@@ -3423,4 +3495,3 @@ To use a measured irradiance sensor instead of a computed one:
 8. Mayne, D. Q. et al. (2000) — "Constrained model predictive control: Stability and optimality", *Automatica*, 36(6), 789–814.
 9. Jazwinski, A. H. (1970) — *Stochastic Processes and Filtering Theory*, Academic Press.  (Continuous-Discrete Kalman filtering theory.)
 10. Kristensen, N. R. et al. (2004) — "Parameter estimation in stochastic grey-box models", *Automatica*, 40(2), 225–237.  (CD-EKF prediction-error decomposition / ML identification.)
-
