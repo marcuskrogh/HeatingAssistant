@@ -850,6 +850,7 @@ class TestCoordinatorUpdateResilience:
         coordinator.controller.last_innovation = None
         coordinator.controller.filtered_temperatures = {}
 
+        assert coordinator.measured_temperatures == {"studio": 15.0}
         await coordinator._async_update_data()
 
         assert coordinator.measured_temperatures == {}
