@@ -660,9 +660,9 @@ For each room declared in `configuration.yaml` the integration creates:
 | `climate.heating_assistant_<room_name>` | climate | HVAC mode (`heat_cool` / `heat` / `off`) | current_temperature, target_temperature, hvac_action |
 | `sensor.heating_assistant_<room_name>_temperature_measured` | sensor | Averaged room temperature measurement in °C | – |
 | `sensor.heating_assistant_<room_name>_temperature_filtered` | sensor | Kalman-filtered state estimate x̂⁺ in °C | thermal_mass, r_external |
-| `sensor.heating_assistant_<room_name>_setpoint` | sensor | Active setpoint in °C | – |
-| `sensor.heating_assistant_<room_name>_constraint_upper` | sensor | Soft-constraint upper bound (setpoint + offset) in °C | – |
-| `sensor.heating_assistant_<room_name>_constraint_lower` | sensor | Soft-constraint lower bound (setpoint − offset) in °C | – |
+| `sensor.heating_assistant_<room_name>_setpoint` | sensor | Active setpoint in °C | forecast (timestamped, per-step setpoint over the MPC horizon) |
+| `sensor.heating_assistant_<room_name>_constraint_upper` | sensor | Soft-constraint upper bound (setpoint + offset) in °C | forecast (timestamped, per-step constraint_upper over the MPC horizon) |
+| `sensor.heating_assistant_<room_name>_constraint_lower` | sensor | Soft-constraint lower bound (setpoint − offset) in °C | forecast (timestamped, per-step constraint_lower over the MPC horizon) |
 | `sensor.heating_assistant_<room_name>_heating_power_measured` | sensor | Total active heating power in W | Per-source breakdown by source name |
 | `sensor.heating_assistant_<room_name>_solar_gain_measured` | sensor | Current solar heat gain in W | window_count, total_window_area |
 | `sensor.heating_assistant_<room_name>_temperature_forecast` | sensor | End-of-horizon MPC predicted temperature in °C | trajectory, forecast (timestamped), setpoint, horizon_steps |
@@ -1848,6 +1848,14 @@ The active setpoint and the MPC soft-constraint band are each exposed as their o
 | Unit | °C |
 | Value | Setpoint, or setpoint ± soft-constraint offset, rounded to 2 decimal places |
 
+**State attributes (all three sensors):**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `forecast` | list[dict] | Timestamped trajectory across the MPC horizon (N+1 entries spaced by `step_seconds`).  Each entry has `time` (ISO-8601 UTC) plus a field named after the sensor (`setpoint`, `constraint_upper`, or `constraint_lower`).  Drives apexcharts `data_generator` series so the line is anchored to the forecast window instead of relying on `extend_to`. |
+| `horizon_steps` | int | OCP horizon length (N). |
+| `step_seconds` | float | Time step duration. |
+
 ### 12.4 Sensor entities – heating power (measured)
 
 **Entity ID format:** `sensor.heating_assistant_<room_name>_heating_power_measured`
@@ -2502,7 +2510,7 @@ series:
       fill: 'null'
     show:
       in_header: false
-  # ── History: setpoint (dashed step) ───────────────────────────────────
+  # ── History: setpoint (recorder history, ends at "Now") ──────────────
   - entity: sensor.heating_assistant_living_room_setpoint
     name: Setpoint
     yaxis_id: temp
@@ -2517,33 +2525,49 @@ series:
       fill: last
     show:
       in_header: false
+  # ── Forecast: setpoint over the MPC horizon ──────────────────────────
+  - entity: sensor.heating_assistant_living_room_setpoint
+    name: Setpoint (forecast)
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.setpoint]);
+    yaxis_id: temp
+    color: '#F44336'
+    stroke_width: 2
+    stroke_dash: 5
+    curve: stepline
+    float_precision: 1
+    show:
+      legend_value: false
+      in_header: false
   # ── Forecast: constraint upper bound ─────────────────────────────────
   - entity: sensor.heating_assistant_living_room_constraint_upper
     name: Constraint Upper
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.constraint_upper]);
     yaxis_id: temp
     color: '#90CAF9'
     stroke_width: 1
     curve: stepline
     opacity: 0.5
-    extend_to: end
-    group_by:
-      func: raw
-      fill: last
     show:
       legend_value: false
       in_header: false
   # ── Forecast: constraint lower bound ─────────────────────────────────
   - entity: sensor.heating_assistant_living_room_constraint_lower
     name: Constraint Lower
+    data_generator: |
+      const fc = entity.attributes.forecast;
+      if (!fc) return [];
+      return fc.map(f => [new Date(f.time).getTime(), f.constraint_lower]);
     yaxis_id: temp
     color: '#90CAF9'
     stroke_width: 1
     curve: stepline
     opacity: 0.5
-    extend_to: end
-    group_by:
-      func: raw
-      fill: last
     show:
       legend_value: false
       in_header: false
@@ -2563,7 +2587,7 @@ series:
       in_header: true
 ```
 
-> **Tip:** Replace `living_room` with your room's entity suffix throughout — every series now references HeatingAssistant-owned sensors, so no per-installation entity substitutions are needed.
+> **Tip:** Replace `living_room` with your room's entity suffix throughout — every series references HeatingAssistant-owned sensors, so no per-installation entity substitutions are needed.  The setpoint/constraint *forecast* series use a `data_generator` against each sensor's `forecast` attribute so the line is anchored to the MPC horizon (rather than extending the historical recorder value indefinitely).
 
 #### 13.17.4 MPC control input card
 
@@ -2836,7 +2860,7 @@ cards:
           fill: 'null'
         show:
           in_header: false
-      # ── History: setpoint (dashed step) ───────────────────────────────
+      # ── History: setpoint (recorder history up to "Now") ─────────────
       - entity: sensor.heating_assistant_living_room_setpoint
         name: Setpoint
         yaxis_id: temp
@@ -2851,31 +2875,47 @@ cards:
           fill: last
         show:
           in_header: false
+      # ── Forecast: setpoint across the MPC horizon ─────────────────────
+      - entity: sensor.heating_assistant_living_room_setpoint
+        name: Setpoint (forecast)
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.setpoint]);
+        yaxis_id: temp
+        color: '#F44336'
+        stroke_width: 2
+        stroke_dash: 5
+        curve: stepline
+        float_precision: 1
+        show:
+          legend_value: false
+          in_header: false
       # ── Forecast: constraint upper bound ─────────────────────────────
       - entity: sensor.heating_assistant_living_room_constraint_upper
         name: Constraint Upper
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.constraint_upper]);
         yaxis_id: temp
         color: '#1565C0'
         stroke_width: 1
         curve: stepline
-        extend_to: end
-        group_by:
-          func: raw
-          fill: last
         show:
           legend_value: false
           in_header: false
       # ── Forecast: constraint lower bound ─────────────────────────────
       - entity: sensor.heating_assistant_living_room_constraint_lower
         name: Constraint Lower
+        data_generator: |
+          const fc = entity.attributes.forecast;
+          if (!fc) return [];
+          return fc.map(f => [new Date(f.time).getTime(), f.constraint_lower]);
         yaxis_id: temp
         color: '#1565C0'
         stroke_width: 1
         curve: stepline
-        extend_to: end
-        group_by:
-          func: raw
-          fill: last
         show:
           legend_value: false
           in_header: false
