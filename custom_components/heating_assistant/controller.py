@@ -652,6 +652,17 @@ class HeatingMPCController:
         return self._last_innovation
 
     @property
+    def filtered_temperatures(self) -> Dict[str, float]:
+        """Kalman-filtered room temperatures x̂⁺ after the latest update step.
+
+        Before the first ``compute()`` call this returns the EKF initial
+        state (which equals the room temperatures the controller was
+        constructed with), so callers always get a usable dict.
+        """
+        x_hat = self._ekf.x_hat
+        return {name: float(x_hat[i]) for i, name in enumerate(self._room_list)}
+
+    @property
     def predictions(self) -> List[Dict[str, float]]:
         """Latest predicted temperature trajectory [{room: °C}, …]."""
         return self._predictions

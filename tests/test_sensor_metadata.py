@@ -6,21 +6,30 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.heating_assistant.sensor import (
-    HeatingPlanSensor,
+    HeatingPowerForecastSensor,
     MPCPerformanceSensor,
-    OutdoorForecastSensor,
-    PredictedTemperatureSensor,
-    SolarForecastSensor,
+    OutdoorTemperatureForecastSensor,
+    SolarGainForecastSensor,
     TemperatureForecastSensor,
 )
 
 
-def test_prediction_entities_have_no_state_class():
-    assert getattr(PredictedTemperatureSensor, "_attr_state_class", None) is None
-    assert getattr(OutdoorForecastSensor, "_attr_state_class", None) is None
+def test_forecast_entities_have_no_state_class():
+    """Forecast sensors must declare no state_class so HA does not feed them
+    into long-term statistics (they're predictions, not measurements)."""
+    assert getattr(OutdoorTemperatureForecastSensor, "_attr_state_class", None) is None
     assert getattr(TemperatureForecastSensor, "_attr_state_class", None) is None
-    assert getattr(HeatingPlanSensor, "_attr_state_class", None) is None
-    assert getattr(SolarForecastSensor, "_attr_state_class", None) is None
+    assert getattr(HeatingPowerForecastSensor, "_attr_state_class", None) is None
+    assert getattr(SolarGainForecastSensor, "_attr_state_class", None) is None
+
+
+def test_forecast_entities_have_no_device_class():
+    """Forecast sensors must declare no device_class so HA's strict
+    `device_class implies state_class` validation accepts them."""
+    assert getattr(OutdoorTemperatureForecastSensor, "_attr_device_class", None) is None
+    assert getattr(TemperatureForecastSensor, "_attr_device_class", None) is None
+    assert getattr(HeatingPowerForecastSensor, "_attr_device_class", None) is None
+    assert getattr(SolarGainForecastSensor, "_attr_device_class", None) is None
 
 
 def test_mpc_performance_sensor_avoids_strict_statistics_metadata():

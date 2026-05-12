@@ -445,6 +445,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.outdoor_forecast: List[float] = []
         self.solar_forecast: list = []
         self.heating_schedule: list = []
+        # Per-room averaged raw measurements (populated each cycle from
+        # configured temp_sensors); kept separate from filter output so the
+        # visualisation can show measurement vs. estimate.
+        self.measured_temperatures: Dict[str, float] = {}
+        # Per-room Kalman-filtered state x̂⁺ after each compute(). Cleared when
+        # the MPC solver fails, so sensor entities report the value as unknown.
+        self.filtered_temperatures: Dict[str, float] = {}
 
         # Rolling observation history for ML parameter estimation.
         # Each entry is a dict: {y, u, d_outdoor, d_solar, timestamp}.
@@ -489,6 +496,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 1. Update measured room temperatures from HA sensor states.
             #    When multiple sensors are configured for a room, use the
             #    average of all valid readings.
+            self.measured_temperatures = {}
             for room_name, entity_ids in self._temp_sensors.items():
                 readings: List[float] = []
                 for entity_id in entity_ids:
@@ -503,9 +511,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                                 state.state,
                             )
                 if readings:
-                    self.model.rooms[room_name].temperature = (
-                        sum(readings) / len(readings)
-                    )
+                    averaged = sum(readings) / len(readings)
+                    self.model.rooms[room_name].temperature = averaged
+                    self.measured_temperatures[room_name] = averaged
 
             # 1b. Apply comfort schedules: resolve the active period for each
             #     room and update the live setpoint / enabled flag accordingly.
@@ -552,6 +560,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.outdoor_forecast = self.controller.outdoor_forecast
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
+                self.filtered_temperatures = self.controller.filtered_temperatures
 
                 # Capture Kalman innovation for diagnostics (may be None on first step)
                 # controller.last_innovation is populated by compute() after splitting
@@ -559,16 +568,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 kalman_innovation: Optional[List[float]] = self.controller.last_innovation
             except Exception:
                 _LOGGER.warning(
-                    "Failed to compute MPC actions; using thermal-model fallback "
-                    "for visualisation data",
+                    "Failed to compute MPC actions; clearing forecast data so "
+                    "dashboards show a visible gap at the failure point",
                     exc_info=True,
                 )
-                # Keep previous actions if available; otherwise default to all-off.
+                # Keep previous actions if available; otherwise default to all-off
+                # so the applied heater commands stay safe.
                 if not self.actions:
                     self.actions = {src.name: 0.0 for src in self.heat_sources}
 
-                # Build outdoor / solar forecasts so they are available for the
-                # thermal-model prediction below.
+                # Pass the weather forecast through (it's read independently of
+                # the MPC), but clear all forecast/filtered fields so the
+                # visualization sensors expose "unknown" instead of fabricating
+                # a thermal-model trajectory.  This makes failures plot as a
+                # visible gap rather than a silent fake forecast.
                 if outdoor_forecast:
                     self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
                     if len(self.outdoor_forecast) < self._horizon:
@@ -577,41 +590,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
                 else:
                     self.outdoor_forecast = [outdoor_temp] * self._horizon
-                self.solar_forecast = [
-                    dict(self.solar_gains) for _ in range(self._horizon + 1)
-                ]
-
-                # Build a per-room heating schedule from the current (or fallback)
-                # actions so HeatingPlanSensor has meaningful data.
-                fallback_step: Dict[str, float] = {
-                    name: 0.0 for name in self.model.room_names
-                }
-                for src in self.heat_sources:
-                    frac = float(self.actions.get(src.name, 0.0))
-                    fallback_step[src.room] += src.thermal_power(max(0.0, frac), outdoor_temp)
-                self.heating_schedule = [
-                    dict(fallback_step) for _ in range(self._horizon)
-                ]
-
-                # Simulate a temperature trajectory with the simple RC thermal model
-                # so TemperatureForecastSensor shows a real trend instead of nothing.
-                solar_seq = [dict(self.solar_gains) for _ in range(self._horizon)]
-                try:
-                    self.predictions = self.model.predict(
-                        horizon=self._horizon,
-                        dt=self.dt,
-                        heat_schedule=self.heating_schedule,
-                        outdoor_temps=self.outdoor_forecast,
-                        solar_gain_schedule=solar_seq,
-                    )
-                except Exception:
-                    _LOGGER.debug(
-                        "Thermal-model fallback prediction failed; "
-                        "forecast entities will show no future trajectory",
-                        exc_info=True,
-                    )
-                    self.predictions = []
-
+                self.predictions = []
+                self.heating_schedule = []
+                self.solar_forecast = []
+                self.filtered_temperatures = {}
                 kalman_innovation = None
 
             # 5. Store heat-flow breakdown (independent of MPC solve success)

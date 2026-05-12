@@ -1,35 +1,31 @@
 """
 Heating Assistant – Sensor platform.
 
-For each room the following sensor entities are created:
-- Predicted temperature  (model's 1-step-ahead prediction) [°C]
-- Heating power          (sum of active heater outputs for the room; negative for cooling) [W]
-- Solar gain             (current solar heat gain through windows) [W]
-- Temperature forecast   (MPC prediction trajectory) [°C]
-- Heat loss              (instantaneous heat loss breakdown) [W]
-- Energy balance         (net energy flow in the room) [W]
-- Heating plan           (planned heating/cooling power over MPC horizon; negative for cooling) [W]
-- Solar forecast         (predicted solar gain over MPC horizon) [W]
-- Temperature prediction (same data as Temperature forecast, stable availability) [°C]
-- Heating plan prediction (same data as Heating plan, stable availability) [W]
-- Solar power prediction (same data as Solar forecast, stable availability) [W]
+Per-room sensors use a consistent ``_measured`` / ``_filtered`` / ``_forecast``
+suffix so the advanced-visualisation dashboards can be pasted verbatim:
 
-For each heat source:
-- Control action         (MPC controller output fraction) [%]
+- ``temperature_measured``  – averaged raw measurement from configured sensors [°C]
+- ``temperature_filtered``  – Kalman-filtered state estimate x̂⁺ [°C]
+- ``temperature_forecast``  – MPC predicted trajectory (state = end-of-horizon) [°C]
+- ``heating_power_measured`` – sum of active heater outputs (negative = cooling) [W]
+- ``heating_power_forecast`` – planned heating/cooling power over the MPC horizon [W]
+- ``solar_gain_measured``    – current solar heat gain through windows [W]
+- ``solar_gain_forecast``    – predicted solar gain over the MPC horizon [W]
+- ``setpoint``               – current per-room setpoint [°C]
+- ``constraint_upper`` / ``constraint_lower`` – setpoint ± soft-constraint band [°C]
+- ``heat_loss``              – instantaneous heat-loss breakdown [W]
+- ``energy_balance``         – net energy flow in the room [W]
 
-For each heat pump source:
-- COP                    (current coefficient of performance)
+Per-heat-source: ``control_action`` (MPC fraction [%]); heat pumps also expose ``cop``.
 
-System-wide:
-- Outdoor temperature    (as read by the integration) [°C]
-- Outdoor temp forecast  (timestamped forecast over MPC horizon) [°C]
-- Outdoor temperature prediction (same data as Outdoor temp forecast, stable availability) [°C]
-- System efficiency      (aggregate system metrics)
+System-wide: ``outdoor_temperature_measured`` / ``outdoor_temperature_forecast``,
+``system_summary``, and ``mpc_performance``.
 
-The "prediction" variants are the ones the advanced visualisation dashboards
-in the README reference.  They expose identical data to the matching forecast
-/ plan sensors but override ``available`` to True so dashboards keep
-rendering the trajectory across transient coordinator update failures.
+The forecast sensors set ``device_class``/``state_class`` to ``None`` (so HA's
+strict sensor validator accepts them — predictions are not measurements and
+must not feed long-term statistics) and override ``available`` to ``True`` so
+dashboards keep rendering the cached trajectory across transient coordinator
+update failures.
 """
 
 from __future__ import annotations
@@ -72,21 +68,18 @@ async def async_setup_entry(
 
     # Per-room sensors
     for room_name in coordinator.model.room_names:
-        entities.append(PredictedTemperatureSensor(coordinator, room_name))
-        entities.append(HeatingPowerSensor(coordinator, room_name))
-        entities.append(SolarGainSensor(coordinator, room_name))
+        entities.append(TemperatureMeasuredSensor(coordinator, room_name))
+        entities.append(TemperatureFilteredSensor(coordinator, room_name))
         entities.append(TemperatureForecastSensor(coordinator, room_name))
+        entities.append(SetpointSensor(coordinator, room_name))
+        entities.append(ConstraintUpperSensor(coordinator, room_name))
+        entities.append(ConstraintLowerSensor(coordinator, room_name))
+        entities.append(HeatingPowerMeasuredSensor(coordinator, room_name))
+        entities.append(HeatingPowerForecastSensor(coordinator, room_name))
+        entities.append(SolarGainMeasuredSensor(coordinator, room_name))
+        entities.append(SolarGainForecastSensor(coordinator, room_name))
         entities.append(HeatLossSensor(coordinator, room_name))
         entities.append(EnergyBalanceSensor(coordinator, room_name))
-        entities.append(HeatingPlanSensor(coordinator, room_name))
-        entities.append(SolarForecastSensor(coordinator, room_name))
-        # Always-available prediction entities (used by the advanced
-        # visualisation dashboards).  These mirror the data of the forecast/
-        # plan sensors above but stay available across coordinator update
-        # failures so dashboards never lose the trajectory.
-        entities.append(TemperaturePredictionSensor(coordinator, room_name))
-        entities.append(HeatingPlanPredictionSensor(coordinator, room_name))
-        entities.append(SolarPowerPredictionSensor(coordinator, room_name))
         # Model fit diagnostics sensors
         entities.append(PredictionErrorSensor(coordinator, room_name))
         entities.append(ModelFitQualitySensor(coordinator, room_name))
@@ -103,9 +96,8 @@ async def async_setup_entry(
             entities.append(HeatPumpCOPSensor(coordinator, src.name))
 
     # System-wide sensors
-    entities.append(OutdoorTemperatureSensor(coordinator))
-    entities.append(OutdoorForecastSensor(coordinator))
-    entities.append(OutdoorTemperaturePredictionSensor(coordinator))
+    entities.append(OutdoorTemperatureMeasuredSensor(coordinator))
+    entities.append(OutdoorTemperatureForecastSensor(coordinator))
     entities.append(SystemEfficiencySensor(coordinator))
     entities.append(MPCPerformanceSensor(coordinator))
 
@@ -113,13 +105,19 @@ async def async_setup_entry(
 
 
 # ---------------------------------------------------------------------------
-# Predicted temperature sensor
+# Temperature sensors (measured and Kalman-filtered) — per room
 # ---------------------------------------------------------------------------
 
-class PredictedTemperatureSensor(CoordinatorEntity, SensorEntity):
-    """Sensor reporting the model-predicted temperature for a room."""
+class TemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
+    """Sensor reporting the room temperature measurement used by the integration.
+
+    When multiple ``temp_sensors`` are configured for the room their readings
+    are averaged each cycle; this sensor exposes that averaged value so
+    dashboards don't have to build their own helper.
+    """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     def __init__(
@@ -130,30 +128,161 @@ class PredictedTemperatureSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_name = room_name
         self._coordinator = coordinator
-        self._attr_name = f"Heating Assistant – {room_name} – Predicted Temperature"
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_predicted_temperature"
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Temperature Measured"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_temperature_measured"
 
     @property
     def native_value(self) -> Optional[float]:
-        """Return the current model temperature (updated each coordinator cycle)."""
-        temp = self._coordinator.model.rooms[self._room_name].temperature
-        return round(temp, 2)
+        temp = self._coordinator.measured_temperatures.get(self._room_name)
+        if temp is None:
+            return None
+        return round(float(temp), 2)
+
+
+class TemperatureFilteredSensor(CoordinatorEntity, SensorEntity):
+    """Sensor reporting the Kalman-filtered room temperature estimate x̂⁺.
+
+    The state estimator fuses the raw measurement with the thermal model
+    so brief sensor glitches don't propagate into the MPC.  This sensor
+    exposes the post-update filtered estimate after each coordinator cycle.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Temperature Filtered"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_temperature_filtered"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        temp = self._coordinator.filtered_temperatures.get(self._room_name)
+        if temp is None:
+            return None
+        return round(float(temp), 2)
 
     @property
     def extra_state_attributes(self) -> dict:
         room = self._coordinator.model.rooms[self._room_name]
         return {
-            "setpoint": room.setpoint,
             "thermal_mass": room.thermal_mass,
             "r_external": room.r_external,
         }
 
 
 # ---------------------------------------------------------------------------
+# Setpoint and soft-constraint sensors (per room)
+# ---------------------------------------------------------------------------
+
+class SetpointSensor(CoordinatorEntity, SensorEntity):
+    """Sensor reporting the active per-room setpoint [°C]."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:target"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Setpoint"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_setpoint"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        room = self._coordinator.model.rooms.get(self._room_name)
+        if room is None:
+            return None
+        return round(float(room.setpoint), 2)
+
+
+class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):
+    """Shared base for the MPC soft-constraint bound sensors."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _sign: float = 1.0
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+
+    @property
+    def native_value(self) -> Optional[float]:
+        room = self._coordinator.model.rooms.get(self._room_name)
+        if room is None:
+            return None
+        controller = getattr(self._coordinator, "controller", None)
+        offset = getattr(controller, "constraint_offset", None)
+        if offset is None:
+            return None
+        return round(float(room.setpoint) + self._sign * float(offset), 2)
+
+
+class ConstraintUpperSensor(_ConstraintSensorBase):
+    """Upper bound of the MPC soft output constraint (setpoint + offset)."""
+
+    _attr_icon = "mdi:arrow-up-bold-box-outline"
+    _sign = 1.0
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator, room_name)
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Constraint Upper"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_constraint_upper"
+
+
+class ConstraintLowerSensor(_ConstraintSensorBase):
+    """Lower bound of the MPC soft output constraint (setpoint − offset)."""
+
+    _attr_icon = "mdi:arrow-down-bold-box-outline"
+    _sign = -1.0
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator, room_name)
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Constraint Lower"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_constraint_lower"
+
+
+# ---------------------------------------------------------------------------
 # Heating power sensor
 # ---------------------------------------------------------------------------
 
-class HeatingPowerSensor(CoordinatorEntity, SensorEntity):
+class HeatingPowerMeasuredSensor(CoordinatorEntity, SensorEntity):
     """Sensor reporting the total active heating/cooling power for a room.
 
     Positive values indicate heating, negative values indicate cooling
@@ -172,8 +301,10 @@ class HeatingPowerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_name = room_name
         self._coordinator = coordinator
-        self._attr_name = f"Heating Assistant – {room_name} – Heating Power"
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_heating_power"
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Heating Power Measured"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_heating_power_measured"
 
     @property
     def native_value(self) -> float:
@@ -197,7 +328,7 @@ class HeatingPowerSensor(CoordinatorEntity, SensorEntity):
 # Solar gain sensor
 # ---------------------------------------------------------------------------
 
-class SolarGainSensor(CoordinatorEntity, SensorEntity):
+class SolarGainMeasuredSensor(CoordinatorEntity, SensorEntity):
     """Sensor reporting the current solar heat gain for a room [W]."""
 
     _attr_device_class = SensorDeviceClass.POWER
@@ -213,8 +344,10 @@ class SolarGainSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_name = room_name
         self._coordinator = coordinator
-        self._attr_name = f"Heating Assistant – {room_name} – Solar Gain"
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_solar_gain"
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Solar Gain Measured"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_solar_gain_measured"
 
     @property
     def native_value(self) -> float:
@@ -328,7 +461,7 @@ class HeatPumpCOPSensor(CoordinatorEntity, SensorEntity):
 # Outdoor temperature sensor
 # ---------------------------------------------------------------------------
 
-class OutdoorTemperatureSensor(CoordinatorEntity, SensorEntity):
+class OutdoorTemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
     """Sensor reporting the outdoor temperature as read by the integration."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -341,8 +474,8 @@ class OutdoorTemperatureSensor(CoordinatorEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator)
         self._coordinator = coordinator
-        self._attr_name = "Heating Assistant – Outdoor Temperature"
-        self._attr_unique_id = f"{DOMAIN}_outdoor_temperature"
+        self._attr_name = "Heating Assistant – Outdoor Temperature Measured"
+        self._attr_unique_id = f"{DOMAIN}_outdoor_temperature_measured"
 
     @property
     def native_value(self) -> float:
@@ -353,7 +486,7 @@ class OutdoorTemperatureSensor(CoordinatorEntity, SensorEntity):
 # Outdoor temperature forecast sensor (system-wide)
 # ---------------------------------------------------------------------------
 
-class OutdoorForecastSensor(CoordinatorEntity, SensorEntity):
+class OutdoorTemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the outdoor temperature forecast over the MPC horizon.
 
@@ -362,9 +495,15 @@ class OutdoorForecastSensor(CoordinatorEntity, SensorEntity):
     When a weather entity is configured, the forecast reflects the interpolated
     weather predictions; otherwise a persistence forecast (current value held
     constant) is used.
+
+    ``device_class``/``state_class`` are ``None`` so HA's strict sensor
+    validator accepts forecast values (which must not feed long-term
+    statistics), and ``available`` stays ``True`` so the cached trajectory
+    survives transient coordinator-update failures.
     """
 
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_device_class = None
+    _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_icon = "mdi:thermometer-lines"
 
@@ -376,6 +515,10 @@ class OutdoorForecastSensor(CoordinatorEntity, SensorEntity):
         self._coordinator = coordinator
         self._attr_name = "Heating Assistant – Outdoor Temperature Forecast"
         self._attr_unique_id = f"{DOMAIN}_outdoor_temperature_forecast"
+
+    @property
+    def available(self) -> bool:
+        return True
 
     @property
     def native_value(self) -> float:
@@ -419,8 +562,15 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     horizon.  The full trajectory (one value per time step) is exposed as
     state attributes so users can plot it in Lovelace or use it in
     automations.
+
+    ``device_class``/``state_class`` are ``None`` so HA's strict sensor
+    validator accepts forecast values (which must not feed long-term
+    statistics), and ``available`` stays ``True`` so the cached trajectory
+    survives transient coordinator-update failures.
     """
 
+    _attr_device_class = None
+    _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_icon = "mdi:chart-line"
 
@@ -436,13 +586,17 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{room_name}_temperature_forecast"
 
     @property
+    def available(self) -> bool:
+        return True
+
+    @property
     def native_value(self) -> Optional[float]:
         predictions = self._coordinator.predictions
         if not predictions:
-            room = self._coordinator.model.rooms.get(self._room_name)
-            if room is None:
-                return None
-            return round(room.temperature, 2)
+            # Surface failure: when the MPC has no trajectory (cold start or
+            # solver failure) leave the state "unknown" so the dashboard
+            # header and the recorder show a visible gap, not a fake value.
+            return None
         last = predictions[-1]
         temp = last.get(self._room_name)
         return round(temp, 2) if temp is not None else None
@@ -734,7 +888,7 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
 # Heating plan sensor (per room)
 # ---------------------------------------------------------------------------
 
-class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
+class HeatingPowerForecastSensor(CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the planned heating/cooling power over the MPC horizon for a room.
 
@@ -742,8 +896,15 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
     cooling (heat removal) when heat pumps operate in dry/dehumidify mode.
     The full schedule is exposed as a timestamped ``forecast`` attribute so it
     can be plotted in dashboard cards like ``apexcharts-card``.
+
+    ``device_class``/``state_class`` are ``None`` so HA's strict sensor
+    validator accepts forecast values (which must not feed long-term
+    statistics), and ``available`` stays ``True`` so the cached trajectory
+    survives transient coordinator-update failures.
     """
 
+    _attr_device_class = None
+    _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:radiator"
 
@@ -755,20 +916,24 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_name = room_name
         self._coordinator = coordinator
-        self._attr_name = f"Heating Assistant – {room_name} – Heating Plan"
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_heating_plan"
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Heating Power Forecast"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_heating_power_forecast"
 
     @property
-    def native_value(self) -> float:
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> Optional[float]:
         schedule = self._coordinator.heating_schedule
-        if schedule:
-            return round(schedule[0].get(self._room_name, 0.0), 1)
-        current_heating = sum(
-            getattr(s, "current_power", 0.0)
-            for s in self._coordinator.heat_sources
-            if s.room == self._room_name
-        )
-        return round(current_heating, 1)
+        if not schedule:
+            # Surface failure: an empty schedule means the MPC produced no
+            # plan this cycle.  Leave the state "unknown" rather than
+            # echoing current heating power as if it were a real plan.
+            return None
+        return round(schedule[0].get(self._room_name, 0.0), 1)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -809,14 +974,21 @@ class HeatingPlanSensor(CoordinatorEntity, SensorEntity):
 # Solar forecast sensor (per room)
 # ---------------------------------------------------------------------------
 
-class SolarForecastSensor(CoordinatorEntity, SensorEntity):
+class SolarGainForecastSensor(CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the predicted solar gain over the MPC horizon for a room.
 
     The state is the current solar gain [W].  The full forecast is exposed as
     a timestamped ``forecast`` attribute for dashboard visualisation.
+
+    ``device_class``/``state_class`` are ``None`` so HA's strict sensor
+    validator accepts forecast values (which must not feed long-term
+    statistics), and ``available`` stays ``True`` so the cached trajectory
+    survives transient coordinator-update failures.
     """
 
+    _attr_device_class = None
+    _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:weather-sunny-alert"
 
@@ -828,15 +1000,23 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._room_name = room_name
         self._coordinator = coordinator
-        self._attr_name = f"Heating Assistant – {room_name} – Solar Forecast"
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_solar_forecast"
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Solar Gain Forecast"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_solar_gain_forecast"
 
     @property
-    def native_value(self) -> float:
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> Optional[float]:
         solar_forecast = self._coordinator.solar_forecast
-        if solar_forecast:
-            return round(solar_forecast[0].get(self._room_name, 0.0), 1)
-        return round(self._coordinator.solar_gains.get(self._room_name, 0.0), 1)
+        if not solar_forecast:
+            # Surface failure: when no forecast is available leave the state
+            # "unknown" rather than echoing the current solar gain.
+            return None
+        return round(solar_forecast[0].get(self._room_name, 0.0), 1)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -875,151 +1055,6 @@ class SolarForecastSensor(CoordinatorEntity, SensorEntity):
             "window_count": len(room.windows),
             "total_window_area": round(sum(w.area for w in room.windows), 2),
         }
-
-
-# ---------------------------------------------------------------------------
-# Always-available prediction sensors
-# ---------------------------------------------------------------------------
-#
-# These entities expose the MPC prediction trajectory under stable entity
-# IDs that the advanced visualisation dashboards reference.  Two issues
-# stopped earlier "forecast" / "plan" sensors from rendering reliably in
-# Home Assistant:
-#
-# 1. Availability gating.  CoordinatorEntity.available returns
-#    coordinator.last_update_success, so every prediction entity flipped to
-#    "unavailable" whenever the coordinator raised UpdateFailed — even
-#    though the cached prediction data on the coordinator was still valid
-#    and the controller kept applying set-points from it.
-#
-# 2. Sensor validation.  Recent Home Assistant releases tightened the
-#    "device_class implies state_class" validation.  A SensorEntity that
-#    declares device_class=POWER or TEMPERATURE without a state_class is
-#    rejected by the validator and the integration is reported as "no
-#    longer delivering" the entity.  We cannot set state_class=MEASUREMENT
-#    because predictions are not measurements: doing so would feed
-#    forward-looking values into Home Assistant's long-term statistics.
-#
-# The classes below address both issues:
-#   • ``available`` is overridden to return True so dashboards keep
-#     rendering across transient coordinator update failures;
-#   • ``device_class`` and ``state_class`` are set to None so the
-#     validator treats them as plain unit-bearing sensors and accepts the
-#     definition at registration time.  The native unit of measurement
-#     and icon are preserved so the entities still display nicely in the
-#     UI, and the prediction trajectory continues to live on the
-#     ``forecast`` state attribute that the dashboards consume.
-
-
-class TemperaturePredictionSensor(TemperatureForecastSensor):
-    """
-    Stable-availability variant of :class:`TemperatureForecastSensor`.
-
-    Exposes the same MPC predicted-temperature trajectory under a stable
-    entity ID, with sensor metadata that passes Home Assistant's strict
-    sensor validator (no ``device_class`` / ``state_class``).
-    """
-
-    _attr_device_class = None
-    _attr_state_class = None
-
-    def __init__(
-        self,
-        coordinator: HeatingAssistantCoordinator,
-        room_name: str,
-    ) -> None:
-        super().__init__(coordinator, room_name)
-        self._attr_name = (
-            f"Heating Assistant – {room_name} – Temperature Prediction"
-        )
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_temperature_prediction"
-
-    @property
-    def available(self) -> bool:
-        return True
-
-
-class HeatingPlanPredictionSensor(HeatingPlanSensor):
-    """
-    Stable-availability variant of :class:`HeatingPlanSensor`.
-
-    Exposes the same MPC heating-power schedule under a stable entity ID,
-    with sensor metadata that passes Home Assistant's strict sensor
-    validator (no ``device_class`` / ``state_class``).
-    """
-
-    _attr_device_class = None
-    _attr_state_class = None
-
-    def __init__(
-        self,
-        coordinator: HeatingAssistantCoordinator,
-        room_name: str,
-    ) -> None:
-        super().__init__(coordinator, room_name)
-        self._attr_name = (
-            f"Heating Assistant – {room_name} – Heating Plan Prediction"
-        )
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_heating_plan_prediction"
-
-    @property
-    def available(self) -> bool:
-        return True
-
-
-class SolarPowerPredictionSensor(SolarForecastSensor):
-    """
-    Stable-availability variant of :class:`SolarForecastSensor`.
-
-    Exposes the same predicted solar-gain trajectory under a stable
-    entity ID, with sensor metadata that passes Home Assistant's strict
-    sensor validator (no ``device_class`` / ``state_class``).
-    """
-
-    _attr_device_class = None
-    _attr_state_class = None
-
-    def __init__(
-        self,
-        coordinator: HeatingAssistantCoordinator,
-        room_name: str,
-    ) -> None:
-        super().__init__(coordinator, room_name)
-        self._attr_name = (
-            f"Heating Assistant – {room_name} – Solar Power Prediction"
-        )
-        self._attr_unique_id = f"{DOMAIN}_{room_name}_solar_power_prediction"
-
-    @property
-    def available(self) -> bool:
-        return True
-
-
-class OutdoorTemperaturePredictionSensor(OutdoorForecastSensor):
-    """
-    Stable-availability variant of :class:`OutdoorForecastSensor`.
-
-    Exposes the same outdoor-temperature forecast under a stable entity
-    ID, with sensor metadata that passes Home Assistant's strict sensor
-    validator (no ``device_class`` / ``state_class``).
-    """
-
-    _attr_device_class = None
-    _attr_state_class = None
-
-    def __init__(
-        self,
-        coordinator: HeatingAssistantCoordinator,
-    ) -> None:
-        super().__init__(coordinator)
-        self._attr_name = (
-            "Heating Assistant – Outdoor Temperature Prediction"
-        )
-        self._attr_unique_id = f"{DOMAIN}_outdoor_temperature_prediction"
-
-    @property
-    def available(self) -> bool:
-        return True
 
 
 # ---------------------------------------------------------------------------
