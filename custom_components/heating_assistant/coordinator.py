@@ -449,8 +449,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # configured temp_sensors); kept separate from filter output so the
         # visualisation can show measurement vs. estimate.
         self.measured_temperatures: Dict[str, float] = {}
-        # Per-room Kalman-filtered state x̂⁺ after each compute(). Falls back
-        # to measured_temperatures when the MPC solver fails.
+        # Per-room Kalman-filtered state x̂⁺ after each compute(). Cleared when
+        # the MPC solver fails, so sensor entities report the value as unknown.
         self.filtered_temperatures: Dict[str, float] = {}
 
         # Rolling observation history for ML parameter estimation.
