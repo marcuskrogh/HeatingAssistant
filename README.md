@@ -2562,7 +2562,7 @@ series:
     data_generator: |
       const fc = entity.attributes.forecast;
       if (!fc) return [];
-      return fc.map(f => [new Date(f.time).getTime(), f.constraint_lower]);
+      return fc.map(f => [new Date(f.time).getTime(), f.constraint_lower ?? null]);
     yaxis_id: temp
     color: '#90CAF9'
     stroke_width: 1
