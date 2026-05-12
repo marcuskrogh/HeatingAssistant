@@ -496,6 +496,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 1. Update measured room temperatures from HA sensor states.
             #    When multiple sensors are configured for a room, use the
             #    average of all valid readings.
+            self.measured_temperatures = {}
             for room_name, entity_ids in self._temp_sensors.items():
                 readings: List[float] = []
                 for entity_id in entity_ids:
