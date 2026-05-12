@@ -36,25 +36,40 @@ _MBC_PACKAGES = [
     "mbc.identification",
 ]
 
-for _pkg in _MBC_PACKAGES:
-    _stub_module(_pkg)
+# Use the real mbc library when it is installed (allows tests that exercise
+# HeatingMPCController / EKF / OCP to run against real code).  Fall back to
+# lightweight stubs only when the package is not available (e.g. a minimal CI
+# environment that only needs to test HA-independent submodules).
+try:
+    import mbc  # noqa: F401
+    import mbc.models  # noqa: F401
+    import mbc.estimation  # noqa: F401
+    import mbc.control  # noqa: F401
+    import mbc.identification  # noqa: F401
+    _mbc_available = True
+except ImportError:
+    _mbc_available = False
 
-_mbc_models = sys.modules["mbc.models"]
-_mbc_models.ContinuousDiscreteModel = object  # type: ignore[attr-defined]
+if not _mbc_available:
+    for _pkg in _MBC_PACKAGES:
+        _stub_module(_pkg)
 
-_mbc_estimation = sys.modules["mbc.estimation"]
-_mbc_estimation.ContinuousDiscreteEKF = object  # type: ignore[attr-defined]
-_mbc_estimation.KalmanFilter = object  # type: ignore[attr-defined]
+    _mbc_models = sys.modules["mbc.models"]
+    _mbc_models.ContinuousDiscreteModel = object  # type: ignore[attr-defined]
 
-_mbc_control = sys.modules["mbc.control"]
-_mbc_control.CDTrackingOptimalControlProblem = object  # type: ignore[attr-defined]
-_mbc_control.OptimalControlProblem = object  # type: ignore[attr-defined]
-_mbc_control.CDNMPCController = object  # type: ignore[attr-defined]
+    _mbc_estimation = sys.modules["mbc.estimation"]
+    _mbc_estimation.ContinuousDiscreteEKF = object  # type: ignore[attr-defined]
+    _mbc_estimation.KalmanFilter = object  # type: ignore[attr-defined]
 
-_mbc_id = sys.modules["mbc.identification"]
-_mbc_id.CDParameterEstimator = object  # type: ignore[attr-defined]
-_mbc_id.cd_ped_neg_log_likelihood = lambda *a, **kw: 0.0  # type: ignore[attr-defined]
-_mbc_id.nelder_mead = lambda *a, **kw: None  # type: ignore[attr-defined]
+    _mbc_control = sys.modules["mbc.control"]
+    _mbc_control.CDTrackingOptimalControlProblem = object  # type: ignore[attr-defined]
+    _mbc_control.OptimalControlProblem = object  # type: ignore[attr-defined]
+    _mbc_control.CDNMPCController = object  # type: ignore[attr-defined]
+
+    _mbc_id = sys.modules["mbc.identification"]
+    _mbc_id.CDParameterEstimator = object  # type: ignore[attr-defined]
+    _mbc_id.cd_ped_neg_log_likelihood = lambda *a, **kw: 0.0  # type: ignore[attr-defined]
+    _mbc_id.nelder_mead = lambda *a, **kw: None  # type: ignore[attr-defined]
 
 
 _HA_PACKAGES = [

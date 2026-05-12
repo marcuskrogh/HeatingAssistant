@@ -660,7 +660,7 @@ class HeatingMPCController:
         constructed with), so callers always get a usable dict.
         """
         x_hat = self._ekf.x_hat
-        return {name: float(x_hat[i]) for i, name in enumerate(self._room_list)}
+        return {name: float(x_hat[i]) for i, name in enumerate(self._system._room_list)}
 
     @property
     def predictions(self) -> List[Dict[str, float]]:
