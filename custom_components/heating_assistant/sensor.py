@@ -365,7 +365,11 @@ def _build_horizon_forecast(
     horizon = getattr(coordinator, "_horizon", None)
     dt = getattr(coordinator, "dt", None)
     if horizon is None or dt is None:
-        return {"forecast": []}
+        return {
+            "forecast": [],
+            "horizon_steps": 0,
+            "step_seconds": None,
+        }
 
     now = datetime.now(tz=timezone.utc)
     current = value(coordinator, room_name)
