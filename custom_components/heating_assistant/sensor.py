@@ -187,7 +187,17 @@ class TemperatureFilteredSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 class SetpointSensor(CoordinatorEntity, SensorEntity):
-    """Sensor reporting the active per-room setpoint [°C]."""
+    """Sensor reporting the active per-room setpoint [°C].
+
+    Exposes both the current scalar (used by entities cards) and a
+    timestamped ``forecast`` attribute that spans the MPC horizon, so
+    apexcharts dashboards can draw the setpoint reference in the forecast
+    region with the same ``data_generator`` pattern used for the predicted
+    trajectory.  The setpoint is the same value across the horizon (the
+    controller uses the current scalar as its z_ref), so the line is flat
+    by construction — but it stays anchored to the forecast time window
+    rather than relying on apexcharts's ``extend_to`` behaviour.
+    """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -212,14 +222,31 @@ class SetpointSensor(CoordinatorEntity, SensorEntity):
             return None
         return round(float(room.setpoint), 2)
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        return _build_horizon_forecast(
+            self._coordinator,
+            self._room_name,
+            field="setpoint",
+            value=_setpoint_value,
+        )
+
 
 class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):
-    """Shared base for the MPC soft-constraint bound sensors."""
+    """Shared base for the MPC soft-constraint bound sensors.
+
+    Exposes both the current scalar (used by entities cards) and a
+    timestamped ``forecast`` attribute that spans the MPC horizon.  The
+    band ``setpoint ± offset`` is constant unless the setpoint changes, so
+    the line is flat by construction — but it stays anchored to the
+    forecast time window, matching the predicted-temperature trace.
+    """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _sign: float = 1.0
+    _attr_field: str = "constraint"
 
     def __init__(
         self,
@@ -232,14 +259,25 @@ class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> Optional[float]:
-        room = self._coordinator.model.rooms.get(self._room_name)
-        if room is None:
-            return None
-        controller = getattr(self._coordinator, "controller", None)
-        offset = getattr(controller, "constraint_offset", None)
-        if offset is None:
-            return None
-        return round(float(room.setpoint) + self._sign * float(offset), 2)
+        bound = _constraint_bound(
+            self._coordinator, self._room_name, self._sign,
+        )
+        return None if bound is None else round(bound, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        sign = self._sign
+        field = self._attr_field
+
+        def _value(coord: Any, room_name: str) -> Optional[float]:
+            return _constraint_bound(coord, room_name, sign)
+
+        return _build_horizon_forecast(
+            self._coordinator,
+            self._room_name,
+            field=field,
+            value=_value,
+        )
 
 
 class ConstraintUpperSensor(_ConstraintSensorBase):
@@ -247,6 +285,7 @@ class ConstraintUpperSensor(_ConstraintSensorBase):
 
     _attr_icon = "mdi:arrow-up-bold-box-outline"
     _sign = 1.0
+    _attr_field = "constraint_upper"
 
     def __init__(
         self,
@@ -265,6 +304,7 @@ class ConstraintLowerSensor(_ConstraintSensorBase):
 
     _attr_icon = "mdi:arrow-down-bold-box-outline"
     _sign = -1.0
+    _attr_field = "constraint_lower"
 
     def __init__(
         self,
@@ -276,6 +316,78 @@ class ConstraintLowerSensor(_ConstraintSensorBase):
             f"Heating Assistant – {room_name} – Constraint Lower"
         )
         self._attr_unique_id = f"{DOMAIN}_{room_name}_constraint_lower"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for setpoint / constraint forecast attributes
+# ---------------------------------------------------------------------------
+
+def _setpoint_value(
+    coordinator: HeatingAssistantCoordinator, room_name: str,
+) -> Optional[float]:
+    room = coordinator.model.rooms.get(room_name)
+    if room is None:
+        return None
+    return round(float(room.setpoint), 2)
+
+
+def _constraint_bound(
+    coordinator: HeatingAssistantCoordinator,
+    room_name: str,
+    sign: float,
+) -> Optional[float]:
+    """Compute setpoint ± constraint_offset for a room, or None if unknown."""
+    room = coordinator.model.rooms.get(room_name)
+    if room is None:
+        return None
+    controller = getattr(coordinator, "controller", None)
+    offset = getattr(controller, "constraint_offset", None)
+    if offset is None:
+        return None
+    return float(room.setpoint) + sign * float(offset)
+
+
+def _build_horizon_forecast(
+    coordinator: HeatingAssistantCoordinator,
+    room_name: str,
+    field: str,
+    value: Any,
+) -> Dict[str, Any]:
+    """Build a per-step ``forecast`` attribute that spans the MPC horizon.
+
+    Produces ``horizon + 1`` entries (bridge at ``now`` + one per step)
+    so dashboard ``data_generator`` blocks can plot the value as a line
+    in the forecast region.  When ``value`` returns ``None`` we still emit
+    the entries so the chart renders a continuous trace — these scalars
+    (setpoint, constraint bounds) are not MPC outputs, so they remain
+    valid even on solver failure.
+    """
+    horizon = getattr(coordinator, "_horizon", None)
+    dt = getattr(coordinator, "dt", None)
+    if horizon is None or dt is None:
+        return {
+            "forecast": [],
+            "horizon_steps": 0,
+            "step_seconds": None,
+        }
+
+    now = datetime.now(tz=timezone.utc)
+    current = value(coordinator, room_name)
+    forecast: List[Dict[str, Any]] = []
+    # Bridge at "now" plus one entry per OCP step (k = 1 … N), so the
+    # line spans the same window as the temperature_forecast trace.
+    for k in range(int(horizon) + 1):
+        step_time = now + timedelta(seconds=float(dt) * k)
+        entry: Dict[str, Any] = {"time": step_time.isoformat()}
+        if current is not None:
+            entry[field] = round(current, 2)
+        forecast.append(entry)
+
+    return {
+        "forecast": forecast,
+        "horizon_steps": int(horizon),
+        "step_seconds": float(dt),
+    }
 
 
 # ---------------------------------------------------------------------------
