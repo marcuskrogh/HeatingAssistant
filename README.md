@@ -681,6 +681,16 @@ For each room declared in `configuration.yaml` the integration creates:
 > transient coordinator-update failures so dashboards keep rendering the
 > cached trajectory.
 
+> **Failure visibility.**  When the MPC solver fails the coordinator clears
+> the `_filtered` state and every `_forecast` series instead of fabricating
+> a thermal-model trajectory.  Those sensors report `unknown` until the next
+> successful solve, so the apexcharts trace shows a visible gap at the
+> failure point — `_measured` sensors keep flowing (they're independent of
+> the MPC), and applied heater commands stay safe (the last computed action
+> is held).  If a dashboard's predicted/heating-plan/solar-forecast line
+> disappears for one or more cycles, that's the signal a solve failed; the
+> integration log records the exception with a `WARNING`.
+
 One system-wide button entity is also created:
 
 | Entity ID | Platform | Action |

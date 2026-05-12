@@ -170,3 +170,29 @@ def test_constraint_sensors_return_none_without_controller():
     lower = ConstraintLowerSensor(coord, "living_room")
     assert upper.native_value is None
     assert lower.native_value is None
+
+
+# ── MPC-failure visibility ──────────────────────────────────────────────
+#
+# When the MPC solver fails the coordinator clears ``filtered_temperatures``
+# (set to {}) and the forecast/schedule lists (set to []).  The sensors
+# below must surface that as ``None`` so dashboards and the recorder show a
+# visible gap rather than echoing the last measurement or current power.
+
+
+def test_temperature_filtered_is_none_when_mpc_cleared_filtered_dict():
+    """Empty filtered_temperatures (set by the coordinator on MPC failure)
+    must produce a None state, not a fallback to the measurement."""
+    coord = _make_coordinator()
+    coord.filtered_temperatures = {}
+    assert TemperatureFilteredSensor(coord, "living_room").native_value is None
+
+
+def test_measured_sensors_still_populated_during_mpc_failure():
+    """Measurements are read independently of MPC and must keep flowing so
+    the historical part of the chart stays continuous up to "now"."""
+    coord = _make_coordinator(measured=20.1, heating_power=750.0, solar=33.0)
+    coord.filtered_temperatures = {}  # MPC cleared this
+    assert TemperatureMeasuredSensor(coord, "living_room").native_value == pytest.approx(20.1)
+    assert HeatingPowerMeasuredSensor(coord, "living_room").native_value == pytest.approx(750.0)
+    assert SolarGainMeasuredSensor(coord, "living_room").native_value == pytest.approx(33.0)

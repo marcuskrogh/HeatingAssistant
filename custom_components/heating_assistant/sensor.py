@@ -593,10 +593,10 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> Optional[float]:
         predictions = self._coordinator.predictions
         if not predictions:
-            room = self._coordinator.model.rooms.get(self._room_name)
-            if room is None:
-                return None
-            return round(room.temperature, 2)
+            # Surface failure: when the MPC has no trajectory (cold start or
+            # solver failure) leave the state "unknown" so the dashboard
+            # header and the recorder show a visible gap, not a fake value.
+            return None
         last = predictions[-1]
         temp = last.get(self._room_name)
         return round(temp, 2) if temp is not None else None
@@ -926,16 +926,14 @@ class HeatingPowerForecastSensor(CoordinatorEntity, SensorEntity):
         return True
 
     @property
-    def native_value(self) -> float:
+    def native_value(self) -> Optional[float]:
         schedule = self._coordinator.heating_schedule
-        if schedule:
-            return round(schedule[0].get(self._room_name, 0.0), 1)
-        current_heating = sum(
-            getattr(s, "current_power", 0.0)
-            for s in self._coordinator.heat_sources
-            if s.room == self._room_name
-        )
-        return round(current_heating, 1)
+        if not schedule:
+            # Surface failure: an empty schedule means the MPC produced no
+            # plan this cycle.  Leave the state "unknown" rather than
+            # echoing current heating power as if it were a real plan.
+            return None
+        return round(schedule[0].get(self._room_name, 0.0), 1)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -1012,11 +1010,13 @@ class SolarGainForecastSensor(CoordinatorEntity, SensorEntity):
         return True
 
     @property
-    def native_value(self) -> float:
+    def native_value(self) -> Optional[float]:
         solar_forecast = self._coordinator.solar_forecast
-        if solar_forecast:
-            return round(solar_forecast[0].get(self._room_name, 0.0), 1)
-        return round(self._coordinator.solar_gains.get(self._room_name, 0.0), 1)
+        if not solar_forecast:
+            # Surface failure: when no forecast is available leave the state
+            # "unknown" rather than echoing the current solar gain.
+            return None
+        return round(solar_forecast[0].get(self._room_name, 0.0), 1)
 
     @property
     def extra_state_attributes(self) -> dict:

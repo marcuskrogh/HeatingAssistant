@@ -567,16 +567,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 kalman_innovation: Optional[List[float]] = self.controller.last_innovation
             except Exception:
                 _LOGGER.warning(
-                    "Failed to compute MPC actions; using thermal-model fallback "
-                    "for visualisation data",
+                    "Failed to compute MPC actions; clearing forecast data so "
+                    "dashboards show a visible gap at the failure point",
                     exc_info=True,
                 )
-                # Keep previous actions if available; otherwise default to all-off.
+                # Keep previous actions if available; otherwise default to all-off
+                # so the applied heater commands stay safe.
                 if not self.actions:
                     self.actions = {src.name: 0.0 for src in self.heat_sources}
 
-                # Build outdoor / solar forecasts so they are available for the
-                # thermal-model prediction below.
+                # Pass the weather forecast through (it's read independently of
+                # the MPC), but clear all forecast/filtered fields so the
+                # visualization sensors expose "unknown" instead of fabricating
+                # a thermal-model trajectory.  This makes failures plot as a
+                # visible gap rather than a silent fake forecast.
                 if outdoor_forecast:
                     self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
                     if len(self.outdoor_forecast) < self._horizon:
@@ -584,45 +588,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
                         )
                 else:
-                    self.outdoor_forecast = [outdoor_temp] * self._horizon
-                self.solar_forecast = [
-                    dict(self.solar_gains) for _ in range(self._horizon + 1)
-                ]
-
-                # Build a per-room heating schedule from the current (or fallback)
-                # actions so HeatingPowerForecastSensor has meaningful data.
-                fallback_step: Dict[str, float] = {
-                    name: 0.0 for name in self.model.room_names
-                }
-                for src in self.heat_sources:
-                    frac = float(self.actions.get(src.name, 0.0))
-                    fallback_step[src.room] += src.thermal_power(max(0.0, frac), outdoor_temp)
-                self.heating_schedule = [
-                    dict(fallback_step) for _ in range(self._horizon)
-                ]
-
-                # Simulate a temperature trajectory with the simple RC thermal model
-                # so TemperatureForecastSensor shows a real trend instead of nothing.
-                solar_seq = [dict(self.solar_gains) for _ in range(self._horizon)]
-                try:
-                    self.predictions = self.model.predict(
-                        horizon=self._horizon,
-                        dt=self.dt,
-                        heat_schedule=self.heating_schedule,
-                        outdoor_temps=self.outdoor_forecast,
-                        solar_gain_schedule=solar_seq,
-                    )
-                except Exception:
-                    _LOGGER.debug(
-                        "Thermal-model fallback prediction failed; "
-                        "forecast entities will show no future trajectory",
-                        exc_info=True,
-                    )
-                    self.predictions = []
-
-                # No EKF update happened — fall back to the raw measurements
-                # so the filtered sensor still tracks something sensible.
-                self.filtered_temperatures = dict(self.measured_temperatures)
+                    self.outdoor_forecast = []
+                self.predictions = []
+                self.heating_schedule = []
+                self.solar_forecast = []
+                self.filtered_temperatures = {}
                 kalman_innovation = None
 
             # 5. Store heat-flow breakdown (independent of MPC solve success)

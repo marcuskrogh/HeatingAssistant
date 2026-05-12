@@ -163,10 +163,13 @@ def test_outdoor_temperature_forecast_exposes_forecast_attribute():
     assert attrs["horizon_steps"] == 2
 
 
-# ── Empty-data fallbacks ───────────────────────────────────────────────
+# ── Empty data surfaces as "unknown" so failures are visible ──────────
 
 
-def test_temperature_forecast_falls_back_to_current_temperature():
+def test_temperature_forecast_reports_unknown_when_predictions_empty():
+    """The sensor stays available (so dashboards keep rendering attributes)
+    but the state is ``None`` — that's what tells the operator the MPC has
+    no trajectory."""
     room = SimpleNamespace(temperature=19.42, setpoint=21.0, windows=[])
     coord = SimpleNamespace(
         predictions=[],
@@ -183,10 +186,10 @@ def test_temperature_forecast_falls_back_to_current_temperature():
     )
     sensor = TemperatureForecastSensor(coord, "living_room")
     assert sensor.available is True
-    assert sensor.native_value == pytest.approx(19.42)
+    assert sensor.native_value is None
 
 
-def test_heating_power_forecast_falls_back_to_current_heating():
+def test_heating_power_forecast_reports_unknown_when_schedule_empty():
     room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
     coord = SimpleNamespace(
         predictions=[],
@@ -205,4 +208,24 @@ def test_heating_power_forecast_falls_back_to_current_heating():
     )
     sensor = HeatingPowerForecastSensor(coord, "living_room")
     assert sensor.available is True
-    assert sensor.native_value == pytest.approx(412.5)
+    assert sensor.native_value is None
+
+
+def test_solar_gain_forecast_reports_unknown_when_solar_forecast_empty():
+    room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+    coord = SimpleNamespace(
+        predictions=[],
+        heating_schedule=[],
+        solar_forecast=[],
+        outdoor_forecast=[],
+        solar_gains={"living_room": 60.0},
+        heat_sources=[],
+        model=SimpleNamespace(rooms={"living_room": room}),
+        outdoor_temp=5.0,
+        dt=900,
+        controller=SimpleNamespace(constraint_offset=2.0),
+        last_update_success=False,
+    )
+    sensor = SolarGainForecastSensor(coord, "living_room")
+    assert sensor.available is True
+    assert sensor.native_value is None

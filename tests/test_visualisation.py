@@ -451,11 +451,12 @@ class TestOutdoorForecast:
 
 
 # ---------------------------------------------------------------------------
-# Tests: visualisation sensor fallback values
+# Tests: forecast sensors surface failure (or first-cycle absence) as
+# ``unknown`` instead of echoing current state, so dashboards show a gap.
 # ---------------------------------------------------------------------------
 
-class TestVisualisationSensorFallbacks:
-    def test_temperature_forecast_uses_current_temperature_before_first_plan(self):
+class TestForecastSensorsReportUnknownOnEmpty:
+    def test_temperature_forecast_is_none_before_first_plan(self):
         room = SimpleNamespace(temperature=20.37, setpoint=21.0, windows=[])
         coordinator = SimpleNamespace(
             predictions=[],
@@ -472,9 +473,9 @@ class TestVisualisationSensorFallbacks:
 
         sensor = TemperatureForecastSensor(coordinator, "living_room")
 
-        assert sensor.native_value == pytest.approx(20.37)
+        assert sensor.native_value is None
 
-    def test_heating_plan_uses_current_heating_before_first_plan(self):
+    def test_heating_power_forecast_is_none_before_first_plan(self):
         room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
         coordinator = SimpleNamespace(
             heating_schedule=[],
@@ -493,9 +494,9 @@ class TestVisualisationSensorFallbacks:
 
         sensor = HeatingPowerForecastSensor(coordinator, "living_room")
 
-        assert sensor.native_value == pytest.approx(432.1)
+        assert sensor.native_value is None
 
-    def test_solar_forecast_uses_current_solar_gain_before_first_plan(self):
+    def test_solar_gain_forecast_is_none_before_first_plan(self):
         room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
         coordinator = SimpleNamespace(
             solar_forecast=[],
@@ -511,7 +512,7 @@ class TestVisualisationSensorFallbacks:
 
         sensor = SolarGainForecastSensor(coordinator, "living_room")
 
-        assert sensor.native_value == pytest.approx(87.6)
+        assert sensor.native_value is None
 
 
 # ---------------------------------------------------------------------------
@@ -770,6 +771,16 @@ class TestCoordinatorUpdateResilience:
         coordinator.outdoor_forecast = []
         coordinator.solar_forecast = []
         coordinator.heating_schedule = []
+        coordinator.measured_temperatures = {"studio": 15.0}
+        coordinator.filtered_temperatures = {"studio": 15.0}
+        coordinator._room_schedule = {}
+        coordinator._base_setpoint = {}
+        coordinator._effective_setpoint = {}
+        coordinator._schedule_disabled = {}
+        coordinator._schedule_enabled = {}
+        coordinator._weather_entity = None
+        coordinator._read_cloud_cover_now = MagicMock(return_value=None)
+        coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
         coordinator._read_outdoor_temp = MagicMock(return_value=4.0)
         coordinator._async_read_weather_forecast = AsyncMock(return_value=None)
@@ -781,6 +792,7 @@ class TestCoordinatorUpdateResilience:
         coordinator.controller.solar_forecast = [{"studio": 12.0}]
         coordinator.controller.heating_schedule = [{"studio": 900.0}]
         coordinator.controller.last_innovation = [0.0]
+        coordinator.controller.filtered_temperatures = {"studio": 15.05}
 
         result = await coordinator._async_update_data()
 
@@ -792,7 +804,13 @@ class TestCoordinatorUpdateResilience:
         assert len(coordinator.history_buffer) == 1
 
     @pytest.mark.asyncio
-    async def test_compute_failure_keeps_forecast_entities_available(self):
+    async def test_compute_failure_clears_forecasts_to_make_failure_visible(self):
+        """When the MPC solver fails the coordinator clears the forecast and
+        filtered fields so dashboards show a visible gap at the failure
+        point instead of a fake thermal-model trajectory.  Applied actions
+        and the weather forecast (read independently) are preserved so the
+        system stays in a safe state and the outdoor chart keeps rendering.
+        """
         model = make_single_room_model()
         source = ElectricHeater("heater", "studio", 2000)
 
@@ -813,6 +831,16 @@ class TestCoordinatorUpdateResilience:
         coordinator.outdoor_forecast = []
         coordinator.solar_forecast = []
         coordinator.heating_schedule = []
+        coordinator.measured_temperatures = {"studio": 15.0}
+        coordinator.filtered_temperatures = {"studio": 15.1}
+        coordinator._room_schedule = {}
+        coordinator._base_setpoint = {}
+        coordinator._effective_setpoint = {}
+        coordinator._schedule_disabled = {}
+        coordinator._schedule_enabled = {}
+        coordinator._weather_entity = None
+        coordinator._read_cloud_cover_now = MagicMock(return_value=None)
+        coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
         coordinator._read_outdoor_temp = MagicMock(return_value=4.0)
         coordinator._async_read_weather_forecast = AsyncMock(
@@ -824,32 +852,23 @@ class TestCoordinatorUpdateResilience:
 
         result = await coordinator._async_update_data()
 
+        # Safe-state actions and the weather forecast pass through.
         assert result["actions"] == {"heater": 0.0}
         assert result["outdoor_forecast"] == [3.0, 2.5, 2.0]
-        assert len(result["solar_forecast"]) == coordinator._horizon + 1
-        assert all(
-            step["studio"] == pytest.approx(0.0, abs=0.1)
-            for step in result["solar_forecast"]
-        )
+
+        # MPC-dependent forecast fields are cleared so the gap is visible.
+        assert result["predictions"] == []
+        assert result["heating_schedule"] == []
+        assert result["solar_forecast"] == []
+        assert coordinator.filtered_temperatures == {}
         assert len(coordinator.history_buffer) == 1
 
-        # With the thermal-model fallback, predictions and heating_schedule must
-        # be non-empty (N steps, one per horizon step) so that forecast entities
-        # show a meaningful trajectory even when the MPC solver fails.
-        assert len(result["predictions"]) == coordinator._horizon
-        assert all("studio" in step for step in result["predictions"])
-        assert len(result["heating_schedule"]) == coordinator._horizon
-        # Heater fraction was 0 → heating power is 0 W
-        assert all(
-            step["studio"] == pytest.approx(0.0, abs=0.1)
-            for step in result["heating_schedule"]
-        )
-
     @pytest.mark.asyncio
-    async def test_compute_failure_with_active_heater_shows_warming_trend(self):
-        """When MPC fails and a heater was previously active, the thermal-model fallback
-        should show a warming trend in the predicted temperature trajectory."""
-        model = make_single_room_model()  # studio room at a cold initial temperature
+    async def test_compute_failure_preserves_safe_actions(self):
+        """A previously active heater's commanded fraction is preserved when
+        the solver fails — clearing the forecast does not flip controls off.
+        """
+        model = make_single_room_model()
         source = ElectricHeater("heater", "studio", 2000)
 
         coordinator = object.__new__(HeatingAssistantCoordinator)
@@ -870,6 +889,16 @@ class TestCoordinatorUpdateResilience:
         coordinator.outdoor_forecast = []
         coordinator.solar_forecast = []
         coordinator.heating_schedule = []
+        coordinator.measured_temperatures = {"studio": 15.0}
+        coordinator.filtered_temperatures = {"studio": 15.0}
+        coordinator._room_schedule = {}
+        coordinator._base_setpoint = {}
+        coordinator._effective_setpoint = {}
+        coordinator._schedule_disabled = {}
+        coordinator._schedule_enabled = {}
+        coordinator._weather_entity = None
+        coordinator._read_cloud_cover_now = MagicMock(return_value=None)
+        coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
         coordinator._read_outdoor_temp = MagicMock(return_value=0.0)
         coordinator._async_read_weather_forecast = AsyncMock(return_value=None)
@@ -880,19 +909,12 @@ class TestCoordinatorUpdateResilience:
         result = await coordinator._async_update_data()
 
         assert result["actions"] == {"heater": 0.8}
-
-        # Predictions must cover the full horizon
-        assert len(result["predictions"]) == coordinator._horizon
-        assert all("studio" in p for p in result["predictions"])
-
-        # With 80% of a 2000W heater heating a cold room, temperature should rise
-        initial_temp = model.rooms["studio"].temperature  # 15°C
-        assert result["predictions"][0]["studio"] > initial_temp
-
-        # Heating schedule must reflect the active heater's thermal output
-        assert len(result["heating_schedule"]) == coordinator._horizon
-        for step in result["heating_schedule"]:
-            assert step["studio"] > 0.0  # heater is on, power > 0
+        # Even with an active heater the forecast stays empty — failure must
+        # remain visible, not be papered over with a thermal-model trajectory.
+        assert result["predictions"] == []
+        assert result["heating_schedule"] == []
+        assert result["solar_forecast"] == []
+        assert coordinator.filtered_temperatures == {}
 
 
 # ---------------------------------------------------------------------------
