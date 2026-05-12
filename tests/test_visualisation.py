@@ -804,7 +804,7 @@ class TestCoordinatorUpdateResilience:
         assert len(coordinator.history_buffer) == 1
 
     @pytest.mark.asyncio
-    async def test_missing_readings_clear_measured_temperature_for_room(self):
+    async def test_missing_readings_clear_measured_temperatures(self):
         model = make_single_room_model()
         source = ElectricHeater("heater", "studio", 2000)
 
