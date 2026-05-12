@@ -589,7 +589,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
                         )
                 else:
-                    self.outdoor_forecast = []
+                    self.outdoor_forecast = [outdoor_temp] * self._horizon
                 self.predictions = []
                 self.heating_schedule = []
                 self.solar_forecast = []

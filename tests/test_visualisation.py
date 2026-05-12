@@ -961,6 +961,7 @@ class TestCoordinatorUpdateResilience:
         result = await coordinator._async_update_data()
 
         assert result["actions"] == {"heater": 0.8}
+        assert result["outdoor_forecast"] == [0.0, 0.0, 0.0, 0.0]
         # Even with an active heater the forecast stays empty — failure must
         # remain visible, not be papered over with a thermal-model trajectory.
         assert result["predictions"] == []
