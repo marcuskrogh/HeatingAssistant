@@ -2897,7 +2897,7 @@ cards:
         data_generator: |
           const fc = entity.attributes.forecast;
           if (!fc) return [];
-          return fc.map(f => [new Date(f.time).getTime(), f.constraint_upper]);
+          return fc.map(f => [new Date(f.time).getTime(), f.constraint_upper ?? null]);
         yaxis_id: temp
         color: '#1565C0'
         stroke_width: 1
