@@ -869,7 +869,8 @@ class HeatingMPCController:
         y_hat_prior = self._system.hm(x_prior, self._u_prev, d_traj[0], p, 0.0)
         self._last_innovation = (y - y_hat_prior).tolist()
         x_hat, _ = self._ekf.update(y, self._u_prev, d_traj[0], p)
-        self._system.x = x_hat.tolist()
+        n_rooms = self._system.nym
+        self._system._offset_state = np.array(x_hat[n_rooms:], dtype=float)
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
         _t0 = time.perf_counter()
