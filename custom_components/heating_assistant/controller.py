@@ -11,10 +11,11 @@ HouseThermalSDE(ContinuousDiscreteModel)
     Wraps HouseModel + list of HeatSource objects as a nonlinear
     continuous-discrete SDE.
 
-    State        x = [T₁, …, Tₙ]                   (room temperatures, °C)
+    State        x = [T₁, …, Tₙ, b₁, …, bₙ]       (room temperatures + sensor offsets, °C)
     Input        u = [f₁, …, fₘ]                   (setpoint fractions, ∈ [0, 1])
     Disturbance  d = [T_out, Q_sol,1, …, Q_sol,n]  (°C and W)
-    Output       z = ym = x                         (full-state observation)
+    Output       z = [T₁, …, Tₙ]                   (controlled output, physical temperatures)
+                 ym = [T₁+b₁, …, Tₙ+bₙ]            (measured temperature incl. offset)
 
     Itô SDE:
         dx(t) = f(x, u, d, p, t) dt + σ_w I dw(t),  dw ~ N(0, I dt)
@@ -97,10 +98,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     where
         f(x, u, d, p, t) = F x + G_u(d[0]) u + G_d d
-        sigma             = sigma_w * I_n   (isotropic process noise)
+        sigma             = diag(sigma_w*I_n, sigma_b*I_n)
 
     and the observation model is:
-        ym(tₖ) = hm(x) = x   (full-state measurement)
+        ym(tₖ) = hm(x) = T + b
         Rm = sigma_v² * I_n
 
     The nonlinearity comes from G_u(T_out): for heat pumps the delivered
@@ -119,6 +120,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     dt         : measurement sampling interval [s]
     sigma_w    : process-noise standard deviation [K/√s].  Default: 0.1.
     sigma_v    : measurement-noise standard deviation [K].  Default: 0.5.
+    sigma_b    : offset-state process-noise standard deviation [K/√s].
+                 Small values make offset adaptation slow/stable. Default: 0.002.
     n_int_steps: Euler sub-steps per sampling interval for EKF/OCP.
                  Default: 10.
     k_sigmoid  : Base sharpness of the smooth sigmoid activation used for
@@ -141,6 +144,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         dt: float,
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
+        sigma_b: float = 0.002,
         n_int_steps: int = 10,
         identifiable_sources: Optional[List[int]] = None,
         theta: Optional[np.ndarray] = None,
@@ -151,6 +155,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._dt = dt
         self._sigma_w = sigma_w
         self._sigma_v = sigma_v
+        self._sigma_b = sigma_b
         self._n_int_steps = n_int_steps
         self._k_sigmoid = k_sigmoid
 
@@ -163,6 +168,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             name: i for i, name in enumerate(self._room_list)
         }
         n = len(self._room_list)
+        self._n_rooms = n
+        self._offset_state: np.ndarray = np.zeros(n, dtype=float)
 
         # Capacitance vector C_cap[i] = Cᵢ  [J/K]
         self._C_cap = np.array(
@@ -186,7 +193,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def nx(self) -> int:
-        return len(self._room_list)
+        return 2 * self._n_rooms
 
     @property
     def nu(self) -> int:
@@ -202,11 +209,11 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def nz(self) -> int:
-        return self.nx
+        return self._n_rooms
 
     @property
     def nym(self) -> int:
-        return self.nx
+        return self._n_rooms
 
     @property
     def Rm(self) -> np.ndarray:
@@ -216,7 +223,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     def _build_G_u(self, outdoor_temp: float) -> np.ndarray:
         """Input gain matrix G_u(T_out) ∈ ℝⁿˣᵐ."""
-        n, m = self.nx, self.nu
+        n, m = self._n_rooms, self.nu
         G_u = np.zeros((n, m))
         for j, src in enumerate(self._sources):
             i = self._room_idx[src.room]
@@ -255,12 +262,13 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         We extract q_int and alpha (heater scales) from the parameter vector and apply them.
         """
         outdoor_temp = float(d[0])
+        n = self._n_rooms
+        T = x[:n]
 
         # Use p if provided, otherwise fall back to self._theta
         theta = p if len(p) > 0 else self._theta
 
         # Extract internal gains and heater scales from parameter vector
-        n = self.nx
         if len(theta) >= 3 * n:
             # theta structure: [log_mass (n), log_r (n), q_int (n), log_alpha (...), log_r_ij (...)]
             q_int = theta[2*n : 3*n]
@@ -292,7 +300,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # * Heating-only sources: standard linear thermal_power(u, T_out),
         #   with u clamped to [0, 1] so that negative OCP values (which the
         #   bounds prevent in practice) never produce spurious cooling.
-        heat_contrib = np.zeros(self.nx)
+        heat_contrib = np.zeros(n)
         for j, src in enumerate(self._sources):
             i = self._room_idx[src.room]
             u_j = float(u_scaled[j])
@@ -306,7 +314,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                     src.thermal_power(max(0.0, u_j), outdoor_temp) / self._C_cap[i]
                 )
 
-        return self._F @ x + heat_contrib + self._G_d @ d_augmented
+        dT = self._F @ T + heat_contrib + self._G_d @ d_augmented
+        db = np.zeros(n)
+        return np.concatenate([dT, db])
 
     def sigma(
         self,
@@ -322,7 +332,11 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         The CD-EKF computes G @ Gᵀ = sigma_w² * I for the continuous
         Riccati equation.
         """
-        return self._sigma_w * np.eye(self.nx)
+        n = self._n_rooms
+        sig = np.zeros((self.nx, self.nw))
+        sig[:n, :n] = self._sigma_w * np.eye(n)
+        sig[n:, n:] = self._sigma_b * np.eye(n)
+        return sig
 
     def g(
         self,
@@ -332,8 +346,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """Controlled output z = x (room temperatures)."""
-        return x.copy()
+        """Controlled output z = T (physical room temperatures)."""
+        return x[: self._n_rooms].copy()
 
     def gm(
         self,
@@ -343,8 +357,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """Continuous-time output gm = x (room temperatures, same as hm)."""
-        return x.copy()
+        """Continuous-time output gm = T (physical room temperatures)."""
+        return x[: self._n_rooms].copy()
 
     def hm(
         self,
@@ -354,8 +368,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float = 0.0,
     ) -> np.ndarray:
-        """Measurement function ym = x (full-state observation)."""
-        return x.copy()
+        """Measurement function ym = T + b (sensor-biased room temperatures)."""
+        n = self._n_rooms
+        return x[:n] + x[n:]
 
     # ── Analytic Jacobians (override default FD for efficiency) ──────────
 
@@ -367,8 +382,11 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """∂f/∂x = F (constant; does not depend on state or inputs)."""
-        return self._F.copy()
+        """∂f/∂x for x = [T, b]."""
+        n = self._n_rooms
+        J = np.zeros((2 * n, 2 * n))
+        J[:n, :n] = self._F
+        return J
 
     def dhmdx(
         self,
@@ -378,21 +396,30 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float = 0.0,
     ) -> np.ndarray:
-        """∂hm/∂x = I (full-state observation)."""
-        return np.eye(self.nx)
+        """∂hm/∂x = [I  I] for ym = T + b."""
+        n = self._n_rooms
+        H = np.zeros((n, 2 * n))
+        H[:, :n] = np.eye(n)
+        H[:, n:] = np.eye(n)
+        return H
 
     # ── Application-layer helpers ────────────────────────────────────────
 
     @property
     def x(self) -> list[float]:
-        """Current room temperatures as a list of floats."""
-        return [self._model.rooms[name].temperature
-                for name in self._room_list]
+        """Current augmented state [T, b] as a list of floats."""
+        temps = [self._model.rooms[name].temperature for name in self._room_list]
+        return temps + self._offset_state.tolist()
 
     @x.setter
     def x(self, val: list[float]) -> None:
+        n = self._n_rooms
+        if len(val) < n:
+            raise ValueError(f"Expected at least {n} state values, got {len(val)}")
         for i, name in enumerate(self._room_list):
             self._model.rooms[name].temperature = float(val[i])
+        if len(val) >= 2 * n:
+            self._offset_state = np.array(val[n:2 * n], dtype=float)
 
     @property
     def x_ref(self) -> np.ndarray:
@@ -434,6 +461,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             gain += float(self._model.rooms[name].internal_gain)
             d[slot] = gain
         return d
+
+    @property
+    def room_offsets(self) -> Dict[str, float]:
+        """Estimated measurement offsets b for each room [°C]."""
+        return {
+            name: float(self._offset_state[i])
+            for i, name in enumerate(self._room_list)
+        }
 
     def heating_powers(
         self,
@@ -511,6 +546,7 @@ class HeatingMPCController:
                         SP − δ ≤ z ≤ SP + δ.  Default: 2.0 °C.
     sigma_w           : process-noise std dev for the SDE / EKF [K/√s].
     sigma_v           : measurement-noise std dev [K].
+    sigma_b           : offset-state process-noise std dev [K/√s].
     n_int_steps       : Euler sub-steps per interval in EKF / OCP.
     """
 
@@ -529,6 +565,7 @@ class HeatingMPCController:
         terminal_weight: float = 100.0,
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
+        sigma_b: float = 0.002,
         n_int_steps: int = 10,
     ) -> None:
         self._sources = heat_sources
@@ -559,20 +596,24 @@ class HeatingMPCController:
         self._system = HouseThermalSDE(
             model, heat_sources, dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
+            sigma_b=sigma_b,
             n_int_steps=n_int_steps,
         )
         n_x = self._system.nx
         n_u = self._system.nu
+        n_z = self._system.nz
 
         # ── EKF: initialise from current room temperatures ──────────────
         x0 = np.array(self._system.x)
         P0 = np.eye(n_x)  # initial state uncertainty [K²]
+        n_rooms = self._system.nym
+        P0[n_rooms:, n_rooms:] *= 4.0  # offsets start more uncertain than temperatures
         self._ekf = ContinuousDiscreteEKF(
             self._system, x0, P0, ekf_dt, n_steps=n_int_steps
         )
 
         # ── OCP cost matrices ───────────────────────────────────────────
-        Q = np.eye(n_x)                      # stage output tracking
+        Q = np.eye(n_z)                      # stage output tracking
         R = energy_weight * np.eye(n_u)      # input cost
         S = (smoothing_weight * np.eye(n_u)
              if smoothing_weight > 0.0 else None)  # ROM penalty
@@ -660,7 +701,21 @@ class HeatingMPCController:
         constructed with), so callers always get a usable dict.
         """
         x_hat = self._ekf.x_hat
-        return {name: float(x_hat[i]) for i, name in enumerate(self._system._room_list)}
+        n = self._system.nym
+        return {
+            name: float(x_hat[i])
+            for i, name in enumerate(self._system._room_list[:n])
+        }
+
+    @property
+    def temperature_offsets(self) -> Dict[str, float]:
+        """Estimated per-room measurement offsets b after the latest EKF update."""
+        x_hat = self._ekf.x_hat
+        n = self._system.nym
+        return {
+            name: float(x_hat[n + i])
+            for i, name in enumerate(self._system._room_list[:n])
+        }
 
     @property
     def predictions(self) -> List[Dict[str, float]]:
@@ -776,7 +831,13 @@ class HeatingMPCController:
         self._solar_forecast = [dict(s) for s in solar_seq]
 
         # ── Current measurement y = room temperatures ────────────────────
-        y = np.array(self._system.x)
+        y = np.array(
+            [
+                self._system._model.rooms[name].temperature
+                for name in self._system._room_list
+            ],
+            dtype=float,
+        )
 
         # ── Update setpoint reference in OCP (setpoints may have changed) ──
         z_ref = self._system.x_ref
@@ -808,6 +869,7 @@ class HeatingMPCController:
         y_hat_prior = self._system.hm(x_prior, self._u_prev, d_traj[0], p, 0.0)
         self._last_innovation = (y - y_hat_prior).tolist()
         x_hat, _ = self._ekf.update(y, self._u_prev, d_traj[0], p)
+        self._system.x = x_hat.tolist()
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
         _t0 = time.perf_counter()
