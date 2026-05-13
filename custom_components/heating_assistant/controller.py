@@ -317,6 +317,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                 )
 
         dT = self._F @ T + heat_contrib + self._G_d @ d_augmented
+        if not self._augment_offsets:
+            return dT
         db = np.zeros(n)
         return np.concatenate([dT, db])
 
@@ -643,6 +645,7 @@ class HeatingMPCController:
         # horizon, improving steady-state tracking without increasing the
         # stage cost (which would sacrifice energy efficiency mid-horizon).
         P = terminal_weight * Q
+        ocp_n_steps = min(n_int_steps, 3)
 
         # Reference and bounds for the OCP
         z_ref = self._control_system.x_ref.copy()
@@ -659,7 +662,7 @@ class HeatingMPCController:
             z_ref=z_ref,
             u_min=u_min,
             u_max=u_max,
-            n_steps=n_int_steps,
+            n_steps=ocp_n_steps,
             dt=dt,
             solver="SLSQP",
         )
