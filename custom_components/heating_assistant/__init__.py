@@ -71,6 +71,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.reload import async_integration_yaml_config
 from homeassistant.helpers.service import async_register_admin_service
+from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_CONNECTIONS,
@@ -141,6 +142,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
+    HISTORY_BUFFER_SIZE,
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
     SERVICE_SET_SCHEDULE_ENABLED,
@@ -418,6 +420,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for room, value in reload_state.get("schedule_enabled", {}).items():
             if room in coordinator._schedule_enabled:
                 coordinator._schedule_enabled[room] = value
+    else:
+        # No in-memory state means this is a full HA restart (not a reload).
+        # Try to restore the history buffer from persistent storage so that
+        # the parameter estimator does not have to wait for another 30+ steps.
+        try:
+            store = Store(
+                hass,
+                version=1,
+                key=f"{DOMAIN}_history_{entry.entry_id}",
+            )
+            stored_history = await store.async_load()
+            if stored_history and isinstance(stored_history, list):
+                coordinator._history_buffer.extend(
+                    stored_history[-HISTORY_BUFFER_SIZE:]
+                )
+                _LOGGER.debug(
+                    "Restored %d history steps from persistent storage",
+                    len(coordinator._history_buffer),
+                )
+        except Exception:
+            _LOGGER.warning(
+                "Heating Assistant: failed to load persisted history buffer",
+                exc_info=True,
+            )
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -456,6 +482,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "room_enabled": dict(coordinator._room_enabled),
                 "schedule_enabled": dict(coordinator._schedule_enabled),
             }
+            # Persist the history buffer to HA's persistent storage so that it
+            # survives a full Home Assistant restart (not just an in-memory reload).
+            try:
+                store = Store(
+                    hass,
+                    version=1,
+                    key=f"{DOMAIN}_history_{entry.entry_id}",
+                )
+                await store.async_save(list(coordinator._history_buffer))
+            except Exception:
+                _LOGGER.warning(
+                    "Heating Assistant: failed to persist history buffer",
+                    exc_info=True,
+                )
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unloaded
 
@@ -588,17 +628,31 @@ def _register_services(hass: HomeAssistant) -> None:
             )
         else:
             lines = []
+            estimated_internal_gains = result.get("estimated_internal_gains", {})
             for room, params in result["estimated_params"].items():
                 curr = result["current_params"][room]
+                ig = estimated_internal_gains.get(room)
+                ig_str = f"\n  internal\\_gain: {ig:+.1f} W" if ig is not None else ""
                 lines.append(
                     f"**{room}**\n"
                     f"  thermal\\_mass: {params['thermal_mass']:,.0f} J/K "
                     f"(was {curr['thermal_mass']:,.0f})\n"
                     f"  r\\_external: {params['r_external']:.5f} K/W "
                     f"(was {curr['r_external']:.5f})"
+                    f"{ig_str}"
                 )
+            identifiable_sources = result.get("identifiable_sources", [])
+            heater_scales = result.get("estimated_heater_scales", {})
+            if identifiable_sources:
+                scale_lines = [
+                    f"  {name}: {heater_scales[name]:.3f}×"
+                    for name in identifiable_sources
+                    if name in heater_scales
+                ]
+                if scale_lines:
+                    lines.append("**Heater power-scale factors:**\n" + "\n".join(scale_lines))
             applied_str = (
-                "Parameters applied to live model."
+                "Parameters applied and persisted (survive restart)."
                 if apply_params
                 else "Dry run – parameters NOT applied."
             )

@@ -3079,6 +3079,184 @@ cards:
 
 ---
 
+## 13.18 Estimated parameters – persistence and dashboard card
+
+This section describes how the integration persists identified thermal parameters across restarts and provides a ready-made Lovelace card to inspect them.
+
+---
+
+### 13.18.1 What parameters are estimated and why they matter
+
+When you run `heating_assistant.estimate_parameters_ml` (or press the **Estimate Parameters** button), the Kalman-filter ML estimator identifies up to four classes of parameter for each room / heat source in a single joint optimisation:
+
+| Parameter | Entity attribute | Physical meaning |
+|-----------|-----------------|-----------------|
+| `thermal_mass` | `rooms.<room>.thermal_mass` | Energy required to heat the room by 1 K [J/K].  Determines how quickly the room heats up and how long it stays warm. |
+| `r_external` | `rooms.<room>.r_external` | Thermal resistance to the outdoors [K/W].  Smaller = leakier room (more heating required in cold weather). |
+| `internal_gain` | `rooms.<room>.internal_gain` | Steady-state background heat input not from the controllable source [W] — body heat, appliances, solar leakage.  Non-zero offset removes a systematic bias. |
+| `power_scale` | `sources.<source>.power_scale` | Multiplier on the nominal heat-source rating [–].  1.0 = exactly as rated; 1.3 = delivers 30 % more heat than the nominal specification. |
+
+The validity of the first two parameters is summarised by the **Parameter Confidence** sensor (0–100 %).
+
+---
+
+### 13.18.2 Persistence across Home Assistant restarts
+
+Estimated parameters are **automatically persisted** in the integration's config-entry data (`entry.data["estimated_params"]`) every time a successful ML estimation is applied.  On the next full HA restart the coordinator reads this snapshot before building the MPC controller, so you start exactly where you left off — no waiting for 30+ more history steps.
+
+The history buffer is also saved to HA's [Storage helper](https://developers.home-assistant.io/docs/dev_101_services) (`<config>/storage/heating_assistant_history_<entry_id>`) on clean shutdown, so the estimator has data to work with immediately after a restart.
+
+> **Note:** Parameters are stored per config-entry.  If you delete and re-create the integration entry you will lose the persisted estimation and need to start over.
+
+---
+
+### 13.18.3 Resetting to defaults
+
+Press the **Reset Parameters** button (`button.heating_assistant_reset_parameters`) to discard the persisted estimation and revert every room and source to its configured (YAML / default) values.  The snapshot is removed from `entry.data` so subsequent restarts also use the defaults.
+
+Use this when:
+- A parameter set turned out to be wrong (e.g. estimated from an atypical heating experiment).
+- You want to re-run the estimation after changing the physical setup (e.g. new radiator, improved insulation).
+
+---
+
+### 13.18.4 New sensor entities
+
+Three new sensor entities are created by this feature:
+
+#### `sensor.heating_assistant_estimated_parameters_status`
+
+System-wide anchor sensor.  State is `"estimated"` when a persisted snapshot exists and `"default"` otherwise.
+
+| Attribute | Description |
+|-----------|-------------|
+| `rooms` | Dict — per-room `{thermal_mass, r_external, internal_gain, is_estimated}` |
+| `sources` | Dict — per-source `{power_scale, is_estimated}` |
+| `connections` | Dict — per-pair `{r_value, is_estimated}` |
+| `estimated_at` | ISO-8601 timestamp of the last successful run |
+| `log_likelihood` | Log-likelihood value at the optimum |
+| `n_rooms_estimated` | Number of rooms whose parameters were estimated |
+| `n_sources_estimated` | Number of sources whose scale was estimated |
+
+#### `sensor.heating_assistant_<source>_heater_scale`
+
+Per heat source.  State is the power-scale factor as a percentage (100 % = nominal, 130 % = 30 % above nominal).
+
+| Attribute | Description |
+|-----------|-------------|
+| `power_scale` | Raw scale factor |
+| `max_power` | Nominal maximum thermal power [W] |
+| `is_estimated` | `true` if this value came from an ML run |
+| `estimated_at` | ISO-8601 timestamp |
+
+#### `sensor.heating_assistant_<room>_parameter_confidence` (extended)
+
+Two new attributes were added to the existing confidence sensor:
+
+| New attribute | Description |
+|---------------|-------------|
+| `internal_gain` | Currently active internal-gain estimate [W] |
+| `is_estimated` | `true` if thermal_mass/r_external came from ML estimation |
+| `estimated_at` | ISO-8601 timestamp |
+
+---
+
+### 13.18.5 Lovelace card – estimated parameters overview
+
+The following card gives a single-glance view of all estimated parameters, their physical validity, and the estimation provenance.  Replace `living_room` and `heater` with your actual room/source names.
+
+```yaml
+type: vertical-stack
+cards:
+
+  # ── Status banner ────────────────────────────────────────────────────────
+  - type: entities
+    title: Estimated Parameters
+    entities:
+      - entity: sensor.heating_assistant_estimated_parameters_status
+        name: Status
+        secondary_info: last-changed
+      - type: divider
+
+      # ── Per-room confidence scores ───────────────────────────────────────
+      # Duplicate this block for each room in your configuration.
+      - entity: sensor.heating_assistant_living_room_parameter_confidence
+        name: living_room – confidence
+        secondary_info: last-changed
+
+  # ── Markdown summary (reads from the status sensor attributes) ───────────
+  - type: markdown
+    title: Active parameter values
+    content: >
+      {% set s = state_attr(
+           'sensor.heating_assistant_estimated_parameters_status', 'rooms') %}
+      {% set src = state_attr(
+           'sensor.heating_assistant_estimated_parameters_status', 'sources') %}
+      {% set ts = state_attr(
+           'sensor.heating_assistant_estimated_parameters_status', 'estimated_at') %}
+      {% set ll = state_attr(
+           'sensor.heating_assistant_estimated_parameters_status', 'log_likelihood') %}
+
+      **Estimation:** {{ states('sensor.heating_assistant_estimated_parameters_status') }}
+      {%- if ts %} · estimated {{ ts[:10] }}{%- endif %}
+      {%- if ll is not none %} · log-lik {{ ll | round(1) }}{%- endif %}
+
+      ---
+
+      | Room | Thermal mass | R external | Internal gain | Estimated? |
+      |------|-------------|-----------|--------------|------------|
+      {% for room, p in s.items() -%}
+      | {{ room }} | {{ p.thermal_mass | int | string }} J/K
+      | {{ p.r_external | round(5) }} K/W
+      | {{ p.internal_gain | round(1) }} W
+      | {{ '✓' if p.is_estimated else '–' }} |
+      {% endfor %}
+
+      ---
+
+      | Source | Power scale | Estimated? |
+      |--------|------------|------------|
+      {% for src_name, sp in src.items() -%}
+      | {{ src_name }} | {{ (sp.power_scale * 100) | round(1) }} %
+      | {{ '✓' if sp.is_estimated else '–' }} |
+      {% endfor %}
+
+  # ── Buttons ──────────────────────────────────────────────────────────────
+  - type: horizontal-stack
+    cards:
+      - type: button
+        name: Estimate Parameters
+        icon: mdi:chart-bell-curve-cumulative
+        tap_action:
+          action: toggle
+        entity: button.heating_assistant_estimate_parameters
+
+      - type: button
+        name: Reset to Defaults
+        icon: mdi:restore
+        tap_action:
+          action: toggle
+        entity: button.heating_assistant_reset_parameters
+```
+
+> **Tip:** The markdown card template works out-of-the-box for any number of rooms and sources because it iterates over the `rooms` / `sources` dicts from the status sensor attributes.  If you prefer individual entity rows, use the `sensor.heating_assistant_<room>_parameter_confidence` and `sensor.heating_assistant_<source>_heater_scale` sensors in a standard `entities` card.
+
+---
+
+### 13.18.6 Interpreting the parameter validity flags
+
+The **Parameter Confidence** sensor raises warnings (and lowers the score below 100 %) in these situations:
+
+| Warning | Likely cause |
+|---------|-------------|
+| `thermal_mass out of range` | Value below ~50 000 J/K or above ~200 000 000 J/K — probably a bad estimation with too little data. |
+| `r_external out of range` | Value below 0.001 K/W (implausibly good insulation) or above 1.0 K/W (implausibly leaky). |
+| `time_constant out of range` | Computed time constant τ = R × C outside 1–500 hours — indicates a parameter combination that is physically unrealistic. |
+
+A score of **100 %** means all three checks pass.  A score below 100 % does not mean the model will not work, but it is a signal to inspect the values (run `heating_assistant.validate_parameters` for a detailed report) and possibly re-estimate with more data.
+
+---
+
 ## 14. Thermal Model Parameter Estimation Guide
 
 Accurate parameters lead to accurate predictions and better control.  This section gives practical guidance on how to estimate them.
@@ -3486,7 +3664,7 @@ To use a measured irradiance sensor instead of a computed one:
 
 - [x] **Weather-API outdoor temperature forecast** — the controller can use a HA weather entity (e.g. Met.no, OpenWeatherMap) for multi-hour outdoor temperature forecasts instead of the persistence assumption.  Configure `weather_entity` in YAML or the UI wizard.
 - [x] **Cooling mode** — heat-pump rooms expose `heat_cool` HVAC mode; two-threshold hysteresis (`turn_off_deadband`) governs mode switching.  MPC-requested active cooling (`fraction < 0`) uses `cool`/`dry`/`fan_only` with `target_temperature_cooling()`; passive cooling activates above `setpoint + deadband` and exits below `setpoint − deadband`.  Signed heating power (positive = heating, negative = cooling) is tracked throughout.
-- [x] **Adaptive parameter estimation** — `estimate_parameters_ml` service uses CD-EKF maximum-likelihood estimation to jointly identify `thermal_mass`, `r_external`, `internal_gain`, heater power-scale factors, and inter-room resistances from accumulated operating history.  A one-press button entity triggers the full ML estimation pipeline.
+- [x] **Adaptive parameter estimation** — `estimate_parameters_ml` service uses CD-EKF maximum-likelihood estimation to jointly identify `thermal_mass`, `r_external`, `internal_gain`, heater power-scale factors, and inter-room resistances from accumulated operating history.  A one-press button entity triggers the full ML estimation pipeline.  Estimated parameters are **persisted to `entry.data`** and restored on full HA restart so no re-identification is needed after a reboot.  History buffer is also saved to HA Storage.  A **Reset Parameters** button reverts to configured defaults.
 - [x] **Model diagnostics** — `analyze_model_fit`, `validate_parameters`, `controller_performance_report`, and `run_open_loop_simulation` services provide comprehensive insight into model quality and controller behaviour.  Per-room diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) update every cycle.
 - [ ] **Comfort schedule support** — define day/night/away setpoint profiles per room on a weekly timetable.
 - [ ] **Energy price optimisation** — weight the energy cost term in the MPC by the time-of-use electricity tariff so the controller pre-heats the house before peak pricing periods.

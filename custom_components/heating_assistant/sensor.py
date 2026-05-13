@@ -92,6 +92,7 @@ async def async_setup_entry(
     # Per-source sensors
     for src in coordinator.heat_sources:
         entities.append(ControlActionSensor(coordinator, src.name))
+        entities.append(HeaterScaleSensor(coordinator, src.name))
         if isinstance(src, HeatPump):
             entities.append(HeatPumpCOPSensor(coordinator, src.name))
 
@@ -99,6 +100,7 @@ async def async_setup_entry(
     entities.append(OutdoorTemperatureMeasuredSensor(coordinator))
     entities.append(OutdoorTemperatureForecastSensor(coordinator))
     entities.append(SystemEfficiencySensor(coordinator))
+    entities.append(EstimatedParametersStatusSensor(coordinator))
     entities.append(MPCPerformanceSensor(coordinator))
 
     async_add_entities(entities)
@@ -1445,14 +1447,30 @@ class ParameterConfidenceSensor(CoordinatorEntity, SensorEntity):
                 room.r_external,
             )
 
+            # Determine whether this room's parameters came from estimation.
+            snapshot = None
+            try:
+                snapshot = self._coordinator.estimated_params_snapshot
+            except Exception:
+                pass
+            is_estimated = (
+                self._room_name in snapshot.get("rooms", {})
+                if snapshot else False
+            )
+
             return {
                 "thermal_mass": validation.thermal_mass,
                 "r_external": validation.r_external,
+                "internal_gain": round(
+                    float(getattr(room, "internal_gain", 0.0)), 2
+                ),
                 "time_constant_hours": round(validation.time_constant_hours, 2),
                 "mass_valid": validation.mass_valid,
                 "r_external_valid": validation.r_external_valid,
                 "time_constant_valid": validation.time_constant_valid,
                 "warnings": validation.warnings,
+                "is_estimated": is_estimated,
+                "estimated_at": snapshot.get("estimated_at") if snapshot else None,
             }
         except Exception as exc:
             _LOGGER.warning("Failed to validate parameters for %s: %s", self._room_name, exc)
@@ -1714,10 +1732,171 @@ class ResidualACFSensor(CoordinatorEntity, SensorEntity):
             return {"error": str(exc)}
 
 
+
+# ---------------------------------------------------------------------------
+# Heater scale sensor (per heat source) — estimated power-scale factor
+# ---------------------------------------------------------------------------
+
+class HeaterScaleSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor reporting the current power-scale factor for a heat source.
+
+    The state is the scale as a percentage (100 % = nominal rated power).
+    A value above 100 % means the estimator found that the source delivers
+    more heat than its nominal rating predicts; below 100 % means it
+    delivers less (e.g. due to duct losses or a degraded heat pump).
+
+    The factor is 1.0 (= 100 %) when no estimation has been run yet.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:tune-vertical"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        source_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._source_name = source_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {source_name} – Heater Scale"
+        self._attr_unique_id = f"{DOMAIN}_{source_name}_heater_scale"
+
+    def _source(self):
+        return next(
+            (s for s in self._coordinator.heat_sources if s.name == self._source_name),
+            None,
+        )
+
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return the power-scale factor as a percentage."""
+        src = self._source()
+        if src is None:
+            return None
+        return round(float(getattr(src, "power_scale", 1.0)) * 100.0, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose raw scale factor and estimation provenance."""
+        src = self._source()
+        snapshot = None
+        try:
+            snapshot = self._coordinator.estimated_params_snapshot
+        except Exception:
+            pass
+        is_estimated = (
+            self._source_name in snapshot.get("sources", {})
+            if snapshot else False
+        )
+        return {
+            "source_name": self._source_name,
+            "power_scale": round(float(getattr(src, "power_scale", 1.0)), 4) if src else None,
+            "max_power": float(src.max_power) if src else None,
+            "is_estimated": is_estimated,
+            "estimated_at": snapshot.get("estimated_at") if snapshot else None,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Estimated parameters status sensor (system-wide)
+# ---------------------------------------------------------------------------
+
+class EstimatedParametersStatusSensor(CoordinatorEntity, SensorEntity):
+    """
+    System-wide sensor summarising all currently active thermal parameters.
+
+    State
+    -----
+    * ``"estimated"`` — at least one parameter was set by the ML estimator
+      and the snapshot has been persisted to ``entry.data``.
+    * ``"default"`` — no estimation has been run yet (or it was reset).
+
+    Attributes
+    ----------
+    The attributes expose the full parameter set as a machine-readable dict
+    that dashboards and automations can consume directly without querying
+    individual per-room sensors:
+
+    * ``rooms``       — per-room ``{thermal_mass, r_external, internal_gain, is_estimated}``
+    * ``sources``     — per-source ``{power_scale, is_estimated}``
+    * ``connections`` — per-pair ``{r_value, is_estimated}``
+    * ``estimated_at``        — ISO-8601 timestamp of the last successful run
+    * ``log_likelihood``      — log-likelihood value at the optimal solution
+    * ``n_rooms_estimated``   — number of rooms whose parameters were estimated
+    * ``n_sources_estimated`` — number of sources whose scale was estimated
+    """
+
+    _attr_icon = "mdi:database-check"
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Estimated Parameters Status"
+        self._attr_unique_id = f"{DOMAIN}_estimated_parameters_status"
+
+    @property
+    def native_value(self) -> str:
+        """Return ``"estimated"`` if a persisted snapshot exists, else ``"default"``."""
+        snapshot = None
+        try:
+            snapshot = self._coordinator.estimated_params_snapshot
+        except Exception:
+            pass
+        return "estimated" if snapshot else "default"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose the full parameter set with estimation provenance flags."""
+        snapshot = None
+        try:
+            snapshot = self._coordinator.estimated_params_snapshot
+        except Exception:
+            pass
+        snap = snapshot or {}
+        rooms_snap = snap.get("rooms", {})
+        sources_snap = snap.get("sources", {})
+        connections_snap = snap.get("connections", {})
+
+        rooms_data: Dict[str, Any] = {}
+        for name, room in self._coordinator.model.rooms.items():
+            rooms_data[name] = {
+                "thermal_mass": round(room.thermal_mass, 0),
+                "r_external": round(room.r_external, 6),
+                "internal_gain": round(
+                    float(getattr(room, "internal_gain", 0.0)), 2
+                ),
+                "is_estimated": name in rooms_snap,
+            }
+
+        sources_data: Dict[str, Any] = {}
+        for src in self._coordinator.heat_sources:
+            sources_data[src.name] = {
+                "power_scale": round(float(getattr(src, "power_scale", 1.0)), 4),
+                "is_estimated": src.name in sources_snap,
+            }
+
+        connections_data: Dict[str, Any] = {
+            key: {"r_value": r_val, "is_estimated": True}
+            for key, r_val in connections_snap.items()
+        }
+
+        return {
+            "rooms": rooms_data,
+            "sources": sources_data,
+            "connections": connections_data,
+            "estimated_at": snap.get("estimated_at"),
+            "log_likelihood": snap.get("log_likelihood"),
+            "n_rooms_estimated": len(rooms_snap),
+            "n_sources_estimated": len(sources_snap),
+        }
+
+
 # ---------------------------------------------------------------------------
 # MPC performance sensor (system-wide)
 # ---------------------------------------------------------------------------
-
 class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
     """
     System-wide sensor reporting MPC solver performance statistics.

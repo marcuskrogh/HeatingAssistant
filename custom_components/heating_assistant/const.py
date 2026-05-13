@@ -112,3 +112,6 @@ MPC_STATS_BUFFER_SIZE = 100
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 #: Service name for runtime comfort-schedule suspend/resume
 SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
+#: entry.data key that stores the latest persisted estimation snapshot so that
+#: estimated parameters survive a full Home Assistant restart.
+CONF_ESTIMATED_PARAMS = "estimated_params"

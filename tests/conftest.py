@@ -190,6 +190,23 @@ def _async_register_admin_service_stub(hass, domain, service, handler, schema=No
 _service_mod = sys.modules["homeassistant.helpers.service"]
 _service_mod.async_register_admin_service = _async_register_admin_service_stub  # type: ignore[attr-defined]
 
+# homeassistant.helpers.storage
+class _StoreStub:
+    """Minimal stub for homeassistant.helpers.storage.Store."""
+
+    def __init__(self, hass=None, version=1, key=""):
+        self._key = key
+
+    async def async_save(self, data):
+        pass
+
+    async def async_load(self):
+        return None
+
+
+_storage_mod = sys.modules["homeassistant.helpers.storage"]
+_storage_mod.Store = _StoreStub  # type: ignore[attr-defined]
+
 # homeassistant.helpers.config_validation – simple passthrough stubs
 _cv = sys.modules["homeassistant.helpers.config_validation"]
 _cv.string = str  # type: ignore[attr-defined]

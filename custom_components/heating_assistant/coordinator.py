@@ -24,6 +24,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_CONSTRAINT_OFFSET,
     CONF_ENERGY_WEIGHT,
+    CONF_ESTIMATED_PARAMS,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
     CONF_LATITUDE,
@@ -365,6 +366,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.model: HouseModel = build_house_model(rooms_cfg)
         self.heat_sources: List[HeatSource] = build_heat_sources(sources_cfg)
 
+        # Restore persisted estimated parameters so that identified values
+        # survive a full Home Assistant restart (not just an in-memory reload).
+        # These are applied directly to the model objects before the MPC
+        # controller is constructed so the controller starts with the correct
+        # parameter values.
+        self._estimation_timestamp: Optional[str] = None
+        self._estimation_log_likelihood: Optional[float] = None
+        stored_est: Optional[Dict[str, Any]] = data.get(CONF_ESTIMATED_PARAMS)
+        if stored_est:
+            self._restore_estimated_parameters(stored_est)
+
         # Map room_name → list of temp_sensor entity_ids (for state updates)
         self._temp_sensors: Dict[str, List[str]] = {}
         for rc in rooms_cfg:
@@ -483,9 +495,107 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """Return a view of the rolling observation history buffer."""
         return self._history_buffer
 
+    @property
+    def estimated_params_snapshot(self) -> Optional[Dict[str, Any]]:
+        """Return the persisted estimation snapshot from the real entry.data.
+
+        Returns ``None`` when no estimation has been persisted yet.  This
+        property fetches the real ``ConfigEntry`` from HA so that it always
+        reflects the latest written snapshot even after an in-session update.
+        """
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            return real_entry.data.get(CONF_ESTIMATED_PARAMS)
+        return None
+
     # ------------------------------------------------------------------
-    # DataUpdateCoordinator hook
+    # Estimation helpers
     # ------------------------------------------------------------------
+
+    def _restore_estimated_parameters(self, snapshot: Dict[str, Any]) -> None:
+        """Apply a persisted estimation snapshot to the in-memory model objects.
+
+        Called from ``__init__`` before the MPC controller is built so the
+        controller always starts with the most recently identified values.
+        Note: ``self.hass`` is **not** available at this point — this method
+        only modifies Python objects in memory.
+        """
+        for room_name, params in snapshot.get("rooms", {}).items():
+            if room_name not in self.model.rooms:
+                continue
+            room = self.model.rooms[room_name]
+            if "thermal_mass" in params:
+                room.thermal_mass = float(params["thermal_mass"])
+            if "r_external" in params:
+                room.r_external = float(params["r_external"])
+            if "internal_gain" in params:
+                room.internal_gain = float(params["internal_gain"])
+
+        for src_name, src_params in snapshot.get("sources", {}).items():
+            for src in self.heat_sources:
+                if src.name == src_name:
+                    src.power_scale = float(src_params.get("power_scale", 1.0))
+
+        for key, r_val in snapshot.get("connections", {}).items():
+            parts = key.split(":", 1)
+            if len(parts) != 2:
+                continue
+            room_a, room_b = parts
+            for name in (room_a, room_b):
+                if name not in self.model.rooms:
+                    continue
+                other = room_b if name == room_a else room_a
+                for conn in self.model.rooms[name].connections:
+                    if conn.connected_room == other:
+                        conn.r_value = float(r_val)
+
+        # Rebuild state-space matrices to reflect the updated parameters.
+        self.model._C, self.model._A, self.model._B_ext = self.model._build_matrices()
+
+        self._estimation_timestamp = snapshot.get("estimated_at")
+        self._estimation_log_likelihood = snapshot.get("log_likelihood")
+        _LOGGER.info("Restored persisted estimated parameters from entry.data")
+
+    def reset_estimated_parameters(self) -> None:
+        """Discard persisted estimation and revert the live model to the
+        configured (YAML / config-entry default) parameter values.
+
+        The ``CONF_ESTIMATED_PARAMS`` key is removed from ``entry.data`` so
+        subsequent restarts also use the original values.  The MPC controller
+        is rebuilt immediately.
+        """
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            new_data = {
+                k: v for k, v in real_entry.data.items()
+                if k != CONF_ESTIMATED_PARAMS
+            }
+            self.hass.config_entries.async_update_entry(real_entry, data=new_data)
+
+        # Rebuild the model from the original YAML / config values (these are
+        # stored in _entry.data independent of any in-memory estimation).
+        rooms_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_ROOMS, [])
+        sources_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_HEAT_SOURCES, [])
+        self.model = build_house_model(rooms_cfg)
+        self.heat_sources = build_heat_sources(sources_cfg)
+
+        self.controller = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=self._horizon,
+            dt=self.dt,
+            measurement_dt=self.dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            constraint_offset=self._constraint_offset,
+            terminal_weight=self._terminal_weight,
+        )
+
+        self._estimation_timestamp = None
+        self._estimation_log_likelihood = None
+        _LOGGER.info("Estimated parameters reset to configured defaults")
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """
@@ -1468,6 +1578,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._apply_estimated_parameters(
                 result["estimated_params"],
                 result.get("estimated_inter_room_r", {}),
+                estimated_internal_gains=result.get("estimated_internal_gains", {}),
+                estimated_heater_scales=result.get("estimated_heater_scales", {}),
+                log_likelihood=result.get("log_likelihood"),
             )
 
         return result
@@ -1476,6 +1589,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self,
         estimated_params: Dict[str, Dict[str, float]],
         estimated_inter_room_r: Optional[Dict[str, float]] = None,
+        estimated_internal_gains: Optional[Dict[str, float]] = None,
+        estimated_heater_scales: Optional[Dict[str, float]] = None,
+        log_likelihood: Optional[float] = None,
     ) -> None:
         """
         Apply estimated parameters to the house model and rebuild the
@@ -1483,6 +1599,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         The existing Kalman filter state is discarded when the controller
         is rebuilt; it will be re-bootstrapped on the next update cycle.
+        The full parameter snapshot is also persisted to ``entry.data`` via
+        ``async_update_entry`` so that values survive a full HA restart.
         """
         for room_name, params in estimated_params.items():
             if room_name not in self.model.rooms:
@@ -1490,6 +1608,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             room = self.model.rooms[room_name]
             room.thermal_mass = float(params["thermal_mass"])
             room.r_external = float(params["r_external"])
+            if estimated_internal_gains and room_name in estimated_internal_gains:
+                room.internal_gain = float(estimated_internal_gains[room_name])
+
+        # Apply per-source heater power-scale factors.
+        if estimated_heater_scales:
+            for src in self.heat_sources:
+                if src.name in estimated_heater_scales:
+                    src.power_scale = float(estimated_heater_scales[src.name])
 
         # Apply inter-room resistances if estimated (Stage 2 result)
         if estimated_inter_room_r:
@@ -1535,9 +1661,42 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             "Applied estimated thermal parameters: %s",
             {
                 name: {
-                    "thermal_mass": params["thermal_mass"],
-                    "r_external": params["r_external"],
+                    "thermal_mass": self.model.rooms[name].thermal_mass,
+                    "r_external": self.model.rooms[name].r_external,
                 }
-                for name, params in estimated_params.items()
+                for name in estimated_params
+                if name in self.model.rooms
             },
         )
+
+        # --- Persist the snapshot so values survive a full HA restart -------
+        now_iso = datetime.now(timezone.utc).isoformat()
+        snapshot: Dict[str, Any] = {
+            "rooms": {
+                name: {
+                    "thermal_mass": self.model.rooms[name].thermal_mass,
+                    "r_external": self.model.rooms[name].r_external,
+                    "internal_gain": float(
+                        getattr(self.model.rooms[name], "internal_gain", 0.0)
+                    ),
+                }
+                for name in self.model.room_names
+            },
+            "sources": {
+                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
+                for src in self.heat_sources
+            },
+            "connections": dict(estimated_inter_room_r) if estimated_inter_room_r else {},
+            "estimated_at": now_iso,
+            "log_likelihood": log_likelihood,
+        }
+        self._estimation_timestamp = now_iso
+        self._estimation_log_likelihood = log_likelihood
+
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
+            )
+            _LOGGER.debug("Persisted estimated parameter snapshot to entry.data")
