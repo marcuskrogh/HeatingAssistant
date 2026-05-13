@@ -145,6 +145,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
         sigma_b: float = 0.002,
+        augment_offsets: bool = True,
         n_int_steps: int = 10,
         identifiable_sources: Optional[List[int]] = None,
         theta: Optional[np.ndarray] = None,
@@ -156,6 +157,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._sigma_w = sigma_w
         self._sigma_v = sigma_v
         self._sigma_b = sigma_b
+        self._augment_offsets = augment_offsets
         self._n_int_steps = n_int_steps
         self._k_sigmoid = k_sigmoid
 
@@ -193,7 +195,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def nx(self) -> int:
-        return 2 * self._n_rooms
+        return 2 * self._n_rooms if self._augment_offsets else self._n_rooms
 
     @property
     def nu(self) -> int:
@@ -333,6 +335,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         Riccati equation.
         """
         n = self._n_rooms
+        if not self._augment_offsets:
+            return self._sigma_w * np.eye(n)
         sig = np.zeros((self.nx, self.nw))
         sig[:n, :n] = self._sigma_w * np.eye(n)
         sig[n:, n:] = self._sigma_b * np.eye(n)
@@ -370,7 +374,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     ) -> np.ndarray:
         """Measurement function ym = T + b (sensor-biased room temperatures)."""
         n = self._n_rooms
-        return x[:n] + x[n:]
+        if not self._augment_offsets or len(x) < 2 * n:
+            return x[:n].copy()
+        return x[:n] + x[n:2 * n]
 
     # ── Analytic Jacobians (override default FD for efficiency) ──────────
 
@@ -384,6 +390,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     ) -> np.ndarray:
         """∂f/∂x for x = [T, b]."""
         n = self._n_rooms
+        if not self._augment_offsets:
+            return self._F.copy()
         J = np.zeros((2 * n, 2 * n))
         J[:n, :n] = self._F
         return J
@@ -398,6 +406,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     ) -> np.ndarray:
         """∂hm/∂x = [I  I] for ym = T + b."""
         n = self._n_rooms
+        if not self._augment_offsets:
+            return np.eye(n)
         H = np.zeros((n, 2 * n))
         H[:, :n] = np.eye(n)
         H[:, n:] = np.eye(n)
@@ -409,6 +419,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     def x(self) -> list[float]:
         """Current augmented state [T, b] as a list of floats."""
         temps = [self._model.rooms[name].temperature for name in self._room_list]
+        if not self._augment_offsets:
+            return temps
         return temps + self._offset_state.tolist()
 
     @x.setter
@@ -418,7 +430,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             raise ValueError(f"Expected at least {n} state values, got {len(val)}")
         for i, name in enumerate(self._room_list):
             self._model.rooms[name].temperature = float(val[i])
-        if len(val) >= 2 * n:
+        if self._augment_offsets and len(val) >= 2 * n:
             self._offset_state = np.array(val[n:2 * n], dtype=float)
 
     @property
@@ -597,11 +609,19 @@ class HeatingMPCController:
             model, heat_sources, dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
+            augment_offsets=True,
+            n_int_steps=n_int_steps,
+        )
+        self._control_system = HouseThermalSDE(
+            model, heat_sources, dt,
+            sigma_w=sigma_w, sigma_v=sigma_v,
+            sigma_b=sigma_b,
+            augment_offsets=False,
             n_int_steps=n_int_steps,
         )
         n_x = self._system.nx
         n_u = self._system.nu
-        n_z = self._system.nz
+        n_z = self._control_system.nz
 
         # ── EKF: initialise from current room temperatures ──────────────
         x0 = np.array(self._system.x)
@@ -625,12 +645,12 @@ class HeatingMPCController:
         P = terminal_weight * Q
 
         # Reference and bounds for the OCP
-        z_ref = self._system.x_ref.copy()
-        u_min, u_max = self._system.u_bounds
+        z_ref = self._control_system.x_ref.copy()
+        u_min, u_max = self._control_system.u_bounds
 
         # ── CDTrackingOptimalControlProblem ─────────────────────────────
         self._ocp = CDTrackingOptimalControlProblem(
-            self._system,
+            self._control_system,
             N=horizon,
             Q=Q,
             R=R,
@@ -820,9 +840,9 @@ class HeatingMPCController:
             outdoor_seq = self._forecast_outdoor(outdoor_temp)
         solar_seq = self._forecast_solar(now, cloud_forecast=cloud_forecast)
 
-        d_traj = np.zeros((N, self._system.nd))
+        d_traj = np.zeros((N, self._control_system.nd))
         for k in range(N):
-            d_traj[k] = self._system.disturbance_vector(
+            d_traj[k] = self._control_system.disturbance_vector(
                 outdoor_seq[k], solar_seq[k]
             )
 
@@ -840,7 +860,7 @@ class HeatingMPCController:
         )
 
         # ── Update setpoint reference in OCP (setpoints may have changed) ──
-        z_ref = self._system.x_ref
+        z_ref = self._control_system.x_ref
         # NOTE: mbc's CDTrackingOptimalControlProblem has no public API for
         # updating the reference trajectory after construction, so we reach
         # into the internal EconomicOptimalControlProblem.  This is technical
@@ -871,11 +891,12 @@ class HeatingMPCController:
         x_hat, _ = self._ekf.update(y, self._u_prev, d_traj[0], p)
         n_rooms = self._system.nym
         self._system._offset_state = np.array(x_hat[n_rooms:], dtype=float)
+        x_hat_control = x_hat[: self._control_system.nx].copy()
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
         _t0 = time.perf_counter()
         u_opt, _, _info = self._ocp.solve(
-            x_hat, d_traj,
+            x_hat_control, d_traj,
             u_prev=self._u_seq_prev,
             x_prev=self._x_seq_prev,
             y_prev=self._y_seq_prev,
@@ -909,17 +930,20 @@ class HeatingMPCController:
                 src.set_power(frac, outdoor_temp)
 
         # ── Reconstruct predicted trajectory for visualisation ───────────
-        room_list = self._system._room_list
-        n_x = self._system.nx
-        h = self._dt / self._system._n_int_steps
+        room_list = self._control_system._room_list
+        n_x = self._control_system.nx
+        h = self._dt / self._control_system._n_int_steps
 
         self._predictions = []
-        x_pred = x_hat.copy()
+        x_pred = x_hat_control.copy()
         for k in range(N):
             # Euler integration over one sampling interval
             x_cur = x_pred.copy()
-            for _ in range(self._system._n_int_steps):
-                x_cur = x_cur + self._system.f(x_cur, u_opt[k], d_traj[k], p, 0.0) * h
+            for _ in range(self._control_system._n_int_steps):
+                x_cur = (
+                    x_cur
+                    + self._control_system.f(x_cur, u_opt[k], d_traj[k], p, 0.0) * h
+                )
             x_pred = x_cur
             self._predictions.append(
                 {name: float(x_pred[i]) for i, name in enumerate(room_list)}
