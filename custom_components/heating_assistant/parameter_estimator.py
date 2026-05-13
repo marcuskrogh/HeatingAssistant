@@ -885,5 +885,8 @@ class KalmanMLEstimator:
 
         P0 = np.eye(nx, dtype=float) * self._R_var * 10.0
         if nx > nym:
+            # Augmented latent states (e.g. temperature offsets) are not
+            # directly observed at startup, so start them with higher
+            # uncertainty than measured temperature components.
             P0[nym:, nym:] *= 4.0
         return x0, P0

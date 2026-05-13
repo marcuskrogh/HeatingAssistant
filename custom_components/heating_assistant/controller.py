@@ -645,7 +645,11 @@ class HeatingMPCController:
         # horizon, improving steady-state tracking without increasing the
         # stage cost (which would sacrifice energy efficiency mid-horizon).
         P = terminal_weight * Q
-        ocp_n_steps = min(n_int_steps, 3)
+        # Keep OCP integration steps lower than EKF steps to bound NLP size and
+        # preserve controller runtime on larger houses; EKF still uses full
+        # n_int_steps for state-estimation fidelity.
+        OCP_MAX_INTEGRATION_STEPS = 3
+        ocp_n_steps = min(n_int_steps, OCP_MAX_INTEGRATION_STEPS)
 
         # Reference and bounds for the OCP
         z_ref = self._control_system.x_ref.copy()
