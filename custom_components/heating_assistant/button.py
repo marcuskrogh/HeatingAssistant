@@ -30,7 +30,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up Heating Assistant button entities from a config entry."""
     coordinator: HeatingAssistantCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([EstimateParametersButton(coordinator)])
+    async_add_entities([
+        EstimateParametersButton(coordinator),
+        ResetParametersButton(coordinator),
+    ])
 
 
 class EstimateParametersButton(ButtonEntity):
@@ -65,3 +68,39 @@ class EstimateParametersButton(ButtonEntity):
     async def async_press(self) -> None:
         """Handle button press – run ML parameter estimation."""
         await self._coordinator.async_estimate_parameters_ml(apply_params=True)
+
+
+class ResetParametersButton(ButtonEntity):
+    """
+    Button that resets all estimated parameters back to the configured
+    (YAML / config-entry default) values and removes the persisted snapshot.
+
+    Pressing this button is useful when a previously estimated parameter set
+    turns out to be wrong or when the user wants to start the identification
+    process from scratch.
+    """
+
+    _attr_icon = "mdi:restore"
+    _attr_has_entity_name = False
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Reset Parameters"
+        self._attr_unique_id = f"{DOMAIN}_reset_parameters_button"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose whether estimated parameters are currently active."""
+        snapshot = None
+        try:
+            snapshot = self._coordinator.estimated_params_snapshot
+        except Exception:
+            pass
+        return {
+            "has_estimated_params": snapshot is not None,
+            "estimated_at": snapshot.get("estimated_at") if snapshot else None,
+        }
+
+    async def async_press(self) -> None:
+        """Handle button press – revert to default parameters."""
+        self._coordinator.reset_estimated_parameters()
