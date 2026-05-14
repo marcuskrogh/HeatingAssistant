@@ -1039,6 +1039,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         for src in self.heat_sources:
             fraction = self.actions.get(src.name, 0.0)
             room_enabled = self.is_room_enabled(src.room)
+            controller = getattr(self, "controller", None)
 
             # If the room is disabled, force fraction to 0 (turn off).
             if not room_enabled:
@@ -1074,13 +1075,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 #       (HP idles with no temperature gap)
                 #   - fraction > 0  → heat mode, offset-based setpoint
                 if isinstance(src, HeatPump):
-                    if not self.is_room_enabled(src.room):
+                    if not room_enabled:
                         # Room explicitly disabled (user toggle or active "off"
                         # schedule period without frost-protection demand) —
                         # force the heat pump fully off.
                         self._cooling_active[src.name] = False
                         src.set_power(0.0, outdoor_temp)
-                        controller = getattr(self, "controller", None)
                         if controller is not None:
                             controller.notify_applied_u(src.name, 0.0)
                         await self.hass.services.async_call(
@@ -1181,7 +1181,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             cooling_power = src.cooling_power(outdoor_temp)
                             src.set_power(0.0, outdoor_temp)
                             src._current_power = cooling_power  # negative = heat removal
-                            controller = getattr(self, "controller", None)
                             if controller is not None:
                                 controller.notify_applied_u(src.name, -1.0)
 
