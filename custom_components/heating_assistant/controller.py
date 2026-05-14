@@ -11,11 +11,11 @@ HouseThermalSDE(ContinuousDiscreteModel)
     Wraps HouseModel + list of HeatSource objects as a nonlinear
     continuous-discrete SDE.
 
-    State        x = [T₁, …, Tₙ, b₁, …, bₙ]       (room temperatures + sensor offsets, °C)
+    State        x = [T₁, …, Tₙ, b₁, …, bₙ]       (room temperatures + integrated model-mismatch offsets, °C)
     Input        u = [f₁, …, fₘ]                   (setpoint fractions, ∈ [0, 1])
     Disturbance  d = [T_out, Q_sol,1, …, Q_sol,n]  (°C and W)
     Output       z = [T₁, …, Tₙ]                   (controlled output, physical temperatures)
-                 ym = [T₁+b₁, …, Tₙ+bₙ]            (measured temperature incl. offset)
+                 ym = [T₁+b₁, …, Tₙ+bₙ]            (effective output incl. offset state)
 
     Itô SDE:
         dx(t) = f(x, u, d, p, t) dt + σ_w I dw(t),  dw ~ N(0, I dt)
@@ -352,8 +352,11 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """Controlled output z = T (physical room temperatures)."""
-        return x[: self._n_rooms].copy()
+        """Controlled output z = T + b for augmented mode, else z = T."""
+        n = self._n_rooms
+        if not self._augment_offsets or len(x) < 2 * n:
+            return x[:n].copy()
+        return x[:n] + x[n:2 * n]
 
     def gm(
         self,
@@ -363,8 +366,11 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """Continuous-time output gm = T (physical room temperatures)."""
-        return x[: self._n_rooms].copy()
+        """Continuous-time output gm = T + b for augmented mode, else gm = T."""
+        n = self._n_rooms
+        if not self._augment_offsets or len(x) < 2 * n:
+            return x[:n].copy()
+        return x[:n] + x[n:2 * n]
 
     def hm(
         self,
@@ -374,7 +380,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float = 0.0,
     ) -> np.ndarray:
-        """Measurement function ym = T + b (sensor-biased room temperatures)."""
+        """Measurement function ym = T + b with integrated mismatch offset state."""
         n = self._n_rooms
         if not self._augment_offsets or len(x) < 2 * n:
             return x[:n].copy()
@@ -478,7 +484,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def room_offsets(self) -> Dict[str, float]:
-        """Estimated measurement offsets b for each room [°C]."""
+        """Estimated integrated mismatch offsets b for each room [°C]."""
         return {
             name: float(self._offset_state[i])
             for i, name in enumerate(self._room_list)
@@ -736,7 +742,7 @@ class HeatingMPCController:
 
     @property
     def temperature_offsets(self) -> Dict[str, float]:
-        """Estimated per-room measurement offsets b after the latest EKF update."""
+        """Estimated per-room integrated mismatch offsets b after EKF update."""
         x_hat = self._ekf.x_hat
         n = self._system.nym
         return {
