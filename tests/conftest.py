@@ -157,7 +157,8 @@ _entity.Entity = object  # type: ignore[attr-defined]
 
 # homeassistant.helpers.update_coordinator
 class _DataUpdateCoordinatorStub:
-    pass
+    def __init__(self, *args, **kwargs):
+        pass
 
 
 class _CoordinatorEntityStub:
