@@ -376,7 +376,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 or data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
             )
         )
-        self._horizon: int = data.get(CONF_HORIZON, DEFAULT_HORIZON)
+        self._horizon: int = int(
+            options.get(CONF_HORIZON)
+            or data.get(CONF_HORIZON, DEFAULT_HORIZON)
+        )
         self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._constraint_offset: float = data.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)

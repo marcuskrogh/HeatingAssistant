@@ -8,7 +8,9 @@ import pytest
 import custom_components.heating_assistant.__init__ as init_mod
 from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
+    CONF_HORIZON,
     CONF_ROOMS,
+    DEFAULT_HORIZON,
     DOMAIN,
 )
 
@@ -135,3 +137,61 @@ async def test_setup_entry_yaml_overrides_options_rooms(monkeypatch):
     assert await init_mod.async_setup_entry(hass, entry) is True
 
     assert captured["entry_data"][CONF_ROOMS] == yaml_rooms
+
+
+@pytest.mark.asyncio
+async def test_coordinator_uses_horizon_from_options(monkeypatch):
+    """CONF_HORIZON set via the options flow must reach the coordinator."""
+    import custom_components.heating_assistant.coordinator as coord_mod
+
+    entry = SimpleNamespace(
+        data={CONF_ROOMS: [], CONF_HEAT_SOURCES: [], CONF_HORIZON: DEFAULT_HORIZON},
+        options={CONF_HORIZON: 42},
+        entry_id="entry-h1",
+        title="Heating Assistant",
+    )
+
+    hass = SimpleNamespace()
+    hass.config = SimpleNamespace(latitude=55.0, longitude=10.0)
+
+    class _FakeController:
+        def __init__(self, *_a, **_kw):
+            pass
+
+    monkeypatch.setattr(coord_mod, "HeatingMPCController", _FakeController)
+
+    coord = coord_mod.HeatingAssistantCoordinator.__new__(
+        coord_mod.HeatingAssistantCoordinator
+    )
+    coord.__init__(hass, entry)
+
+    assert coord._horizon == 42, f"Expected 42, got {coord._horizon}"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_falls_back_to_data_horizon_when_options_absent(monkeypatch):
+    """When options does not set CONF_HORIZON, entry.data value must be used."""
+    import custom_components.heating_assistant.coordinator as coord_mod
+
+    entry = SimpleNamespace(
+        data={CONF_ROOMS: [], CONF_HEAT_SOURCES: [], CONF_HORIZON: 75},
+        options={},
+        entry_id="entry-h2",
+        title="Heating Assistant",
+    )
+
+    hass = SimpleNamespace()
+    hass.config = SimpleNamespace(latitude=55.0, longitude=10.0)
+
+    class _FakeController:
+        def __init__(self, *_a, **_kw):
+            pass
+
+    monkeypatch.setattr(coord_mod, "HeatingMPCController", _FakeController)
+
+    coord = coord_mod.HeatingAssistantCoordinator.__new__(
+        coord_mod.HeatingAssistantCoordinator
+    )
+    coord.__init__(hass, entry)
+
+    assert coord._horizon == 75, f"Expected 75, got {coord._horizon}"
