@@ -567,7 +567,7 @@ class TestApplyActionsClimate:
         assert calls[0].args[2]["hvac_mode"] == "off"
 
     @pytest.mark.asyncio
-    async def test_heat_pump_climate_disabled_room_turns_off(self):
+    async def test_heat_pump_disabled_room_turns_off(self):
         """When a heat-pump room is disabled, force hvac_mode=off."""
         hp = HeatPump(
             "hp1", "living_room", max_power=5000,
