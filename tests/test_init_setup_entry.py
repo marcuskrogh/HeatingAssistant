@@ -59,3 +59,79 @@ async def test_setup_entry_continues_on_first_refresh_failure(monkeypatch):
         update_call.kwargs["data"][CONF_HEAT_SOURCES]
         == yaml_cfg[CONF_HEAT_SOURCES]
     )
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_uses_rooms_from_options_when_no_yaml(monkeypatch):
+    """Rooms saved via the options flow (entry.options) must reach the coordinator."""
+    options_rooms = [{"name": "bedroom", "thermal_mass": 4000000.0}]
+    entry = SimpleNamespace(
+        data={CONF_ROOMS: [], CONF_HEAT_SOURCES: []},
+        options={CONF_ROOMS: options_rooms},
+        entry_id="entry-2",
+        title="Heating Assistant",
+        add_update_listener=MagicMock(return_value=lambda: None),
+        async_on_unload=MagicMock(),
+    )
+
+    hass = SimpleNamespace()
+    hass.data = {DOMAIN: {}}  # no yaml_config
+    hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
+    hass.config_entries = SimpleNamespace(
+        async_update_entry=MagicMock(),
+        async_forward_entry_setups=AsyncMock(),
+    )
+
+    captured: dict = {}
+
+    class _CapturingCoordinator:
+        def __init__(self, _hass, merged_entry, *_args, **_kwargs):
+            captured["entry_data"] = merged_entry.data
+
+        async def async_config_entry_first_refresh(self):
+            pass
+
+    monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _CapturingCoordinator)
+
+    assert await init_mod.async_setup_entry(hass, entry) is True
+
+    assert captured["entry_data"][CONF_ROOMS] == options_rooms
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_yaml_overrides_options_rooms(monkeypatch):
+    """YAML rooms must still win over options-flow rooms."""
+    options_rooms = [{"name": "bedroom"}]
+    yaml_rooms = [{"name": "living_room"}, {"name": "kitchen"}]
+
+    entry = SimpleNamespace(
+        data={CONF_ROOMS: [], CONF_HEAT_SOURCES: []},
+        options={CONF_ROOMS: options_rooms},
+        entry_id="entry-3",
+        title="Heating Assistant",
+        add_update_listener=MagicMock(return_value=lambda: None),
+        async_on_unload=MagicMock(),
+    )
+
+    hass = SimpleNamespace()
+    hass.data = {DOMAIN: {"yaml_config": {CONF_ROOMS: yaml_rooms}}}
+    hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
+    hass.config_entries = SimpleNamespace(
+        async_update_entry=MagicMock(),
+        async_forward_entry_setups=AsyncMock(),
+    )
+
+    captured: dict = {}
+
+    class _CapturingCoordinator:
+        def __init__(self, _hass, merged_entry, *_args, **_kwargs):
+            captured["entry_data"] = merged_entry.data
+
+        async def async_config_entry_first_refresh(self):
+            pass
+
+    monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _CapturingCoordinator)
+
+    assert await init_mod.async_setup_entry(hass, entry) is True
+
+    assert captured["entry_data"][CONF_ROOMS] == yaml_rooms

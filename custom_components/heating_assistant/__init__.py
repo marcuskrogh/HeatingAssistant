@@ -423,6 +423,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Merge YAML config (if present) into the entry data so the coordinator
     # can see room and heat-source definitions regardless of how they were set.
     entry_data = dict(entry.data)
+
+    # Incorporate rooms/sources that were configured via the options flow
+    # (stored in entry.options) into entry_data so the coordinator picks them
+    # up.  YAML overrides both when it defines rooms/sources (see below).
+    opts = entry.options
+    if opts.get(CONF_ROOMS):
+        entry_data[CONF_ROOMS] = opts[CONF_ROOMS]
+    if opts.get(CONF_HEAT_SOURCES):
+        entry_data[CONF_HEAT_SOURCES] = opts[CONF_HEAT_SOURCES]
+
     yaml_cfg = hass.data[DOMAIN].get("yaml_config", {})
     if yaml_cfg:
         entry_data = _merge_yaml_into_entry_data(entry_data, yaml_cfg)

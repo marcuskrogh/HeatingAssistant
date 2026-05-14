@@ -25,10 +25,18 @@
     "step": {
       "init": {
         "title": "Heating Assistant – Options",
+        "menu_options": {
+          "global_settings": "Global settings",
+          "manage_rooms": "Configure rooms",
+          "save": "Save & close"
+        }
+      },
+      "global_settings": {
+        "title": "Global Settings",
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID",
           "weather_entity": "Weather forecast entity ID (leave blank to disable forecast)",
-          "update_interval": "Control time step (seconds, 60–3600) — how often the MPC re-solves and applies actions (ZOH duration = EKF step = OCP step)",
+          "update_interval": "Control time step (seconds, 60–3600)",
           "horizon": "MPC prediction horizon (steps)",
           "mpc_solver": "MPC solver backend",
           "mpc_analytic_derivatives": "Enable analytical derivatives (recommended for IPOPT)",
@@ -36,7 +44,73 @@
           "sigma_v": "EKF measurement-noise std dev (sigma_v, K)",
           "sigma_b": "EKF offset process-noise std dev (sigma_b, K/√s)"
         }
+      },
+      "manage_rooms": {
+        "title": "Rooms",
+        "menu_options": {
+          "add_room": "Add room",
+          "edit_room": "Edit room",
+          "remove_room": "Remove room",
+          "finish_rooms": "Back to main menu"
+        }
+      },
+      "add_room": {
+        "title": "Add Room",
+        "data": {
+          "name": "Room name (unique identifier)",
+          "temp_sensor": "Temperature sensor entity ID (leave blank if none)",
+          "thermal_mass": "Thermal mass (J/K) — default suits a typical room",
+          "r_external": "Thermal resistance to outdoors (K/W) — lower = less insulation",
+          "setpoint": "Default setpoint (°C)"
+        }
+      },
+      "edit_room": {
+        "title": "Select Room to Edit",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "room_detail": {
+        "title": "Edit Room",
+        "data": {
+          "name": "Room name",
+          "temp_sensor": "Temperature sensor entity ID",
+          "thermal_mass": "Thermal mass (J/K)",
+          "r_external": "Thermal resistance to outdoors (K/W)",
+          "setpoint": "Default setpoint (°C)"
+        }
+      },
+      "remove_room": {
+        "title": "Remove Room",
+        "data": {
+          "room_name": "Room to remove"
+        }
+      },
+      "manage_windows": {
+        "title": "Windows",
+        "menu_options": {
+          "add_window": "Add window",
+          "remove_window": "Remove window",
+          "finish_windows": "Done with windows"
+        }
+      },
+      "add_window": {
+        "title": "Add Window",
+        "data": {
+          "area": "Window area (m²)",
+          "orientation": "Orientation (compass direction the window faces)",
+          "tilt": "Tilt from horizontal (°) — 90 = vertical wall"
+        }
+      },
+      "remove_window": {
+        "title": "Remove Window",
+        "data": {
+          "window_idx": "Window to remove"
+        }
       }
+    },
+    "error": {
+      "duplicate_room": "A room with this name already exists."
     }
   },
   "services": {
