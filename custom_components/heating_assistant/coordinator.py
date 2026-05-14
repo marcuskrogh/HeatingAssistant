@@ -1338,9 +1338,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 )
             elif domain == "switch":
                 # Disabled/off-scheduled room should always switch the unit off.
-                service = "turn_off" if not room_enabled else (
-                    "turn_on" if fraction > 0.5 else "turn_off"
-                )
+                if not room_enabled:
+                    service = "turn_off"
+                else:
+                    service = "turn_on" if fraction > 0.5 else "turn_off"
                 await self.hass.services.async_call(
                     "switch",
                     service,
