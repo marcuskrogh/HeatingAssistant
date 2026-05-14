@@ -2,7 +2,7 @@
 Performance benchmarks for the active control system and parameter estimation.
 
 Measures wall-clock run-times of:
-  • HeatingMPCController.compute()  — EKF predict-update + L-BFGS-B NLP solve
+  • HeatingMPCController.compute()  — EKF predict-update + NLP solve
   • KalmanMLEstimator.estimate()    — multi-start Nelder–Mead ML estimation
 
 Three representative house configurations are tested:
@@ -109,14 +109,30 @@ def _generate_history(rooms, sources, n_steps: int = 60, seed: int = 42):
     return history
 
 
-def _record(scenario: str, routine: str, reps: int, mean_ms: float,
-            median_ms: float, p95_ms: float) -> None:
+def _record(
+    scenario: str,
+    routine: str,
+    solver: str,
+    solver_active: str,
+    reps: int,
+    mean_ms: float,
+    median_ms: float,
+    p95_ms: float,
+) -> None:
     _RESULTS.append(
-        dict(scenario=scenario, routine=routine, reps=reps,
-             mean_ms=mean_ms, median_ms=median_ms, p95_ms=p95_ms)
+        dict(
+            scenario=scenario,
+            routine=routine,
+            solver=solver,
+            solver_active=solver_active,
+            reps=reps,
+            mean_ms=mean_ms,
+            median_ms=median_ms,
+            p95_ms=p95_ms,
+        )
     )
     print(
-        f"\n  [{scenario}] {routine}: "
+        f"\n  [{scenario}] {routine} ({solver}->{solver_active}): "
         f"mean={mean_ms:.1f}ms  median={median_ms:.1f}ms  p95={p95_ms:.1f}ms  "
         f"(n={reps})"
     )
@@ -199,73 +215,105 @@ class TestMPCPerformance:
     """Benchmark HeatingMPCController.compute() for different house sizes."""
 
     _NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+    _SOLVERS = ("SLSQP", "IPOPT")
 
     def test_studio_1room(self):
-        """1-room studio: EKF + L-BFGS-B NLP (horizon=6, 1 input)."""
-        model, sources = _studio()
-        ctrl = HeatingMPCController(model, sources, horizon=6, dt=900.0)
+        """1-room studio: EKF + NLP (horizon=6, 1 input)."""
+        for solver in self._SOLVERS:
+            model, sources = _studio()
+            ctrl = HeatingMPCController(model, sources, horizon=6, dt=900.0, solver=solver)
 
-        def run():
-            ctrl.compute(outdoor_temp=0.0, solar_gains={"living_room": 0.0},
-                         now=self._NOW)
+            def run():
+                ctrl.compute(outdoor_temp=0.0, solar_gains={"living_room": 0.0},
+                             now=self._NOW)
 
-        # Warm-up (first call may initialise scipy internals)
-        run()
+            # Warm-up (first call may initialise scipy internals)
+            run()
 
-        mean_ms, median_ms, p95_ms = _time_it(run, _MPC_REPS)
-        _record("studio-1room", "MPC.compute", _MPC_REPS, mean_ms, median_ms, p95_ms)
+            mean_ms, median_ms, p95_ms = _time_it(run, _MPC_REPS)
+            _record(
+                "studio-1room",
+                "MPC.compute",
+                solver,
+                ctrl.solver_active,
+                _MPC_REPS,
+                mean_ms,
+                median_ms,
+                p95_ms,
+            )
 
-        # Soft performance guard: median must stay under 5 s (5 000 ms)
-        assert median_ms < 5_000, (
-            f"MPC.compute median {median_ms:.0f}ms exceeds 5 000ms for studio-1room"
-        )
+            if ctrl.solver_active.upper() == "SLSQP":
+                # Soft performance guard: median must stay under 5 s (5 000 ms)
+                assert median_ms < 5_000, (
+                    f"MPC.compute median {median_ms:.0f}ms exceeds 5 000ms for studio-1room"
+                )
 
     def test_two_bedroom_2room(self):
-        """2-room flat: EKF + L-BFGS-B NLP (horizon=6, 2 inputs)."""
-        model, sources = _two_bedroom()
-        ctrl = HeatingMPCController(model, sources, horizon=6, dt=900.0)
+        """2-room flat: EKF + NLP (horizon=6, 2 inputs)."""
+        for solver in self._SOLVERS:
+            model, sources = _two_bedroom()
+            ctrl = HeatingMPCController(model, sources, horizon=6, dt=900.0, solver=solver)
 
-        def run():
-            ctrl.compute(
-                outdoor_temp=0.0,
-                solar_gains={"living_room": 0.0, "bedroom": 0.0},
-                now=self._NOW,
+            def run():
+                ctrl.compute(
+                    outdoor_temp=0.0,
+                    solar_gains={"living_room": 0.0, "bedroom": 0.0},
+                    now=self._NOW,
+                )
+
+            run()  # warm-up
+
+            mean_ms, median_ms, p95_ms = _time_it(run, _MPC_REPS)
+            _record(
+                "two-bedroom-2room",
+                "MPC.compute",
+                solver,
+                ctrl.solver_active,
+                _MPC_REPS,
+                mean_ms,
+                median_ms,
+                p95_ms,
             )
 
-        run()  # warm-up
-
-        mean_ms, median_ms, p95_ms = _time_it(run, _MPC_REPS)
-        _record("two-bedroom-2room", "MPC.compute", _MPC_REPS,
-                mean_ms, median_ms, p95_ms)
-
-        assert median_ms < 5_000, (
-            f"MPC.compute median {median_ms:.0f}ms exceeds 5 000ms for "
-            "two-bedroom-2room"
-        )
+            if ctrl.solver_active.upper() == "SLSQP":
+                assert median_ms < 5_000, (
+                    f"MPC.compute median {median_ms:.0f}ms exceeds 5 000ms for "
+                    "two-bedroom-2room"
+                )
 
     def test_full_house_5room(self):
-        """5-room house: EKF + L-BFGS-B NLP (horizon=8, 5 inputs)."""
-        model, sources = _full_house()
-        ctrl = HeatingMPCController(model, sources, horizon=8, dt=900.0)
-        rooms = [r.name for r in model.rooms.values()]
+        """5-room house: EKF + NLP (horizon=8, 5 inputs)."""
+        for solver in self._SOLVERS:
+            model, sources = _full_house()
+            rooms = [r.name for r in model.rooms.values()]
+            ctrl = HeatingMPCController(model, sources, horizon=8, dt=900.0, solver=solver)
 
-        def run():
-            ctrl.compute(
-                outdoor_temp=0.0,
-                solar_gains={name: 0.0 for name in rooms},
-                now=self._NOW,
+            def run():
+                ctrl.compute(
+                    outdoor_temp=0.0,
+                    solar_gains={name: 0.0 for name in rooms},
+                    now=self._NOW,
+                )
+
+            run()  # warm-up
+
+            mean_ms, median_ms, p95_ms = _time_it(run, _MPC_REPS)
+            _record(
+                "full-house-5room",
+                "MPC.compute",
+                solver,
+                ctrl.solver_active,
+                _MPC_REPS,
+                mean_ms,
+                median_ms,
+                p95_ms,
             )
 
-        run()  # warm-up
-
-        mean_ms, median_ms, p95_ms = _time_it(run, _MPC_REPS)
-        _record("full-house-5room", "MPC.compute", _MPC_REPS,
-                mean_ms, median_ms, p95_ms)
-
-        assert median_ms < 10_000, (
-            f"MPC.compute median {median_ms:.0f}ms exceeds 10 000ms for "
-            "full-house-5room"
-        )
+            if ctrl.solver_active.upper() == "SLSQP":
+                assert median_ms < 10_000, (
+                    f"MPC.compute median {median_ms:.0f}ms exceeds 10 000ms for "
+                    "full-house-5room"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +443,7 @@ def _write_benchmarks_md() -> None:
 
     def _table_row(r: dict) -> str:
         return (
-            f"| {r['scenario']:<22} | {r['mean_ms']:>9.1f} "
+            f"| {r['scenario']:<22} | {r['solver']:<8} | {r['solver_active']:<14} | {r['mean_ms']:>9.1f} "
             f"| {r['median_ms']:>11.1f} | {r['p95_ms']:>8.1f} "
             f"| {r['reps']:>4} |"
         )
@@ -420,10 +468,10 @@ def _write_benchmarks_md() -> None:
         "",
         "One control step consists of:",
         "1. CD-EKF predict-update (integrate nonlinear drift + Riccati ODE, then Kalman gain)",
-        "2. CDTrackingOCP NLP solve via L-BFGS-B (scipy)",
+        "2. CDTrackingOCP NLP solve via configured backend (IPOPT default, deterministic fallback to SLSQP)",
         "",
-        "| Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |",
-        "|------------------------|------------|-------------|----------|-----|",
+        "| Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |",
+        "|------------------------|------------|----------------|------------|-------------|----------|-----|",
         mpc_table,
         "",
         "**Configurations:**",
@@ -463,7 +511,7 @@ def _write_benchmarks_md() -> None:
         "",
         "- Timings include Python runtime overhead (numpy, scipy) but not module",
         "  import time (the module is already loaded).",
-        "- The L-BFGS-B solver convergence time depends on the warm-start; the",
+        "- Solver convergence time depends on the warm-start; the",
         "  first call (warm-up) is typically the slowest and is excluded.",
         "- Parameter estimation timing depends heavily on the number of identifiable",
         "  parameters (which the estimator detects automatically from the data).",

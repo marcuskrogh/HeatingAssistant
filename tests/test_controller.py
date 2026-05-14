@@ -4,6 +4,7 @@ import sys
 import os
 import pytest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -52,6 +53,12 @@ def _make_model_and_sources():
     return model, sources
 
 
+def _aug_state(temps: list[float], offsets: list[float] | None = None) -> np.ndarray:
+    if offsets is None:
+        offsets = [0.0] * len(temps)
+    return np.array(list(temps) + list(offsets), dtype=float)
+
+
 # -- HouseThermalSDE tests ----------------------------------------------------
 
 class TestHouseThermalSDE:
@@ -65,84 +72,89 @@ class TestHouseThermalSDE:
     def test_dimensions(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        assert sde.nx == 2
+        assert sde.nx == 4
         assert sde.nu == 2
         assert sde.nd == 3   # T_out + 2 solar
-        assert sde.nw == 2   # one noise per state
+        assert sde.nw == 4   # one noise per state (T + b)
         assert sde.nz == 2   # controlled output = room temps
         assert sde.nym == 2  # measured output = room temps
 
     def test_drift_shape(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([18.0, 17.0])
+        x = _aug_state([18.0, 17.0])
         u = np.array([0.5, 0.3])
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         f = sde.f(x, u, d, p, 0.0)
-        assert f.shape == (2,)
+        assert f.shape == (4,)
 
     def test_drift_heating_increases_temperature(self):
         """Full heating (u=1) should give positive drift when room is cold."""
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([15.0, 14.0])   # cold rooms
+        x = _aug_state([15.0, 14.0])   # cold rooms
         u = np.array([1.0, 1.0])     # full heating
         d = sde.disturbance_vector(0.0, {})
         p = np.array([])
         f = sde.f(x, u, d, p, 0.0)
-        assert np.all(f > 0.0), f"Expected positive drift with full heating, got {f}"
+        assert np.all(f[:2] > 0.0), f"Expected positive drift with full heating, got {f}"
+        assert np.allclose(f[2:], 0.0)
 
     def test_drift_no_heat_cold_outside(self):
         """No heating and cold outside: warm rooms should cool down."""
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([20.0, 20.0])   # warm rooms
+        x = _aug_state([20.0, 20.0])   # warm rooms
         u = np.zeros(sde.nu)         # no heating
         d = sde.disturbance_vector(-10.0, {})
         p = np.array([])
         f = sde.f(x, u, d, p, 0.0)
-        assert np.all(f < 0.0), f"Expected negative drift with cold outside, got {f}"
+        assert np.all(f[:2] < 0.0), f"Expected negative drift with cold outside, got {f}"
+        assert np.allclose(f[2:], 0.0)
 
     def test_sigma_shape(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([18.0, 17.0])
+        x = _aug_state([18.0, 17.0])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         sig = sde.sigma(x, u, d, p, 0.0)
-        assert sig.shape == (2, 2)
+        assert sig.shape == (4, 4)
 
     def test_sigma_is_scaled_identity(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0, sigma_w=0.1)
-        x = np.array([18.0, 17.0])
+        x = _aug_state([18.0, 17.0])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         sig = sde.sigma(x, u, d, p, 0.0)
-        np.testing.assert_array_almost_equal(sig, 0.1 * np.eye(2))
+        expected = np.zeros((4, 4))
+        expected[:2, :2] = 0.1 * np.eye(2)
+        expected[2:, 2:] = 0.002 * np.eye(2)
+        np.testing.assert_array_almost_equal(sig, expected)
 
     def test_controlled_output_equals_state(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([18.5, 17.5])
+        x = _aug_state([18.5, 17.5])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         z = sde.g(x, u, d, p, 0.0)
-        np.testing.assert_array_equal(z, x)
+        np.testing.assert_array_equal(z, np.array([18.5, 17.5]))
 
     def test_measurement_equals_state(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([18.5, 17.5])
+        x = _aug_state([18.5, 17.5])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         ym = sde.hm(x, u, d, p, 0.0)
-        np.testing.assert_array_equal(ym, x)
+        np.testing.assert_array_equal(ym, np.array([18.5, 17.5]))
 
     def test_measurement_noise_covariance_shape(self):
         model, sources = _make_model_and_sources()
@@ -162,22 +174,24 @@ class TestHouseThermalSDE:
         """dfdx should equal the structural matrix F."""
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([18.0, 17.0])
+        x = _aug_state([18.0, 17.0])
         u = np.array([0.3, 0.5])
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         J_analytic = sde.dfdx(x, u, d, p, 0.0)
-        np.testing.assert_array_almost_equal(J_analytic, sde._F)
+        np.testing.assert_array_almost_equal(J_analytic[:2, :2], sde._F)
+        np.testing.assert_array_equal(J_analytic[:2, 2:], np.zeros((2, 2)))
+        np.testing.assert_array_equal(J_analytic[2:, :], np.zeros((2, 4)))
 
     def test_observation_jacobian_is_identity(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([18.0, 17.0])
+        x = _aug_state([18.0, 17.0])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         H = sde.dhmdx(x, u, d, p, 0.0)
-        np.testing.assert_array_equal(H, np.eye(2))
+        np.testing.assert_array_equal(H, np.array([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]]))
 
     def test_disturbance_vector_shape(self):
         model, sources = _make_model_and_sources()
@@ -226,7 +240,7 @@ class TestHouseThermalSDE:
         model = HouseModel([living])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
         sde = HouseThermalSDE(model, [hp], dt=900.0)
-        x = np.array([25.0])
+        x = _aug_state([25.0])
         u = np.array([-1.0])   # full cooling
         d = sde.disturbance_vector(25.0, {})   # warm outside – no natural cooling
         p = np.array([])
@@ -240,7 +254,7 @@ class TestHouseThermalSDE:
         model = HouseModel([living])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
         sde = HouseThermalSDE(model, [hp], dt=900.0)
-        x = np.array([20.0])
+        x = _aug_state([20.0])
         u_zero = np.array([0.0])
         d = sde.disturbance_vector(20.0, {})   # same inside/outside → no heat exchange
         p = np.array([])
@@ -253,7 +267,7 @@ class TestHouseThermalSDE:
         """A heating-only source must not produce cooling drift when u < 0."""
         model, sources = _make_model_and_sources()  # ElectricHeaters, can_cool=False
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = np.array([25.0, 24.0])
+        x = _aug_state([25.0, 24.0])
         u = np.array([-1.0, -1.0])   # negative, but sources can't cool
         d = sde.disturbance_vector(25.0, {})
         p = np.array([])
@@ -282,7 +296,7 @@ class TestContinuousDiscreteEKF:
 
     def test_initial_covariance_shape(self):
         ekf, sde = self._make_ekf()
-        assert ekf.P.shape == (2, 2)
+        assert ekf.P.shape == (sde.nx, sde.nx)
 
     def test_update_with_measurement(self):
         """After update the estimate should be close to the measurement."""
@@ -292,7 +306,7 @@ class TestContinuousDiscreteEKF:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         x_hat, P = ekf.step(y, u, d, p, 0.0)
-        np.testing.assert_array_almost_equal(x_hat, y, decimal=1)
+        np.testing.assert_array_almost_equal(x_hat[:sde.nym], y, decimal=1)
 
     def test_covariance_propagates(self):
         """P should change after a predict-update cycle."""
@@ -339,7 +353,7 @@ class TestCDTrackingOCP:
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
         n_x, n_u = sde.nx, sde.nu
-        Q = np.eye(n_x)
+        Q = np.eye(sde.nz)
         R = 0.01 * np.eye(n_u)
         z_ref = sde.x_ref
         u_min, u_max = sde.u_bounds
@@ -372,7 +386,7 @@ class TestCDTrackingOCP:
     def test_heats_when_below_setpoint(self):
         """When rooms are cold, the OCP should recommend positive heating."""
         ocp, sde = self._make_ocp(horizon=4)
-        x0 = np.array([15.0, 14.0])  # below setpoints
+        x0 = _aug_state([15.0, 14.0])  # below setpoints
         d = sde.disturbance_vector(-10.0, {})
         d_traj = np.tile(d, (4, 1))
         u_opt, _, _ = ocp.solve(x0, d_traj)
@@ -389,13 +403,13 @@ class TestCDTrackingOCP:
         ]
         sde = HouseThermalSDE(model, sources, dt=900.0)
         ocp = CDTrackingOptimalControlProblem(
-            sde, N=3, Q=np.eye(2), R=0.001 * np.eye(2),
+            sde, N=3, Q=np.eye(sde.nz), R=0.001 * np.eye(2),
             z_ref=sde.x_ref, u_min=np.zeros(2), u_max=np.ones(2),
             dt=900.0, n_steps=5,
         )
         d = sde.disturbance_vector(22.0, {})
         d_traj = np.tile(d, (3, 1))
-        x0 = np.array([25.0, 24.0])
+        x0 = _aug_state([25.0, 24.0])
         u_opt, _, _ = ocp.solve(x0, d_traj)
         np.testing.assert_array_almost_equal(u_opt[0], np.zeros(2), decimal=4)
 
@@ -569,6 +583,8 @@ class TestHeatingMPCController:
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl._system, HouseThermalSDE)
+        assert isinstance(ctrl._control_system, HouseThermalSDE)
+        assert ctrl._control_system.nx == ctrl._system.nx
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
         assert isinstance(ctrl._ocp, CDTrackingOptimalControlProblem)
 
@@ -577,6 +593,63 @@ class TestHeatingMPCController:
         with pytest.raises(ValueError, match="smoothing_weight"):
             HeatingMPCController(model, sources, horizon=2, dt=900,
                                  smoothing_weight=-0.1)
+
+    def test_solver_selection_is_exposed(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(
+            model,
+            sources,
+            horizon=2,
+            dt=900,
+            solver="SLSQP",
+            solver_options={"maxiter": 42},
+        )
+        assert ctrl.solver_requested == "SLSQP"
+        assert ctrl.solver_active == "SLSQP"
+        assert ctrl.use_analytic_derivatives is True
+        assert ctrl._ocp._eocp._solver_backend._options["maxiter"] == 42
+
+    def test_default_solver_prefers_ipopt_but_falls_back_on_build_failure(self):
+        model, sources = _make_model_and_sources()
+        original_build = HeatingMPCController._build_ocp
+
+        def _flaky_build(ctrl_self, **kwargs):
+            if str(kwargs["solver"]).lower() in {"ipopt", "cyipopt"}:
+                raise RuntimeError("IPOPT backend unavailable at initialization")
+            return original_build(ctrl_self, **kwargs)
+
+        with patch.object(HeatingMPCController, "_build_ocp", new=_flaky_build):
+            ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+
+        assert ctrl.solver_requested == "ipopt"
+        assert ctrl.solver_active == "SLSQP"
+
+    def test_ipopt_runtime_error_falls_back_to_slsqp(self):
+        model, sources = _make_model_and_sources()
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        original_solve = CDTrackingOptimalControlProblem.solve
+
+        def _flaky_solve(ocp_self, *args, **kwargs):
+            backend_name = type(ocp_self._eocp._solver_backend).__name__.lower()
+            if "ipopt" in backend_name:
+                raise RuntimeError(
+                    "IPOPT backend requested but cyipopt is not available."
+                )
+            return original_solve(ocp_self, *args, **kwargs)
+
+        with patch.object(CDTrackingOptimalControlProblem, "solve", new=_flaky_solve):
+            ctrl = HeatingMPCController(
+                model,
+                sources,
+                horizon=2,
+                dt=900,
+                solver="ipopt",
+            )
+            actions = ctrl.compute(outdoor_temp=0.0, now=now)
+
+        assert ctrl.solver_requested == "ipopt"
+        assert ctrl.solver_active == "SLSQP"
+        assert all(0.0 <= frac <= 1.0 for frac in actions.values())
 
     def test_mpc_requests_cooling_when_above_setpoint(self):
         """When a cooling-capable heat pump room is well above setpoint, the

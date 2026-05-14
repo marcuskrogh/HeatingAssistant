@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-08 08:08 UTC*
+*Generated: 2026-05-14 08:59 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -14,11 +14,16 @@ warm-up and is **not** included in the timing samples.
 
 One control step consists of:
 1. CD-EKF predict-update (integrate nonlinear drift + Riccati ODE, then Kalman gain)
-2. CDTrackingOCP NLP solve via L-BFGS-B (scipy)
+2. CDTrackingOCP NLP solve via configured backend (IPOPT default, deterministic fallback to SLSQP)
 
-| Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
-|------------------------|------------|-------------|----------|-----|
-| two-bedroom-2room      |    6254.7 |      5431.9 |  10895.8 |   15 |
+| Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
+|------------------------|------------|----------------|------------|-------------|----------|-----|
+| studio-1room           | SLSQP    | SLSQP          |      46.8 |        43.2 |    107.7 |   15 |
+| studio-1room           | IPOPT    | SLSQP          |      46.9 |        43.3 |    107.5 |   15 |
+| two-bedroom-2room      | SLSQP    | SLSQP          |     120.5 |       109.0 |    232.6 |   15 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |     119.5 |       108.6 |    233.7 |   15 |
+| full-house-5room       | SLSQP    | SLSQP          |    5739.3 |      5646.8 |   6402.0 |   15 |
+| full-house-5room       | IPOPT    | SLSQP          |    5745.4 |      5631.0 |   6397.8 |   15 |
 
 **Configurations:**
 
@@ -57,7 +62,7 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 - Timings include Python runtime overhead (numpy, scipy) but not module
   import time (the module is already loaded).
-- The L-BFGS-B solver convergence time depends on the warm-start; the
+- Solver convergence time depends on the warm-start; the
   first call (warm-up) is typically the slowest and is excluded.
 - Parameter estimation timing depends heavily on the number of identifiable
   parameters (which the estimator detects automatically from the data).

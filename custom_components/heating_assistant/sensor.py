@@ -70,6 +70,7 @@ async def async_setup_entry(
     for room_name in coordinator.model.room_names:
         entities.append(TemperatureMeasuredSensor(coordinator, room_name))
         entities.append(TemperatureFilteredSensor(coordinator, room_name))
+        entities.append(TemperatureOffsetSensor(coordinator, room_name))
         entities.append(TemperatureForecastSensor(coordinator, room_name))
         entities.append(SetpointSensor(coordinator, room_name))
         entities.append(ConstraintUpperSensor(coordinator, room_name))
@@ -182,6 +183,38 @@ class TemperatureFilteredSensor(CoordinatorEntity, SensorEntity):
             "thermal_mass": room.thermal_mass,
             "r_external": room.r_external,
         }
+
+
+class TemperatureOffsetSensor(CoordinatorEntity, SensorEntity):
+    """Sensor reporting the EKF-estimated measurement offset state b [°C]."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_icon = "mdi:thermometer-lines"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Temperature Offset"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_temperature_offset"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        try:
+            offset = self._coordinator.controller.temperature_offsets.get(self._room_name)
+        except Exception:
+            return None
+        if offset is None:
+            return None
+        return round(float(offset), 3)
 
 
 # ---------------------------------------------------------------------------

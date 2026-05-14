@@ -15,6 +15,8 @@ import homeassistant.helpers.config_validation as cv
 from .const import (
     CONF_HORIZON,
     CONF_LATITUDE,
+    CONF_MPC_ANALYTIC_DERIVATIVES,
+    CONF_MPC_SOLVER,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
@@ -22,6 +24,8 @@ from .const import (
     CONF_ROOMS,
     CONF_HEAT_SOURCES,
     DEFAULT_HORIZON,
+    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+    DEFAULT_MPC_SOLVER,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     NAME,
@@ -69,6 +73,13 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
                     vol.Coerce(int), vol.Range(min=1, max=24)
                 ),
+                vol.Optional(CONF_MPC_SOLVER, default=DEFAULT_MPC_SOLVER): vol.All(
+                    str, lambda value: value.lower(), vol.In(["slsqp", "ipopt", "cyipopt"])
+                ),
+                vol.Optional(
+                    CONF_MPC_ANALYTIC_DERIVATIVES,
+                    default=DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+                ): bool,
             }
         )
 
@@ -120,6 +131,19 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     CONF_HORIZON,
                     default=current.get(CONF_HORIZON, DEFAULT_HORIZON),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
+                vol.Optional(
+                    CONF_MPC_SOLVER,
+                    default=current.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER),
+                ): vol.All(
+                    str, lambda value: value.lower(), vol.In(["slsqp", "ipopt", "cyipopt"])
+                ),
+                vol.Optional(
+                    CONF_MPC_ANALYTIC_DERIVATIVES,
+                    default=current.get(
+                        CONF_MPC_ANALYTIC_DERIVATIVES,
+                        DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+                    ),
+                ): bool,
             }
         )
 

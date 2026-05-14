@@ -760,7 +760,9 @@ def compute_open_loop_predictions(
         if len(y0) < n:
             continue
 
-        x = np.array(y0[:n], dtype=float)
+        nx = int(getattr(system, "nx", n))
+        x = np.zeros(nx, dtype=float)
+        x[:n] = np.array(y0[:n], dtype=float)
         d_prev = _make_d(seg[0])
 
         valid_segment = True

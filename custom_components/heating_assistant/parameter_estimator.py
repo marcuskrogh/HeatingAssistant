@@ -335,9 +335,11 @@ class KalmanMLEstimator:
         def _model_factory(theta: np.ndarray):
             return self._build_parametric_system(layout, theta)
 
-        # Initial state estimate (use first measurement)
-        x0 = std_history[0]["ym"]
-        P0 = np.eye(self._n) * self._R_var * 10.0  # Initial uncertainty
+        # Initial state estimate/covariance (supports augmented states, e.g. [T, b])
+        system0 = _model_factory(theta_prior)
+        if system0 is None:
+            return None
+        x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
 
         try:
             # Evaluate negative log-likelihood using CD-EKF
@@ -468,9 +470,35 @@ class KalmanMLEstimator:
             pert[a:b] *= 200.0   # std ≈ 100 W in linear space
             return theta0 + pert
 
-        # ── Initial state estimate for CD-EKF ──────────────────────────────
-        x0 = std_history[0]["ym"]
-        P0 = np.eye(n) * self._R_var * 10.0  # Initial uncertainty
+        # ── Initial state estimate for CD-EKF (supports augmented states) ──
+        system0 = _model_factory(theta_prior)
+        if system0 is None:
+            return {
+                "success": False,
+                "estimated_params": {
+                    name: {"thermal_mass": p["thermal_mass"], "r_external": p["r_external"]}
+                    for name, p in current.items()
+                },
+                "current_params": {
+                    name: {"thermal_mass": p["thermal_mass"], "r_external": p["r_external"]}
+                    for name, p in current.items()
+                },
+                "estimated_internal_gains": {
+                    name: p["internal_gain"] for name, p in current.items()
+                },
+                "estimated_heater_scales": {
+                    s.name: float(getattr(s, "power_scale", 1.0))
+                    for s in self._sources
+                },
+                "estimated_inter_room_r": {},
+                "identifiable_connections": [],
+                "identifiable_sources": [],
+                "stage2_converged": False,
+                "n_steps": n_steps,
+                "log_likelihood": None,
+                "message": "Failed to initialize parametric model for estimation.",
+            }
+        x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
 
         # ── Delegate optimisation to CDParameterEstimator ──────────────────
         mbc_est = _CDParameterEstimator(
@@ -842,3 +870,23 @@ class KalmanMLEstimator:
                 np.sum((log_r_ij - r_ij_priors) ** 2)
             )
         return reg
+
+    def _initial_state_and_covariance(
+        self,
+        system: HouseThermalSystem,
+        first_measurement: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Build x0/P0 matching system dimensions (supports augmented states)."""
+        nx = int(system.nx)
+        nym = int(system.nym)
+        x0 = np.zeros(nx, dtype=float)
+        n_copy = min(nym, len(first_measurement), nx)
+        x0[:n_copy] = np.array(first_measurement[:n_copy], dtype=float)
+
+        P0 = np.eye(nx, dtype=float) * self._R_var * 10.0
+        if nx > nym:
+            # Augmented latent states (e.g. temperature offsets) are not
+            # directly observed at startup, so start them with higher
+            # uncertainty than measured temperature components.
+            P0[nym:, nym:] *= 4.0
+        return x0, P0

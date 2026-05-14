@@ -3,9 +3,13 @@
 from custom_components.heating_assistant.__init__ import _merge_yaml_into_entry_data
 from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
+    CONF_MPC_ANALYTIC_DERIVATIVES,
+    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOMS,
     CONF_WEATHER_ENTITY,
+    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+    DEFAULT_MPC_SOLVER,
 )
 
 
@@ -72,3 +76,16 @@ def test_merge_returns_empty_when_both_have_no_rooms_or_sources():
 
     assert merged[CONF_ROOMS] == []
     assert merged[CONF_HEAT_SOURCES] == []
+
+
+def test_merge_populates_solver_defaults():
+    entry_data = {CONF_ROOMS: [], CONF_HEAT_SOURCES: []}
+    yaml_cfg = {}
+
+    merged = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
+
+    assert merged[CONF_MPC_SOLVER] == DEFAULT_MPC_SOLVER
+    assert (
+        merged[CONF_MPC_ANALYTIC_DERIVATIVES]
+        == DEFAULT_MPC_ANALYTIC_DERIVATIVES
+    )

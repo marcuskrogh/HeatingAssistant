@@ -18,6 +18,7 @@ from custom_components.heating_assistant.sensor import (
     SolarGainMeasuredSensor,
     TemperatureFilteredSensor,
     TemperatureMeasuredSensor,
+    TemperatureOffsetSensor,
 )
 
 
@@ -73,6 +74,14 @@ def test_temperature_filtered_unique_id_and_name():
     assert "Temperature Filtered" in sensor._attr_name
 
 
+def test_temperature_offset_unique_id_and_name():
+    coord = _make_coordinator()
+    coord.controller.temperature_offsets = {"living_room": 0.123}
+    sensor = TemperatureOffsetSensor(coord, "living_room")
+    assert sensor._attr_unique_id == "heating_assistant_living_room_temperature_offset"
+    assert "Temperature Offset" in sensor._attr_name
+
+
 def test_setpoint_unique_id():
     coord = _make_coordinator()
     sensor = SetpointSensor(coord, "living_room")
@@ -113,6 +122,13 @@ def test_temperature_filtered_returns_ekf_estimate():
     coord = _make_coordinator(measured=19.83, filtered=20.27)
     sensor = TemperatureFilteredSensor(coord, "living_room")
     assert sensor.native_value == pytest.approx(20.27)
+
+
+def test_temperature_offset_returns_estimate():
+    coord = _make_coordinator()
+    coord.controller.temperature_offsets = {"living_room": -0.257}
+    sensor = TemperatureOffsetSensor(coord, "living_room")
+    assert sensor.native_value == pytest.approx(-0.257)
 
 
 def test_temperature_measured_and_filtered_are_independent():
