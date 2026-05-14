@@ -125,6 +125,18 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
+def _normalize_solver_name(value: Any) -> str:
+    """Normalize solver names to canonical values used by the controller."""
+    if value is None:
+        return DEFAULT_MPC_SOLVER
+    key = str(value).strip().lower()
+    if key in {"ipopt", "cyipopt"}:
+        return key
+    if key in {"slsqp", "scipy", "scipy-minimize"}:
+        return "SLSQP"
+    return DEFAULT_MPC_SOLVER
+
+
 def _coerce_cloud_cover_percent(value: Any) -> Optional[float]:
     """Convert a cloud-cover percentage (0–100) to a fraction in [0, 1].
 
@@ -363,7 +375,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._constraint_offset: float = data.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
-        self._mpc_solver: str = (
+        self._mpc_solver: str = _normalize_solver_name(
             options.get(CONF_MPC_SOLVER)
             or data.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)
         )
@@ -420,12 +432,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
-            solver=getattr(self, "_mpc_solver", DEFAULT_MPC_SOLVER),
-            use_analytic_derivatives=getattr(
-                self,
-                "_mpc_analytic_derivatives",
-                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-            ),
+            solver=self._mpc_solver,
+            use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
         # Per-room user toggle (True = on, False = manually disabled by the
@@ -613,12 +621,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
-            solver=getattr(self, "_mpc_solver", DEFAULT_MPC_SOLVER),
-            use_analytic_derivatives=getattr(
-                self,
-                "_mpc_analytic_derivatives",
-                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-            ),
+            solver=self._mpc_solver,
+            use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
         self._estimation_timestamp = None
@@ -1683,12 +1687,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
-            solver=getattr(self, "_mpc_solver", DEFAULT_MPC_SOLVER),
-            use_analytic_derivatives=getattr(
-                self,
-                "_mpc_analytic_derivatives",
-                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-            ),
+            solver=self._mpc_solver,
+            use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
         _LOGGER.info(

@@ -271,8 +271,8 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(
                     CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                vol.Optional(CONF_MPC_SOLVER, default=DEFAULT_MPC_SOLVER): vol.In(
-                    ["SLSQP", "ipopt", "IPOPT", "cyipopt", "CYIPOPT"]
+                vol.Optional(CONF_MPC_SOLVER, default=DEFAULT_MPC_SOLVER): vol.All(
+                    str, lambda value: value.lower(), vol.In(["slsqp", "ipopt", "cyipopt"])
                 ),
                 vol.Optional(
                     CONF_MPC_ANALYTIC_DERIVATIVES,

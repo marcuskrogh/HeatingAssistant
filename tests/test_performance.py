@@ -215,7 +215,7 @@ class TestMPCPerformance:
     """Benchmark HeatingMPCController.compute() for different house sizes."""
 
     _NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
-    _SOLVERS = ("SLSQP", "ipopt")
+    _SOLVERS = ("SLSQP", "IPOPT")
 
     def test_studio_1room(self):
         """1-room studio: EKF + NLP (horizon=6, 1 input)."""

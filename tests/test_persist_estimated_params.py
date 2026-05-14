@@ -89,6 +89,8 @@ class _FakeCoordinator:
         self._smoothing_weight = 0.1
         self._constraint_offset = 2.0
         self._terminal_weight = 100.0
+        self._mpc_solver = "SLSQP"
+        self._mpc_analytic_derivatives = True
         self._latitude = 0.0
         self._longitude = 0.0
         self.dt = 900.0
