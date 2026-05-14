@@ -146,6 +146,16 @@ class TestHouseThermalSDE:
         z = sde.g(x, u, d, p, 0.0)
         np.testing.assert_array_equal(z, np.array([18.5, 17.5]))
 
+    def test_controlled_output_includes_offset_state(self):
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = _aug_state([18.5, 17.5], [1.0, -0.25])
+        u = np.zeros(sde.nu)
+        d = sde.disturbance_vector(5.0, {})
+        p = np.array([])
+        z = sde.g(x, u, d, p, 0.0)
+        np.testing.assert_array_equal(z, np.array([19.5, 17.25]))
+
     def test_measurement_equals_state(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
@@ -155,6 +165,16 @@ class TestHouseThermalSDE:
         p = np.array([])
         ym = sde.hm(x, u, d, p, 0.0)
         np.testing.assert_array_equal(ym, np.array([18.5, 17.5]))
+
+    def test_measurement_includes_offset_state(self):
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = _aug_state([18.5, 17.5], [1.0, -0.25])
+        u = np.zeros(sde.nu)
+        d = sde.disturbance_vector(5.0, {})
+        p = np.array([])
+        ym = sde.hm(x, u, d, p, 0.0)
+        np.testing.assert_array_equal(ym, np.array([19.5, 17.25]))
 
     def test_measurement_noise_covariance_shape(self):
         model, sources = _make_model_and_sources()
@@ -491,6 +511,52 @@ class TestHeatingMPCController:
         assert len(ctrl.outdoor_forecast) == 3
         assert len(ctrl.solar_forecast) == 4  # N+1: covers now through now+N*dt
         assert len(ctrl.heating_schedule) == 3
+
+    def test_filtered_temperatures_include_estimated_offset(self):
+        room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
+        model = HouseModel([room])
+        ctrl = HeatingMPCController(
+            model,
+            [ElectricHeater("h", "living_room", 2000.0)],
+            horizon=2,
+            dt=900,
+        )
+        ctrl._ekf._x_np = _aug_state([20.0], [1.0])
+
+        assert ctrl.filtered_temperatures["living_room"] == pytest.approx(21.0)
+
+    def test_predictions_include_estimated_offset(self):
+        room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
+        model = HouseModel([room])
+        ctrl = HeatingMPCController(
+            model,
+            [ElectricHeater("h", "living_room", 2000.0)],
+            horizon=2,
+            dt=900,
+        )
+        biased_state = _aug_state([20.0], [1.0])
+        ctrl._ekf._x_np = biased_state.copy()
+        ctrl._ekf.predict = lambda *args, **kwargs: None
+
+        def _update(*args, **kwargs):
+            ctrl._ekf._x_np = biased_state.copy()
+            return biased_state.copy(), ctrl._ekf.P
+
+        ctrl._ekf.update = _update
+        ctrl._ocp.solve = lambda *args, **kwargs: (
+            np.zeros((ctrl._horizon, ctrl._system.nu)),
+            None,
+            {},
+        )
+
+        ctrl.compute(
+            outdoor_temp=20.0,
+            solar_gains={"living_room": 0.0},
+            now=datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc),
+            outdoor_forecast=[20.0, 20.0],
+        )
+
+        assert [step["living_room"] for step in ctrl.predictions] == pytest.approx([21.0, 21.0])
 
     def test_predictions_contain_all_rooms(self):
         model, sources = _make_model_and_sources()

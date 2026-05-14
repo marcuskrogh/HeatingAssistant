@@ -865,7 +865,7 @@ class HeatingMPCController:
 
     @property
     def filtered_temperatures(self) -> Dict[str, float]:
-        """Kalman-filtered room temperatures x̂⁺ after the latest update step.
+        """Kalman-filtered room temperatures y(k|k) after the latest update step.
 
         Before the first ``compute()`` call this returns the EKF initial
         state (which equals the room temperatures the controller was
@@ -873,8 +873,9 @@ class HeatingMPCController:
         """
         x_hat = self._ekf.x_hat
         n = self._system.nym
+        y_hat = self._effective_room_temperatures(self._system, x_hat)
         return {
-            name: float(x_hat[i])
+            name: float(y_hat[i])
             for i, name in enumerate(self._system._room_list[:n])
         }
 
@@ -936,6 +937,19 @@ class HeatingMPCController:
     def total_computes(self) -> int:
         """Monotonically increasing count of all compute() calls (never resets)."""
         return self._total_computes
+
+    def _effective_room_temperatures(
+        self,
+        system: HouseThermalSDE,
+        x: np.ndarray,
+    ) -> np.ndarray:
+        """Map a state vector to the room temperatures shown in visualisations."""
+        n = system.nym
+        if len(x) < n:
+            return np.zeros(n)
+        if system._augment_offsets and len(x) >= 2 * n:
+            return x[:n] + x[n:2 * n]
+        return x[:n].copy()
 
     # ── Main entry point ─────────────────────────────────────────────────
 
@@ -1125,8 +1139,9 @@ class HeatingMPCController:
                     + self._control_system.f(x_cur, u_opt[k], d_traj[k], p, 0.0) * h
                 )
             x_pred = x_cur
+            y_pred = self._effective_room_temperatures(self._control_system, x_pred)
             self._predictions.append(
-                {name: float(x_pred[i]) for i, name in enumerate(room_list)}
+                {name: float(y_pred[i]) for i, name in enumerate(room_list)}
             )
 
         self._heating_schedule = [
