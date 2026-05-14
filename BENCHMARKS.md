@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-14 03:57 UTC*
+*Generated: 2026-05-14 04:49 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,9 +18,9 @@ One control step consists of:
 
 | Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|-------------|----------|-----|
-| studio-1room           |      41.6 |        44.4 |     45.0 |   15 |
-| two-bedroom-2room      |      88.6 |        85.3 |    132.2 |   15 |
-| full-house-5room       |    5364.6 |      5371.9 |   5624.5 |   15 |
+| studio-1room           |      27.1 |        28.9 |     29.1 |   15 |
+| two-bedroom-2room      |      57.7 |        55.6 |     86.5 |   15 |
+| full-house-5room       |    3896.4 |      3892.0 |   4090.4 |   15 |
 
 **Configurations:**
 
@@ -43,9 +43,9 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 | Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|-------------|----------|-----|
-| studio-1room           |   13581.0 |     13581.0 |  13581.0 |    1 |
-| two-bedroom-2room      |   55321.8 |     55321.8 |  55321.8 |    1 |
-| full-house-5room       |  654229.1 |    654229.1 | 654229.1 |    1 |
+| studio-1room           |    9716.8 |      9716.8 |   9716.8 |    1 |
+| two-bedroom-2room      |   39400.4 |     39400.4 |  39400.4 |    1 |
+| full-house-5room       |  379151.7 |    379151.7 | 379151.7 |    1 |
 
 **Configurations:**
 
