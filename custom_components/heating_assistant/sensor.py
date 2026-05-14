@@ -1263,7 +1263,7 @@ class PredictionErrorSensor(CoordinatorEntity, SensorEntity):
         errors = []
         room_idx = self._coordinator.model.room_names.index(self._room_name)
 
-        for record in self._coordinator.history_buffer[-50:]:  # Last 50 samples
+        for record in list(self._coordinator.history_buffer)[-50:]:  # Last 50 samples
             y = record.get("y", [])
             y_pred = record.get("y_pred")  # aligned: prediction made at k-1 for k
 
