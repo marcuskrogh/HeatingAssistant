@@ -14,6 +14,7 @@ from custom_components.heating_assistant.sensor import (
     ConstraintUpperSensor,
     HeatingPowerMeasuredSensor,
     OutdoorTemperatureMeasuredSensor,
+    PredictionErrorSensor,
     SetpointSensor,
     SolarGainMeasuredSensor,
     TemperatureFilteredSensor,
@@ -300,3 +301,19 @@ def test_constraint_forecast_omits_value_when_offset_missing():
     for entry in fc:
         assert "time" in entry
         assert "constraint_upper" not in entry
+
+
+def test_prediction_error_attributes_handle_deque_history_buffer():
+    """PredictionErrorSensor attributes should work when history_buffer is a deque."""
+    from collections import deque
+
+    coord = _make_coordinator()
+    coord.history_buffer = deque([
+        {"y": [20.0], "y_pred": [20.2]},
+        {"y": [20.1], "y_pred": [20.3]},
+        {"y": [20.2], "y_pred": [20.0]},
+    ], maxlen=100)
+
+    attrs = PredictionErrorSensor(coord, "living_room").extra_state_attributes
+    assert attrs["n_samples"] == 3
+    assert attrs["recent_errors"] == [0.2, 0.2, -0.2]
