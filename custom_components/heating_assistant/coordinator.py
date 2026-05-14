@@ -36,6 +36,9 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
+    CONF_SIGMA_B,
+    CONF_SIGMA_V,
+    CONF_SIGMA_W,
     CONF_SOURCE_COOLING_COP,
     CONF_SOURCE_COOLING_EFFICIENCY,
     CONF_SOURCE_HEATING_EFFICIENCY,
@@ -79,6 +82,9 @@ from .const import (
     DEFAULT_MPC_SOLVER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_SIGMA_B,
+    DEFAULT_SIGMA_V,
+    DEFAULT_SIGMA_W,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
@@ -375,6 +381,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._constraint_offset: float = data.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
+        self._sigma_w: float = float(
+            options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
+        )
+        self._sigma_v: float = float(
+            options.get(CONF_SIGMA_V, data.get(CONF_SIGMA_V, DEFAULT_SIGMA_V))
+        )
+        self._sigma_b: float = float(
+            options.get(CONF_SIGMA_B, data.get(CONF_SIGMA_B, DEFAULT_SIGMA_B))
+        )
         self._mpc_solver: str = _normalize_solver_name(
             options.get(CONF_MPC_SOLVER)
             or data.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)
@@ -432,6 +447,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
             solver=self._mpc_solver,
             use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
@@ -621,6 +639,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
             solver=self._mpc_solver,
             use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
@@ -1687,6 +1708,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
             solver=self._mpc_solver,
             use_analytic_derivatives=self._mpc_analytic_derivatives,
         )

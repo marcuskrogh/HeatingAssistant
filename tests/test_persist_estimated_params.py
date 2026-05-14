@@ -89,6 +89,9 @@ class _FakeCoordinator:
         self._smoothing_weight = 0.1
         self._constraint_offset = 2.0
         self._terminal_weight = 100.0
+        self._sigma_w = 0.25
+        self._sigma_v = 0.75
+        self._sigma_b = 0.01
         self._mpc_solver = "SLSQP"
         self._mpc_analytic_derivatives = True
         self._latitude = 0.0
@@ -139,7 +142,7 @@ def test_apply_estimated_parameters_sets_internal_gain_and_power_scale():
     with patch(
         "custom_components.heating_assistant.coordinator.HeatingMPCController",
         return_value=mock_controller,
-    ):
+    ) as m_controller:
         coord_mod.HeatingAssistantCoordinator._apply_estimated_parameters(
             coordinator,
             estimated_params={"lr": {"thermal_mass": 4e6, "r_external": 0.04}},
@@ -153,6 +156,10 @@ def test_apply_estimated_parameters_sets_internal_gain_and_power_scale():
     assert coordinator.model.rooms["lr"].r_external == pytest.approx(0.04)
     assert coordinator.model.rooms["lr"].internal_gain == pytest.approx(150.0)
     assert src.power_scale == pytest.approx(1.25)
+    kwargs = m_controller.call_args.kwargs
+    assert kwargs["sigma_w"] == pytest.approx(0.25)
+    assert kwargs["sigma_v"] == pytest.approx(0.75)
+    assert kwargs["sigma_b"] == pytest.approx(0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -306,13 +313,17 @@ def test_reset_estimated_parameters_removes_snapshot_and_rebuilds():
         patch(
             "custom_components.heating_assistant.coordinator.HeatingMPCController",
             return_value=mock_controller,
-        ),
+        ) as m_controller,
     ):
         coord_mod.HeatingAssistantCoordinator.reset_estimated_parameters(coordinator)
 
     assert CONF_ESTIMATED_PARAMS not in coordinator._real_entry.data
     assert coordinator._estimation_timestamp is None
     assert coordinator._estimation_log_likelihood is None
+    kwargs = m_controller.call_args.kwargs
+    assert kwargs["sigma_w"] == pytest.approx(0.25)
+    assert kwargs["sigma_v"] == pytest.approx(0.75)
+    assert kwargs["sigma_b"] == pytest.approx(0.01)
 
 
 # ---------------------------------------------------------------------------

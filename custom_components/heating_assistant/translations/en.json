@@ -9,7 +9,10 @@
           "longitude": "Longitude (degrees, positive = East)",
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID (leave blank to use HA default)",
           "update_interval": "Control time step (seconds, 60–3600) — how often the MPC re-solves and applies actions (ZOH duration = EKF step = OCP step)",
-          "horizon": "MPC prediction horizon (steps)"
+          "horizon": "MPC prediction horizon (steps)",
+          "sigma_w": "EKF process-noise std dev (sigma_w, K/√s)",
+          "sigma_v": "EKF measurement-noise std dev (sigma_v, K)",
+          "sigma_b": "EKF offset process-noise std dev (sigma_b, K/√s)"
         }
       }
     },
@@ -22,7 +25,10 @@
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID",
           "update_interval": "Control time step (seconds, 60–3600) — how often the MPC re-solves and applies actions (ZOH duration = EKF step = OCP step)",
-          "horizon": "MPC prediction horizon (steps)"
+          "horizon": "MPC prediction horizon (steps)",
+          "sigma_w": "EKF process-noise std dev (sigma_w, K/√s)",
+          "sigma_v": "EKF measurement-noise std dev (sigma_v, K)",
+          "sigma_b": "EKF offset process-noise std dev (sigma_b, K/√s)"
         }
       }
     }
