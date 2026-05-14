@@ -263,7 +263,7 @@ CONFIG_SCHEMA = vol.Schema(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=24)
+                    vol.Coerce(int), vol.Range(min=1, max=100)
                 ),
                 vol.Optional(
                     CONF_ENERGY_WEIGHT, default=DEFAULT_ENERGY_WEIGHT
