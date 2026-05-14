@@ -582,6 +582,8 @@ class TestHeatingMPCController:
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl._system, HouseThermalSDE)
+        assert isinstance(ctrl._control_system, HouseThermalSDE)
+        assert ctrl._control_system.nx == ctrl._system.nx
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
         assert isinstance(ctrl._ocp, CDTrackingOptimalControlProblem)
 

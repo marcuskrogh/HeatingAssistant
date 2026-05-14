@@ -624,7 +624,7 @@ class HeatingMPCController:
             model, heat_sources, dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
-            augment_offsets=False,
+            augment_offsets=True,
             n_int_steps=n_int_steps,
         )
         n_x = self._system.nx
@@ -654,7 +654,7 @@ class HeatingMPCController:
         # Keep OCP integration steps lower than EKF steps to bound NLP size and
         # preserve controller runtime on larger houses; EKF still uses full
         # n_int_steps for state-estimation fidelity.
-        OCP_MAX_INTEGRATION_STEPS = 3
+        OCP_MAX_INTEGRATION_STEPS = 2
         ocp_n_steps = min(n_int_steps, OCP_MAX_INTEGRATION_STEPS)
 
         # Reference and bounds for the OCP
@@ -904,7 +904,7 @@ class HeatingMPCController:
         x_hat, _ = self._ekf.update(y, self._u_prev, d_traj[0], p)
         n_rooms = self._system.nym
         self._system._offset_state = np.array(x_hat[n_rooms:], dtype=float)
-        x_hat_control = x_hat[: self._control_system.nx].copy()
+        x_hat_control = x_hat.copy()
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
         _t0 = time.perf_counter()
