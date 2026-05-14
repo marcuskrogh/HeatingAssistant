@@ -79,8 +79,8 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
                     vol.Coerce(int), vol.Range(min=1, max=24)
                 ),
-                vol.Optional(CONF_MPC_SOLVER, default=DEFAULT_MPC_SOLVER): vol.All(
-                    str, lambda value: value.lower(), vol.In(["slsqp", "ipopt", "cyipopt"])
+                vol.Optional(CONF_MPC_SOLVER, default=DEFAULT_MPC_SOLVER): vol.In(
+                    ["slsqp", "ipopt", "cyipopt"]
                 ),
                 vol.Optional(
                     CONF_MPC_ANALYTIC_DERIVATIVES,
@@ -146,9 +146,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_MPC_SOLVER,
                     default=current.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER),
-                ): vol.All(
-                    str, lambda value: value.lower(), vol.In(["slsqp", "ipopt", "cyipopt"])
-                ),
+                ): vol.In(["slsqp", "ipopt", "cyipopt"]),
                 vol.Optional(
                     CONF_MPC_ANALYTIC_DERIVATIVES,
                     default=current.get(
