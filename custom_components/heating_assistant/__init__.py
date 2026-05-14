@@ -82,6 +82,8 @@ from .const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_MPC_ANALYTIC_DERIVATIVES,
+    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_WEATHER_ENTITY,
     CONF_R_EXTERNAL,
@@ -132,6 +134,8 @@ from .const import (
     DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_HORIZON,
     DEFAULT_MAX_TEMP_OFFSET,
+    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+    DEFAULT_MPC_SOLVER,
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
@@ -267,6 +271,13 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(
                     CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
+                vol.Optional(CONF_MPC_SOLVER, default=DEFAULT_MPC_SOLVER): vol.In(
+                    ["SLSQP", "ipopt", "IPOPT", "cyipopt", "CYIPOPT"]
+                ),
+                vol.Optional(
+                    CONF_MPC_ANALYTIC_DERIVATIVES,
+                    default=DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+                ): cv.boolean,
             }
         )
     },
@@ -372,6 +383,14 @@ def _merge_yaml_into_entry_data(
     if CONF_TERMINAL_WEIGHT not in merged:
         merged[CONF_TERMINAL_WEIGHT] = yaml_cfg.get(
             CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT
+        )
+    if CONF_MPC_SOLVER not in merged:
+        merged[CONF_MPC_SOLVER] = yaml_cfg.get(
+            CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER
+        )
+    if CONF_MPC_ANALYTIC_DERIVATIVES not in merged:
+        merged[CONF_MPC_ANALYTIC_DERIVATIVES] = yaml_cfg.get(
+            CONF_MPC_ANALYTIC_DERIVATIVES, DEFAULT_MPC_ANALYTIC_DERIVATIVES
         )
     return merged
 

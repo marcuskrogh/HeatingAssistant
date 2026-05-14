@@ -4,6 +4,7 @@ import sys
 import os
 import pytest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -592,6 +593,48 @@ class TestHeatingMPCController:
         with pytest.raises(ValueError, match="smoothing_weight"):
             HeatingMPCController(model, sources, horizon=2, dt=900,
                                  smoothing_weight=-0.1)
+
+    def test_solver_selection_is_exposed(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(
+            model,
+            sources,
+            horizon=2,
+            dt=900,
+            solver="SLSQP",
+            solver_options={"maxiter": 42},
+        )
+        assert ctrl.solver_requested == "SLSQP"
+        assert ctrl.solver_active == "SLSQP"
+        assert ctrl.use_analytic_derivatives is True
+        assert ctrl._ocp._eocp._solver_backend._options["maxiter"] == 42
+
+    def test_ipopt_runtime_error_falls_back_to_slsqp(self):
+        model, sources = _make_model_and_sources()
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        original_solve = CDTrackingOptimalControlProblem.solve
+
+        def _flaky_solve(ocp_self, *args, **kwargs):
+            backend_name = type(ocp_self._eocp._solver_backend).__name__.lower()
+            if "ipopt" in backend_name:
+                raise RuntimeError(
+                    "IPOPT backend requested but cyipopt is not available."
+                )
+            return original_solve(ocp_self, *args, **kwargs)
+
+        with patch.object(CDTrackingOptimalControlProblem, "solve", new=_flaky_solve):
+            ctrl = HeatingMPCController(
+                model,
+                sources,
+                horizon=2,
+                dt=900,
+                solver="ipopt",
+            )
+            actions = ctrl.compute(outdoor_temp=0.0, now=now)
+
+        assert ctrl.solver_requested == "ipopt"
+        assert ctrl.solver_active == "SLSQP"
+        assert all(0.0 <= frac <= 1.0 for frac in actions.values())
 
     def test_mpc_requests_cooling_when_above_setpoint(self):
         """When a cooling-capable heat pump room is well above setpoint, the

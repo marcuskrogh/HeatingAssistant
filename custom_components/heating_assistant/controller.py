@@ -47,10 +47,12 @@ HeatingMPCController
 
 from __future__ import annotations
 
+import inspect
+import logging
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -78,6 +80,8 @@ from .const import MPC_STATS_BUFFER_SIZE
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
 from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
+
+_LOGGER = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -111,7 +115,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     a smooth, asymmetric sigmoid (see ``HeatPump.smooth_thermal_power``) that
     maps u ∈ [−1, 1] continuously to the range [−Q_cool_max, +Q_heat_max].
     This eliminates the non-differentiable kink at u = 0 that a piecewise
-    model would produce, giving the L-BFGS-B optimiser smooth gradients.
+    model would produce, giving the NLP optimiser smooth gradients.
 
     Parameters
     ----------
@@ -251,7 +255,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
           to [−Q_cool_max, +Q_heat_max].  Positive u contributes heating;
           negative u contributes cooling (negative power).  The function is
           C∞-smooth everywhere, providing well-defined gradients for the
-          L-BFGS-B optimiser even at u = 0.
+          nonlinear NLP optimiser even at u = 0.
 
         * **Heating-only sources** (``src.can_cool is False``): the standard
           linear ``thermal_power(max(0, u_j), T_out)`` is used, with a
@@ -531,7 +535,8 @@ class HeatingMPCController:
       2. CDTrackingOCP solve: minimise the NLP over the horizon.
       3. Apply the first optimal action to all heat sources.
 
-    The CDTrackingOptimalControlProblem uses SLSQP (via scipy) to solve the
+    The CDTrackingOptimalControlProblem uses a configurable NLP backend
+    (default: SLSQP via scipy) to solve the
     finite-horizon NLP with:
         - Quadratic output-tracking cost  ‖z − z_ref‖²_Q
         - Quadratic input cost            ‖u‖²_R
@@ -587,6 +592,9 @@ class HeatingMPCController:
         sigma_v: float = 0.5,
         sigma_b: float = 0.002,
         n_int_steps: int = 10,
+        solver: str = "SLSQP",
+        solver_options: Optional[Dict[str, Any]] = None,
+        use_analytic_derivatives: bool = True,
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
@@ -594,6 +602,10 @@ class HeatingMPCController:
         self._latitude = latitude
         self._longitude = longitude
         self._constraint_offset = constraint_offset
+        self._solver_requested = solver
+        self._solver_active = solver
+        self._solver_options = dict(solver_options) if solver_options is not None else {}
+        self._use_analytic_derivatives = bool(use_analytic_derivatives)
 
         # The EKF must integrate over the actual wall-clock interval between
         # compute() calls, NOT the OCP horizon step size.  Using dt (e.g.
@@ -656,15 +668,20 @@ class HeatingMPCController:
         # n_int_steps for state-estimation fidelity.
         OCP_MAX_INTEGRATION_STEPS = 2
         ocp_n_steps = min(n_int_steps, OCP_MAX_INTEGRATION_STEPS)
+        self._ocp_n_steps = ocp_n_steps
+        self._Q = Q
+        self._R = R
+        self._S = S
+        self._P = P
 
         # Reference and bounds for the OCP
         z_ref = self._control_system.x_ref.copy()
         u_min, u_max = self._control_system.u_bounds
 
         # ── CDTrackingOptimalControlProblem ─────────────────────────────
-        self._ocp = CDTrackingOptimalControlProblem(
-            self._control_system,
-            N=horizon,
+        self._ocp = self._build_ocp(
+            solver=self._solver_active,
+            horizon=horizon,
             Q=Q,
             R=R,
             P=P,
@@ -674,7 +691,6 @@ class HeatingMPCController:
             u_max=u_max,
             n_steps=ocp_n_steps,
             dt=dt,
-            solver="SLSQP",
         )
 
         # ── Warm-start storage ──────────────────────────────────────────
@@ -702,6 +718,62 @@ class HeatingMPCController:
         self._solar_forecast: List[Dict[str, float]] = []
         self._heating_schedule: List[Dict[str, float]] = []
 
+    def _build_ocp(
+        self,
+        *,
+        solver: str,
+        horizon: int,
+        Q: np.ndarray,
+        R: np.ndarray,
+        P: np.ndarray,
+        S: Optional[np.ndarray],
+        z_ref: np.ndarray,
+        u_min: np.ndarray,
+        u_max: np.ndarray,
+        n_steps: int,
+        dt: float,
+    ) -> CDTrackingOptimalControlProblem:
+        solver_options = self._solver_options_for(solver)
+        kwargs: Dict[str, Any] = {
+            "N": horizon,
+            "Q": Q,
+            "R": R,
+            "P": P,
+            "S": S,
+            "z_ref": z_ref,
+            "u_min": u_min,
+            "u_max": u_max,
+            "n_steps": n_steps,
+            "dt": dt,
+            "solver": solver,
+        }
+        if solver_options:
+            kwargs["solver_options"] = solver_options
+
+        # Forward-compatible analytical-derivative plumbing:
+        # pass hooks only when the installed mbc API explicitly supports them.
+        if self._use_analytic_derivatives:
+            sig = inspect.signature(CDTrackingOptimalControlProblem.__init__).parameters
+            if "use_analytic_derivatives" in sig:
+                kwargs["use_analytic_derivatives"] = True
+            if "derivative_fallback" in sig:
+                kwargs["derivative_fallback"] = "numerical"
+            if "analytic_derivatives_fallback" in sig:
+                kwargs["analytic_derivatives_fallback"] = "numerical"
+
+        return CDTrackingOptimalControlProblem(self._control_system, **kwargs)
+
+    def _solver_options_for(self, solver: str) -> Dict[str, Any]:
+        opts = dict(self._solver_options)
+        key = solver.lower()
+        if key in {"ipopt", "cyipopt"}:
+            opts.setdefault("max_iter", 300)
+            opts.setdefault("tol", 1e-6)
+        else:
+            opts.setdefault("maxiter", 300)
+            opts.setdefault("ftol", 1e-6)
+        return opts
+
     # ── Visualisation properties ─────────────────────────────────────────
 
     @property
@@ -713,6 +785,21 @@ class HeatingMPCController:
     def terminal_weight(self) -> float:
         """Terminal cost weight (P = terminal_weight × Q) in effect for this controller."""
         return self._terminal_weight
+
+    @property
+    def solver_requested(self) -> str:
+        """Configured NLP solver backend name."""
+        return self._solver_requested
+
+    @property
+    def solver_active(self) -> str:
+        """Currently active NLP solver backend (may change after fallback)."""
+        return self._solver_active
+
+    @property
+    def use_analytic_derivatives(self) -> bool:
+        """Whether analytical-derivative plumbing is enabled when supported by mbc."""
+        return self._use_analytic_derivatives
 
     @property
     def last_innovation(self) -> Optional[List[float]]:
@@ -908,13 +995,42 @@ class HeatingMPCController:
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
         _t0 = time.perf_counter()
-        u_opt, _, _info = self._ocp.solve(
-            x_hat_control, d_traj,
-            u_prev=self._u_seq_prev,
-            x_prev=self._x_seq_prev,
-            y_prev=self._y_seq_prev,
-            p=p, t0=0.0
-        )
+        try:
+            u_opt, _, _info = self._ocp.solve(
+                x_hat_control, d_traj,
+                u_prev=self._u_seq_prev,
+                x_prev=self._x_seq_prev,
+                y_prev=self._y_seq_prev,
+                p=p, t0=0.0
+            )
+        except RuntimeError as err:
+            if self._solver_active.lower() not in {"ipopt", "cyipopt"}:
+                raise
+            _LOGGER.warning(
+                "IPOPT solve failed (%s); falling back to SLSQP for deterministic continuity.",
+                err,
+            )
+            self._solver_active = "SLSQP"
+            self._ocp = self._build_ocp(
+                solver=self._solver_active,
+                horizon=self._horizon,
+                Q=self._Q,
+                R=self._R,
+                P=self._P,
+                S=self._S,
+                z_ref=self._control_system.x_ref.copy(),
+                u_min=self._control_system.u_bounds[0],
+                u_max=self._control_system.u_bounds[1],
+                n_steps=self._ocp_n_steps,
+                dt=self._dt,
+            )
+            u_opt, _, _info = self._ocp.solve(
+                x_hat_control, d_traj,
+                u_prev=self._u_seq_prev,
+                x_prev=self._x_seq_prev,
+                y_prev=self._y_seq_prev,
+                p=p, t0=0.0
+            )
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1
 

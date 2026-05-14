@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-14 07:37 UTC*
+*Generated: 2026-05-14 08:11 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -14,13 +14,16 @@ warm-up and is **not** included in the timing samples.
 
 One control step consists of:
 1. CD-EKF predict-update (integrate nonlinear drift + Riccati ODE, then Kalman gain)
-2. CDTrackingOCP NLP solve via L-BFGS-B (scipy)
+2. CDTrackingOCP NLP solve via configured backend (SLSQP default, IPOPT optional)
 
-| Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
-|------------------------|------------|-------------|----------|-----|
-| studio-1room           |      44.5 |        45.3 |     56.0 |   15 |
-| two-bedroom-2room      |      98.4 |        87.6 |    149.8 |   15 |
-| full-house-5room       |    5959.9 |      5871.9 |   6982.3 |   15 |
+| Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
+|------------------------|------------|----------------|------------|-------------|----------|-----|
+| studio-1room           | SLSQP    | SLSQP          |      43.5 |        45.4 |     45.8 |   15 |
+| studio-1room           | ipopt    | SLSQP          |      43.6 |        45.4 |     46.9 |   15 |
+| two-bedroom-2room      | SLSQP    | SLSQP          |      98.5 |        87.4 |    150.3 |   15 |
+| two-bedroom-2room      | ipopt    | SLSQP          |      98.7 |        88.1 |    150.9 |   15 |
+| full-house-5room       | SLSQP    | SLSQP          |    5953.2 |      5868.9 |   6944.5 |   15 |
+| full-house-5room       | ipopt    | SLSQP          |    5924.4 |      5844.9 |   6938.7 |   15 |
 
 **Configurations:**
 
@@ -59,7 +62,7 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 - Timings include Python runtime overhead (numpy, scipy) but not module
   import time (the module is already loaded).
-- The L-BFGS-B solver convergence time depends on the warm-start; the
+- Solver convergence time depends on the warm-start; the
   first call (warm-up) is typically the slowest and is excluded.
 - Parameter estimation timing depends heavily on the number of identifiable
   parameters (which the estimator detects automatically from the data).

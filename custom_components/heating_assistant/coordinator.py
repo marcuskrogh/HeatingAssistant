@@ -29,6 +29,8 @@ from .const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_MPC_ANALYTIC_DERIVATIVES,
+    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -73,6 +75,8 @@ from .const import (
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
     DEFAULT_MIN_POWER,
+    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+    DEFAULT_MPC_SOLVER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
@@ -359,6 +363,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._constraint_offset: float = data.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
+        self._mpc_solver: str = (
+            options.get(CONF_MPC_SOLVER)
+            or data.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)
+        )
+        self._mpc_analytic_derivatives: bool = bool(
+            options.get(CONF_MPC_ANALYTIC_DERIVATIVES)
+            if CONF_MPC_ANALYTIC_DERIVATIVES in options
+            else data.get(
+                CONF_MPC_ANALYTIC_DERIVATIVES,
+                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+            )
+        )
 
         rooms_cfg: List[Dict[str, Any]] = data.get(CONF_ROOMS, [])
         sources_cfg: List[Dict[str, Any]] = data.get(CONF_HEAT_SOURCES, [])
@@ -404,6 +420,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
+            solver=getattr(self, "_mpc_solver", DEFAULT_MPC_SOLVER),
+            use_analytic_derivatives=getattr(
+                self,
+                "_mpc_analytic_derivatives",
+                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+            ),
         )
 
         # Per-room user toggle (True = on, False = manually disabled by the
@@ -591,6 +613,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
+            solver=getattr(self, "_mpc_solver", DEFAULT_MPC_SOLVER),
+            use_analytic_derivatives=getattr(
+                self,
+                "_mpc_analytic_derivatives",
+                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+            ),
         )
 
         self._estimation_timestamp = None
@@ -1655,6 +1683,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             smoothing_weight=self._smoothing_weight,
             constraint_offset=self._constraint_offset,
             terminal_weight=self._terminal_weight,
+            solver=getattr(self, "_mpc_solver", DEFAULT_MPC_SOLVER),
+            use_analytic_derivatives=getattr(
+                self,
+                "_mpc_analytic_derivatives",
+                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+            ),
         )
 
         _LOGGER.info(

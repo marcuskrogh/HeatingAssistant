@@ -65,6 +65,8 @@ CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output c
 CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (energy saving vs. tracking)
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (dampens rapid input changes)
 CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
+CONF_MPC_SOLVER = "mpc_solver"                    # NLP solver backend ("SLSQP" | "ipopt")
+CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # enable analytical-derivative hooks when backend supports them
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -86,6 +88,8 @@ DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint of
 DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
+DEFAULT_MPC_SOLVER = "SLSQP"
+DEFAULT_MPC_ANALYTIC_DERIVATIVES = True
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
 

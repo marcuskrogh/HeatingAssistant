@@ -7,4 +7,4 @@
 numpy
 scipy
 cvxopt
-mbc @ git+https://github.com/marcuskrogh/mbc.git
+mbc @ git+https://github.com/marcuskrogh/mbc.git@4ea58756cef61fe29695d91cee14daa876c8b4a6
