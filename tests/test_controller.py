@@ -609,6 +609,21 @@ class TestHeatingMPCController:
         assert ctrl.use_analytic_derivatives is True
         assert ctrl._ocp._eocp._solver_backend._options["maxiter"] == 42
 
+    def test_default_solver_prefers_ipopt_but_falls_back_on_build_failure(self):
+        model, sources = _make_model_and_sources()
+        original_build = HeatingMPCController._build_ocp
+
+        def _flaky_build(ctrl_self, **kwargs):
+            if str(kwargs["solver"]).lower() in {"ipopt", "cyipopt"}:
+                raise RuntimeError("IPOPT backend unavailable at initialization")
+            return original_build(ctrl_self, **kwargs)
+
+        with patch.object(HeatingMPCController, "_build_ocp", new=_flaky_build):
+            ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+
+        assert ctrl.solver_requested == "ipopt"
+        assert ctrl.solver_active == "SLSQP"
+
     def test_ipopt_runtime_error_falls_back_to_slsqp(self):
         model, sources = _make_model_and_sources()
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)

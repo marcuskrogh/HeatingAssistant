@@ -295,7 +295,7 @@ Inside HeatingMPCController.compute():
   │    NLP:  min  Σ ‖z[k] − z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S
   │               + ρ_z (soft constraint violation penalty)
   │          s.t.  0 ≤ u ≤ 1  (hard input box)
-  │    solve via configurable NLP backend (SLSQP default; IPOPT optional)
+  │    solve via configurable NLP backend (IPOPT default; deterministic fallback to SLSQP)
   │
   └─ apply u*[0] to heat sources (receding horizon)
 ```
@@ -531,7 +531,7 @@ The controller (`controller.py`) implements a **nonlinear model predictive contr
 |-----------|-------|------|
 | **System model** | `ContinuousDiscreteModel` (ABC) | Defines the continuous-discrete SDE: `dx = f(x,u,d,p,t)dt + σdw`, `ym = hm(x,...)`. |
 | **State estimator** | `ContinuousDiscreteEKF` | CD-EKF: integrates the nonlinear drift and linearised Riccati ODE between measurement steps using Euler sub-stepping. |
-| **Optimal control** | `CDTrackingOptimalControlProblem` | NLP formulation of the receding-horizon tracking problem.  Propagates the predicted trajectory via Euler integration and solves via a configurable NLP backend (SLSQP by default; IPOPT optional). |
+| **Optimal control** | `CDTrackingOptimalControlProblem` | NLP formulation of the receding-horizon tracking problem.  Propagates the predicted trajectory via Euler integration and solves via a configurable NLP backend (IPOPT by default; deterministic fallback to SLSQP when unavailable). |
 | **MPC policy** | `CDNMPCController` | Orchestrates estimate → optimise → apply at each step. |
 
 The house-heating application provides two classes in `controller.py`:
@@ -600,7 +600,7 @@ where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u
 | $\rho_z$ | Soft constraint penalty weight (default: $10^4$) |
 | $\mathbf{u}[k]$ | Input vector (continuous fractions $\in [0, 1]$) |
 
-The predicted state trajectory is propagated using Euler sub-stepping of the nonlinear drift $\mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, \mathbf{p}, t)$ over each sampling interval.  The NLP is solved via a configurable backend (default **SLSQP** from `scipy.optimize`, optional **IPOPT**) with box constraints $0 \le \mathbf{u}[k] \le 1$.
+The predicted state trajectory is propagated using Euler sub-stepping of the nonlinear drift $\mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, \mathbf{p}, t)$ over each sampling interval.  The NLP is solved via a configurable backend (default **IPOPT** with analytical derivatives when supported; deterministic fallback to **SLSQP** from `scipy.optimize` when IPOPT is unavailable) with box constraints $0 \le \mathbf{u}[k] \le 1$.
 
 The **terminal cost** $\mathbf{P}$ is the key mechanism for achieving setpoint tracking.  Without a large terminal weight the optimizer has weak incentive to drive the state to the reference by the end of the horizon — it can minimise total cost by spreading the error across all stages without converging.  Setting $\mathbf{P} = \lambda \mathbf{Q}$ with $\lambda \gg 1$ (default $\lambda = 100$) is equivalent to approximating the infinite-horizon cost and forces the optimal trajectory to converge to the setpoint well within the horizon.
 
@@ -639,7 +639,7 @@ compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
 ├─ CDTrackingOptimalControlProblem.solve(x̂, D)
 │   ├─ propagate: x[k+1] = x[k] + h·f(x[k],u[k],d[k],p,t)  (Euler sub-steps)
 │   ├─ NLP:  min Σ ‖z[k]-z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S + ρ_z·violation
-│   └─ solve via configurable NLP backend (SLSQP/IPOPT)  s.t.  0 ≤ u ≤ 1
+│   └─ solve via configurable NLP backend (default IPOPT; fallback SLSQP)  s.t.  0 ≤ u ≤ 1
 │
 └─ Apply u*[0] to heat sources (receding horizon)
    Return {source_name: fraction}
@@ -1113,7 +1113,7 @@ heating_assistant:
 | `smoothing_weight` | float | No | `0.1` | Weight on the input rate-of-change cost ‖Δ**u**‖² in the MPC objective.  Higher values strongly penalise rapid changes in heater output between consecutive time steps, dampening oscillations and reducing actuator wear.  Set to `0.0` to disable.  Typical range: `0.0`–`2.0`.  See [Section 14.5](#145-mpc-regulator-tuning). |
 | `constraint_offset` | float | No | `2.0` | Symmetric soft output constraint band [°C] around the setpoint: the controller keeps predicted room temperatures within `[setpoint − δ, setpoint + δ]`.  Violations are penalised but not forbidden.  Decrease for tighter tracking; increase if the NLP solver reports infeasibility. |
 | `terminal_weight` | float | No | `100.0` | Terminal cost multiplier λ: **P** = λ × **Q**.  A large value forces the predicted trajectory to converge to the setpoint by the end of the horizon, dramatically improving steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint; decrease toward 10–20 if you prefer softer convergence with more energy-aware shaping over the horizon.  Must be ≥ 1. |
-| `mpc_solver` | string | No | `SLSQP` | NLP solver backend for MPC (`SLSQP` or `ipopt`). When `ipopt` is configured but unavailable, the controller falls back deterministically to `SLSQP`. |
+| `mpc_solver` | string | No | `ipopt` | NLP solver backend for MPC (`ipopt` or `SLSQP`). The default path enables IPOPT, and when IPOPT is unavailable the controller falls back deterministically to `SLSQP`. |
 | `mpc_analytic_derivatives` | bool | No | `true` | Enables analytical-derivative plumbing when supported by the installed `mbc` backend. Unsupported hooks automatically fall back to numerical derivatives. |
 | `rooms` | list | No | `[]` | List of room definitions (see below). |
 | `heat_sources` | list | No | `[]` | List of heat source definitions (see below). |

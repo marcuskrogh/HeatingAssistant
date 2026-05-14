@@ -536,7 +536,7 @@ class HeatingMPCController:
       3. Apply the first optimal action to all heat sources.
 
     The CDTrackingOptimalControlProblem uses a configurable NLP backend
-    (default: SLSQP via scipy) to solve the
+    (default: IPOPT with deterministic fallback to SLSQP when unavailable) to solve the
     finite-horizon NLP with:
         - Quadratic output-tracking cost  ‖z − z_ref‖²_Q
         - Quadratic input cost            ‖u‖²_R
@@ -592,7 +592,7 @@ class HeatingMPCController:
         sigma_v: float = 0.5,
         sigma_b: float = 0.002,
         n_int_steps: int = 10,
-        solver: str = "SLSQP",
+        solver: str = "ipopt",
         solver_options: Optional[Dict[str, Any]] = None,
         use_analytic_derivatives: bool = True,
     ) -> None:
@@ -679,8 +679,7 @@ class HeatingMPCController:
         u_min, u_max = self._control_system.u_bounds
 
         # ── CDTrackingOptimalControlProblem ─────────────────────────────
-        self._ocp = self._build_ocp(
-            solver=self._solver_active,
+        self._ocp = self._build_ocp_with_fallback(
             horizon=horizon,
             Q=Q,
             R=R,
@@ -762,6 +761,58 @@ class HeatingMPCController:
                 kwargs["analytic_derivatives_fallback"] = "numerical"
 
         return CDTrackingOptimalControlProblem(self._control_system, **kwargs)
+
+    def _build_ocp_with_fallback(
+        self,
+        *,
+        horizon: int,
+        Q: np.ndarray,
+        R: np.ndarray,
+        P: np.ndarray,
+        S: Optional[np.ndarray],
+        z_ref: np.ndarray,
+        u_min: np.ndarray,
+        u_max: np.ndarray,
+        n_steps: int,
+        dt: float,
+    ) -> CDTrackingOptimalControlProblem:
+        """Build OCP, with deterministic IPOPT→SLSQP fallback when unavailable."""
+        try:
+            return self._build_ocp(
+                solver=self._solver_active,
+                horizon=horizon,
+                Q=Q,
+                R=R,
+                P=P,
+                S=S,
+                z_ref=z_ref,
+                u_min=u_min,
+                u_max=u_max,
+                n_steps=n_steps,
+                dt=dt,
+            )
+        except (ImportError, ModuleNotFoundError, RuntimeError, ValueError) as err:
+            if self._solver_active.lower() not in {"ipopt", "cyipopt"}:
+                raise
+            _LOGGER.warning(
+                "IPOPT backend unavailable during OCP build (%s); "
+                "falling back to SLSQP for deterministic continuity.",
+                err,
+            )
+            self._solver_active = "SLSQP"
+            return self._build_ocp(
+                solver=self._solver_active,
+                horizon=horizon,
+                Q=Q,
+                R=R,
+                P=P,
+                S=S,
+                z_ref=z_ref,
+                u_min=u_min,
+                u_max=u_max,
+                n_steps=n_steps,
+                dt=dt,
+            )
 
     def _solver_options_for(self, solver: str) -> Dict[str, Any]:
         opts = dict(self._solver_options)

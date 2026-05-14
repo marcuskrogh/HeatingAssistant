@@ -468,7 +468,7 @@ def _write_benchmarks_md() -> None:
         "",
         "One control step consists of:",
         "1. CD-EKF predict-update (integrate nonlinear drift + Riccati ODE, then Kalman gain)",
-        "2. CDTrackingOCP NLP solve via configured backend (SLSQP default, IPOPT optional)",
+        "2. CDTrackingOCP NLP solve via configured backend (IPOPT default, deterministic fallback to SLSQP)",
         "",
         "| Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |",
         "|------------------------|------------|----------------|------------|-------------|----------|-----|",
