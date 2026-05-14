@@ -8,8 +8,8 @@ from typing import Any, Dict, Optional
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -50,7 +50,7 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """
         Step 1: Basic site settings (location, outdoor sensor, time step).
 
@@ -109,24 +109,21 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> "HeatingAssistantOptionsFlow":
-        return HeatingAssistantOptionsFlow(config_entry)
+        return HeatingAssistantOptionsFlow()
 
 
 class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     """Handle options (reconfiguration) for an existing entry."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self._entry = config_entry
-
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         errors: Dict[str, str] = {}
 
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self._entry.options or self._entry.data
+        current = self.config_entry.options or self.config_entry.data
 
         schema = vol.Schema(
             {
