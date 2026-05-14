@@ -7,9 +7,15 @@ from custom_components.heating_assistant.const import (
     CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOMS,
+    CONF_SIGMA_B,
+    CONF_SIGMA_V,
+    CONF_SIGMA_W,
     CONF_WEATHER_ENTITY,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_MPC_SOLVER,
+    DEFAULT_SIGMA_B,
+    DEFAULT_SIGMA_V,
+    DEFAULT_SIGMA_W,
 )
 
 
@@ -89,3 +95,27 @@ def test_merge_populates_solver_defaults():
         merged[CONF_MPC_ANALYTIC_DERIVATIVES]
         == DEFAULT_MPC_ANALYTIC_DERIVATIVES
     )
+    assert merged[CONF_SIGMA_W] == DEFAULT_SIGMA_W
+    assert merged[CONF_SIGMA_V] == DEFAULT_SIGMA_V
+    assert merged[CONF_SIGMA_B] == DEFAULT_SIGMA_B
+
+
+def test_merge_preserves_entry_sigma_values():
+    entry_data = {
+        CONF_ROOMS: [],
+        CONF_HEAT_SOURCES: [],
+        CONF_SIGMA_W: 0.25,
+        CONF_SIGMA_V: 0.75,
+        CONF_SIGMA_B: 0.01,
+    }
+    yaml_cfg = {
+        CONF_SIGMA_W: 0.5,
+        CONF_SIGMA_V: 1.5,
+        CONF_SIGMA_B: 0.02,
+    }
+
+    merged = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
+
+    assert merged[CONF_SIGMA_W] == 0.25
+    assert merged[CONF_SIGMA_V] == 0.75
+    assert merged[CONF_SIGMA_B] == 0.01

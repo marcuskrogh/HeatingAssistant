@@ -67,6 +67,9 @@ CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖²
 CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
 CONF_MPC_SOLVER = "mpc_solver"                    # NLP solver backend ("ipopt" | "SLSQP")
 CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # enable analytical-derivative hooks when backend supports them
+CONF_SIGMA_W = "sigma_w"                          # EKF/process model process-noise std dev [K/√s]
+CONF_SIGMA_V = "sigma_v"                          # EKF measurement-noise std dev [K]
+CONF_SIGMA_B = "sigma_b"                          # EKF offset-state process-noise std dev [K/√s]
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -90,6 +93,9 @@ DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-ch
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_MPC_SOLVER = "ipopt"
 DEFAULT_MPC_ANALYTIC_DERIVATIVES = True
+DEFAULT_SIGMA_W = 0.1
+DEFAULT_SIGMA_V = 0.5
+DEFAULT_SIGMA_B = 0.002
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
 

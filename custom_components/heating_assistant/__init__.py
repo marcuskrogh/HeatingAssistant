@@ -99,6 +99,9 @@ from .const import (
     CONF_SCHEDULE_SETPOINT,
     CONF_SCHEDULE_START,
     CONF_SETPOINT,
+    CONF_SIGMA_B,
+    CONF_SIGMA_V,
+    CONF_SIGMA_W,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOURCE_COOLING_COP,
     CONF_SOURCE_COOLING_EFFICIENCY,
@@ -139,6 +142,9 @@ from .const import (
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
+    DEFAULT_SIGMA_B,
+    DEFAULT_SIGMA_V,
+    DEFAULT_SIGMA_W,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_THERMAL_MASS,
@@ -278,6 +284,15 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_MPC_ANALYTIC_DERIVATIVES,
                     default=DEFAULT_MPC_ANALYTIC_DERIVATIVES,
                 ): cv.boolean,
+                vol.Optional(CONF_SIGMA_W, default=DEFAULT_SIGMA_W): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                ),
+                vol.Optional(CONF_SIGMA_V, default=DEFAULT_SIGMA_V): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                ),
+                vol.Optional(CONF_SIGMA_B, default=DEFAULT_SIGMA_B): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-8, max=1.0)
+                ),
             }
         )
     },
@@ -392,6 +407,12 @@ def _merge_yaml_into_entry_data(
         merged[CONF_MPC_ANALYTIC_DERIVATIVES] = yaml_cfg.get(
             CONF_MPC_ANALYTIC_DERIVATIVES, DEFAULT_MPC_ANALYTIC_DERIVATIVES
         )
+    if CONF_SIGMA_W not in merged:
+        merged[CONF_SIGMA_W] = yaml_cfg.get(CONF_SIGMA_W, DEFAULT_SIGMA_W)
+    if CONF_SIGMA_V not in merged:
+        merged[CONF_SIGMA_V] = yaml_cfg.get(CONF_SIGMA_V, DEFAULT_SIGMA_V)
+    if CONF_SIGMA_B not in merged:
+        merged[CONF_SIGMA_B] = yaml_cfg.get(CONF_SIGMA_B, DEFAULT_SIGMA_B)
     return merged
 
 

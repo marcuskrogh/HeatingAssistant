@@ -19,6 +19,9 @@ from .const import (
     CONF_MPC_SOLVER,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_SIGMA_B,
+    CONF_SIGMA_V,
+    CONF_SIGMA_W,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     CONF_ROOMS,
@@ -26,6 +29,9 @@ from .const import (
     DEFAULT_HORIZON,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_MPC_SOLVER,
+    DEFAULT_SIGMA_B,
+    DEFAULT_SIGMA_V,
+    DEFAULT_SIGMA_W,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     NAME,
@@ -80,6 +86,15 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MPC_ANALYTIC_DERIVATIVES,
                     default=DEFAULT_MPC_ANALYTIC_DERIVATIVES,
                 ): bool,
+                vol.Optional(CONF_SIGMA_W, default=DEFAULT_SIGMA_W): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                ),
+                vol.Optional(CONF_SIGMA_V, default=DEFAULT_SIGMA_V): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                ),
+                vol.Optional(CONF_SIGMA_B, default=DEFAULT_SIGMA_B): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-8, max=1.0)
+                ),
             }
         )
 
@@ -144,6 +159,18 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                         DEFAULT_MPC_ANALYTIC_DERIVATIVES,
                     ),
                 ): bool,
+                vol.Optional(
+                    CONF_SIGMA_W,
+                    default=current.get(CONF_SIGMA_W, DEFAULT_SIGMA_W),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
+                vol.Optional(
+                    CONF_SIGMA_V,
+                    default=current.get(CONF_SIGMA_V, DEFAULT_SIGMA_V),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
+                vol.Optional(
+                    CONF_SIGMA_B,
+                    default=current.get(CONF_SIGMA_B, DEFAULT_SIGMA_B),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1e-8, max=1.0)),
             }
         )
 

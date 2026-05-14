@@ -1115,6 +1115,9 @@ heating_assistant:
 | `terminal_weight` | float | No | `100.0` | Terminal cost multiplier λ: **P** = λ × **Q**.  A large value forces the predicted trajectory to converge to the setpoint by the end of the horizon, dramatically improving steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint; decrease toward 10–20 if you prefer softer convergence with more energy-aware shaping over the horizon.  Must be ≥ 1. |
 | `mpc_solver` | string | No | `ipopt` | NLP solver backend for MPC (`ipopt` or `SLSQP`). The default path enables IPOPT, and when IPOPT is unavailable the controller falls back deterministically to `SLSQP`. |
 | `mpc_analytic_derivatives` | bool | No | `true` | Enables analytical-derivative plumbing when supported by the installed `mbc` backend. Unsupported hooks automatically fall back to numerical derivatives. |
+| `sigma_w` | float | No | `0.1` | EKF process-noise standard deviation [K/√s]. Increase when the thermal model is too “stiff” and does not adapt quickly enough to disturbances. UI/YAML range: `1e-6`–`10.0`. |
+| `sigma_v` | float | No | `0.5` | EKF measurement-noise standard deviation [K]. Increase when room sensors are noisy/spiky; decrease when sensors are stable and you want tighter measurement tracking. UI/YAML range: `1e-6`–`10.0`. |
+| `sigma_b` | float | No | `0.002` | EKF offset-state process-noise standard deviation [K/√s] for the integrated model-mismatch state. Increase to let the offset term adapt faster to persistent bias. UI/YAML range: `1e-8`–`1.0`. |
 | `rooms` | list | No | `[]` | List of room definitions (see below). |
 | `heat_sources` | list | No | `[]` | List of heat source definitions (see below). |
 
@@ -3343,8 +3346,11 @@ The MPC controller solves a quadratic program at each update cycle.  Its behavio
 | **Energy weight** | `energy_weight` | `0.01` | Weight on ‖**u**‖² — penalises running heaters.  Increase to make the controller more conservative (less aggressive heating). |
 | **Smoothing weight** | `smoothing_weight` | `0.1` | Weight on ‖Δ**u**‖² — penalises changing the heater output from one step to the next.  Increase to dampen oscillations and reduce actuator wear. |
 | **Constraint offset** | `constraint_offset` | `2.0 °C` | Half-width of the soft temperature band around the setpoint.  Does not directly affect oscillations but controls how strictly the constraint is enforced. |
+| **EKF process noise** | `sigma_w` | `0.1` | Process-noise level for the thermal state model. Higher values make the filter react faster to unmodelled disturbances. |
+| **EKF measurement noise** | `sigma_v` | `0.5` | Measurement-noise level for room temperature sensors. Higher values trust sensors less and model predictions more. |
+| **EKF offset noise** | `sigma_b` | `0.002` | Process noise for the integrated offset state (model-mismatch compensation). Higher values let offset correction adapt faster. |
 
-All parameters are set under the top-level `heating_assistant:` key in `configuration.yaml`.  Restart Home Assistant after any change.
+These parameters can be tuned from the integration setup/options UI, and can also be set under the top-level `heating_assistant:` key in `configuration.yaml`.
 
 #### 14.5.2 Diagnosing and correcting oscillations
 
