@@ -625,6 +625,19 @@ class TestApplyActionsSwitch:
         call = hass.services.async_call.call_args_list[0]
         assert call.args[:2] == ("switch", "turn_off")
 
+    @pytest.mark.asyncio
+    async def test_switch_disabled_room_forces_off(self):
+        heater = ElectricHeater("e1", "kitchen", max_power=2000, heater_entity="switch.heater")
+        hass, _coord = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 1.0},
+            entity_states={"switch.heater": "on"},
+            room_setpoints={"kitchen": 21.0},
+            room_enabled={"kitchen": False},
+        )
+        call = hass.services.async_call.call_args_list[0]
+        assert call.args[:2] == ("switch", "turn_off")
+
 
 class TestApplyActionsNumber:
     """number.* entity handling."""
@@ -641,6 +654,20 @@ class TestApplyActionsNumber:
         call = hass.services.async_call.call_args_list[0]
         assert call.args[:2] == ("number", "set_value")
         assert call.args[2]["value"] == 75
+
+    @pytest.mark.asyncio
+    async def test_number_disabled_room_forces_zero(self):
+        heater = ElectricHeater("e1", "office", max_power=1500, heater_entity="number.heater_power")
+        hass, _coord = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 0.75},
+            entity_states={"number.heater_power": "75"},
+            room_setpoints={"office": 21.0},
+            room_enabled={"office": False},
+        )
+        call = hass.services.async_call.call_args_list[0]
+        assert call.args[:2] == ("number", "set_value")
+        assert call.args[2]["value"] == 0
 
 
 class TestApplyActionsEdgeCases:

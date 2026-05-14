@@ -1038,9 +1038,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """Write the computed set-point fractions to heater entities via HA services."""
         for src in self.heat_sources:
             fraction = self.actions.get(src.name, 0.0)
+            room_enabled = self.is_room_enabled(src.room)
 
             # If the room is disabled, force fraction to 0 (turn off).
-            if not self.is_room_enabled(src.room):
+            if not room_enabled:
                 fraction = 0.0
 
             entity_id = src.heater_entity
@@ -1329,11 +1330,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": entity_id, "value": round(fraction * 100)},
+                    {
+                        "entity_id": entity_id,
+                        # Disabled/off-scheduled room should always apply zero output.
+                        "value": 0 if not room_enabled else round(fraction * 100),
+                    },
                     blocking=False,
                 )
             elif domain == "switch":
-                service = "turn_on" if fraction > 0.5 else "turn_off"
+                # Disabled/off-scheduled room should always switch the unit off.
+                service = "turn_off" if not room_enabled else (
+                    "turn_on" if fraction > 0.5 else "turn_off"
+                )
                 await self.hass.services.async_call(
                     "switch",
                     service,
