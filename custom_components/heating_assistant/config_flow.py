@@ -297,7 +297,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             room_name = user_input[CONF_ROOM_NAME].strip()
-            if any(r[CONF_ROOM_NAME] == room_name for r in self._rooms):
+            if any(r[CONF_ROOM_NAME].lower() == room_name.lower() for r in self._rooms):
                 errors[CONF_ROOM_NAME] = "duplicate_room"
             else:
                 new_room: Dict[str, Any] = {
@@ -362,7 +362,41 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         room = self._rooms[self._current_room_idx]  # type: ignore[index]
 
         if user_input is not None:
-            room[CONF_ROOM_NAME] = user_input[CONF_ROOM_NAME].strip()
+            new_name = user_input[CONF_ROOM_NAME].strip()
+            # Duplicate check: exclude the current room from the comparison
+            if any(
+                i != self._current_room_idx
+                and r[CONF_ROOM_NAME].lower() == new_name.lower()
+                for i, r in enumerate(self._rooms)
+            ):
+                return self.async_show_form(
+                    step_id="room_detail",
+                    data_schema=vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_ROOM_NAME, default=user_input.get(CONF_ROOM_NAME, "")
+                            ): str,
+                            vol.Optional(
+                                CONF_TEMP_SENSOR,
+                                default=user_input.get(CONF_TEMP_SENSOR, ""),
+                            ): str,
+                            vol.Optional(
+                                CONF_THERMAL_MASS,
+                                default=user_input.get(CONF_THERMAL_MASS, DEFAULT_THERMAL_MASS),
+                            ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
+                            vol.Optional(
+                                CONF_R_EXTERNAL,
+                                default=user_input.get(CONF_R_EXTERNAL, DEFAULT_R_EXTERNAL),
+                            ): vol.All(vol.Coerce(float), vol.Range(min=1e-6)),
+                            vol.Optional(
+                                CONF_SETPOINT,
+                                default=user_input.get(CONF_SETPOINT, DEFAULT_SETPOINT),
+                            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=40.0)),
+                        }
+                    ),
+                    errors={CONF_ROOM_NAME: "duplicate_room"},
+                )
+            room[CONF_ROOM_NAME] = new_name
             room[CONF_TEMP_SENSOR] = user_input.get(CONF_TEMP_SENSOR, "")
             room[CONF_THERMAL_MASS] = user_input[CONF_THERMAL_MASS]
             room[CONF_R_EXTERNAL] = user_input[CONF_R_EXTERNAL]
