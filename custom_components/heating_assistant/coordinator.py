@@ -1073,6 +1073,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 #       (HP idles with no temperature gap)
                 #   - fraction > 0  → heat mode, offset-based setpoint
                 if isinstance(src, HeatPump):
+                    if not self.is_room_enabled(src.room):
+                        # Room explicitly disabled (user toggle or active "off"
+                        # schedule period without frost-protection demand) —
+                        # force the heat pump fully off.
+                        self._cooling_active[src.name] = False
+                        src.set_power(0.0, outdoor_temp)
+                        if hasattr(self, 'controller'):
+                            self.controller.notify_applied_u(src.name, 0.0)
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": entity_id, "hvac_mode": "off"},
+                            blocking=False,
+                        )
+                        continue
+
                     room_temp = self.model.rooms[src.room].temperature
                     room_setpoint = self.get_room_setpoint(src.room)
 
