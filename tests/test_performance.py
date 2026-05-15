@@ -3,7 +3,7 @@ Performance benchmarks for the active control system and parameter estimation.
 
 Measures wall-clock run-times of:
   • HeatingMPCController.compute()  — EKF predict-update + NLP solve
-  • KalmanMLEstimator.estimate()    — multi-start Nelder–Mead ML estimation
+  • KalmanMLEstimator.estimate()    — multi-start IPOPT ML estimation
 
 Three representative house configurations are tested:
   1. Studio apartment  — 1 room,  1 electric heater,  MPC horizon = 6
@@ -27,7 +27,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pytest
@@ -64,9 +64,65 @@ _BENCHMARKS_FILE = os.path.join(_REPO_ROOT, "BENCHMARKS.md")
 # keeping each benchmark run under a few seconds for the 1-room and 2-room
 # cases.  The 5-room case takes ~1.1s per call, so 15 reps ≈ 17s total.
 _MPC_REPS = 15
-# Parameter estimation is slow (multi-start Nelder-Mead with a Kalman filter
-# in the objective); a single timed call is sufficient to track regressions.
+# Parameter estimation is slow (multi-start IPOPT with a Kalman filter
+# objective); a single timed call is sufficient to track regressions.
 _ESTIM_REPS = 1
+
+
+def _read_previous_baseline(path: str) -> Dict[Tuple[str, str, str], float]:
+    """Parse previous BENCHMARKS.md medians keyed by (routine, scenario, solver)."""
+    if not os.path.exists(path):
+        return {}
+
+    baseline: Dict[Tuple[str, str, str], float] = {}
+    section: str | None = None
+
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if line.startswith("## MPC active control step"):
+                section = "MPC.compute"
+                continue
+            if line.startswith("## Parameter estimation"):
+                section = "KalmanMLEstimator.estimate"
+                continue
+            if not line.startswith("|") or line.startswith("|---") or section is None:
+                continue
+
+            cols = [c.strip() for c in line.strip("|").split("|")]
+            if len(cols) < 6 or cols[0] == "Scenario":
+                continue
+
+            scenario, solver_req = cols[0], cols[1]
+            median = cols[4]
+            try:
+                baseline[(section, scenario, solver_req)] = float(median)
+            except ValueError:
+                continue
+
+    return baseline
+
+
+_PREVIOUS_BASELINE = _read_previous_baseline(_BENCHMARKS_FILE)
+
+
+def _format_comparison_rows(results: List[dict]) -> List[str]:
+    """Build markdown rows comparing current medians with previous benchmarks."""
+    rows: List[str] = []
+    for r in results:
+        key = (r["routine"], r["scenario"], r["solver"])
+        old_median = _PREVIOUS_BASELINE.get(key)
+        if old_median is None or old_median <= 0:
+            continue
+
+        new_median = float(r["median_ms"])
+        delta_pct = ((new_median - old_median) / old_median) * 100.0
+        trend = "faster" if delta_pct < 0 else "slower"
+        rows.append(
+            f"| {r['routine']:<27} | {r['scenario']:<22} | {r['solver']:<8} | "
+            f"{old_median:>11.1f} | {new_median:>11.1f} | {delta_pct:>8.1f}% ({trend}) |"
+        )
+    return rows
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -325,7 +381,7 @@ class TestParameterEstimationPerformance:
     """Benchmark KalmanMLEstimator.estimate() for different house sizes.
 
     These tests are marked ``slow`` because each run involves multi-start
-    Nelder-Mead with a Kalman filter as the objective, which can take tens
+    IPOPT optimisation with a Kalman filter objective, which can take tens
     of seconds.  Skip them in quick CI passes with ``-m "not slow"``.
     """
 
@@ -333,7 +389,7 @@ class TestParameterEstimationPerformance:
 
     @pytest.mark.slow
     def test_studio_1room(self):
-        """1-room studio: Kalman ML estimation (Nelder-Mead, 3 params)."""
+        """1-room studio: Kalman ML estimation (IPOPT + analytic gradient, 3 params)."""
         rooms_cfg = [
             Room(name="living_room", thermal_mass=4_000_000.0, r_external=0.05,
                  temperature=18.0, setpoint=21.0)
@@ -347,8 +403,16 @@ class TestParameterEstimationPerformance:
             estimator.estimate(history)
 
         mean_ms, median_ms, p95_ms = _time_it(run, _ESTIM_REPS)
-        _record("studio-1room", "KalmanMLEstimator.estimate", _ESTIM_REPS,
-                mean_ms, median_ms, p95_ms)
+        _record(
+            "studio-1room",
+            "KalmanMLEstimator.estimate",
+            "IPOPT",
+            "IPOPT",
+            _ESTIM_REPS,
+            mean_ms,
+            median_ms,
+            p95_ms,
+        )
 
         # Soft performance guard: median under 60 s (60 000 ms)
         assert median_ms < 60_000, (
@@ -358,7 +422,7 @@ class TestParameterEstimationPerformance:
 
     @pytest.mark.slow
     def test_two_bedroom_2room(self):
-        """2-room flat: Kalman ML estimation (Nelder-Mead, ~7 params)."""
+        """2-room flat: Kalman ML estimation (IPOPT + analytic gradient, ~7 params)."""
         rooms_cfg = [
             Room(name="living_room", thermal_mass=5_000_000.0, r_external=0.05,
                  connections=[RoomConnection("bedroom", 0.3)],
@@ -376,8 +440,16 @@ class TestParameterEstimationPerformance:
             estimator.estimate(history)
 
         mean_ms, median_ms, p95_ms = _time_it(run, _ESTIM_REPS)
-        _record("two-bedroom-2room", "KalmanMLEstimator.estimate", _ESTIM_REPS,
-                mean_ms, median_ms, p95_ms)
+        _record(
+            "two-bedroom-2room",
+            "KalmanMLEstimator.estimate",
+            "IPOPT",
+            "IPOPT",
+            _ESTIM_REPS,
+            mean_ms,
+            median_ms,
+            p95_ms,
+        )
 
         assert median_ms < 120_000, (
             f"KalmanMLEstimator.estimate median {median_ms:.0f}ms exceeds "
@@ -408,8 +480,16 @@ class TestParameterEstimationPerformance:
             estimator.estimate(history)
 
         mean_ms, median_ms, p95_ms = _time_it(run, _ESTIM_REPS)
-        _record("full-house-5room", "KalmanMLEstimator.estimate", _ESTIM_REPS,
-                mean_ms, median_ms, p95_ms)
+        _record(
+            "full-house-5room",
+            "KalmanMLEstimator.estimate",
+            "IPOPT",
+            "IPOPT",
+            _ESTIM_REPS,
+            mean_ms,
+            median_ms,
+            p95_ms,
+        )
 
         assert median_ms < 900_000, (
             f"KalmanMLEstimator.estimate median {median_ms:.0f}ms exceeds "
@@ -488,13 +568,13 @@ def _write_benchmarks_md() -> None:
         "",
         "One estimation run consists of:",
         "1. Identifiability analysis over the history buffer",
-        "2. Multi-start Nelder–Mead maximisation of the Kalman prediction-error",
-        "   decomposition log-likelihood (3 restarts from the prior + random perturbations)",
+        "2. Multi-start IPOPT minimisation of negative Kalman prediction-error",
+        "   decomposition log-likelihood with analytical gradients (3 restarts)",
         "",
         f"History buffer: {MIN_HISTORY_STEPS + 30} steps (1-minute samples) of synthetic data.",
         "",
-        "| Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |",
-        "|------------------------|------------|-------------|----------|-----|",
+        "| Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |",
+        "|------------------------|------------|----------------|------------|-------------|----------|-----|",
         est_table,
         "",
         "**Configurations:**",
@@ -505,6 +585,31 @@ def _write_benchmarks_md() -> None:
         "| `two-bedroom-2room` | 2 | 2 | C₁₋₂, R₁₋₂, Q_int₁₋₂, R₁₂ (7) |",
         "| `full-house-5room` | 5 | 5 | C₁₋₅, R₁₋₅, Q_int₁₋₅, R_ij (≥15) |",
         "",
+        "---",
+        "",
+        "## Comparison vs previous `BENCHMARKS.md`",
+        "",
+    ]
+
+    comparison_rows = _format_comparison_rows(_RESULTS)
+    if comparison_rows:
+        lines.extend(
+            [
+                "| Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |",
+                "|-----------------------------|------------------------|------------|-----------------|-----------------|----------|",
+                *comparison_rows,
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "No comparable baseline rows were found in the previous benchmark file.",
+                "",
+            ]
+        )
+
+    lines.extend([
         "---",
         "",
         "## Notes",
@@ -521,7 +626,7 @@ def _write_benchmarks_md() -> None:
         "  ```bash",
         "  python -m pytest tests/test_performance.py -v -s",
         "  ```",
-    ]
+    ])
 
     with open(_BENCHMARKS_FILE, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
