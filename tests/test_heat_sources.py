@@ -58,6 +58,12 @@ class TestElectricHeater:
         with pytest.raises(ValueError):
             ElectricHeater("h1", "living_room", max_power=2000.0, max_temp_offset=-1.0)
 
+    def test_zero_max_temp_offset_gives_no_setpoint_offset(self):
+        heater = ElectricHeater(
+            "h1", "living_room", max_power=2000.0, max_temp_offset=0.0
+        )
+        assert heater.target_temperature(1.0, 20.0) == pytest.approx(20.0)
+
 
 class TestHeatPump:
     def test_full_power_at_rated_conditions(self):
