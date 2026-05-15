@@ -566,6 +566,37 @@ class TestApplyActionsClimate:
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "off"
 
+    @pytest.mark.asyncio
+    async def test_heat_pump_disabled_room_turns_off(self):
+        """When a heat-pump room is disabled, force hvac_mode=off."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000,
+            heater_entity="climate.heat_pump",
+        )
+        hass, coord = await _run_apply_actions(
+            heat_sources=[hp],
+            actions={"hp1": -0.7},
+            entity_states={
+                "climate.heat_pump": {
+                    "state": "cool",
+                    "attributes": {
+                        "current_temperature": 25.0,
+                        "hvac_modes": ["heat", "cool", "fan_only", "off"],
+                    },
+                },
+            },
+            room_setpoints={"living_room": 21.0},
+            room_temperatures={"living_room": 25.0},
+            room_enabled={"living_room": False},
+            initial_cooling_state={"hp1": True},
+        )
+
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 1
+        assert calls[0].args[:2] == ("climate", "set_hvac_mode")
+        assert calls[0].args[2]["hvac_mode"] == "off"
+        assert coord._cooling_active["hp1"] is False
+
 
 class TestApplyActionsSwitch:
     """switch.* entity handling."""
@@ -594,6 +625,19 @@ class TestApplyActionsSwitch:
         call = hass.services.async_call.call_args_list[0]
         assert call.args[:2] == ("switch", "turn_off")
 
+    @pytest.mark.asyncio
+    async def test_switch_disabled_room_forces_off(self):
+        heater = ElectricHeater("e1", "kitchen", max_power=2000, heater_entity="switch.heater")
+        hass, _coord = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 1.0},
+            entity_states={"switch.heater": "on"},
+            room_setpoints={"kitchen": 21.0},
+            room_enabled={"kitchen": False},
+        )
+        call = hass.services.async_call.call_args_list[0]
+        assert call.args[:2] == ("switch", "turn_off")
+
 
 class TestApplyActionsNumber:
     """number.* entity handling."""
@@ -610,6 +654,20 @@ class TestApplyActionsNumber:
         call = hass.services.async_call.call_args_list[0]
         assert call.args[:2] == ("number", "set_value")
         assert call.args[2]["value"] == 75
+
+    @pytest.mark.asyncio
+    async def test_number_disabled_room_forces_zero(self):
+        heater = ElectricHeater("e1", "office", max_power=1500, heater_entity="number.heater_power")
+        hass, _coord = await _run_apply_actions(
+            heat_sources=[heater],
+            actions={"e1": 0.75},
+            entity_states={"number.heater_power": "75"},
+            room_setpoints={"office": 21.0},
+            room_enabled={"office": False},
+        )
+        call = hass.services.async_call.call_args_list[0]
+        assert call.args[:2] == ("number", "set_value")
+        assert call.args[2]["value"] == 0
 
 
 class TestApplyActionsEdgeCases:
@@ -727,13 +785,9 @@ class TestHeatPumpFanMode:
 
     @pytest.mark.asyncio
     async def test_heat_pump_disabled_room_turns_off_not_fan(self):
-        """When room is disabled, fraction is forced to 0.  If room_temp exceeds
-        the upper dead-band threshold (setpoint + deadband) the HP uses passive
-        cooling mode and sets a temperature below its internal sensor."""
+        """When room is disabled, the heat pump is forced fully off."""
         hp = HeatPump("hp1", "living_room", max_power=5000,
                        heater_entity="climate.heat_pump")
-        # room=26.5, setpoint=25.0, deadband=1.0 → upper threshold=26.0
-        # 26.5 > 26.0 → enters passive cooling
         hass, _coord = await _run_apply_actions(
             heat_sources=[hp],
             actions={"hp1": 0.0},
@@ -748,12 +802,9 @@ class TestHeatPumpFanMode:
             room_enabled={"living_room": False},
         )
 
-        # room_temp (26.5) > upper threshold (26.0) → cooling mode
         calls = hass.services.async_call.call_args_list
-        assert len(calls) == 2
-        assert calls[0].args[2]["hvac_mode"] == "fan_only"
-        # overshoot = 1.5 → offset = 2.5; target = 27.0 - 2.5 = 24.5
-        assert calls[1].args[2]["temperature"] == pytest.approx(24.5)
+        assert len(calls) == 1
+        assert calls[0].args[2]["hvac_mode"] == "off"
 
 
 class TestElectricHeaterCoolingProtection:
