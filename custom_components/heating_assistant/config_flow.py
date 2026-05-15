@@ -104,7 +104,7 @@ def _window_display(room_name: str, idx: int, window: Dict[str, Any]) -> str:
 
 def _parse_entity_ids(raw_value: str) -> List[str]:
     """Parse comma-separated entity IDs from a text field."""
-    if not raw_value:
+    if not raw_value or not raw_value.strip():
         return []
     return [entity.strip() for entity in raw_value.split(",") if entity.strip()]
 
@@ -119,6 +119,18 @@ def _nearest_choice(value: float, mapping: Dict[str, float], default_key: str) -
     if not mapping:
         return default_key
     return min(mapping, key=lambda key: abs(mapping[key] - value))
+
+
+def _normalize_solver(value: Any) -> str:
+    """Normalize solver value for persisted options."""
+    if value is None:
+        return DEFAULT_MPC_SOLVER
+    solver = str(value).lower()
+    if solver == "cyipopt":
+        return "ipopt"
+    if solver in {"slsqp", "ipopt"}:
+        return solver
+    return DEFAULT_MPC_SOLVER
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +233,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         if not self._initialized:
             current = self.config_entry.options or self.config_entry.data
             self._data = dict(current)
+            self._data[CONF_MPC_SOLVER] = _normalize_solver(
+                self._data.get(CONF_MPC_SOLVER)
+            )
             # Rooms may live in options (UI-configured) or data (YAML/initial).
             opts = self.config_entry.options
             data = self.config_entry.data
@@ -246,11 +261,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_init()
 
         current = self._data
-        solver_default = str(current.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)).lower()
-        if solver_default == "cyipopt":
-            solver_default = "ipopt"
-        if solver_default not in {"slsqp", "ipopt"}:
-            solver_default = DEFAULT_MPC_SOLVER
+        solver_default = _normalize_solver(current.get(CONF_MPC_SOLVER))
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -305,6 +316,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
         """Persist all accumulated changes and close the options flow."""
+        self._data[CONF_MPC_SOLVER] = _normalize_solver(
+            self._data.get(CONF_MPC_SOLVER)
+        )
         self._data[CONF_ROOMS] = self._rooms
         return self.async_create_entry(title="", data=self._data)
 
