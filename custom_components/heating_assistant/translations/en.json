@@ -13,9 +13,9 @@
           "horizon": "MPC prediction horizon (steps)",
           "mpc_solver": "MPC solver backend",
           "mpc_analytic_derivatives": "Enable analytical derivatives (recommended for IPOPT)",
-          "sigma_w": "EKF process-noise std dev (sigma_w, K/√s)",
-          "sigma_v": "EKF measurement-noise std dev (sigma_v, K)",
-          "sigma_b": "EKF offset process-noise std dev (sigma_b, K/√s)"
+          "sigma_w": "SDE process-noise std dev (sigma_w, K/√s)",
+          "sigma_v": "Temperature measurement-noise std dev (sigma_v, K)",
+          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)"
         }
       }
     },
@@ -34,15 +34,15 @@
       "global_settings": {
         "title": "Global Settings",
         "data": {
-          "outdoor_temp_entity": "Outdoor temperature sensor entity ID",
-          "weather_entity": "Weather forecast entity ID (leave blank to disable forecast)",
+          "outdoor_temp_entity": "Outdoor temperature sensor entity ID (optional when weather forecast entity is set)",
+          "weather_entity": "Weather forecast entity ID (optional; if not set, outdoor sensor is required)",
           "update_interval": "Control time step (seconds, 60–3600)",
           "horizon": "MPC prediction horizon (steps)",
-          "mpc_solver": "MPC solver backend",
+          "mpc_solver": "MPC solver backend (IPOPT or SLSQP; cyipopt is just an IPOPT Python binding)",
           "mpc_analytic_derivatives": "Enable analytical derivatives (recommended for IPOPT)",
-          "sigma_w": "EKF process-noise std dev (sigma_w, K/√s)",
-          "sigma_v": "EKF measurement-noise std dev (sigma_v, K)",
-          "sigma_b": "EKF offset process-noise std dev (sigma_b, K/√s)"
+          "sigma_w": "SDE process-noise std dev (sigma_w, K/√s)",
+          "sigma_v": "Temperature measurement-noise std dev (sigma_v, K)",
+          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)"
         }
       },
       "manage_rooms": {
@@ -50,6 +50,7 @@
         "menu_options": {
           "add_room": "Add room",
           "edit_room": "Edit room",
+          "manage_room_windows": "Configure room windows",
           "remove_room": "Remove room",
           "finish_rooms": "Back to main menu"
         }
@@ -58,10 +59,9 @@
         "title": "Add Room",
         "data": {
           "name": "Room name (unique identifier)",
-          "temp_sensor": "Temperature sensor entity ID (leave blank if none)",
-          "thermal_mass": "Thermal mass (J/K) — default suits a typical room",
-          "r_external": "Thermal resistance to outdoors (K/W) — lower = less insulation",
-          "setpoint": "Default setpoint (°C)"
+          "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
+          "room_size": "Approximate room size",
+          "building_age": "Approximate building age/insulation level"
         }
       },
       "edit_room": {
@@ -74,10 +74,15 @@
         "title": "Edit Room",
         "data": {
           "name": "Room name",
-          "temp_sensor": "Temperature sensor entity ID",
-          "thermal_mass": "Thermal mass (J/K)",
-          "r_external": "Thermal resistance to outdoors (K/W)",
-          "setpoint": "Default setpoint (°C)"
+          "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
+          "room_size": "Approximate room size",
+          "building_age": "Approximate building age/insulation level"
+        }
+      },
+      "manage_room_windows": {
+        "title": "Select Room for Windows",
+        "data": {
+          "room_name": "Room"
         }
       },
       "remove_room": {

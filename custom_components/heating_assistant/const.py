@@ -74,7 +74,7 @@ CONF_SIGMA_B = "sigma_b"                          # EKF offset-state process-noi
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
 DEFAULT_R_EXTERNAL = 0.05              # K/W
-DEFAULT_SETPOINT = 21.0                # °C
+DEFAULT_SETPOINT = 22.0                # °C
 DEFAULT_HORIZON = 100                  # 100 steps ahead (~25 h at 15-min steps)
 DEFAULT_UPDATE_INTERVAL = 900          # OCP step / ZOH duration = coordinator / EKF update period (seconds)
 DEFAULT_EFFICIENCY = 1.0
