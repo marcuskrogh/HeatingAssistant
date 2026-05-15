@@ -127,6 +127,27 @@ async def test_setup_entry_attaches_update_listener(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_listener_schedules_reload_in_background():
+    """Options listener should schedule reload without waiting for completion."""
+    hass = _make_hass()
+    entry = _make_entry(entry_id="entry-bg")
+    scheduled = []
+
+    def _capture_task(coro):
+        scheduled.append(coro)
+
+    hass.async_create_task = _capture_task
+
+    await init_mod._async_update_listener(hass, entry)
+
+    assert len(scheduled) == 1
+    hass.config_entries.async_reload.assert_not_awaited()
+
+    await scheduled[0]
+    hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
+
+
+@pytest.mark.asyncio
 async def test_reload_service_refreshes_yaml_and_reloads_entries(monkeypatch):
     """The reload service should re-read YAML and reload every domain entry."""
     hass = _make_hass()
