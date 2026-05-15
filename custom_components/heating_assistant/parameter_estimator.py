@@ -32,13 +32,12 @@ The optimiser only includes a parameter when the data actually identify it:
 * Q_int,i — always included (always identifiable from the steady-state
             energy balance jointly with C, R_ext)
 
-A multi-start Nelder–Mead is run from the prior plus a few small random
+A multi-start IPOPT run is started from the prior plus a few small random
 perturbations; the run with the best (lowest) negative log-likelihood is
-returned.  This reduces the chance of being trapped in the flat valleys
-that are typical of RC-network identification problems.
-
-The optimisation uses a pure-NumPy Nelder–Mead so no additional runtime
-dependencies beyond numpy are required.
+returned.  Analytical gradients of the CD-EKF PED log-likelihood are
+supplied via a forward-sensitivity pass, giving IPOPT exact first-order
+information and dramatically reducing the number of function evaluations
+compared to Nelder–Mead.
 """
 
 from __future__ import annotations
@@ -53,7 +52,6 @@ import numpy as np
 from .controller import HouseThermalSDE as HouseThermalSystem
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
-from mbc.identification import CDParameterEstimator as _CDParameterEstimator
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from mbc.identification import nelder_mead as _nelder_mead  # for test compatibility
 
@@ -221,8 +219,10 @@ class KalmanMLEstimator:
     * α_s    – std(u_s) over the history ≥ ``_MIN_HEATER_USAGE_STD``
     * R_ij   – std(T_i − T_j) over the history ≥ ``_MIN_TEMP_DIFF_STD``
 
-    A multi-start Nelder–Mead is run from the prior and a few random
-    perturbations; the lowest-objective restart is returned.
+    A multi-start IPOPT run is started from the prior and a few random
+    perturbations; the lowest-objective restart is returned.  Analytical
+    gradients of the CD-EKF PED log-likelihood are computed via a
+    forward-sensitivity pass and supplied directly to IPOPT.
 
     Parameters
     ----------
@@ -362,7 +362,8 @@ class KalmanMLEstimator:
     def estimate(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Estimate all identifiable thermal parameters from the history buffer
-        using a single joint optimisation with multistart Nelder–Mead.
+        using a single joint optimisation with multistart IPOPT and analytical
+        gradients.
         """
         n_steps = len(history)
         current = {
@@ -500,56 +501,68 @@ class KalmanMLEstimator:
             }
         x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
 
-        # ── Delegate optimisation to CDParameterEstimator ──────────────────
-        mbc_est = _CDParameterEstimator(
-            model_factory=_model_factory,
-            theta0=theta_prior,
-            bounds=bounds,
-            x0=x0,
-            P0=P0,
-            dt=self._dt,
-            n_steps=10,
-            regularization_fn=_regularization_fn,
-            n_restarts=_N_RESTARTS,
-            restart_perturbation=_RESTART_PERT,
-            perturbation_fn=_perturb,
-        )
+        # ── IPOPT multi-start optimisation with analytical gradients ──────────
+        from cyipopt import minimize_ipopt
+        from scipy.optimize import Bounds as _Bounds
 
-        try:
-            mbc_result = mbc_est.estimate(std_history)
-        except Exception as exc:
-            _LOGGER.error("Parameter estimation failed: %s", exc)
-            return {
-                "success": False,
-                "estimated_params": {
-                    name: {"thermal_mass": p["thermal_mass"],
-                           "r_external": p["r_external"]}
-                    for name, p in current.items()
-                },
-                "current_params": {
-                    name: {"thermal_mass": p["thermal_mass"],
-                           "r_external": p["r_external"]}
-                    for name, p in current.items()
-                },
-                "estimated_internal_gains": {
-                    name: p["internal_gain"] for name, p in current.items()
-                },
-                "estimated_heater_scales": {
-                    s.name: float(getattr(s, "power_scale", 1.0))
-                    for s in self._sources
-                },
-                "estimated_inter_room_r": {},
-                "identifiable_connections": [],
-                "identifiable_sources": [],
-                "stage2_converged": False,
-                "n_steps": n_steps,
-                "log_likelihood": None,
-                "message": f"Estimation error: {exc}",
-            }
+        lb = np.array([lo for lo, _ in bounds])
+        ub = np.array([hi for _, hi in bounds])
+        scipy_bounds = _Bounds(lb, ub)
 
-        best_theta = mbc_result.theta_best
-        best_f = mbc_result.neg_log_likelihood
-        best_converged = mbc_result.converged
+        # Cache the last (theta, neg_ll, grad) triple so IPOPT's separate
+        # calls to fun/jac at the same point do not trigger a second pass.
+        _cache: List[Optional[object]] = [None, None, None]  # [theta, val, grad]
+
+        def _eval(theta: np.ndarray) -> None:
+            if _cache[0] is None or not np.array_equal(theta, _cache[0]):
+                neg_ll_lik, g_lik = self._cd_ped_neg_ll_and_grad(
+                    theta, layout, std_history, x0, P0
+                )
+                reg = _regularization_fn(theta)
+                reg_grad = self._compute_regularization_gradient(
+                    theta, layout, identifiable_pairs
+                )
+                _cache[0] = theta.copy()
+                _cache[1] = neg_ll_lik + reg
+                _cache[2] = g_lik + reg_grad
+
+        def _fun(theta: np.ndarray) -> float:
+            _eval(theta)
+            return float(_cache[1])  # type: ignore[arg-type]
+
+        def _jac(theta: np.ndarray) -> np.ndarray:
+            _eval(theta)
+            return np.asarray(_cache[2], dtype=float)  # type: ignore[arg-type]
+
+        rng = np.random.default_rng(0)
+        best_theta = theta_prior.copy()
+        best_f = float("inf")
+        best_converged = False
+
+        for restart in range(_N_RESTARTS):
+            if restart == 0:
+                theta_start = theta_prior.copy()
+            else:
+                theta_start = _perturb(theta_prior, rng, restart)
+                theta_start = np.clip(theta_start, lb, ub)
+
+            _cache[0] = None  # invalidate cache for new starting point
+
+            try:
+                res = minimize_ipopt(
+                    _fun,
+                    theta_start,
+                    jac=_jac,
+                    bounds=scipy_bounds,
+                    options={"print_level": 0},
+                )
+                f_val = float(res.fun) if np.isfinite(res.fun) else float("inf")
+                if f_val < best_f:
+                    best_f = f_val
+                    best_theta = np.asarray(res.x, dtype=float)
+                    best_converged = bool(res.success)
+            except Exception as exc:
+                _LOGGER.debug("IPOPT restart %d failed: %s", restart, exc)
 
         # ── Unpack and clip the best solution ──────────────────────────────
         log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(best_theta)
@@ -643,6 +656,321 @@ class KalmanMLEstimator:
         }
 
     # ── Internal helpers ──────────────────────────────────────────────────
+
+    def _cd_ped_neg_ll_and_grad(
+        self,
+        theta: np.ndarray,
+        layout: "_ThetaLayout",
+        std_history: List[Dict[str, np.ndarray]],
+        x0: np.ndarray,
+        P0: np.ndarray,
+    ) -> Tuple[float, np.ndarray]:
+        """
+        Compute the CD-EKF PED negative log-likelihood **and** its gradient
+        w.r.t. ``theta`` in a single forward-sensitivity pass.
+
+        The likelihood is
+
+            neg_ll(θ) = ½ Σ_k [ log|Sₖ| + νₖᵀ Sₖ⁻¹ νₖ ]
+
+        Sensitivities  sx_i = ∂x̂/∂θ_i  and  sP_i = ∂P/∂θ_i  are propagated
+        alongside the state and covariance through the Euler prediction steps.
+        At each measurement the innovation contributes to both the objective and
+        the gradient via
+
+            ∂(neg_ll_k)/∂θ_i = ½ tr(M sP_i) − q · sx_i − ½ q · sP_i q
+
+        where  M = Hᵀ S⁻¹ H  and  q = Hᵀ S⁻¹ ν.
+
+        Returns
+        -------
+        neg_ll : float
+        grad   : (ntheta,) ndarray – gradient of neg_ll only (regularisation
+                 is added by the caller).
+        """
+        _SENTINEL = 1e10
+        ntheta = len(theta)
+        _zero_grad = np.zeros(ntheta)
+
+        if not np.all(np.isfinite(theta)):
+            return _SENTINEL, _zero_grad.copy()
+
+        model = self._build_parametric_system(layout, theta)
+        if model is None:
+            return _SENTINEL, _zero_grad.copy()
+
+        n = self._n
+        nx = int(model.nx)     # n or 2n (augmented)
+        n_sub = 10
+        h_sub = self._dt / n_sub
+
+        # ── Unpack theta ────────────────────────────────────────────────────
+        log_mass, log_r, q_int, log_alpha, log_r_ij_vec = layout.unpack(theta)
+        C_cap = np.exp(log_mass)          # (n,) thermal masses
+        g_ext = np.exp(-log_r)            # (n,) external conductances 1/R_ext
+
+        # Per-source heater scales
+        heater_scales = np.ones(self._n_u)
+        for k_la, s_idx in enumerate(layout.identifiable_sources):
+            heater_scales[s_idx] = float(np.exp(log_alpha[k_la]))
+
+        # Per-pair inter-room conductances
+        g_ij_vec = (np.exp(-log_r_ij_vec)
+                    if len(log_r_ij_vec) else np.array([]))  # 1/R_ij
+
+        # Structural matrices baked into this model instance
+        F_n = model._F       # (n, n) room-temperature block of drift Jacobian
+        G_d_mat = model._G_d  # (n, 1+n) disturbance gain matrix
+
+        n_alpha = len(layout.identifiable_sources)
+        n_pairs = len(layout.identifiable_pairs)
+
+        # ── Precompute dFdtheta (constant – doesn't depend on x/u/d) ───────
+        # Shape (ntheta, nx, nx).  Only the top-left n×n block is nonzero.
+        dFdtheta = np.zeros((ntheta, nx, nx))
+
+        # log_mass[j]  → (∂F_n/∂log_mass_j)[j, :] = −F_n[j, :]
+        for j in range(n):
+            dFdtheta[j, j, :n] = -F_n[j, :]
+
+        # log_r[j]  → (∂F_n/∂log_r_j)[j, j] = g_ext[j] / C_cap[j]
+        for j in range(n):
+            dFdtheta[n + j, j, j] = g_ext[j] / C_cap[j]
+
+        # q_int[j], log_alpha[k] → dFdtheta = 0  (already zero)
+
+        # log_r_ij[k] for pair (pi, pj):
+        for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+            g_ij = float(g_ij_vec[k_rij])
+            t_idx = 3 * n + n_alpha + k_rij
+            dFdtheta[t_idx, pi, pi] = g_ij / C_cap[pi]
+            dFdtheta[t_idx, pj, pj] = g_ij / C_cap[pj]
+            dFdtheta[t_idx, pi, pj] = -g_ij / C_cap[pi]
+            dFdtheta[t_idx, pj, pi] = -g_ij / C_cap[pj]
+
+        # ── Measurement Jacobian H (constant for this model) ────────────────
+        _u0 = np.zeros(model.nu)
+        _d0 = np.zeros(model.nd)
+        _p0 = model.params
+        H = model.dhmdx(x0, _u0, _d0, _p0, 0.0)   # (nym, nx)
+        Rm_mat = model.Rm                            # (nym, nym)
+
+        # ── Initialise state and sensitivity arrays ──────────────────────────
+        x = np.asarray(x0, dtype=float).copy()
+        P = np.asarray(P0, dtype=float).copy()
+        sx = np.zeros((ntheta, nx))      # ∂x̂/∂θ_i
+        sP = np.zeros((ntheta, nx, nx))  # ∂P/∂θ_i (symmetric)
+
+        neg_ll = 0.0
+        grad = np.zeros(ntheta)
+
+        for k in range(len(std_history) - 1):
+            rec_k = std_history[k]
+            rec_next = std_history[k + 1]
+
+            try:
+                u_k = np.asarray(rec_k["u"], dtype=float)
+                d_k = np.asarray(rec_k["d"], dtype=float)
+                ym_next = np.asarray(rec_next["ym"], dtype=float)
+            except (KeyError, TypeError, ValueError):
+                return _SENTINEL, _zero_grad.copy()
+
+            T_out_k = float(d_k[0])
+
+            # ── Euler prediction sub-steps ───────────────────────────────────
+            for _ in range(n_sub):
+                T = x[:n]
+
+                try:
+                    f_val = model.f(x, u_k, d_k, _p0, 0.0)        # (nx,)
+                    F_full = model.dfdx(x, u_k, d_k, _p0, 0.0)    # (nx, nx)
+                    G_sig = model.sigma(x, u_k, d_k, _p0, 0.0)    # (nx, nw)
+                except Exception:
+                    return _SENTINEL, _zero_grad.copy()
+
+                # ── Compute dfdtheta (state-dependent) ─────────────────────
+                # Shape (ntheta, nx).  Only the T-block (first n rows) is
+                # nonzero – the b-block drift is always zero.
+                dfdtheta_val = np.zeros((ntheta, nx))
+
+                # log_mass[j]: ∂f_j/∂log_mass_j = −f_val[j]
+                for j in range(n):
+                    dfdtheta_val[j, j] = -f_val[j]
+
+                # log_r[j]: ∂f_j/∂log_r_j = (g_ext_j/C_j)(T_j − T_out)
+                for j in range(n):
+                    dfdtheta_val[n + j, j] = (g_ext[j] / C_cap[j]) * (
+                        T[j] - T_out_k
+                    )
+
+                # q_int[j]: ∂f_j/∂q_int_j = G_d[j, 1+j] = 1/C_j
+                for j in range(n):
+                    dfdtheta_val[2 * n + j, j] = G_d_mat[j, 1 + j]
+
+                # log_alpha[k]: ∂f_{i_src}/∂log_alpha_k = heat_contrib of src k
+                for k_la, s_idx in enumerate(layout.identifiable_sources):
+                    src = self._sources[s_idx]
+                    i_src = model._room_idx[src.room]
+                    u_s = float(u_k[s_idx]) if s_idx < len(u_k) else 0.0
+                    u_scaled_s = heater_scales[s_idx] * u_s
+                    heat_c = (
+                        src.thermal_power(max(0.0, u_scaled_s), T_out_k)
+                        / C_cap[i_src]
+                    )
+                    dfdtheta_val[3 * n + k_la, i_src] = heat_c
+
+                # log_r_ij[k]: ∂f_{pi}/∂log_r_ij_k = (g_ij/C_pi)(T_pi−T_pj)
+                for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+                    g_ij = float(g_ij_vec[k_rij])
+                    t_idx = 3 * n + n_alpha + k_rij
+                    dfdtheta_val[t_idx, pi] = (g_ij / C_cap[pi]) * (
+                        T[pi] - T[pj]
+                    )
+                    dfdtheta_val[t_idx, pj] = (g_ij / C_cap[pj]) * (
+                        T[pj] - T[pi]
+                    )
+
+                # ── Propagate state and covariance (Euler) ──────────────────
+                P_dot = F_full @ P + P @ F_full.T + G_sig @ G_sig.T
+
+                # ── Propagate sensitivities (Euler) ─────────────────────────
+                # sx_dot[i] = F_full @ sx[i] + dfdtheta[i]
+                # Vectorised: sx @ F_full.T gives (F_full @ sx[i])^T per row
+                sx_dot = sx @ F_full.T + dfdtheta_val  # (ntheta, nx)
+
+                # sP_dot[i] = F sP[i] + sP[i] Fᵀ + dFdtheta[i] P + P dFdtheta[i]ᵀ
+                # Since sP[i] and P are symmetric:
+                #   sP[i] Fᵀ = (F sP[i])ᵀ   →  FsP + FsP.T(axes)
+                #   P dFdtheta[i]ᵀ = (dFdtheta[i] P)ᵀ  →  dFP + dFP.T(axes)
+                FsP = np.einsum("ab,ibc->iac", F_full, sP)   # F @ sP[i]
+                dFP = np.einsum("iab,bc->iac", dFdtheta, P)  # dFdtheta[i] @ P
+                sP_dot = FsP + FsP.transpose(0, 2, 1) + dFP + dFP.transpose(0, 2, 1)
+
+                x = x + h_sub * f_val
+                P = P + h_sub * P_dot
+                P = (P + P.T) * 0.5
+                sx = sx + h_sub * sx_dot
+                sP = sP + h_sub * sP_dot
+                sP = (sP + sP.transpose(0, 2, 1)) * 0.5
+
+            if not (np.all(np.isfinite(x)) and np.all(np.isfinite(P))):
+                return _SENTINEL, _zero_grad.copy()
+
+            # ── Innovation step ──────────────────────────────────────────────
+            try:
+                y_hat = model.hm(x, u_k, d_k, _p0, 0.0)
+            except Exception:
+                return _SENTINEL, _zero_grad.copy()
+
+            nu = ym_next - y_hat
+            S = H @ P @ H.T + Rm_mat
+
+            try:
+                sign, logdet = np.linalg.slogdet(S)
+                if sign <= 0:
+                    return _SENTINEL, _zero_grad.copy()
+                S_inv = np.linalg.inv(S)
+            except np.linalg.LinAlgError:
+                return _SENTINEL, _zero_grad.copy()
+
+            S_inv_nu = S_inv @ nu
+            neg_ll += 0.5 * (logdet + float(nu @ S_inv_nu))
+            if not np.isfinite(neg_ll):
+                return _SENTINEL, _zero_grad.copy()
+
+            # ── Gradient contributions ───────────────────────────────────────
+            # q = Hᵀ S⁻¹ ν   (nx,)
+            # M = Hᵀ S⁻¹ H   (nx, nx)
+            # ∂(neg_ll_k)/∂θ_i = ½ tr(M sP_i) − q·sx_i − ½ q·sP_i·q
+            q = H.T @ S_inv_nu   # (nx,)
+            M = H.T @ S_inv @ H  # (nx, nx)
+
+            # Vectorised over all parameters:
+            #   tr(M sP_i) = sum(M * sP_i)   [element-wise then sum]
+            #   q · sx_i = sx @ q
+            #   q · sP_i · q = einsum('i,iab,b', q, sP, q) == q @ sP[i] @ q per i
+            grad += (
+                0.5 * np.einsum("ab,iab->i", M, sP)
+                - sx @ q
+                - 0.5 * np.einsum("a,iab,b->i", q, sP, q)
+            )
+
+            # ── Kalman update ────────────────────────────────────────────────
+            K = P @ H.T @ S_inv          # (nx, nym)
+            Phi = np.eye(nx) - K @ H     # (nx, nx)
+            P_minus = P.copy()
+
+            x = x + K @ nu
+            P = Phi @ P_minus @ Phi.T + K @ Rm_mat @ K.T
+            P = (P + P.T) * 0.5
+
+            # ── Sensitivity update through Kalman correction ─────────────────
+            # sx[i]⁺ = Φ (sx[i] + sP[i] Hᵀ S⁻¹ ν) = Φ (sx[i] + sP[i] q)
+            sx_aug = sx + np.einsum("iab,b->ia", sP, q)   # (ntheta, nx)
+            sx = np.einsum("ab,ib->ia", Phi, sx_aug)       # Φ @ sx_aug[i]
+
+            # J_i = Φ sP[i] Hᵀ S⁻¹ = ∂K/∂θ_i   (nx, nym) per i
+            Phi_sP = np.einsum("ab,ibc->iac", Phi, sP)              # (ntheta, nx, nx)
+            Phi_sP_Ht = np.einsum("iac,dc->iad", Phi_sP, H)         # (ntheta, nx, nym)
+            J = np.einsum("iad,de->iae", Phi_sP_Ht, S_inv)          # (ntheta, nx, nym)
+
+            # sP[i]⁺ = Φ sP[i] Φᵀ − J_i H P⁻ Φᵀ − Φ P⁻ Hᵀ J_iᵀ + J_i Rm Kᵀ + K Rm J_iᵀ
+            HP_m = H @ P_minus                                        # (nym, nx)
+            JHP = np.einsum("iad,db->iab", J, HP_m)                  # (ntheta, nx, nx)
+            term2 = np.einsum("iab,cb->iac", JHP, Phi)               # J H P⁻ Φᵀ
+            JRm = np.einsum("iad,de->iae", J, Rm_mat)                # (ntheta, nx, nym)
+            term4 = np.einsum("iad,bd->iab", JRm, K)                 # J Rm Kᵀ
+            sP = (
+                np.einsum("iab,cb->iac", Phi_sP, Phi)  # Φ sP[i] Φᵀ
+                - term2                                  # − J H P⁻ Φᵀ
+                - term2.transpose(0, 2, 1)               # − Φ P⁻ Hᵀ Jᵀ
+                + term4                                  # + J Rm Kᵀ
+                + term4.transpose(0, 2, 1)               # + K Rm Jᵀ
+            )
+            sP = (sP + sP.transpose(0, 2, 1)) * 0.5
+
+        return neg_ll, grad
+
+    def _compute_regularization_gradient(
+        self,
+        theta: np.ndarray,
+        layout: "_ThetaLayout",
+        identifiable_pairs: List[Tuple[int, int]],
+    ) -> np.ndarray:
+        """
+        Return ∂reg/∂θ where reg(θ) is the Gaussian regularisation term
+        from :meth:`_compute_regularization`.
+        """
+        log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(theta)
+        lam = self._regularization
+        grad = np.zeros_like(theta)
+
+        a, b = layout.idx_log_mass
+        grad[a:b] = 2.0 * lam * (log_mass - self._log_mass_prior)
+
+        a, b = layout.idx_log_r
+        grad[a:b] = 2.0 * lam * (log_r - self._log_r_prior)
+
+        a, b = layout.idx_q_int
+        grad[a:b] = 2.0 * lam * (q_int - self._q_int_prior) / (100.0 ** 2)
+
+        a, b = layout.idx_log_alpha
+        if a < b:
+            # Mirror the prior-slice logic from _compute_regularization
+            la_prior = np.array(
+                [self._log_alpha_prior_full[s] for s in range(self._n_u)]
+            )[: b - a]
+            grad[a:b] = 2.0 * lam * (log_alpha - la_prior)
+
+        a, b = layout.idx_log_r_ij
+        if a < b:
+            r_priors = np.array([
+                self._connection_r_priors[self._connection_pairs.index(p)]
+                for p in identifiable_pairs
+            ])
+            grad[a:b] = 2.0 * lam * (log_r_ij - r_priors)
+
+        return grad
 
     def _build_system(
         self,
