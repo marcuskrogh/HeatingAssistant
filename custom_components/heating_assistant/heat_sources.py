@@ -117,9 +117,7 @@ class ElectricHeater(HeatSource):
         """Thermal power = electrical power × efficiency × power_scale."""
         return self.max_power * setpoint_fraction * self.efficiency * self.power_scale
 
-    def target_temperature(
-        self, setpoint_fraction: float, internal_temp: float,
-    ) -> float:
+    def target_temperature(self, setpoint_fraction: float, internal_temp: float) -> float:
         """Target setpoint = internal_temp + fraction × max_temp_offset."""
         setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
         return internal_temp + setpoint_fraction * self.max_temp_offset
