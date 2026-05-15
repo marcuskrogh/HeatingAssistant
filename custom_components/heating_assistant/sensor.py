@@ -765,9 +765,9 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         # outdoor temperature, and setpoint so cards (e.g. apexcharts-card)
         # can plot them all from a single attribute.
         #
-        # The first entry is at t=now with the *current* measured values so
-        # that the predicted trace connects seamlessly to the historical
-        # recorder trace (no gap between history and forecast).
+        # The first entry is at t=now with the current filtered measurement
+        # estimate y(k|k) so the predicted trace starts from the same point as
+        # the estimator state exposed by TemperatureFilteredSensor.
         now = datetime.now(tz=timezone.utc)
         forecast = []
         outdoor_forecast = self._coordinator.outdoor_forecast
@@ -782,10 +782,17 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         )
         current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
 
+        filtered_now = self._coordinator.filtered_temperatures.get(self._room_name)
+        now_temp = (
+            round(float(filtered_now), 2)
+            if filtered_now is not None
+            else round(room.temperature, 2)
+        )
+
         # Entry at t=now: bridge between history and prediction
         now_entry: Dict[str, Any] = {
             "time": now.isoformat(),
-            "temperature": round(room.temperature, 2),
+            "temperature": now_temp,
             "heating_power": round(current_heating, 1),
             "solar_gain": round(current_solar, 1),
             "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
@@ -826,7 +833,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             "forecast": forecast,
             "setpoint": room.setpoint,
             "constraint_offset": constraint_offset,
-            "current_temperature": round(room.temperature, 2),
+            "current_temperature": now_temp,
             "horizon_steps": len(predictions),
             "step_seconds": dt,
             "horizon_minutes": round(len(predictions) * dt / 60, 1),
