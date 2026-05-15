@@ -19,6 +19,7 @@ from custom_components.heating_assistant.parameter_estimator import (
     KalmanMLEstimator,
     MIN_HISTORY_STEPS,
     _nelder_mead,
+    _ThetaLayout,
     _LOG_MASS_LO,
     _LOG_MASS_HI,
     _LOG_R_LO,
@@ -447,3 +448,122 @@ class TestJointInternalGainAndHeaterScale:
         # The joint estimator should lift the log-likelihood meaningfully.
         assert ll_post >= ll_prior - 1.0
 
+
+# ---------------------------------------------------------------------------
+# Tests for analytical gradient (forward-sensitivity pass)
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyticalGradient:
+    """
+    Verify that _cd_ped_neg_ll_and_grad returns a gradient that matches
+    the finite-difference approximation.  These tests do not require IPOPT
+    to be installed.
+    """
+
+    def _make_estimator_and_data(self, rooms, sources):
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0, regularization=0.0)
+        history = _generate_history(rooms, sources, n_steps=MIN_HISTORY_STEPS + 10)
+        return estimator, history
+
+    def _run_grad_check(self, rooms, sources, identifiable_sources=None,
+                        identifiable_pairs=None, eps=1e-4, rtol=0.02):
+        """
+        Compare the analytical gradient from _cd_ped_neg_ll_and_grad against
+        central finite differences.  Asserts max relative error < rtol.
+        """
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0, regularization=0.0)
+        history = _generate_history(rooms, sources, n_steps=60, seed=99)
+        std_history = estimator._convert_history_std(history, use_ym=True)
+
+        if identifiable_sources is None:
+            identifiable_sources = []
+        if identifiable_pairs is None:
+            identifiable_pairs = []
+
+        layout = _ThetaLayout(
+            n_rooms=estimator._n,
+            identifiable_sources=identifiable_sources,
+            identifiable_pairs=identifiable_pairs,
+        )
+        import math as _math
+        n = estimator._n
+        theta0 = np.concatenate([
+            estimator._log_mass_prior,
+            estimator._log_r_prior,
+            estimator._q_int_prior,
+            np.array([estimator._log_alpha_prior_full[s]
+                      for s in identifiable_sources]),
+            np.array([estimator._connection_r_priors[
+                          estimator._connection_pairs.index(p)]
+                      for p in identifiable_pairs])
+            if identifiable_pairs else np.array([]),
+        ])
+
+        system0 = estimator._build_parametric_system(layout, theta0)
+        assert system0 is not None
+        x0, P0 = estimator._initial_state_and_covariance(
+            system0, std_history[0]["ym"]
+        )
+
+        # Analytical gradient
+        neg_ll_val, grad_analytical = estimator._cd_ped_neg_ll_and_grad(
+            theta0, layout, std_history, x0, P0
+        )
+        assert np.isfinite(neg_ll_val), "neg_ll should be finite"
+        assert np.all(np.isfinite(grad_analytical)), "gradient should be finite"
+
+        # Central finite-difference gradient
+        grad_fd = np.zeros_like(theta0)
+        for i in range(len(theta0)):
+            tp = theta0.copy(); tp[i] += eps
+            tm = theta0.copy(); tm[i] -= eps
+            fp, _ = estimator._cd_ped_neg_ll_and_grad(
+                tp, layout, std_history, x0, P0
+            )
+            fm, _ = estimator._cd_ped_neg_ll_and_grad(
+                tm, layout, std_history, x0, P0
+            )
+            grad_fd[i] = (fp - fm) / (2.0 * eps)
+
+        # Allow absolute tolerance for near-zero entries
+        np.testing.assert_allclose(
+            grad_analytical, grad_fd,
+            rtol=rtol, atol=1e-3,
+            err_msg="Analytical gradient deviates from finite differences",
+        )
+
+    def test_gradient_single_room_basic_params(self):
+        """Gradient w.r.t. [log_mass, log_r, q_int] for a single room."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        self._run_grad_check(rooms, sources)
+
+    def test_gradient_two_room_basic_params(self):
+        """Gradient w.r.t. [log_mass×2, log_r×2, q_int×2] for two rooms."""
+        rooms = _make_two_rooms()
+        sources = _make_sources(rooms)
+        self._run_grad_check(rooms, sources)
+
+    def test_gradient_with_log_alpha(self):
+        """Gradient includes log_alpha when source is identifiable."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        self._run_grad_check(rooms, sources, identifiable_sources=[0])
+
+    def test_gradient_with_inter_room_resistance(self):
+        """Gradient includes log_r_ij when inter-room pair is identifiable."""
+        rooms = _make_two_rooms()
+        sources = _make_sources(rooms)
+        # Room indices 0 and 1 are connected
+        self._run_grad_check(rooms, sources, identifiable_pairs=[(0, 1)])
+
+    def test_gradient_full_parameter_set(self):
+        """Full two-room parameter set including alpha and inter-room R."""
+        rooms = _make_two_rooms()
+        sources = _make_sources(rooms)
+        self._run_grad_check(
+            rooms, sources,
+            identifiable_sources=[0, 1],
+            identifiable_pairs=[(0, 1)],
+        )
