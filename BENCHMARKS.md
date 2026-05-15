@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-15 15:09 UTC*
+*Generated: 2026-05-15 21:32 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,12 +18,12 @@ One control step consists of:
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | SLSQP    | SLSQP          |      35.5 |        37.0 |     37.3 |   15 |
-| studio-1room           | IPOPT    | IPOPT          |      91.5 |        92.0 |     99.7 |   15 |
-| two-bedroom-2room      | SLSQP    | SLSQP          |      81.0 |        72.3 |    123.6 |   15 |
-| two-bedroom-2room      | IPOPT    | IPOPT          |     185.8 |       177.9 |    196.9 |   15 |
-| full-house-5room       | SLSQP    | SLSQP          |    5158.8 |      5092.4 |   6072.7 |   15 |
-| full-house-5room       | IPOPT    | IPOPT          |    5527.1 |      4726.0 |  13224.2 |   15 |
+| studio-1room           | SLSQP    | SLSQP          |      43.2 |        44.9 |     45.3 |   15 |
+| studio-1room           | IPOPT    | SLSQP          |      43.2 |        44.9 |     45.9 |   15 |
+| two-bedroom-2room      | SLSQP    | SLSQP          |      98.4 |        88.8 |    150.8 |   15 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |      98.6 |        87.8 |    151.4 |   15 |
+| full-house-5room       | SLSQP    | SLSQP          |    5959.0 |      5875.4 |   6980.2 |   15 |
+| full-house-5room       | IPOPT    | SLSQP          |    5962.2 |      5886.7 |   6983.6 |   15 |
 
 **Configurations:**
 
@@ -39,13 +39,13 @@ One control step consists of:
 
 One estimation run consists of:
 1. Identifiability analysis over the history buffer
-2. Multi-start Nelder–Mead maximisation of the Kalman prediction-error
-   decomposition log-likelihood (3 restarts from the prior + random perturbations)
+2. Multi-start IPOPT minimisation of negative Kalman prediction-error
+   decomposition log-likelihood with analytical gradients (3 restarts)
 
 History buffer: 60 steps (1-minute samples) of synthetic data.
 
-| Scenario               |  mean (ms) | median (ms) | p95 (ms) |   n |
-|------------------------|------------|-------------|----------|-----|
+| Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
+|------------------------|------------|----------------|------------|-------------|----------|-----|
 
 
 **Configurations:**
@@ -55,6 +55,19 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 | `studio-1room` | 1 | 1 | C₁, R₁, Q_int₁ (3) |
 | `two-bedroom-2room` | 2 | 2 | C₁₋₂, R₁₋₂, Q_int₁₋₂, R₁₂ (7) |
 | `full-house-5room` | 5 | 5 | C₁₋₅, R₁₋₅, Q_int₁₋₅, R_ij (≥15) |
+
+---
+
+## Comparison vs previous `BENCHMARKS.md`
+
+| Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |
+|-----------------------------|------------------------|------------|-----------------|-----------------|----------|
+| MPC.compute                 | studio-1room           | SLSQP    |        37.0 |        44.9 |     21.4% (slower) |
+| MPC.compute                 | studio-1room           | IPOPT    |        92.0 |        44.9 |    -51.2% (faster) |
+| MPC.compute                 | two-bedroom-2room      | SLSQP    |        72.3 |        88.8 |     22.8% (slower) |
+| MPC.compute                 | two-bedroom-2room      | IPOPT    |       177.9 |        87.8 |    -50.7% (faster) |
+| MPC.compute                 | full-house-5room       | SLSQP    |      5092.4 |      5875.4 |     15.4% (slower) |
+| MPC.compute                 | full-house-5room       | IPOPT    |      4726.0 |      5886.7 |     24.6% (slower) |
 
 ---
 
