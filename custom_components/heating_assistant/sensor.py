@@ -765,9 +765,11 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         # outdoor temperature, and setpoint so cards (e.g. apexcharts-card)
         # can plot them all from a single attribute.
         #
-        # The first entry is at t=now with the *current* measured values so
-        # that the predicted trace connects seamlessly to the historical
-        # recorder trace (no gap between history and forecast).
+        # The first entry is at t=now with the filtered state estimate so
+        # that the predicted trace connects seamlessly to the EKF-filtered
+        # history trace rather than the raw measurement.  If the filtered
+        # estimate is not yet available (cold start), fall back to the raw
+        # measured temperature.
         now = datetime.now(tz=timezone.utc)
         forecast = []
         outdoor_forecast = self._coordinator.outdoor_forecast
@@ -782,10 +784,18 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         )
         current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
 
+        # Use the filtered state estimate as the starting point so the
+        # forecast trace aligns with the EKF output, not the raw sensor
+        # reading.  Fall back to the measurement only when no filtered
+        # estimate exists (e.g. before the first EKF update).
+        filtered_temp = self._coordinator.filtered_temperatures.get(
+            self._room_name, room.temperature
+        )
+
         # Entry at t=now: bridge between history and prediction
         now_entry: Dict[str, Any] = {
             "time": now.isoformat(),
-            "temperature": round(room.temperature, 2),
+            "temperature": round(filtered_temp, 2),
             "heating_power": round(current_heating, 1),
             "solar_gain": round(current_solar, 1),
             "outdoor_temp": round(self._coordinator.outdoor_temp, 2),

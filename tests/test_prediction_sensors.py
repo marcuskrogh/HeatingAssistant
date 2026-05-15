@@ -42,6 +42,7 @@ def _make_room_coordinator():
         dt=900,
         controller=SimpleNamespace(constraint_offset=2.0),
         last_update_success=False,  # simulate a recent UpdateFailed
+        filtered_temperatures={"living_room": 20.45},
     )
 
 

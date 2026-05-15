@@ -516,6 +516,60 @@ class TestForecastSensorsReportUnknownOnEmpty:
 
 
 # ---------------------------------------------------------------------------
+# Tests: TemperatureForecastSensor bridge entry uses filtered temperature
+# ---------------------------------------------------------------------------
+
+class TestTemperatureForecastBridgeEntry:
+    """Verify the t=now bridge entry in TemperatureForecastSensor uses the
+    filtered state estimate rather than the raw measurement."""
+
+    _DT = 900
+
+    def _make_coordinator(self, filtered_temps: dict, room_temp: float = 20.0):
+        room = SimpleNamespace(temperature=room_temp, setpoint=21.0, windows=[])
+        return SimpleNamespace(
+            predictions=[{"studio": 21.5}],
+            model=SimpleNamespace(rooms={"studio": room}),
+            heat_sources=[],
+            solar_gains={"studio": 0.0},
+            outdoor_forecast=[5.0],
+            solar_forecast=[{"studio": 0.0}],
+            heating_schedule=[{"studio": 1000.0}],
+            outdoor_temp=5.0,
+            dt=self._DT,
+            controller=SimpleNamespace(constraint_offset=2.0),
+            filtered_temperatures=filtered_temps,
+        )
+
+    def test_bridge_entry_uses_filtered_temperature(self):
+        """When filtered_temperatures contains the room, bridge entry must use it."""
+        raw_temp = 20.0
+        filtered_temp = 19.85  # EKF estimate differs from raw measurement
+        coordinator = self._make_coordinator(
+            filtered_temps={"studio": filtered_temp}, room_temp=raw_temp
+        )
+        sensor = TemperatureForecastSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        bridge = attrs["forecast"][0]
+        assert bridge["temperature"] == pytest.approx(filtered_temp, abs=0.01)
+        assert bridge["temperature"] != pytest.approx(raw_temp, abs=0.01)
+
+    def test_bridge_entry_falls_back_to_raw_when_no_filtered(self):
+        """When filtered_temperatures is empty (cold start), bridge entry must fall
+        back to the raw room temperature."""
+        raw_temp = 20.0
+        coordinator = self._make_coordinator(
+            filtered_temps={}, room_temp=raw_temp
+        )
+        sensor = TemperatureForecastSensor(coordinator, "studio")
+
+        attrs = sensor.extra_state_attributes
+        bridge = attrs["forecast"][0]
+        assert bridge["temperature"] == pytest.approx(raw_temp, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
 # Tests: forecast sensor timestamp correctness
 # ---------------------------------------------------------------------------
 
