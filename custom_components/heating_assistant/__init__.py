@@ -334,8 +334,8 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when its options change via the UI."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Reload the config entry in the background when options change via UI."""
+    hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
 
 
 def _merge_yaml_into_entry_data(
