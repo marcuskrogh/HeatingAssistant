@@ -461,8 +461,8 @@ class TestApplyActionsClimate:
         assert coord._cooling_active.get("hp1") is False
 
     @pytest.mark.asyncio
-    async def test_non_heat_pump_climate_uses_room_setpoint(self):
-        """An ElectricHeater on a climate entity falls back to the room setpoint."""
+    async def test_non_heat_pump_climate_uses_internal_temp_plus_offset(self):
+        """An ElectricHeater on a climate entity modulates from internal temp."""
         heater = ElectricHeater(
             "e1", "bedroom", max_power=2000,
             heater_entity="climate.bedroom_heater",
@@ -480,7 +480,8 @@ class TestApplyActionsClimate:
         )
 
         temp_call = hass.services.async_call.call_args_list[1]
-        assert temp_call.args[2]["temperature"] == 22.5
+        # max(22.5, 20.0 + 0.7 * 5.0) = 23.5
+        assert temp_call.args[2]["temperature"] == pytest.approx(23.5)
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_idle_uses_internal_temp(self):
@@ -918,8 +919,8 @@ class TestElectricHeaterCoolingProtection:
         calls = hass.services.async_call.call_args_list
         assert len(calls) == 2
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        # Room at setpoint, fraction > 0 → use room setpoint
-        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
+        # Room at setpoint, fraction > 0 → internal_temp + fraction * offset
+        assert calls[1].args[2]["temperature"] == pytest.approx(24.5)
 
 
 class TestHeatPumpCoolingModeSelection:
