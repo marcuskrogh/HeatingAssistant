@@ -35,6 +35,7 @@ def _make_room_coordinator():
             {"living_room": 70.0},
         ],
         outdoor_forecast=[5.0, 4.5],
+        filtered_temperatures={"living_room": 20.63},
         solar_gains={"living_room": 50.0},
         heat_sources=[SimpleNamespace(room="living_room", current_power=900.0)],
         model=SimpleNamespace(rooms={"living_room": room}),
@@ -136,6 +137,23 @@ def test_temperature_forecast_exposes_forecast_attribute():
     assert "forecast" in attrs
     assert "trajectory" in attrs
     assert attrs["horizon_steps"] == 2
+
+
+def test_temperature_forecast_bridge_uses_filtered_measurement_estimate():
+    coord = _make_room_coordinator()
+    sensor = TemperatureForecastSensor(coord, "living_room")
+    attrs = sensor.extra_state_attributes
+    assert attrs["forecast"][0]["temperature"] == pytest.approx(20.63)
+    assert attrs["current_temperature"] == pytest.approx(20.63)
+
+
+def test_temperature_forecast_bridge_falls_back_to_measurement_when_filtered_missing():
+    coord = _make_room_coordinator()
+    coord.filtered_temperatures = {}
+    sensor = TemperatureForecastSensor(coord, "living_room")
+    attrs = sensor.extra_state_attributes
+    assert attrs["forecast"][0]["temperature"] == pytest.approx(20.5)
+    assert attrs["current_temperature"] == pytest.approx(20.5)
 
 
 def test_heating_power_forecast_exposes_forecast_attribute():
