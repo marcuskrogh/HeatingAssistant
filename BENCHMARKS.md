@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-15 06:24 UTC*
+*Generated: 2026-05-15 06:37 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,12 +18,12 @@ One control step consists of:
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | SLSQP    | SLSQP          |      35.6 |        36.8 |     40.3 |   15 |
-| studio-1room           | IPOPT    | SLSQP          |      35.5 |        36.8 |     37.7 |   15 |
-| two-bedroom-2room      | SLSQP    | SLSQP          |      81.3 |        72.1 |    123.2 |   15 |
-| two-bedroom-2room      | IPOPT    | SLSQP          |      80.7 |        71.9 |    123.4 |   15 |
-| full-house-5room       | SLSQP    | SLSQP          |    5157.4 |      5088.7 |   6044.8 |   15 |
-| full-house-5room       | IPOPT    | SLSQP          |    5156.6 |      5096.7 |   6039.2 |   15 |
+| studio-1room           | SLSQP    | SLSQP          |      35.4 |        36.8 |     36.9 |   15 |
+| studio-1room           | IPOPT    | SLSQP          |      35.3 |        36.8 |     37.2 |   15 |
+| two-bedroom-2room      | SLSQP    | SLSQP          |      80.4 |        71.9 |    123.0 |   15 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |      80.4 |        71.8 |    122.9 |   15 |
+| full-house-5room       | SLSQP    | SLSQP          |    5136.9 |      5070.0 |   6017.7 |   15 |
+| full-house-5room       | IPOPT    | SLSQP          |    5125.7 |      5067.6 |   5998.0 |   15 |
 
 **Configurations:**
 

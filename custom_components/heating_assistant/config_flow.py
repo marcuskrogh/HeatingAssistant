@@ -28,6 +28,7 @@ from .const import (
     CONF_SIGMA_V,
     CONF_SIGMA_W,
     CONF_TEMP_SENSOR,
+    CONF_TEMP_SENSORS,
     CONF_THERMAL_MASS,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -39,7 +40,6 @@ from .const import (
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_MPC_SOLVER,
     DEFAULT_R_EXTERNAL,
-    DEFAULT_SETPOINT,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -70,6 +70,21 @@ COMPASS_TO_DEGREES: Dict[str, float] = {
 
 _DEGREES_TO_COMPASS: Dict[float, str] = {v: k for k, v in COMPASS_TO_DEGREES.items()}
 
+ROOM_SIZE_TO_THERMAL_MASS: Dict[str, float] = {
+    "small": 3_500_000.0,
+    "medium": 5_000_000.0,
+    "large": 8_000_000.0,
+}
+
+BUILDING_AGE_TO_R_EXTERNAL: Dict[str, float] = {
+    "pre_1940": 0.03,
+    "1940_1979": 0.045,
+    "1980_1999": 0.06,
+    "2000_plus": 0.08,
+}
+
+DEFAULT_ROOM_SETPOINT = 22.0
+
 
 def _degrees_to_compass(degrees: float) -> str:
     """Return the nearest compass label for an orientation in degrees."""
@@ -79,12 +94,31 @@ def _degrees_to_compass(degrees: float) -> str:
     return _DEGREES_TO_COMPASS[best]
 
 
-def _window_display(idx: int, window: Dict[str, Any]) -> str:
+def _window_display(room_name: str, idx: int, window: Dict[str, Any]) -> str:
     """Human-readable window label for the remove-window selector."""
     area = window.get(CONF_WINDOW_AREA, "?")
     compass = _degrees_to_compass(float(window.get(CONF_WINDOW_ORIENTATION, 0)))
     tilt = window.get(CONF_WINDOW_TILT, DEFAULT_WINDOW_TILT)
-    return f"Window {idx + 1}: {area} m² facing {compass} (tilt {tilt}°)"
+    return f"{room_name} · Window {idx + 1}: {area} m² facing {compass} (tilt {tilt}°)"
+
+
+def _parse_entity_ids(raw_value: str) -> List[str]:
+    """Parse comma-separated entity IDs from a text field."""
+    if not raw_value:
+        return []
+    return [entity.strip() for entity in raw_value.split(",") if entity.strip()]
+
+
+def _format_entity_ids(entity_ids: List[str]) -> str:
+    """Format entity IDs as a comma-separated string for UI defaults."""
+    return ", ".join(entity_ids)
+
+
+def _nearest_choice(value: float, mapping: Dict[str, float], default_key: str) -> str:
+    """Return the nearest mapping key for a numeric value."""
+    if not mapping:
+        return default_key
+    return min(mapping, key=lambda key: abs(mapping[key] - value))
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +246,11 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_init()
 
         current = self._data
+        solver_default = str(current.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)).lower()
+        if solver_default == "cyipopt":
+            solver_default = "ipopt"
+        if solver_default not in {"slsqp", "ipopt"}:
+            solver_default = DEFAULT_MPC_SOLVER
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -232,8 +271,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                 vol.Optional(
                     CONF_MPC_SOLVER,
-                    default=current.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER),
-                ): vol.In(["slsqp", "ipopt", "cyipopt"]),
+                    default=solver_default,
+                ): vol.In(["slsqp", "ipopt"]),
                 vol.Optional(
                     CONF_MPC_ANALYTIC_DERIVATIVES,
                     default=current.get(
@@ -279,7 +318,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         """Room management menu."""
         menu_options: List[str] = ["add_room"]
         if self._rooms:
-            menu_options += ["edit_room", "remove_room"]
+            menu_options += ["edit_room", "manage_room_windows", "remove_room"]
         menu_options.append("finish_rooms")
         return self.async_show_menu(step_id="manage_rooms", menu_options=menu_options)
 
@@ -300,31 +339,32 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             if any(r[CONF_ROOM_NAME].lower() == room_name.lower() for r in self._rooms):
                 errors[CONF_ROOM_NAME] = "duplicate_room"
             else:
+                selected_sensors = _parse_entity_ids(
+                    user_input.get(CONF_TEMP_SENSORS, "")
+                )
                 new_room: Dict[str, Any] = {
                     CONF_ROOM_NAME: room_name,
-                    CONF_TEMP_SENSOR: user_input.get(CONF_TEMP_SENSOR, ""),
-                    CONF_THERMAL_MASS: user_input[CONF_THERMAL_MASS],
-                    CONF_R_EXTERNAL: user_input[CONF_R_EXTERNAL],
-                    CONF_SETPOINT: user_input[CONF_SETPOINT],
+                    CONF_TEMP_SENSORS: selected_sensors,
+                    CONF_THERMAL_MASS: ROOM_SIZE_TO_THERMAL_MASS[user_input["room_size"]],
+                    CONF_R_EXTERNAL: BUILDING_AGE_TO_R_EXTERNAL[user_input["building_age"]],
+                    CONF_SETPOINT: DEFAULT_ROOM_SETPOINT,
                     CONF_WINDOWS: [],
                 }
+                if selected_sensors:
+                    new_room[CONF_TEMP_SENSOR] = selected_sensors[0]
                 self._rooms.append(new_room)
-                self._current_room_idx = len(self._rooms) - 1
-                return await self.async_step_manage_windows()
+                return await self.async_step_manage_rooms()
 
         schema = vol.Schema(
             {
                 vol.Required(CONF_ROOM_NAME, default=""): str,
-                vol.Optional(CONF_TEMP_SENSOR, default=""): str,
-                vol.Optional(
-                    CONF_THERMAL_MASS, default=DEFAULT_THERMAL_MASS
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                vol.Optional(
-                    CONF_R_EXTERNAL, default=DEFAULT_R_EXTERNAL
-                ): vol.All(vol.Coerce(float), vol.Range(min=1e-6)),
-                vol.Optional(
-                    CONF_SETPOINT, default=DEFAULT_SETPOINT
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=40.0)),
+                vol.Optional(CONF_TEMP_SENSORS, default=""): str,
+                vol.Required("room_size", default="medium"): vol.In(
+                    list(ROOM_SIZE_TO_THERMAL_MASS)
+                ),
+                vol.Required("building_age", default="1980_1999"): vol.In(
+                    list(BUILDING_AGE_TO_R_EXTERNAL)
+                ),
             }
         )
 
@@ -377,52 +417,59 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                                 CONF_ROOM_NAME, default=user_input.get(CONF_ROOM_NAME, "")
                             ): str,
                             vol.Optional(
-                                CONF_TEMP_SENSOR,
-                                default=user_input.get(CONF_TEMP_SENSOR, ""),
+                                CONF_TEMP_SENSORS,
+                                default=user_input.get(CONF_TEMP_SENSORS, ""),
                             ): str,
-                            vol.Optional(
-                                CONF_THERMAL_MASS,
-                                default=user_input.get(CONF_THERMAL_MASS, DEFAULT_THERMAL_MASS),
-                            ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                            vol.Optional(
-                                CONF_R_EXTERNAL,
-                                default=user_input.get(CONF_R_EXTERNAL, DEFAULT_R_EXTERNAL),
-                            ): vol.All(vol.Coerce(float), vol.Range(min=1e-6)),
-                            vol.Optional(
-                                CONF_SETPOINT,
-                                default=user_input.get(CONF_SETPOINT, DEFAULT_SETPOINT),
-                            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=40.0)),
+                            vol.Required(
+                                "room_size", default=user_input.get("room_size", "medium")
+                            ): vol.In(list(ROOM_SIZE_TO_THERMAL_MASS)),
+                            vol.Required(
+                                "building_age",
+                                default=user_input.get("building_age", "1980_1999"),
+                            ): vol.In(list(BUILDING_AGE_TO_R_EXTERNAL)),
                         }
                     ),
                     errors={CONF_ROOM_NAME: "duplicate_room"},
                 )
+            selected_sensors = _parse_entity_ids(user_input.get(CONF_TEMP_SENSORS, ""))
             room[CONF_ROOM_NAME] = new_name
-            room[CONF_TEMP_SENSOR] = user_input.get(CONF_TEMP_SENSOR, "")
-            room[CONF_THERMAL_MASS] = user_input[CONF_THERMAL_MASS]
-            room[CONF_R_EXTERNAL] = user_input[CONF_R_EXTERNAL]
-            room[CONF_SETPOINT] = user_input[CONF_SETPOINT]
-            return await self.async_step_manage_windows()
+            room[CONF_TEMP_SENSORS] = selected_sensors
+            if selected_sensors:
+                room[CONF_TEMP_SENSOR] = selected_sensors[0]
+            else:
+                room.pop(CONF_TEMP_SENSOR, None)
+            room[CONF_THERMAL_MASS] = ROOM_SIZE_TO_THERMAL_MASS[user_input["room_size"]]
+            room[CONF_R_EXTERNAL] = BUILDING_AGE_TO_R_EXTERNAL[user_input["building_age"]]
+            room[CONF_SETPOINT] = DEFAULT_ROOM_SETPOINT
+            return await self.async_step_manage_rooms()
 
+        room_sensors = room.get(CONF_TEMP_SENSORS, [])
+        if not room_sensors and room.get(CONF_TEMP_SENSOR):
+            room_sensors = [room[CONF_TEMP_SENSOR]]
+        room_size_default = _nearest_choice(
+            float(room.get(CONF_THERMAL_MASS, DEFAULT_THERMAL_MASS)),
+            ROOM_SIZE_TO_THERMAL_MASS,
+            "medium",
+        )
+        building_age_default = _nearest_choice(
+            float(room.get(CONF_R_EXTERNAL, DEFAULT_R_EXTERNAL)),
+            BUILDING_AGE_TO_R_EXTERNAL,
+            "1980_1999",
+        )
         schema = vol.Schema(
             {
                 vol.Required(
                     CONF_ROOM_NAME, default=room.get(CONF_ROOM_NAME, "")
                 ): str,
                 vol.Optional(
-                    CONF_TEMP_SENSOR, default=room.get(CONF_TEMP_SENSOR, "")
+                    CONF_TEMP_SENSORS, default=_format_entity_ids(room_sensors)
                 ): str,
-                vol.Optional(
-                    CONF_THERMAL_MASS,
-                    default=room.get(CONF_THERMAL_MASS, DEFAULT_THERMAL_MASS),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                vol.Optional(
-                    CONF_R_EXTERNAL,
-                    default=room.get(CONF_R_EXTERNAL, DEFAULT_R_EXTERNAL),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1e-6)),
-                vol.Optional(
-                    CONF_SETPOINT,
-                    default=room.get(CONF_SETPOINT, DEFAULT_SETPOINT),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=40.0)),
+                vol.Required("room_size", default=room_size_default): vol.In(
+                    list(ROOM_SIZE_TO_THERMAL_MASS)
+                ),
+                vol.Required("building_age", default=building_age_default): vol.In(
+                    list(BUILDING_AGE_TO_R_EXTERNAL)
+                ),
             }
         )
 
@@ -446,6 +493,29 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         )
         return self.async_show_form(step_id="remove_room", data_schema=schema)
 
+    async def async_step_manage_room_windows(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Select room before entering the windows sub-flow."""
+        if not self._rooms:
+            return await self.async_step_manage_rooms()
+
+        if user_input is not None:
+            room_name = user_input["room_name"]
+            self._current_room_idx = next(
+                (i for i, r in enumerate(self._rooms) if r[CONF_ROOM_NAME] == room_name),
+                None,
+            )
+            if self._current_room_idx is not None:
+                return await self.async_step_manage_windows()
+            return await self.async_step_manage_rooms()
+
+        room_names = [r[CONF_ROOM_NAME] for r in self._rooms]
+        schema = vol.Schema(
+            {vol.Required("room_name", default=room_names[0]): vol.In(room_names)}
+        )
+        return self.async_show_form(step_id="manage_room_windows", data_schema=schema)
+
     # ------------------------------------------------------------------
     # Window management
     # ------------------------------------------------------------------
@@ -454,6 +524,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
         """Window management menu for the currently-selected room."""
+        if self._current_room_idx is None:
+            return await self.async_step_manage_room_windows()
         room = self._rooms[self._current_room_idx]  # type: ignore[index]
         windows = room.get(CONF_WINDOWS, [])
         menu_options: List[str] = ["add_window"]
@@ -512,7 +584,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_manage_windows()
 
         window_options = {
-            str(i): _window_display(i, w) for i, w in enumerate(windows)
+            str(i): _window_display(room.get(CONF_ROOM_NAME, "Room"), i, w)
+            for i, w in enumerate(windows)
         }
         schema = vol.Schema(
             {vol.Required("window_idx", default="0"): vol.In(window_options)}
