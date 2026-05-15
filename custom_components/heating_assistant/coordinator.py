@@ -319,6 +319,7 @@ def build_heat_sources(
                     room=room,
                     max_power=max_power,
                     efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_EFFICIENCY),
+                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
                     heater_entity=entity,
                 )
             )
@@ -1291,7 +1292,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "hvac_mode": "heat"},
                             blocking=False,
                         )
-                        target_temp = room_setpoint
+                        target_temp = max(
+                            room_setpoint,
+                            src.target_temperature(fraction, entity_temp),
+                        )
                         await self.hass.services.async_call(
                             "climate",
                             "set_temperature",

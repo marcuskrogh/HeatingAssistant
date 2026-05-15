@@ -48,6 +48,22 @@ class TestElectricHeater:
         p2 = heater.thermal_power(1.0, outdoor_temp=20.0)
         assert p1 == pytest.approx(p2)
 
+    def test_target_temperature_uses_internal_temp_plus_offset(self):
+        heater = ElectricHeater(
+            "h1", "living_room", max_power=2000.0, max_temp_offset=4.0
+        )
+        assert heater.target_temperature(0.5, 20.0) == pytest.approx(22.0)
+
+    def test_invalid_max_temp_offset(self):
+        with pytest.raises(ValueError):
+            ElectricHeater("h1", "living_room", max_power=2000.0, max_temp_offset=-1.0)
+
+    def test_zero_max_temp_offset_gives_no_setpoint_offset(self):
+        heater = ElectricHeater(
+            "h1", "living_room", max_power=2000.0, max_temp_offset=0.0
+        )
+        assert heater.target_temperature(1.0, 20.0) == pytest.approx(20.0)
+
 
 class TestHeatPump:
     def test_full_power_at_rated_conditions(self):
