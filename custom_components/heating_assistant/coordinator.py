@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -221,6 +221,28 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     distributes results to the climate and sensor platforms.
     """
 
+    _RELOAD_REQUIRED_CONFIG_KEYS: Set[str] = {
+        CONF_ROOMS,
+        CONF_HEAT_SOURCES,
+        CONF_HORIZON,
+        CONF_UPDATE_INTERVAL,
+    }
+    _RUNTIME_RECONFIG_KEYS: Set[str] = {
+        CONF_OUTDOOR_TEMP_ENTITY,
+        CONF_WEATHER_ENTITY,
+        CONF_LATITUDE,
+        CONF_LONGITUDE,
+        CONF_CONSTRAINT_OFFSET,
+        CONF_ENERGY_WEIGHT,
+        CONF_SMOOTHING_WEIGHT,
+        CONF_TERMINAL_WEIGHT,
+        CONF_MPC_SOLVER,
+        CONF_MPC_ANALYTIC_DERIVATIVES,
+        CONF_SIGMA_W,
+        CONF_SIGMA_V,
+        CONF_SIGMA_B,
+    }
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -276,6 +298,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 DEFAULT_MPC_ANALYTIC_DERIVATIVES,
             )
         )
+        self._last_runtime_config: Dict[str, Any] = {**dict(data), **dict(options)}
+        self._pending_runtime_reconfiguration: Dict[str, Any] = {}
 
         rooms_cfg: List[Dict[str, Any]] = data.get(CONF_ROOMS, [])
         sources_cfg: List[Dict[str, Any]] = data.get(CONF_HEAT_SOURCES, [])
@@ -529,6 +553,119 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             index.setdefault(src.room, []).append(src)
         self._sources_by_room = index
 
+    def _build_controller(self) -> None:
+        """Build or rebuild the MPC controller from current settings."""
+        self.controller = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=self._horizon,
+            dt=self.dt,
+            measurement_dt=self.dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            constraint_offset=self._constraint_offset,
+            terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
+            solver=self._mpc_solver,
+            use_analytic_derivatives=self._mpc_analytic_derivatives,
+        )
+
+    def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
+        """Queue non-structural config changes for the next regular tick.
+
+        Returns ``True`` when the change can be applied in-place, ``False``
+        when a full integration reload is required.
+        """
+        if not hasattr(self, "_last_runtime_config"):
+            self._last_runtime_config = {}
+        if not hasattr(self, "_pending_runtime_reconfiguration"):
+            self._pending_runtime_reconfiguration = {}
+
+        new_config = dict(config)
+        changed_keys = {
+            key
+            for key in set(self._last_runtime_config) | set(new_config)
+            if self._last_runtime_config.get(key) != new_config.get(key)
+        }
+        self._last_runtime_config = new_config
+
+        if not changed_keys:
+            return True
+
+        if changed_keys & self._RELOAD_REQUIRED_CONFIG_KEYS:
+            return False
+
+        for key in changed_keys & self._RUNTIME_RECONFIG_KEYS:
+            self._pending_runtime_reconfiguration[key] = new_config.get(key)
+        return True
+
+    def _apply_pending_runtime_reconfiguration(self) -> None:
+        """Apply queued runtime config updates at the start of a normal cycle."""
+        pending_state = getattr(self, "_pending_runtime_reconfiguration", None)
+        if not pending_state:
+            return
+
+        pending = dict(pending_state)
+        self._pending_runtime_reconfiguration.clear()
+        rebuild_controller = False
+
+        if CONF_OUTDOOR_TEMP_ENTITY in pending:
+            self._outdoor_entity = str(pending.get(CONF_OUTDOOR_TEMP_ENTITY, ""))
+        if CONF_WEATHER_ENTITY in pending:
+            self._weather_entity = str(pending.get(CONF_WEATHER_ENTITY, ""))
+        if CONF_LATITUDE in pending:
+            self._latitude = float(pending.get(CONF_LATITUDE, self._latitude))
+        if CONF_LONGITUDE in pending:
+            self._longitude = float(pending.get(CONF_LONGITUDE, self._longitude))
+        if CONF_CONSTRAINT_OFFSET in pending:
+            self._constraint_offset = float(
+                pending.get(CONF_CONSTRAINT_OFFSET, self._constraint_offset)
+            )
+            rebuild_controller = True
+        if CONF_ENERGY_WEIGHT in pending:
+            self._energy_weight = float(
+                pending.get(CONF_ENERGY_WEIGHT, self._energy_weight)
+            )
+            rebuild_controller = True
+        if CONF_SMOOTHING_WEIGHT in pending:
+            self._smoothing_weight = float(
+                pending.get(CONF_SMOOTHING_WEIGHT, self._smoothing_weight)
+            )
+            rebuild_controller = True
+        if CONF_TERMINAL_WEIGHT in pending:
+            self._terminal_weight = float(
+                pending.get(CONF_TERMINAL_WEIGHT, self._terminal_weight)
+            )
+            rebuild_controller = True
+        if CONF_SIGMA_W in pending:
+            self._sigma_w = float(pending.get(CONF_SIGMA_W, self._sigma_w))
+            rebuild_controller = True
+        if CONF_SIGMA_V in pending:
+            self._sigma_v = float(pending.get(CONF_SIGMA_V, self._sigma_v))
+            rebuild_controller = True
+        if CONF_SIGMA_B in pending:
+            self._sigma_b = float(pending.get(CONF_SIGMA_B, self._sigma_b))
+            rebuild_controller = True
+        if CONF_MPC_SOLVER in pending:
+            self._mpc_solver = _normalize_solver_name(
+                pending.get(CONF_MPC_SOLVER, self._mpc_solver)
+            )
+            rebuild_controller = True
+        if CONF_MPC_ANALYTIC_DERIVATIVES in pending:
+            self._mpc_analytic_derivatives = bool(
+                pending.get(
+                    CONF_MPC_ANALYTIC_DERIVATIVES, self._mpc_analytic_derivatives
+                )
+            )
+            rebuild_controller = True
+
+        if rebuild_controller:
+            self._build_controller()
+
     def sources_for_room(self, room_name: str) -> List[HeatSource]:
         """Return the cached list of heat sources for ``room_name`` (empty if
         none), without copying.  Sensors should not mutate the returned list.
@@ -593,6 +730,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #    timestamp (and avoids redundant ``datetime.now()`` calls in
             #    each sensor's ``extra_state_attributes`` getter).
             self.now_utc = datetime.now(tz=timezone.utc)
+            self._apply_pending_runtime_reconfiguration()
 
             # 1. Update measured room temperatures from HA sensor states.
             #    When multiple sensors are configured for a room, use the

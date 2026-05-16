@@ -335,7 +335,12 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry in the background when options change via UI."""
+    """Apply options in-place when possible; reload only for structural changes."""
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(coordinator, HeatingAssistantCoordinator):
+        merged_config = {**dict(entry.data), **dict(entry.options)}
+        if coordinator.apply_runtime_reconfiguration(merged_config):
+            return
     hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
 
 

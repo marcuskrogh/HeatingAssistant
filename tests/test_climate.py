@@ -11,6 +11,7 @@ cooling state correctly.
 
 import sys
 import os
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -23,6 +24,7 @@ from custom_components.heating_assistant.heat_sources import (
 )
 
 from homeassistant.components.climate import HVACAction, HVACMode
+from homeassistant.const import ATTR_TEMPERATURE
 
 
 class _FakeRoom:
@@ -138,3 +140,17 @@ class TestHvacModes:
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
         ent, _ = _make_entity([hp], enabled=False)
         assert ent.hvac_mode == HVACMode.OFF
+
+
+@pytest.mark.asyncio
+async def test_set_temperature_does_not_force_immediate_refresh():
+    heater = ElectricHeater("h1", "living_room", max_power=2000.0)
+    ent, coord = _make_entity([heater])
+    coord.async_request_refresh = AsyncMock()
+    ent.async_write_ha_state = MagicMock()
+
+    await ent.async_set_temperature(**{ATTR_TEMPERATURE: 23.5})
+
+    assert coord.get_room_setpoint("living_room") == 23.5
+    coord.async_request_refresh.assert_not_awaited()
+    ent.async_write_ha_state.assert_called_once()
