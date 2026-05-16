@@ -39,7 +39,8 @@ def _make_coordinator(
         r_external=0.05,
         windows=[],
     )
-    return SimpleNamespace(
+    sources = [SimpleNamespace(room="living_room", current_power=heating_power)]
+    coord = SimpleNamespace(
         model=SimpleNamespace(
             room_names=["living_room"],
             rooms={"living_room": room},
@@ -47,15 +48,15 @@ def _make_coordinator(
         measured_temperatures={"living_room": measured},
         filtered_temperatures={"living_room": filtered},
         solar_gains={"living_room": solar},
-        heat_sources=[
-            SimpleNamespace(room="living_room", current_power=heating_power),
-        ],
+        heat_sources=sources,
         outdoor_temp=outdoor,
         controller=SimpleNamespace(constraint_offset=constraint_offset),
         last_update_success=True,
         _horizon=6,
         dt=900,
     )
+    coord.sources_for_room = lambda r: [s for s in coord.heat_sources if s.room == r]
+    return coord
 
 
 # ── Naming conventions ────────────────────────────────────────────────

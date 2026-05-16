@@ -40,11 +40,12 @@ def _make_room(name="living_room", thermal_mass=5_000_000.0, r_external=0.05, in
     return room
 
 
-def _make_source(name="heater", power_scale=1.0, max_power=2000.0):
+def _make_source(name="heater", power_scale=1.0, max_power=2000.0, room="lr"):
     src = SimpleNamespace()
     src.name = name
     src.power_scale = power_scale
     src.max_power = max_power
+    src.room = room
     return src
 
 
@@ -79,6 +80,9 @@ class _FakeCoordinator:
 
         self.model = _make_model(rooms)
         self.heat_sources = sources
+        # Mirror the real coordinator's per-room source index so methods that
+        # call ``self._rebuild_sources_by_room()`` (e.g. reset) succeed.
+        self._sources_by_room: Dict[str, list] = {}
         self._history_buffer = deque()
         self._estimation_timestamp = None
         self._estimation_log_likelihood = None
@@ -124,6 +128,13 @@ class _FakeCoordinator:
         if real_entry is not None:
             return real_entry.data.get(self._CONF_ESTIMATED_PARAMS)
         return None
+
+    def _rebuild_sources_by_room(self) -> None:
+        """Mirror the real coordinator's room-index rebuild."""
+        index: Dict[str, list] = {}
+        for src in self.heat_sources:
+            index.setdefault(src.room, []).append(src)
+        self._sources_by_room = index
 
 
 # ---------------------------------------------------------------------------

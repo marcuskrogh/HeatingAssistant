@@ -110,6 +110,7 @@ from .schedule import (
     next_transition,
     resolve_effective_setpoint,
 )
+from . import weather as _weather
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -119,16 +120,6 @@ def _coerce_interval_seconds(value: Any) -> float:
     if isinstance(value, timedelta):
         return float(value.total_seconds())
     return float(value)
-
-
-def _coerce_float(value: Any) -> Optional[float]:
-    """Return ``float(value)`` or None when the value is missing or unparsable."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _normalize_solver_name(value: Any) -> str:
@@ -141,127 +132,6 @@ def _normalize_solver_name(value: Any) -> str:
     if key in {"slsqp", "scipy", "scipy-minimize"}:
         return "SLSQP"
     return DEFAULT_MPC_SOLVER
-
-
-def _coerce_cloud_cover_percent(value: Any) -> Optional[float]:
-    """Convert a cloud-cover percentage (0–100) to a fraction in [0, 1].
-
-    Returns ``None`` for missing or unparsable input.  Values outside the
-    [0, 100] range are clamped.
-    """
-    f = _coerce_float(value)
-    if f is None:
-        return None
-    return max(0.0, min(1.0, f / 100.0))
-
-
-# Representative cloud-cover fractions for the standard HA weather conditions.
-# Used when ``cloud_coverage`` is not available on the entity / forecast entry.
-# Values picked to be conservative: clearly clear vs clearly overcast, with
-# partlycloudy in the middle.  Conditions implying heavy precipitation map
-# to fully overcast.  See https://www.home-assistant.io/integrations/weather/
-# for the standardised condition strings.
-_CONDITION_CLOUD_COVER: Dict[str, float] = {
-    "sunny": 0.0,
-    "clear-night": 0.0,
-    "windy": 0.0,
-    "windy-variant": 0.3,
-    "partlycloudy": 0.3,
-    "cloudy": 0.85,
-    "fog": 1.0,
-    "hail": 1.0,
-    "lightning": 0.9,
-    "lightning-rainy": 1.0,
-    "pouring": 1.0,
-    "rainy": 0.95,
-    "snowy": 1.0,
-    "snowy-rainy": 1.0,
-    "exceptional": 0.85,
-}
-
-
-def _parse_forecast_field(
-    forecast_data: list,
-    horizon: int,
-    dt: float,
-    field: str,
-    coerce: Any,
-    fallback_field: Optional[str] = None,
-    fallback_coerce: Any = None,
-    now: Optional[datetime] = None,
-) -> Optional[List[float]]:
-    """Parse a forecast field into ``horizon`` values interpolated to MPC steps.
-
-    Parameters
-    ----------
-    forecast_data : list of dict
-        Raw forecast entries.  Each entry must have a ``datetime`` key
-        (ISO-8601 string or datetime object) plus the requested ``field``.
-    horizon : int
-        Number of MPC prediction steps.
-    dt : float
-        MPC time step in seconds.
-    field : str
-        Primary field name to read from each entry (e.g. ``"temperature"``,
-        ``"cloud_coverage"``).
-    coerce : callable
-        Function mapping the raw field value to a float in the desired unit,
-        or returning None when the value is missing / unparsable.
-    fallback_field, fallback_coerce : optional
-        When provided and the primary field is missing/unparsable for an
-        entry, the parser tries this fallback field with this coerce function
-        before discarding the entry.  Used to back ``cloud_coverage`` with
-        the per-entry ``condition`` string.
-    now : datetime, optional
-        Reference time for interpolation.  Defaults to current UTC.
-
-    Returns
-    -------
-    list of float or None
-        ``horizon`` values aligned to MPC steps, or None when no usable
-        entries are found.
-    """
-    if now is None:
-        now = datetime.now(tz=timezone.utc)
-
-    entries: List[tuple] = []
-    for entry in forecast_data:
-        dt_str = entry.get("datetime")
-        if dt_str is None:
-            continue
-        raw = entry.get(field)
-        value = coerce(raw)
-        if value is None and fallback_field is not None and fallback_coerce is not None:
-            value = fallback_coerce(entry.get(fallback_field))
-        if value is None:
-            continue
-        try:
-            if isinstance(dt_str, str):
-                if dt_str.endswith("Z"):
-                    dt_str = dt_str[:-1] + "+00:00"
-                fc_time = datetime.fromisoformat(dt_str)
-            elif isinstance(dt_str, datetime):
-                fc_time = dt_str
-            else:
-                continue
-            if fc_time.tzinfo is None:
-                fc_time = fc_time.replace(tzinfo=timezone.utc)
-            entries.append((fc_time.timestamp(), float(value)))
-        except (ValueError, TypeError):
-            continue
-
-    if not entries:
-        return None
-
-    entries.sort(key=lambda e: e[0])
-
-    now_ts = now.timestamp()
-    result: List[float] = []
-    for k in range(horizon):
-        target_ts = now_ts + dt * (k + 1)
-        result.append(HeatingAssistantCoordinator._interpolate_forecast(entries, target_ts))
-
-    return result
 
 
 def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
@@ -412,6 +282,31 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         self.model: HouseModel = build_house_model(rooms_cfg)
         self.heat_sources: List[HeatSource] = build_heat_sources(sources_cfg)
+        # Cache room → list[HeatSource] index so per-room sensors don't have to
+        # filter the full source list on every attribute access.  Must be
+        # rebuilt whenever ``self.heat_sources`` is reassigned (see
+        # ``_rebuild_sources_by_room``).
+        self._sources_by_room: Dict[str, List[HeatSource]] = {}
+        self._rebuild_sources_by_room()
+
+        # Single UTC "now" stamped at the start of each ``_async_update_data``
+        # cycle and reused by every sensor that needs to anchor a forecast
+        # trace to the current instant.  Initialised eagerly so sensors don't
+        # have to handle a None case before the first cycle.
+        self.now_utc: datetime = datetime.now(tz=timezone.utc)
+
+        # Weather-forecast fetch health (consumed by the diagnostic
+        # WeatherForecastStatusSensor).  ``weather_last_error`` is the last
+        # exception message or ``"no_data"`` when the service returned an
+        # empty payload; ``None`` means the most recent fetch succeeded.
+        self.weather_last_error: Optional[str] = None
+        self.weather_last_error_at: Optional[datetime] = None
+        self.weather_last_success_at: Optional[datetime] = None
+        self.weather_consecutive_failures: int = 0
+        # Throttle WARN logs so a persistently-broken weather entity doesn't
+        # flood the log.  We re-warn whenever the failure count crosses a
+        # boundary (1, 2, 5, 10, 50, 100, …).
+        self._weather_warn_thresholds: tuple = (1, 2, 5, 10, 50, 100, 500, 1000)
 
         # Restore persisted estimated parameters so that identified values
         # survive a full Home Assistant restart (not just an in-memory reload).
@@ -424,20 +319,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if stored_est:
             self._restore_estimated_parameters(stored_est)
 
-        # Map room_name → list of temp_sensor entity_ids (for state updates)
-        self._temp_sensors: Dict[str, List[str]] = {}
-        for rc in rooms_cfg:
-            room_name = rc[CONF_ROOM_NAME]
-            sensors: List[str] = []
-            # Support both singular 'temp_sensor' and plural 'temp_sensors'
-            if CONF_TEMP_SENSORS in rc:
-                sensors.extend(rc[CONF_TEMP_SENSORS])
-            if CONF_TEMP_SENSOR in rc:
-                single = rc[CONF_TEMP_SENSOR]
-                if single not in sensors:
-                    sensors.append(single)
-            if sensors:
-                self._temp_sensors[room_name] = sensors
+        self._temp_sensors: Dict[str, List[str]] = self._build_temp_sensor_map(rooms_cfg)
 
         self.controller = HeatingMPCController(
             model=self.model,
@@ -458,27 +340,57 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
-        # Per-room user toggle (True = on, False = manually disabled by the
-        # climate UI / automations).  ``is_room_enabled`` combines this with
-        # the schedule-imposed disable so the two concerns never clobber
-        # each other.  Defaults to True so the system is active after
-        # (re)start.
-        self._room_enabled: Dict[str, bool] = {
-            name: True for name in self.model.room_names
-        }
-        # True while an "off" schedule period is currently disabling the room.
-        # Maintained by ``_apply_schedule`` and read by ``is_room_enabled``.
-        self._schedule_disabled: Dict[str, bool] = {
-            name: False for name in self.model.room_names
-        }
+        self._init_room_state(rooms_cfg)
+        self._init_runtime_buffers()
 
-        # Comfort schedules: per-room time-of-day setpoint / setback rules.
-        # ``_base_setpoint`` is the user's chosen setpoint when no schedule
-        # period is active (i.e. the value the climate UI restores to);
-        # ``_room_schedule`` holds the parsed schedule;
-        # ``_schedule_enabled`` lets the user suspend the schedule per room
-        # at runtime (e.g. "stay up late tonight") without losing the
-        # configured rules.
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(seconds=self._update_interval),
+        )
+
+    # ------------------------------------------------------------------
+    # __init__ helpers (S4)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_temp_sensor_map(
+        rooms_cfg: List[Dict[str, Any]],
+    ) -> Dict[str, List[str]]:
+        """Return ``{room_name: [entity_id, ...]}`` for temperature readouts.
+
+        Supports both the singular ``temp_sensor`` and plural ``temp_sensors``
+        keys; deduplicates while preserving the YAML-provided order.
+        """
+        mapping: Dict[str, List[str]] = {}
+        for rc in rooms_cfg:
+            room_name = rc[CONF_ROOM_NAME]
+            sensors: List[str] = []
+            if CONF_TEMP_SENSORS in rc:
+                sensors.extend(rc[CONF_TEMP_SENSORS])
+            if CONF_TEMP_SENSOR in rc:
+                single = rc[CONF_TEMP_SENSOR]
+                if single not in sensors:
+                    sensors.append(single)
+            if sensors:
+                mapping[room_name] = sensors
+        return mapping
+
+    def _init_room_state(self, rooms_cfg: List[Dict[str, Any]]) -> None:
+        """Initialise per-room flags and parsed comfort schedules.
+
+        ``_room_enabled`` / ``_schedule_disabled`` decouple the user toggle
+        from the schedule-imposed disable so the two concerns never clobber
+        each other.  ``_base_setpoint`` is the value the climate UI restores
+        to when no schedule period is active; ``_schedule_enabled`` lets the
+        user suspend the schedule per room at runtime without losing the
+        configured rules.
+        """
+        room_names = self.model.room_names
+        self._room_enabled: Dict[str, bool] = {name: True for name in room_names}
+        self._schedule_disabled: Dict[str, bool] = {name: False for name in room_names}
+
         self._room_schedule: Dict[str, RoomSchedule] = {}
         self._base_setpoint: Dict[str, float] = {}
         self._schedule_enabled: Dict[str, bool] = {}
@@ -492,16 +404,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             )
             self._schedule_enabled[room_name] = True
 
+    def _init_runtime_buffers(self) -> None:
+        """Initialise per-cycle and visualisation state.
+
+        Everything here is updated each ``_async_update_data`` tick and read
+        by sensor entities between ticks; the empty initial values are what
+        the sensors see before the first cycle completes.
+        """
         # Latest control actions (source_name → fraction 0‑1)
         self.actions: Dict[str, float] = {}
-
         # Track which heat sources are in cooling mode (source_name → bool)
         self._cooling_active: Dict[str, bool] = {}
 
         # Visualization data
         self.solar_gains: Dict[str, float] = {}
-        # Current cloud-cover fraction in [0, 1], or None when unavailable.
-        # Used to attenuate the clear-sky solar model — see solar_model.cloud_attenuation_factor.
+        # Current cloud-cover fraction in [0, 1], or None when unavailable;
+        # used to attenuate the clear-sky solar model.
         self.cloud_cover: Optional[float] = None
         self.outdoor_temp: float = 5.0
         self.heat_flows: Dict[str, Dict[str, float]] = {}
@@ -513,20 +431,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # configured temp_sensors); kept separate from filter output so the
         # visualisation can show measurement vs. estimate.
         self.measured_temperatures: Dict[str, float] = {}
-        # Per-room Kalman-filtered state x̂⁺ after each compute(). Cleared when
-        # the MPC solver fails, so sensor entities report the value as unknown.
+        # Per-room Kalman-filtered state x̂⁺ after each compute(); cleared
+        # when the MPC solver fails so sensor entities report ``unknown``.
         self.filtered_temperatures: Dict[str, float] = {}
 
         # Rolling observation history for ML parameter estimation.
         # Each entry is a dict: {y, u, d_outdoor, d_solar, timestamp}.
         self._history_buffer: deque = deque(maxlen=HISTORY_BUFFER_SIZE)
-
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=self._update_interval),
-        )
 
     # ------------------------------------------------------------------
     # Public properties
@@ -608,6 +519,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._estimation_log_likelihood = snapshot.get("log_likelihood")
         _LOGGER.info("Restored persisted estimated parameters from entry.data")
 
+    def _rebuild_sources_by_room(self) -> None:
+        """Refresh the room → heat-sources index after ``self.heat_sources``
+        is (re)assigned.  Sensors read from this cache instead of filtering
+        the full list on every attribute access.
+        """
+        index: Dict[str, List[HeatSource]] = {}
+        for src in self.heat_sources:
+            index.setdefault(src.room, []).append(src)
+        self._sources_by_room = index
+
+    def sources_for_room(self, room_name: str) -> List[HeatSource]:
+        """Return the cached list of heat sources for ``room_name`` (empty if
+        none), without copying.  Sensors should not mutate the returned list.
+        """
+        return self._sources_by_room.get(room_name, [])
+
     def reset_estimated_parameters(self) -> None:
         """Discard persisted estimation and revert the live model to the
         configured (YAML / config-entry default) parameter values.
@@ -630,6 +557,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         sources_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_HEAT_SOURCES, [])
         self.model = build_house_model(rooms_cfg)
         self.heat_sources = build_heat_sources(sources_cfg)
+        self._rebuild_sources_by_room()
 
         self.controller = HeatingMPCController(
             model=self.model,
@@ -660,6 +588,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         and returns a snapshot of the system state.
         """
         try:
+            # 0. Stamp a single UTC "now" for this cycle so every sensor that
+            #    anchors a forecast trace to the current instant uses the same
+            #    timestamp (and avoids redundant ``datetime.now()`` calls in
+            #    each sensor's ``extra_state_attributes`` getter).
+            self.now_utc = datetime.now(tz=timezone.utc)
+
             # 1. Update measured room temperatures from HA sensor states.
             #    When multiple sensors are configured for a room, use the
             #    average of all valid readings.
@@ -700,7 +634,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             cloud_forecast = await self._async_read_cloud_forecast()
 
             # 3. Compute current solar gains for visualization
-            now = datetime.now(tz=timezone.utc)
+            now = self.now_utc
             self.cloud_cover = cloud_cover_now
             self.solar_gains = {
                 name: room_solar_gains(
@@ -848,195 +782,80 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def _read_outdoor_temp(self) -> float:
-        if self._outdoor_entity:
-            state = self.hass.states.get(self._outdoor_entity)
-            if state and state.state not in ("unknown", "unavailable"):
-                try:
-                    return float(state.state)
-                except ValueError:
-                    pass
-        # No dedicated outdoor-temp entity — try the weather entity's current
-        # temperature attribute (weather entities expose the current observation
-        # via attributes["temperature"]).
-        if self._weather_entity:
-            state = self.hass.states.get(self._weather_entity)
-            if state and state.state not in ("unknown", "unavailable"):
-                temp = state.attributes.get("temperature")
-                if temp is not None:
-                    try:
-                        return float(temp)
-                    except (ValueError, TypeError):
-                        pass
-        # Fall back to a benign default
-        return 5.0
+        return _weather.read_outdoor_temp(
+            self.hass, self._outdoor_entity, self._weather_entity
+        )
 
     async def _async_read_weather_forecast(self) -> Optional[List[float]]:
         """Read outdoor temperature forecast from a weather entity.
 
-        Tries the modern ``weather.get_forecasts`` service first (HA 2023.9+),
-        then falls back to reading the deprecated ``forecast`` state attribute
-        for backward compatibility with older HA versions.
-
         Returns a list of N outdoor temperature values aligned to the MPC
-        horizon steps, or None if no weather entity is configured or
-        no forecast data is available.
+        horizon steps, or None if no weather entity is configured or no
+        forecast data is available.
         """
         forecast_data = await self._async_get_forecast_entries()
         if not forecast_data:
             return None
-        return self._parse_weather_forecast(forecast_data, self._horizon, self.dt)
+        return _weather.parse_temperature_forecast(forecast_data, self._horizon, self.dt)
 
     async def _async_read_cloud_forecast(self) -> Optional[List[float]]:
-        """Read cloud-cover forecast (fraction in [0, 1]) from the weather entity.
-
-        Uses ``cloud_coverage`` percent values when present on the forecast
-        entries (populated by most modern HA weather integrations), and falls
-        back to mapping the per-entry ``condition`` string when the percentage
-        is missing.  Returns a list of N values aligned to the MPC horizon
-        steps, or None if no usable data is available.
-        """
+        """Read cloud-cover forecast (fraction in [0, 1]) from the weather entity."""
         forecast_data = await self._async_get_forecast_entries()
         if not forecast_data:
             return None
-        return self._parse_cloud_forecast(forecast_data, self._horizon, self.dt)
+        return _weather.parse_cloud_forecast(forecast_data, self._horizon, self.dt)
 
     async def _async_get_forecast_entries(self) -> Optional[list]:
-        """Fetch raw forecast entries from the configured weather entity.
-
-        Shared by the temperature and cloud-cover readers so both signals come
-        from a single service call per cycle.  Tries ``weather.get_forecasts``
-        first, then falls back to the deprecated ``forecast`` state attribute.
+        """Fetch raw forecast entries from the configured weather entity and
+        record success / failure on the coordinator for the diagnostic
+        ``WeatherForecastStatusSensor``.
         """
+        forecast_data, error = await _weather.fetch_forecast_entries(
+            self.hass, self._weather_entity
+        )
         if not self._weather_entity:
+            # Not configured — neither success nor failure.
             return None
+        if forecast_data is not None:
+            self._record_weather_success()
+            return forecast_data
+        self._record_weather_failure(error or "unknown error")
+        return None
 
-        # ── Modern approach: weather.get_forecasts service (HA 2023.9+) ──────
-        if self.hass.services.has_service("weather", "get_forecasts"):
-            try:
-                response = await self.hass.services.async_call(
-                    "weather",
-                    "get_forecasts",
-                    service_data={
-                        "entity_id": self._weather_entity,
-                        "type": "hourly",
-                    },
-                    blocking=True,
-                    return_response=True,
-                )
-                if response and self._weather_entity in response:
-                    forecast_data = response[self._weather_entity].get("forecast", [])
-                    if forecast_data:
-                        return forecast_data
-            except Exception as exc:
-                _LOGGER.debug(
-                    "weather.get_forecasts service call failed for %s, "
-                    "falling back to state attribute: %s",
-                    self._weather_entity,
-                    exc,
-                )
+    def _record_weather_success(self) -> None:
+        """Mark the most recent forecast fetch as successful."""
+        if self.weather_consecutive_failures > 0:
+            _LOGGER.info(
+                "Weather forecast recovered for %s after %d consecutive failures",
+                self._weather_entity,
+                self.weather_consecutive_failures,
+            )
+        self.weather_last_error = None
+        self.weather_last_error_at = None
+        self.weather_last_success_at = self.now_utc
+        self.weather_consecutive_failures = 0
 
-        # ── Fallback: read from the deprecated state attribute ────────────────
-        state = self.hass.states.get(self._weather_entity)
-        if state is None:
-            return None
-
-        forecast_data = state.attributes.get("forecast")
-        if not forecast_data:
-            return None
-        return forecast_data
+    def _record_weather_failure(self, reason: str) -> None:
+        """Record a forecast-fetch failure and log on threshold crossings."""
+        self.weather_consecutive_failures += 1
+        self.weather_last_error = reason
+        self.weather_last_error_at = self.now_utc
+        if self.weather_consecutive_failures in self._weather_warn_thresholds:
+            _LOGGER.warning(
+                "Weather forecast unavailable for %s (failure #%d): %s",
+                self._weather_entity,
+                self.weather_consecutive_failures,
+                reason,
+            )
 
     def _read_cloud_cover_now(self) -> Optional[float]:
-        """Read the current cloud-cover fraction in [0, 1] from the weather entity.
+        return _weather.read_cloud_cover_now(self.hass, self._weather_entity)
 
-        Prefers the numeric ``cloud_coverage`` attribute (percent) when
-        present, and falls back to mapping the entity's ``condition`` /
-        state string (``sunny``, ``partlycloudy``, ``cloudy``, ``rainy``, …)
-        to a representative fraction.  Returns ``None`` when no weather
-        entity is configured or neither signal is available, in which case
-        the solar model stays on its clear-sky default.
-        """
-        if not self._weather_entity:
-            return None
-        state = self.hass.states.get(self._weather_entity)
-        if state is None or state.state in ("unknown", "unavailable"):
-            return None
-
-        cc = state.attributes.get("cloud_coverage")
-        frac = _coerce_cloud_cover_percent(cc)
-        if frac is not None:
-            return frac
-
-        # Weather entities expose the condition as the entity state.
-        return _CONDITION_CLOUD_COVER.get(state.state)
-
-    @staticmethod
-    def _parse_weather_forecast(
-        forecast_data: list,
-        horizon: int,
-        dt: float,
-        now: Optional[datetime] = None,
-    ) -> Optional[List[float]]:
-        """Parse raw weather forecast entries into interpolated horizon temperatures."""
-        return _parse_forecast_field(
-            forecast_data,
-            horizon,
-            dt,
-            field="temperature",
-            coerce=_coerce_float,
-            now=now,
-        )
-
-    @staticmethod
-    def _parse_cloud_forecast(
-        forecast_data: list,
-        horizon: int,
-        dt: float,
-        now: Optional[datetime] = None,
-    ) -> Optional[List[float]]:
-        """Parse raw weather forecast entries into interpolated horizon cloud-cover.
-
-        Returns fractions in [0, 1].  Prefers the numeric ``cloud_coverage``
-        field; falls back to mapping the per-entry ``condition`` string when
-        the percentage is missing on individual entries.
-        """
-        return _parse_forecast_field(
-            forecast_data,
-            horizon,
-            dt,
-            field="cloud_coverage",
-            coerce=_coerce_cloud_cover_percent,
-            fallback_field="condition",
-            fallback_coerce=lambda v: _CONDITION_CLOUD_COVER.get(v) if isinstance(v, str) else None,
-            now=now,
-        )
-
-    @staticmethod
-    def _interpolate_forecast(
-        entries: List[tuple], target_ts: float,
-    ) -> float:
-        """Linearly interpolate a forecast field at a target timestamp.
-
-        If the target is before all entries, returns the first entry's value.
-        If after all entries, returns the last entry's value.
-        """
-        if not entries:
-            return 5.0  # fallback (only reached via the temperature path)
-
-        if target_ts <= entries[0][0]:
-            return entries[0][1]
-        if target_ts >= entries[-1][0]:
-            return entries[-1][1]
-
-        for i in range(len(entries) - 1):
-            t0, v0 = entries[i]
-            t1, v1 = entries[i + 1]
-            if t0 <= target_ts <= t1:
-                if t1 == t0:
-                    return v0
-                frac = (target_ts - t0) / (t1 - t0)
-                return v0 + frac * (v1 - v0)
-
-        return entries[-1][1]
+    # Backwards-compatible aliases for any caller / test that imported the
+    # static helpers from the coordinator before the U3 weather extraction.
+    _parse_weather_forecast = staticmethod(_weather.parse_temperature_forecast)
+    _parse_cloud_forecast = staticmethod(_weather.parse_cloud_forecast)
+    _interpolate_forecast = staticmethod(_weather.interpolate_forecast)
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         """Write the computed set-point fractions to heater entities via HA services."""
