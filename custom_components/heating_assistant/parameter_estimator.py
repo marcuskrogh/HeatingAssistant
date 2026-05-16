@@ -37,7 +37,9 @@ perturbations; the run with the best (lowest) negative log-likelihood is
 returned.  Analytical gradients of the CD-EKF PED log-likelihood are
 supplied via a forward-sensitivity pass, giving IPOPT exact first-order
 information and dramatically reducing the number of function evaluations
-compared to Nelder–Mead.
+compared to Nelder–Mead.  The IPOPT call is routed through mbc's
+``IpoptNLPBackend`` — the same backend the MPC controller uses for OCP
+solves — so identification and control share a single IPOPT integration.
 """
 
 from __future__ import annotations
@@ -52,6 +54,7 @@ import numpy as np
 from .controller import HouseThermalSDE as HouseThermalSystem
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
+from mbc.control import IpoptNLPBackend, NLPProblem
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from mbc.identification import nelder_mead as _nelder_mead  # for test compatibility
 
@@ -502,15 +505,15 @@ class KalmanMLEstimator:
         x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
 
         # ── IPOPT multi-start optimisation with analytical gradients ──────────
-        from cyipopt import minimize_ipopt
-        from scipy.optimize import Bounds as _Bounds
-
+        # Route through mbc's IpoptNLPBackend — the same backend the MPC
+        # controller uses for OCP solves — so identification and control
+        # share a single IPOPT integration point.
         lb = np.array([lo for lo, _ in bounds])
         ub = np.array([hi for _, hi in bounds])
-        scipy_bounds = _Bounds(lb, ub)
 
-        # Cache the last (theta, neg_ll, grad) triple so IPOPT's separate
-        # calls to fun/jac at the same point do not trigger a second pass.
+        # Cache the last (theta, neg_ll, grad) triple so the optimiser's
+        # separate calls to fun/jac at the same point do not trigger a
+        # second forward-sensitivity pass.
         _cache: List[Optional[object]] = [None, None, None]  # [theta, val, grad]
 
         def _eval(theta: np.ndarray) -> None:
@@ -534,6 +537,10 @@ class KalmanMLEstimator:
             _eval(theta)
             return np.asarray(_cache[2], dtype=float)  # type: ignore[arg-type]
 
+        ipopt_backend = IpoptNLPBackend(
+            options={"print_level": 0, "max_iter": 300, "tol": 1e-6}
+        )
+
         rng = np.random.default_rng(0)
         best_theta = theta_prior.copy()
         best_f = float("inf")
@@ -549,13 +556,15 @@ class KalmanMLEstimator:
             _cache[0] = None  # invalidate cache for new starting point
 
             try:
-                res = minimize_ipopt(
-                    _fun,
-                    theta_start,
-                    jac=_jac,
-                    bounds=scipy_bounds,
-                    options={"print_level": 0},
+                problem = NLPProblem(
+                    objective=_fun,
+                    objective_jac=_jac,
+                    x0=theta_start,
+                    lb=lb,
+                    ub=ub,
+                    constraints=(),
                 )
+                res = ipopt_backend.solve(problem)
                 f_val = float(res.fun) if np.isfinite(res.fun) else float("inf")
                 if f_val < best_f:
                     best_f = f_val
