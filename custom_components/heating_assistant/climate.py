@@ -146,7 +146,9 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is not None:
             self._coordinator.set_room_setpoint(self._room_name, float(temp))
-            await self._coordinator.async_request_refresh()
+            # Do not force an out-of-band control update; let the new setpoint
+            # be consumed on the next regular coordinator interval.
+            self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """

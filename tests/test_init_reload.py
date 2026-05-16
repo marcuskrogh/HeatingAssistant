@@ -148,6 +148,38 @@ async def test_update_listener_schedules_reload_in_background():
 
 
 @pytest.mark.asyncio
+async def test_update_listener_applies_non_structural_changes_without_reload():
+    """Options listener should skip reload when coordinator can apply in-place."""
+    hass = _make_hass()
+    entry = _make_entry(entry_id="entry-runtime")
+    entry.data = {"existing": "data"}
+    entry.options = {"existing": "options"}
+    apply_runtime_reconfiguration = MagicMock(return_value=True)
+
+    class _Coordinator:
+        def apply_runtime_reconfiguration(self, _config):
+            return apply_runtime_reconfiguration(_config)
+
+    original = init_mod.HeatingAssistantCoordinator
+    init_mod.HeatingAssistantCoordinator = _Coordinator
+    hass.data = {
+        DOMAIN: {
+            entry.entry_id: _Coordinator()
+        }
+    }
+    hass.async_create_task = MagicMock()
+
+    try:
+        await init_mod._async_update_listener(hass, entry)
+    finally:
+        init_mod.HeatingAssistantCoordinator = original
+
+    apply_runtime_reconfiguration.assert_called_once_with({"existing": "options"})
+    hass.async_create_task.assert_not_called()
+    hass.config_entries.async_reload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_reload_service_refreshes_yaml_and_reloads_entries(monkeypatch):
     """The reload service should re-read YAML and reload every domain entry."""
     hass = _make_hass()
