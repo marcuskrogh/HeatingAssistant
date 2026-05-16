@@ -708,9 +708,10 @@ class TestHeatingPlanForecastTimestamps:
     def test_heating_plan_fallback_when_empty(self):
         """When schedule is empty, a single bridge entry from current_power is returned."""
         room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        sources = [SimpleNamespace(room="studio", current_power=432.0)]
         coordinator = SimpleNamespace(
             heating_schedule=[],
-            heat_sources=[SimpleNamespace(room="studio", current_power=432.0)],
+            heat_sources=sources,
             model=SimpleNamespace(rooms={"studio": room}),
             solar_forecast=[],
             solar_gains={},
@@ -718,6 +719,9 @@ class TestHeatingPlanForecastTimestamps:
             outdoor_forecast=[],
             outdoor_temp=5.0,
             dt=self._DT,
+        )
+        coordinator.sources_for_room = (
+            lambda r: [s for s in coordinator.heat_sources if s.room == r]
         )
         sensor = HeatingPowerForecastSensor(coordinator, "studio")
 
@@ -728,9 +732,10 @@ class TestHeatingPlanForecastTimestamps:
     def test_heating_plan_fallback_missing_current_power(self):
         """Fallback must use getattr guard — missing current_power defaults to 0."""
         room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
+        sources = [SimpleNamespace(room="studio")]  # no current_power attr
         coordinator = SimpleNamespace(
             heating_schedule=[],
-            heat_sources=[SimpleNamespace(room="studio")],  # no current_power attr
+            heat_sources=sources,
             model=SimpleNamespace(rooms={"studio": room}),
             solar_forecast=[],
             solar_gains={},
@@ -738,6 +743,9 @@ class TestHeatingPlanForecastTimestamps:
             outdoor_forecast=[],
             outdoor_temp=5.0,
             dt=self._DT,
+        )
+        coordinator.sources_for_room = (
+            lambda r: [s for s in coordinator.heat_sources if s.room == r]
         )
         sensor = HeatingPowerForecastSensor(coordinator, "studio")
 

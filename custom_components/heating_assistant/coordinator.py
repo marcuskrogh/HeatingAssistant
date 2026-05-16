@@ -412,6 +412,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         self.model: HouseModel = build_house_model(rooms_cfg)
         self.heat_sources: List[HeatSource] = build_heat_sources(sources_cfg)
+        # Cache room → list[HeatSource] index so per-room sensors don't have to
+        # filter the full source list on every attribute access.  Must be
+        # rebuilt whenever ``self.heat_sources`` is reassigned (see
+        # ``_rebuild_sources_by_room``).
+        self._sources_by_room: Dict[str, List[HeatSource]] = {}
+        self._rebuild_sources_by_room()
+
+        # Single UTC "now" stamped at the start of each ``_async_update_data``
+        # cycle and reused by every sensor that needs to anchor a forecast
+        # trace to the current instant.  Initialised eagerly so sensors don't
+        # have to handle a None case before the first cycle.
+        self.now_utc: datetime = datetime.now(tz=timezone.utc)
 
         # Restore persisted estimated parameters so that identified values
         # survive a full Home Assistant restart (not just an in-memory reload).
@@ -608,6 +620,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._estimation_log_likelihood = snapshot.get("log_likelihood")
         _LOGGER.info("Restored persisted estimated parameters from entry.data")
 
+    def _rebuild_sources_by_room(self) -> None:
+        """Refresh the room → heat-sources index after ``self.heat_sources``
+        is (re)assigned.  Sensors read from this cache instead of filtering
+        the full list on every attribute access.
+        """
+        index: Dict[str, List[HeatSource]] = {}
+        for src in self.heat_sources:
+            index.setdefault(src.room, []).append(src)
+        self._sources_by_room = index
+
+    def sources_for_room(self, room_name: str) -> List[HeatSource]:
+        """Return the cached list of heat sources for ``room_name`` (empty if
+        none), without copying.  Sensors should not mutate the returned list.
+        """
+        return self._sources_by_room.get(room_name, [])
+
     def reset_estimated_parameters(self) -> None:
         """Discard persisted estimation and revert the live model to the
         configured (YAML / config-entry default) parameter values.
@@ -630,6 +658,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         sources_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_HEAT_SOURCES, [])
         self.model = build_house_model(rooms_cfg)
         self.heat_sources = build_heat_sources(sources_cfg)
+        self._rebuild_sources_by_room()
 
         self.controller = HeatingMPCController(
             model=self.model,
@@ -660,6 +689,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         and returns a snapshot of the system state.
         """
         try:
+            # 0. Stamp a single UTC "now" for this cycle so every sensor that
+            #    anchors a forecast trace to the current instant uses the same
+            #    timestamp (and avoids redundant ``datetime.now()`` calls in
+            #    each sensor's ``extra_state_attributes`` getter).
+            self.now_utc = datetime.now(tz=timezone.utc)
+
             # 1. Update measured room temperatures from HA sensor states.
             #    When multiple sensors are configured for a room, use the
             #    average of all valid readings.
@@ -700,7 +735,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             cloud_forecast = await self._async_read_cloud_forecast()
 
             # 3. Compute current solar gains for visualization
-            now = datetime.now(tz=timezone.utc)
+            now = self.now_utc
             self.cloud_cover = cloud_cover_now
             self.solar_gains = {
                 name: room_solar_gains(

@@ -406,7 +406,7 @@ def _build_horizon_forecast(
             "step_seconds": None,
         }
 
-    now = datetime.now(tz=timezone.utc)
+    now = getattr(coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
     current = value(coordinator, room_name)
     forecast: List[Dict[str, Any]] = []
     # Bridge at "now" plus one entry per OCP step (k = 1 … N), so the
@@ -456,15 +456,12 @@ class HeatingPowerMeasuredSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> float:
         """Return the sum of current heater powers for the room [W]."""
-        sources = self._coordinator.heat_sources
-        return round(
-            sum(s.current_power for s in sources if s.room == self._room_name),
-            1,
-        )
+        sources = self._coordinator.sources_for_room(self._room_name)
+        return round(sum(s.current_power for s in sources), 1)
 
     @property
     def extra_state_attributes(self) -> dict:
-        sources = [s for s in self._coordinator.heat_sources if s.room == self._room_name]
+        sources = self._coordinator.sources_for_room(self._room_name)
         return {
             src.name: round(src.current_power, 1)
             for src in sources
@@ -675,7 +672,7 @@ class OutdoorTemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         outdoor_forecast = self._coordinator.outdoor_forecast
         dt = self._coordinator.dt
-        now = datetime.now(tz=timezone.utc)
+        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
 
         # Entry at t=now: bridge between history and prediction
         forecast: List[Dict[str, Any]] = [{
@@ -754,12 +751,6 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         room = self._coordinator.model.rooms[self._room_name]
         dt = self._coordinator.dt
 
-        trajectory = []
-        for i, pred in enumerate(predictions):
-            temp = pred.get(self._room_name)
-            if temp is not None:
-                trajectory.append(round(temp, 2))
-
         # Build timestamped forecast entries for dashboard visualisation.
         # Each entry combines temperature, heating power, solar gain,
         # outdoor temperature, and setpoint so cards (e.g. apexcharts-card)
@@ -768,8 +759,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         # The first entry is at t=now with the current filtered measurement
         # estimate y(k|k) so the predicted trace starts from the same point as
         # the estimator state exposed by TemperatureFilteredSensor.
-        now = datetime.now(tz=timezone.utc)
-        forecast = []
+        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
         outdoor_forecast = self._coordinator.outdoor_forecast
         solar_forecast = self._coordinator.solar_forecast
         heating_schedule = self._coordinator.heating_schedule
@@ -777,8 +767,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         # Current heating power for this room (actual, not planned)
         current_heating = sum(
             getattr(s, "current_power", 0.0)
-            for s in self._coordinator.heat_sources
-            if s.room == self._room_name
+            for s in self._coordinator.sources_for_room(self._room_name)
         )
         current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
 
@@ -790,35 +779,43 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         )
 
         # Entry at t=now: bridge between history and prediction
-        now_entry: Dict[str, Any] = {
+        forecast: List[Dict[str, Any]] = [{
             "time": now.isoformat(),
             "temperature": now_temp,
             "heating_power": round(current_heating, 1),
             "solar_gain": round(current_solar, 1),
             "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
             "setpoint": room.setpoint,
-        }
-        forecast.append(now_entry)
+        }]
 
+        # Walk predictions once, building both the scalar trajectory list and
+        # the per-step forecast dict in lock-step (P5 — was previously two
+        # passes over ``predictions``).
+        trajectory: List[float] = []
+        n_sched = len(heating_schedule)
+        n_solar = len(solar_forecast)
+        n_outdoor = len(outdoor_forecast)
         for i, pred in enumerate(predictions):
             temp = pred.get(self._room_name)
             if temp is None:
                 continue
+            temp_rounded = round(temp, 2)
+            trajectory.append(temp_rounded)
             step_time = now + timedelta(seconds=dt * (i + 1))
             entry: Dict[str, Any] = {
                 "time": step_time.isoformat(),
-                "temperature": round(temp, 2),
+                "temperature": temp_rounded,
                 "setpoint": room.setpoint,
             }
-            if i < len(heating_schedule):
+            if i < n_sched:
                 entry["heating_power"] = round(
                     heating_schedule[i].get(self._room_name, 0.0), 1
                 )
-            if i < len(solar_forecast):
+            if i < n_solar:
                 entry["solar_gain"] = round(
                     solar_forecast[i].get(self._room_name, 0.0), 1
                 )
-            if i < len(outdoor_forecast):
+            if i < n_outdoor:
                 entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
             forecast.append(entry)
 
@@ -828,7 +825,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         if hasattr(self._coordinator, "controller"):
             constraint_offset = self._coordinator.controller.constraint_offset
 
-        attrs: Dict[str, Any] = {
+        return {
             "trajectory": trajectory,
             "forecast": forecast,
             "setpoint": room.setpoint,
@@ -838,7 +835,6 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             "step_seconds": dt,
             "horizon_minutes": round(len(predictions) * dt / 60, 1),
         }
-        return attrs
 
 
 # ---------------------------------------------------------------------------
@@ -917,11 +913,8 @@ class EnergyBalanceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> float:
-        heating = sum(
-            s.current_power
-            for s in self._coordinator.heat_sources
-            if s.room == self._room_name
-        )
+        sources = self._coordinator.sources_for_room(self._room_name)
+        heating = sum(s.current_power for s in sources)
         solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
         flows = self._coordinator.heat_flows.get(self._room_name, {})
         total_loss = flows.get("total_loss", 0.0)
@@ -930,9 +923,7 @@ class EnergyBalanceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        sources = [
-            s for s in self._coordinator.heat_sources if s.room == self._room_name
-        ]
+        sources = self._coordinator.sources_for_room(self._room_name)
         heating = sum(s.current_power for s in sources)
         solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
         flows = self._coordinator.heat_flows.get(self._room_name, {})
@@ -997,11 +988,16 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
             for f in self._coordinator.heat_flows.values()
         )
 
-        # Per-room heating power
+        # Per-room heating power (uses cached room → sources index so this is
+        # O(N + M) instead of O(N × M) for N rooms and M sources).
         room_heating: Dict[str, float] = {}
         for name in self._coordinator.model.room_names:
             room_heating[name] = round(
-                sum(s.current_power for s in sources if s.room == name), 1,
+                sum(
+                    s.current_power
+                    for s in self._coordinator.sources_for_room(name)
+                ),
+                1,
             )
 
         # Effective system COP (thermal output / electrical input)
@@ -1093,7 +1089,7 @@ class HeatingPowerForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         schedule = self._coordinator.heating_schedule
         dt = self._coordinator.dt
-        now = datetime.now(tz=timezone.utc)
+        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
 
         forecast = []
         if schedule:
@@ -1109,8 +1105,7 @@ class HeatingPowerForecastSensor(CoordinatorEntity, SensorEntity):
             # Fallback: bridge from current actual power when no schedule is available
             current_heating = sum(
                 getattr(s, "current_power", 0.0)
-                for s in self._coordinator.heat_sources
-                if s.room == self._room_name
+                for s in self._coordinator.sources_for_room(self._room_name)
             )
             forecast.append({
                 "time": now.isoformat(),
@@ -1176,7 +1171,7 @@ class SolarGainForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         solar_forecast = self._coordinator.solar_forecast
         dt = self._coordinator.dt
-        now = datetime.now(tz=timezone.utc)
+        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
 
         # solar_forecast has N+1 entries: solar_forecast[k] = solar at now + k*dt
         # for k = 0, …, N.  Entry k=0 is at "now" and acts as the bridge point

@@ -26,7 +26,8 @@ from custom_components.heating_assistant.sensor import (
 def _make_room_coordinator():
     """Coordinator stub with populated horizon data for one room."""
     room = SimpleNamespace(temperature=20.5, setpoint=21.0, windows=[])
-    return SimpleNamespace(
+    sources = [SimpleNamespace(room="living_room", current_power=900.0)]
+    coord = SimpleNamespace(
         predictions=[{"living_room": 20.6}, {"living_room": 20.7}],
         heating_schedule=[{"living_room": 1234.0}, {"living_room": 1100.0}],
         solar_forecast=[
@@ -37,13 +38,15 @@ def _make_room_coordinator():
         outdoor_forecast=[5.0, 4.5],
         filtered_temperatures={"living_room": 20.63},
         solar_gains={"living_room": 50.0},
-        heat_sources=[SimpleNamespace(room="living_room", current_power=900.0)],
+        heat_sources=sources,
         model=SimpleNamespace(rooms={"living_room": room}),
         outdoor_temp=5.0,
         dt=900,
         controller=SimpleNamespace(constraint_offset=2.0),
         last_update_success=False,  # simulate a recent UpdateFailed
     )
+    coord.sources_for_room = lambda r: [s for s in coord.heat_sources if s.room == r]
+    return coord
 
 
 # ── Unique IDs and display names ────────────────────────────────────────
