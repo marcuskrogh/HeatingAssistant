@@ -54,7 +54,7 @@ import numpy as np
 from .controller import HouseThermalSDE as HouseThermalSystem
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
-from mbc.control import IpoptNLPBackend, NLPProblem
+from mbc.control import IpoptNLPBackend, NLPProblem, ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from mbc.identification import nelder_mead as _nelder_mead  # for test compatibility
 
@@ -540,6 +540,11 @@ class KalmanMLEstimator:
         ipopt_backend = IpoptNLPBackend(
             options={"print_level": 0, "max_iter": 300, "tol": 1e-6}
         )
+        scipy_backend = ScipyNLPBackend(
+            method="SLSQP",
+            options={"maxiter": 300, "ftol": 1e-6},
+        )
+        _active_backend = ipopt_backend
 
         rng = np.random.default_rng(0)
         best_theta = theta_prior.copy()
@@ -564,14 +569,35 @@ class KalmanMLEstimator:
                     ub=ub,
                     constraints=(),
                 )
-                res = ipopt_backend.solve(problem)
+                res = _active_backend.solve(problem)
                 f_val = float(res.fun) if np.isfinite(res.fun) else float("inf")
                 if f_val < best_f:
                     best_f = f_val
                     best_theta = np.asarray(res.x, dtype=float)
                     best_converged = bool(res.success)
+            except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
+                if _active_backend is ipopt_backend:
+                    _LOGGER.warning(
+                        "IPOPT backend unavailable for parameter estimation (%s); "
+                        "falling back to SLSQP.",
+                        exc,
+                    )
+                    _active_backend = scipy_backend
+                    # Retry this restart with the fallback backend
+                    _cache[0] = None
+                    try:
+                        res = _active_backend.solve(problem)
+                        f_val = float(res.fun) if np.isfinite(res.fun) else float("inf")
+                        if f_val < best_f:
+                            best_f = f_val
+                            best_theta = np.asarray(res.x, dtype=float)
+                            best_converged = bool(res.success)
+                    except Exception as exc2:
+                        _LOGGER.debug("SLSQP restart %d failed: %s", restart, exc2)
+                else:
+                    _LOGGER.debug("SLSQP restart %d failed: %s", restart, exc)
             except Exception as exc:
-                _LOGGER.debug("IPOPT restart %d failed: %s", restart, exc)
+                _LOGGER.debug("Optimiser restart %d failed: %s", restart, exc)
 
         # ── Unpack and clip the best solution ──────────────────────────────
         log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(best_theta)
@@ -609,11 +635,14 @@ class KalmanMLEstimator:
 
         # Compute reportable log-likelihood (without regularisation)
         try:
-            reg = self._compute_regularization(
-                log_mass, log_r, q_int, log_alpha, log_r_ij,
-                identifiable_pairs,
-            )
-            log_ll_val: Optional[float] = round(float(-(best_f - reg)), 3)
+            if not np.isfinite(best_f):
+                log_ll_val: Optional[float] = None
+            else:
+                reg = self._compute_regularization(
+                    log_mass, log_r, q_int, log_alpha, log_r_ij,
+                    identifiable_pairs,
+                )
+                log_ll_val = round(float(-(best_f - reg)), 3)
         except Exception:
             log_ll_val = None
 
@@ -1094,6 +1123,7 @@ class KalmanMLEstimator:
                 model, self._sources, self._dt,
                 sigma_w=math.sqrt(self._Q_var),
                 sigma_v=math.sqrt(self._R_var),
+                augment_offsets=False,
                 n_int_steps=10,
                 identifiable_sources=layout.identifiable_sources,
                 theta=theta,
