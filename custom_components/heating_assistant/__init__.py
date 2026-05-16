@@ -161,6 +161,7 @@ from .const import (
     UPDATE_INTERVAL,
 )
 from .coordinator import HeatingAssistantCoordinator
+from .yaml_merge import MergedEntry as _MergedEntry, merge_yaml_into_entry_data as _merge_yaml_into_entry_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -338,84 +339,6 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
 
 
-def _merge_yaml_into_entry_data(
-    entry_data: Dict[str, Any],
-    yaml_cfg: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Merge YAML-backed definitions into config-entry data.
-
-    YAML is authoritative for rooms and heat sources when it defines any.
-    If YAML omits them (or provides empty lists), persisted entry data is used.
-    """
-    merged = dict(entry_data)
-
-    # YAML wins when it defines rooms/sources, otherwise fall back to entry data.
-    yaml_rooms = yaml_cfg.get(CONF_ROOMS, None)
-    if yaml_rooms not in (None, []):
-        merged[CONF_ROOMS] = yaml_rooms
-    elif not merged.get(CONF_ROOMS):
-        merged[CONF_ROOMS] = []
-
-    yaml_sources = yaml_cfg.get(CONF_HEAT_SOURCES, None)
-    if yaml_sources not in (None, []):
-        merged[CONF_HEAT_SOURCES] = yaml_sources
-    elif not merged.get(CONF_HEAT_SOURCES):
-        merged[CONF_HEAT_SOURCES] = []
-
-    # Use YAML outdoor entity if the config entry value is empty/missing.
-    # setdefault would not overwrite the empty-string default from the
-    # config-flow, so we need an explicit check here.
-    if not merged.get(CONF_OUTDOOR_TEMP_ENTITY):
-        merged[CONF_OUTDOOR_TEMP_ENTITY] = yaml_cfg.get(
-            CONF_OUTDOOR_TEMP_ENTITY, ""
-        )
-    if not merged.get(CONF_WEATHER_ENTITY):
-        merged[CONF_WEATHER_ENTITY] = yaml_cfg.get(
-            CONF_WEATHER_ENTITY, ""
-        )
-    if CONF_UPDATE_INTERVAL not in merged:
-        merged[CONF_UPDATE_INTERVAL] = yaml_cfg.get(
-            CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL
-        )
-    if CONF_HORIZON not in merged:
-        merged[CONF_HORIZON] = yaml_cfg.get(CONF_HORIZON, DEFAULT_HORIZON)
-    if CONF_LATITUDE not in merged and CONF_LATITUDE in yaml_cfg:
-        merged[CONF_LATITUDE] = yaml_cfg[CONF_LATITUDE]
-    if CONF_LONGITUDE not in merged and CONF_LONGITUDE in yaml_cfg:
-        merged[CONF_LONGITUDE] = yaml_cfg[CONF_LONGITUDE]
-    if CONF_ENERGY_WEIGHT not in merged:
-        merged[CONF_ENERGY_WEIGHT] = yaml_cfg.get(
-            CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT
-        )
-    if CONF_SMOOTHING_WEIGHT not in merged:
-        merged[CONF_SMOOTHING_WEIGHT] = yaml_cfg.get(
-            CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT
-        )
-    if CONF_CONSTRAINT_OFFSET not in merged:
-        merged[CONF_CONSTRAINT_OFFSET] = yaml_cfg.get(
-            CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET
-        )
-    if CONF_TERMINAL_WEIGHT not in merged:
-        merged[CONF_TERMINAL_WEIGHT] = yaml_cfg.get(
-            CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT
-        )
-    if CONF_MPC_SOLVER not in merged:
-        merged[CONF_MPC_SOLVER] = yaml_cfg.get(
-            CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER
-        )
-    if CONF_MPC_ANALYTIC_DERIVATIVES not in merged:
-        merged[CONF_MPC_ANALYTIC_DERIVATIVES] = yaml_cfg.get(
-            CONF_MPC_ANALYTIC_DERIVATIVES, DEFAULT_MPC_ANALYTIC_DERIVATIVES
-        )
-    if CONF_SIGMA_W not in merged:
-        merged[CONF_SIGMA_W] = yaml_cfg.get(CONF_SIGMA_W, DEFAULT_SIGMA_W)
-    if CONF_SIGMA_V not in merged:
-        merged[CONF_SIGMA_V] = yaml_cfg.get(CONF_SIGMA_V, DEFAULT_SIGMA_V)
-    if CONF_SIGMA_B not in merged:
-        merged[CONF_SIGMA_B] = yaml_cfg.get(CONF_SIGMA_B, DEFAULT_SIGMA_B)
-    return merged
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Heating Assistant from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -548,17 +471,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unloaded
-
-
-class _MergedEntry:
-    """Thin wrapper that presents merged entry data to the coordinator."""
-
-    def __init__(self, entry: ConfigEntry, data: Dict[str, Any]) -> None:
-        self._entry = entry
-        self.data = data
-        self.options = entry.options
-        self.entry_id = entry.entry_id
-        self.title = entry.title
 
 
 # ---------------------------------------------------------------------------

@@ -112,25 +112,51 @@ Legend:
 
 ## Simplicity / code quality
 
-- [ ] **S1. Inline the thin shim modules.** `optimal_control.py` (11 lines)
-  and `state_estimator.py` (11 lines) are pure `from mbc...` re-exports.
-  Delete them and import directly in `controller.py` /
-  `parameter_estimator.py`. *Impact: low · Effort: small.*
+- [x] **S1. Inline the thin shim modules.** ~~`optimal_control.py` (11
+  lines) and `state_estimator.py` (11 lines) are pure `from mbc...`
+  re-exports.  Delete them and import directly in `controller.py` /
+  `parameter_estimator.py`.~~ *Impact: low · Effort: small.* —
+  _Both shim files deleted; verified neither was imported anywhere in the
+  codebase (`controller.py` and `parameter_estimator.py` already pulled from
+  `mbc.control` / `mbc.estimation` directly)._
 
-- [ ] **S2. Extract YAML-merge logic out of `__init__.py`.** `__init__.py` is
-  1133 lines and mixes setup, the `_MergedEntry` proxy, and YAML merging.
-  Move merge logic to `yaml_merge.py`. *Impact: medium maintainability ·
-  Effort: medium.*
+- [x] **S2. Extract YAML-merge logic out of `__init__.py`.** ~~`__init__.py`
+  is 1133 lines and mixes setup, the `_MergedEntry` proxy, and YAML merging.
+  Move merge logic to `yaml_merge.py`.~~ *Impact: medium maintainability ·
+  Effort: medium.* —
+  _New module `yaml_merge.py` (136 lines) owns `merge_yaml_into_entry_data`
+  and `MergedEntry`.  Also factored the repetitive "fill default when key
+  absent" boilerplate into a small private `_fill_default` helper so the
+  scalar-merge body shrunk to ~10 readable lines.  `__init__.py` drops from
+  1133 → 1045 lines and now only re-exports the helpers under their
+  legacy `_`-prefixed names so the existing test imports keep working._
 
-- [ ] **S3. Modularise `coordinator.py` (1793 lines).** Split state-estimation,
-  MPC dispatch, history-buffer, and weather-fetch helpers into sibling
-  modules; keep `HeatingDataUpdateCoordinator` as the orchestrator.
-  *Impact: medium maintainability · Effort: large · No runtime effect if done
-  as a pure move.*
+- [x] **S3. Modularise `coordinator.py` (1793 lines).** ~~Split
+  state-estimation, MPC dispatch, history-buffer, and weather-fetch helpers
+  into sibling modules; keep `HeatingDataUpdateCoordinator` as the
+  orchestrator.~~ *Impact: medium maintainability · Effort: large · No
+  runtime effect if done as a pure move.* —
+  _Extracted every weather-fetch concern into a new `weather.py` module
+  (354 lines): the cloud-cover percent / condition coercions, the generic
+  `parse_forecast_field` plus `parse_temperature_forecast` and
+  `parse_cloud_forecast` wrappers, the `interpolate_forecast` helper, and
+  the entity readers (`read_outdoor_temp`, `read_cloud_cover_now`,
+  `fetch_forecast_entries`).  The coordinator's seven previously-inline
+  methods are now ~3-line delegates that record success/failure for the
+  diagnostic sensor.  `coordinator.py` drops from 1885 → 1612 lines (-273).
+  Pure refactor — 23 new unit tests in `tests/test_weather_module.py`
+  pin down the behaviour.  History-buffer and MPC-dispatch extraction
+  deferred: those touch coordinator state extensively and the win is
+  smaller than the risk of regressing the MPC loop._
 
-- [ ] **S4. Group coordinator `__init__` setup into helpers.** Coordinator
+- [x] **S4. Group coordinator `__init__` setup into helpers.** ~~Coordinator
   constructor sets ~30 instance vars inline. Extract `_init_model()`,
-  `_init_estimator()`, `_init_buffers()`. *Impact: low · Effort: small.*
+  `_init_estimator()`, `_init_buffers()`.~~ *Impact: low · Effort: small.* —
+  _Added `_build_temp_sensor_map(rooms_cfg)` (staticmethod),
+  `_init_room_state(rooms_cfg)` (per-room flags + parsed schedules), and
+  `_init_runtime_buffers()` (per-cycle visualisation state + history
+  buffer).  `__init__` shrinks from ~200 lines of straight-line statements
+  into a readable orchestrator that reads each phase in one line._
 
 ---
 
@@ -149,3 +175,4 @@ Legend:
 |------------|-------------------|----------------------------------------------------------------------------------------|
 | 2026-05-16 | P1, P2, P5        | First performance pass. 365 tests pass; the 14 pre-existing `mbc`-dependent failures (EKF stubs in the CI env) are unchanged. |
 | 2026-05-16 | U1, U2, U3, U4    | Full usability pass. 402 tests pass (+37 new). New module `_options_flow.py` (RoomFlowHelper / WindowFlowHelper), new `WeatherForecastStatusSensor`, 11 sensors gain `EntityCategory.DIAGNOSTIC`, numeric sensors gain `suggested_display_precision`. Same 14 `mbc`-dependent failures unchanged. |
+| 2026-05-16 | S1, S2, S3, S4    | Full simplification pass. 425 tests pass (+23 new). Deleted two `mbc` shim files. New modules `yaml_merge.py` (136 lines) and `weather.py` (354 lines). `coordinator.py` 1885 → 1612 (-273), `__init__.py` 1133 → 1045 (-88). Coordinator `__init__` split into 3 helper methods. Same 14 `mbc`-dependent failures unchanged. |

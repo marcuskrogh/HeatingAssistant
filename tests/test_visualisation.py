@@ -1207,33 +1207,23 @@ class TestCoerceCloudCoverPercent:
     """Test the module-level cloud-cover percent → fraction coercion."""
 
     def test_none_returns_none(self):
-        from custom_components.heating_assistant.coordinator import (
-            _coerce_cloud_cover_percent,
-        )
-        assert _coerce_cloud_cover_percent(None) is None
+        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        assert coerce_cloud_cover_percent(None) is None
 
     def test_unparsable_returns_none(self):
-        from custom_components.heating_assistant.coordinator import (
-            _coerce_cloud_cover_percent,
-        )
-        assert _coerce_cloud_cover_percent("partly") is None
+        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        assert coerce_cloud_cover_percent("partly") is None
 
     def test_typical_values(self):
-        from custom_components.heating_assistant.coordinator import (
-            _coerce_cloud_cover_percent,
-        )
-        assert _coerce_cloud_cover_percent(0) == pytest.approx(0.0)
-        assert _coerce_cloud_cover_percent(50) == pytest.approx(0.5)
-        assert _coerce_cloud_cover_percent(100) == pytest.approx(1.0)
+        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        assert coerce_cloud_cover_percent(0) == pytest.approx(0.0)
+        assert coerce_cloud_cover_percent(50) == pytest.approx(0.5)
+        assert coerce_cloud_cover_percent(100) == pytest.approx(1.0)
 
     def test_clamps_negative(self):
-        from custom_components.heating_assistant.coordinator import (
-            _coerce_cloud_cover_percent,
-        )
-        assert _coerce_cloud_cover_percent(-10) == pytest.approx(0.0)
+        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        assert coerce_cloud_cover_percent(-10) == pytest.approx(0.0)
 
     def test_clamps_above_hundred(self):
-        from custom_components.heating_assistant.coordinator import (
-            _coerce_cloud_cover_percent,
-        )
-        assert _coerce_cloud_cover_percent(150) == pytest.approx(1.0)
+        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        assert coerce_cloud_cover_percent(150) == pytest.approx(1.0)
