@@ -46,6 +46,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -103,6 +104,7 @@ async def async_setup_entry(
     entities.append(SystemEfficiencySensor(coordinator))
     entities.append(EstimatedParametersStatusSensor(coordinator))
     entities.append(MPCPerformanceSensor(coordinator))
+    entities.append(WeatherForecastStatusSensor(coordinator))
 
     async_add_entities(entities)
 
@@ -122,6 +124,7 @@ class TemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
 
     def __init__(
         self,
@@ -155,6 +158,7 @@ class TemperatureFilteredSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
 
     def __init__(
         self,
@@ -191,7 +195,9 @@ class TemperatureOffsetSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:thermometer-lines"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -237,6 +243,7 @@ class SetpointSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
     _attr_icon = "mdi:target"
 
     def __init__(
@@ -280,6 +287,7 @@ class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
     _sign: float = 1.0
     _attr_field: str = "constraint"
 
@@ -439,6 +447,7 @@ class HeatingPowerMeasuredSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
@@ -478,6 +487,7 @@ class SolarGainMeasuredSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:white-balance-sunny"
 
     def __init__(
@@ -521,6 +531,7 @@ class ControlActionSensor(CoordinatorEntity, SensorEntity):
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:tune-vertical"
 
     def __init__(
@@ -562,6 +573,7 @@ class HeatPumpCOPSensor(CoordinatorEntity, SensorEntity):
     """Sensor reporting the current COP of a heat pump source."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:heat-pump-outline"
 
     def __init__(
@@ -611,6 +623,7 @@ class OutdoorTemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
 
     def __init__(
         self,
@@ -649,6 +662,7 @@ class OutdoorTemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = None
     _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
     _attr_icon = "mdi:thermometer-lines"
 
     def __init__(
@@ -716,6 +730,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = None
     _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
     _attr_icon = "mdi:chart-line"
 
     def __init__(
@@ -853,6 +868,7 @@ class HeatLossSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:thermometer-minus"
 
     def __init__(
@@ -898,6 +914,7 @@ class EnergyBalanceSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:scale-balance"
 
     def __init__(
@@ -961,6 +978,7 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:home-thermometer"
 
     def __init__(
@@ -1056,6 +1074,7 @@ class HeatingPowerForecastSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = None
     _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:radiator"
 
     def __init__(
@@ -1139,6 +1158,7 @@ class SolarGainForecastSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = None
     _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:weather-sunny-alert"
 
     def __init__(
@@ -1227,7 +1247,9 @@ class PredictionErrorSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:chart-bell-curve"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -1315,7 +1337,9 @@ class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:poll"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -1427,7 +1451,9 @@ class ParameterConfidenceSensor(CoordinatorEntity, SensorEntity):
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 0
     _attr_icon = "mdi:shield-check"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -1536,7 +1562,9 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 2
     _attr_icon = "mdi:chart-timeline-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     SEGMENT_LENGTH = 30  # steps
 
@@ -1633,7 +1661,9 @@ class KalmanInnovationSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:waveform"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -1720,7 +1750,9 @@ class ResidualACFSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:chart-bar"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -1786,7 +1818,9 @@ class HeaterScaleSensor(CoordinatorEntity, SensorEntity):
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 1
     _attr_icon = "mdi:tune-vertical"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -1865,6 +1899,7 @@ class EstimatedParametersStatusSensor(CoordinatorEntity, SensorEntity):
     """
 
     _attr_icon = "mdi:database-check"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
         super().__init__(coordinator)
@@ -1946,7 +1981,9 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 
     _attr_state_class = None
     _attr_native_unit_of_measurement = "s"
+    _attr_suggested_display_precision = 3
     _attr_icon = "mdi:timer-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
         super().__init__(coordinator)
@@ -2036,3 +2073,57 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
         attrs["recent_solve_times_s"] = [round(t, 4) for t in solve_times[-50:]]
 
         return attrs
+
+
+# ---------------------------------------------------------------------------
+# Weather forecast status sensor (system-wide, diagnostic)
+# ---------------------------------------------------------------------------
+
+class WeatherForecastStatusSensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor reporting the health of the weather-forecast fetch.
+
+    The state is one of:
+
+    * ``"ok"``        — the most recent fetch succeeded
+    * ``"failing"``   — at least one consecutive fetch has failed
+    * ``"disabled"``  — no weather entity is configured
+
+    Attributes expose the last error message, the timestamps of the most
+    recent success and failure, and the consecutive-failure counter so users
+    can diagnose persistent breakages without having to grep the HA log.
+    """
+
+    _attr_icon = "mdi:weather-cloudy-alert"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Weather Forecast Status"
+        self._attr_unique_id = f"{DOMAIN}_weather_forecast_status"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> str:
+        if not getattr(self._coordinator, "_weather_entity", None):
+            return "disabled"
+        if getattr(self._coordinator, "weather_consecutive_failures", 0) > 0:
+            return "failing"
+        return "ok"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        last_err_at = getattr(self._coordinator, "weather_last_error_at", None)
+        last_ok_at = getattr(self._coordinator, "weather_last_success_at", None)
+        return {
+            "weather_entity": getattr(self._coordinator, "_weather_entity", None),
+            "last_error": getattr(self._coordinator, "weather_last_error", None),
+            "last_error_at": last_err_at.isoformat() if last_err_at else None,
+            "last_success_at": last_ok_at.isoformat() if last_ok_at else None,
+            "consecutive_failures": getattr(
+                self._coordinator, "weather_consecutive_failures", 0
+            ),
+        }

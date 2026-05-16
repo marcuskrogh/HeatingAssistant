@@ -425,6 +425,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # have to handle a None case before the first cycle.
         self.now_utc: datetime = datetime.now(tz=timezone.utc)
 
+        # Weather-forecast fetch health (consumed by the diagnostic
+        # WeatherForecastStatusSensor).  ``weather_last_error`` is the last
+        # exception message or ``"no_data"`` when the service returned an
+        # empty payload; ``None`` means the most recent fetch succeeded.
+        self.weather_last_error: Optional[str] = None
+        self.weather_last_error_at: Optional[datetime] = None
+        self.weather_last_success_at: Optional[datetime] = None
+        self.weather_consecutive_failures: int = 0
+        # Throttle WARN logs so a persistently-broken weather entity doesn't
+        # flood the log.  We re-warn whenever the failure count crosses a
+        # boundary (1, 2, 5, 10, 50, 100, …).
+        self._weather_warn_thresholds: tuple = (1, 2, 5, 10, 50, 100, 500, 1000)
+
         # Restore persisted estimated parameters so that identified values
         # survive a full Home Assistant restart (not just an in-memory reload).
         # These are applied directly to the model objects before the MPC
@@ -941,9 +954,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         Shared by the temperature and cloud-cover readers so both signals come
         from a single service call per cycle.  Tries ``weather.get_forecasts``
         first, then falls back to the deprecated ``forecast`` state attribute.
+
+        Updates ``self.weather_last_error`` / ``weather_consecutive_failures``
+        on the way out so the diagnostic ``WeatherForecastStatusSensor`` (and
+        any HA log scraper) can surface persistently broken weather setups.
         """
         if not self._weather_entity:
+            # Not configured — neither success nor failure; sensor reports
+            # "disabled" by checking weather_entity is None.
             return None
+
+        service_exc: Optional[str] = None
 
         # ── Modern approach: weather.get_forecasts service (HA 2023.9+) ──────
         if self.hass.services.has_service("weather", "get_forecasts"):
@@ -961,8 +982,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 if response and self._weather_entity in response:
                     forecast_data = response[self._weather_entity].get("forecast", [])
                     if forecast_data:
+                        self._record_weather_success()
                         return forecast_data
             except Exception as exc:
+                service_exc = f"{type(exc).__name__}: {exc}"
                 _LOGGER.debug(
                     "weather.get_forecasts service call failed for %s, "
                     "falling back to state attribute: %s",
@@ -973,12 +996,46 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # ── Fallback: read from the deprecated state attribute ────────────────
         state = self.hass.states.get(self._weather_entity)
         if state is None:
+            self._record_weather_failure(
+                service_exc or f"weather entity {self._weather_entity!r} not found"
+            )
             return None
 
         forecast_data = state.attributes.get("forecast")
         if not forecast_data:
+            self._record_weather_failure(
+                service_exc or "no forecast data on weather entity"
+            )
             return None
+
+        self._record_weather_success()
         return forecast_data
+
+    def _record_weather_success(self) -> None:
+        """Mark the most recent forecast fetch as successful."""
+        if self.weather_consecutive_failures > 0:
+            _LOGGER.info(
+                "Weather forecast recovered for %s after %d consecutive failures",
+                self._weather_entity,
+                self.weather_consecutive_failures,
+            )
+        self.weather_last_error = None
+        self.weather_last_error_at = None
+        self.weather_last_success_at = self.now_utc
+        self.weather_consecutive_failures = 0
+
+    def _record_weather_failure(self, reason: str) -> None:
+        """Record a forecast-fetch failure and log on threshold crossings."""
+        self.weather_consecutive_failures += 1
+        self.weather_last_error = reason
+        self.weather_last_error_at = self.now_utc
+        if self.weather_consecutive_failures in self._weather_warn_thresholds:
+            _LOGGER.warning(
+                "Weather forecast unavailable for %s (failure #%d): %s",
+                self._weather_entity,
+                self.weather_consecutive_failures,
+                reason,
+            )
 
     def _read_cloud_cover_now(self) -> Optional[float]:
         """Read the current cloud-cover fraction in [0, 1] from the weather entity.

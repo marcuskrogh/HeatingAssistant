@@ -10,6 +10,9 @@ from custom_components.heating_assistant.const import DEFAULT_SETPOINT
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_FLOW_PATH = REPO_ROOT / "custom_components" / "heating_assistant" / "config_flow.py"
+OPTIONS_FLOW_HELPERS_PATH = (
+    REPO_ROOT / "custom_components" / "heating_assistant" / "_options_flow.py"
+)
 STRINGS_PATH = REPO_ROOT / "custom_components" / "heating_assistant" / "strings.json"
 EN_TRANSLATION_PATH = (
     REPO_ROOT / "custom_components" / "heating_assistant" / "translations" / "en.json"
@@ -22,17 +25,30 @@ def test_default_setpoint_is_22() -> None:
 
 
 def test_options_flow_source_has_expected_room_and_solver_updates() -> None:
-    """Options flow should expose simplified room UI and solver choices."""
-    source = CONFIG_FLOW_PATH.read_text(encoding="utf-8")
+    """Options flow should expose simplified room UI and solver choices.
 
-    assert "manage_room_windows" in source
-    assert "CONF_TEMP_SENSORS" in source
-    assert "ROOM_SIZE_TO_THERMAL_MASS" in source
-    assert "BUILDING_AGE_TO_R_EXTERNAL" in source
-    assert 'vol.In(["slsqp", "ipopt"])' in source
-    assert 'vol.In(["slsqp", "ipopt", "cyipopt"])' not in source
-    assert "DEFAULT_ROOM_SETPOINT = 22.0" in source
-    assert "CONF_SETPOINT: DEFAULT_ROOM_SETPOINT" in source
+    Room/window CRUD lives in ``_options_flow.py`` after the U4 refactor,
+    so a few of these checks span both files.
+    """
+    config_flow_source = CONFIG_FLOW_PATH.read_text(encoding="utf-8")
+    helpers_source = OPTIONS_FLOW_HELPERS_PATH.read_text(encoding="utf-8")
+    combined = config_flow_source + "\n" + helpers_source
+
+    # OptionsFlow-side wiring still lives in config_flow.py.
+    assert "manage_room_windows" in config_flow_source
+    assert 'vol.In(["slsqp", "ipopt"])' in config_flow_source
+    assert 'vol.In(["slsqp", "ipopt", "cyipopt"])' not in config_flow_source
+    assert "DEFAULT_ROOM_SETPOINT = 22.0" in config_flow_source
+    # The default setpoint is passed into the helper's add() call.
+    assert "setpoint=DEFAULT_ROOM_SETPOINT" in config_flow_source
+
+    # Shared constants/symbols can live in either file.
+    assert "CONF_TEMP_SENSORS" in combined
+    assert "ROOM_SIZE_TO_THERMAL_MASS" in combined
+    assert "BUILDING_AGE_TO_R_EXTERNAL" in combined
+    # The room dict template (now built inside RoomFlowHelper.add) wires the
+    # setpoint into CONF_SETPOINT.
+    assert "CONF_SETPOINT: setpoint" in helpers_source
 
 
 def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None:

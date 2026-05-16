@@ -59,26 +59,56 @@ Legend:
 
 ## Usability
 
-- [ ] **U1. Tag diagnostic sensors with `EntityCategory.DIAGNOSTIC`.**
-  `sensor.py` currently uses no `EntityCategory` anywhere. Sensors like
+- [x] **U1. Tag diagnostic sensors with `EntityCategory.DIAGNOSTIC`.**
+  ~~`sensor.py` currently uses no `EntityCategory` anywhere. Sensors like
   `ModelFitQuality`, `ParameterConfidence`, `KalmanInnovation`, `ResidualACF`,
   prediction-error sensors should be diagnostic so they don't clutter the
-  main device card. *Impact: medium UX win · Effort: small.*
+  main device card.~~ *Impact: medium UX win · Effort: small.* —
+  _Tagged 11 sensors: `TemperatureOffset`, `PredictionError`,
+  `ModelFitQuality`, `ParameterConfidence`, `OpenLoopRMSE`,
+  `KalmanInnovation`, `ResidualACF`, `HeaterScale`,
+  `EstimatedParametersStatus`, `MPCPerformance`, and the new
+  `WeatherForecastStatus` (U3) all carry
+  `EntityCategory.DIAGNOSTIC`.  Conftest stub gained an `EntityCategory`
+  enum so tests don't fall over the new import._
 
-- [ ] **U2. Add `suggested_display_precision` to numeric forecast/measurement
-  sensors.** Temperature (1), power (0 or 1), energy (1). Tightens the HA
-  UI. *Impact: low · Effort: small.*
+- [x] **U2. Add `suggested_display_precision` to numeric forecast/measurement
+  sensors.** ~~Temperature (1), power (0 or 1), energy (1). Tightens the HA
+  UI.~~ *Impact: low · Effort: small.* —
+  _Added precisions across the user-facing sensors (temperature 1 dp, power
+  0 dp, COP 2 dp, control action 0 dp) and all diagnostic sensors
+  (prediction error 2 dp, model fit 3 dp, parameter confidence 0 dp,
+  open-loop RMSE 2 dp, Kalman innovation 3 dp, residual ACF 3 dp, heater
+  scale 1 dp, MPC solve time 3 dp)._
 
-- [ ] **U3. Log + surface weather-forecast fetch failures.**
-  `coordinator._async_read_weather_forecast` returns `None` silently. Log at
-  WARN with throttling and expose a "last weather error" attribute on a
-  diagnostic sensor. *Impact: medium for debugging · Effort: small.*
+- [x] **U3. Log + surface weather-forecast fetch failures.**
+  ~~`coordinator._async_read_weather_forecast` returns `None` silently. Log
+  at WARN with throttling and expose a "last weather error" attribute on a
+  diagnostic sensor.~~ *Impact: medium for debugging · Effort: small.* —
+  _Coordinator now tracks `weather_last_error`,
+  `weather_last_error_at`, `weather_last_success_at`, and
+  `weather_consecutive_failures`.  `_record_weather_success` /
+  `_record_weather_failure` log WARN only on failure-count threshold
+  crossings (1, 2, 5, 10, 50, …) and INFO on recovery, so a permanently
+  broken weather entity won't flood the log.  New diagnostic
+  `WeatherForecastStatusSensor` exposes the state (`"ok"` / `"failing"` /
+  `"disabled"`) with the last error message and timestamps as attributes.
+  10 unit tests in `tests/test_weather_status.py`._
 
-- [ ] **U4. Split the options flow into a helper class.** `config_flow.py`
-  has 15+ `async_step_*` methods for room/window CRUD. Extracting a
-  `RoomFlowHelper` / `WindowFlowHelper` shrinks the file and makes individual
-  flows unit-testable. *Impact: medium maintainability · Effort: large · Pure
-  refactor, no runtime change.*
+- [x] **U4. Split the options flow into a helper class.**
+  ~~`config_flow.py` has 15+ `async_step_*` methods for room/window CRUD.
+  Extracting a `RoomFlowHelper` / `WindowFlowHelper` shrinks the file and
+  makes individual flows unit-testable.~~ *Impact: medium maintainability ·
+  Effort: large · Pure refactor, no runtime change.* —
+  _New module `_options_flow.py` (~280 lines) owns `RoomFlowHelper`,
+  `WindowFlowHelper`, the UI constants (`COMPASS_TO_DEGREES`,
+  `ROOM_SIZE_TO_THERMAL_MASS`, `BUILDING_AGE_TO_R_EXTERNAL`), and the
+  pure helpers (`parse_entity_ids`, `format_entity_ids`, `nearest_choice`,
+  `degrees_to_compass`, `window_display`).  `config_flow.py` drops from
+  613 → 536 lines and each remaining `async_step_*` method is now a thin
+  orchestrator that delegates validation + mutation to the helper.  27
+  unit tests in `tests/test_options_flow_helpers.py` exercise the helpers
+  without HA's flow framework._
 
 ## Simplicity / code quality
 
@@ -118,3 +148,4 @@ Legend:
 | Date       | Items shipped     | Notes                                                                                  |
 |------------|-------------------|----------------------------------------------------------------------------------------|
 | 2026-05-16 | P1, P2, P5        | First performance pass. 365 tests pass; the 14 pre-existing `mbc`-dependent failures (EKF stubs in the CI env) are unchanged. |
+| 2026-05-16 | U1, U2, U3, U4    | Full usability pass. 402 tests pass (+37 new). New module `_options_flow.py` (RoomFlowHelper / WindowFlowHelper), new `WeatherForecastStatusSensor`, 11 sensors gain `EntityCategory.DIAGNOSTIC`, numeric sensors gain `suggested_display_precision`. Same 14 `mbc`-dependent failures unchanged. |

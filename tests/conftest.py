@@ -155,6 +155,15 @@ _const.UnitOfPower = _FakeEnum  # type: ignore[attr-defined]
 _entity = sys.modules["homeassistant.helpers.entity"]
 _entity.Entity = object  # type: ignore[attr-defined]
 
+
+class _EntityCategoryStub:
+    """Mirror of homeassistant.helpers.entity.EntityCategory."""
+    CONFIG = "config"
+    DIAGNOSTIC = "diagnostic"
+
+
+_entity.EntityCategory = _EntityCategoryStub  # type: ignore[attr-defined]
+
 # homeassistant.helpers.update_coordinator
 class _DataUpdateCoordinatorStub:
     def __init__(self, *args, **kwargs):
