@@ -185,7 +185,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
         "type": "custom:apexcharts-card",
         "header": {
             "show": True,
-            "title": f"{room.name} – Predicted Temperature",
+            "title": f"{room.name} – Temperature",
             "show_states": True,
         },
         "graph_span": f"{int(spec.graph_span_hours)}h",
@@ -204,7 +204,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
             # History: filtered estimate y(k|k)
             {
                 "entity": filtered,
-                "name": "Filtered estimate (y(k|k))",
+                "name": "Filtered",
                 "yaxis_id": "temp",
                 "color": "#0D47A1",
                 "stroke_width": 2,
@@ -218,7 +218,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
             # installed apexcharts-card version does not support).
             {
                 "entity": measured,
-                "name": "Actual measurement (y(k))",
+                "name": "Measured",
                 "yaxis_id": "temp",
                 "color": "#E53935",
                 "stroke_width": 0,
@@ -256,7 +256,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
             # Forecast: upper constraint
             {
                 "entity": upper,
-                "name": "Constraint Upper",
+                "name": "Upper",
                 "data_generator": _forecast_generator("constraint_upper"),
                 "yaxis_id": "temp",
                 "color": "#1565C0",
@@ -267,7 +267,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
             # Forecast: lower constraint
             {
                 "entity": lower,
-                "name": "Constraint Lower",
+                "name": "Lower",
                 "data_generator": _forecast_generator("constraint_lower"),
                 "yaxis_id": "temp",
                 "color": "#1565C0",
@@ -299,7 +299,7 @@ def _mpc_control_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         "type": "custom:apexcharts-card",
         "header": {
             "show": True,
-            "title": f"{room.name} – Planned Heating Power",
+            "title": f"{room.name} – Power",
             "show_states": True,
         },
         "graph_span": f"{int(spec.graph_span_hours)}h",
@@ -308,9 +308,8 @@ def _mpc_control_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         "yaxis": [
             {
                 "id": "power",
-                "min": 0,
                 "apex_config": {
-                    "title": {"text": "Heating Power (W)"},
+                    "title": {"text": "Power (W)"},
                     "tickAmount": 4,
                 },
             }
@@ -318,7 +317,7 @@ def _mpc_control_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         "series": [
             {
                 "entity": measured,
-                "name": "Actual Heating",
+                "name": "Actual",
                 "yaxis_id": "power",
                 "type": "area",
                 "curve": "stepline",
@@ -331,7 +330,7 @@ def _mpc_control_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
             },
             {
                 "entity": forecast,
-                "name": "Planned Heating",
+                "name": "Plan",
                 "data_generator": _forecast_generator("heating_power"),
                 "yaxis_id": "power",
                 "type": "area",
@@ -356,7 +355,7 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         "type": "custom:apexcharts-card",
         "header": {
             "show": True,
-            "title": f"{room.name} – Disturbance Forecast",
+            "title": f"{room.name} – Disturbances",
             "show_states": True,
         },
         "graph_span": f"{int(spec.graph_span_hours)}h",
@@ -374,7 +373,7 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         "series": [
             {
                 "entity": outdoor_meas,
-                "name": "Outdoor (actual)",
+                "name": "Outdoor",
                 "yaxis_id": "temp",
                 "color": "#37474F",
                 "stroke_width": 2,
@@ -385,7 +384,7 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
             },
             {
                 "entity": solar_meas,
-                "name": "Solar (actual)",
+                "name": "Solar",
                 "yaxis_id": "power",
                 "type": "area",
                 "color": "#FF8F00",
@@ -397,7 +396,7 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
             },
             {
                 "entity": outdoor_fc,
-                "name": "Outdoor (forecast)",
+                "name": "Outdoor fc.",
                 "data_generator": _forecast_generator("outdoor_temp"),
                 "yaxis_id": "temp",
                 "color": "#78909C",
@@ -408,7 +407,7 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
             },
             {
                 "entity": solar_fc,
-                "name": "Solar (forecast)",
+                "name": "Solar fc.",
                 "data_generator": _forecast_generator("solar_gain"),
                 "yaxis_id": "power",
                 "type": "area",
@@ -500,6 +499,17 @@ def _open_loop_card(room: RoomSpec) -> Dict[str, Any]:
         "type": "custom:apexcharts-card",
         "header": {"show": True, "title": f"{room.name} – Open-loop trace", "show_states": True},
         "graph_span": "2h",
+        "apex_config": {
+            "noData": {
+                "text": (
+                    "Collecting history – the open-loop trace needs ~30 min "
+                    "of operation before it can be computed."
+                ),
+                "align": "center",
+                "verticalAlign": "middle",
+                "style": {"fontSize": "13px", "color": "#9E9E9E"},
+            },
+        },
         "yaxis": [{"id": "temp", "apex_config": {"title": {"text": "Temperature (°C)"}, "decimalsInFloat": 2}}],
         "series": [
             {
@@ -516,7 +526,7 @@ def _open_loop_card(room: RoomSpec) -> Dict[str, Any]:
             },
             {
                 "entity": ol,
-                "name": "Simulated (free-run)",
+                "name": "Simulated",
                 "yaxis_id": "temp",
                 "color": "#EF6C00",
                 "stroke_width": 2,
@@ -717,7 +727,7 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
         series.append(
             {
                 "entity": _eid("sensor", room.name, "temperature_forecast"),
-                "name": f"{room.name} (forecast)",
+                "name": f"{room.name} fc.",
                 "data_generator": _forecast_generator("temperature"),
                 "yaxis_id": "temp",
                 "color": color,
@@ -771,17 +781,15 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
         )
     return {
         "type": "custom:apexcharts-card",
-        "stacked": True,
-        "header": {"show": True, "title": "Heating Power (stacked)", "show_states": True},
+        "header": {"show": True, "title": "Power – All Rooms", "show_states": True},
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "Now", "color": "#424242"},
         "yaxis": [
             {
                 "id": "power",
-                "min": 0,
                 "apex_config": {
-                    "title": {"text": "Heating Power (W)"},
+                    "title": {"text": "Power (W)"},
                     "tickAmount": 4,
                 },
             }
@@ -1045,6 +1053,22 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
     # ------------------------------------------------------------------
     # Open-loop validation
     # ------------------------------------------------------------------
+    _btn = _button_eid("estimate_parameters")
+    open_loop_status: Dict[str, Any] = {
+        "type": "markdown",
+        "content": (
+            "{% set buf = state_attr('" + _btn + "', 'history_steps') | int(0) %}"
+            "{% set need = state_attr('" + _btn + "', 'min_steps_required') | int(30) %}"
+            "{% if buf < need %}"
+            "⏳ **Collecting history:** {{ buf }}/{{ need }} steps"
+            " — open-loop RMSE will be available in ≈ {{ [need - buf, 0] | max }} min."
+            "{% else %}"
+            "✅ Buffer ready ({{ buf }} steps). "
+            "Press **Run open-loop simulation** to compute or refresh the RMSE."
+            "{% endif %}"
+        ),
+    }
+
     open_loop_panel = {
         "type": "entities",
         "title": "Open-loop RMSE",
@@ -1173,6 +1197,7 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
                 "type": "grid",
                 "cards": [
                     {"type": "heading", "heading": "Open-loop validation", "heading_style": "title"},
+                    open_loop_status,
                     open_loop_panel,
                     open_loop_run_button,
                     open_loop_analyse_button,
