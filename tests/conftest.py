@@ -107,6 +107,7 @@ class _FakeEnum:
     """Stand-in for HA string-enum classes."""
     CELSIUS = "°C"
     WATT = "W"
+    KILO_WATT_HOUR = "kWh"
     MEASUREMENT = "measurement"
     TOTAL = "total"
     TOTAL_INCREASING = "total_increasing"
@@ -160,6 +161,7 @@ for _attr in [
 
 _const.UnitOfTemperature = _FakeEnum  # type: ignore[attr-defined]
 _const.UnitOfPower = _FakeEnum  # type: ignore[attr-defined]
+_const.UnitOfEnergy = _FakeEnum  # type: ignore[attr-defined]
 
 # homeassistant.helpers.entity
 _entity = sys.modules["homeassistant.helpers.entity"]
@@ -243,6 +245,19 @@ _sensor = sys.modules["homeassistant.components.sensor"]
 _sensor.SensorEntity = object  # type: ignore[attr-defined]
 _sensor.SensorDeviceClass = _FakeEnum  # type: ignore[attr-defined]
 _sensor.SensorStateClass = _FakeEnum  # type: ignore[attr-defined]
+
+
+class _RestoreSensorStub:
+    """Stub for RestoreSensor so multi-inheritance keeps working in tests."""
+
+    async def async_added_to_hass(self) -> None:  # pragma: no cover
+        return None
+
+    async def async_get_last_sensor_data(self):  # pragma: no cover
+        return None
+
+
+_sensor.RestoreSensor = _RestoreSensorStub  # type: ignore[attr-defined]
 
 # homeassistant.components.climate
 _climate = sys.modules["homeassistant.components.climate"]

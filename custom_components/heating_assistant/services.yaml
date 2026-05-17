@@ -293,6 +293,47 @@ run_open_loop_simulation:
           step: 5
           unit_of_measurement: "steps"
 
+compute_loglik_slice:
+  name: Compute log-likelihood slice
+  description: >
+    Evaluate the CD-EKF PED log-likelihood on a 2-D grid in
+    (log thermal_mass, log r_external) space, centred on the room's
+    current MLE values.  Used by the Diagnostics dashboard to render a
+    contour plot of the likelihood landscape so the user can assess
+    parameter identifiability and the curvature of the optimum.  The
+    computation runs CD-EKF over the full history buffer for every grid
+    point and may take several seconds for an 11x11 grid.
+  fields:
+    room_name:
+      name: Room name
+      description: Room whose parameters should be sliced (must match a configured room).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    n_grid:
+      name: Grid points per axis
+      description: Number of grid points per axis (odd values keep the centre on a grid line).
+      required: false
+      default: 11
+      example: 11
+      selector:
+        number:
+          min: 3
+          max: 41
+          step: 2
+    span_log:
+      name: Half-width (log-units)
+      description: Half-width of the slice in log-units (1.0 ≈ factor 2.7 either side).
+      required: false
+      default: 1.0
+      example: 1.0
+      selector:
+        number:
+          min: 0.1
+          max: 4.0
+          step: 0.1
+
 regenerate_dashboard:
   name: Regenerate Lovelace dashboard
   description: >

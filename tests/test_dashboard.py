@@ -375,6 +375,52 @@ def test_build_from_coordinator_extracts_rooms_and_sources():
     assert "Schedule" not in hallway_headings
 
 
+def test_overview_lists_energy_total_per_source(two_room_spec):
+    overview = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
+    )
+    refs = set(_iter_entity_refs(overview))
+    assert f"sensor.{DOMAIN}_lr_heater_energy_total" in refs
+    assert f"sensor.{DOMAIN}_br_heater_energy_total" in refs
+
+
+def test_room_view_includes_open_loop_chart(two_room_spec):
+    view = _room_view(build_dashboard(two_room_spec), "Living Room")
+    # The open-loop chart uses a data_generator over the simulation attribute.
+    generators = [
+        s.get("data_generator", "")
+        for card in _iter_cards(view)
+        if card.get("type") == "custom:apexcharts-card"
+        for s in card.get("series", [])
+    ]
+    assert any("attributes.simulation" in g for g in generators)
+
+
+def test_diagnostics_view_offers_loglik_slice_buttons_per_room(two_room_spec):
+    diag = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
+    )
+    loglik_services = [
+        ent.get("service_data")
+        for card in _iter_cards(diag)
+        for ent in card.get("entities", [])
+        if isinstance(ent, dict)
+        and ent.get("service") == f"{DOMAIN}.compute_loglik_slice"
+    ]
+    rooms_covered = {sd.get("room_name") for sd in loglik_services if isinstance(sd, dict)}
+    assert rooms_covered == {"Living Room", "Bedroom"}
+
+
+def test_diagnostics_view_renders_history_markdown(two_room_spec):
+    diag = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
+    )
+    markdowns = [c for c in _iter_cards(diag) if c.get("type") == "markdown"]
+    assert any(
+        "estimation_history" in m.get("content", "") for m in markdowns
+    )
+
+
 def test_dashboard_to_yaml_round_trips(two_room_spec):
     yaml_module = pytest.importorskip("yaml")
     dashboard = build_dashboard(two_room_spec)

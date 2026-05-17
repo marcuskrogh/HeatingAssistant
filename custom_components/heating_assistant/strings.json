@@ -202,6 +202,24 @@
           "description": "Plain filename (no path) inside <config>/dashboards. Defaults to heating_assistant.yaml."
         }
       }
+    },
+    "compute_loglik_slice": {
+      "name": "Compute log-likelihood slice",
+      "description": "Evaluate the CD-EKF PED log-likelihood on a (log C, log R_ext) grid centred on the room's current MLE. Drives the Diagnostics dashboard's likelihood-landscape card.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Room whose parameters should be sliced."
+        },
+        "n_grid": {
+          "name": "Grid points",
+          "description": "Number of grid points per axis (odd preferred)."
+        },
+        "span_log": {
+          "name": "Half-width (log)",
+          "description": "Half-width of the slice in log-units. 1.0 ≈ factor 2.7."
+        }
+      }
     }
   }
 }

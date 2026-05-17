@@ -171,6 +171,7 @@ SERVICE_SIMULATE_THERMAL_RESPONSE = "simulate_thermal_response"
 SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 SERVICE_REGENERATE_DASHBOARD = "regenerate_dashboard"
+SERVICE_COMPUTE_LOGLIK_SLICE = "compute_loglik_slice"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
@@ -1208,4 +1209,45 @@ def _register_services(hass: HomeAssistant) -> None:
             }
         ),
         supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def handle_compute_loglik_slice(call: ServiceCall) -> ServiceResponse:
+        """Compute a 2-D log-likelihood slice for a room and return it.
+
+        Used by the Diagnostics dashboard to render a contour plot of the
+        likelihood landscape around the current ``(C, R_ext)`` MLE. The
+        computation runs CD-EKF over the whole history buffer for every
+        grid point and may take a few seconds for an 11×11 grid.
+        """
+        coordinator = _get_coordinator(hass)
+        room_name = call.data["room_name"]
+        n_grid = int(call.data.get("n_grid", 11))
+        span_log = float(call.data.get("span_log", 1.0))
+
+        result = await coordinator.async_compute_loglik_slice(
+            room_name, n_grid=n_grid, span_log=span_log
+        )
+        if result is None:
+            return {
+                "room": room_name,
+                "error": "history_too_short_or_unknown_room",
+            }
+        return result
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_COMPUTE_LOGLIK_SLICE,
+        handle_compute_loglik_slice,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Optional("n_grid", default=11): vol.All(
+                    vol.Coerce(int), vol.Range(min=3, max=41)
+                ),
+                vol.Optional("span_log", default=1.0): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.1, max=4.0)
+                ),
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
     )

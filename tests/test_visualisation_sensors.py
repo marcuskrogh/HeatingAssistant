@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from custom_components.heating_assistant.sensor import (
     ConstraintLowerSensor,
     ConstraintUpperSensor,
+    HeatLossSensor,
+    HeatingEnergyTotalSensor,
     HeatingPowerMeasuredSensor,
     OutdoorTemperatureMeasuredSensor,
     PredictionErrorSensor,
@@ -318,3 +320,75 @@ def test_prediction_error_attributes_handle_deque_history_buffer():
     attrs = PredictionErrorSensor(coord, "living_room").extra_state_attributes
     assert attrs["n_samples"] == 3
     assert attrs["recent_errors"] == [0.2, 0.2, -0.2]
+
+
+# ── HeatLossSensor.connection_flows ───────────────────────────────────
+
+
+def test_heat_loss_sensor_exposes_typed_connection_flows():
+    coord = _make_coordinator()
+    coord.heat_flows = {
+        "living_room": {
+            "external_loss": 320.0,
+            "kitchen": 45.0,
+            "bedroom": -12.0,
+            "total_loss": 353.0,
+        }
+    }
+    sensor = HeatLossSensor(coord, "living_room")
+    attrs = sensor.extra_state_attributes
+    flows = attrs["connection_flows"]
+    # external_loss and total_loss are not connection flows.
+    rooms = {f["to_room"] for f in flows}
+    assert rooms == {"kitchen", "bedroom"}
+    by_room = {f["to_room"]: f["watts"] for f in flows}
+    assert by_room == {"kitchen": 45.0, "bedroom": -12.0}
+
+
+def test_heat_loss_sensor_connection_flows_empty_when_no_connections():
+    coord = _make_coordinator()
+    coord.heat_flows = {"living_room": {"external_loss": 200.0, "total_loss": 200.0}}
+    sensor = HeatLossSensor(coord, "living_room")
+    assert sensor.extra_state_attributes["connection_flows"] == []
+
+
+# ── HeatingEnergyTotalSensor ──────────────────────────────────────────
+
+
+def test_energy_total_sensor_integrates_power_over_time(monkeypatch):
+    coord = _make_coordinator(heating_power=2000.0)
+    coord.heat_sources[0].name = "lr_heater"
+    sensor = HeatingEnergyTotalSensor(coord, "lr_heater")
+
+    # Drive the integration timeline by patching the datetime symbol
+    # imported lazily inside ``native_value`` (it does ``from datetime
+    # import datetime`` per call).
+    import datetime as _datetime_mod
+    from types import SimpleNamespace as _NS
+
+    state = _NS(now_ts=1_000_000.0)
+
+    class _FakeDateTime:
+        @classmethod
+        def now(cls, tz=None):
+            return _NS(timestamp=lambda: state.now_ts)
+
+    monkeypatch.setattr(_datetime_mod, "datetime", _FakeDateTime)
+
+    # First call seeds the timestamp without integrating.
+    assert sensor.native_value == 0.0
+
+    # Advance one hour at 2 kW → 2 kWh added.
+    state.now_ts += 3600
+    assert sensor.native_value == pytest.approx(2.0, abs=1e-6)
+
+    # Another hour → 4 kWh total.
+    state.now_ts += 3600
+    assert sensor.native_value == pytest.approx(4.0, abs=1e-6)
+
+
+def test_energy_total_sensor_unique_id_pattern():
+    coord = _make_coordinator()
+    coord.heat_sources[0].name = "lr_heater"
+    sensor = HeatingEnergyTotalSensor(coord, "lr_heater")
+    assert sensor._attr_unique_id == "heating_assistant_lr_heater_energy_total"

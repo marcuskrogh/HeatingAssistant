@@ -9,6 +9,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.model_diagnostics import (
+    compute_autocorrelation_function,
     compute_model_fit_metrics,
     analyze_residuals,
     validate_parameters,
@@ -504,3 +505,37 @@ def test_compute_open_loop_predictions_uses_correct_attribute_names():
     assert result["n_segments"] >= 1
     assert "studio" in result["per_room"]
     assert result["per_room"]["studio"]["rmse"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Ljung–Box p-value on the ACF helper
+# ---------------------------------------------------------------------------
+
+
+def test_acf_white_noise_has_high_pvalue_and_is_white_noise_true():
+    rng = np.random.default_rng(0)
+    residuals = list(rng.normal(0.0, 1.0, 400))
+    result = compute_autocorrelation_function(residuals, max_lag=20)
+    assert "ljung_box_p_value" in result
+    assert result["is_white_noise"] is True
+    assert result["ljung_box_p_value"] > 0.05
+
+
+def test_acf_strongly_correlated_residuals_have_low_pvalue():
+    # Build residuals with a clear lag-1 dependence so the Ljung–Box test
+    # rejects whiteness.
+    n = 400
+    out = [0.0]
+    rng = np.random.default_rng(1)
+    for _ in range(n - 1):
+        out.append(0.85 * out[-1] + rng.normal(0.0, 0.2))
+    result = compute_autocorrelation_function(out, max_lag=20)
+    assert result["is_white_noise"] is False
+    assert result["ljung_box_p_value"] < 0.05
+
+
+def test_acf_short_series_returns_neutral_pvalue():
+    result = compute_autocorrelation_function([0.1, -0.1], max_lag=5)
+    assert result["n_samples"] == 2
+    assert result["ljung_box_p_value"] == 1.0
+    assert result["is_white_noise"] is True

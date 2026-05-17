@@ -407,6 +407,43 @@ def _residual_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
     }
 
 
+def _open_loop_card(room: RoomSpec) -> Dict[str, Any]:
+    """Measured vs. free-run-simulated trace from OpenLoopRMSESensor."""
+    ol = _eid("sensor", room.name, "open_loop_rmse")
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {"show": True, "title": f"{room.name} – Open-loop trace", "show_states": True},
+        "graph_span": "2h",
+        "yaxis": [{"id": "temp", "apex_config": {"title": {"text": "Temperature (°C)"}, "decimalsInFloat": 2}}],
+        "series": [
+            {
+                "entity": ol,
+                "name": "Measured",
+                "yaxis_id": "temp",
+                "color": "#0D47A1",
+                "stroke_width": 2,
+                "curve": "smooth",
+                "data_generator": (
+                    "return (entity.attributes.simulation || []).map(p => "
+                    "[new Date(p.time).getTime(), p.measured]);"
+                ),
+            },
+            {
+                "entity": ol,
+                "name": "Simulated (free-run)",
+                "yaxis_id": "temp",
+                "color": "#EF6C00",
+                "stroke_width": 2,
+                "stroke_dash": 4,
+                "data_generator": (
+                    "return (entity.attributes.simulation || []).map(p => "
+                    "[new Date(p.time).getTime(), p.predicted]);"
+                ),
+            },
+        ],
+    }
+
+
 def _parameter_table_card(room: RoomSpec) -> Dict[str, Any]:
     """Compact view of estimated parameter values + identifiability flags."""
     confidence = _eid("sensor", room.name, "parameter_confidence")
@@ -495,6 +532,20 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
         for room in spec.rooms
     ]
 
+    energy_card = {
+        "type": "entities",
+        "title": "Energy delivered (cumulative)",
+        "state_color": True,
+        "entities": [
+            {
+                "entity": _eid("sensor", src.name, "energy_total"),
+                "name": src.name,
+            }
+            for src in spec.sources
+        ]
+        or [{"type": "section", "label": "No heat sources configured"}],
+    }
+
     sections: List[Dict[str, Any]] = [
         {
             "type": "grid",
@@ -522,6 +573,13 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
                         {"entity": est_status, "name": "Parameters"},
                     ],
                 },
+            ],
+        },
+        {
+            "type": "grid",
+            "cards": [
+                {"type": "heading", "heading": "Energy", "heading_style": "title"},
+                energy_card,
             ],
         },
         {
@@ -630,6 +688,7 @@ def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
                 {"type": "heading", "heading": "Model fit", "heading_style": "title"},
                 _fit_gauge_card(room),
                 _residual_card(room, spec),
+                _open_loop_card(room),
             ],
         },
         {
@@ -753,6 +812,53 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
         ],
     }
 
+    history_panel = {
+        "type": "markdown",
+        "title": "Estimation history",
+        "content": (
+            "{% set history = state_attr('"
+            + est_status
+            + "', 'estimation_history') %}"
+            "{% if history %}"
+            "| When | LL | Applied | Success |\n"
+            "|---|---|---|---|\n"
+            "{% for h in history[-10:] | reverse %}"
+            "| {{ h.estimated_at }} | "
+            "{{ '%.2f' % h.log_likelihood if h.log_likelihood is not none else '—' }} | "
+            "{{ 'yes' if h.applied else 'no' }} | "
+            "{{ 'yes' if h.success else 'no' }} |\n"
+            "{% endfor %}"
+            "{% else %}"
+            "_No estimation runs yet. Press **Estimate now** to start._"
+            "{% endif %}"
+        ),
+    }
+
+    loglik_panel = {
+        "type": "entities",
+        "title": "Log-likelihood landscape",
+        "entities": [
+            {
+                "type": "call-service",
+                "name": f"Compute slice – {room.name}",
+                "icon": "mdi:chart-bell-curve",
+                "service": f"{DOMAIN}.compute_loglik_slice",
+                "service_data": {"room_name": room.name, "n_grid": 11, "span_log": 1.0},
+            }
+            for room in spec.rooms
+        ]
+        or [{"type": "section", "label": "No rooms configured"}],
+        "footer": {
+            "type": "markdown",
+            "content": (
+                "Each button evaluates the CD-EKF log-likelihood on an 11×11"
+                " (log C, log R_ext) grid around the current MLE. The grid"
+                " comes back in the service response – use Developer Tools →"
+                " Services to inspect it, or add a Plotly card."
+            ),
+        },
+    }
+
     return {
         "title": "Diagnostics",
         "path": "diagnostics",
@@ -764,6 +870,8 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
             {"type": "grid", "cards": [{"type": "heading", "heading": "Residuals", "heading_style": "title"}, residual_panel]},
             {"type": "grid", "cards": [{"type": "heading", "heading": "Open-loop validation", "heading_style": "title"}, open_loop_panel]},
             {"type": "grid", "cards": [{"type": "heading", "heading": "Parameter identifiability", "heading_style": "title"}, parameter_panel]},
+            {"type": "grid", "cards": [{"type": "heading", "heading": "Log-likelihood landscape", "heading_style": "title"}, loglik_panel]},
+            {"type": "grid", "cards": [{"type": "heading", "heading": "History", "heading_style": "title"}, history_panel]},
         ],
     }
 

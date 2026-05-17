@@ -877,7 +877,10 @@ def compute_autocorrelation_function(
         ``confidence_bound`` : float      – approximate ±95 % CI width
                                (= 1.96 / sqrt(n))
         ``ljung_box_stat``   : float      – Q = n(n+2) Σ ρ_k²/(n−k)
+        ``ljung_box_p_value``: float      – right-tail χ²_K p-value for Q
+                               (small p ⇒ residuals are not white noise)
         ``n_samples``        : int
+        ``is_white_noise``   : bool       – ``ljung_box_p_value > 0.05``
     """
     n = len(residuals)
     if n < 4:
@@ -886,7 +889,9 @@ def compute_autocorrelation_function(
             "lags": [0],
             "confidence_bound": 1.0,
             "ljung_box_stat": 0.0,
+            "ljung_box_p_value": 1.0,
             "n_samples": n,
+            "is_white_noise": True,
         }
 
     r = np.array(residuals, dtype=float)
@@ -909,10 +914,39 @@ def compute_autocorrelation_function(
     )
     lb_stat = float(n * (n + 2) * lb)
 
+    # χ²_K right-tail p-value. scipy.stats is optional so we fall back to a
+    # series approximation when it is unavailable.
+    dof = max(1, len(acf) - 1)
+    p_value = _chi2_sf(lb_stat, dof)
+
     return {
         "acf": [round(v, 5) for v in acf],
         "lags": lags,
         "confidence_bound": round(ci, 4),
         "ljung_box_stat": round(lb_stat, 3),
+        "ljung_box_p_value": round(p_value, 4),
         "n_samples": n,
+        "is_white_noise": bool(p_value > 0.05),
     }
+
+
+def _chi2_sf(x: float, dof: int) -> float:
+    """Survival function (1 - cdf) of the χ² distribution with ``dof`` dof.
+
+    Uses :func:`scipy.stats.chi2.sf` when available and falls back to a
+    Wilson–Hilferty normal approximation otherwise so the diagnostics module
+    keeps working even in stripped-down environments.
+    """
+    if x <= 0 or dof <= 0:
+        return 1.0
+    try:
+        from scipy.stats import chi2
+
+        return float(chi2.sf(x, dof))
+    except Exception:
+        # Wilson–Hilferty: ((x/dof)^(1/3) − (1 − 2/(9 dof))) / sqrt(2/(9 dof))
+        # is approximately N(0, 1). We use the complementary error function
+        # for the right tail.
+        a = 2.0 / (9.0 * dof)
+        z = ((x / dof) ** (1.0 / 3.0) - (1.0 - a)) / math.sqrt(a)
+        return 0.5 * math.erfc(z / math.sqrt(2.0))
