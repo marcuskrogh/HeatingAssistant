@@ -3725,15 +3725,246 @@ To use a measured irradiance sensor instead of a computed one:
 
 ## 17. Roadmap
 
-- [x] **Weather-API outdoor temperature forecast** — the controller can use a HA weather entity (e.g. Met.no, OpenWeatherMap) for multi-hour outdoor temperature forecasts instead of the persistence assumption.  Configure `weather_entity` in YAML or the UI wizard.
-- [x] **Cooling mode** — heat-pump rooms expose `heat_cool` HVAC mode; two-threshold hysteresis (`turn_off_deadband`) governs mode switching.  MPC-requested active cooling (`fraction < 0`) uses `cool`/`dry`/`fan_only` with `target_temperature_cooling()`; passive cooling activates above `setpoint + deadband` and exits below `setpoint − deadband`.  Signed heating power (positive = heating, negative = cooling) is tracked throughout.
-- [x] **Adaptive parameter estimation** — `estimate_parameters_ml` service uses CD-EKF maximum-likelihood estimation to jointly identify `thermal_mass`, `r_external`, `internal_gain`, heater power-scale factors, and inter-room resistances from accumulated operating history.  A one-press button entity triggers the full ML estimation pipeline.  Estimated parameters are **persisted to `entry.data`** and restored on full HA restart so no re-identification is needed after a reboot.  History buffer is also saved to HA Storage.  A **Reset Parameters** button reverts to configured defaults.
-- [x] **Model diagnostics** — `analyze_model_fit`, `validate_parameters`, `controller_performance_report`, and `run_open_loop_simulation` services provide comprehensive insight into model quality and controller behaviour.  Per-room diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) update every cycle.
-- [ ] **Comfort schedule support** — define day/night/away setpoint profiles per room on a weekly timetable.
-- [ ] **Energy price optimisation** — weight the energy cost term in the MPC by the time-of-use electricity tariff so the controller pre-heats the house before peak pricing periods.
-- [ ] **GUI room editor** — add config-flow steps for defining rooms and heat sources through the UI, eliminating the YAML requirement.
-- [ ] **Measured irradiance override** — allow a solar irradiance sensor to replace the clear-sky model for greater accuracy on cloudy days.
-- [ ] **HACS integration** — publish to the HACS default repository for one-click installation.
+Heating Assistant has grown from a research prototype into a fully-featured MPC
+integration for Home Assistant.  The roadmap below records what has already
+shipped and lays out an ambitious multi-year vision for becoming the
+**de-facto open-source whole-home energy controller** for HA users — built on
+rigorous physics, optimised for comfort *and* cost, and gorgeous to look at.
+
+### 17.1 Shipped (current release, v1.x)
+
+The features in this list are live today.  See the corresponding sections of
+this README for usage details.
+
+- [x] **Receding-horizon nonlinear MPC** — CD-EKF state estimation +
+  `CDTrackingOptimalControlProblem` NLP solve every cycle, with IPOPT default
+  and deterministic SLSQP fallback.  Solves a 5-room / 8-step horizon in
+  ~5 s on a small NUC.
+- [x] **Per-room RC thermal model with inter-room coupling** — full lumped-
+  parameter network including connections to adjacent rooms and to the
+  outdoors; assembled once into compact state-space matrices for fast updates.
+- [x] **Electric, infrared, and air-source heat-pump heat sources** — joint
+  optimisation across any mix of switch/number/climate-domain devices in any
+  room; per-source heater-scale factors are jointly identified by the
+  estimator.
+- [x] **Weather-API outdoor temperature forecast** — multi-hour outdoor
+  temperature forecasts from any HA weather entity (Met.no, OpenWeatherMap,
+  …) interpolated to each MPC horizon step.  Diagnostic
+  `WeatherForecastStatusSensor` surfaces fetch health.
+- [x] **Active and passive cooling** — heat-pump rooms expose `heat_cool`
+  HVAC mode with two-threshold Schmitt-trigger hysteresis around the
+  setpoint; signed heating power (positive = heating, negative = cooling) is
+  tracked throughout the MPC, sensors, and dashboard.
+- [x] **Adaptive ML parameter estimation** — `estimate_parameters_ml`
+  service runs CD-EKF maximum-likelihood identification of `thermal_mass`,
+  `r_external`, `internal_gain`, heater scale factors, and inter-room
+  resistances over the rolling observation history.  A one-press button
+  entity triggers the full pipeline.  Estimated parameters and the history
+  buffer are persisted to `entry.data` / HA Storage and survive restarts; a
+  **Reset Parameters** button reverts to configured defaults.
+- [x] **Comfort schedules (sleep / setback / away)** — per-room weekly
+  timetable of setpoint changes or fully-off periods, with optional
+  frost-protection floor.  The MPC's horizon naturally produces optimal
+  pre-heat ahead of the next comfort window.  Runtime
+  `set_schedule_enabled` service suspends/resumes schedules for one-off
+  exceptions.
+- [x] **Comprehensive model diagnostics** — `analyze_model_fit`,
+  `validate_parameters`, `controller_performance_report`,
+  `run_open_loop_simulation`, and `compute_loglik_slice` services provide
+  RMSE/MAE/R²/bias, residual whiteness (Ljung–Box), open-loop free-run
+  validation, and a 2-D log-likelihood landscape for assessing parameter
+  identifiability.  Per-room diagnostic sensors update every cycle.
+- [x] **Out-of-the-box Lovelace dashboard** — `dashboard.py` auto-generates
+  and registers a complete multi-view dashboard from the room/heat-source
+  topology on first setup, with per-room subviews, temperature/heating-plan
+  charts, diagnostics, and a system overview.  The
+  `regenerate_dashboard` service rebuilds it after topology changes and
+  supports a `dry_run` mode for previewing the YAML.
+- [x] **Generic `mbc` framework** — the underlying continuous-discrete
+  modelling, EKF, and optimal-control library is reusable for arbitrary
+  nonlinear systems and lives in its own repository.
+- [x] **Persistent history + warm restart** — the rolling observation buffer,
+  identified parameters, and per-room overrides survive HA restarts and
+  integration reloads.
+
+### 17.2 Next release (v1.x — short term, in flight)
+
+Focused, well-scoped items that improve the day-one experience for new users
+and unlock the first cost-saving capabilities.
+
+- [ ] **HACS publication** — submit to the HACS default repository for
+  one-click installation, automatic update notifications, and a
+  curated `hacs.json` with proper version constraints.
+- [ ] **End-to-end GUI room editor** — extend the existing config-flow
+  helpers so rooms, windows, connections, and heat sources can be created,
+  edited, and deleted entirely through the HA UI.  YAML remains supported
+  for power-users but stops being mandatory.  Includes a "visual"
+  drag-to-connect topology editor backed by `mermaid` diagrams.
+- [ ] **Energy-price-aware MPC** — weight the MPC energy term by a
+  time-of-use tariff entity (Nord Pool, Octopus Agile, Tibber, EPEX) so
+  the controller pre-heats during cheap hours and coasts through peaks.
+  Surface a per-room **Cost Forecast** sensor (€/h) and a system-wide
+  **Today's Savings** sensor (€) comparing actual spend vs a flat-tariff
+  baseline.
+- [ ] **Measured irradiance override** — let a global-horizontal or
+  plane-of-array irradiance sensor (W/m²) replace the clear-sky model on
+  cloudy days; auto-detect overcast conditions and blend smoothly.
+- [ ] **Window / door open detection** — subscribe to `binary_sensor` open
+  entities per room and temporarily clamp heater output to zero (with a
+  configurable hold-off) so the controller doesn't fight a wide-open
+  window.  Surface a "boost loss" estimate (Wh wasted) on the dashboard.
+- [ ] **Occupancy-aware setpoints** — accept a per-room `binary_sensor`
+  (motion / presence / device_tracker) and switch between *occupied* and
+  *unoccupied* setpoint profiles, with a configurable smoothing delay so a
+  brief absence doesn't immediately drop the temperature.
+- [ ] **First-class English & translated UI** — translate the wizard,
+  options flow, services, and dashboard captions into the major HA locales
+  (de, fr, es, it, nl, da, sv, no, fi, pl, …) via the standard HA
+  `translations/` directory.
+
+### 17.3 v2 — "Whole-home energy optimiser" (medium term)
+
+A coherent leap in scope: from a heating controller to a holistic
+*home-energy* controller that co-optimises heating, hot water, electricity
+price, PV, and battery.
+
+- [ ] **Domestic Hot Water (DHW) tank model** — treat the cylinder as an
+  additional thermal node with stratified or single-zone dynamics, modelled
+  losses, and a draw-pattern forecast.  Co-schedule reheats inside the same
+  MPC so legionella cycles and price valleys are handled jointly with space
+  heating.
+- [ ] **Underfloor heating & high-thermal-mass emitters** — add an explicit
+  emitter sub-model (slab + floor + air) so the controller correctly
+  predicts the 4–8 h lag of UFH and avoids the "too late, too much"
+  overshoot pattern that plagues naïve thermostats.  Per-manifold valve
+  actuator support.
+- [ ] **PV generation forecast & self-consumption** — pull solar production
+  forecasts from `solcast` / `forecast.solar` and bias heating into the
+  hours when self-generated power is free, reducing grid import.
+- [ ] **Home battery co-optimisation** — joint MPC over battery SOC and
+  thermal mass, so the integration can decide "charge the battery now,
+  pre-heat at noon".  Supports Tesla Powerwall, Enphase, Victron, Sonnen,
+  and Huawei via existing HA integrations.
+- [ ] **Smart-grid / Demand-Response signal compliance** — react to grid
+  operator DR events (OpenADR, Tibber Pulse, EDS DK1/DK2 signals) by
+  shaving load while respecting per-room comfort bounds.  A "DR
+  participation" sensor tallies kWh shifted.
+- [ ] **Heat-pump telemetry adapters** — first-class support for Mitsubishi
+  MELCloud, Daikin Onecta, NIBE Uplink, IVT, Bosch, Vaillant, Viessmann,
+  and Panasonic Aquarea so the integration consumes real reported COP,
+  flow temperature, compressor frequency, and defrost state instead of the
+  Carnot approximation.
+- [ ] **Stochastic / robust MPC** — propagate weather and price forecast
+  uncertainty through scenario-tree or chance-constrained MPC so comfort
+  bounds are honoured *with probability ≥ 95 %* instead of in expectation.
+- [ ] **PMV/PPD thermal comfort objective** — switch from "track a setpoint"
+  to "maintain ASHRAE-55 PMV ≈ 0", combining temperature, humidity, air
+  speed, mean radiant temperature, clothing, and metabolic-rate
+  estimates.  Per-room humidity sensor support.
+- [ ] **Multi-zone ducted heat pump & VAV support** — model dampers, smart
+  vents (Flair, Keen), and trunk-line dynamics so a single ducted unit can
+  be optimised across all the rooms it serves.
+
+### 17.4 v3 — "Self-driving home" (long term, dream big)
+
+The aspirational ceiling.  Each item below is plausible with today's tools
+and a focused engineering push.
+
+- [ ] **3-D interactive floor-plan dashboard** — first-class custom
+  Lovelace strategy that renders an isometric or top-down floor plan from
+  the room topology, animated with a live temperature heatmap, heat-flux
+  arrows between rooms, solar-gain shading per window, and click-through
+  to per-room MPC views.  Built on a small WebGL/SVG strategy module
+  bundled with the integration.
+- [ ] **BIM / floor-plan import** — generate the room topology, windows,
+  and external surface areas automatically from a Matterport scan,
+  Magicplan project, IFC file, or a hand-drawn sketch processed by a
+  vision model.  Replaces 80 % of manual YAML on first install.
+- [ ] **Self-tuning controller weights** — Bayesian optimisation loop that
+  searches `energy_weight`, `smoothing_weight`, `constraint_offset`, and
+  horizon length to maximise a user-selectable utility (comfort vs cost
+  vs equipment wear) over the long-run history buffer.  Surface
+  recommended tunings in the dashboard with one-click apply.
+- [ ] **Learned residual hybrid model (grey-box)** — keep the physics-
+  based RC core but learn a small neural-network residual `g_θ(x,u,d)`
+  to capture unmodelled effects (radiator non-linearities, draughts,
+  occupant heat).  Training runs locally on CPU, falls back to the pure
+  RC model if confidence is low.
+- [ ] **Reinforcement-learning policy as MPC accelerator** — distil a
+  fast policy network from the MPC's offline rollouts, run it at every
+  control cycle for sub-millisecond response, and use the full MPC as a
+  safety-fallback / periodic re-trainer.  Solves the 5-room scenario in
+  <10 ms.
+- [ ] **Differentiable physics simulator + gradient-based design** —
+  expose the RC model as a JAX/PyTorch-compatible module so users can
+  back-propagate "what insulation upgrade saves the most over a winter?"
+  through a year-long simulation.
+- [ ] **Federated benchmarking** — opt-in, differentially-private
+  aggregation of anonymised RC parameters and savings across the user
+  base, so each installation can compare itself to similar homes
+  ("your insulation R-value is in the 30th percentile for 1970s Danish
+  semi-detached houses").
+- [ ] **Voice & LLM integration** — first-class Assist intents for natural
+  requests: *"Make the lounge cosy for a movie at 8 pm"*, *"Warm the
+  bedroom 30 min before my alarm"*, *"Spend at most €2 on heating
+  tomorrow"*.  Backed by an LLM tool layer that translates the request
+  into a temporary MPC objective and explains its plan back to the user.
+- [ ] **Anomaly detection & equipment-health monitoring** — flag a heat
+  pump whose measured COP drifts > 15 % below the Carnot model
+  (refrigerant leak, fouled coil), a radiator that no longer responds
+  to its valve command, or a sensor returning physically impossible
+  values; raise HA Repairs issues automatically.
+- [ ] **CO₂ / air-quality coupling** — co-control ventilation (MVHR,
+  bath fans, window openers) with heating, balancing fresh-air demand
+  (CO₂, VOC, humidity) against thermal-loss penalty.
+- [ ] **Ground-source, water-source, and hybrid systems** — add models for
+  ground-loop temperature dynamics, gas-condensing boilers (with cycling
+  efficiency curves), pellet boilers, district heating substations, and
+  hybrid setups that switch between sources based on marginal cost.
+- [ ] **Solar-thermal collectors** — first-class flat-plate / evacuated-
+  tube models feeding the DHW tank, integrated into the same energy
+  MPC.
+- [ ] **EV charging coordination** — share the household import budget
+  with the EV charger (OCPP, Wallbox, Easee, Zaptec) so heating doesn't
+  trip the main fuse during overnight charging and surplus PV is
+  allocated optimally between car and house.
+- [ ] **Built-in HiL simulator & screencast mode** — `pytest`-driven
+  hardware-in-the-loop harness that replays a year of real weather and
+  occupancy through the controller, plus a "screencast" mode that
+  renders the dashboard at 60 fps for demos and documentation.
+- [ ] **Mobile companion experience** — HA Companion-app-native push
+  notifications ("Cheap-power window starts in 30 min — boosting the
+  hot-water tank"), rich charts, and a "I'm coming home early" gesture
+  that triggers an MPC re-plan with the new arrival ETA.
+- [ ] **Home Assistant Core integration** — once the surface area is
+  stable, propose Heating Assistant for inclusion in HA Core so it ships
+  to every HA install out of the box.
+
+### 17.5 Cross-cutting non-functional goals
+
+These run alongside every release and define the bar we hold ourselves to.
+
+- [ ] **<1 s control cycle for 10-room houses** — micro-optimise the
+  NLP build, exploit warm-starts across cycles, optionally pre-compile
+  the model with `casadi` / `cython`, and parallelise per-house EKFs so
+  large homes feel instant.
+- [ ] **100 % typed Python + `mypy --strict`** — extend the existing
+  type coverage to the whole codebase and gate it in CI.
+- [ ] **>90 % test coverage with golden-trace regression tests** — bundle
+  a library of synthetic and recorded house traces and assert that the
+  controller's decisions stay within tight bands across releases.
+- [ ] **Quality docs + a friendly "Why is the controller doing that?"
+  explainer** — a dashboard card that decomposes the current control
+  action into "tracking", "energy", "smoothing", and "constraint" terms
+  so the user can *see* why their radiator is at 47 %.
+- [ ] **Zero-friction safety** — every dangerous action (large
+  thermal-mass changes, parameter resets, schedule overrides) is
+  reversible with a single click and audit-logged in the diagnostics
+  panel.
+
+Ideas, votes, and contributions are very welcome — open an issue or a PR on
+[GitHub](https://github.com/marcuskrogh/HeatingAssistant) to discuss any of
+the above.
 
 ---
 
