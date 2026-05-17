@@ -959,9 +959,18 @@ def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
 
 
 def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
-    """Diagnostics view – estimation workflow + per-room fit matrix."""
+    """Diagnostics view – estimation workflow + per-room fit matrix.
+
+    Service actions are rendered as standalone ``type: button`` cards rather
+    than ``type: call-service`` rows inside entities cards.  This avoids
+    frontend compatibility issues in newer HA versions where call-service
+    entity rows interact poorly with services that carry response data.
+    """
     est_status = _system_eid("sensor", "estimated_parameters_status")
 
+    # ------------------------------------------------------------------
+    # Workflow section
+    # ------------------------------------------------------------------
     estimation_card = {
         "type": "entities",
         "title": "Parameter estimation",
@@ -970,73 +979,21 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
             {"entity": _button_eid("estimate_parameters"), "name": "Estimate now"},
             {"entity": _button_eid("reset_parameters"), "name": "Reset to defaults"},
             {"entity": est_status, "name": "Estimated parameters"},
-            {
-                "type": "call-service",
-                "name": "Dry-run estimation",
-                "icon": "mdi:flask-empty-outline",
-                "service": f"{DOMAIN}.estimate_parameters_ml",
-                "service_data": {"apply_parameters": False},
-            },
         ],
     }
 
-    fit_rows: List[Dict[str, Any]] = []
-    for room in spec.rooms:
-        fit = _eid("sensor", room.name, "model_fit_quality")
-        fit_rows.append({"entity": fit, "name": room.name})
-
-    fit_matrix = {
-        "type": "entities",
-        "title": "Per-room model fit",
-        "state_color": True,
-        "entities": fit_rows,
-    }
-
-    residual_rows: List[Dict[str, Any]] = []
-    for room in spec.rooms:
-        residual_rows.append({"entity": _eid("sensor", room.name, "residual_acf"), "name": room.name})
-    residual_panel = {
-        "type": "entities",
-        "title": "Residual whiteness (lag-1 ACF)",
-        "state_color": True,
-        "entities": residual_rows,
-    }
-
-    open_loop_entities: List[Dict[str, Any]] = [
-        {"entity": _eid("sensor", room.name, "open_loop_rmse"), "name": room.name}
-        for room in spec.rooms
-    ]
-    open_loop_entities.extend(
-        [
-            {
-                "type": "call-service",
-                "name": "Run open-loop simulation",
-                "icon": "mdi:play-circle",
-                "service": f"{DOMAIN}.run_open_loop_simulation",
-            },
-            {
-                "type": "call-service",
-                "name": "Analyse model fit",
-                "icon": "mdi:chart-bell-curve",
-                "service": f"{DOMAIN}.analyze_model_fit",
-            },
-        ]
-    )
-    open_loop_panel = {
-        "type": "entities",
-        "title": "Open-loop RMSE",
-        "state_color": True,
-        "entities": open_loop_entities,
-    }
-
-    parameter_panel = {
-        "type": "entities",
-        "title": "Identifiability",
-        "state_color": True,
-        "entities": [
-            {"entity": _eid("sensor", room.name, "parameter_confidence"), "name": room.name}
-            for room in spec.rooms
-        ],
+    # Dry-run as a standalone button card – keeps the entities card free of
+    # call-service rows, which can trigger frontend configuration errors in
+    # some HA releases when the target service returns response data.
+    dry_run_button: Dict[str, Any] = {
+        "type": "button",
+        "name": "Dry-run estimation (no apply)",
+        "icon": "mdi:flask-empty-outline",
+        "tap_action": {
+            "action": "call-service",
+            "service": f"{DOMAIN}.estimate_parameters_ml",
+            "service_data": {"apply_parameters": False},
+        },
     }
 
     history_panel = {
@@ -1061,34 +1018,114 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
         ),
     }
 
-    loglik_entities: List[Dict[str, Any]] = []
+    # ------------------------------------------------------------------
+    # Fit matrix / residuals
+    # ------------------------------------------------------------------
+    fit_rows: List[Dict[str, Any]] = [
+        {"entity": _eid("sensor", room.name, "model_fit_quality"), "name": room.name}
+        for room in spec.rooms
+    ]
+    fit_matrix = {
+        "type": "entities",
+        "title": "Per-room model fit",
+        "state_color": True,
+        "entities": fit_rows,
+    }
+
+    residual_panel = {
+        "type": "entities",
+        "title": "Residual whiteness (lag-1 ACF)",
+        "state_color": True,
+        "entities": [
+            {"entity": _eid("sensor", room.name, "residual_acf"), "name": room.name}
+            for room in spec.rooms
+        ],
+    }
+
+    # ------------------------------------------------------------------
+    # Open-loop validation
+    # ------------------------------------------------------------------
+    open_loop_panel = {
+        "type": "entities",
+        "title": "Open-loop RMSE",
+        "state_color": True,
+        "entities": [
+            {"entity": _eid("sensor", room.name, "open_loop_rmse"), "name": room.name}
+            for room in spec.rooms
+        ],
+    }
+
+    open_loop_run_button: Dict[str, Any] = {
+        "type": "button",
+        "name": "Run open-loop simulation",
+        "icon": "mdi:play-circle",
+        "tap_action": {
+            "action": "call-service",
+            "service": f"{DOMAIN}.run_open_loop_simulation",
+        },
+    }
+    open_loop_analyse_button: Dict[str, Any] = {
+        "type": "button",
+        "name": "Analyse model fit",
+        "icon": "mdi:chart-bell-curve",
+        "tap_action": {
+            "action": "call-service",
+            "service": f"{DOMAIN}.analyze_model_fit",
+        },
+    }
+
+    # ------------------------------------------------------------------
+    # Parameter identifiability
+    # ------------------------------------------------------------------
+    parameter_panel = {
+        "type": "entities",
+        "title": "Identifiability",
+        "state_color": True,
+        "entities": [
+            {"entity": _eid("sensor", room.name, "parameter_confidence"), "name": room.name}
+            for room in spec.rooms
+        ],
+    }
+
+    # ------------------------------------------------------------------
+    # Log-likelihood landscape
+    # ------------------------------------------------------------------
+    loglik_entity_rows: List[Dict[str, Any]] = []
     if spec.rooms:
-        loglik_entities.append({"type": "section", "label": "Last computed"})
-        loglik_entities.extend(
-            {
-                "entity": _eid("sensor", room.name, "loglik_slice"),
-                "name": f"{room.name} – computed at",
-            }
-            for room in spec.rooms
-        )
-        loglik_entities.append({"type": "section", "label": "Compute slice"})
-        loglik_entities.extend(
-            {
-                "type": "call-service",
-                "name": f"Compute slice – {room.name}",
-                "icon": "mdi:chart-bell-curve",
-                "service": f"{DOMAIN}.compute_loglik_slice",
-                "service_data": {"room_name": room.name, "n_grid": 11, "span_log": 1.0},
-            }
-            for room in spec.rooms
-        )
+        loglik_entity_rows.append({"type": "section", "label": "Last computed"})
+        for room in spec.rooms:
+            loglik_entity_rows.append(
+                {
+                    "entity": _eid("sensor", room.name, "loglik_slice"),
+                    "name": f"{room.name} – computed at",
+                }
+            )
     else:
-        loglik_entities.append({"type": "section", "label": "No rooms configured"})
+        loglik_entity_rows.append({"type": "section", "label": "No rooms configured"})
+
     loglik_panel = {
         "type": "entities",
         "title": "Log-likelihood landscape",
-        "entities": loglik_entities,
+        "entities": loglik_entity_rows,
     }
+
+    # One button card per room – standalone so the frontend does not need to
+    # handle a service response inline (compute_loglik_slice stores its result
+    # on the LoglikSliceSensor attribute and posts a persistent notification).
+    loglik_button_cards: List[Dict[str, Any]] = [
+        {
+            "type": "button",
+            "name": f"Compute slice – {room.name}",
+            "icon": "mdi:chart-bell-curve",
+            "tap_action": {
+                "action": "call-service",
+                "service": f"{DOMAIN}.compute_loglik_slice",
+                "service_data": {"room_name": room.name, "n_grid": 11, "span_log": 1.0},
+            },
+        }
+        for room in spec.rooms
+    ]
+
     loglik_help = {
         "type": "markdown",
         "content": (
@@ -1097,11 +1134,9 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
             " CD-EKF log-likelihood on an 11×11 (log C, log R_ext) grid"
             " around the current MLE.\n\n"
             "The result is stored on the per-room `…_loglik_slice` sensor and"
-            " summarised in a persistent notification. Call the service from"
-            " Developer Tools with `return_response: true` to get the full"
-            " grid in the response, or read"
-            " `state_attr('sensor.heating_assistant_<room>_loglik_slice',"
-            " 'log_likelihood')` from a template / Plotly card."
+            " summarised in a persistent notification. To read the full grid,"
+            " use `state_attr('sensor.heating_assistant_<room>_loglik_slice',"
+            " 'log_likelihood')` from a template or Plotly card."
         ),
     }
 
@@ -1111,20 +1146,54 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
         "icon": "mdi:stethoscope",
         "type": "sections",
         "sections": [
-            {"type": "grid", "cards": [{"type": "heading", "heading": "Workflow", "heading_style": "title"}, estimation_card]},
-            {"type": "grid", "cards": [{"type": "heading", "heading": "Fit matrix", "heading_style": "title"}, fit_matrix]},
-            {"type": "grid", "cards": [{"type": "heading", "heading": "Residuals", "heading_style": "title"}, residual_panel]},
-            {"type": "grid", "cards": [{"type": "heading", "heading": "Open-loop validation", "heading_style": "title"}, open_loop_panel]},
-            {"type": "grid", "cards": [{"type": "heading", "heading": "Parameter identifiability", "heading_style": "title"}, parameter_panel]},
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Workflow", "heading_style": "title"},
+                    estimation_card,
+                    dry_run_button,
+                    history_panel,
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Fit matrix", "heading_style": "title"},
+                    fit_matrix,
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Residuals", "heading_style": "title"},
+                    residual_panel,
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Open-loop validation", "heading_style": "title"},
+                    open_loop_panel,
+                    open_loop_run_button,
+                    open_loop_analyse_button,
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Parameter identifiability", "heading_style": "title"},
+                    parameter_panel,
+                ],
+            },
             {
                 "type": "grid",
                 "cards": [
                     {"type": "heading", "heading": "Log-likelihood landscape", "heading_style": "title"},
                     loglik_panel,
+                    *loglik_button_cards,
                     loglik_help,
                 ],
             },
-            {"type": "grid", "cards": [{"type": "heading", "heading": "History", "heading_style": "title"}, history_panel]},
         ],
     }
 
