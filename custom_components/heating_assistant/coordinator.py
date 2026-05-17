@@ -344,6 +344,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Each entry mirrors the snapshot persisted in entry.data plus the
         # ``applied`` flag so dashboards can show a history of decisions.
         self._estimation_history: deque = deque(maxlen=ESTIMATION_HISTORY_SIZE)
+        # Most recent log-likelihood slice per room, populated by
+        # ``async_compute_loglik_slice`` and consumed by the matching
+        # ``LoglikSliceSensor``.
+        self._loglik_slices: Dict[str, Dict[str, Any]] = {}
         stored_est: Optional[Dict[str, Any]] = data.get(CONF_ESTIMATED_PARAMS)
         if stored_est:
             self._restore_estimated_parameters(stored_est)
@@ -1661,7 +1665,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """Run :meth:`KalmanMLEstimator.compute_loglik_slice` off-thread.
 
         Returns ``None`` when the room is unknown or the history buffer is
-        too short. The grid is centred on the current parameter values.
+        too short. The grid is centred on the current parameter values
+        and cached on ``self._loglik_slices[room_name]`` so the matching
+        :class:`LoglikSliceSensor` can expose it without recomputing.
         """
         from .parameter_estimator import KalmanMLEstimator
 
@@ -1672,13 +1678,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         history = list(self._history_buffer)
-        return await self.hass.async_add_executor_job(
+        result = await self.hass.async_add_executor_job(
             estimator.compute_loglik_slice,
             history,
             room_name,
             int(n_grid),
             float(span_log),
         )
+        if result is not None:
+            slices = getattr(self, "_loglik_slices", None)
+            if slices is None:
+                slices = {}
+                self._loglik_slices = slices
+            slices[room_name] = {
+                "computed_at": datetime.now(timezone.utc).isoformat(),
+                **result,
+            }
+            self.async_update_listeners()
+        return result
 
     def _apply_estimated_parameters(
         self,

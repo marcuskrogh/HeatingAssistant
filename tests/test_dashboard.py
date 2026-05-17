@@ -155,7 +155,10 @@ def test_room_view_temperature_chart_references_canonical_entities(two_room_spec
     view = _room_view(build_dashboard(two_room_spec), "Living Room")
     refs = set(_iter_entity_refs(view))
     expected = {
-        f"climate.{DOMAIN}_living_room_climate",
+        # The climate entity drops the ``_climate`` suffix on the
+        # registry-assigned entity_id (HA slugifies ``_attr_name``, which
+        # is "Heating Assistant – Living Room").
+        f"climate.{DOMAIN}_living_room",
         f"sensor.{DOMAIN}_living_room_temperature_measured",
         f"sensor.{DOMAIN}_living_room_temperature_filtered",
         f"sensor.{DOMAIN}_living_room_temperature_forecast",
@@ -178,13 +181,14 @@ def test_room_view_temperature_chart_references_canonical_entities(two_room_spec
     assert not missing, f"Missing entity references on room view: {missing}"
 
 
-def test_control_card_includes_per_source_action_for_room(two_room_spec):
+def test_room_view_does_not_reference_legacy_climate_suffix(two_room_spec):
+    """Regression guard for the entity_id bug: the climate card must use
+    ``climate.heating_assistant_living_room`` (HA's slug of the name), not
+    ``climate.heating_assistant_living_room_climate`` (the unique_id)."""
     view = _room_view(build_dashboard(two_room_spec), "Living Room")
     refs = set(_iter_entity_refs(view))
-    # The heat pump in Living Room contributes a control_action series.
-    assert f"sensor.{DOMAIN}_lr_heater_control_action" in refs
-    # The bedroom heater's series must NOT appear on the living-room view.
-    assert f"sensor.{DOMAIN}_br_heater_control_action" not in refs
+    assert f"climate.{DOMAIN}_living_room_climate" not in refs
+    assert f"climate.{DOMAIN}_living_room" in refs
 
 
 def test_room_without_schedule_has_no_schedule_section():
@@ -221,8 +225,8 @@ def test_overview_has_one_comfort_tile_per_room(two_room_spec):
     overview = next(v for v in dashboard["views"] if v["title"] == "Overview")
     tiles = [c for c in _iter_cards(overview) if c.get("type") == "tile"]
     refs = {t["entity"] for t in tiles}
-    assert f"climate.{DOMAIN}_living_room_climate" in refs
-    assert f"climate.{DOMAIN}_bedroom_climate" in refs
+    assert f"climate.{DOMAIN}_living_room" in refs
+    assert f"climate.{DOMAIN}_bedroom" in refs
 
 
 def test_overview_links_to_room_subviews(two_room_spec):
@@ -237,44 +241,72 @@ def test_overview_links_to_room_subviews(two_room_spec):
     assert "/heating-assistant/bedroom" in nav_paths
 
 
+def _iter_call_service_rows(node):
+    """Yield every ``call-service`` row dict inside ``entities`` lists."""
+    if isinstance(node, dict):
+        if node.get("type") == "call-service" and node.get("service"):
+            yield node
+        for v in node.values():
+            yield from _iter_call_service_rows(v)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _iter_call_service_rows(item)
+
+
 def test_diagnostics_view_includes_estimation_buttons_and_per_room_rows(two_room_spec):
     dashboard = build_dashboard(two_room_spec)
     diag = next(v for v in dashboard["views"] if v["title"] == "Diagnostics")
     refs = set(_iter_entity_refs(diag))
-    assert f"button.{DOMAIN}_estimate_parameters_button" in refs
-    assert f"button.{DOMAIN}_reset_parameters_button" in refs
+    # Buttons drop the ``_button`` unique-id suffix — the entity_id is the
+    # slug of ``_attr_name`` (no ``_button``).
+    assert f"button.{DOMAIN}_estimate_parameters" in refs
+    assert f"button.{DOMAIN}_reset_parameters" in refs
     assert f"sensor.{DOMAIN}_living_room_model_fit_quality" in refs
     assert f"sensor.{DOMAIN}_bedroom_model_fit_quality" in refs
     assert f"sensor.{DOMAIN}_living_room_parameter_confidence" in refs
     assert f"sensor.{DOMAIN}_bedroom_parameter_confidence" in refs
 
 
-def test_diagnostics_dry_run_button_calls_estimate_ml_with_apply_false(two_room_spec):
-    dashboard = build_dashboard(two_room_spec)
-    diag = next(v for v in dashboard["views"] if v["title"] == "Diagnostics")
-    dry_runs = [
-        c for c in _iter_cards(diag)
-        if c.get("type") == "entity-button"
-        and c.get("tap_action", {}).get("service") == f"{DOMAIN}.estimate_parameters_ml"
+def test_diagnostics_view_does_not_reference_legacy_button_suffix(two_room_spec):
+    """Regression guard for the button entity_id bug."""
+    diag = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
+    )
+    refs = set(_iter_entity_refs(diag))
+    assert f"button.{DOMAIN}_estimate_parameters_button" not in refs
+    assert f"button.{DOMAIN}_reset_parameters_button" not in refs
+
+
+def test_diagnostics_dry_run_row_calls_estimate_ml_with_apply_false(two_room_spec):
+    diag = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
+    )
+    rows = [
+        row for row in _iter_call_service_rows(diag)
+        if row["service"] == f"{DOMAIN}.estimate_parameters_ml"
     ]
-    assert dry_runs, "Expected a dry-run estimation button on the diagnostics view"
-    assert dry_runs[0]["tap_action"]["service_data"] == {"apply_parameters": False}
+    assert rows, "Expected a dry-run estimation row on the diagnostics view"
+    assert rows[0].get("service_data") == {"apply_parameters": False}
 
 
-def test_diagnostics_open_loop_card_wires_to_service(two_room_spec):
-    dashboard = build_dashboard(two_room_spec)
-    diag = next(v for v in dashboard["views"] if v["title"] == "Diagnostics")
-    services = []
-    for card in _iter_cards(diag):
-        footer = card.get("footer")
-        if isinstance(footer, dict):
-            for ent in footer.get("entities", []):
-                if isinstance(ent, dict):
-                    tap = ent.get("tap_action") or {}
-                    if tap.get("action") == "call-service":
-                        services.append(tap["service"])
+def test_diagnostics_open_loop_card_wires_services_via_entity_rows(two_room_spec):
+    """Open-loop panel uses ``call-service`` rows in the entities list rather
+    than a ``footer: type: buttons`` (which requires entity refs)."""
+    diag = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
+    )
+    services = {row["service"] for row in _iter_call_service_rows(diag)}
     assert f"{DOMAIN}.run_open_loop_simulation" in services
     assert f"{DOMAIN}.analyze_model_fit" in services
+    # Should NOT appear in a footer-buttons block.
+    for card in _iter_cards(diag):
+        footer = card.get("footer")
+        if isinstance(footer, dict) and footer.get("type") == "buttons":
+            for ent in footer.get("entities", []):
+                assert "entity" in ent, (
+                    "footer-button items must reference an entity (Lovelace "
+                    "rejects them otherwise)"
+                )
 
 
 def test_settings_view_has_regenerate_dashboard_call(two_room_spec):
@@ -419,6 +451,84 @@ def test_diagnostics_view_renders_history_markdown(two_room_spec):
     assert any(
         "estimation_history" in m.get("content", "") for m in markdowns
     )
+
+
+def test_no_chart_series_uses_unsupported_scatter_type(two_room_spec):
+    """The installed apexcharts-card doesn't accept ``type: scatter`` series –
+    measurements are drawn as a zero-stroke line with raw markers instead."""
+    dashboard = build_dashboard(two_room_spec)
+    for card in _iter_cards(dashboard):
+        if card.get("type") != "custom:apexcharts-card":
+            continue
+        for series in card.get("series", []):
+            assert series.get("type") != "scatter", (
+                f"Series {series.get('name')!r} on card "
+                f"{card.get('header', {}).get('title')!r} uses unsupported "
+                "type: scatter"
+            )
+
+
+def test_forecast_series_use_readme_field_names(two_room_spec):
+    """Forecast attribute fields are ``time``/``temperature``/``setpoint``/
+    ``heating_power``/``outdoor_temp``/``solar_gain``/``constraint_*`` –
+    every data_generator must read those, not the legacy
+    ``timestamp``/``value`` shape."""
+    dashboard = build_dashboard(two_room_spec)
+    for card in _iter_cards(dashboard):
+        if card.get("type") != "custom:apexcharts-card":
+            continue
+        for series in card.get("series", []):
+            gen = series.get("data_generator")
+            if not gen:
+                continue
+            # New (correct) shape uses ``f.time`` from the iterator.
+            assert "new Date(f.time)" in gen or "new Date(p.time)" in gen, (
+                f"data_generator on series {series.get('name')!r} does not use "
+                f"the README's f.time/p.time field: {gen[:80]!r}"
+            )
+            # Old (broken) shape used ``p.timestamp`` / ``p.value`` — must
+            # not regress.
+            assert ".timestamp" not in gen, gen
+            assert "p.value" not in gen, gen
+
+
+def test_overview_has_two_all_rooms_charts(two_room_spec):
+    """The overview must contain one temperature chart and one power chart
+    that cover all rooms (per user feedback: keep rooms together, don't
+    fragment the overview)."""
+    overview = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
+    )
+    apex_titles = [
+        c["header"]["title"]
+        for c in _iter_cards(overview)
+        if c.get("type") == "custom:apexcharts-card" and c.get("header")
+    ]
+    assert any("Room Temperatures" in t for t in apex_titles)
+    assert any("Heating Power" in t for t in apex_titles)
+
+
+def test_overview_temperature_chart_covers_every_room(two_room_spec):
+    overview = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
+    )
+    temp_card = next(
+        c for c in _iter_cards(overview)
+        if c.get("type") == "custom:apexcharts-card"
+        and c.get("header", {}).get("title") == "Room Temperatures"
+    )
+    entities = {s["entity"] for s in temp_card["series"]}
+    assert f"sensor.{DOMAIN}_living_room_temperature_filtered" in entities
+    assert f"sensor.{DOMAIN}_bedroom_temperature_filtered" in entities
+
+
+def test_diagnostics_loglik_panel_exposes_sensor_and_button_per_room(two_room_spec):
+    diag = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
+    )
+    refs = set(_iter_entity_refs(diag))
+    assert f"sensor.{DOMAIN}_living_room_loglik_slice" in refs
+    assert f"sensor.{DOMAIN}_bedroom_loglik_slice" in refs
 
 
 def test_dashboard_to_yaml_round_trips(two_room_spec):
