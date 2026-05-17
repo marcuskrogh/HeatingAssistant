@@ -240,7 +240,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 **_history_series_kwargs(),
                 "show": {"in_header": False},
             },
-            # Forecast: setpoint over the MPC horizon (same name as history → single legend entry)
+            # Forecast: setpoint over the MPC horizon – hidden from legend; history entry covers it
             {
                 "entity": setpoint,
                 "name": "Setpoint",
@@ -251,9 +251,9 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "stroke_dash": 5,
                 "curve": "stepline",
                 "float_precision": 1,
-                "show": {"legend_value": False, "in_header": False},
+                "show": {"in_legend": False, "in_header": False},
             },
-            # Forecast: upper constraint (both constraints share the "Constraints" name)
+            # Forecast: upper constraint – appears once in legend as "Constraints"
             {
                 "entity": upper,
                 "name": "Constraints",
@@ -262,9 +262,9 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "color": "#1565C0",
                 "stroke_width": 1,
                 "curve": "stepline",
-                "show": {"legend_value": False, "in_header": False},
+                "show": {"in_header": False},
             },
-            # Forecast: lower constraint
+            # Forecast: lower constraint – hidden from legend; upper entry covers it
             {
                 "entity": lower,
                 "name": "Constraints",
@@ -273,7 +273,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "color": "#1565C0",
                 "stroke_width": 1,
                 "curve": "stepline",
-                "show": {"legend_value": False, "in_header": False},
+                "show": {"in_legend": False, "in_header": False},
             },
             # Forecast: predicted temperature trajectory
             {
@@ -403,11 +403,11 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
                 "stroke_width": 2,
                 "curve": "smooth",
                 "float_precision": 1,
-                "show": {"legend_value": False, "in_header": False},
+                "show": {"in_legend": False, "in_header": False},
             },
             {
                 "entity": solar_fc,
-                "name": "Solar fc.",
+                "name": "Solar",
                 "data_generator": _forecast_generator("solar_gain"),
                 "yaxis_id": "power",
                 "type": "area",
@@ -415,7 +415,7 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
                 "opacity": 0.4,
                 "stroke_width": 2,
                 "float_precision": 0,
-                "show": {"in_header": True},
+                "show": {"in_legend": False, "in_header": False},
             },
         ],
     }
@@ -736,7 +736,7 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
                 "opacity": 0.85,
                 "curve": "smooth",
                 "float_precision": 2,
-                "show": {"legend_value": False, "in_header": False},
+                "show": {"in_legend": False, "in_header": False},
             }
         )
     return {
@@ -848,7 +848,7 @@ def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
                 "opacity": 0.35,
                 "stroke_width": 1,
                 "float_precision": 0,
-                "show": {"legend_value": False, "in_header": False},
+                "show": {"in_legend": False, "in_header": False},
             }
         )
 
@@ -888,7 +888,7 @@ def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
                 "stroke_width": 2,
                 "curve": "smooth",
                 "float_precision": 1,
-                "show": {"legend_value": False, "in_header": False},
+                "show": {"in_legend": False, "in_header": False},
             },
             *solar_series,
         ],
