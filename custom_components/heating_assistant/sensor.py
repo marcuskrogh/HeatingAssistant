@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
@@ -42,6 +43,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
 )
@@ -95,6 +97,7 @@ async def async_setup_entry(
     for src in coordinator.heat_sources:
         entities.append(ControlActionSensor(coordinator, src.name))
         entities.append(HeaterScaleSensor(coordinator, src.name))
+        entities.append(HeatingEnergyTotalSensor(coordinator, src.name))
         if isinstance(src, HeatPump):
             entities.append(HeatPumpCOPSensor(coordinator, src.name))
 
@@ -894,6 +897,14 @@ class HeatLossSensor(CoordinatorEntity, SensorEntity):
         attrs: Dict[str, Any] = dict(flows)
         attrs["outdoor_temp"] = self._coordinator.outdoor_temp
         attrs["room_temp"] = round(room.temperature, 2)
+        # Typed per-connection flow list so dashboards (e.g. a Sankey card)
+        # can iterate over connections without having to filter the special
+        # ``external_loss``/``total_loss`` keys out of the flat dict.
+        attrs["connection_flows"] = [
+            {"to_room": key, "watts": float(value)}
+            for key, value in flows.items()
+            if key not in ("external_loss", "total_loss")
+        ]
         return attrs
 
 
@@ -1870,6 +1881,87 @@ class HeaterScaleSensor(CoordinatorEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
+# Cumulative energy sensor (per heat source)
+# ---------------------------------------------------------------------------
+
+
+class HeatingEnergyTotalSensor(CoordinatorEntity, RestoreSensor):
+    """Cumulative thermal energy delivered by a heat source [kWh].
+
+    The accumulator advances by ``current_power × dt`` on each coordinator
+    update and is persisted via :class:`RestoreSensor` so totals survive
+    restarts. ``state_class = TOTAL_INCREASING`` lets the value participate
+    in Home Assistant's Energy dashboard.
+    """
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_suggested_display_precision = 3
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        source_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._source_name = source_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {source_name} – Energy Total"
+        self._attr_unique_id = f"{DOMAIN}_{source_name}_energy_total"
+        self._total_kwh: float = 0.0
+        # ``_last_update_ts`` tracks wall-clock time so we integrate over
+        # the real elapsed interval even when the coordinator runs a
+        # missed-cycle catch-up or the user changes ``update_interval``.
+        self._last_update_ts: Optional[float] = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        restored = await self.async_get_last_sensor_data()
+        if restored is not None and restored.native_value is not None:
+            try:
+                self._total_kwh = float(restored.native_value)
+            except (TypeError, ValueError):
+                self._total_kwh = 0.0
+
+    def _source(self):
+        return next(
+            (s for s in self._coordinator.heat_sources if s.name == self._source_name),
+            None,
+        )
+
+    @property
+    def native_value(self) -> float:
+        # Integrate on each access driven by a coordinator update. The
+        # CoordinatorEntity base ensures the value is requested whenever
+        # the coordinator's ``last_update_success`` fires.
+        from datetime import datetime, timezone
+
+        src = self._source()
+        if src is None:
+            return round(self._total_kwh, 6)
+
+        now_ts = datetime.now(tz=timezone.utc).timestamp()
+        power_w = max(0.0, float(getattr(src, "current_power", 0.0) or 0.0))
+        if self._last_update_ts is not None:
+            dt_s = max(0.0, now_ts - self._last_update_ts)
+            if dt_s > 0.0:
+                self._total_kwh += power_w * dt_s / 3_600_000.0
+        self._last_update_ts = now_ts
+        return round(self._total_kwh, 6)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        src = self._source()
+        return {
+            "source_name": self._source_name,
+            "current_power": round(float(getattr(src, "current_power", 0.0) or 0.0), 1) if src else None,
+            "room": getattr(src, "room", None) if src else None,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Estimated parameters status sensor (system-wide)
 # ---------------------------------------------------------------------------
 
@@ -1953,6 +2045,9 @@ class EstimatedParametersStatusSensor(CoordinatorEntity, SensorEntity):
             for key, r_val in connections_snap.items()
         }
 
+        history = list(
+            getattr(self._coordinator, "_estimation_history", []) or []
+        )
         return {
             "rooms": rooms_data,
             "sources": sources_data,
@@ -1961,6 +2056,7 @@ class EstimatedParametersStatusSensor(CoordinatorEntity, SensorEntity):
             "log_likelihood": snap.get("log_likelihood"),
             "n_rooms_estimated": len(rooms_snap),
             "n_sources_estimated": len(sources_snap),
+            "estimation_history": history,
         }
 
 

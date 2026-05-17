@@ -2418,6 +2418,61 @@ Evaluates model quality by running a free-run (open-loop) multi-step simulation 
 
 ### 13.17 Lovelace dashboard – board and card reference
 
+#### 13.17.0 Out-of-the-box dashboard
+
+Heating Assistant ships a Lovelace dashboard generator. Nothing else to install
+on the Python side: the integration writes
+`<config>/dashboards/heating_assistant.yaml` automatically the first time the
+config entry sets up and, on Home Assistant versions that expose the
+Lovelace storage API, also registers a **Heating Assistant** entry in the
+sidebar pointing at that file. If the auto-registration step is skipped
+(unusual – older HA, custom Lovelace setups), a persistent notification
+explains the two-click path to add the dashboard manually.
+
+> Prerequisite: the `apexcharts-card` HACS frontend card (every MPC chart on
+> the auto-generated dashboard depends on it).
+
+What you get out of the box:
+
+* **Overview** view – per-room comfort tiles, a stacked 24 h system-power
+  chart, cumulative kWh per heat source, an MPC / weather health glance card
+  and an outdoor-temperature + solar-gain strip.
+* **Per-room subview** – a thermostat card, the MPC triplet (predicted
+  temperature with setpoint band, planned heating power, disturbance
+  forecasts), model-fit gauges (R² + RMSE/MAE/bias/ACF/open-loop-RMSE), a
+  residual time-series, the free-run open-loop trace and a compact estimated-
+  parameter table. Comfort-schedule controls appear when the room has a
+  schedule configured.
+* **Diagnostics** view – one-click ML estimation (including a dry-run
+  button), per-room fit matrix, residual-whiteness chips (lag-1 ACF +
+  Ljung-Box), open-loop validation panel that wires to
+  `run_open_loop_simulation` / `analyze_model_fit`, parameter-identifiability
+  chips, **Compute slice** buttons per room that fire the new
+  `compute_loglik_slice` service for a (log C, log R_ext) likelihood
+  landscape, and a rolling Estimation-history table (last 20 runs).
+* **Settings & Services** view – regenerate dashboard, reload integration,
+  per-room schedule toggles.
+
+Useful services exposed for the dashboard:
+
+* `heating_assistant.regenerate_dashboard` – returns the YAML in the response
+  (`dry_run: true`) or writes it to `<config>/dashboards/`.
+* `heating_assistant.compute_loglik_slice` – evaluates the CD-EKF
+  log-likelihood on an `n_grid × n_grid` grid around the room's MLE.
+* `heating_assistant.run_open_loop_simulation`,
+  `heating_assistant.analyze_model_fit` – existing diagnostics.
+
+If you delete the auto-generated file the integration won't recreate it on
+restart (a one-shot marker remembers it has already written the starter
+dashboard). To opt back in just call `regenerate_dashboard` again.
+
+#### 13.17.1 Manual / hand-built cards
+
+The card recipes below remain useful if you want to compose your own
+dashboard, embed a Heating Assistant chart in an existing Lovelace view, or
+add advanced cards (Plotly contours, Sankey flow diagrams) that the v1
+generator doesn't yet emit.
+
 This section provides a complete set of Lovelace card configurations for building an MPC-style monitoring dashboard.  The cards follow the standard model predictive control visualisation layout used in industry and academia:
 
 1. **Predicted output** – temperature trajectory with setpoint reference and soft constraint band

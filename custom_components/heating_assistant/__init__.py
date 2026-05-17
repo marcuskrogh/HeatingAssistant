@@ -60,13 +60,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SERVICE_RELOAD
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.reload import async_integration_yaml_config
@@ -170,7 +170,11 @@ PLATFORMS = ["climate", "sensor", "button"]
 SERVICE_SIMULATE_THERMAL_RESPONSE = "simulate_thermal_response"
 SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
+SERVICE_REGENERATE_DASHBOARD = "regenerate_dashboard"
+SERVICE_COMPUTE_LOGLIK_SLICE = "compute_loglik_slice"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
+
+DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
 
 # ---------------------------------------------------------------------------
 # YAML schema
@@ -445,7 +449,172 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    written = await _async_auto_write_default_dashboard(hass, entry, coordinator)
+    if written:
+        await _async_try_register_lovelace_dashboard(hass, written)
+
     return True
+
+
+DASHBOARD_URL_PATH = "heating-assistant"
+
+
+async def _async_auto_write_default_dashboard(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: HeatingAssistantCoordinator,
+) -> Optional[str]:
+    """Write the default dashboard YAML on first setup.
+
+    Skipped when (a) the target file already exists – we never clobber a
+    user-edited dashboard – or (b) the per-entry marker says we've already
+    auto-written once. Users who delete the generated file therefore aren't
+    surprised by it reappearing; they can re-create it explicitly with the
+    ``regenerate_dashboard`` service.
+
+    This is a best-effort convenience: any failure is logged at debug
+    level and never propagated, so a missing ``hass.config`` (in tests) or
+    a read-only config directory cannot break integration setup.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    from .dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
+
+    try:
+        marker_store = Store(
+            hass, version=1, key=f"{DOMAIN}_dashboard_marker_{entry.entry_id}"
+        )
+        marker = await marker_store.async_load()
+        if marker and marker.get("written_at"):
+            return marker.get("path") if marker.get("path") else None
+
+        base_dir = hass.config.path("dashboards")
+        target = os.path.join(base_dir, DEFAULT_DASHBOARD_FILENAME)
+
+        def _exists() -> bool:
+            return os.path.exists(target)
+
+        if await hass.async_add_executor_job(_exists):
+            await marker_store.async_save(
+                {
+                    "written_at": datetime.now(tz=timezone.utc).isoformat(),
+                    "skipped": True,
+                    "path": target,
+                }
+            )
+            return target
+
+        dashboard = build_dashboard_from_coordinator(coordinator)
+        yaml_text = await hass.async_add_executor_job(dashboard_to_yaml, dashboard)
+
+        def _write() -> None:
+            os.makedirs(base_dir, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write(yaml_text)
+
+        await hass.async_add_executor_job(_write)
+
+        await marker_store.async_save(
+            {"written_at": datetime.now(tz=timezone.utc).isoformat(), "path": target}
+        )
+
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant dashboard available",
+                "message": (
+                    f"Heating Assistant wrote a starter Lovelace dashboard to "
+                    f"`{target}`. To add it to the sidebar, open "
+                    "**Settings → Dashboards → Add Dashboard → Show YAML "
+                    "editor**, paste the file contents, and save. Re-run "
+                    "`heating_assistant.regenerate_dashboard` after editing "
+                    "rooms to refresh the file."
+                ),
+                "notification_id": f"{DOMAIN}_dashboard_first_install",
+            },
+            blocking=False,
+        )
+        return target
+    except Exception:
+        _LOGGER.debug(
+            "Heating Assistant: auto-write of starter dashboard skipped",
+            exc_info=True,
+        )
+        return None
+
+
+async def _async_try_register_lovelace_dashboard(
+    hass: HomeAssistant,
+    yaml_path: str,
+) -> None:
+    """Best-effort registration of the YAML file as a Lovelace dashboard.
+
+    Hooks into ``hass.data["lovelace"]`` to add a YAML-mode dashboard whose
+    source is the file we just wrote, so the entry appears in the sidebar
+    without the user having to paste anything. The whole block is wrapped
+    in ``try``/``except`` because we depend on a semi-private HA surface
+    that occasionally moves between releases. On any failure we leave the
+    existing persistent notification as the fallback path.
+    """
+    import os
+
+    try:
+        from homeassistant.components.lovelace.dashboard import LovelaceYAML
+
+        lovelace_data = hass.data.get("lovelace")
+        if lovelace_data is None:
+            return
+
+        # ``LovelaceData`` (modern HA) exposes ``dashboards``; older
+        # snapshots stored it as ``hass.data["lovelace"]["dashboards"]``.
+        dashboards = getattr(lovelace_data, "dashboards", None)
+        if dashboards is None and isinstance(lovelace_data, dict):
+            dashboards = lovelace_data.get("dashboards")
+        if dashboards is None:
+            return
+        if DASHBOARD_URL_PATH in dashboards:
+            return  # already registered (e.g. by the user)
+
+        rel_filename = os.path.relpath(yaml_path, hass.config.path())
+        config = {
+            "mode": "yaml",
+            "icon": "mdi:home-thermometer",
+            "title": "Heating Assistant",
+            "filename": rel_filename,
+            "url_path": DASHBOARD_URL_PATH,
+            "show_in_sidebar": True,
+            "require_admin": False,
+        }
+        dashboards[DASHBOARD_URL_PATH] = LovelaceYAML(
+            hass, DASHBOARD_URL_PATH, config
+        )
+
+        try:
+            from homeassistant.components import frontend
+
+            frontend.async_register_built_in_panel(
+                hass,
+                component_name="lovelace",
+                sidebar_title=config["title"],
+                sidebar_icon=config["icon"],
+                frontend_url_path=DASHBOARD_URL_PATH,
+                config={"mode": "yaml"},
+                require_admin=False,
+                update=False,
+            )
+        except Exception:
+            _LOGGER.debug(
+                "Heating Assistant: sidebar panel registration skipped",
+                exc_info=True,
+            )
+    except Exception:
+        _LOGGER.debug(
+            "Heating Assistant: Lovelace dashboard auto-registration skipped",
+            exc_info=True,
+        )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -1047,4 +1216,120 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("enabled"): cv.boolean,
             }
         ),
+    )
+
+    async def handle_regenerate_dashboard(call: ServiceCall) -> ServiceResponse:
+        """Regenerate the Heating Assistant Lovelace dashboard.
+
+        When ``dry_run`` is true the generated YAML is returned in the
+        service response without touching the filesystem. Otherwise it is
+        written to ``<config>/dashboards/<filename>`` (relative paths
+        outside the config directory are rejected).
+        """
+        import os
+
+        from .dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
+
+        coordinator = _get_coordinator(hass)
+        # ``build_dashboard_from_coordinator`` is a pure read over coordinator
+        # state; run it inline to avoid racing with the next update cycle.
+        dashboard = build_dashboard_from_coordinator(coordinator)
+        yaml_text: str = await hass.async_add_executor_job(
+            dashboard_to_yaml, dashboard
+        )
+
+        dry_run = bool(call.data.get("dry_run", False))
+        filename = str(call.data.get("filename") or DEFAULT_DASHBOARD_FILENAME)
+        write_path: str | None = None
+
+        if not dry_run:
+            base_dir = hass.config.path("dashboards")
+            safe_filename = os.path.basename(filename)
+            if not safe_filename or safe_filename != filename:
+                raise ValueError(
+                    "filename must be a plain file name, not a path"
+                )
+            write_path = os.path.join(base_dir, safe_filename)
+
+            def _write() -> None:
+                os.makedirs(base_dir, exist_ok=True)
+                with open(write_path, "w", encoding="utf-8") as fh:
+                    fh.write(yaml_text)
+
+            await hass.async_add_executor_job(_write)
+
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Heating Assistant dashboard regenerated",
+                    "message": (
+                        f"Wrote dashboard YAML to `{write_path}`. "
+                        "Add a `lovelace.dashboards` entry referencing this file "
+                        "or paste the contents into a new dashboard via "
+                        "Settings → Dashboards."
+                    ),
+                    "notification_id": f"{DOMAIN}_dashboard_regenerated",
+                },
+                blocking=False,
+            )
+
+        return {
+            "yaml": yaml_text,
+            "rooms": [v["title"] for v in dashboard["views"] if v.get("subview")],
+            "written_to": write_path,
+        }
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REGENERATE_DASHBOARD,
+        handle_regenerate_dashboard,
+        schema=vol.Schema(
+            {
+                vol.Optional("dry_run", default=False): cv.boolean,
+                vol.Optional("filename"): cv.string,
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def handle_compute_loglik_slice(call: ServiceCall) -> ServiceResponse:
+        """Compute a 2-D log-likelihood slice for a room and return it.
+
+        Used by the Diagnostics dashboard to render a contour plot of the
+        likelihood landscape around the current ``(C, R_ext)`` MLE. The
+        computation runs CD-EKF over the whole history buffer for every
+        grid point and may take a few seconds for an 11×11 grid.
+        """
+        coordinator = _get_coordinator(hass)
+        room_name = call.data["room_name"]
+        n_grid = int(call.data.get("n_grid", 11))
+        span_log = float(call.data.get("span_log", 1.0))
+
+        result = await coordinator.async_compute_loglik_slice(
+            room_name, n_grid=n_grid, span_log=span_log
+        )
+        if result is None:
+            return {
+                "room": room_name,
+                "error": "history_too_short_or_unknown_room",
+            }
+        return result
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_COMPUTE_LOGLIK_SLICE,
+        handle_compute_loglik_slice,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Optional("n_grid", default=11): vol.All(
+                    vol.Coerce(int), vol.Range(min=3, max=41)
+                ),
+                vol.Optional("span_log", default=1.0): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.1, max=4.0)
+                ),
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
     )

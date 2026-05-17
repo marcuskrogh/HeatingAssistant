@@ -362,6 +362,120 @@ class KalmanMLEstimator:
             _LOGGER.debug("compute_log_likelihood failed: %s", exc, exc_info=True)
             return None
 
+    def compute_loglik_slice(
+        self,
+        history: List[Dict[str, Any]],
+        room_name: str,
+        n_grid: int = 11,
+        span_log: float = 1.0,
+    ) -> Optional[Dict[str, Any]]:
+        """Evaluate the log-likelihood on a ``log(C)`` × ``log(R_ext)`` grid.
+
+        The grid is centred on the current estimated ``thermal_mass`` /
+        ``r_external`` for *room_name* and spans ``±span_log`` log-units in
+        each direction. Used by the Diagnostics dashboard to render a
+        2-D log-likelihood landscape (mirrors ``plots/fig6_ll_surface.png``).
+
+        Parameters
+        ----------
+        history
+            Observation buffer (same format as :meth:`compute_log_likelihood`).
+        room_name
+            Room to slice the likelihood over.
+        n_grid
+            Number of grid points per axis. Defaults to 11 (centre + 5 on
+            each side); odd values keep the centre on a grid line.
+        span_log
+            Half-width of the slice in log-units. ``1.0`` ≈ factor 2.7 either
+            side, which is wide enough to see the local curvature.
+
+        Returns
+        -------
+        dict | None
+            ``None`` when history is too short or the room is unknown.
+            Otherwise a dict with ``log_mass_grid``, ``log_r_grid``,
+            ``log_likelihood`` (2-D list, ``None`` on per-cell failures),
+            and the ``center`` values.
+        """
+        if len(history) < MIN_HISTORY_STEPS:
+            return None
+        if room_name not in self._room_names:
+            return None
+
+        room_idx = self._room_names.index(room_name)
+
+        layout = _ThetaLayout(
+            n_rooms=self._n,
+            identifiable_sources=[],
+            identifiable_pairs=[],
+        )
+        theta_prior = np.concatenate([
+            self._log_mass_prior,
+            self._log_r_prior,
+            self._q_int_prior,
+        ])
+
+        center_log_mass = float(self._log_mass_prior[room_idx])
+        center_log_r = float(self._log_r_prior[room_idx])
+
+        def _model_factory(theta: np.ndarray):
+            return self._build_parametric_system(layout, theta)
+
+        std_history = self._convert_history_std(history, use_ym=True)
+        system0 = _model_factory(theta_prior)
+        if system0 is None:
+            return None
+        x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
+
+        n_grid = max(3, int(n_grid))
+        span = float(abs(span_log))
+        log_mass_grid = np.linspace(
+            center_log_mass - span, center_log_mass + span, n_grid
+        )
+        log_r_grid = np.linspace(
+            center_log_r - span, center_log_r + span, n_grid
+        )
+
+        log_lik: List[List[Optional[float]]] = []
+        for log_mass in log_mass_grid:
+            row: List[Optional[float]] = []
+            for log_r in log_r_grid:
+                theta = theta_prior.copy()
+                theta[room_idx] = log_mass
+                theta[self._n + room_idx] = log_r
+                try:
+                    neg_ll = _cd_ped_neg_ll(
+                        model_factory=_model_factory,
+                        theta=theta,
+                        history=std_history,
+                        x0=x0,
+                        P0=P0,
+                        dt=self._dt,
+                        n_steps=10,
+                    )
+                    if not np.isfinite(neg_ll):
+                        row.append(None)
+                    else:
+                        row.append(float(-neg_ll))
+                except Exception:
+                    row.append(None)
+            log_lik.append(row)
+
+        return {
+            "room": room_name,
+            "param_x": "log_thermal_mass",
+            "param_y": "log_r_external",
+            "log_mass_grid": [float(v) for v in log_mass_grid],
+            "log_r_grid": [float(v) for v in log_r_grid],
+            "log_likelihood": log_lik,
+            "center": {
+                "log_mass": center_log_mass,
+                "log_r_external": center_log_r,
+                "thermal_mass": float(math.exp(center_log_mass)),
+                "r_external": float(math.exp(center_log_r)),
+            },
+        }
+
     def estimate(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Estimate all identifiable thermal parameters from the history buffer

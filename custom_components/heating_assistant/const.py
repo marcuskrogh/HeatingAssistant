@@ -118,6 +118,8 @@ UPDATE_INTERVAL = DEFAULT_UPDATE_INTERVAL
 HISTORY_BUFFER_SIZE = 480
 #: Number of MPC solve-time samples to retain for rolling statistics.
 MPC_STATS_BUFFER_SIZE = 100
+#: Number of past parameter-estimation runs retained for the dashboard.
+ESTIMATION_HISTORY_SIZE = 20
 #: Service name for ML parameter estimation
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 #: Service name for runtime comfort-schedule suspend/resume

@@ -94,6 +94,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
     DOMAIN,
+    ESTIMATION_HISTORY_SIZE,
     HISTORY_BUFFER_SIZE,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
@@ -339,6 +340,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # parameter values.
         self._estimation_timestamp: Optional[str] = None
         self._estimation_log_likelihood: Optional[float] = None
+        # Rolling buffer of the last N estimation runs (most recent last).
+        # Each entry mirrors the snapshot persisted in entry.data plus the
+        # ``applied`` flag so dashboards can show a history of decisions.
+        self._estimation_history: deque = deque(maxlen=ESTIMATION_HISTORY_SIZE)
         stored_est: Optional[Dict[str, Any]] = data.get(CONF_ESTIMATED_PARAMS)
         if stored_est:
             self._restore_estimated_parameters(stored_est)
@@ -1626,7 +1631,54 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 log_likelihood=result.get("log_likelihood"),
             )
 
+        # Record the run in the rolling history – dry-runs included – so the
+        # Diagnostics dashboard shows every estimation the user kicked off.
+        history_buf = getattr(self, "_estimation_history", None)
+        if history_buf is not None:
+            history_buf.append(
+                {
+                    "estimated_at": datetime.now(timezone.utc).isoformat(),
+                    "success": bool(result.get("success")),
+                    "log_likelihood": (
+                        float(result.get("log_likelihood"))
+                        if isinstance(result.get("log_likelihood"), (int, float))
+                        else None
+                    ),
+                    "applied": bool(result.get("success")) and apply_params,
+                    "n_rooms": len(self.model.room_names),
+                    "n_sources": len(self.heat_sources),
+                }
+            )
+
         return result
+
+    async def async_compute_loglik_slice(
+        self,
+        room_name: str,
+        n_grid: int = 11,
+        span_log: float = 1.0,
+    ) -> Optional[Dict[str, Any]]:
+        """Run :meth:`KalmanMLEstimator.compute_loglik_slice` off-thread.
+
+        Returns ``None`` when the room is unknown or the history buffer is
+        too short. The grid is centred on the current parameter values.
+        """
+        from .parameter_estimator import KalmanMLEstimator
+
+        estimator = KalmanMLEstimator(
+            rooms=list(self.model.rooms.values()),
+            sources=self.heat_sources,
+            dt=_coerce_interval_seconds(self._update_interval),
+        )
+
+        history = list(self._history_buffer)
+        return await self.hass.async_add_executor_job(
+            estimator.compute_loglik_slice,
+            history,
+            room_name,
+            int(n_grid),
+            float(span_log),
+        )
 
     def _apply_estimated_parameters(
         self,
