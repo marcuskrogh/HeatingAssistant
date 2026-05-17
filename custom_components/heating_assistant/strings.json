@@ -188,6 +188,20 @@
           "description": "Duration of the experiment (seconds)."
         }
       }
+    },
+    "regenerate_dashboard": {
+      "name": "Regenerate Lovelace dashboard",
+      "description": "Build a complete per-room Lovelace dashboard from the current Heating Assistant configuration. Returns the YAML in the response and optionally writes it to <config>/dashboards/.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Return YAML only, do not write a file or create a notification."
+        },
+        "filename": {
+          "name": "Output filename",
+          "description": "Plain filename (no path) inside <config>/dashboards. Defaults to heating_assistant.yaml."
+        }
+      }
     }
   }
 }

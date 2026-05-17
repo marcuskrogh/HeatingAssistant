@@ -2418,6 +2418,22 @@ Evaluates model quality by running a free-run (open-loop) multi-step simulation 
 
 ### 13.17 Lovelace dashboard – board and card reference
 
+> **Quick start.** Heating Assistant ships a Lovelace dashboard generator. Call
+> the service `heating_assistant.regenerate_dashboard` (use `dry_run: true` to
+> preview without writing files) and either:
+>
+> * paste the returned YAML into a new dashboard via *Settings → Dashboards →
+>   Add Dashboard → Show YAML editor*, or
+> * leave `dry_run` off – the service writes
+>   `<config>/dashboards/heating_assistant.yaml` and shows a notification with
+>   next steps.
+>
+> The generator builds an Overview view, one subview per room (MPC triplet +
+> diagnostics), a Diagnostics view (estimation workflow, fit matrix,
+> open-loop validation) and a Settings view from the current room and
+> heat-source configuration. `apexcharts-card` is a hard prerequisite. The
+> reference cards below remain useful for hand-crafting your own dashboards.
+
 This section provides a complete set of Lovelace card configurations for building an MPC-style monitoring dashboard.  The cards follow the standard model predictive control visualisation layout used in industry and academia:
 
 1. **Predicted output** – temperature trajectory with setpoint reference and soft constraint band

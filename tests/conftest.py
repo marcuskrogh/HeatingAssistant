@@ -124,6 +124,16 @@ _ha_core = sys.modules["homeassistant.core"]
 _ha_core.HomeAssistant = object  # type: ignore[attr-defined]
 _ha_core.callback = lambda f: f  # type: ignore[attr-defined]
 _ha_core.ServiceCall = object  # type: ignore[attr-defined]
+_ha_core.ServiceResponse = dict  # type: ignore[attr-defined]
+
+
+class _SupportsResponseStub:
+    NONE = "none"
+    OPTIONAL = "optional"
+    ONLY = "only"
+
+
+_ha_core.SupportsResponse = _SupportsResponseStub  # type: ignore[attr-defined]
 
 # homeassistant.exceptions
 _exc = sys.modules["homeassistant.exceptions"]

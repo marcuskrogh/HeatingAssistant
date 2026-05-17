@@ -66,7 +66,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SERVICE_RELOAD
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.reload import async_integration_yaml_config
@@ -170,7 +170,10 @@ PLATFORMS = ["climate", "sensor", "button"]
 SERVICE_SIMULATE_THERMAL_RESPONSE = "simulate_thermal_response"
 SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
+SERVICE_REGENERATE_DASHBOARD = "regenerate_dashboard"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
+
+DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
 
 # ---------------------------------------------------------------------------
 # YAML schema
@@ -1047,4 +1050,79 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("enabled"): cv.boolean,
             }
         ),
+    )
+
+    async def handle_regenerate_dashboard(call: ServiceCall) -> ServiceResponse:
+        """Regenerate the Heating Assistant Lovelace dashboard.
+
+        When ``dry_run`` is true the generated YAML is returned in the
+        service response without touching the filesystem. Otherwise it is
+        written to ``<config>/dashboards/<filename>`` (relative paths
+        outside the config directory are rejected).
+        """
+        import os
+
+        from .dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
+
+        coordinator = _get_coordinator(hass)
+        # ``build_dashboard_from_coordinator`` is a pure read over coordinator
+        # state; run it inline to avoid racing with the next update cycle.
+        dashboard = build_dashboard_from_coordinator(coordinator)
+        yaml_text: str = await hass.async_add_executor_job(
+            dashboard_to_yaml, dashboard
+        )
+
+        dry_run = bool(call.data.get("dry_run", False))
+        filename = str(call.data.get("filename") or DEFAULT_DASHBOARD_FILENAME)
+        write_path: str | None = None
+
+        if not dry_run:
+            base_dir = hass.config.path("dashboards")
+            safe_filename = os.path.basename(filename)
+            if not safe_filename or safe_filename != filename:
+                raise ValueError(
+                    "filename must be a plain file name, not a path"
+                )
+            write_path = os.path.join(base_dir, safe_filename)
+
+            def _write() -> None:
+                os.makedirs(base_dir, exist_ok=True)
+                with open(write_path, "w", encoding="utf-8") as fh:
+                    fh.write(yaml_text)
+
+            await hass.async_add_executor_job(_write)
+
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Heating Assistant dashboard regenerated",
+                    "message": (
+                        f"Wrote dashboard YAML to `{write_path}`. "
+                        "Add a `lovelace.dashboards` entry referencing this file "
+                        "or paste the contents into a new dashboard via "
+                        "Settings → Dashboards."
+                    ),
+                    "notification_id": f"{DOMAIN}_dashboard_regenerated",
+                },
+                blocking=False,
+            )
+
+        return {
+            "yaml": yaml_text,
+            "rooms": [v["title"] for v in dashboard["views"] if v.get("subview")],
+            "written_to": write_path,
+        }
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REGENERATE_DASHBOARD,
+        handle_regenerate_dashboard,
+        schema=vol.Schema(
+            {
+                vol.Optional("dry_run", default=False): cv.boolean,
+                vol.Optional("filename"): cv.string,
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
