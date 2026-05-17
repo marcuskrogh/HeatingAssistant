@@ -472,6 +472,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Each entry is a dict: {y, u, d_outdoor, d_solar, timestamp}.
         self._history_buffer: deque = deque(maxlen=HISTORY_BUFFER_SIZE)
 
+        # Cache populated by run_open_loop_simulation service.
+        # Keyed by room_name; each value is the per-room dict returned by
+        # compute_open_loop_predictions (rmse, mae, simulation list).
+        # OpenLoopRMSESensor reads from here instead of computing on the
+        # event loop.
+        self.open_loop_results: Dict[str, Any] = {}
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------

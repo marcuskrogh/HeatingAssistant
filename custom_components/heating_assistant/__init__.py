@@ -885,12 +885,19 @@ def _register_services(hass: HomeAssistant) -> None:
             if "error" in result:
                 message = f"**Error:** {result['error']}"
             else:
+                per_room = result.get("per_room", {})
+
+                # Write per-room results to coordinator cache so that
+                # OpenLoopRMSESensor entities can read them without any
+                # blocking computation on the event loop.
+                coordinator.open_loop_results.update(per_room)
+                coordinator.async_update_listeners()
+
                 lines = [
                     f"**Segment length:** {result['segment_length']} steps "
                     f"({result['segment_length']} min)\n"
                     f"**Segments evaluated:** {result['n_segments']}\n"
                 ]
-                per_room = result.get("per_room", {})
                 rooms_to_report = (
                     [room_name_filter]
                     if room_name_filter and room_name_filter in per_room
