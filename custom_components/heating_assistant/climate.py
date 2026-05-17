@@ -58,7 +58,11 @@ async def async_setup_entry(
 class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
     """Climate entity representing a single room."""
 
-    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
+    _attr_supported_features = (
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.TURN_ON
+        | ClimateEntityFeature.TURN_OFF
+    )
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
@@ -168,3 +172,16 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
             if self._coordinator.get_room_setpoint(self._room_name) <= MIN_TEMP:
                 self._coordinator.set_room_setpoint(self._room_name, DEFAULT_SETPOINT)
         await self._coordinator.async_request_refresh()
+
+    async def async_turn_on(self) -> None:
+        """Re-enable the room (required by ClimateEntityFeature.TURN_ON)."""
+        target = (
+            HVACMode.HEAT_COOL
+            if HVACMode.HEAT_COOL in self._attr_hvac_modes
+            else HVACMode.HEAT
+        )
+        await self.async_set_hvac_mode(target)
+
+    async def async_turn_off(self) -> None:
+        """Disable the room (required by ClimateEntityFeature.TURN_OFF)."""
+        await self.async_set_hvac_mode(HVACMode.OFF)
