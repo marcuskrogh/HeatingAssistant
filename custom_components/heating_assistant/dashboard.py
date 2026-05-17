@@ -499,6 +499,17 @@ def _open_loop_card(room: RoomSpec) -> Dict[str, Any]:
         "type": "custom:apexcharts-card",
         "header": {"show": True, "title": f"{room.name} – Open-loop trace", "show_states": True},
         "graph_span": "2h",
+        "apex_config": {
+            "noData": {
+                "text": (
+                    "Collecting history – the open-loop trace needs ~30 min "
+                    "of operation before it can be computed."
+                ),
+                "align": "center",
+                "verticalAlign": "middle",
+                "style": {"fontSize": "13px", "color": "#9E9E9E"},
+            },
+        },
         "yaxis": [{"id": "temp", "apex_config": {"title": {"text": "Temperature (°C)"}, "decimalsInFloat": 2}}],
         "series": [
             {
@@ -1042,6 +1053,22 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
     # ------------------------------------------------------------------
     # Open-loop validation
     # ------------------------------------------------------------------
+    _btn = _button_eid("estimate_parameters")
+    open_loop_status: Dict[str, Any] = {
+        "type": "markdown",
+        "content": (
+            "{% set buf = state_attr('" + _btn + "', 'history_steps') | int(0) %}"
+            "{% set need = state_attr('" + _btn + "', 'min_steps_required') | int(30) %}"
+            "{% if buf < need %}"
+            "⏳ **Collecting history:** {{ buf }}/{{ need }} steps"
+            " — open-loop RMSE will be available in ≈ {{ [need - buf, 0] | max }} min."
+            "{% else %}"
+            "✅ Buffer ready ({{ buf }} steps). "
+            "Press **Run open-loop simulation** to compute or refresh the RMSE."
+            "{% endif %}"
+        ),
+    }
+
     open_loop_panel = {
         "type": "entities",
         "title": "Open-loop RMSE",
@@ -1170,6 +1197,7 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
                 "type": "grid",
                 "cards": [
                     {"type": "heading", "heading": "Open-loop validation", "heading_style": "title"},
+                    open_loop_status,
                     open_loop_panel,
                     open_loop_run_button,
                     open_loop_analyse_button,
