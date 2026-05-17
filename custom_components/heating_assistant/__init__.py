@@ -1294,12 +1294,17 @@ def _register_services(hass: HomeAssistant) -> None:
     )
 
     async def handle_compute_loglik_slice(call: ServiceCall) -> ServiceResponse:
-        """Compute a 2-D log-likelihood slice for a room and return it.
+        """Compute a 2-D log-likelihood slice for a room.
 
-        Used by the Diagnostics dashboard to render a contour plot of the
-        likelihood landscape around the current ``(C, R_ext)`` MLE. The
-        computation runs CD-EKF over the whole history buffer for every
-        grid point and may take a few seconds for an 11×11 grid.
+        The slice is stored on the coordinator and exposed via the
+        per-room ``…_loglik_slice`` sensor so dashboards can visualise it
+        without re-running the computation. The service also returns the
+        full grid when called with ``return_response: true`` (Developer
+        Tools / scripts), and posts a one-line persistent notification
+        with the peak likelihood so dashboard buttons give immediate
+        feedback. Response support is ``OPTIONAL`` so the dashboard's
+        plain ``call-service`` row can fire it without the
+        ``return_response=true`` ceremony.
         """
         coordinator = _get_coordinator(hass)
         room_name = call.data["room_name"]
@@ -1310,10 +1315,49 @@ def _register_services(hass: HomeAssistant) -> None:
             room_name, n_grid=n_grid, span_log=span_log
         )
         if result is None:
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": "Heating Assistant – log-likelihood slice",
+                    "message": (
+                        f"Could not compute the slice for `{room_name}`. The "
+                        "history buffer may be too short, or the room is not "
+                        "configured."
+                    ),
+                    "notification_id": f"{DOMAIN}_loglik_slice_{room_name}",
+                },
+                blocking=False,
+            )
             return {
                 "room": room_name,
                 "error": "history_too_short_or_unknown_room",
             }
+
+        # Surface a compact summary so a dashboard call gives the user
+        # immediate feedback even when they didn't ask for the full grid.
+        grid = result.get("log_likelihood") or []
+        flat = [v for row in grid for v in row if isinstance(v, (int, float))]
+        peak = max(flat) if flat else None
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – log-likelihood slice",
+                "message": (
+                    f"Computed {n_grid}×{n_grid} (log C, log R_ext) grid for "
+                    f"**{room_name}** (span ±{span_log} log-units).\n\n"
+                    f"Peak log-likelihood: "
+                    f"{'%.2f' % peak if peak is not None else 'n/a'}\n\n"
+                    "Use `sensor.heating_assistant_"
+                    f"{room_name.lower().replace(' ', '_')}_loglik_slice` "
+                    "for the full grid, or call this service from Developer "
+                    "Tools with `return_response: true`."
+                ),
+                "notification_id": f"{DOMAIN}_loglik_slice_{room_name}",
+            },
+            blocking=False,
+        )
         return result
 
     hass.services.async_register(
@@ -1331,5 +1375,5 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
             }
         ),
-        supports_response=SupportsResponse.ONLY,
+        supports_response=SupportsResponse.OPTIONAL,
     )

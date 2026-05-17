@@ -98,6 +98,29 @@ def slugify(value: str) -> str:
     return slug or "_"
 
 
+def _climate_eid(room_name: str) -> str:
+    """Entity ID of a room's climate entity.
+
+    The climate entity's name is ``"Heating Assistant – {room}"`` (no
+    metric suffix), so HA slugifies it to
+    ``climate.heating_assistant_{slug(room)}``. Earlier revisions of the
+    generator wrongly appended ``_climate`` to match the ``unique_id``;
+    that broke the dashboard because the registry-assigned entity_id is
+    derived from ``_attr_name``, not ``_attr_unique_id``.
+    """
+    return f"climate.{DOMAIN}_{slugify(room_name)}"
+
+
+def _button_eid(metric: str) -> str:
+    """Entity ID of an integration button.
+
+    The button names are e.g. ``"Heating Assistant – Estimate Parameters"``,
+    so HA assigns ``button.heating_assistant_estimate_parameters``. The
+    ``_button`` suffix lives only on the ``unique_id``.
+    """
+    return f"button.{DOMAIN}_{metric}"
+
+
 def _eid(platform: str, room_or_source: str, metric: str) -> str:
     """Compose an entity_id matching the integration's naming convention."""
     return f"{platform}.{DOMAIN}_{slugify(room_or_source)}_{metric}"
@@ -108,6 +131,36 @@ def _system_eid(platform: str, metric: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Shared apexcharts fragments
+# ---------------------------------------------------------------------------
+
+
+def _forecast_generator(field: str) -> str:
+    """Return the README-style ``data_generator`` for a forecast field.
+
+    The integration's forecast attributes are arrays of dicts containing
+    ``time`` (ISO 8601) plus one or more field names (``temperature``,
+    ``setpoint``, ``heating_power``, ``outdoor_temp``, ``solar_gain``,
+    ``constraint_upper``/``constraint_lower``). This helper produces a
+    matching JS snippet so each chart series consumes the right field.
+    """
+    return (
+        "const fc = entity.attributes.forecast;\n"
+        "if (!fc) return [];\n"
+        "return fc.map(f => [new Date(f.time).getTime(), "
+        f"f.{field} ?? null]);"
+    )
+
+
+def _history_series_kwargs() -> Dict[str, Any]:
+    """README-style options for a series that draws from recorder history."""
+    return {
+        "extend_to": "now",
+        "group_by": {"func": "raw", "fill": "last"},
+    }
+
+
+# ---------------------------------------------------------------------------
 # Card builders – per-room subview
 # ---------------------------------------------------------------------------
 
@@ -115,13 +168,13 @@ def _system_eid(platform: str, metric: str) -> str:
 def _thermostat_card(room: RoomSpec) -> Dict[str, Any]:
     return {
         "type": "thermostat",
-        "entity": _eid("climate", room.name, "climate"),
+        "entity": _climate_eid(room.name),
         "name": room.name,
     }
 
 
 def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
-    """ApexCharts card – measured/filtered temperature + MPC forecast + setpoint band."""
+    """Predicted-temperature chart – mirrors README §13.17.3 / §13.17.8."""
     measured = _eid("sensor", room.name, "temperature_measured")
     filtered = _eid("sensor", room.name, "temperature_filtered")
     forecast = _eid("sensor", room.name, "temperature_forecast")
@@ -130,7 +183,11 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
     lower = _eid("sensor", room.name, "constraint_lower")
     return {
         "type": "custom:apexcharts-card",
-        "header": {"show": True, "title": f"{room.name} – Predicted Temperature", "show_states": True},
+        "header": {
+            "show": True,
+            "title": f"{room.name} – Predicted Temperature",
+            "show_states": True,
+        },
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "Now", "color": "#424242"},
@@ -140,197 +197,226 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "apex_config": {
                     "title": {"text": "Temperature (°C)"},
                     "tickAmount": 5,
-                    "decimalsInFloat": 1,
                 },
             }
         ],
         "series": [
+            # History: filtered estimate y(k|k)
             {
                 "entity": filtered,
-                "name": "Filtered estimate y(k|k)",
+                "name": "Filtered estimate (y(k|k))",
                 "yaxis_id": "temp",
                 "color": "#0D47A1",
                 "stroke_width": 2,
                 "curve": "smooth",
                 "float_precision": 2,
-                "extend_to": "now",
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
             },
+            # History: measured y(k) — rendered as a thin line with no
+            # stroke + raw markers (avoids `type: scatter`, which the
+            # installed apexcharts-card version does not support).
             {
                 "entity": measured,
-                "name": "Measured y(k)",
+                "name": "Actual measurement (y(k))",
                 "yaxis_id": "temp",
-                "color": "#D32F2F",
-                "type": "scatter",
+                "color": "#E53935",
                 "stroke_width": 0,
                 "float_precision": 2,
+                "extend_to": "now",
+                "group_by": {"func": "raw", "fill": "null"},
+                "show": {"in_header": False},
             },
-            {
-                "entity": forecast,
-                "name": "MPC forecast",
-                "yaxis_id": "temp",
-                "color": "#1976D2",
-                "stroke_width": 2,
-                "stroke_dash": 4,
-                "data_generator": (
-                    "return entity.attributes.forecast.map(p => "
-                    "[new Date(p.timestamp).getTime(), p.value]);"
-                ),
-            },
+            # History: setpoint
             {
                 "entity": setpoint,
                 "name": "Setpoint",
                 "yaxis_id": "temp",
-                "color": "#9E9E9E",
-                "stroke_width": 1,
-                "stroke_dash": 2,
+                "color": "#F44336",
+                "stroke_width": 2,
+                "stroke_dash": 5,
                 "curve": "stepline",
-                "data_generator": (
-                    "return entity.attributes.forecast.map(p => "
-                    "[new Date(p.timestamp).getTime(), p.value]);"
-                ),
+                "float_precision": 1,
+                **_history_series_kwargs(),
+                "show": {"in_header": False},
             },
+            # Forecast: setpoint over the MPC horizon
+            {
+                "entity": setpoint,
+                "name": "Setpoint (forecast)",
+                "data_generator": _forecast_generator("setpoint"),
+                "yaxis_id": "temp",
+                "color": "#F44336",
+                "stroke_width": 2,
+                "stroke_dash": 5,
+                "curve": "stepline",
+                "float_precision": 1,
+                "show": {"legend_value": False, "in_header": False},
+            },
+            # Forecast: upper constraint
             {
                 "entity": upper,
-                "name": "Upper constraint",
+                "name": "Constraint Upper",
+                "data_generator": _forecast_generator("constraint_upper"),
                 "yaxis_id": "temp",
-                "color": "#FFCDD2",
+                "color": "#1565C0",
                 "stroke_width": 1,
-                "opacity": 0.4,
-                "show": {"legend_value": False},
-                "data_generator": (
-                    "return entity.attributes.forecast.map(p => "
-                    "[new Date(p.timestamp).getTime(), p.value]);"
-                ),
+                "curve": "stepline",
+                "show": {"legend_value": False, "in_header": False},
             },
+            # Forecast: lower constraint
             {
                 "entity": lower,
-                "name": "Lower constraint",
+                "name": "Constraint Lower",
+                "data_generator": _forecast_generator("constraint_lower"),
                 "yaxis_id": "temp",
-                "color": "#FFCDD2",
+                "color": "#1565C0",
                 "stroke_width": 1,
-                "opacity": 0.4,
-                "show": {"legend_value": False},
-                "data_generator": (
-                    "return entity.attributes.forecast.map(p => "
-                    "[new Date(p.timestamp).getTime(), p.value]);"
-                ),
+                "curve": "stepline",
+                "show": {"legend_value": False, "in_header": False},
+            },
+            # Forecast: predicted temperature trajectory
+            {
+                "entity": forecast,
+                "name": "Predicted",
+                "data_generator": _forecast_generator("temperature"),
+                "yaxis_id": "temp",
+                "color": "#1E88E5",
+                "stroke_width": 3,
+                "curve": "smooth",
+                "float_precision": 2,
+                "show": {"in_header": True},
             },
         ],
     }
 
 
 def _mpc_control_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
-    """ApexCharts card – measured + forecast heating power for the room."""
+    """Planned-heating-power chart – mirrors README §13.17.4."""
     measured = _eid("sensor", room.name, "heating_power_measured")
     forecast = _eid("sensor", room.name, "heating_power_forecast")
-    sources_here = [s for s in spec.sources if s.room == room.name]
-    series: List[Dict[str, Any]] = [
-        {
-            "entity": measured,
-            "name": "Measured power",
-            "color": "#F57C00",
-            "stroke_width": 2,
-            "curve": "stepline",
-            "float_precision": 0,
-            "extend_to": "now",
-        },
-        {
-            "entity": forecast,
-            "name": "Planned power",
-            "color": "#FFB74D",
-            "stroke_width": 2,
-            "stroke_dash": 4,
-            "curve": "stepline",
-            "data_generator": (
-                "return entity.attributes.forecast.map(p => "
-                "[new Date(p.timestamp).getTime(), p.value]);"
-            ),
-        },
-    ]
-    for src in sources_here:
-        series.append(
-            {
-                "entity": _eid("sensor", src.name, "control_action"),
-                "name": f"{src.name} action",
-                "color": "#90A4AE",
-                "stroke_width": 1,
-                "curve": "stepline",
-                "float_precision": 0,
-                "show": {"in_chart": True, "legend_value": True},
-                "opacity": 0.6,
-            }
-        )
     return {
         "type": "custom:apexcharts-card",
-        "header": {"show": True, "title": f"{room.name} – Control Input", "show_states": True},
+        "header": {
+            "show": True,
+            "title": f"{room.name} – Planned Heating Power",
+            "show_states": True,
+        },
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "Now", "color": "#424242"},
-        "yaxis": [{"id": "power", "apex_config": {"title": {"text": "Power (W)"}, "decimalsInFloat": 0}}],
-        "series": series,
+        "yaxis": [
+            {
+                "id": "power",
+                "min": 0,
+                "apex_config": {
+                    "title": {"text": "Heating Power (W)"},
+                    "tickAmount": 4,
+                },
+            }
+        ],
+        "series": [
+            {
+                "entity": measured,
+                "name": "Actual Heating",
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": "#BF360C",
+                "opacity": 0.2,
+                "stroke_width": 2,
+                "float_precision": 0,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
+            },
+            {
+                "entity": forecast,
+                "name": "Planned Heating",
+                "data_generator": _forecast_generator("heating_power"),
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": "#E65100",
+                "opacity": 0.35,
+                "stroke_width": 2,
+                "float_precision": 0,
+                "show": {"in_header": True},
+            },
+        ],
     }
 
 
 def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
-    """Outdoor temperature + solar gain for this room, history + forecast."""
+    """Outdoor temperature + solar gain chart – mirrors README §13.17.5."""
     outdoor_meas = _system_eid("sensor", "outdoor_temperature_measured")
     outdoor_fc = _system_eid("sensor", "outdoor_temperature_forecast")
     solar_meas = _eid("sensor", room.name, "solar_gain_measured")
     solar_fc = _eid("sensor", room.name, "solar_gain_forecast")
     return {
         "type": "custom:apexcharts-card",
-        "header": {"show": True, "title": f"{room.name} – Disturbances", "show_states": True},
+        "header": {
+            "show": True,
+            "title": f"{room.name} – Disturbance Forecast",
+            "show_states": True,
+        },
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "Now", "color": "#424242"},
         "yaxis": [
-            {"id": "temp", "apex_config": {"title": {"text": "T_out (°C)"}, "decimalsInFloat": 1}},
-            {"id": "solar", "opposite": True, "apex_config": {"title": {"text": "Solar (W)"}, "decimalsInFloat": 0}},
+            {"id": "temp", "apex_config": {"title": {"text": "Outdoor Temp (°C)"}}},
+            {
+                "id": "power",
+                "opposite": True,
+                "min": 0,
+                "apex_config": {"title": {"text": "Solar Gain (W)"}},
+            },
         ],
         "series": [
             {
                 "entity": outdoor_meas,
-                "name": "Outdoor T",
+                "name": "Outdoor (actual)",
                 "yaxis_id": "temp",
-                "color": "#2E7D32",
+                "color": "#37474F",
                 "stroke_width": 2,
                 "curve": "smooth",
                 "float_precision": 1,
-                "extend_to": "now",
-            },
-            {
-                "entity": outdoor_fc,
-                "name": "Outdoor T forecast",
-                "yaxis_id": "temp",
-                "color": "#66BB6A",
-                "stroke_width": 2,
-                "stroke_dash": 4,
-                "data_generator": (
-                    "return entity.attributes.forecast.map(p => "
-                    "[new Date(p.timestamp).getTime(), p.value]);"
-                ),
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
             },
             {
                 "entity": solar_meas,
-                "name": "Solar gain",
-                "yaxis_id": "solar",
-                "color": "#FBC02D",
+                "name": "Solar (actual)",
+                "yaxis_id": "power",
+                "type": "area",
+                "color": "#FF8F00",
+                "opacity": 0.25,
+                "stroke_width": 2,
+                "float_precision": 0,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
+            },
+            {
+                "entity": outdoor_fc,
+                "name": "Outdoor (forecast)",
+                "data_generator": _forecast_generator("outdoor_temp"),
+                "yaxis_id": "temp",
+                "color": "#78909C",
                 "stroke_width": 2,
                 "curve": "smooth",
-                "float_precision": 0,
-                "extend_to": "now",
+                "float_precision": 1,
+                "show": {"in_header": True},
             },
             {
                 "entity": solar_fc,
-                "name": "Solar forecast",
-                "yaxis_id": "solar",
-                "color": "#FFEE58",
+                "name": "Solar (forecast)",
+                "data_generator": _forecast_generator("solar_gain"),
+                "yaxis_id": "power",
+                "type": "area",
+                "color": "#FFC107",
+                "opacity": 0.4,
                 "stroke_width": 2,
-                "stroke_dash": 4,
-                "data_generator": (
-                    "return entity.attributes.forecast.map(p => "
-                    "[new Date(p.timestamp).getTime(), p.value]);"
-                ),
+                "float_precision": 0,
+                "show": {"in_header": True},
             },
         ],
     }
@@ -462,36 +548,36 @@ def _parameter_table_card(room: RoomSpec) -> Dict[str, Any]:
 
 
 def _schedule_card(room: RoomSpec) -> Optional[Dict[str, Any]]:
-    """Show schedule state if the room has one."""
+    """Show schedule state and quick-action service rows when the room has a schedule.
+
+    Uses ``call-service`` rows in the main ``entities`` list rather than the
+    ``footer: type: buttons`` form, because the footer-buttons schema
+    requires each item to reference an existing entity – which our
+    suspend/resume actions don't.
+    """
     if not room.has_schedule:
         return None
     return {
         "type": "entities",
         "title": "Comfort schedule",
+        "state_color": True,
         "entities": [
-            {"entity": _eid("climate", room.name, "climate"), "name": "Active setpoint"},
+            {"entity": _climate_eid(room.name), "name": "Active setpoint"},
+            {
+                "type": "call-service",
+                "name": f"Disable schedule – {room.name}",
+                "icon": "mdi:calendar-remove",
+                "service": f"{DOMAIN}.set_schedule_enabled",
+                "service_data": {"room_name": room.name, "enabled": False},
+            },
+            {
+                "type": "call-service",
+                "name": f"Enable schedule – {room.name}",
+                "icon": "mdi:calendar-check",
+                "service": f"{DOMAIN}.set_schedule_enabled",
+                "service_data": {"room_name": room.name, "enabled": True},
+            },
         ],
-        "footer": {
-            "type": "buttons",
-            "entities": [
-                {
-                    "name": "Disable schedule",
-                    "tap_action": {
-                        "action": "call-service",
-                        "service": f"{DOMAIN}.set_schedule_enabled",
-                        "service_data": {"room_name": room.name, "enabled": False},
-                    },
-                },
-                {
-                    "name": "Enable schedule",
-                    "tap_action": {
-                        "action": "call-service",
-                        "service": f"{DOMAIN}.set_schedule_enabled",
-                        "service_data": {"room_name": room.name, "enabled": True},
-                    },
-                },
-            ],
-        },
     }
 
 
@@ -505,7 +591,7 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
     comfort_tiles = [
         {
             "type": "tile",
-            "entity": _eid("climate", room.name, "climate"),
+            "entity": _climate_eid(room.name),
             "name": room.name,
             "icon": room.icon or "mdi:home-thermometer",
             "tap_action": {
@@ -521,16 +607,12 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
     weather_status = _system_eid("sensor", "weather_forecast_status")
     est_status = _system_eid("sensor", "estimated_parameters_status")
 
-    power_series: List[Dict[str, Any]] = [
-        {
-            "entity": _eid("sensor", room.name, "heating_power_measured"),
-            "name": f"{room.name}",
-            "stroke_width": 1,
-            "curve": "stepline",
-            "group_by": {"func": "avg", "duration": "5min"},
-        }
-        for room in spec.rooms
-    ]
+    # All-rooms charts: one shared temperature chart (lines overlaid) and one
+    # shared heating-power chart (stacked area). Keeping everything on a
+    # single chart per quantity gives the user a holistic, comparable view
+    # at a glance, while the per-room subviews remain the place for detail.
+    all_rooms_temperature_chart = _overview_temperature_chart(spec)
+    all_rooms_power_chart = _overview_power_chart(spec)
 
     energy_card = {
         "type": "entities",
@@ -554,17 +636,23 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
         {
             "type": "grid",
             "cards": [
-                {"type": "heading", "heading": "System totals", "heading_style": "title"},
-                {
-                    "type": "custom:apexcharts-card",
-                    "header": {"show": True, "title": "Heating power (last 24 h)", "show_states": True},
-                    "graph_span": "24h",
-                    "stacked": True,
-                    "series": power_series,
-                },
+                {"type": "heading", "heading": "Temperatures (all rooms)", "heading_style": "title"},
+                all_rooms_temperature_chart,
+            ],
+        },
+        {
+            "type": "grid",
+            "cards": [
+                {"type": "heading", "heading": "Heating power (all rooms)", "heading_style": "title"},
+                all_rooms_power_chart,
+            ],
+        },
+        {
+            "type": "grid",
+            "cards": [
+                {"type": "heading", "heading": "System status", "heading_style": "title"},
                 {
                     "type": "glance",
-                    "title": "System status",
                     "entities": [
                         {"entity": system_summary, "name": "Total power"},
                         {"entity": _system_eid("sensor", "outdoor_temperature_measured"), "name": "Outdoor"},
@@ -600,51 +688,199 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
     }
 
 
-def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
-    """Outdoor temperature history + forecast, plus aggregate solar gain."""
-    outdoor_meas = _system_eid("sensor", "outdoor_temperature_measured")
-    outdoor_fc = _system_eid("sensor", "outdoor_temperature_forecast")
-    solar_series: List[Dict[str, Any]] = [
-        {
-            "entity": _eid("sensor", room.name, "solar_gain_measured"),
-            "name": room.name,
-            "yaxis_id": "solar",
-            "stroke_width": 1,
-            "curve": "smooth",
-        }
-        for room in spec.rooms
-    ]
+def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
+    """All-rooms temperature chart for the overview view.
+
+    Each room contributes two series: its filtered-estimate history (solid
+    line) and its MPC forecast (dashed line drawn from the
+    ``temperature_forecast`` attribute). Setpoints are not plotted here so
+    the chart stays readable when there are many rooms; users get the
+    full triplet on the per-room subview.
+    """
+    palette = _ROOM_PALETTE
+    series: List[Dict[str, Any]] = []
+    for i, room in enumerate(spec.rooms):
+        color = palette[i % len(palette)]
+        series.append(
+            {
+                "entity": _eid("sensor", room.name, "temperature_filtered"),
+                "name": room.name,
+                "yaxis_id": "temp",
+                "color": color,
+                "stroke_width": 2,
+                "curve": "smooth",
+                "float_precision": 2,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
+            }
+        )
+        series.append(
+            {
+                "entity": _eid("sensor", room.name, "temperature_forecast"),
+                "name": f"{room.name} (forecast)",
+                "data_generator": _forecast_generator("temperature"),
+                "yaxis_id": "temp",
+                "color": color,
+                "stroke_width": 2,
+                "stroke_dash": 4,
+                "opacity": 0.85,
+                "curve": "smooth",
+                "float_precision": 2,
+                "show": {"legend_value": False, "in_header": False},
+            }
+        )
     return {
         "type": "custom:apexcharts-card",
-        "header": {"show": True, "title": "Outdoor & solar", "show_states": True},
+        "header": {"show": True, "title": "Room Temperatures", "show_states": True},
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "Now", "color": "#424242"},
         "yaxis": [
-            {"id": "temp", "apex_config": {"title": {"text": "T_out (°C)"}, "decimalsInFloat": 1}},
-            {"id": "solar", "opposite": True, "apex_config": {"title": {"text": "Solar (W)"}, "decimalsInFloat": 0}},
+            {
+                "id": "temp",
+                "apex_config": {
+                    "title": {"text": "Temperature (°C)"},
+                    "tickAmount": 5,
+                },
+            }
+        ],
+        "series": series,
+    }
+
+
+def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
+    """All-rooms heating-power chart (stacked area) for the overview view."""
+    palette = _ROOM_PALETTE
+    series: List[Dict[str, Any]] = []
+    for i, room in enumerate(spec.rooms):
+        color = palette[i % len(palette)]
+        series.append(
+            {
+                "entity": _eid("sensor", room.name, "heating_power_measured"),
+                "name": room.name,
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": color,
+                "stroke_width": 1,
+                "opacity": 0.5,
+                "float_precision": 0,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
+            }
+        )
+    return {
+        "type": "custom:apexcharts-card",
+        "stacked": True,
+        "header": {"show": True, "title": "Heating Power (stacked)", "show_states": True},
+        "graph_span": f"{int(spec.graph_span_hours)}h",
+        "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
+        "now": {"show": True, "label": "Now", "color": "#424242"},
+        "yaxis": [
+            {
+                "id": "power",
+                "min": 0,
+                "apex_config": {
+                    "title": {"text": "Heating Power (W)"},
+                    "tickAmount": 4,
+                },
+            }
+        ],
+        "series": series,
+    }
+
+
+# Repeating colour palette used across the multi-room overview charts so
+# the same room keeps the same colour on the temperature and power plots.
+_ROOM_PALETTE: List[str] = [
+    "#1E88E5",  # blue
+    "#43A047",  # green
+    "#E53935",  # red
+    "#FB8C00",  # orange
+    "#8E24AA",  # purple
+    "#00ACC1",  # cyan
+    "#FFB300",  # amber
+    "#6D4C41",  # brown
+    "#3949AB",  # indigo
+    "#7CB342",  # lime
+]
+
+
+def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
+    """Outdoor temperature + per-room solar gain, history + forecast."""
+    outdoor_meas = _system_eid("sensor", "outdoor_temperature_measured")
+    outdoor_fc = _system_eid("sensor", "outdoor_temperature_forecast")
+    palette = _ROOM_PALETTE
+
+    solar_series: List[Dict[str, Any]] = []
+    for i, room in enumerate(spec.rooms):
+        color = palette[i % len(palette)]
+        solar_series.append(
+            {
+                "entity": _eid("sensor", room.name, "solar_gain_measured"),
+                "name": f"{room.name} solar",
+                "yaxis_id": "power",
+                "type": "area",
+                "color": color,
+                "opacity": 0.2,
+                "stroke_width": 1,
+                "float_precision": 0,
+                **_history_series_kwargs(),
+                "show": {"in_header": False},
+            }
+        )
+        solar_series.append(
+            {
+                "entity": _eid("sensor", room.name, "solar_gain_forecast"),
+                "name": f"{room.name} solar (forecast)",
+                "data_generator": _forecast_generator("solar_gain"),
+                "yaxis_id": "power",
+                "type": "area",
+                "color": color,
+                "opacity": 0.35,
+                "stroke_width": 1,
+                "float_precision": 0,
+                "show": {"legend_value": False, "in_header": False},
+            }
+        )
+
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {"show": True, "title": "Outdoor & Solar", "show_states": True},
+        "graph_span": f"{int(spec.graph_span_hours)}h",
+        "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
+        "now": {"show": True, "label": "Now", "color": "#424242"},
+        "yaxis": [
+            {"id": "temp", "apex_config": {"title": {"text": "Outdoor Temp (°C)"}}},
+            {
+                "id": "power",
+                "opposite": True,
+                "min": 0,
+                "apex_config": {"title": {"text": "Solar Gain (W)"}},
+            },
         ],
         "series": [
             {
                 "entity": outdoor_meas,
-                "name": "Outdoor T",
+                "name": "Outdoor (actual)",
                 "yaxis_id": "temp",
-                "color": "#2E7D32",
+                "color": "#37474F",
                 "stroke_width": 2,
                 "curve": "smooth",
-                "extend_to": "now",
+                "float_precision": 1,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
             },
             {
                 "entity": outdoor_fc,
-                "name": "Forecast",
+                "name": "Outdoor (forecast)",
+                "data_generator": _forecast_generator("outdoor_temp"),
                 "yaxis_id": "temp",
-                "color": "#66BB6A",
+                "color": "#78909C",
                 "stroke_width": 2,
-                "stroke_dash": 4,
-                "data_generator": (
-                    "return entity.attributes.forecast.map(p => "
-                    "[new Date(p.timestamp).getTime(), p.value]);"
-                ),
+                "curve": "smooth",
+                "float_precision": 1,
+                "show": {"in_header": True},
             },
             *solar_series,
         ],
@@ -727,26 +963,19 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
     est_status = _system_eid("sensor", "estimated_parameters_status")
 
     estimation_card = {
-        "type": "vertical-stack",
-        "cards": [
+        "type": "entities",
+        "title": "Parameter estimation",
+        "state_color": True,
+        "entities": [
+            {"entity": _button_eid("estimate_parameters"), "name": "Estimate now"},
+            {"entity": _button_eid("reset_parameters"), "name": "Reset to defaults"},
+            {"entity": est_status, "name": "Estimated parameters"},
             {
-                "type": "entities",
-                "title": "Parameter estimation",
-                "entities": [
-                    {"entity": _system_eid("button", "estimate_parameters_button"), "name": "Estimate now"},
-                    {"entity": _system_eid("button", "reset_parameters_button"), "name": "Reset to defaults"},
-                    est_status,
-                ],
-            },
-            {
-                "type": "entity-button",
+                "type": "call-service",
                 "name": "Dry-run estimation",
-                "entity": _system_eid("button", "estimate_parameters_button"),
-                "tap_action": {
-                    "action": "call-service",
-                    "service": f"{DOMAIN}.estimate_parameters_ml",
-                    "service_data": {"apply_parameters": False},
-                },
+                "icon": "mdi:flask-empty-outline",
+                "service": f"{DOMAIN}.estimate_parameters_ml",
+                "service_data": {"apply_parameters": False},
             },
         ],
     }
@@ -773,33 +1002,31 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
         "entities": residual_rows,
     }
 
+    open_loop_entities: List[Dict[str, Any]] = [
+        {"entity": _eid("sensor", room.name, "open_loop_rmse"), "name": room.name}
+        for room in spec.rooms
+    ]
+    open_loop_entities.extend(
+        [
+            {
+                "type": "call-service",
+                "name": "Run open-loop simulation",
+                "icon": "mdi:play-circle",
+                "service": f"{DOMAIN}.run_open_loop_simulation",
+            },
+            {
+                "type": "call-service",
+                "name": "Analyse model fit",
+                "icon": "mdi:chart-bell-curve",
+                "service": f"{DOMAIN}.analyze_model_fit",
+            },
+        ]
+    )
     open_loop_panel = {
         "type": "entities",
         "title": "Open-loop RMSE",
         "state_color": True,
-        "entities": [
-            {"entity": _eid("sensor", room.name, "open_loop_rmse"), "name": room.name}
-            for room in spec.rooms
-        ],
-        "footer": {
-            "type": "buttons",
-            "entities": [
-                {
-                    "name": "Run open-loop simulation",
-                    "tap_action": {
-                        "action": "call-service",
-                        "service": f"{DOMAIN}.run_open_loop_simulation",
-                    },
-                },
-                {
-                    "name": "Analyse model fit",
-                    "tap_action": {
-                        "action": "call-service",
-                        "service": f"{DOMAIN}.analyze_model_fit",
-                    },
-                },
-            ],
-        },
+        "entities": open_loop_entities,
     }
 
     parameter_panel = {
@@ -834,10 +1061,18 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
         ),
     }
 
-    loglik_panel = {
-        "type": "entities",
-        "title": "Log-likelihood landscape",
-        "entities": [
+    loglik_entities: List[Dict[str, Any]] = []
+    if spec.rooms:
+        loglik_entities.append({"type": "section", "label": "Last computed"})
+        loglik_entities.extend(
+            {
+                "entity": _eid("sensor", room.name, "loglik_slice"),
+                "name": f"{room.name} – computed at",
+            }
+            for room in spec.rooms
+        )
+        loglik_entities.append({"type": "section", "label": "Compute slice"})
+        loglik_entities.extend(
             {
                 "type": "call-service",
                 "name": f"Compute slice – {room.name}",
@@ -846,17 +1081,28 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
                 "service_data": {"room_name": room.name, "n_grid": 11, "span_log": 1.0},
             }
             for room in spec.rooms
-        ]
-        or [{"type": "section", "label": "No rooms configured"}],
-        "footer": {
-            "type": "markdown",
-            "content": (
-                "Each button evaluates the CD-EKF log-likelihood on an 11×11"
-                " (log C, log R_ext) grid around the current MLE. The grid"
-                " comes back in the service response – use Developer Tools →"
-                " Services to inspect it, or add a Plotly card."
-            ),
-        },
+        )
+    else:
+        loglik_entities.append({"type": "section", "label": "No rooms configured"})
+    loglik_panel = {
+        "type": "entities",
+        "title": "Log-likelihood landscape",
+        "entities": loglik_entities,
+    }
+    loglik_help = {
+        "type": "markdown",
+        "content": (
+            "Each **Compute slice** button fires `heating_assistant."
+            "compute_loglik_slice` on the matching room, which evaluates the"
+            " CD-EKF log-likelihood on an 11×11 (log C, log R_ext) grid"
+            " around the current MLE.\n\n"
+            "The result is stored on the per-room `…_loglik_slice` sensor and"
+            " summarised in a persistent notification. Call the service from"
+            " Developer Tools with `return_response: true` to get the full"
+            " grid in the response, or read"
+            " `state_attr('sensor.heating_assistant_<room>_loglik_slice',"
+            " 'log_likelihood')` from a template / Plotly card."
+        ),
     }
 
     return {
@@ -870,7 +1116,14 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
             {"type": "grid", "cards": [{"type": "heading", "heading": "Residuals", "heading_style": "title"}, residual_panel]},
             {"type": "grid", "cards": [{"type": "heading", "heading": "Open-loop validation", "heading_style": "title"}, open_loop_panel]},
             {"type": "grid", "cards": [{"type": "heading", "heading": "Parameter identifiability", "heading_style": "title"}, parameter_panel]},
-            {"type": "grid", "cards": [{"type": "heading", "heading": "Log-likelihood landscape", "heading_style": "title"}, loglik_panel]},
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Log-likelihood landscape", "heading_style": "title"},
+                    loglik_panel,
+                    loglik_help,
+                ],
+            },
             {"type": "grid", "cards": [{"type": "heading", "heading": "History", "heading_style": "title"}, history_panel]},
         ],
     }

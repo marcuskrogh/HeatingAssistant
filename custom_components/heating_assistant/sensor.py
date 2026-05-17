@@ -92,6 +92,7 @@ async def async_setup_entry(
         entities.append(OpenLoopRMSESensor(coordinator, room_name))
         entities.append(KalmanInnovationSensor(coordinator, room_name))
         entities.append(ResidualACFSensor(coordinator, room_name))
+        entities.append(LoglikSliceSensor(coordinator, room_name))
 
     # Per-source sensors
     for src in coordinator.heat_sources:
@@ -1878,6 +1879,60 @@ class HeaterScaleSensor(CoordinatorEntity, SensorEntity):
             "is_estimated": is_estimated,
             "estimated_at": snapshot.get("estimated_at") if snapshot else None,
         }
+
+
+# ---------------------------------------------------------------------------
+# Log-likelihood slice sensor (per room)
+# ---------------------------------------------------------------------------
+
+
+class LoglikSliceSensor(CoordinatorEntity, SensorEntity):
+    """Most recent log-likelihood slice computed for a room.
+
+    Populated by the :meth:`HeatingAssistantCoordinator.async_compute_loglik_slice`
+    call (triggered by the ``compute_loglik_slice`` service / dashboard
+    button). The state is the ISO timestamp of the last successful run –
+    set to ``unknown`` until the user requests a slice for the room. The
+    attributes carry the full grid so a Plotly card or template sensor can
+    visualise the likelihood landscape without recomputing.
+    """
+
+    _attr_icon = "mdi:chart-bell-curve"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Loglik Slice"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_loglik_slice"
+
+    def _slice(self) -> Optional[Dict[str, Any]]:
+        slices = getattr(self._coordinator, "_loglik_slices", {}) or {}
+        return slices.get(self._room_name)
+
+    @property
+    def native_value(self) -> Optional[str]:
+        sl = self._slice()
+        return None if sl is None else sl.get("computed_at")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        sl = self._slice()
+        if sl is None:
+            return {
+                "room": self._room_name,
+                "status": "not_computed",
+            }
+        # Avoid copying the (potentially large) grid until the user opens
+        # the entity – it lives in coordinator state so this is a view.
+        return dict(sl)
 
 
 # ---------------------------------------------------------------------------
