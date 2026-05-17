@@ -240,10 +240,10 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 **_history_series_kwargs(),
                 "show": {"in_header": False},
             },
-            # Forecast: setpoint over the MPC horizon
+            # Forecast: setpoint over the MPC horizon (same name as history → single legend entry)
             {
                 "entity": setpoint,
-                "name": "Setpoint (forecast)",
+                "name": "Setpoint",
                 "data_generator": _forecast_generator("setpoint"),
                 "yaxis_id": "temp",
                 "color": "#F44336",
@@ -253,10 +253,10 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "float_precision": 1,
                 "show": {"legend_value": False, "in_header": False},
             },
-            # Forecast: upper constraint
+            # Forecast: upper constraint (both constraints share the "Constraints" name)
             {
                 "entity": upper,
-                "name": "Upper",
+                "name": "Constraints",
                 "data_generator": _forecast_generator("constraint_upper"),
                 "yaxis_id": "temp",
                 "color": "#1565C0",
@@ -267,7 +267,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
             # Forecast: lower constraint
             {
                 "entity": lower,
-                "name": "Lower",
+                "name": "Constraints",
                 "data_generator": _forecast_generator("constraint_lower"),
                 "yaxis_id": "temp",
                 "color": "#1565C0",
@@ -396,14 +396,14 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
             },
             {
                 "entity": outdoor_fc,
-                "name": "Outdoor fc.",
+                "name": "Outdoor",
                 "data_generator": _forecast_generator("outdoor_temp"),
                 "yaxis_id": "temp",
                 "color": "#78909C",
                 "stroke_width": 2,
                 "curve": "smooth",
                 "float_precision": 1,
-                "show": {"in_header": True},
+                "show": {"legend_value": False, "in_header": False},
             },
             {
                 "entity": solar_fc,
@@ -840,7 +840,7 @@ def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
         solar_series.append(
             {
                 "entity": _eid("sensor", room.name, "solar_gain_forecast"),
-                "name": f"{room.name} solar (forecast)",
+                "name": f"{room.name} solar",
                 "data_generator": _forecast_generator("solar_gain"),
                 "yaxis_id": "power",
                 "type": "area",
@@ -870,7 +870,7 @@ def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
         "series": [
             {
                 "entity": outdoor_meas,
-                "name": "Outdoor (actual)",
+                "name": "Outdoor",
                 "yaxis_id": "temp",
                 "color": "#37474F",
                 "stroke_width": 2,
@@ -881,14 +881,14 @@ def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
             },
             {
                 "entity": outdoor_fc,
-                "name": "Outdoor (forecast)",
+                "name": "Outdoor",
                 "data_generator": _forecast_generator("outdoor_temp"),
                 "yaxis_id": "temp",
                 "color": "#78909C",
                 "stroke_width": 2,
                 "curve": "smooth",
                 "float_precision": 1,
-                "show": {"in_header": True},
+                "show": {"legend_value": False, "in_header": False},
             },
             *solar_series,
         ],

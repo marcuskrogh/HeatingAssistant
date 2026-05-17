@@ -1591,65 +1591,35 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Heating Assistant – {room_name} – Open Loop RMSE"
         self._attr_unique_id = f"{DOMAIN}_{room_name}_open_loop_rmse"
 
-    def _compute(self) -> dict:
-        from .model_diagnostics import compute_open_loop_predictions
-
-        history = list(self._coordinator.history_buffer)
-        system = self._coordinator.controller._system  # HouseThermalSDE
-        room_names = self._coordinator.model.room_names
-        n_rooms = len(room_names)
-
-        return compute_open_loop_predictions(
-            history=history,
-            system=system,
-            room_names=room_names,
-            n_rooms=n_rooms,
-            dt=float(self._coordinator.update_interval_seconds),
-            segment_length=self.SEGMENT_LENGTH,
-        )
-
     @property
     def native_value(self) -> Optional[float]:
-        """Return open-loop RMSE [°C] for this room."""
-        try:
-            result = self._compute()
-            per_room = result.get("per_room", {})
-            room_data = per_room.get(self._room_name, {})
-            return room_data.get("rmse")
-        except Exception as exc:
-            _LOGGER.debug("OpenLoopRMSESensor compute error for %s: %s", self._room_name, exc)
-            return None
+        """Return open-loop RMSE [°C] for this room, from coordinator cache."""
+        room_data = self._coordinator.open_loop_results.get(self._room_name, {})
+        return room_data.get("rmse")
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Expose open-loop simulation data for Apex Charts."""
-        try:
-            result = self._compute()
-            per_room = result.get("per_room", {})
-            room_data = per_room.get(self._room_name, {})
-            sim = room_data.get("simulation", [])
-            # Convert timestamps to ISO strings for Apex Charts
-            from datetime import datetime, timezone
-            formatted_sim = []
-            for entry in sim:
-                ts = entry.get("time", 0.0)
-                dt_iso = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
-                formatted_sim.append({
-                    "time": dt_iso,
-                    "measured": entry.get("measured"),
-                    "predicted": entry.get("predicted"),
-                })
-            return {
-                "open_loop_rmse": room_data.get("rmse"),
-                "open_loop_mae": room_data.get("mae"),
-                "simulation": formatted_sim,
-                "segment_length_steps": result.get("segment_length"),
-                "n_segments": result.get("n_segments"),
-                "error": result.get("error"),
-            }
-        except Exception as exc:
-            _LOGGER.debug("OpenLoopRMSESensor attributes error for %s: %s", self._room_name, exc)
-            return {"error": str(exc)}
+        """Expose open-loop simulation data for Apex Charts, from coordinator cache."""
+        room_data = self._coordinator.open_loop_results.get(self._room_name, {})
+        sim = room_data.get("simulation", [])
+        from datetime import datetime, timezone
+        formatted_sim = []
+        for entry in sim:
+            ts = entry.get("time", 0.0)
+            dt_iso = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+            formatted_sim.append({
+                "time": dt_iso,
+                "measured": entry.get("measured"),
+                "predicted": entry.get("predicted"),
+            })
+        attrs: dict = {
+            "open_loop_rmse": room_data.get("rmse"),
+            "open_loop_mae": room_data.get("mae"),
+            "simulation": formatted_sim,
+        }
+        if "error" in room_data:
+            attrs["error"] = room_data["error"]
+        return attrs
 
 
 # ---------------------------------------------------------------------------
