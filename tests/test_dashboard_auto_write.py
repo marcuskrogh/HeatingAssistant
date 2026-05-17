@@ -141,3 +141,21 @@ async def test_auto_write_swallows_errors_when_hass_config_missing(tmp_path):
     # Must not raise.
     await init_mod._async_auto_write_default_dashboard(hass, _entry(), coordinator)
     hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_register_lovelace_dashboard_silent_when_lovelace_missing(tmp_path):
+    hass = _make_hass(tmp_path)
+    # No ``hass.data["lovelace"]`` populated: the helper must return cleanly.
+    await init_mod._async_try_register_lovelace_dashboard(
+        hass, str(tmp_path / "dashboards" / "heating_assistant.yaml")
+    )
+
+
+@pytest.mark.asyncio
+async def test_auto_write_returns_path_used_for_lovelace_registration(tmp_path):
+    hass = _make_hass(tmp_path)
+    coordinator = _make_coordinator()
+    path = await init_mod._async_auto_write_default_dashboard(hass, _entry(), coordinator)
+    assert path is not None
+    assert path.endswith(init_mod.DEFAULT_DASHBOARD_FILENAME)

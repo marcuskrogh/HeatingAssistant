@@ -60,7 +60,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import voluptuous as vol
 
@@ -450,16 +450,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    await _async_auto_write_default_dashboard(hass, entry, coordinator)
+    written = await _async_auto_write_default_dashboard(hass, entry, coordinator)
+    if written:
+        await _async_try_register_lovelace_dashboard(hass, written)
 
     return True
+
+
+DASHBOARD_URL_PATH = "heating-assistant"
 
 
 async def _async_auto_write_default_dashboard(
     hass: HomeAssistant,
     entry: ConfigEntry,
     coordinator: HeatingAssistantCoordinator,
-) -> None:
+) -> Optional[str]:
     """Write the default dashboard YAML on first setup.
 
     Skipped when (a) the target file already exists – we never clobber a
@@ -483,7 +488,7 @@ async def _async_auto_write_default_dashboard(
         )
         marker = await marker_store.async_load()
         if marker and marker.get("written_at"):
-            return
+            return marker.get("path") if marker.get("path") else None
 
         base_dir = hass.config.path("dashboards")
         target = os.path.join(base_dir, DEFAULT_DASHBOARD_FILENAME)
@@ -493,9 +498,13 @@ async def _async_auto_write_default_dashboard(
 
         if await hass.async_add_executor_job(_exists):
             await marker_store.async_save(
-                {"written_at": datetime.now(tz=timezone.utc).isoformat(), "skipped": True}
+                {
+                    "written_at": datetime.now(tz=timezone.utc).isoformat(),
+                    "skipped": True,
+                    "path": target,
+                }
             )
-            return
+            return target
 
         dashboard = build_dashboard_from_coordinator(coordinator)
         yaml_text = await hass.async_add_executor_job(dashboard_to_yaml, dashboard)
@@ -528,9 +537,82 @@ async def _async_auto_write_default_dashboard(
             },
             blocking=False,
         )
+        return target
     except Exception:
         _LOGGER.debug(
             "Heating Assistant: auto-write of starter dashboard skipped",
+            exc_info=True,
+        )
+        return None
+
+
+async def _async_try_register_lovelace_dashboard(
+    hass: HomeAssistant,
+    yaml_path: str,
+) -> None:
+    """Best-effort registration of the YAML file as a Lovelace dashboard.
+
+    Hooks into ``hass.data["lovelace"]`` to add a YAML-mode dashboard whose
+    source is the file we just wrote, so the entry appears in the sidebar
+    without the user having to paste anything. The whole block is wrapped
+    in ``try``/``except`` because we depend on a semi-private HA surface
+    that occasionally moves between releases. On any failure we leave the
+    existing persistent notification as the fallback path.
+    """
+    import os
+
+    try:
+        from homeassistant.components.lovelace.dashboard import LovelaceYAML
+
+        lovelace_data = hass.data.get("lovelace")
+        if lovelace_data is None:
+            return
+
+        # ``LovelaceData`` (modern HA) exposes ``dashboards``; older
+        # snapshots stored it as ``hass.data["lovelace"]["dashboards"]``.
+        dashboards = getattr(lovelace_data, "dashboards", None)
+        if dashboards is None and isinstance(lovelace_data, dict):
+            dashboards = lovelace_data.get("dashboards")
+        if dashboards is None:
+            return
+        if DASHBOARD_URL_PATH in dashboards:
+            return  # already registered (e.g. by the user)
+
+        rel_filename = os.path.relpath(yaml_path, hass.config.path())
+        config = {
+            "mode": "yaml",
+            "icon": "mdi:home-thermometer",
+            "title": "Heating Assistant",
+            "filename": rel_filename,
+            "url_path": DASHBOARD_URL_PATH,
+            "show_in_sidebar": True,
+            "require_admin": False,
+        }
+        dashboards[DASHBOARD_URL_PATH] = LovelaceYAML(
+            hass, DASHBOARD_URL_PATH, config
+        )
+
+        try:
+            from homeassistant.components import frontend
+
+            frontend.async_register_built_in_panel(
+                hass,
+                component_name="lovelace",
+                sidebar_title=config["title"],
+                sidebar_icon=config["icon"],
+                frontend_url_path=DASHBOARD_URL_PATH,
+                config={"mode": "yaml"},
+                require_admin=False,
+                update=False,
+            )
+        except Exception:
+            _LOGGER.debug(
+                "Heating Assistant: sidebar panel registration skipped",
+                exc_info=True,
+            )
+    except Exception:
+        _LOGGER.debug(
+            "Heating Assistant: Lovelace dashboard auto-registration skipped",
             exc_info=True,
         )
 

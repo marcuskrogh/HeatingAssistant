@@ -2423,8 +2423,11 @@ Evaluates model quality by running a free-run (open-loop) multi-step simulation 
 Heating Assistant ships a Lovelace dashboard generator. Nothing else to install
 on the Python side: the integration writes
 `<config>/dashboards/heating_assistant.yaml` automatically the first time the
-config entry sets up and posts a persistent notification with the two-click
-path to add it to the sidebar.
+config entry sets up and, on Home Assistant versions that expose the
+Lovelace storage API, also registers a **Heating Assistant** entry in the
+sidebar pointing at that file. If the auto-registration step is skipped
+(unusual – older HA, custom Lovelace setups), a persistent notification
+explains the two-click path to add the dashboard manually.
 
 > Prerequisite: the `apexcharts-card` HACS frontend card (every MPC chart on
 > the auto-generated dashboard depends on it).
