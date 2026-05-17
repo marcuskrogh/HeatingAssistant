@@ -448,7 +448,90 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    await _async_auto_write_default_dashboard(hass, entry, coordinator)
+
     return True
+
+
+async def _async_auto_write_default_dashboard(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: HeatingAssistantCoordinator,
+) -> None:
+    """Write the default dashboard YAML on first setup.
+
+    Skipped when (a) the target file already exists – we never clobber a
+    user-edited dashboard – or (b) the per-entry marker says we've already
+    auto-written once. Users who delete the generated file therefore aren't
+    surprised by it reappearing; they can re-create it explicitly with the
+    ``regenerate_dashboard`` service.
+
+    This is a best-effort convenience: any failure is logged at debug
+    level and never propagated, so a missing ``hass.config`` (in tests) or
+    a read-only config directory cannot break integration setup.
+    """
+    import os
+    from datetime import datetime, timezone
+
+    from .dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
+
+    try:
+        marker_store = Store(
+            hass, version=1, key=f"{DOMAIN}_dashboard_marker_{entry.entry_id}"
+        )
+        marker = await marker_store.async_load()
+        if marker and marker.get("written_at"):
+            return
+
+        base_dir = hass.config.path("dashboards")
+        target = os.path.join(base_dir, DEFAULT_DASHBOARD_FILENAME)
+
+        def _exists() -> bool:
+            return os.path.exists(target)
+
+        if await hass.async_add_executor_job(_exists):
+            await marker_store.async_save(
+                {"written_at": datetime.now(tz=timezone.utc).isoformat(), "skipped": True}
+            )
+            return
+
+        dashboard = build_dashboard_from_coordinator(coordinator)
+        yaml_text = await hass.async_add_executor_job(dashboard_to_yaml, dashboard)
+
+        def _write() -> None:
+            os.makedirs(base_dir, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write(yaml_text)
+
+        await hass.async_add_executor_job(_write)
+
+        await marker_store.async_save(
+            {"written_at": datetime.now(tz=timezone.utc).isoformat(), "path": target}
+        )
+
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant dashboard available",
+                "message": (
+                    f"Heating Assistant wrote a starter Lovelace dashboard to "
+                    f"`{target}`. To add it to the sidebar, open "
+                    "**Settings → Dashboards → Add Dashboard → Show YAML "
+                    "editor**, paste the file contents, and save. Re-run "
+                    "`heating_assistant.regenerate_dashboard` after editing "
+                    "rooms to refresh the file."
+                ),
+                "notification_id": f"{DOMAIN}_dashboard_first_install",
+            },
+            blocking=False,
+        )
+    except Exception:
+        _LOGGER.debug(
+            "Heating Assistant: auto-write of starter dashboard skipped",
+            exc_info=True,
+        )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
