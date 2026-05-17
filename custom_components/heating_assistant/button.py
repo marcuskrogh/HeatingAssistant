@@ -67,7 +67,12 @@ class EstimateParametersButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle button press – run ML parameter estimation."""
-        await self._coordinator.async_estimate_parameters_ml(apply_params=True)
+        await self.hass.services.async_call(
+            DOMAIN,
+            "estimate_parameters_ml",
+            {"apply_parameters": True},
+            blocking=False,
+        )
 
 
 class ResetParametersButton(ButtonEntity):
@@ -104,3 +109,13 @@ class ResetParametersButton(ButtonEntity):
     async def async_press(self) -> None:
         """Handle button press – revert to default parameters."""
         self._coordinator.reset_estimated_parameters()
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – Parameters Reset",
+                "message": "Thermal parameters have been reset to their configured defaults.",
+                "notification_id": f"{DOMAIN}_params_reset",
+            },
+            blocking=False,
+        )

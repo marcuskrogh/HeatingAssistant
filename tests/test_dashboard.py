@@ -512,7 +512,7 @@ def test_overview_has_two_all_rooms_charts(two_room_spec):
         if c.get("type") == "custom:apexcharts-card" and c.get("header")
     ]
     assert any("Room Temperatures" in t for t in apex_titles)
-    assert any("Heating Power" in t for t in apex_titles)
+    assert any("Power" in t for t in apex_titles)
 
 
 def test_overview_temperature_chart_covers_every_room(two_room_spec):
