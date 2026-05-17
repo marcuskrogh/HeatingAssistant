@@ -253,6 +253,23 @@ def _iter_call_service_rows(node):
             yield from _iter_call_service_rows(item)
 
 
+def _iter_button_action_cards(node):
+    """Yield every standalone button card with a call-service tap_action."""
+    if isinstance(node, dict):
+        if (
+            node.get("type") == "button"
+            and isinstance(node.get("tap_action"), dict)
+            and node["tap_action"].get("action") == "call-service"
+            and node["tap_action"].get("service")
+        ):
+            yield node
+        for v in node.values():
+            yield from _iter_button_action_cards(v)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _iter_button_action_cards(item)
+
+
 def test_diagnostics_view_includes_estimation_buttons_and_per_room_rows(two_room_spec):
     dashboard = build_dashboard(two_room_spec)
     diag = next(v for v in dashboard["views"] if v["title"] == "Diagnostics")
@@ -281,32 +298,23 @@ def test_diagnostics_dry_run_row_calls_estimate_ml_with_apply_false(two_room_spe
     diag = next(
         v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
     )
-    rows = [
-        row for row in _iter_call_service_rows(diag)
-        if row["service"] == f"{DOMAIN}.estimate_parameters_ml"
+    buttons = [
+        card for card in _iter_button_action_cards(diag)
+        if card["tap_action"]["service"] == f"{DOMAIN}.estimate_parameters_ml"
     ]
-    assert rows, "Expected a dry-run estimation row on the diagnostics view"
-    assert rows[0].get("service_data") == {"apply_parameters": False}
+    assert buttons, "Expected a dry-run estimation button card on the diagnostics view"
+    assert buttons[0]["tap_action"].get("service_data") == {"apply_parameters": False}
 
 
 def test_diagnostics_open_loop_card_wires_services_via_entity_rows(two_room_spec):
-    """Open-loop panel uses ``call-service`` rows in the entities list rather
-    than a ``footer: type: buttons`` (which requires entity refs)."""
+    """Open-loop actions are exposed as standalone button cards (not as
+    ``call-service`` rows inside an entities card, which newer HA rejects)."""
     diag = next(
         v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
     )
-    services = {row["service"] for row in _iter_call_service_rows(diag)}
+    services = {card["tap_action"]["service"] for card in _iter_button_action_cards(diag)}
     assert f"{DOMAIN}.run_open_loop_simulation" in services
     assert f"{DOMAIN}.analyze_model_fit" in services
-    # Should NOT appear in a footer-buttons block.
-    for card in _iter_cards(diag):
-        footer = card.get("footer")
-        if isinstance(footer, dict) and footer.get("type") == "buttons":
-            for ent in footer.get("entities", []):
-                assert "entity" in ent, (
-                    "footer-button items must reference an entity (Lovelace "
-                    "rejects them otherwise)"
-                )
 
 
 def test_settings_view_has_regenerate_dashboard_call(two_room_spec):
@@ -429,17 +437,16 @@ def test_room_view_includes_open_loop_chart(two_room_spec):
 
 
 def test_diagnostics_view_offers_loglik_slice_buttons_per_room(two_room_spec):
+    """Each room gets its own standalone button card for compute_loglik_slice."""
     diag = next(
         v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
     )
-    loglik_services = [
-        ent.get("service_data")
-        for card in _iter_cards(diag)
-        for ent in card.get("entities", [])
-        if isinstance(ent, dict)
-        and ent.get("service") == f"{DOMAIN}.compute_loglik_slice"
-    ]
-    rooms_covered = {sd.get("room_name") for sd in loglik_services if isinstance(sd, dict)}
+    rooms_covered = {
+        card["tap_action"]["service_data"]["room_name"]
+        for card in _iter_button_action_cards(diag)
+        if card["tap_action"]["service"] == f"{DOMAIN}.compute_loglik_slice"
+        and isinstance(card["tap_action"].get("service_data"), dict)
+    }
     assert rooms_covered == {"Living Room", "Bedroom"}
 
 

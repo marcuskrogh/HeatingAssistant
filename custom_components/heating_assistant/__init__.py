@@ -1293,18 +1293,20 @@ def _register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.OPTIONAL,
     )
 
-    async def handle_compute_loglik_slice(call: ServiceCall) -> ServiceResponse:
+    async def handle_compute_loglik_slice(call: ServiceCall) -> dict:
         """Compute a 2-D log-likelihood slice for a room.
 
         The slice is stored on the coordinator and exposed via the
         per-room ``…_loglik_slice`` sensor so dashboards can visualise it
-        without re-running the computation. The service also returns the
-        full grid when called with ``return_response: true`` (Developer
-        Tools / scripts), and posts a one-line persistent notification
-        with the peak likelihood so dashboard buttons give immediate
-        feedback. Response support is ``OPTIONAL`` so the dashboard's
-        plain ``call-service`` row can fire it without the
-        ``return_response=true`` ceremony.
+        without re-running the computation.  A persistent notification
+        reports the peak log-likelihood so Lovelace button presses give
+        immediate feedback.
+
+        The service intentionally has no ``supports_response`` registration
+        so Lovelace button cards can fire it without the frontend requiring
+        ``return_response=true``.  The full grid is always available via
+        ``state_attr('sensor.heating_assistant_<room>_loglik_slice',
+        'log_likelihood')``.
         """
         coordinator = _get_coordinator(hass)
         room_name = call.data["room_name"]
@@ -1375,5 +1377,4 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
             }
         ),
-        supports_response=SupportsResponse.OPTIONAL,
     )
