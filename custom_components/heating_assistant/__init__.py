@@ -465,13 +465,14 @@ async def _async_auto_write_default_dashboard(
     entry: ConfigEntry,
     coordinator: HeatingAssistantCoordinator,
 ) -> Optional[str]:
-    """Write the default dashboard YAML on first setup.
+    """Write the default dashboard YAML on first setup (or after a format upgrade).
 
-    Skipped when (a) the target file already exists – we never clobber a
-    user-edited dashboard – or (b) the per-entry marker says we've already
-    auto-written once. Users who delete the generated file therefore aren't
-    surprised by it reappearing; they can re-create it explicitly with the
-    ``regenerate_dashboard`` service.
+    Skipped when the per-entry marker says we've already auto-written at the
+    current format version.  Bumping ``_DASHBOARD_FORMAT_VERSION`` below forces
+    a one-time regeneration for all existing installs (e.g. after entity-id
+    formula changes).  The file is always overwritten when a regeneration is
+    triggered; users who have customised the file directly are expected to use
+    the ``regenerate_dashboard`` service instead of relying on the auto-write.
 
     This is a best-effort convenience: any failure is logged at debug
     level and never propagated, so a missing ``hass.config`` (in tests) or
@@ -482,29 +483,25 @@ async def _async_auto_write_default_dashboard(
 
     from .dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
 
+    # Bump this when the generated entity-id formula or card structure changes
+    # in a way that makes old files incorrect.  Existing installs will have
+    # their dashboard file overwritten once on the next HA restart.
+    _DASHBOARD_FORMAT_VERSION = 2
+
     try:
         marker_store = Store(
             hass, version=1, key=f"{DOMAIN}_dashboard_marker_{entry.entry_id}"
         )
         marker = await marker_store.async_load()
-        if marker and marker.get("written_at"):
+        if (
+            marker
+            and marker.get("written_at")
+            and marker.get("format_version", 1) >= _DASHBOARD_FORMAT_VERSION
+        ):
             return marker.get("path") if marker.get("path") else None
 
         base_dir = hass.config.path("dashboards")
         target = os.path.join(base_dir, DEFAULT_DASHBOARD_FILENAME)
-
-        def _exists() -> bool:
-            return os.path.exists(target)
-
-        if await hass.async_add_executor_job(_exists):
-            await marker_store.async_save(
-                {
-                    "written_at": datetime.now(tz=timezone.utc).isoformat(),
-                    "skipped": True,
-                    "path": target,
-                }
-            )
-            return target
 
         dashboard = build_dashboard_from_coordinator(coordinator)
         yaml_text = await hass.async_add_executor_job(dashboard_to_yaml, dashboard)
@@ -517,7 +514,11 @@ async def _async_auto_write_default_dashboard(
         await hass.async_add_executor_job(_write)
 
         await marker_store.async_save(
-            {"written_at": datetime.now(tz=timezone.utc).isoformat(), "path": target}
+            {
+                "written_at": datetime.now(tz=timezone.utc).isoformat(),
+                "path": target,
+                "format_version": _DASHBOARD_FORMAT_VERSION,
+            }
         )
 
         await hass.services.async_call(
