@@ -4075,6 +4075,34 @@ revisited only if a specific failure mode is observed in production:
 - **Particle filter fallback.**  Gaussian assumption with the
   outlier gate handling heavy-tail rejections is sufficient.
 
+#### Further robustness considerations (deferred)
+
+A separate question — *what if a sustained model bias causes the gate to
+reject everything?* — surfaces four orthogonal safeguards.  Given the
+typical 10–15 minute update interval, the basic auto-thaw via process-
+noise accumulation alone delivers a worst-case reacceptance time well
+under 1.5 hours, which is acceptable for slow thermal dynamics.  None
+of these are in the Phase 2 v1 scope; each is implementation-detail-
+sized and orthogonal, and can be added incrementally without touching
+the basic mechanism if specific failure modes appear in production:
+
+- **Multiplicative $P^-$ inflation on rejection** (factor $\beta > 1$
+  per rejected cycle).  Turns the linear thaw into exponential thaw;
+  reduces worst-case reacceptance from ~$30Q^{-1}$ cycles to
+  ~$\log(\cdot)/\log\beta$ cycles.
+- **Consecutive-rejection cap with force-accept.**  After
+  $N_\text{max}$ consecutive rejections, the next measurement is
+  force-accepted with inflated $R_\text{forced} = \gamma R$.  Hard
+  backstop against any pathological persistent rejection.
+- **Floor on innovation variance.**
+  $S_\text{eff} = \max(S, S_\text{min})$ guarantees a minimum gate
+  width regardless of how confident the filter or how tightly $R$ is
+  configured.  Protects against pathological $R$ misconfiguration.
+- **Physical-bounds sanity check.**  If $\hat T_a$ drifts outside
+  $[-20, 50]\,°C$, log ERROR, raise a Repairs issue, and re-anchor
+  from the most recent reading.  Belt-and-braces against the
+  worst-case where every other layer has failed.
+
 ---
 
 ### 17.4 Phase 3 — Optimal-control problem upgrades
