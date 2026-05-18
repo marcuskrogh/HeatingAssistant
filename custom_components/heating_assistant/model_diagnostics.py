@@ -770,12 +770,20 @@ def compute_open_loop_predictions(
         x[:n] = np.array(y0[:n], dtype=float)
         d_prev = _make_d(seg[0])
 
+        # u_prev holds the control applied during [t_{k-1}, t_k].
+        # u_k (stored at step k) is the action applied from t_k onward,
+        # so to advance x from t_0 to t_1 we need u_0 (= seg[0]["u"]).
+        n_u = system.nu
+        u_prev = np.zeros(n_u)
+        for k, v in enumerate(seg[0].get("u", [])):
+            if k < n_u:
+                u_prev[k] = float(v)
+
         valid_segment = True
         for record in seg[1:]:
             d = _make_d(record)
 
             u_raw = record.get("u", [])
-            n_u = system.nu
             u = np.zeros(n_u)
             for k, v in enumerate(u_raw):
                 if k < n_u:
@@ -783,19 +791,23 @@ def compute_open_loop_predictions(
 
             # Implicit-Euler sub-stepping over one cycle; matches the
             # controller's prediction scheme so open-loop and closed-loop
-            # diagnostics use the same integrator.  Zero-order hold on
-            # inputs and disturbances over the interval.
+            # diagnostics use the same integrator.  Zero-order hold:
+            # u_prev is the control applied during [t_{k-1}, t_k] (the
+            # interval being reproduced here) and d_prev is the
+            # disturbance at the start of that interval — the same ZOH
+            # convention as the live MPC.
             dt = system._dt
             n_steps = 10  # Sub-steps; L-stable, so step size is for accuracy
 
             d_zoh = d_prev
+            u_zoh = u_prev
             _params = np.array([])
 
-            def rhs(state, u_zoh=u, d_loc=d_zoh):
-                return system.f(state, u_zoh, d_loc, _params, 0.0)
+            def rhs(state, u_loc=u_zoh, d_loc=d_zoh):
+                return system.f(state, u_loc, d_loc, _params, 0.0)
 
-            def jac(state, u_zoh=u, d_loc=d_zoh):
-                return system.dfdx(state, u_zoh, d_loc, _params, 0.0)
+            def jac(state, u_loc=u_zoh, d_loc=d_zoh):
+                return system.dfdx(state, u_loc, d_loc, _params, 0.0)
 
             try:
                 x = implicit_euler_substeps(rhs, jac, x, dt, n_steps)
@@ -804,6 +816,7 @@ def compute_open_loop_predictions(
                 break
 
             d_prev = d
+            u_prev = u
 
             y_meas = record.get("y", [])
             ts = record.get("timestamp", 0.0)
@@ -819,7 +832,6 @@ def compute_open_loop_predictions(
                         "measured": round(meas_val, 3),
                         "predicted": round(pred_val, 3),
                     })
-            d_prev = d
 
         if valid_segment:
             n_segments += 1
