@@ -13,7 +13,8 @@ CONF_CONTROLLER = "controller"
 # Room configuration keys
 CONF_ROOM_NAME = "name"
 CONF_THERMAL_MASS = "thermal_mass"      # J/K
-CONF_R_EXTERNAL = "r_external"          # K/W (thermal resistance to outdoors)
+CONF_R_EXTERNAL = "r_external"          # K/W (typical-conditions total resistance to outdoors)
+CONF_INFILTRATION_FRACTION = "infiltration_fraction"  # 0–1, fraction of 1/r_external from wind-driven infiltration at typical conditions
 CONF_CONNECTIONS = "connections"        # list of {room, r_value}
 CONF_WINDOWS = "windows"               # list of {area, orientation, tilt}
 CONF_SETPOINT = "setpoint"             # °C
@@ -55,6 +56,71 @@ CONF_SOURCE_TURN_OFF_DEADBAND = "turn_off_deadband"  # °C above setpoint before
 CONF_SOURCE_COOLING_COP = "cooling_cop"  # cooling COP (EER) for heat pumps in cooling mode
 CONF_SOURCE_COOLING_EFFICIENCY = "cooling_efficiency"  # fraction of max cooling capacity (0–1) used in dry/cool mode
 CONF_SOURCE_HEATING_EFFICIENCY = "heating_efficiency"  # fraction of max heating capacity (0–1) used in heat mode
+
+# Envelope tightness (Sherman–Grimsrud infiltration model — Phase 1 C1).
+#
+# The total external loss bundled into ``r_external`` is split at runtime
+# into a fixed conductive part and a wind-driven infiltration part:
+#
+#     UA_total(v, ΔT) = (1 − f) / r_external                    # conductive
+#                     + ρ c_p · L · √(C_s |ΔT| + C_w v²)        # infiltration
+#
+# where ``f`` is the per-room ``infiltration_fraction`` (0 = no wind-driven
+# component, 1 = entire envelope loss is infiltration), and ``L`` is the
+# per-room effective leakage area implicitly derived so that the runtime
+# UA equals exactly ``1/r_external`` at the typical reference conditions
+# (v = ``SHERMAN_GRIMSRUD_V_TYPICAL``, ΔT = ``SHERMAN_GRIMSRUD_DT_TYPICAL``).
+#
+# Result: when no wind data is available, the model reduces exactly to
+# today's behaviour, so adding C1 introduces no regression for installs
+# that don't configure a wind source.
+
+#: User-facing tightness preset key (also accepted as a config-flow / YAML field).
+CONF_ENVELOPE_TIGHTNESS = "envelope_tightness"
+
+#: Tightness presets → default per-room infiltration_fraction.
+#:
+#: ``leaky``        ~7+ ACH50 (pre-1980 unsealed) — large wind-driven swing.
+#: ``typical``      ~3-5 ACH50 (1980s–2000s) — default.
+#: ``tight``        ~1-2 ACH50 (modern construction) — small swing.
+#: ``passive_house`` <0.6 ACH50 (PassivHaus) — almost no swing.
+ENVELOPE_TIGHTNESS_LEAKY = "leaky"
+ENVELOPE_TIGHTNESS_TYPICAL = "typical"
+ENVELOPE_TIGHTNESS_TIGHT = "tight"
+ENVELOPE_TIGHTNESS_PASSIVE = "passive_house"
+ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION = {
+    ENVELOPE_TIGHTNESS_LEAKY: 0.50,
+    ENVELOPE_TIGHTNESS_TYPICAL: 0.30,
+    ENVELOPE_TIGHTNESS_TIGHT: 0.15,
+    ENVELOPE_TIGHTNESS_PASSIVE: 0.05,
+}
+DEFAULT_ENVELOPE_TIGHTNESS = ENVELOPE_TIGHTNESS_TYPICAL
+DEFAULT_INFILTRATION_FRACTION = (
+    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[DEFAULT_ENVELOPE_TIGHTNESS]
+)
+
+#: Sherman–Grimsrud (LBL) infiltration coefficients.
+#:
+#: SHERMAN_GRIMSRUD_STACK_COEF — coefficient on |ΔT| inside the square root,
+#: units (m/s)²/K.  Default 0.000145 corresponds to a single-storey building
+#: with no significant shielding (LBL/RHB-79 typical residential value).
+#:
+#: SHERMAN_GRIMSRUD_WIND_COEF — coefficient on v² inside the square root,
+#: dimensionless (it scales (m/s)² → (m/s)²).  Default 0.000319 corresponds
+#: to a single-storey building with average shielding.
+SHERMAN_GRIMSRUD_STACK_COEF = 1.45e-4
+SHERMAN_GRIMSRUD_WIND_COEF = 3.19e-4
+
+#: Reference conditions at which the runtime UA equals exactly ``1/r_external``.
+#: Picked to be representative of a heating-season operating point so that
+#: existing-installation parameters stay calibrated.
+SHERMAN_GRIMSRUD_V_TYPICAL = 3.0    # m/s
+SHERMAN_GRIMSRUD_DT_TYPICAL = 20.0  # K
+
+#: Volumetric heat capacity of dry air at room temperature, ρ × c_p ≈
+#: 1.2 kg/m³ × 1005 J/(kg·K).  Used to convert the Sherman–Grimsrud
+#: volumetric flow rate to a thermal conductance.
+AIR_RHO_CP = 1200.0  # J / (m³ · K)
 
 # Controller configuration keys
 CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)

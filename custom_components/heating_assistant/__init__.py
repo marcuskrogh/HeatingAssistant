@@ -84,6 +84,7 @@ from .const import (
     CONF_LONGITUDE,
     CONF_MPC_ANALYTIC_DERIVATIVES,
     CONF_MPC_SOLVER,
+    CONF_INFILTRATION_FRACTION,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_WEATHER_ENTITY,
     CONF_R_EXTERNAL,
@@ -138,6 +139,7 @@ from .const import (
     DEFAULT_HORIZON,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+    DEFAULT_INFILTRATION_FRACTION,
     DEFAULT_MPC_SOLVER,
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
@@ -216,6 +218,13 @@ _ROOM_SCHEMA = vol.Schema(
         vol.Required(CONF_ROOM_NAME): str,
         vol.Optional(CONF_THERMAL_MASS, default=DEFAULT_THERMAL_MASS): vol.Coerce(float),
         vol.Optional(CONF_R_EXTERNAL, default=DEFAULT_R_EXTERNAL): vol.Coerce(float),
+        # Sherman–Grimsrud infiltration share (Phase 1 C1).  See
+        # const.ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION for typology
+        # defaults exposed by the config flow.
+        vol.Optional(
+            CONF_INFILTRATION_FRACTION,
+            default=DEFAULT_INFILTRATION_FRACTION,
+        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
         vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],

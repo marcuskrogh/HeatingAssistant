@@ -81,7 +81,13 @@ from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
 from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
 
+from .const import (
+    AIR_RHO_CP,
+    SHERMAN_GRIMSRUD_STACK_COEF,
+    SHERMAN_GRIMSRUD_WIND_COEF,
+)
 from .integrator import implicit_euler_substeps
+from .thermal_model import _SG_FACTOR_TYPICAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -194,6 +200,25 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         for i in range(n):
             self._G_d[i, 1 + i] = 1.0 / self._C_cap[i]
 
+        # Sherman–Grimsrud per-room effective leakage area [m²].
+        # Mirrors HouseModel._leakage_area; cached here so the controller
+        # is self-contained even when used outside the live coordinator.
+        self._leakage_area = np.array(
+            [
+                max(0.0, model.rooms[name].infiltration_fraction)
+                * (1.0 / model.rooms[name].r_external)
+                / (AIR_RHO_CP * _SG_FACTOR_TYPICAL)
+                for name in self._room_list
+            ],
+            dtype=float,
+        )
+
+        # Wind speed [m/s] applied to the SG overlay; held constant over
+        # the OCP horizon and across EKF sub-steps within one coordinator
+        # cycle.  ``None`` (default) disables the overlay so the model
+        # reduces exactly to its typical-conditions UA.
+        self._wind_speed: Optional[float] = None
+
         # Cached measurement noise covariance
         self._Rm: np.ndarray = (sigma_v ** 2) * np.eye(n)
 
@@ -214,6 +239,39 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     @property
     def nw(self) -> int:
         return self.nx
+
+    # ── Sherman–Grimsrud wind overlay (Phase 1 C1) ────────────────────────
+
+    def set_wind_speed(self, wind_speed: Optional[float]) -> None:
+        """Update the SG overlay wind speed.  ``None`` disables the overlay
+        so ``f`` / ``dfdx`` reduce to their typical-conditions form."""
+        if wind_speed is None or not np.isfinite(wind_speed):
+            self._wind_speed = None
+        else:
+            self._wind_speed = float(max(0.0, wind_speed))
+
+    def _infiltration_delta_ua(
+        self, outdoor_temp: float, room_temps: np.ndarray,
+    ) -> np.ndarray:
+        """Per-room *delta* on external UA relative to typical conditions.
+
+        Returns the zero vector when no wind speed is configured, so the
+        overlay is a no-op until ``set_wind_speed`` is called with a
+        finite value.  See :func:`thermal_model.HouseModel.infiltration_delta_ua`
+        for the matching reference implementation used by the standalone
+        ``HouseModel``.
+        """
+        if self._wind_speed is None:
+            return np.zeros(self._n_rooms)
+        v = self._wind_speed
+        dT_abs = np.abs(room_temps - outdoor_temp)
+        sg = np.sqrt(
+            SHERMAN_GRIMSRUD_STACK_COEF * dT_abs
+            + SHERMAN_GRIMSRUD_WIND_COEF * v * v
+        )
+        ua_inf = AIR_RHO_CP * self._leakage_area * sg
+        ua_inf_typ = AIR_RHO_CP * self._leakage_area * _SG_FACTOR_TYPICAL
+        return ua_inf - ua_inf_typ
 
     @property
     def nz(self) -> int:
@@ -323,6 +381,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                 )
 
         dT = self._F @ T + heat_contrib + self._G_d @ d_augmented
+
+        # Sherman–Grimsrud wind-driven infiltration overlay (Phase 1 C1).
+        # When no wind speed is set this returns the zero vector, so the
+        # model reduces exactly to its typical-conditions form.  Frozen
+        # at the current substep's state (linearly-implicit treatment).
+        delta_ua = self._infiltration_delta_ua(outdoor_temp, T)
+        dT += (delta_ua / self._C_cap) * (outdoor_temp - T)
+
         if not self._augment_offsets:
             return dT
         db = np.zeros(n)
@@ -402,12 +468,24 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """∂f/∂x for x = [T, b]."""
+        """∂f/∂x for x = [T, b].
+
+        Includes the Sherman–Grimsrud wind-overlay contribution.  Under
+        the linearly-implicit treatment the overlay UA is frozen at the
+        current substep's state, so the Jacobian carries a diagonal
+        ``-δᵢ / Cᵢ`` per room — the same correction the EKF needs to stay
+        consistent with the dynamics in :meth:`f`.
+        """
         n = self._n_rooms
+        T = x[:n]
+        outdoor_temp = float(d[0])
+        delta_ua = self._infiltration_delta_ua(outdoor_temp, T)
+        F_eff = self._F.copy()
+        F_eff[np.arange(n), np.arange(n)] -= delta_ua / self._C_cap
         if not self._augment_offsets:
-            return self._F.copy()
+            return F_eff
         J = np.zeros((2 * n, 2 * n))
-        J[:n, :n] = self._F
+        J[:n, :n] = F_eff
         return J
 
     def dhmdx(
@@ -860,6 +938,19 @@ class HeatingMPCController:
     def use_analytic_derivatives(self) -> bool:
         """Whether analytical-derivative plumbing is enabled when supported by mbc."""
         return self._use_analytic_derivatives
+
+    def set_wind_speed(self, wind_speed: Optional[float]) -> None:
+        """Apply a new wind speed [m/s] to the Sherman–Grimsrud
+        infiltration overlay (Phase 1 C1).  ``None`` disables the
+        overlay so the external conductance falls back to the
+        typical-conditions baseline.
+
+        Pushed to both the EKF system (used for state estimation) and
+        the OCP system (used for prediction over the horizon) so the
+        same wind value drives both halves of the cycle.
+        """
+        self._system.set_wind_speed(wind_speed)
+        self._control_system.set_wind_speed(wind_speed)
 
     @property
     def last_innovation(self) -> Optional[List[float]]:

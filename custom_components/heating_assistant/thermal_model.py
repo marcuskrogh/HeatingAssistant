@@ -23,7 +23,39 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from .const import (
+    AIR_RHO_CP,
+    DEFAULT_INFILTRATION_FRACTION,
+    SHERMAN_GRIMSRUD_DT_TYPICAL,
+    SHERMAN_GRIMSRUD_STACK_COEF,
+    SHERMAN_GRIMSRUD_V_TYPICAL,
+    SHERMAN_GRIMSRUD_WIND_COEF,
+)
 from .integrator import implicit_euler_step
+
+
+def _sherman_grimsrud_factor(v: float, dT: float) -> float:
+    """
+    Square-root term of the Sherman–Grimsrud LBL infiltration model:
+
+        √( C_s · |ΔT| + C_w · v² )
+
+    Used both to derive the per-room leakage area ``L`` from
+    typical-conditions calibration and to evaluate the wind-driven
+    conductance at runtime.
+    """
+    return float(np.sqrt(
+        SHERMAN_GRIMSRUD_STACK_COEF * abs(dT)
+        + SHERMAN_GRIMSRUD_WIND_COEF * v * v
+    ))
+
+
+# Pre-computed Sherman–Grimsrud factor at the reference conditions used
+# for typical-conditions calibration of ``L``.  Kept as a module constant
+# so the cold-path leakage-area derivation is a single multiply.
+_SG_FACTOR_TYPICAL = _sherman_grimsrud_factor(
+    SHERMAN_GRIMSRUD_V_TYPICAL, SHERMAN_GRIMSRUD_DT_TYPICAL,
+)
 
 
 @dataclass
@@ -49,7 +81,13 @@ class Room:
 
     name: str
     thermal_mass: float                         # J/K
-    r_external: float                           # K/W (to outdoor)
+    r_external: float                           # K/W (at the typical reference
+                                                # conditions:
+                                                # v=SHERMAN_GRIMSRUD_V_TYPICAL m/s,
+                                                # |ΔT|=SHERMAN_GRIMSRUD_DT_TYPICAL K).
+                                                # When no wind information is
+                                                # available the runtime UA equals
+                                                # exactly 1 / r_external.
     connections: List[RoomConnection] = field(default_factory=list)
     windows: List[Window] = field(default_factory=list)
     temperature: float = 20.0                   # °C, current state
@@ -58,6 +96,13 @@ class Room:
                                                 # gain (occupants, electronics,
                                                 # appliances).  Identified
                                                 # jointly with C and R_ext.
+    infiltration_fraction: float = DEFAULT_INFILTRATION_FRACTION
+    # 0 ≤ infiltration_fraction ≤ 1.  Fraction of 1/r_external attributed
+    # to wind-driven Sherman–Grimsrud infiltration at typical conditions.
+    # When equal to 0 the room has no wind sensitivity; when equal to 1
+    # the entire envelope loss is wind-driven (unusual but valid for a
+    # leaky single-room outbuilding).  Defaulted by the building's
+    # envelope-tightness preset; see const.ENVELOPE_TIGHTNESS_*.
 
 
 class HouseModel:
@@ -80,9 +125,26 @@ class HouseModel:
         self._room_list: List[str] = [r.name for r in rooms]
         self._n = len(rooms)
 
-        # Build state-space matrices once (they are time-invariant except for
-        # the outdoor-temperature input column which is precomputed per step)
+        # Build state-space matrices once.  At the typical reference
+        # conditions the assembled (A, B_ext) reproduces the bundled
+        # 1/r_external behaviour exactly; the wind-driven overlay below is
+        # zero at those conditions.
         self._C, self._A, self._B_ext = self._build_matrices()
+
+        # Per-room effective leakage area L_i (m²), derived so that
+        #   ρ c_p · L_i · √(C_s·ΔT_typ + C_w·v_typ²) = f_i / r_external_i .
+        # This makes the wind-driven UA reduce to f_i / r_external_i at
+        # typical conditions, which is the share of 1/r_external the
+        # ``infiltration_fraction`` setting attributes to infiltration.
+        self._leakage_area = np.array(
+            [
+                max(0.0, room.infiltration_fraction)
+                * (1.0 / room.r_external)
+                / (AIR_RHO_CP * _SG_FACTOR_TYPICAL)
+                for room in (self._rooms[name] for name in self._room_list)
+            ],
+            dtype=float,
+        )
 
     # ------------------------------------------------------------------
     # Properties
@@ -104,6 +166,49 @@ class HouseModel:
         for name, temp in temps.items():
             if name in self._rooms:
                 self._rooms[name].temperature = temp
+
+    # ------------------------------------------------------------------
+    # Wind-driven infiltration overlay (Sherman–Grimsrud, Phase 1 C1)
+    # ------------------------------------------------------------------
+
+    def infiltration_delta_ua(
+        self,
+        outdoor_temp: float,
+        wind_speed: Optional[float],
+        room_temps: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Per-room *delta* on the external conductance relative to the
+        typical-conditions baseline already baked into ``A`` and ``B_ext``.
+
+        Returns ``Δ ∈ ℝⁿ`` such that the effective external conductance is
+
+            UA_ext_i(v, ΔT) = (1 / r_external_i) + Δᵢ          [W/K],
+
+        and the contribution to the heat balance is ``Δᵢ · (T_out − T_i)``.
+
+        At the reference conditions ``v = SHERMAN_GRIMSRUD_V_TYPICAL`` and
+        ``|ΔT| = SHERMAN_GRIMSRUD_DT_TYPICAL`` this returns the zero
+        vector, so the baseline behaviour is preserved.
+
+        When ``wind_speed`` is ``None`` the function also returns the zero
+        vector — no wind data ⇒ stick to the typical-conditions UA, i.e.
+        exactly the pre-C1 behaviour.
+        """
+        if wind_speed is None or not np.all(np.isfinite([wind_speed])):
+            return np.zeros(self._n)
+
+        v = float(max(0.0, wind_speed))
+        # |ΔT| per room at the start of the substep (linearly-implicit
+        # treatment — the coefficient is refreshed between sub-steps).
+        dT_abs = np.abs(room_temps - outdoor_temp)
+        sg = np.sqrt(
+            SHERMAN_GRIMSRUD_STACK_COEF * dT_abs
+            + SHERMAN_GRIMSRUD_WIND_COEF * v * v
+        )
+        ua_inf = AIR_RHO_CP * self._leakage_area * sg
+        ua_inf_typ = AIR_RHO_CP * self._leakage_area * _SG_FACTOR_TYPICAL
+        return ua_inf - ua_inf_typ
 
     # ------------------------------------------------------------------
     # Matrix construction
@@ -154,6 +259,7 @@ class HouseModel:
         heat_inputs: Dict[str, float],
         outdoor_temp: float,
         solar_gains: Dict[str, float],
+        wind_speed: Optional[float] = None,
     ) -> Dict[str, float]:
         """
         Advance the thermal model by one time step using implicit (backward)
@@ -177,6 +283,12 @@ class HouseModel:
             Outdoor air temperature [°C].
         solar_gains : dict
             Mapping room name → solar heat gain [W].
+        wind_speed : float or None, optional
+            Outdoor wind speed [m/s].  When provided the Sherman–Grimsrud
+            infiltration overlay (Phase 1 C1) adjusts the per-room
+            external conductance for wind-driven air exchange.  When
+            ``None`` the runtime UA equals exactly ``1 / r_external``
+            (the typical-conditions baseline).
 
         Returns
         -------
@@ -198,10 +310,15 @@ class HouseModel:
         for i, name in enumerate(self._room_list):
             Q[i] += self._rooms[name].internal_gain
 
-        # dT/dt = C^{-1} * (A*T + B_ext*T_outdoor + Q)
+        # Wind-driven external-conductance overlay (delta from typical).
+        # Linearly-implicit treatment: the coefficient is frozen at the
+        # current state for this single ``dt`` step.
+        delta_ua = self.infiltration_delta_ua(outdoor_temp, wind_speed, T)
+
+        # dT/dt = C^{-1} * ((A - diag(δ)) T + (B_ext + δ) T_out + Q)
         inv_C = 1.0 / self._C
-        F = self._A * inv_C[:, None]            # state Jacobian (n×n)
-        bias = (self._B_ext * outdoor_temp + Q) * inv_C   # state-independent term
+        F = (self._A - np.diag(delta_ua)) * inv_C[:, None]
+        bias = ((self._B_ext + delta_ua) * outdoor_temp + Q) * inv_C
 
         def rhs(state: np.ndarray) -> np.ndarray:
             return F @ state + bias
@@ -230,6 +347,7 @@ class HouseModel:
         outdoor_temps: List[float],
         solar_gain_schedule: List[Dict[str, float]],
         initial_temps: Optional[Dict[str, float]] = None,
+        wind_speeds: Optional[List[float]] = None,
     ) -> List[Dict[str, float]]:
         """
         Simulate the model over a prediction horizon without mutating state.
@@ -248,6 +366,11 @@ class HouseModel:
             Solar heat gain [W] per room for each future time step.
         initial_temps : dict, optional
             Starting room temperatures; defaults to current model state.
+        wind_speeds : list of float, optional
+            Outdoor wind speed [m/s] per step.  When omitted the model
+            falls back to its typical-conditions external conductance
+            (the pre-C1 behaviour).  Shorter than ``horizon`` is fine —
+            the last entry is held constant.
 
         Returns
         -------
@@ -263,11 +386,15 @@ class HouseModel:
 
         predictions: List[Dict[str, float]] = []
         for k in range(horizon):
+            wind_k: Optional[float] = None
+            if wind_speeds:
+                wind_k = wind_speeds[k] if k < len(wind_speeds) else wind_speeds[-1]
             temps = self.step(
                 dt=dt,
                 heat_inputs=heat_schedule[k] if k < len(heat_schedule) else {},
                 outdoor_temp=outdoor_temps[k] if k < len(outdoor_temps) else outdoor_temps[-1],
                 solar_gains=solar_gain_schedule[k] if k < len(solar_gain_schedule) else {},
+                wind_speed=wind_k,
             )
             predictions.append(dict(temps))
 

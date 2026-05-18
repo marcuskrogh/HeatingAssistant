@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from .const import (
+    CONF_ENVELOPE_TIGHTNESS,
+    CONF_INFILTRATION_FRACTION,
     CONF_ROOM_NAME,
     CONF_SETPOINT,
     CONF_R_EXTERNAL,
@@ -22,7 +24,9 @@ from .const import (
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
+    DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_WINDOW_TILT,
+    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
 )
 
 # ---------------------------------------------------------------------------
@@ -168,8 +172,15 @@ class RoomFlowHelper:
         thermal_mass: float,
         r_external: float,
         setpoint: float,
+        infiltration_fraction: Optional[float] = None,
     ) -> Optional[str]:
-        """Append a new room.  Returns an error key on duplicate, else ``None``."""
+        """Append a new room.  Returns an error key on duplicate, else ``None``.
+
+        ``infiltration_fraction`` is the Sherman–Grimsrud share of
+        ``1/r_external`` that the Phase 1 C1 overlay attributes to
+        wind-driven air exchange.  When ``None`` the default for the
+        configured envelope-tightness preset is used.
+        """
         name = name.strip()
         if self.is_duplicate(name):
             return "duplicate_room"
@@ -181,6 +192,8 @@ class RoomFlowHelper:
             CONF_SETPOINT: setpoint,
             CONF_WINDOWS: [],
         }
+        if infiltration_fraction is not None:
+            new_room[CONF_INFILTRATION_FRACTION] = float(infiltration_fraction)
         if sensors:
             new_room[CONF_TEMP_SENSOR] = sensors[0]
         self.rooms.append(new_room)
@@ -194,6 +207,7 @@ class RoomFlowHelper:
         thermal_mass: float,
         r_external: float,
         setpoint: float,
+        infiltration_fraction: Optional[float] = None,
     ) -> Optional[str]:
         """Update the currently-selected room.  Returns an error key or ``None``."""
         if self.current_idx is None:
@@ -211,6 +225,12 @@ class RoomFlowHelper:
         room[CONF_THERMAL_MASS] = thermal_mass
         room[CONF_R_EXTERNAL] = r_external
         room[CONF_SETPOINT] = setpoint
+        if infiltration_fraction is not None:
+            room[CONF_INFILTRATION_FRACTION] = float(infiltration_fraction)
+        elif CONF_INFILTRATION_FRACTION in room:
+            # No explicit override on this edit → leave whatever was there
+            # alone (keeps a previously customised value intact).
+            pass
         return None
 
     def remove_by_name(self, name: str) -> bool:
