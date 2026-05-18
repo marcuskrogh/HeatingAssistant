@@ -3736,6 +3736,19 @@ phase lists its prerequisite phases so the order is explicit, and every step
 identifies the failure mode it fixes, the technique it introduces, and the
 measurable acceptance criterion that closes it.
 
+**Status of phases.**  Phases 1–3 are **locked in detail**: capability
+scope, locked design decisions, definition of done (implementation +
+README + tests + config UI), sequenced steps with acceptance criteria,
+migration plan, and deferred items.  Implementation work begins with
+Phase 1 Step 1.  Phases 4–11 are **locked at the capability level**
+documented below; each will receive the same sequenced,
+definition-of-done treatment as its implementation work begins.  At
+that point, items that turn out to be premature or unnecessary (as
+happened with most of the original Phase 2 menu) will be moved to a
+deferred footer with rationale.  This staged approach keeps the
+near-term plan concrete and the long-term direction visible without
+front-loading detail that is likely to change.
+
 ---
 
 ### 17.1 Current technical baseline
@@ -4132,16 +4145,26 @@ Phase 11 (whole-home co-optimisation).
   deferred list as a follow-up to add only if real-world dispatch
   quality demands it.
 - **Soft corridor with a weak setpoint pull as the new cost
-  structure.**  The temperature term becomes
-  $J_T = \sum_k \big[\varepsilon (T_k - T^\text{ref}_k)^2
-  + \rho_\text{soft} \max(0, T^\text{lo}_k - T_k)^2
-  + \rho_\text{soft} \max(0, T_k - T^\text{hi}_k)^2 \big]$
-  with $\varepsilon \ll \rho_\text{soft}$.  Inside the corridor the
-  controller is essentially economic-driven with a barely-perceptible
-  preference for the setpoint; near and outside the edges the
-  existing slack penalty dominates and pulls back.  The user-facing
-  configuration grows a `[T_lo, T_hi]` corridor; the existing
-  `setpoint` becomes the soft attractor inside the band.
+  structure**, implemented as a smooth slack-variable formulation
+  (mbc's native soft-constraint mechanism).  Per horizon step, two
+  non-negative slack variables $s^\text{lo}_k, s^\text{hi}_k$ are
+  added to the decision vector and the cost becomes
+
+  $$J_T = \sum_k \big[\varepsilon (T_k - T^\text{ref}_k)^2 + \rho_\text{soft} (s^\text{lo}_k)^2 + \rho_\text{soft} (s^\text{hi}_k)^2 \big]$$
+
+  subject to the soft inequalities
+
+  $$T_k + s^\text{lo}_k \;\ge\; T^\text{lo}_k, \qquad T_k - s^\text{hi}_k \;\le\; T^\text{hi}_k, \qquad s^\text{lo}_k, s^\text{hi}_k \;\ge\; 0.$$
+
+  No `max`, no piecewise term — the objective is a smooth quadratic
+  in $(u, s)$ and the constraints are linear, so IPOPT and SLSQP use
+  their existing gradient and Hessian pipelines without any
+  reformulation per cycle.  With $\varepsilon \ll \rho_\text{soft}$,
+  the controller is essentially economic-driven inside the corridor
+  with a barely-perceptible preference for the setpoint; the slack
+  penalty dominates at and outside the edges and pulls back.  The
+  user-facing configuration grows a `[T_lo, T_hi]` corridor; the
+  existing `setpoint` becomes the soft attractor inside the band.
 - **Economic energy term that defaults to flat unit price.**  The
   $\|u\|^2_R$ energy term is replaced by
   $\sum_k \pi_k \cdot P^\text{elec}_k(u_k, d_k) \cdot \Delta t$ where
@@ -4190,15 +4213,24 @@ Phase 11 (whole-home co-optimisation).
 
 1. [ ] **Step 1 — O2: Soft corridor with weak setpoint pull.**
    Reformulate the temperature cost from pure quadratic tracking to
-   $\varepsilon$-attracted soft-corridor form.  Migrate existing
-   `setpoint` + `turn_off_deadband` into a corridor
+   the smooth slack-variable corridor form above, using mbc's
+   existing soft-constraint mechanism.  Add per-step
+   $s^\text{lo}_k, s^\text{hi}_k$ to the decision vector with
+   non-negativity bounds, the linear inequalities relating them to
+   $T_k$, and the $\rho_\text{soft} \sum_k (s^\text{lo}_k)^2 + (s^\text{hi}_k)^2$
+   penalty plus the $\varepsilon$-weighted setpoint attractor.
+   Migrate existing `setpoint` + `turn_off_deadband` into a corridor
    $[T^\text{ref} - \text{deadband},\, T^\text{ref} + \text{deadband}]$
    on first start (no user action required).  Default $\varepsilon$
-   chosen so the setpoint pull is dominant at the corridor's
-   centre but negligible at the edges.  Acceptance: with a flat
-   tariff, mid-corridor and no disturbances, $u^* = 0$ (no heat
-   applied) instead of the current chasing behaviour; corridor edges
-   are respected on a year-long synthetic trace.  Config UI:
+   chosen so the setpoint pull is dominant at the corridor's centre
+   but negligible at the edges; default $\rho_\text{soft}$ large
+   enough that 0.1 K of corridor violation contributes the same cost
+   as the most expensive single-hour tariff peak.  Acceptance: with
+   a flat tariff, mid-corridor and no disturbances, $u^* = 0$ (no
+   heat applied) instead of the current chasing behaviour; corridor
+   edges are respected on a year-long synthetic trace; closed-loop
+   solver iteration count stays within ~10 % of the pre-refactor
+   baseline (the slack variables grow the NLP slightly).  Config UI:
    per-room `comfort_corridor_low` / `comfort_corridor_high` fields
    (defaulted from setpoint ± deadband); existing `setpoint`
    retained as the soft attractor.
