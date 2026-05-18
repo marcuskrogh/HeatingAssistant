@@ -81,6 +81,8 @@ from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
 from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
 
+from .integrator import implicit_euler_substeps
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -648,8 +650,15 @@ class HeatingMPCController:
         P0 = np.eye(n_x)  # initial state uncertainty [K²]
         n_rooms = self._system.nym
         P0[n_rooms:, n_rooms:] *= 4.0  # offsets start more uncertain than temperatures
+        # Implicit-Euler scheme is L-stable on the stiff envelope dynamics
+        # introduced by later Phase 1 steps (2R2C + slab); see README §3.3.
+        # On the well-conditioned 1R1C dynamics in production today the
+        # difference vs explicit Euler is below the EKF's measurement-noise
+        # floor (verified by the bit-equivalence test in
+        # tests/test_integrator.py).
         self._ekf = ContinuousDiscreteEKF(
-            self._system, x0, P0, ekf_dt, n_steps=n_int_steps
+            self._system, x0, P0, ekf_dt,
+            n_steps=n_int_steps, scheme="implicit-euler",
         )
 
         # ── OCP cost matrices ───────────────────────────────────────────
@@ -1124,22 +1133,29 @@ class HeatingMPCController:
                 src.set_power(frac, outdoor_temp)
 
         # ── Reconstruct predicted trajectory for visualisation ───────────
+        # Implicit-Euler sub-stepping matches the MPC's prediction scheme
+        # (the OCP itself already uses implicit Euler upstream) and stays
+        # L-stable when later phases introduce stiff 2R2C / slab dynamics.
         room_list = self._control_system._room_list
         n_x = self._control_system.nx
-        h = self._dt / self._control_system._n_int_steps
+        sys = self._control_system
 
         self._predictions = []
         x_pred = x_hat_control.copy()
         for k in range(N):
-            # Euler integration over one sampling interval
-            x_cur = x_pred.copy()
-            for _ in range(self._control_system._n_int_steps):
-                x_cur = (
-                    x_cur
-                    + self._control_system.f(x_cur, u_opt[k], d_traj[k], p, 0.0) * h
-                )
-            x_pred = x_cur
-            y_pred = self._effective_room_temperatures(self._control_system, x_pred)
+            u_k = u_opt[k]
+            d_k = d_traj[k]
+
+            def rhs(state, u=u_k, d=d_k):
+                return sys.f(state, u, d, p, 0.0)
+
+            def jac(state, u=u_k, d=d_k):
+                return sys.dfdx(state, u, d, p, 0.0)
+
+            x_pred = implicit_euler_substeps(
+                rhs, jac, x_pred, self._dt, sys._n_int_steps,
+            )
+            y_pred = self._effective_room_temperatures(sys, x_pred)
             self._predictions.append(
                 {name: float(y_pred[i]) for i, name in enumerate(room_list)}
             )

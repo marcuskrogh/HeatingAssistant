@@ -20,6 +20,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .integrator import (
+    ImplicitEulerConvergenceError,
+    implicit_euler_substeps,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -784,18 +789,29 @@ def compute_open_loop_predictions(
                 if k < n_u:
                     u[k] = float(v)
 
-            # Continuous-time integration using forward Euler.
-            # ZOH: use d_prev (disturbance at start of interval) and
-            # u_prev (control applied during this interval).
+            # Implicit-Euler sub-stepping over one cycle; matches the
+            # controller's prediction scheme so open-loop and closed-loop
+            # diagnostics use the same integrator.  Zero-order hold:
+            # u_prev is the control applied during [t_{k-1}, t_k] (the
+            # interval being reproduced here) and d_prev is the
+            # disturbance at the start of that interval — the same ZOH
+            # convention as the live MPC.
             dt = system._dt
-            n_steps = 10  # Sub-steps for numerical stability
-            dt_sub = dt / n_steps
+            n_steps = 10  # Sub-steps; L-stable, so step size is for accuracy
+
+            d_zoh = d_prev
+            u_zoh = u_prev
+            _params = np.array([])
+
+            def rhs(state, u_loc=u_zoh, d_loc=d_zoh):
+                return system.f(state, u_loc, d_loc, _params, 0.0)
+
+            def jac(state, u_loc=u_zoh, d_loc=d_zoh):
+                return system.dfdx(state, u_loc, d_loc, _params, 0.0)
 
             try:
-                for _ in range(n_steps):
-                    dx = system.f(x, u_prev, d_prev, np.array([]), 0.0)
-                    x = x + dx * dt_sub
-            except Exception:
+                x = implicit_euler_substeps(rhs, jac, x, dt, n_steps)
+            except (ImplicitEulerConvergenceError, Exception):
                 valid_segment = False
                 break
 

@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
+from .integrator import implicit_euler_step
+
 
 @dataclass
 class RoomConnection:
@@ -154,9 +156,16 @@ class HouseModel:
         solar_gains: Dict[str, float],
     ) -> Dict[str, float]:
         """
-        Advance the thermal model by one time step using the explicit
-        (forward) Euler method.  For small dt (≤ 15 min) this is accurate
-        enough while keeping the implementation dependency-free.
+        Advance the thermal model by one time step using implicit (backward)
+        Euler.
+
+        For the lumped-RC model the drift ``dT/dt = C⁻¹ (A T + B_ext T_out +
+        Q)`` is affine in ``T`` (the Jacobian ``C⁻¹ A`` is independent of
+        the state), so the implicit-Euler residual is linear in ``T_next``
+        and Newton converges in a single iteration — i.e. one ``n × n``
+        linear solve per call.  L-stability ensures the step stays
+        accurate and well-conditioned even when later phases introduce
+        stiffer envelope / slab dynamics.
 
         Parameters
         ----------
@@ -190,8 +199,17 @@ class HouseModel:
             Q[i] += self._rooms[name].internal_gain
 
         # dT/dt = C^{-1} * (A*T + B_ext*T_outdoor + Q)
-        dT_dt = (self._A @ T + self._B_ext * outdoor_temp + Q) / self._C
-        T_new = T + dT_dt * dt
+        inv_C = 1.0 / self._C
+        F = self._A * inv_C[:, None]            # state Jacobian (n×n)
+        bias = (self._B_ext * outdoor_temp + Q) * inv_C   # state-independent term
+
+        def rhs(state: np.ndarray) -> np.ndarray:
+            return F @ state + bias
+
+        def jacobian(_state: np.ndarray) -> np.ndarray:
+            return F
+
+        T_new = implicit_euler_step(rhs, jacobian, T, dt)
 
         new_temps = {}
         for i, name in enumerate(self._room_list):
