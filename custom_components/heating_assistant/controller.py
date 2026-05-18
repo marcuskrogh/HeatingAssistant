@@ -650,8 +650,15 @@ class HeatingMPCController:
         P0 = np.eye(n_x)  # initial state uncertainty [K²]
         n_rooms = self._system.nym
         P0[n_rooms:, n_rooms:] *= 4.0  # offsets start more uncertain than temperatures
+        # Implicit-Euler scheme is L-stable on the stiff envelope dynamics
+        # introduced by later Phase 1 steps (2R2C + slab); see README §3.3.
+        # On the well-conditioned 1R1C dynamics in production today the
+        # difference vs explicit Euler is below the EKF's measurement-noise
+        # floor (verified by the bit-equivalence test in
+        # tests/test_integrator.py).
         self._ekf = ContinuousDiscreteEKF(
-            self._system, x0, P0, ekf_dt, n_steps=n_int_steps
+            self._system, x0, P0, ekf_dt,
+            n_steps=n_int_steps, scheme="implicit-euler",
         )
 
         # ── OCP cost matrices ───────────────────────────────────────────
