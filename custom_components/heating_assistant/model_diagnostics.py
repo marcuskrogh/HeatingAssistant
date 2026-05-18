@@ -765,33 +765,42 @@ def compute_open_loop_predictions(
         x[:n] = np.array(y0[:n], dtype=float)
         d_prev = _make_d(seg[0])
 
+        # u_prev holds the control applied during [t_{k-1}, t_k].
+        # u_k (stored at step k) is the action applied from t_k onward,
+        # so to advance x from t_0 to t_1 we need u_0 (= seg[0]["u"]).
+        n_u = system.nu
+        u_prev = np.zeros(n_u)
+        for k, v in enumerate(seg[0].get("u", [])):
+            if k < n_u:
+                u_prev[k] = float(v)
+
         valid_segment = True
         for record in seg[1:]:
             d = _make_d(record)
 
             u_raw = record.get("u", [])
-            n_u = system.nu
             u = np.zeros(n_u)
             for k, v in enumerate(u_raw):
                 if k < n_u:
                     u[k] = float(v)
 
-            # Continuous-time integration using forward Euler
-            # This matches the approach used in CD-EKF
+            # Continuous-time integration using forward Euler.
+            # ZOH: use d_prev (disturbance at start of interval) and
+            # u_prev (control applied during this interval).
             dt = system._dt
             n_steps = 10  # Sub-steps for numerical stability
             dt_sub = dt / n_steps
 
             try:
                 for _ in range(n_steps):
-                    # Use previous disturbance (zero-order hold)
-                    dx = system.f(x, u, d_prev, np.array([]), 0.0)
+                    dx = system.f(x, u_prev, d_prev, np.array([]), 0.0)
                     x = x + dx * dt_sub
             except Exception:
                 valid_segment = False
                 break
 
             d_prev = d
+            u_prev = u
 
             y_meas = record.get("y", [])
             ts = record.get("timestamp", 0.0)
@@ -807,7 +816,6 @@ def compute_open_loop_predictions(
                         "measured": round(meas_val, 3),
                         "predicted": round(pred_val, 3),
                     })
-            d_prev = d
 
         if valid_segment:
             n_segments += 1
