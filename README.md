@@ -3953,6 +3953,15 @@ downgrade cleanly rejects the new layout.
   between rooms, as an alternative to merging open-plan rooms.
   → **future phase**, only if real-world feedback shows that the
   "declare open-plan as one room" workaround is unworkable.
+- **Per-window air-exchange-rate modelling.**  Phase 3's W1
+  open-window override is a coarse "force $u = 0$ during open
+  periods" rule that does not predict the cooling rate of the
+  room.  A model-level upgrade would identify each configured
+  window's effective open-state air-exchange rate so the OCP can
+  predict the room's cooling trajectory and the post-close
+  recovery dynamics.
+  → **Phase 1.5** if the coarse W1 override proves insufficient
+  in practice.
 
 ---
 
@@ -4206,8 +4215,10 @@ Phase 11 (whole-home co-optimisation).
    corridor-violation rate test under Monte Carlo forecast
    realisations.  Benchmark entries added to `BENCHMARKS.md`.
 4. **Config UI extended.**  New options-flow fields for corridor
-   edges, tariff entity, and tightening parameters; defaults derived
-   from existing configuration so no manual migration is required.
+   edges, tariff entity, tightening parameters, and (for W1)
+   per-room window sensors plus global open/close timing; defaults
+   derived from existing configuration so no manual migration is
+   required.
 
 #### Sequenced work-plan
 
@@ -4274,6 +4285,62 @@ Phase 11 (whole-home co-optimisation).
    iteration count drops measurably on the bundled benchmark
    scenarios; per-cycle work re-runs as the `BENCHMARKS.md` regression
    suite.  No config UI change.
+6. [ ] **Step 6 — W1: Open-window / open-door heater override.**
+   High-level handling for rooms whose configured window or door
+   binary sensors report `on` for an extended period.  Independent
+   of Steps 1–5; can be developed in parallel.
+
+   *Mechanism.*  A small per-room state machine tracks
+   `closed → pending_open → open → pending_closed → closed`.
+   The room enters the `open` state when *any* configured
+   `binary_sensor` has been continuously `on` for at least
+   `window_open_debounce` (default 60 s); it leaves `open` and
+   enters `pending_closed` when all configured sensors report `off`,
+   and returns to `closed` after `window_open_close_settle`
+   (default 30 s) without any sensor flipping back to `on`.  This
+   hysteresis prevents both brief-opening false triggers (taking
+   out the trash) and rapid re-toggling on bouncy contact sensors.
+
+   *Three orthogonal effects while the room is in the `open` state:*
+   - **Dispatch-layer override.**  The coordinator clamps
+     commanded $u = 0$ for every heat source assigned to the room
+     before issuing actuator commands.  The OCP solution from
+     step 1 onwards is unaffected — the receding horizon
+     re-evaluates next cycle.
+   - **Process-noise inflation.**  The affected room's EKF
+     process-noise covariance is inflated by
+     `window_open_q_inflation` (default 10×) so the filter
+     tracks the rapid cooling rather than tripping the Phase 2
+     outlier gate.
+   - **No plant-model change.**  The model stays blind to the
+     open window; per-window air-exchange-rate identification is
+     a deferred Phase 1.5 follow-up (see Phase 1's deferred
+     items).
+
+   *Multi-sensor rooms* combine their sensors with logical OR.
+   Rooms with no configured `window_sensors` keep the existing
+   behaviour exactly — the feature is fully opt-in per room.
+
+   *Acceptance:* on a synthetic trace with a 10-minute window
+   opening, the heater stops within one cycle of the debounce
+   expiring and the EKF state tracks the rapid cooling without
+   triggering outlier rejections; a 30-second window opening
+   (below debounce) does not trigger the override; on close,
+   the override releases within one cycle of the settle expiring
+   and normal control resumes; multi-sensor rooms behave as
+   logical OR.  README: §4.5 (control cycle) gains a window-
+   override subsection; §10 / §11 documents `window_sensors`,
+   `window_open_debounce`, `window_open_close_settle`,
+   `window_open_q_inflation`.  Tests: state-machine regression
+   (debounce, settle, multi-sensor OR, bouncy contact),
+   dispatch-override end-to-end test, process-noise-inflation
+   effect on EKF tracking test, no-regression test for rooms
+   without window sensors.  Config UI: per-room `window_sensors`
+   field (list of HA `binary_sensor.*` entity IDs) added to the
+   room edit flow; global options-flow gains the three timing
+   parameters with safe defaults; new diagnostic sensor
+   `window_state` per room exposing the state-machine state
+   (`closed` / `pending_open` / `open` / `pending_closed`).
 
 #### Migration
 
@@ -4287,6 +4354,11 @@ upgrade:
 - `corridor_confidence` defaults to `standard` (95 %); the corridor
   tightens by $\approx 0.59$ K.
 - Per-source Δu weights inherit type defaults.
+- `window_sensors` defaults to an empty list per room (W1 is fully
+  opt-in); when no window sensors are configured, dispatch behaviour
+  is unchanged from today.  `window_open_debounce` (60 s),
+  `window_open_close_settle` (30 s), and `window_open_q_inflation`
+  (10×) default at the global level.
 
 The `format_version` field in persisted storage is bumped so a
 downgrade cleanly rejects the new layout.  No YAML re-authoring is
@@ -4314,6 +4386,19 @@ the cycle is 10–15 min:
   $u = 0.33$ on a 15-min step ⇒ on for 5 min, off for 10).  Currently
   on/off heaters are dispatched by simple threshold; the dispatcher
   is a clean follow-up if that proves coarse.
+- **Predictive open-window horizon clamping (W1 follow-up).**
+  Instead of just clamping $u_0 = 0$ at dispatch, propagate the
+  override over the first $N$ horizon steps based on a learned
+  open-duration distribution.  Skipped because the receding-
+  horizon controller re-evaluates every cycle and the simpler
+  dispatch-override gives acceptable closed-loop behaviour;
+  revisit if pre-emptive overshoot at window-close becomes
+  visible.
+- **Residual-based open-window detector (W1 follow-up).**  Detect
+  open windows from the EKF innovation signature alone, without
+  requiring a configured binary sensor.  Phase 10 fault-detection
+  territory; useful for rooms whose users haven't installed
+  contact sensors.
 - **Minimum-modulation handling for modulating sources.**
   $u \in \{0\} \cup [u_\text{min}, 1]$ as an explicit OCP constraint.
   Non-convex; would require either MILP or a smoothing relaxation.
