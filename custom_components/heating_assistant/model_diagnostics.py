@@ -20,6 +20,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .integrator import (
+    ImplicitEulerConvergenceError,
+    implicit_euler_substeps,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -776,18 +781,25 @@ def compute_open_loop_predictions(
                 if k < n_u:
                     u[k] = float(v)
 
-            # Continuous-time integration using forward Euler
-            # This matches the approach used in CD-EKF
+            # Implicit-Euler sub-stepping over one cycle; matches the
+            # controller's prediction scheme so open-loop and closed-loop
+            # diagnostics use the same integrator.  Zero-order hold on
+            # inputs and disturbances over the interval.
             dt = system._dt
-            n_steps = 10  # Sub-steps for numerical stability
-            dt_sub = dt / n_steps
+            n_steps = 10  # Sub-steps; L-stable, so step size is for accuracy
+
+            d_zoh = d_prev
+            _params = np.array([])
+
+            def rhs(state, u_zoh=u, d_loc=d_zoh):
+                return system.f(state, u_zoh, d_loc, _params, 0.0)
+
+            def jac(state, u_zoh=u, d_loc=d_zoh):
+                return system.dfdx(state, u_zoh, d_loc, _params, 0.0)
 
             try:
-                for _ in range(n_steps):
-                    # Use previous disturbance (zero-order hold)
-                    dx = system.f(x, u, d_prev, np.array([]), 0.0)
-                    x = x + dx * dt_sub
-            except Exception:
+                x = implicit_euler_substeps(rhs, jac, x, dt, n_steps)
+            except (ImplicitEulerConvergenceError, Exception):
                 valid_segment = False
                 break
 

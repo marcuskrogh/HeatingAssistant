@@ -343,17 +343,23 @@ This representation makes each `step()` call a simple vector-matrix multiply —
 
 ### 3.3 Continuous-discrete integration
 
-The MPC controller treats the thermal model as a **continuous-discrete stochastic differential equation (CD-SDE)** and integrates it using **explicit Euler with sub-steps** (the *n_int_steps* parameter, default 10 sub-steps per sampling interval).  Given the nonlinear continuous-time drift:
+The MPC controller treats the thermal model as a **continuous-discrete stochastic differential equation (CD-SDE)**.  Given the nonlinear continuous-time drift:
 
 $$\dot{\mathbf{x}}(t) = \mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, t) = \mathbf{F}\,\mathbf{x} + \mathbf{G}_u(T_{\text{out}})\,\mathbf{u} + \mathbf{G}_d\,\mathbf{d}$$
 
-with $\mathbf{F} = \mathbf{C}_{\text{cap}}^{-1}\,\mathbf{A}$, the state is propagated over each sub-step $h = dt / n_{\text{int\_steps}}$ as:
+with $\mathbf{F} = \mathbf{C}_{\text{cap}}^{-1}\,\mathbf{A}$, the state is propagated over each sub-step $h = dt / n_{\text{int\_steps}}$ using **implicit (backward) Euler**:
 
-$$\mathbf{x}(t + h) \approx \mathbf{x}(t) + h\,\mathbf{f}(\mathbf{x}(t), \mathbf{u}, \mathbf{d}, t)$$
+$$\mathbf{x}(t + h) = \mathbf{x}(t) + h\,\mathbf{f}(\mathbf{x}(t + h), \mathbf{u}, \mathbf{d}, t + h)$$
 
-This handles the nonlinearity in $\mathbf{G}_u(T_{\text{out}})$ (heat-pump COP varying with outdoor temperature) correctly without linearising or discretising the model into a fixed matrix form.  The CD-EKF propagates both the mean state and the error covariance matrix using the same Euler sub-stepping approach.
+The implicit form is solved by Newton iteration on the residual
 
-The `HouseModel.step()` and `HouseModel.predict()` methods also use forward Euler and are used for the `simulate_thermal_response` service and diagnostics.
+$$R(\mathbf{x}_{k+1}) = \mathbf{x}_{k+1} - \mathbf{x}_k - h\,\mathbf{f}(\mathbf{x}_{k+1}, \mathbf{u}, \mathbf{d}, t_{k+1})$$
+
+with Jacobian $\mathbf{I} - h\,\partial \mathbf{f}/\partial \mathbf{x}$.  For the residential thermal model the drift is affine in the state (heat-pump COP varies with the *disturbance* $T_{\text{out}}$, not with the state itself), so the residual is linear in $\mathbf{x}_{k+1}$ and Newton converges in a single iteration — i.e. one $n \times n$ linear solve per sub-step.
+
+**Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  This matters once later phases of the roadmap (§17) introduce 2R2C + slab dynamics with eigenvalue spreads of $10^3$–$10^4$; under explicit Euler the same step size would be conditionally stable at best and divergent at worst on the fast mode, forcing impractically small sub-steps.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.
+
+The CD-EKF propagates both the mean state and the error covariance matrix using the same integration scheme (the Riccati covariance update reduces analogously to a Kronecker linear system under implicit Euler).  The `HouseModel.step()` and `HouseModel.predict()` methods, the controller's visualisation prediction loop, and the open-loop diagnostic simulator all share a single integration helper (`custom_components/heating_assistant/integrator.py`) so the integration scheme is uniform across the codebase.
 
 For typical residential buildings (large thermal masses, slow dynamics) a control time step `update_interval ≤ 900 s` (15 minutes) gives accurate results with the default 10 integration sub-steps.  The default `update_interval = 900 s` is a good balance between prediction accuracy and computational load.
 
