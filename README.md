@@ -3725,246 +3725,591 @@ To use a measured irradiance sensor instead of a computed one:
 
 ## 17. Roadmap
 
-Heating Assistant has grown from a research prototype into a fully-featured MPC
-integration for Home Assistant.  The roadmap below records what has already
-shipped and lays out an ambitious multi-year vision for becoming the
-**de-facto open-source whole-home energy controller** for HA users — built on
-rigorous physics, optimised for comfort *and* cost, and gorgeous to look at.
+This roadmap describes the **technical evolution of the control software**:
+how the thermal model, state estimator, optimal-control problem, parameter
+identification, and disturbance forecasts will deepen over the next several
+release cycles.  Distribution, UI polish, and HACS publication are tracked
+separately in §17.13 and treated as one-line items.
 
-### 17.1 Shipped (current release, v1.x)
+The plan is sequenced as **phases** rather than calendar quarters.  Each
+phase lists its prerequisite phases so the order is explicit, and every step
+identifies the failure mode it fixes, the technique it introduces, and the
+measurable acceptance criterion that closes it.
 
-The features in this list are live today.  See the corresponding sections of
-this README for usage details.
+---
 
-- [x] **Receding-horizon nonlinear MPC** — CD-EKF state estimation +
-  `CDTrackingOptimalControlProblem` NLP solve every cycle, with IPOPT default
-  and deterministic SLSQP fallback.  Solves a 5-room / 8-step horizon in
-  ~5 s on a small NUC.
-- [x] **Per-room RC thermal model with inter-room coupling** — full lumped-
-  parameter network including connections to adjacent rooms and to the
-  outdoors; assembled once into compact state-space matrices for fast updates.
-- [x] **Electric, infrared, and air-source heat-pump heat sources** — joint
-  optimisation across any mix of switch/number/climate-domain devices in any
-  room; per-source heater-scale factors are jointly identified by the
-  estimator.
-- [x] **Weather-API outdoor temperature forecast** — multi-hour outdoor
-  temperature forecasts from any HA weather entity (Met.no, OpenWeatherMap,
-  …) interpolated to each MPC horizon step.  Diagnostic
-  `WeatherForecastStatusSensor` surfaces fetch health.
-- [x] **Active and passive cooling** — heat-pump rooms expose `heat_cool`
-  HVAC mode with two-threshold Schmitt-trigger hysteresis around the
-  setpoint; signed heating power (positive = heating, negative = cooling) is
-  tracked throughout the MPC, sensors, and dashboard.
-- [x] **Adaptive ML parameter estimation** — `estimate_parameters_ml`
-  service runs CD-EKF maximum-likelihood identification of `thermal_mass`,
-  `r_external`, `internal_gain`, heater scale factors, and inter-room
-  resistances over the rolling observation history.  A one-press button
-  entity triggers the full pipeline.  Estimated parameters and the history
-  buffer are persisted to `entry.data` / HA Storage and survive restarts; a
-  **Reset Parameters** button reverts to configured defaults.
-- [x] **Comfort schedules (sleep / setback / away)** — per-room weekly
-  timetable of setpoint changes or fully-off periods, with optional
-  frost-protection floor.  The MPC's horizon naturally produces optimal
-  pre-heat ahead of the next comfort window.  Runtime
-  `set_schedule_enabled` service suspends/resumes schedules for one-off
-  exceptions.
-- [x] **Comprehensive model diagnostics** — `analyze_model_fit`,
-  `validate_parameters`, `controller_performance_report`,
-  `run_open_loop_simulation`, and `compute_loglik_slice` services provide
-  RMSE/MAE/R²/bias, residual whiteness (Ljung–Box), open-loop free-run
-  validation, and a 2-D log-likelihood landscape for assessing parameter
-  identifiability.  Per-room diagnostic sensors update every cycle.
-- [x] **Out-of-the-box Lovelace dashboard** — `dashboard.py` auto-generates
-  and registers a complete multi-view dashboard from the room/heat-source
-  topology on first setup, with per-room subviews, temperature/heating-plan
-  charts, diagnostics, and a system overview.  The
-  `regenerate_dashboard` service rebuilds it after topology changes and
-  supports a `dry_run` mode for previewing the YAML.
-- [x] **Generic `mbc` framework** — the underlying continuous-discrete
-  modelling, EKF, and optimal-control library is reusable for arbitrary
-  nonlinear systems and lives in its own repository.
-- [x] **Persistent history + warm restart** — the rolling observation buffer,
-  identified parameters, and per-room overrides survive HA restarts and
-  integration reloads.
+### 17.1 Current technical baseline
 
-### 17.2 Next release (v1.x — short term, in flight)
+This is the surface we build on.  Every later phase is described as a
+*delta* from this baseline.
 
-Focused, well-scoped items that improve the day-one experience for new users
-and unlock the first cost-saving capabilities.
+| Layer | Today |
+|-------|-------|
+| **Plant model** | One thermal node per room ($1R1C$ per room) with inter-room conductances $1/R_{ij}$ and outdoor conductance $1/R_{i,\text{ext}}$; clear-sky solar gain through each window; Carnot-corrected heat-pump COP |
+| **Disturbances** | Outdoor temperature (HA weather forecast, interpolated to horizon); solar irradiance from latitude/longitude clear-sky pipeline |
+| **State estimator** | Continuous-discrete EKF; explicit Euler sub-stepped covariance propagation; per-room scalar measurement update |
+| **Optimal-control problem** | Receding-horizon NLP over continuous $u\in[0,1]$ minimising tracking + energy + Δu smoothing + soft-constraint slack; zero-order hold; horizon $N$ steps × $\Delta t$ (default 8 × 15 min) |
+| **Solver** | IPOPT primary, SLSQP deterministic fallback; warm-start from previous solution; analytic Jacobians for `f` and `h` |
+| **System ID** | Offline maximum-likelihood (CD-EKF prediction-error decomposition) over the rolling history buffer; identifies $C_i$, $R_{i,\text{ext}}$, internal gain, heater scale, inter-room R |
+| **Constraints** | Box on $u$; soft slack on temperature corridors; Schmitt-trigger hysteresis on cooling mode |
+| **Cycle time** | ~5 s for a 5-room / 8-step horizon on a small NUC |
 
-- [ ] **HACS publication** — submit to the HACS default repository for
-  one-click installation, automatic update notifications, and a
-  curated `hacs.json` with proper version constraints.
-- [ ] **End-to-end GUI room editor** — extend the existing config-flow
-  helpers so rooms, windows, connections, and heat sources can be created,
-  edited, and deleted entirely through the HA UI.  YAML remains supported
-  for power-users but stops being mandatory.  Includes a "visual"
-  drag-to-connect topology editor backed by `mermaid` diagrams.
-- [ ] **Energy-price-aware MPC** — weight the MPC energy term by a
-  time-of-use tariff entity (Nord Pool, Octopus Agile, Tibber, EPEX) so
-  the controller pre-heats during cheap hours and coasts through peaks.
-  Surface a per-room **Cost Forecast** sensor (€/h) and a system-wide
-  **Today's Savings** sensor (€) comparing actual spend vs a flat-tariff
-  baseline.
-- [ ] **Measured irradiance override** — let a global-horizontal or
-  plane-of-array irradiance sensor (W/m²) replace the clear-sky model on
-  cloudy days; auto-detect overcast conditions and blend smoothly.
-- [ ] **Window / door open detection** — subscribe to `binary_sensor` open
-  entities per room and temporarily clamp heater output to zero (with a
-  configurable hold-off) so the controller doesn't fight a wide-open
-  window.  Surface a "boost loss" estimate (Wh wasted) on the dashboard.
-- [ ] **Occupancy-aware setpoints** — accept a per-room `binary_sensor`
-  (motion / presence / device_tracker) and switch between *occupied* and
-  *unoccupied* setpoint profiles, with a configurable smoothing delay so a
-  brief absence doesn't immediately drop the temperature.
-- [ ] **First-class English & translated UI** — translate the wizard,
-  options flow, services, and dashboard captions into the major HA locales
-  (de, fr, es, it, nl, da, sv, no, fi, pl, …) via the standard HA
-  `translations/` directory.
+The remainder of §17 lifts each of these rows in turn.
 
-### 17.3 v2 — "Whole-home energy optimiser" (medium term)
+---
 
-A coherent leap in scope: from a heating controller to a holistic
-*home-energy* controller that co-optimises heating, hot water, electricity
-price, PV, and battery.
+### 17.2 Phase 1 — Modelling fidelity (deepening the plant)
 
-- [ ] **Domestic Hot Water (DHW) tank model** — treat the cylinder as an
-  additional thermal node with stratified or single-zone dynamics, modelled
-  losses, and a draw-pattern forecast.  Co-schedule reheats inside the same
-  MPC so legionella cycles and price valleys are handled jointly with space
-  heating.
-- [ ] **Underfloor heating & high-thermal-mass emitters** — add an explicit
-  emitter sub-model (slab + floor + air) so the controller correctly
-  predicts the 4–8 h lag of UFH and avoids the "too late, too much"
-  overshoot pattern that plagues naïve thermostats.  Per-manifold valve
-  actuator support.
-- [ ] **PV generation forecast & self-consumption** — pull solar production
-  forecasts from `solcast` / `forecast.solar` and bias heating into the
-  hours when self-generated power is free, reducing grid import.
-- [ ] **Home battery co-optimisation** — joint MPC over battery SOC and
-  thermal mass, so the integration can decide "charge the battery now,
-  pre-heat at noon".  Supports Tesla Powerwall, Enphase, Victron, Sonnen,
-  and Huawei via existing HA integrations.
-- [ ] **Smart-grid / Demand-Response signal compliance** — react to grid
-  operator DR events (OpenADR, Tibber Pulse, EDS DK1/DK2 signals) by
-  shaving load while respecting per-room comfort bounds.  A "DR
-  participation" sensor tallies kWh shifted.
-- [ ] **Heat-pump telemetry adapters** — first-class support for Mitsubishi
-  MELCloud, Daikin Onecta, NIBE Uplink, IVT, Bosch, Vaillant, Viessmann,
-  and Panasonic Aquarea so the integration consumes real reported COP,
-  flow temperature, compressor frequency, and defrost state instead of the
-  Carnot approximation.
-- [ ] **Stochastic / robust MPC** — propagate weather and price forecast
-  uncertainty through scenario-tree or chance-constrained MPC so comfort
-  bounds are honoured *with probability ≥ 95 %* instead of in expectation.
-- [ ] **PMV/PPD thermal comfort objective** — switch from "track a setpoint"
-  to "maintain ASHRAE-55 PMV ≈ 0", combining temperature, humidity, air
-  speed, mean radiant temperature, clothing, and metabolic-rate
-  estimates.  Per-room humidity sensor support.
-- [ ] **Multi-zone ducted heat pump & VAV support** — model dampers, smart
-  vents (Flair, Keen), and trunk-line dynamics so a single ducted unit can
-  be optimised across all the rooms it serves.
+**Why:** The 1R1C lumped model is the dominant residual-error source.  Open-
+loop RMSE > 0.5 °C usually tracks back to unmodelled envelope dynamics, slab
+thermal lag, latent-heat exchange, or wind-driven infiltration.  Fixing the
+model is the single highest-leverage upgrade — every later phase benefits.
 
-### 17.4 v3 — "Self-driving home" (long term, dream big)
+**Depends on:** baseline.  **Unlocks:** Phases 2, 4, 5, 7.
 
-The aspirational ceiling.  Each item below is plausible with today's tools
-and a focused engineering push.
+- [ ] **1R1C → 2R2C envelope per room.**  Split each room into an *air* node
+  $T_a$ and an *envelope/mass* node $T_w$ coupled by $R_{aw}$, with the
+  envelope coupled outward via $R_{we}$.  Captures the ~30–90 min lag
+  between heater input and air-temperature response that the current model
+  underestimates.  Acceptance: open-loop 30-min RMSE drops ≥ 30 % on the
+  bundled golden traces.
+- [ ] **3R2C with explicit slab node for ground floors.**  Adds a slab node
+  $T_s$ with large $C_s$ and resistance $R_{sg}$ to a ground-temperature
+  driver $T_g(t)$.  Required for any house with substantial floor mass
+  (UFH, polished concrete, suspended timber with insulated void all
+  benefit).
+- [ ] **Underfloor heating (UFH) emitter sub-model.**  Heater power flows
+  into the slab node, not the air node; air receives heat via a fitted
+  $h_{sa}$ slab→air conductance.  Predicts the characteristic 4–8 h delay
+  and damps the "too late, too much" overshoot pattern.
+- [ ] **Radiator / fan-coil emitter model.**  Per-emitter lumped water-loop
+  capacitance $C_w$ and metal capacitance $C_m$ with flow-temperature
+  dynamics; valve position becomes a continuous input rather than a
+  proxy for heat output.  Lets the controller exploit the radiator's
+  thermal inertia directly.
+- [ ] **Air-infiltration and ventilation as identified disturbances.**
+  Replace the bundled $R_{\text{ext}}$ with separable conductive
+  ($1/R_{\text{cond}}$) and ventilative ($\rho c_p \dot V$) terms; let
+  $\dot V$ scale with wind speed (Sherman–Grimsrud) and trickle-vent
+  position.  Acceptance: bias on windy days $< 0.1$ °C.
+- [ ] **Latent-heat / enthalpy dynamics.**  Add per-room humidity ratio
+  $w_i$ as a state, with sources (occupants, cooking, drying) and sinks
+  (ventilation, AC dehumidification).  Required for cooling-mode
+  optimisation, condensation-risk constraints, and PMV/PPD comfort.
+- [ ] **Long-wave radiation to sky.**  Add a sky-temperature term
+  $T_{\text{sky}} = T_a - \varepsilon \cdot \Delta T_{\text{sky}}$ for
+  windows and roof surfaces.  Improves nocturnal cooling prediction on
+  clear nights.
+- [ ] **Solar absorptance on opaque surfaces.**  Today only windows receive
+  solar gain; add a configurable solar absorptance × area × tilt term per
+  external wall/roof so dark south-facing facades behave correctly.
+- [ ] **Stratified-air option for tall rooms.**  Optional two-air-node
+  model (low/high) coupled by buoyancy-driven mixing for stairwells and
+  open-plan voids.
+- [ ] **Thermal-bridge correction.**  Per-room linear-thermal-bridge term
+  $\psi L$ identified jointly with envelope resistances; surfaces
+  worst-bridge rooms in diagnostics.
 
-- [ ] **3-D interactive floor-plan dashboard** — first-class custom
-  Lovelace strategy that renders an isometric or top-down floor plan from
-  the room topology, animated with a live temperature heatmap, heat-flux
-  arrows between rooms, solar-gain shading per window, and click-through
-  to per-room MPC views.  Built on a small WebGL/SVG strategy module
-  bundled with the integration.
-- [ ] **BIM / floor-plan import** — generate the room topology, windows,
-  and external surface areas automatically from a Matterport scan,
-  Magicplan project, IFC file, or a hand-drawn sketch processed by a
-  vision model.  Replaces 80 % of manual YAML on first install.
-- [ ] **Self-tuning controller weights** — Bayesian optimisation loop that
-  searches `energy_weight`, `smoothing_weight`, `constraint_offset`, and
-  horizon length to maximise a user-selectable utility (comfort vs cost
-  vs equipment wear) over the long-run history buffer.  Surface
-  recommended tunings in the dashboard with one-click apply.
-- [ ] **Learned residual hybrid model (grey-box)** — keep the physics-
-  based RC core but learn a small neural-network residual `g_θ(x,u,d)`
-  to capture unmodelled effects (radiator non-linearities, draughts,
-  occupant heat).  Training runs locally on CPU, falls back to the pure
-  RC model if confidence is low.
-- [ ] **Reinforcement-learning policy as MPC accelerator** — distil a
-  fast policy network from the MPC's offline rollouts, run it at every
-  control cycle for sub-millisecond response, and use the full MPC as a
-  safety-fallback / periodic re-trainer.  Solves the 5-room scenario in
-  <10 ms.
-- [ ] **Differentiable physics simulator + gradient-based design** —
-  expose the RC model as a JAX/PyTorch-compatible module so users can
-  back-propagate "what insulation upgrade saves the most over a winter?"
-  through a year-long simulation.
-- [ ] **Federated benchmarking** — opt-in, differentially-private
-  aggregation of anonymised RC parameters and savings across the user
-  base, so each installation can compare itself to similar homes
-  ("your insulation R-value is in the 30th percentile for 1970s Danish
-  semi-detached houses").
-- [ ] **Voice & LLM integration** — first-class Assist intents for natural
-  requests: *"Make the lounge cosy for a movie at 8 pm"*, *"Warm the
-  bedroom 30 min before my alarm"*, *"Spend at most €2 on heating
-  tomorrow"*.  Backed by an LLM tool layer that translates the request
-  into a temporary MPC objective and explains its plan back to the user.
-- [ ] **Anomaly detection & equipment-health monitoring** — flag a heat
-  pump whose measured COP drifts > 15 % below the Carnot model
-  (refrigerant leak, fouled coil), a radiator that no longer responds
-  to its valve command, or a sensor returning physically impossible
-  values; raise HA Repairs issues automatically.
-- [ ] **CO₂ / air-quality coupling** — co-control ventilation (MVHR,
-  bath fans, window openers) with heating, balancing fresh-air demand
-  (CO₂, VOC, humidity) against thermal-loss penalty.
-- [ ] **Ground-source, water-source, and hybrid systems** — add models for
-  ground-loop temperature dynamics, gas-condensing boilers (with cycling
-  efficiency curves), pellet boilers, district heating substations, and
-  hybrid setups that switch between sources based on marginal cost.
-- [ ] **Solar-thermal collectors** — first-class flat-plate / evacuated-
-  tube models feeding the DHW tank, integrated into the same energy
-  MPC.
-- [ ] **EV charging coordination** — share the household import budget
-  with the EV charger (OCPP, Wallbox, Easee, Zaptec) so heating doesn't
-  trip the main fuse during overnight charging and surplus PV is
-  allocated optimally between car and house.
-- [ ] **Built-in HiL simulator & screencast mode** — `pytest`-driven
-  hardware-in-the-loop harness that replays a year of real weather and
-  occupancy through the controller, plus a "screencast" mode that
-  renders the dashboard at 60 fps for demos and documentation.
-- [ ] **Mobile companion experience** — HA Companion-app-native push
-  notifications ("Cheap-power window starts in 30 min — boosting the
-  hot-water tank"), rich charts, and a "I'm coming home early" gesture
-  that triggers an MPC re-plan with the new arrival ETA.
-- [ ] **Home Assistant Core integration** — once the surface area is
-  stable, propose Heating Assistant for inclusion in HA Core so it ships
-  to every HA install out of the box.
+---
 
-### 17.5 Cross-cutting non-functional goals
+### 17.3 Phase 2 — State estimation upgrades
 
-These run alongside every release and define the bar we hold ourselves to.
+**Why:** The CD-EKF Jacobian linearisation degrades on the larger, stiffer,
+more nonlinear models introduced in Phase 1.  Move to estimators that handle
+the new dynamics, multi-rate sensors, sensor faults, and joint state +
+parameter inference.
 
-- [ ] **<1 s control cycle for 10-room houses** — micro-optimise the
-  NLP build, exploit warm-starts across cycles, optionally pre-compile
-  the model with `casadi` / `cython`, and parallelise per-house EKFs so
-  large homes feel instant.
-- [ ] **100 % typed Python + `mypy --strict`** — extend the existing
-  type coverage to the whole codebase and gate it in CI.
-- [ ] **>90 % test coverage with golden-trace regression tests** — bundle
-  a library of synthetic and recorded house traces and assert that the
-  controller's decisions stay within tight bands across releases.
-- [ ] **Quality docs + a friendly "Why is the controller doing that?"
-  explainer** — a dashboard card that decomposes the current control
-  action into "tracking", "energy", "smoothing", and "constraint" terms
-  so the user can *see* why their radiator is at 47 %.
-- [ ] **Zero-friction safety** — every dangerous action (large
-  thermal-mass changes, parameter resets, schedule overrides) is
-  reversible with a single click and audit-logged in the diagnostics
-  panel.
+**Depends on:** Phase 1.  **Unlocks:** Phases 3, 4, 9, 10.
 
-Ideas, votes, and contributions are very welcome — open an issue or a PR on
-[GitHub](https://github.com/marcuskrogh/HeatingAssistant) to discuss any of
-the above.
+- [ ] **Iterated EKF (IEKF) for the measurement update.**  Re-linearise
+  $h$ around the posterior mean until convergence; cheap upgrade,
+  measurable bias reduction with nonlinear humidity / radiation
+  measurements.
+- [ ] **Continuous-Discrete Unscented Kalman Filter (CD-UKF).**  Replace
+  the Riccati ODE with deterministic sigma-point propagation; removes
+  the analytic-Jacobian requirement for new model components and is
+  empirically more robust on stiff models (Särkkä 2007).
+- [ ] **Moving-Horizon Estimator (MHE).**  Solve an N-step constrained
+  MAP problem each cycle (same QP backend as the MPC) for state +
+  disturbance + bias.  Native constraint handling (positivity on heat
+  flux, bounded sensor bias) and known statistical-efficiency advantage
+  over EKF on nonlinear systems.
+- [ ] **Adaptive process/measurement noise.**  Innovation-based
+  recursive estimation of $Q$ and $R$ (Mehra 1972, Sage–Husa
+  variants) so the filter automatically loosens when the model is
+  drifting and tightens when it's tracking well.
+- [ ] **Outlier rejection with Mahalanobis gating.**  Replace
+  unconditional measurement acceptance with a $\chi^2$ gate on the
+  innovation; surface rejected measurements as a diagnostic time-series.
+- [ ] **Multi-sensor fusion with per-sensor bias and drift state.**
+  Today multiple temperature sensors per room are averaged; instead
+  augment the state with $b_k$ per sensor and identify it online.
+  Catches the classic "sensor near a draught reads 1.5 °C low" problem.
+- [ ] **Joint state-and-parameter estimation (dual / augmented EKF).**
+  Promote the slowly-drifting parameters (envelope resistances,
+  infiltration coefficient, heater scale) into the state vector with
+  small random-walk process noise so the filter tracks seasonal drift
+  without requiring a periodic offline re-fit.
+- [ ] **Particle filter fallback for non-Gaussian regimes.**  Optional
+  bootstrap PF when the innovation distribution fails the Anderson–
+  Darling normality test, e.g. during defrost cycles or window-open
+  events.
+
+---
+
+### 17.4 Phase 3 — Optimal-control problem upgrades
+
+**Why:** The current OCP is a smooth continuous-input nonlinear program.
+Real plants are mixed-integer (compressors are on/off, heat pumps have
+minimum on/off times, modulating boilers have flame-on hysteresis) and real
+forecasts are uncertain.  The upgrades below close both gaps.
+
+**Depends on:** Phases 1, 2.  **Unlocks:** Phases 7, 9, 11.
+
+- [ ] **Mixed-integer MPC for on/off equipment.**  Add binary decision
+  variables for compressor on/off, three-way valve positions, and stage-
+  switching boilers, with minimum on/off-time constraints
+  ($t_\text{on} \ge t_\text{min}$).  Solve via branch-and-bound (Bonmin)
+  or relaxed-rounding heuristics with a feasibility-projection step.
+- [ ] **Real-Time Iteration (RTI) scheme.**  Solve a single SQP step per
+  cycle, exploiting the previous cycle as the linearisation point
+  (Diehl 2002, acados implementation).  Turns the 5 s solve into a
+  sub-100 ms solve while keeping closed-loop performance within
+  measurable noise.
+- [ ] **Hierarchical MPC: slow upper + fast lower layer.**  Upper layer
+  (Δt = 15 min, horizon 24–48 h) solves the cost/energy/DHW/battery
+  problem with coarse dynamics.  Lower layer (Δt = 60 s, horizon
+  15–30 min) tracks the upper-layer plan with full per-room nonlinear
+  dynamics.  Decouples long-horizon economics from short-horizon
+  comfort.
+- [ ] **Distributed MPC across zones (ADMM / dual decomposition).**
+  Per-zone subproblems coupled by inter-zone heat-flux consensus.
+  Linear in the number of zones; enables sub-second solves for
+  ≥ 15 rooms without giving up the coupling-aware solution.
+- [ ] **Stochastic / scenario-tree MPC.**  Sample $K$ weather + price
+  scenarios at each branching depth; the OCP optimises a non-
+  anticipative control tree.  Reports an explicit "comfort
+  violation probability" instead of soft slack.
+- [ ] **Chance-constrained corridors.**  Tighten the temperature
+  corridor by $k_\alpha \sqrt{\Sigma_k}$ (Pre-Stabilising Tube MPC,
+  Mayne 2005) using the EKF/MHE prediction covariance so $P(T \in
+  \text{comfort}) \ge 1-\alpha$ holds.
+- [ ] **Economic MPC objective.**  Switch the tracking quadratic for
+  a direct cost minimisation $J = \int \pi(t)\,P_\text{elec}(t)\,dt
+  + \lambda \cdot \text{PMV}(t)^2 \,dt$.  Closed-loop savings
+  measured against the legacy tracking objective become the KPI.
+- [ ] **PMV/PPD comfort objective.**  Replace setpoint-tracking with an
+  ASHRAE-55 PMV target band combining $T_a$, $T_{\text{mrt}}$, $w$, air
+  speed, clothing, and metabolic rate.  Requires Phase 1 latent-heat
+  state and a humidity sensor per room.
+- [ ] **Sound-pressure / equipment-wear constraints.**  Compressor
+  frequency upper bound at night; max-starts-per-hour budget; max-Δu
+  per minute on modulating valves.
+- [ ] **Soft constraint relaxation hierarchy (lex-MPC).**  Lexicographic
+  ordering of constraint priorities (safety > comfort > cost) so the
+  controller degrades gracefully when the problem is infeasible.
+- [ ] **Convexified relaxation for warm cold-start.**  When the
+  warm-start is unavailable (first cycle after restart) solve a linear
+  MPC on the Phase 1 model linearised at $T_\text{ref}$ first, then
+  hand off as the warm-start to the full NMPC.  Guarantees a usable
+  control action even on the first cycle.
+
+---
+
+### 17.5 Phase 4 — System identification & online adaptation
+
+**Why:** Today's identification is offline (`estimate_parameters_ml` button
+press), uses a single point estimate, and lacks a strategy for sustained
+non-identifiability or seasonal regime shifts.  The upgrades make ID
+continuous, prior-aware, and adversarial-resistant.
+
+**Depends on:** Phases 1, 2.  **Unlocks:** Phase 8.
+
+- [ ] **Bayesian MAP identification with informative priors.**  Replace
+  the unconstrained NLL minimisation with a MAP objective $\mathcal{L}
+  + \log p(\theta)$ using log-normal priors centred on
+  building-typology defaults (year built, wall type, square metres).
+  Eliminates the degenerate "$C$ huge, $R$ huge" optimum that the
+  current loglik landscape sometimes drifts into.
+- [ ] **Recursive Bayesian update (RB-Kalman / particle-filter
+  parameter sampler).**  Maintain a full posterior over $\theta$
+  rather than a point estimate; update once per cycle.  Surfaces
+  posterior credible intervals on the dashboard.
+- [ ] **Multi-step prediction-error minimisation.**  Optimise the loss
+  $\sum_{k=1}^{K} \|y_{t+k} - \hat y_{t+k|t}\|^2$ over open-loop
+  rollouts of length $K$ (e.g. $K=12$) instead of one-step Kalman
+  innovations.  Aligns the ID objective with the MPC's actual
+  prediction horizon.
+- [ ] **Active experiment design.**  When parameters are flagged
+  non-identifiable, the controller proposes a small comfort-bounded
+  perturbation $\delta u$ to maximise Fisher information on the
+  problem parameter, with explicit user opt-in.  Acceptance: median
+  parameter-confidence ≥ 0.7 within 5 days of install.
+- [ ] **Sparse topology identification (SR3 / LASSO on $A$).**  Learn
+  which inter-room connections matter from data, automatically
+  pruning negligible $1/R_{ij}$ edges and proposing new ones.
+  Reduces over-fitting and surfaces unintentional topology errors.
+- [ ] **Seasonal regime detection.**  Detect changepoints in the
+  innovation statistics (Bayesian online changepoint detection,
+  Adams & MacKay 2007) and either re-identify or branch into a
+  regime-specific parameter set (heating season / cooling season /
+  shoulder season).
+- [ ] **Sensitivity-weighted parameter freezing.**  Auto-fix the
+  identifiability-flagged parameters at their prior mean during low-
+  excitation periods to prevent the optimiser from chasing noise.
+- [ ] **Cross-validation framework.**  Train/test split on rolling
+  windows; report out-of-sample log-likelihood; refuse to apply a
+  re-estimation that degrades out-of-sample fit beyond a threshold.
+
+---
+
+### 17.6 Phase 5 — Disturbance forecasting
+
+**Why:** The MPC is forecast-bounded — better forecasts directly translate
+to better control.  Today, outdoor temperature is interpolated from a
+weather entity and solar gain is computed from a clear-sky model with no
+data assimilation.  These are the next two biggest residual sources after
+the plant model.
+
+**Depends on:** Phase 1 (for solar absorptance), Phase 2 (for assimilation).
+
+- [ ] **Clear-sky → cloud-corrected irradiance.**  Combine HA cloud-cover
+  forecasts with the Erbs / Reindl decomposition to produce DNI/DHI
+  forecasts on cloudy days.  Acceptance: solar-gain RMSE ≤ 30 % of
+  midday peak on a year-long trace.
+- [ ] **Plane-of-array irradiance assimilation.**  If a measured
+  irradiance sensor (or even a PV-generation entity) is available,
+  blend it with the clear-sky model via a Kalman correction step on a
+  per-window basis.
+- [ ] **Multi-source weather ensemble.**  Pull forecasts from $M$
+  weather entities (Met.no + ECMWF + DMI + …) and use a recursive
+  least-squares forecast-combination layer to produce a single
+  posterior temperature trajectory with calibrated variance.  The
+  variance feeds the stochastic / chance-constrained MPC.
+- [ ] **Occupancy / internal-gain forecasting.**  Hidden Markov model
+  over per-room presence sensors + calendar + device_tracker; output
+  an expected internal-gain $\hat Q_\text{int}(t)$ trajectory with
+  uncertainty.  Replaces the constant $Q_\text{int}$ assumption.
+- [ ] **Wind-dependent infiltration forecast.**  Use forecast wind
+  speed / direction to drive the Phase 1 infiltration model so the
+  controller pre-heats ahead of forecast storms.
+- [ ] **Ground-temperature model.**  Sinusoidal annual + diffusion-
+  lagged ground temperature for the Phase 1 slab/GSHP coupling.  No
+  external data needed.
+- [ ] **Price forecasting & residual modelling.**  When a day-ahead
+  price (Nord Pool / EPEX) is published, store it; outside that
+  window, run a small autoregressive model conditioned on
+  day-of-week + season for the look-ahead beyond the public horizon.
+
+---
+
+### 17.7 Phase 6 — Heat-source model fidelity
+
+**Why:** The Carnot-corrected COP and step-modulated heater scale are good
+enough for switch-domain electric heaters but miss the dominant cost
+non-linearities of real heat pumps (defrost, modulation efficiency curve,
+flow-temperature dependence) and modulating boilers (cycling losses,
+condensing efficiency cliff).
+
+**Depends on:** Phase 1, telemetry availability.  **Unlocks:** Phase 11.
+
+- [ ] **Variable-speed inverter heat-pump map.**  Replace the Carnot
+  scaling with a fitted $(f_\text{comp}, T_\text{out},
+  T_\text{flow}) \to (P_\text{elec}, Q_\text{th})$ map.  Identified
+  from telemetry (MELCloud, Onecta, NIBE Uplink) or from
+  manufacturer NEN-EN 14825 curves where telemetry is absent.
+- [ ] **Defrost cycle as an explicit input-domain event.**  Detect
+  defrost from telemetry or from the residual signature; model it as
+  a known transient $-Q_\text{def}$ that the controller can either
+  pre-empt or schedule into a low-comfort-impact window.
+- [ ] **Modulating gas / oil boiler with cycling-efficiency curve.**
+  Steady-state efficiency vs modulation ratio + per-cycle ignition
+  loss; condensing/non-condensing transition at the dew-point flow
+  temperature.
+- [ ] **Buffer-tank / hydraulic-separator dynamics.**  Single-node
+  or stratified-node tank between the heat pump and the emitters;
+  decouples source modulation from emitter demand.
+- [ ] **Ground-source / water-source heat pump.**  Borehole loop
+  temperature dynamics (line-source g-function, Eskilson) so the
+  controller respects the ground-loop's thermal recovery rate.
+- [ ] **Solar-thermal collector model.**  Flat-plate / evacuated-tube
+  efficiency $\eta = \eta_0 - a_1 \Delta T / G - a_2 (\Delta T)^2 /
+  G$ feeding the buffer tank; jointly scheduled with the PV +
+  battery + heat-pump plan.
+- [ ] **Hybrid sources with marginal-cost crossover.**  Heat-pump +
+  boiler, heat-pump + electric immersion, district + boiler:
+  marginal-cost (€/kWh-thermal) is computed each cycle and the MPC
+  binary-selects the cheaper source within the equipment
+  constraints from Phase 3.
+
+---
+
+### 17.8 Phase 7 — Solver, numerics, performance
+
+**Why:** Closing the gap between "5 s solve on 5 rooms" and "sub-second
+solve on 15 rooms with mixed-integer dynamics and stochastic scenarios"
+requires moving off the current Python-loop NLP build and onto a sparse,
+JIT-compiled symbolic stack.
+
+**Depends on:** Phases 3 and 4 to know the final problem structure.
+
+- [ ] **CasADi symbolic OCP build.**  Replace the hand-rolled NLP
+  assembly with a CasADi graph; gives free analytic Jacobians +
+  Hessians + sparsity patterns.  Persist the compiled function
+  cache between HA restarts.
+- [ ] **acados backend (multiple-shooting + RTI).**  Migrate the
+  short-horizon lower-layer MPC to acados for sub-100 ms solves with
+  warm-start.  IPOPT remains the long-horizon upper-layer solver.
+- [ ] **Sparse Hessian exploitation.**  The OCP is block-tridiagonal
+  in time; expose the structure to the QP backend (HPIPM, qpOASES)
+  for $O(N)$ rather than $O(N^3)$ solves.
+- [ ] **JIT-compiled EKF/UKF inner loop (numba / cython).**  The
+  Euler-sub-stepped covariance propagation is the per-cycle hot path
+  for the estimator; pre-compile per house topology.
+- [ ] **Parallel per-house EKFs for the parameter-likelihood grid.**
+  `compute_loglik_slice` and the multi-start ID search are
+  embarrassingly parallel; use `concurrent.futures` with a worker
+  pool sized to the host's CPU count.
+- [ ] **Deterministic regression harness.**  Seeded synthetic
+  traces, recorded numeric outputs of every solve, golden snapshots
+  in CI to catch any silent change in optimiser behaviour across
+  releases.
+
+---
+
+### 17.9 Phase 8 — Verification, validation, benchmarking
+
+**Why:** Each upgrade above is a hypothesis ("this estimator is better",
+"this objective saves cost") and needs to be checked against the
+alternatives on a common benchmark.  Without this, the codebase drifts.
+
+**Depends on:** Phases 1–7 incrementally; itself blocks confident release
+of Phases 9–11.
+
+- [ ] **Hardware-in-the-loop simulator harness.**  Bind a high-fidelity
+  reference simulator (e.g. EnergyPlus FMU or a Modelica IDEAS
+  package) as the "true plant" and run the integration against it
+  through HA's regular event loop.  Captures dynamics that the RC
+  abstraction must approximate.
+- [ ] **Year-long golden trace library.**  Bundle a handful of
+  recorded year-long real-house traces (weather + setpoints + sensor
+  + controller decisions) and assert closed-loop KPIs stay within
+  bands across releases.
+- [ ] **Monte-Carlo robustness assessment.**  Sample $N=1000$
+  parameter / forecast realisations from their identified
+  posteriors; report a comfort-violation probability and a 95-%
+  cost envelope for each release.
+- [ ] **KPI suite.**  Standardise on: (1) RMSE of one-step prediction,
+  (2) open-loop $K$-step RMSE, (3) ITAE on setpoint tracking,
+  (4) total kWh per HDD, (5) total € per HDD, (6) compressor
+  cycles per day, (7) % time in comfort band.  Surface every KPI in
+  the dashboard and in CI.
+- [ ] **A/B controller comparison framework.**  Run two controller
+  variants over the same trace with synchronised seeds and produce
+  a paired-test report.  Used to gate Phase-3/4/10 changes.
+- [ ] **Formal comfort guarantee under tube MPC.**  Prove (or
+  numerically certify via reachable-set propagation) that the
+  Phase-3 tube MPC keeps the temperature in the comfort band under
+  the identified disturbance bounds.
+
+---
+
+### 17.10 Phase 9 — Learning-augmented control (grey-box / hybrid)
+
+**Why:** After Phase 1 there will still be a residual the physics doesn't
+capture (occupant heat patterns, infiltration micro-pathways,
+unidentified emitters).  A small learned component can absorb that
+residual while the physics core keeps the system safe, sample-efficient,
+and explainable.
+
+**Depends on:** Phases 1, 2, 4, 8.  **Unlocks:** later RL work.
+
+- [ ] **Residual neural-network drift term.**  Write the dynamics as
+  $\dot x = f_\text{phys}(x,u,d;\theta) + g_\phi(x,u,d)$ with
+  $g_\phi$ a small MLP (∼10–100 parameters).  Train $\phi$ jointly
+  with $\theta$ under a weight prior $\|\phi\|^2$ that pushes the
+  residual toward zero when the physics is enough.  Falls back to
+  pure physics when $\|g_\phi\| > \tau$ on out-of-distribution
+  inputs.
+- [ ] **Neural-ODE option for the room drift.**  When the residual
+  is non-negligible, swap $f_\text{phys}+g_\phi$ for a parameterised
+  Neural-ODE; preserves the continuous-discrete framework and
+  remains compatible with the existing EKF / NMPC.
+- [ ] **Differentiable simulator.**  Expose $f_\text{phys}+g_\phi$
+  as a JAX / PyTorch module so that gradients through year-long
+  rollouts are available for design questions ("what insulation
+  upgrade saves the most?") and for end-to-end ID.
+- [ ] **MPC-policy distillation.**  Train a feed-forward policy
+  $\pi_\psi(x,d) \to u$ on offline MPC rollouts (behaviour cloning
+  + DAgger).  Run at every cycle for sub-millisecond decisions and
+  fall back to the full MPC whenever $\|u_\text{policy} -
+  u_\text{MPC,1-step}\| > \tau$.
+- [ ] **Safety-filtered RL fine-tuning.**  Optional online RL
+  improvement layer with the MPC as a safety filter (Hewing 2020):
+  the RL proposes $u_\text{RL}$, the MPC projects it onto the
+  constraint-admissible set, and only the projected action is
+  applied.  Provably keeps the safety guarantee while enabling
+  exploration.
+- [ ] **Bayesian-optimisation auto-tuner for MPC weights.**  Treat
+  $(Q_\text{track}, R_\text{energy}, S_\Delta u, \rho_z, N)$ as a
+  black-box hyperparameter vector and run BO over the closed-loop
+  KPI on the HiL harness.
+
+---
+
+### 17.11 Phase 10 — Fault & anomaly detection
+
+**Why:** A well-instrumented controller knows when *itself* is wrong.
+Today the only signal is `prediction_error` per room; we can do much
+more with the residuals the estimator already produces.
+
+**Depends on:** Phase 2 (better residual statistics).
+
+- [ ] **CUSUM / Page–Hinkley change detector on innovations.**  Per-
+  room and per-source detectors that trigger a Repairs issue when
+  the residual mean drifts.
+- [ ] **Generalised likelihood-ratio (GLR) test for COP drop.**
+  Compare a "nominal Carnot" hypothesis against a "scaled-Carnot
+  with factor $\eta < 1$" hypothesis on the heat-pump residuals;
+  flag refrigerant-leak / fouled-coil candidates with a $p$-value.
+- [ ] **Sensor-bias / stuck-at detector.**  The Phase-2 per-sensor
+  bias state, combined with a flatline detector and a Δ-out-of-band
+  detector, classifies each sensor as healthy / drifting / stuck /
+  unplugged.
+- [ ] **Actuator-stuck detector.**  Cross-correlate commanded $u$
+  with downstream power telemetry (or temperature response in the
+  absence of telemetry) to detect a valve that no longer responds.
+- [ ] **Window-open / door-open detector from residual signature.**
+  Sudden negative-step infiltration spike with characteristic decay
+  is recognisable even without a contact sensor; surfaced as a
+  diagnostic event and used to clamp $u$.
+- [ ] **Forecast-quality monitor.**  Track the prediction skill of
+  the weather entity (mean absolute error vs the realised
+  temperature) and down-weight or fail over to a backup forecast
+  source when skill drops.
+
+---
+
+### 17.12 Phase 11 — Whole-home energy co-optimisation
+
+**Why:** With Phases 1–10 in place, the controller becomes the obvious
+optimal scheduler for *all* low-rate flexible loads in the home — not just
+heaters.  This phase widens the OCP to the whole house energy budget.
+
+**Depends on:** Phases 3, 6, 8.
+
+- [ ] **DHW tank as an additional thermal node in the OCP.**  Co-
+  optimise reheat windows with the space-heating plan, respecting
+  legionella minimums and draw-pattern forecasts.
+- [ ] **PV + battery + house-thermal-mass joint MPC.**  Battery SOC
+  enters the state vector; the OCP decides, for every cycle, whether
+  to charge the battery, dump PV into the DHW tank, or pre-heat
+  rooms.
+- [ ] **EV charger as a flexible load.**  Charge-by-time constraint
+  + max-import constraint + dynamic tariff; the EV charge plan and
+  the heating plan share the household import budget so the main
+  fuse never trips.
+- [ ] **Demand-response signal compliance.**  React to a published
+  DR signal (OpenADR / Tibber Pulse / EDS DK1) by tightening the
+  energy budget for the affected window; the comfort corridor
+  widens, the cost objective dominates.
+- [ ] **Multi-vector cost objective.**  €(t) for electricity, gas, and
+  district heating combined into a single marginal-cost field; the
+  Phase-6 hybrid-source switch is now a decision the OCP makes
+  every minute.
+- [ ] **Grid-import peak-shaving constraint.**  Hard $P_\text{import}
+  \le P_\text{contract}$ inequality + soft peak-tariff
+  ($\max_t P$) penalty; relevant in countries with kW-band tariffs
+  (NL, DK, partly DE).
+
+---
+
+### 17.13 Sequencing & dependency diagram
+
+```
+                ┌────────────────────────────┐
+                │  Phase 1 — Plant model     │
+                │  (multi-node, UFH, latent) │
+                └─────────────┬──────────────┘
+                              │ richer dynamics
+                              ▼
+                ┌────────────────────────────┐
+                │  Phase 2 — Estimator       │
+                │  (UKF / MHE, adaptive Q,R) │
+                └──────┬───────────┬─────────┘
+                       │           │
+        residuals      │           │ better state
+        & innovations  ▼           ▼
+   ┌─────────────────────┐   ┌────────────────────────┐
+   │ Phase 5 — Forecasts │   │ Phase 3 — OCP upgrades │
+   │ (cloud, occ., wind) │   │ (MILP, RTI, stochastic)│
+   └──────────┬──────────┘   └────────────┬───────────┘
+              │                            │
+              │ assimilation               │ richer u-space
+              ▼                            ▼
+        ┌──────────────────────────────────────────┐
+        │ Phase 4 — System ID (Bayesian, multi-step,│
+        │ active-experiment, regime detection)     │
+        └────────────────────┬─────────────────────┘
+                             │ posterior θ
+                             ▼
+   ┌──────────────────────────────────────────────────┐
+   │ Phase 6 — Heat-source models (variable-speed HP,  │
+   │ boiler cycling, GSHP, buffer tank, solar thermal) │
+   └────────────────────┬─────────────────────────────┘
+                        │ realistic u→Q maps
+                        ▼
+   ┌──────────────────────────────────────────────────┐
+   │ Phase 7 — Solver/numerics (CasADi, acados, sparse│
+   │ Hessians, JIT EKF)                                │
+   └────────────────────┬─────────────────────────────┘
+                        │ sub-second cycles
+                        ▼
+   ┌──────────────────────────────────────────────────┐
+   │ Phase 8 — Verification (HiL, golden traces,       │
+   │ Monte-Carlo, KPIs, formal certification)          │
+   └─────────┬──────────────────────────┬──────────────┘
+             │                          │
+             ▼                          ▼
+   ┌─────────────────────┐   ┌──────────────────────────┐
+   │ Phase 9 — Learning  │   │ Phase 10 — Fault & anomaly│
+   │ (residual NN, RL,   │   │ detection                 │
+   │  distilled policy)  │   │                            │
+   └──────────┬──────────┘   └──────────────┬────────────┘
+              │                              │
+              └──────────────┬───────────────┘
+                             ▼
+                ┌────────────────────────────┐
+                │  Phase 11 — Whole-home     │
+                │  co-optimisation (DHW, PV, │
+                │  battery, EV, DR)          │
+                └────────────────────────────┘
+```
+
+Phases 1–2 are blocking; everything else fans out from a richer plant +
+estimator.  Phases 5 (forecasts) and 3 (OCP) can be developed in
+parallel.  Phase 8 (validation) runs alongside every later phase and is
+the gate for Phases 9–11.
+
+---
+
+### 17.14 Distribution & non-functional (one-liners)
+
+These items are tracked for completeness but are *not* part of the
+technical roadmap above.  They unblock adoption rather than capability.
+
+- HACS publication and Home Assistant Core integration submission once
+  the v2 surface is stable.
+- Translated UI for the major HA locales.
+- `mypy --strict` coverage and `pytest` coverage ≥ 90 % gated in CI.
+- Explainability dashboard card decomposing each control action into
+  the tracking / energy / smoothing / constraint cost contributions.
+- Reversible / audit-logged user actions for every parameter, schedule,
+  and reset.
+
+Ideas, votes, and contributions are very welcome — open an issue or a PR
+on [GitHub](https://github.com/marcuskrogh/HeatingAssistant) to discuss
+any of the above.
 
 ---
 
