@@ -3943,48 +3943,137 @@ downgrade cleanly rejects the new layout.
 
 ---
 
-### 17.3 Phase 2 — State estimation upgrades
+### 17.3 Phase 2 — Outlier rejection (predictive-likelihood gating)
 
-**Why:** The CD-EKF Jacobian linearisation degrades on the larger, stiffer,
-more nonlinear models introduced in Phase 1.  Move to estimators that handle
-the new dynamics, multi-rate sensors, sensor faults, and joint state +
-parameter inference.
+**Why:** The implicit CD-EKF adopted in Phase 1 (N1) is sufficient for
+state estimation on this plant.  The measurement function is linear
+($y = H x$ with $H$ picking $T_a$ out of the per-room state vector); the
+residual nonlinearity in $f$ (Carnot COP, sol-air, long-wave to sky) is
+mild and gets re-linearised at every implicit-Euler substep; and
+parameters are positive-by-construction in the storage representation,
+so MHE's constraint-handling advantage is muted.  The estimator's only
+remaining weakness is robustness to bad measurements — today only
+`None` values are filtered, so a stuck-at thermistor, a ghost reading,
+or a brief sensor fault feeds straight into the measurement update
+and throws the filter for hours.  Phase 2 fixes exactly that and
+nothing more.
 
-**Depends on:** Phase 1.  **Unlocks:** Phases 3, 4, 9, 10.
+**Depends on:** none (uses only the $\hat y^-, S$ pair the existing
+CD-EKF already produces).  Ships in parallel with Phase 1.
+**Unlocks:** Phase 10 (rejection events feed the longer-term fault
+diagnosis).
 
-- [ ] **Iterated EKF (IEKF) for the measurement update.**  Re-linearise
-  $h$ around the posterior mean until convergence; cheap upgrade,
-  measurable bias reduction with nonlinear humidity / radiation
-  measurements.
-- [ ] **Continuous-Discrete Unscented Kalman Filter (CD-UKF).**  Replace
-  the Riccati ODE with deterministic sigma-point propagation; removes
-  the analytic-Jacobian requirement for new model components and is
-  empirically more robust on stiff models (Särkkä 2007).
-- [ ] **Moving-Horizon Estimator (MHE).**  Solve an N-step constrained
-  MAP problem each cycle (same QP backend as the MPC) for state +
-  disturbance + bias.  Native constraint handling (positivity on heat
-  flux, bounded sensor bias) and known statistical-efficiency advantage
-  over EKF on nonlinear systems.
-- [ ] **Adaptive process/measurement noise.**  Innovation-based
-  recursive estimation of $Q$ and $R$ (Mehra 1972, Sage–Husa
-  variants) so the filter automatically loosens when the model is
-  drifting and tightens when it's tracking well.
-- [ ] **Outlier rejection with Mahalanobis gating.**  Replace
-  unconditional measurement acceptance with a $\chi^2$ gate on the
-  innovation; surface rejected measurements as a diagnostic time-series.
-- [ ] **Multi-sensor fusion with per-sensor bias and drift state.**
-  Today multiple temperature sensors per room are averaged; instead
-  augment the state with $b_k$ per sensor and identify it online.
-  Catches the classic "sensor near a draught reads 1.5 °C low" problem.
-- [ ] **Joint state-and-parameter estimation (dual / augmented EKF).**
-  Promote the slowly-drifting parameters (envelope resistances,
-  infiltration coefficient, heater scale) into the state vector with
-  small random-walk process noise so the filter tracks seasonal drift
-  without requiring a periodic offline re-fit.
-- [ ] **Particle filter fallback for non-Gaussian regimes.**  Optional
-  bootstrap PF when the innovation distribution fails the Anderson–
-  Darling normality test, e.g. during defrost cycles or window-open
-  events.
+#### The mechanism
+
+At each measurement-application cycle the CD-EKF already produces the
+predictive distribution
+
+$$\hat y^- = H \hat x^-, \qquad S = H P^- H^T + R$$
+
+so under a Gaussian assumption $p(y \mid \hat x^-) = \mathcal{N}(\hat y^-, S)$.
+For each incoming measurement $y$, compute the squared
+normalised-innovation distance
+
+$$d^2 = (y - \hat y^-)^T S^{-1} (y - \hat y^-)$$
+
+and **hard-reject** the measurement if $d^2 > k^2$ for a configurable
+threshold $k$ (default $k = 5\sigma$, false-reject rate ~5.7 × 10⁻⁷
+under normality).  For our current scalar measurement this reduces to
+the one-line test $|y - \hat y^-| / \sqrt{S} > k$; written in the
+general multivariate form so the same code-path applies when humidity
+or other measurements are added later.
+
+This sits *on top of* the existing `None`-value filter and the existing
+sensor-availability checks; it does not replace them.
+
+#### Behaviour and design calls
+
+- **Hard-reject, not down-weight.**  When the test fails, skip the
+  measurement update entirely for that sensor on that cycle.  Predict
+  still runs; $P^-$ stays uncorrected and grows on the next cycle.
+  Simpler and more honest than inflating $R$.
+- **Auto-thaw via covariance growth.**  Persistent rejection grows
+  $P$, which grows $S$, until a previously-extreme reading falls
+  within $k\sigma$ and the filter reaccepts.  This is the right
+  behaviour for genuine fast transients (a window opens; the filter
+  catches up after a brief lag) and for sensors that recover from
+  being stuck.  A permanently broken sensor is *not* permanently
+  muted by this layer — that diagnosis belongs in Phase 10.
+- **Independent per sensor in multi-sensor rooms.**  Each sensor's
+  measurement gets its own test against the same predictive $S$; a
+  drafty sensor that consistently disagrees with the others is
+  silenced on its own merit while the others keep updating.
+- **Normality assumed.**  We rely on the Gaussian predictive
+  distribution.  No empirical likelihood, no heavy-tailed
+  alternatives.  Sufficient for this plant; revisited only if a
+  specific failure mode demands it.
+- **Out of scope.**  This gate sits at the measurement-update
+  boundary.  It does not validate disturbance inputs (outdoor
+  temperature, irradiance, weather-forecast trajectories) — those
+  have their own validation path in `weather.py` (the U3
+  `WeatherForecastStatusSensor`) — and it does not validate
+  setpoints or comfort-schedule inputs.
+
+#### Definition of done
+
+1. **Implementation** in `controller.py` / `coordinator.py` at the
+   measurement-application boundary; written for the multivariate
+   case from the start.
+2. **README update.**  §4.2 (state estimation) gains a subsection
+   describing the gate, the auto-thaw mechanism, and the explicit
+   scope boundary.
+3. **Regression tests.**  False-reject rate ≤ $10^{-5}$ under
+   synthetic Gaussian noise at $k = 5\sigma$; true-reject rate
+   ≥ 99 % against injected $> 10\sigma$ spikes; thawing within
+   $M$ cycles after sustained rejection; multivariate
+   generalisation (2-D synthetic case); cold-start non-interference
+   (initial inflated $P$ must not trigger spurious rejections);
+   per-sensor independence in a multi-sensor room.
+4. **Configuration UI.**  New options-flow field
+   `outlier_sensitivity` with presets `conservative` (5σ) /
+   `moderate` (4σ) / `aggressive` (3σ), defaulted to
+   `conservative`.  Per-measurement-source rejection counter and
+   last-rejection timestamp exposed as diagnostic-category sensors.
+   Rate-limited INFO log on each rejection following the U3
+   weather-failure logging pattern.
+
+#### Deferred from Phase 2
+
+The items below were considered for Phase 2 and explicitly rejected
+because the implicit CD-EKF plus the outlier gate above is sufficient
+for this plant.  Each remains a known option for future work, to be
+revisited only if a specific failure mode is observed in production:
+
+- **Iterated EKF (IEKF).**  Buys nothing on a linear measurement
+  function $y = H x$; would only matter if a future $h$ becomes
+  nonlinear (e.g. a fused-PMV observation).
+- **Continuous-Discrete UKF (CD-UKF).**  Second-order sigma points
+  add little when the state-transition nonlinearity is mild and
+  gets re-linearised at every implicit-Euler substep.  Kept on the
+  shelf for a future model with sharp curvature in $f$.
+- **Moving-Horizon Estimator (MHE).**  Constraint-handling
+  advantage is muted because parameters are positive-by-
+  construction in the storage representation; revisit only if
+  observed sensor biases or parameter excursions cross hard bounds.
+- **Square-root EKF/UKF form.**  Numerical safeguard against loss
+  of positive-definiteness; the current plain form is stable in
+  practice on the implicit-Euler-integrated dynamics.  Revisit
+  only if PD violations are observed.
+- **Rauch–Tung–Striebel smoother.**  Useful for offline residual
+  analysis; not needed because Phase 4 system ID and Phase 8
+  golden-trace work operate on filtered (not smoothed) states.
+- **Adaptive process / measurement noise.**  Risky without a
+  whiteness monitor that distinguishes "noise drift" from "model
+  drift"; static $Q$, $R$ from configuration is more predictable.
+- **Augmented joint state-and-parameter estimation.**  Online
+  parameter tracking is deferred to Phase 4's offline Bayesian
+  identification, which is more controllable and auditable.
+- **Per-sensor bias and drift state.**  Persistent multi-sensor
+  disagreement is silenced by the per-sensor outlier gate above;
+  explicit bias modelling becomes interesting only if real-world
+  data shows disagreement consistently below the gate threshold.
+- **Particle filter fallback.**  Gaussian assumption with the
+  outlier gate handling heavy-tail rejections is sufficient.
 
 ---
 
@@ -4302,7 +4391,8 @@ and explainable.
 Today the only signal is `prediction_error` per room; we can do much
 more with the residuals the estimator already produces.
 
-**Depends on:** Phase 2 (better residual statistics).
+**Depends on:** Phase 2 (rejection events as a real-time fault signal)
+and Phase 8 (residual statistics from the validation harness).
 
 - [ ] **CUSUM / Page–Hinkley change detector on innovations.**  Per-
   room and per-source detectors that trigger a Repairs issue when
@@ -4366,69 +4456,81 @@ heaters.  This phase widens the OCP to the whole house energy budget.
 ### 17.13 Sequencing & dependency diagram
 
 ```
-                ┌────────────────────────────┐
-                │  Phase 1 — Plant model     │
-                │  (multi-node, UFH, latent) │
-                └─────────────┬──────────────┘
-                              │ richer dynamics
-                              ▼
-                ┌────────────────────────────┐
-                │  Phase 2 — Estimator       │
-                │  (UKF / MHE, adaptive Q,R) │
-                └──────┬───────────┬─────────┘
-                       │           │
-        residuals      │           │ better state
-        & innovations  ▼           ▼
-   ┌─────────────────────┐   ┌────────────────────────┐
-   │ Phase 5 — Forecasts │   │ Phase 3 — OCP upgrades │
-   │ (cloud, occ., wind) │   │ (MILP, RTI, stochastic)│
-   └──────────┬──────────┘   └────────────┬───────────┘
-              │                            │
-              │ assimilation               │ richer u-space
-              ▼                            ▼
-        ┌──────────────────────────────────────────┐
-        │ Phase 4 — System ID (Bayesian, multi-step,│
-        │ active-experiment, regime detection)     │
-        └────────────────────┬─────────────────────┘
-                             │ posterior θ
-                             ▼
-   ┌──────────────────────────────────────────────────┐
-   │ Phase 6 — Heat-source models (variable-speed HP,  │
-   │ boiler cycling, GSHP, buffer tank, solar thermal) │
-   └────────────────────┬─────────────────────────────┘
-                        │ realistic u→Q maps
-                        ▼
-   ┌──────────────────────────────────────────────────┐
-   │ Phase 7 — Solver/numerics (CasADi, acados, sparse│
-   │ Hessians, JIT EKF)                                │
-   └────────────────────┬─────────────────────────────┘
-                        │ sub-second cycles
-                        ▼
-   ┌──────────────────────────────────────────────────┐
-   │ Phase 8 — Verification (HiL, golden traces,       │
-   │ Monte-Carlo, KPIs, formal certification)          │
-   └─────────┬──────────────────────────┬──────────────┘
-             │                          │
-             ▼                          ▼
-   ┌─────────────────────┐   ┌──────────────────────────┐
-   │ Phase 9 — Learning  │   │ Phase 10 — Fault & anomaly│
-   │ (residual NN, RL,   │   │ detection                 │
-   │  distilled policy)  │   │                            │
-   └──────────┬──────────┘   └──────────────┬────────────┘
-              │                              │
-              └──────────────┬───────────────┘
-                             ▼
-                ┌────────────────────────────┐
-                │  Phase 11 — Whole-home     │
-                │  co-optimisation (DHW, PV, │
-                │  battery, EV, DR)          │
-                └────────────────────────────┘
+   Main model-fidelity chain                Independent robustness track
+   ─────────────────────────                ─────────────────────────────
+
+   ┌────────────────────────────┐           ┌──────────────────────────┐
+   │ Phase 1 — Plant model      │           │ Phase 2 — Outlier         │
+   │ (2R2C + slab + UFH +       │           │ rejection (predictive-    │
+   │ sol-air + infiltration +   │           │ likelihood gate on the    │
+   │ implicit Euler — the new   │           │ existing CD-EKF)          │
+   │ default per-room model)    │           └──────────────┬────────────┘
+   └──┬─────────────┬─────────┬─┘                          │ rejection
+      │             │         │                            │ events
+      ▼             ▼         ▼                            │
+   ┌──────────┐ ┌────────┐ ┌──────────┐                    │
+   │ Phase 5  │ │ Phase 3│ │ Phase 4  │                    │
+   │ Forecasts│ │ OCP    │ │ System ID│                    │
+   │ (cloud,  │ │ (MILP, │ │(Bayesian,│                    │
+   │ occ.,    │ │ RTI,   │ │ multi-   │                    │
+   │ wind,    │ │ scen., │ │ step,    │                    │
+   │ ground)  │ │ PMV)   │ │ regime)  │                    │
+   └─────┬────┘ └────┬───┘ └─────┬────┘                    │
+         │           │            │                        │
+         │assimilate │richer u   │posterior θ              │
+         └─────┬─────┴────────────┘                        │
+               ▼                                           │
+    ┌──────────────────────────────────┐                   │
+    │ Phase 6 — Heat-source models     │                   │
+    │ (variable-speed HP, defrost,     │                   │
+    │ boiler cycling, GSHP, buffer     │                   │
+    │ tank, solar thermal, full water- │                   │
+    │ loop emitter)                    │                   │
+    └─────────────────┬────────────────┘                   │
+                      │realistic u→Q                       │
+                      ▼                                    │
+    ┌──────────────────────────────────┐                   │
+    │ Phase 7 — Solver / numerics      │                   │
+    │ (CasADi, acados, sparse Hessians)│                   │
+    └─────────────────┬────────────────┘                   │
+                      │sub-second cycles                   │
+                      ▼                                    │
+    ┌──────────────────────────────────┐                   │
+    │ Phase 8 — V&V (HiL, golden       │                   │
+    │ traces, Monte-Carlo, KPIs,       │                   │
+    │ certification)                   │                   │
+    └─────┬──────────────────────┬─────┘                   │
+          │                      │                         │
+          ▼                      ▼                         ▼
+    ┌─────────────────┐  ┌───────────────────────────────────────┐
+    │ Phase 9 —       │  │ Phase 10 — Fault & anomaly detection  │
+    │ Learning-       │  │ (CUSUM/Page-Hinkley, GLR for COP      │
+    │ augmented       │  │ drop, actuator-stuck, forecast-quality│
+    │ control         │  │ monitor — consumes Phase 2 rejection  │
+    │ (residual NN,   │  │ events + Phase 8 residual stats)      │
+    │ RL distill)     │  └────────────────────┬──────────────────┘
+    └────────┬────────┘                       │
+             │                                │
+             └──────────────┬─────────────────┘
+                            ▼
+              ┌──────────────────────────────┐
+              │ Phase 11 — Whole-home        │
+              │ co-optimisation (DHW, PV,    │
+              │ battery, EV, DR)             │
+              └──────────────────────────────┘
 ```
 
-Phases 1–2 are blocking; everything else fans out from a richer plant +
-estimator.  Phases 5 (forecasts) and 3 (OCP) can be developed in
-parallel.  Phase 8 (validation) runs alongside every later phase and is
-the gate for Phases 9–11.
+- **Phase 1 is the single blocker** for the model-fidelity chain
+  (Phases 3, 4, 5, 6, 7) and for the validation that gates the later
+  phases (Phase 8).  Inside Phase 1 the steps are themselves
+  sequenced (N1 → C1 → A1 → A2+B1 → B2 → finishing pass).
+- **Phase 2 is independent.** It only consumes $\hat y^-$ and $S$ from
+  the existing CD-EKF and can ship before, alongside, or after Phase 1.
+  Its rejection events feed Phase 10's longer-term fault diagnosis.
+- **Phases 3, 4, 5 can be developed in parallel** once Phase 1 lands;
+  they converge into Phase 6.
+- **Phase 8 (validation) runs alongside every later phase** and is the
+  gate for Phases 9–11.
 
 ---
 
