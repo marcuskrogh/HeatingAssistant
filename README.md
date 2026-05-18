@@ -4105,62 +4105,217 @@ the basic mechanism if specific failure modes appear in production:
 
 ---
 
-### 17.4 Phase 3 — Optimal-control problem upgrades
+### 17.4 Phase 3 — Cost-aware corridor MPC (continuous-time, continuous-variable)
 
-**Why:** The current OCP is a smooth continuous-input nonlinear program.
-Real plants are mixed-integer (compressors are on/off, heat pumps have
-minimum on/off times, modulating boilers have flame-on hysteresis) and real
-forecasts are uncertain.  The upgrades below close both gaps.
+**Why:** The current OCP is a setpoint-tracking quadratic with a
+dimensionless energy term: it pulls the room toward a single
+temperature target with no notion of price, and it actively works even
+when the room is comfortably within the user's tolerance band.  Real
+users want a comfort *band*, and a controller that exploits
+time-of-use tariffs by pre-heating cheaply, not just physically.
+Phase 3 reformulates the cost around a soft comfort corridor with an
+economic energy term, while keeping the continuous-variable OCP and
+the existing solver stack intact.
 
-**Depends on:** Phases 1, 2.  **Unlocks:** Phases 7, 9, 11.
+**Depends on:** Phase 1 (the multi-state plant model is the prediction
+substrate).  **Unlocks:** Phase 6 (heat-source-side cost models),
+Phase 11 (whole-home co-optimisation).
 
-- [ ] **Mixed-integer MPC for on/off equipment.**  Add binary decision
-  variables for compressor on/off, three-way valve positions, and stage-
-  switching boilers, with minimum on/off-time constraints
-  ($t_\text{on} \ge t_\text{min}$).  Solve via branch-and-bound (Bonmin)
-  or relaxed-rounding heuristics with a feasibility-projection step.
-- [ ] **Real-Time Iteration (RTI) scheme.**  Solve a single SQP step per
-  cycle, exploiting the previous cycle as the linearisation point
-  (Diehl 2002, acados implementation).  Turns the 5 s solve into a
-  sub-100 ms solve while keeping closed-loop performance within
-  measurable noise.
-- [ ] **Hierarchical MPC: slow upper + fast lower layer.**  Upper layer
-  (Δt = 15 min, horizon 24–48 h) solves the cost/energy/DHW/battery
-  problem with coarse dynamics.  Lower layer (Δt = 60 s, horizon
-  15–30 min) tracks the upper-layer plan with full per-room nonlinear
-  dynamics.  Decouples long-horizon economics from short-horizon
-  comfort.
-- [ ] **Distributed MPC across zones (ADMM / dual decomposition).**
-  Per-zone subproblems coupled by inter-zone heat-flux consensus.
-  Linear in the number of zones; enables sub-second solves for
-  ≥ 15 rooms without giving up the coupling-aware solution.
-- [ ] **Stochastic / scenario-tree MPC.**  Sample $K$ weather + price
-  scenarios at each branching depth; the OCP optimises a non-
-  anticipative control tree.  Reports an explicit "comfort
-  violation probability" instead of soft slack.
-- [ ] **Chance-constrained corridors.**  Tighten the temperature
-  corridor by $k_\alpha \sqrt{\Sigma_k}$ (Pre-Stabilising Tube MPC,
-  Mayne 2005) using the EKF/MHE prediction covariance so $P(T \in
-  \text{comfort}) \ge 1-\alpha$ holds.
-- [ ] **Economic MPC objective.**  Switch the tracking quadratic for
-  a direct cost minimisation $J = \int \pi(t)\,P_\text{elec}(t)\,dt
-  + \lambda \cdot \text{PMV}(t)^2 \,dt$.  Closed-loop savings
-  measured against the legacy tracking objective become the KPI.
-- [ ] **PMV/PPD comfort objective.**  Replace setpoint-tracking with an
-  ASHRAE-55 PMV target band combining $T_a$, $T_{\text{mrt}}$, $w$, air
-  speed, clothing, and metabolic rate.  Requires Phase 1 latent-heat
-  state and a humidity sensor per room.
-- [ ] **Sound-pressure / equipment-wear constraints.**  Compressor
-  frequency upper bound at night; max-starts-per-hour budget; max-Δu
-  per minute on modulating valves.
-- [ ] **Soft constraint relaxation hierarchy (lex-MPC).**  Lexicographic
-  ordering of constraint priorities (safety > comfort > cost) so the
-  controller degrades gracefully when the problem is infeasible.
-- [ ] **Convexified relaxation for warm cold-start.**  When the
-  warm-start is unavailable (first cycle after restart) solve a linear
-  MPC on the Phase 1 model linearised at $T_\text{ref}$ first, then
-  hand off as the warm-start to the full NMPC.  Guarantees a usable
-  control action even on the first cycle.
+#### Locked design decisions
+
+- **Continuous-time, continuous-variable OCP.**  No mixed-integer
+  formulation in Phase 3.  On/off heaters are dispatched at the
+  actuator boundary by the existing `switch.*` / `number.*` / `climate.*`
+  dispatch logic.  A duty-cycle dispatcher that translates
+  continuous $u$ into a temporal on/off pattern within the sample
+  interval (e.g. "$u = 0.33$ ⇒ on for 5 of 15 minutes") is on the
+  deferred list as a follow-up to add only if real-world dispatch
+  quality demands it.
+- **Soft corridor with a weak setpoint pull as the new cost
+  structure.**  The temperature term becomes
+  $J_T = \sum_k \big[\varepsilon (T_k - T^\text{ref}_k)^2
+  + \rho_\text{soft} \max(0, T^\text{lo}_k - T_k)^2
+  + \rho_\text{soft} \max(0, T_k - T^\text{hi}_k)^2 \big]$
+  with $\varepsilon \ll \rho_\text{soft}$.  Inside the corridor the
+  controller is essentially economic-driven with a barely-perceptible
+  preference for the setpoint; near and outside the edges the
+  existing slack penalty dominates and pulls back.  The user-facing
+  configuration grows a `[T_lo, T_hi]` corridor; the existing
+  `setpoint` becomes the soft attractor inside the band.
+- **Economic energy term that defaults to flat unit price.**  The
+  $\|u\|^2_R$ energy term is replaced by
+  $\sum_k \pi_k \cdot P^\text{elec}_k(u_k, d_k) \cdot \Delta t$ where
+  $\pi_k$ is the per-step electricity price.  When no tariff entity
+  is configured, $\pi_k \equiv 1$ (dimensionless), and the term
+  reduces to a unit-priced energy minimisation that gives the same
+  effective behaviour as today's energy weight.  When a tariff entity
+  *is* configured (Nord Pool, Tibber, Octopus, EPEX, flat tariff,
+  any HA sensor in €/kWh), $\pi_k$ becomes the time-varying real
+  price and the controller pre-heats during cheap hours.
+- **Robust corridor tightening with a constant default σ.**  The
+  corridor edges $T^\text{lo}_k, T^\text{hi}_k$ at each horizon step
+  are tightened inward by $k_\alpha \cdot \sigma_\text{const}$ where
+  $\sigma_\text{const}$ is a configured constant standard deviation
+  (default 0.3 K) and $k_\alpha$ is a fixed quantile (default 1.96 for
+  95 % confidence).  Phase 5 later replaces $\sigma_\text{const}$ with
+  the actual forecast-ensemble standard deviation per step, at which
+  point the tightening becomes time-varying without changing the OCP
+  structure.
+- **Efficient-by-default implementation as a non-functional
+  requirement.**  Every Phase 3 item carries an obligation to use
+  warm-starts across cycles, exploit known sparsity in the NLP build,
+  avoid per-cycle Python-level Jacobian recomputation where the
+  structure is constant, and add benchmark coverage to
+  `BENCHMARKS.md`.  Real-Time Iteration (RTI) and acados migration
+  remain in Phase 7 — they are structural changes to the solver
+  stack, best done once across the whole codebase.
+
+#### Definition of done (per item, same as Phase 1 / 2)
+
+1. **Implementation** in `controller.py` / `coordinator.py` /
+   `parameter_estimator.py` as appropriate.
+2. **README updated.**  §4.3 (OCP), §4.5 (control cycle) rewritten;
+   §10 (configuration reference) and §11 (examples) updated for any
+   new user-facing parameter; §14.5 (MPC tuning) updated for the new
+   weights.
+3. **Regression tests.**  Synthetic closed-loop scenario suite plus
+   a price-aware regression against a flat-tariff baseline plus a
+   corridor-violation rate test under Monte Carlo forecast
+   realisations.  Benchmark entries added to `BENCHMARKS.md`.
+4. **Config UI extended.**  New options-flow fields for corridor
+   edges, tariff entity, and tightening parameters; defaults derived
+   from existing configuration so no manual migration is required.
+
+#### Sequenced work-plan
+
+1. [ ] **Step 1 — O2: Soft corridor with weak setpoint pull.**
+   Reformulate the temperature cost from pure quadratic tracking to
+   $\varepsilon$-attracted soft-corridor form.  Migrate existing
+   `setpoint` + `turn_off_deadband` into a corridor
+   $[T^\text{ref} - \text{deadband},\, T^\text{ref} + \text{deadband}]$
+   on first start (no user action required).  Default $\varepsilon$
+   chosen so the setpoint pull is dominant at the corridor's
+   centre but negligible at the edges.  Acceptance: with a flat
+   tariff, mid-corridor and no disturbances, $u^* = 0$ (no heat
+   applied) instead of the current chasing behaviour; corridor edges
+   are respected on a year-long synthetic trace.  Config UI:
+   per-room `comfort_corridor_low` / `comfort_corridor_high` fields
+   (defaulted from setpoint ± deadband); existing `setpoint`
+   retained as the soft attractor.
+2. [ ] **Step 2 — O1: Tariff-aware economic energy term.**  Replace
+   $\|u\|^2_R$ with $\sum_k \pi_k P^\text{elec}_k \Delta t$.  Add a
+   per-room or per-source optional `tariff_entity` configuration that
+   resolves to a €/kWh number (a fixed-value HA `input_number`, a
+   `sensor.*` exposed by Nord Pool / Tibber / Octopus, or unspecified
+   = flat 1).  Sample the tariff at each horizon step via the same
+   interpolation pipeline as the weather forecast.  Acceptance: on a
+   synthetic day with a 4:1 cheap-vs-peak price ratio, the controller
+   shifts ≥ 50 % of heating energy from peak to cheap hours while
+   keeping corridor-violation rate under 5 %.  Config UI: per-config-
+   entry `tariff_entity` field (optional, defaults to none = flat 1).
+   New diagnostic sensors `cost_forecast` (€/h) and
+   `cost_savings_today` (€ vs flat-tariff baseline).
+3. [ ] **Step 3 — O3: Per-source Δu smoothing weights.**  Promote the
+   global $\|\Delta u\|^2_S$ scalar weight to a per-source vector so a
+   heat pump gets a heavier penalty than an electric resistive heater.
+   Default values keyed by heat-source type (`electric`: small,
+   `heat_pump`: medium, `modulating_boiler`: medium).  This is the
+   continuous-regime analogue of "equipment wear cost".  Acceptance:
+   on a heat-pump room with a noisy outdoor-temperature forecast,
+   commanded Δu magnitude drops measurably vs the global-weight
+   baseline.  Config UI: per-source override field; otherwise inherits
+   the type default.
+4. [ ] **Step 4 — U2: Robust corridor tightening (constant default
+   σ).**  Tighten the corridor edges inward by $k_\alpha \cdot
+   \sigma_\text{const}$ at every horizon step.  Defaults: $k_\alpha
+   = 1.96$ (95 %), $\sigma_\text{const} = 0.3$ K.  Implementation
+   leaves a hook for the per-step σ to come from Phase 5 forecast
+   ensembles without restructuring the OCP.  Acceptance: under
+   Monte-Carlo forecast realisations with $\sigma \le 0.3$ K,
+   comfort-corridor violation rate ≤ 5 %.  Config UI:
+   `corridor_confidence` preset (`relaxed` 90 % / `standard` 95 % /
+   `strict` 99 %), defaulted to `standard`; advanced users may set
+   `corridor_sigma` directly.
+5. [ ] **Step 5 — N2: Warm-start refinement.**  Each cycle's NLP is
+   seeded from the previous cycle's solution shifted by one step,
+   with a one-shot terminal extrapolation.  Acceptance: median solver
+   iteration count drops measurably on the bundled benchmark
+   scenarios; per-cycle work re-runs as the `BENCHMARKS.md` regression
+   suite.  No config UI change.
+
+#### Migration
+
+Existing installs are migrated atomically on first start after
+upgrade:
+- `setpoint` becomes the soft-attractor inside the corridor.
+- The corridor is set to
+  $[\,\text{setpoint} - \text{turn\_off\_deadband},\,\text{setpoint} + \text{turn\_off\_deadband}\,]$.
+- `tariff_entity` is None (flat 1 €/kWh), keeping cost-objective
+  behaviour identical to today's dimensionless energy term.
+- `corridor_confidence` defaults to `standard` (95 %); the corridor
+  tightens by $\approx 0.59$ K.
+- Per-source Δu weights inherit type defaults.
+
+The `format_version` field in persisted storage is bumped so a
+downgrade cleanly rejects the new layout.  No YAML re-authoring is
+required; users see a wider, "looser" controller behaviour out of
+the box that, on a flat tariff, matches today's energy-priced
+controller within numerical noise.
+
+#### Deferred from Phase 3 (kept on the roadmap)
+
+The items below were considered for Phase 3 and explicitly rejected
+because they are heavier structural changes, are gated on capability
+from other phases, or are simply premature optimisation given that
+the cycle is 10–15 min:
+
+- **Mixed-integer MPC (MILP / MINLP) for on/off equipment.**  Binary
+  variables + min on/off-time constraints + branch-and-bound (Bonmin).
+  Skipped because the user-impact gap between properly-rounded
+  continuous + good dispatch and full MILP is small for residential
+  systems, and the MILP solver dependency is non-trivial.  **Revisit
+  if** real-world dispatch shows pathological cycling that the
+  duty-cycle dispatcher below cannot fix.
+- **Duty-cycle dispatcher for on/off heaters.**  An actuator-layer
+  overhead that translates the OCP's continuous $u \in [0, 1]$ into
+  a temporal on/off pattern within the sample interval (e.g.
+  $u = 0.33$ on a 15-min step ⇒ on for 5 min, off for 10).  Currently
+  on/off heaters are dispatched by simple threshold; the dispatcher
+  is a clean follow-up if that proves coarse.
+- **Minimum-modulation handling for modulating sources.**
+  $u \in \{0\} \cup [u_\text{min}, 1]$ as an explicit OCP constraint.
+  Non-convex; would require either MILP or a smoothing relaxation.
+  Skipped for now; live with the relaxed continuous solution.
+- **Stochastic scenario-tree MPC.**  $K$ forecast realisations, non-
+  anticipative control tree.  Skipped because U2's robust corridor
+  tightening gives a similar comfort guarantee at a tiny fraction of
+  the cost.  Revisit if Phase 5 produces well-calibrated forecast
+  ensembles and dynamic-tariff variance becomes large enough to
+  warrant scenario decomposition.
+- **Lexicographic constraint hierarchy (lex-MPC).**  Sequence of OCPs
+  with priorities safety > comfort > cost.  The current weighted-sum
+  with hard safety + soft corridor + cost handles infeasibility
+  gracefully in practice; revisit only if observed behaviour shows
+  premature comfort sacrifice in cost-minimisation regimes.
+- **PMV/PPD comfort objective.**  Requires Phase 1's deferred
+  latent-heat state (C2) and per-room humidity sensors.  Lands when
+  those land.
+- **Hierarchical (slow + fast) MPC.**  Two-rate controller.
+  Justified once DHW, battery, and EV co-optimisation enter the
+  scope (Phase 11); the single-rate Phase 3 OCP is sufficient until
+  then.
+- **Distributed MPC across zones (ADMM).**  Per-zone subproblems
+  with consensus on inter-zone heat-flux.  Justified above ~15 rooms
+  or when sub-second cycles are required; revisit when the user base
+  shows real-world houses at that scale.
+- **Real-Time Iteration scheme and acados migration.**  Structural
+  changes to the solver stack.  Deferred to Phase 7 (numerics) so
+  the migration happens once across the codebase rather than being
+  bolted onto a Phase 3 item.
+- **Convexified relaxation for warm cold-start.**  Linear-MPC warm-
+  start handoff to the full NMPC on first cycle after restart.
+  Skipped because cold starts converge in practice; revisit only if
+  observed cold-start failures appear.
 
 ---
 
