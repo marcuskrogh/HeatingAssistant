@@ -3758,57 +3758,188 @@ The remainder of §17 lifts each of these rows in turn.
 
 ---
 
-### 17.2 Phase 1 — Modelling fidelity (deepening the plant)
+### 17.2 Phase 1 — Modelling fidelity (the new default plant model)
 
-**Why:** The 1R1C lumped model is the dominant residual-error source.  Open-
-loop RMSE > 0.5 °C usually tracks back to unmodelled envelope dynamics, slab
-thermal lag, latent-heat exchange, or wind-driven infiltration.  Fixing the
-model is the single highest-leverage upgrade — every later phase benefits.
+**Why:** The 1R1C lumped model is the dominant residual-error source.
+Open-loop RMSE > 0.5 °C usually tracks back to unmodelled envelope
+dynamics, slab thermal lag, wind-driven infiltration, or unaccounted-for
+nocturnal long-wave loss.  Fixing the plant is the single highest-leverage
+upgrade — every later phase consumes residuals that Phase 1 reduces.
 
 **Depends on:** baseline.  **Unlocks:** Phases 2, 4, 5, 7.
 
-- [ ] **1R1C → 2R2C envelope per room.**  Split each room into an *air* node
-  $T_a$ and an *envelope/mass* node $T_w$ coupled by $R_{aw}$, with the
-  envelope coupled outward via $R_{we}$.  Captures the ~30–90 min lag
-  between heater input and air-temperature response that the current model
-  underestimates.  Acceptance: open-loop 30-min RMSE drops ≥ 30 % on the
-  bundled golden traces.
-- [ ] **3R2C with explicit slab node for ground floors.**  Adds a slab node
-  $T_s$ with large $C_s$ and resistance $R_{sg}$ to a ground-temperature
-  driver $T_g(t)$.  Required for any house with substantial floor mass
-  (UFH, polished concrete, suspended timber with insulated void all
-  benefit).
-- [ ] **Underfloor heating (UFH) emitter sub-model.**  Heater power flows
-  into the slab node, not the air node; air receives heat via a fitted
-  $h_{sa}$ slab→air conductance.  Predicts the characteristic 4–8 h delay
-  and damps the "too late, too much" overshoot pattern.
-- [ ] **Radiator / fan-coil emitter model.**  Per-emitter lumped water-loop
-  capacitance $C_w$ and metal capacitance $C_m$ with flow-temperature
-  dynamics; valve position becomes a continuous input rather than a
-  proxy for heat output.  Lets the controller exploit the radiator's
-  thermal inertia directly.
-- [ ] **Air-infiltration and ventilation as identified disturbances.**
-  Replace the bundled $R_{\text{ext}}$ with separable conductive
-  ($1/R_{\text{cond}}$) and ventilative ($\rho c_p \dot V$) terms; let
-  $\dot V$ scale with wind speed (Sherman–Grimsrud) and trickle-vent
-  position.  Acceptance: bias on windy days $< 0.1$ °C.
-- [ ] **Latent-heat / enthalpy dynamics.**  Add per-room humidity ratio
-  $w_i$ as a state, with sources (occupants, cooking, drying) and sinks
-  (ventilation, AC dehumidification).  Required for cooling-mode
-  optimisation, condensation-risk constraints, and PMV/PPD comfort.
-- [ ] **Long-wave radiation to sky.**  Add a sky-temperature term
-  $T_{\text{sky}} = T_a - \varepsilon \cdot \Delta T_{\text{sky}}$ for
-  windows and roof surfaces.  Improves nocturnal cooling prediction on
-  clear nights.
-- [ ] **Solar absorptance on opaque surfaces.**  Today only windows receive
-  solar gain; add a configurable solar absorptance × area × tilt term per
-  external wall/roof so dark south-facing facades behave correctly.
-- [ ] **Stratified-air option for tall rooms.**  Optional two-air-node
-  model (low/high) coupled by buoyancy-driven mixing for stairwells and
-  open-plan voids.
-- [ ] **Thermal-bridge correction.**  Per-room linear-thermal-bridge term
-  $\psi L$ identified jointly with envelope resistances; surfaces
-  worst-bridge rooms in diagnostics.
+#### Locked design decisions
+
+These are the calls we've made for the v1 of Phase 1 and they bound the
+scope of every item below:
+
+- **2R2C-with-slab becomes the new default per-room model**, not an opt-in
+  variant.  Existing installs are migrated by a one-shot re-identification
+  on first start after the upgrade; failure (insufficient excitation) falls
+  back to the 1R1C parameters until enough history accumulates.
+- **All inter-room connections are wall-to-wall (mass-to-mass).**
+  Cross-couplings route through the envelope node $T_w$, not the air node.
+  The existing `connections:` schema is unchanged.
+- **Open-plan spaces are declared as a single room** in YAML / UI — a
+  single well-mixed air node is the correct model for an open archway
+  anyway, and this keeps the configuration surface narrow.  An explicit
+  "open" connection type stays on the deferred list (see below) and will
+  be added only if real-world data motivates it.
+- **The implicit-Euler integrator from `mbc` is adopted as part of
+  Phase 1**, not deferred to Phase 7 numerics.  2R2C + slab has a
+  stiffness ratio of ~$10^3$–$10^4$; an L-stable solver is a hard
+  prerequisite, not a polish item.
+
+#### Definition of done (applies to every item below)
+
+Each Phase 1 item is "done" only when **all four** of the following are
+landed in the same release:
+
+1. **Implementation** in `thermal_model.py` / `heat_sources.py` /
+   `controller.py` / `parameter_estimator.py` as appropriate.
+2. **README updated.**  §3.1 (lumped model), §3.2 (state-space form),
+   §3.3 (integration), §3.4 (solar) and §3.5 (heat sources) are rewritten
+   to match the new physics.  Configuration reference (§10), examples
+   (§11), and the parameter-estimation guide (§14) are updated wherever
+   user-facing parameters appear.
+3. **Regression tests.**  At minimum: a synthetic ground-truth test for
+   the new dynamics, a closed-loop replay test against the previous
+   model's behaviour on the bundled scenarios, and a parameter-
+   identification test for any new parameter.  Existing tests must
+   continue to pass; the 14 known `mbc`-dependent failures stay the
+   only exceptions.
+4. **Configuration UI extended.**  Where a Phase 1 item introduces a
+   new user-facing parameter, `config_flow.py` / `_options_flow.py` /
+   `strings.json` / `translations/en.json` are updated so the parameter
+   is reachable through the wizard *and* the options flow.  Defaults
+   come from typology presets (building age, floor type, facade colour);
+   advanced users can override.
+
+#### Sequenced work-plan
+
+Each step assumes the previous steps are landed.
+
+- [ ] **Step 1 — N1: Implicit-Euler integrator (numerics first).**  Adopt
+  `mbc`'s implicit-Euler stepper for the EKF state propagation, the
+  Riccati covariance update, and the OCP dynamics constraint.  Validate
+  on the *current* 1R1C model before any structural change so the
+  numerics swap is decoupled from the modelling swap.  Acceptance:
+  bit-equivalent closed-loop behaviour on the synthetic baseline
+  scenarios, plus a new stress test with a deliberately stiff
+  configuration (stiffness ratio ≥ $10^3$) that explicit Euler fails
+  and implicit Euler passes.  README: §3.3 rewrite.  Tests: new
+  explicit-vs-implicit equivalence suite under `tests/test_integrator.py`.
+  Config UI: no change.
+- [ ] **Step 2 — C1: Infiltration vs conduction split.**  Replace the
+  bundled $1/R_{i,\text{ext}}$ with a fixed conductive $UA_\text{cond}$
+  and a wind-driven Sherman–Grimsrud infiltration term
+  $\rho c_p \dot V_\text{inf}(v_w, \Delta T)$.  Identification jointly
+  fits $UA_\text{cond}$ and a small set of building-wide leakage
+  coefficients.  Acceptance: residual correlation with forecast wind
+  speed drops to within $\pm 0.05$ on the bundled traces.  README:
+  §3.1 update, §10/§11 new envelope-tightness field.  Tests:
+  windy-day synthetic regression + leakage-coefficient identification
+  test.  Config UI: new "envelope tightness" preset selector
+  (`leaky` / `typical` / `tight` / `passive_house`) with
+  auto-mapping to Sherman–Grimsrud coefficients; advanced users may
+  override the raw values.
+- [ ] **Step 3 — A1: 1R1C → 2R2C envelope.**  Per-room split into
+  air node $T_a$ (small $C_a$, fast) and envelope node $T_w$ (large
+  $C_w$, slow) coupled by $R_{aw}$, with the envelope conducting to
+  outdoor via $R_{we}$.  All inter-room couplings route through $T_w$.
+  Default-on for every install; auto-fallback to 1R1C per room if the
+  $C_w$ posterior fails to tighten beyond a configurable threshold
+  after $N$ days of observation.  Acceptance: open-loop 30-min RMSE
+  drops ≥ 30 % on the bundled golden traces; the (C, R) log-likelihood
+  slice flattens from banana to ellipse on richly-excited synthetic
+  data.  README: §3.1, §3.2 rewrite; §14 thermal-mass guide updated to
+  document the new air/envelope split.  Tests: step-response
+  regression; observability check on the 2×2 system; loglik-shape test;
+  EKF $T_w$ back-estimation test.  Config UI: the existing
+  thermal-mass preset gains an internal split-ratio defaulted by
+  building age; advanced users can override.  The dashboard hides
+  $T_w$ from the default sensor list and exposes it only on the
+  diagnostics view.
+- [ ] **Step 4 — A2 + B1: Slab node and UFH routing.**  Add a third
+  state $T_s$ per room with `floor_type ∈ {slab_on_grade, concrete,
+  ufh}`, coupled to a built-in ground-temperature driver $T_g(t)$
+  (sinusoidal annual + diffusion lag, no external data required).
+  UFH heat sources route their power into $T_s$ rather than $T_a$,
+  capturing the characteristic 4–8 h lag.  Acceptance: a synthetic
+  UFH step test reproduces the expected slab→air delay within 15 %.
+  README: §3.1 (slab equations), §3.5 (UFH routing), §10/§11
+  (new `floor_type` field).  Tests: slab-dynamics regression + UFH
+  lag regression + ground-temperature driver test.  Config UI: new
+  per-room `floor_type` selector defaulted by building age, with
+  free-form override.
+- [ ] **Step 5 — B2 (pragmatic): Per-source first-order emitter
+  filter.**  Each heat source's commanded fraction is passed through
+  a first-order filter with an identified time constant
+  $\tau_\text{em}$ before reaching the air (or slab, for UFH) node.
+  Captures the dominant TRV / valve / metal-mass lag without
+  requiring supply-temperature telemetry.  Acceptance: closed-loop
+  overshoot on a radiator-equipped room drops by ≥ 50 % on the
+  bundled traces.  README: §3.5 (emitter filter), §10/§11 (per-source
+  time constant).  Tests: filter-state-identification test +
+  closed-loop overshoot regression.  Config UI: per-source
+  `emitter_time_constant` field with type-based default (electric =
+  0 s; radiator = 600 s; fan-coil = 60 s).  The full water-loop
+  emitter with $T_\text{supply}$ telemetry is deferred to Phase 6.
+- [ ] **Step 6 — Finishing pass: C3, C4, C5.**  Three small,
+  independent residual terms shipped together:
+    - **C3 long-wave radiation to sky.**  Add a radiative
+      conductance in parallel with conduction on outer surfaces,
+      using effective sky temperature
+      $T_\text{sky} = T_e - \Delta T_\text{sky}$ with a constant
+      fallback $\Delta T_\text{sky} = 6$ K.  Phase 5 promotes this
+      to a cloud-cover-driven term later.
+    - **C4 sol-air temperature on opaque surfaces.**  External
+      walls and roof see
+      $T_\text{sol-air} = T_e + \alpha \cdot G_\text{inc} / h_e$
+      using the existing per-surface tilt/azimuth pipeline.  Per-
+      surface absorptance $\alpha$ defaulted by colour preset.
+    - **C5 thermal-bridge correction.**  Per-room $\Psi L$ [W/K]
+      added to external $UA$, identified from data with default 0
+      and a strong prior centred on 0.
+  Acceptance: clear-night nocturnal-cooling bias drops below
+  $0.15$ °C; south-facing-facade midday bias drops below $0.15$ °C;
+  no regression on rooms where C5's posterior posterior stays at 0.
+  README: §3.1 (sky and sol-air terms), §3.4 (solar pipeline update),
+  §10 (facade-colour preset).  Tests: residual-pattern regressions on
+  three targeted synthetic traces.  Config UI: per-room
+  `facade_colour` preset (`light` / `medium` / `dark` / `custom_alpha`);
+  thermal-bridge value entirely auto-identified, no user input.
+
+#### Migration
+
+The very first start after upgrading triggers a one-shot
+re-identification on the new (2R2C + slab + emitter) model using the
+persisted history buffer.  If the re-identification succeeds (all
+parameter posteriors tighten), the live controller switches to the new
+model atomically.  If it fails (insufficient excitation, ill-
+conditioned likelihood), each affected room keeps its 1R1C parameters
+and re-identifies opportunistically as more excitation accumulates.
+The `format_version` field in persisted storage is bumped so a
+downgrade cleanly rejects the new layout.
+
+#### Deferred to later phases (kept on the roadmap)
+
+- **A3 — Stratified-air node for tall rooms.**  Two-air-node model
+  with buoyancy-driven mixing.  Gated by a `room_type: tall` flag.
+  → **Phase 1.5** once the v1 Phase 1 results are in production and
+  the demand is visible.
+- **B2 (full) — Two-state water-loop / metal emitter.**  Honest
+  $C_w^{\text{rad}}$ + $C_m$ dynamics with $T_\text{supply}(t)$ from
+  the heat-source side.  → **Phase 6**, alongside heat-pump telemetry
+  adapters that surface the supply-temperature feed.
+- **C2 — Latent-heat / enthalpy state.**  Humidity ratio $w_i$ per
+  room, sources from occupancy/cooking, sinks from ventilation/AC.
+  → **Phase 3** (required by the PMV/PPD comfort objective) and
+  **Phase 6** (cooling-mode realism with sensible/latent split).
+- **"Open" connection type.**  Doorway/archway-as-air-coupling
+  between rooms, as an alternative to merging open-plan rooms.
+  → **future phase**, only if real-world feedback shows that the
+  "declare open-plan as one room" workaround is unworkable.
 
 ---
 
@@ -4018,6 +4149,14 @@ condensing efficiency cliff).
   T_\text{flow}) \to (P_\text{elec}, Q_\text{th})$ map.  Identified
   from telemetry (MELCloud, Onecta, NIBE Uplink) or from
   manufacturer NEN-EN 14825 curves where telemetry is absent.
+- [ ] **Full water-loop / metal emitter model (Phase 1 B2 follow-up).**
+  Replace the pragmatic first-order emitter filter shipped in Phase 1
+  with an honest two-state model: water-loop capacitance $C_w^{\text{rad}}$,
+  metal capacitance $C_m$, and a flow-temperature input $T_\text{supply}(t)$
+  fed from the heat-source side (now available via the inverter
+  telemetry bullet above).  Identification jointly fits the emitter UA
+  and $C_w^{\text{rad}}, C_m$.  Falls back to the Phase 1 filter when
+  supply-temperature telemetry is absent.
 - [ ] **Defrost cycle as an explicit input-domain event.**  Detect
   defrost from telemetry or from the residual signature; model it as
   a known transient $-Q_\text{def}$ that the controller can either
