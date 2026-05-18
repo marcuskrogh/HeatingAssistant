@@ -25,7 +25,10 @@ import numpy as np
 
 from .const import (
     AIR_RHO_CP,
+    DEFAULT_C_AIR_FRACTION,
     DEFAULT_INFILTRATION_FRACTION,
+    DEFAULT_R_AW_FRACTION,
+    MAX_INFILTRATION_FRACTION,
     SHERMAN_GRIMSRUD_DT_TYPICAL,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_V_TYPICAL,
@@ -77,20 +80,49 @@ class Window:
 
 @dataclass
 class Room:
-    """Lumped-parameter thermal model of a single room."""
+    """Lumped-parameter thermal model of a single room.
+
+    Phase 1 A1 promotes each room from a single ``T`` node to a 2R2C
+    network with:
+
+    - a fast **air** node ``T_a`` (small ``C_a`` ≈ ``c_air_fraction × thermal_mass``),
+    - a slow **envelope** node ``T_w`` (large ``C_w`` ≈ ``(1 − c_air_fraction) × thermal_mass``),
+    - an internal film resistance ``R_aw`` coupling them, and
+    - a wall-to-outdoor resistance ``R_we`` carrying the room's
+      conductive heat loss to the outdoor.
+
+    The bundled ``thermal_mass`` and ``r_external`` remain the user-
+    facing typology inputs.  The split fractions
+    ``c_air_fraction`` and ``r_aw_fraction`` are optional (defaulted by
+    a sensible typology-neutral value) and can be overridden per room.
+
+    The split derivation:
+
+    - ``c_air  = c_air_fraction × thermal_mass``
+    - ``c_wall = (1 − c_air_fraction) × thermal_mass``
+    - ``R_cond_total = r_external / (1 − infiltration_fraction)``
+    - ``r_aw  = r_aw_fraction × R_cond_total``
+    - ``r_we  = (1 − r_aw_fraction) × R_cond_total``
+
+    The ``R_cond_total`` factor reflects that only the *conductive*
+    share of the room's envelope path goes through the wall (the
+    infiltration share bypasses the wall and lands on the air node
+    directly, as configured by Phase 1 C1).
+    """
 
     name: str
-    thermal_mass: float                         # J/K
+    thermal_mass: float                         # J/K — bundled C_air + C_wall
     r_external: float                           # K/W (at the typical reference
                                                 # conditions:
                                                 # v=SHERMAN_GRIMSRUD_V_TYPICAL m/s,
                                                 # |ΔT|=SHERMAN_GRIMSRUD_DT_TYPICAL K).
                                                 # When no wind information is
-                                                # available the runtime UA equals
-                                                # exactly 1 / r_external.
+                                                # available the runtime total
+                                                # UA equals exactly 1 / r_external.
     connections: List[RoomConnection] = field(default_factory=list)
     windows: List[Window] = field(default_factory=list)
-    temperature: float = 20.0                   # °C, current state
+    air_temperature: float = 20.0               # °C, T_a (fast air node)
+    wall_temperature: float = 20.0              # °C, T_w (slow envelope node)
     setpoint: float = 21.0                      # °C, desired temperature
     internal_gain: float = 0.0                  # W, constant background heat
                                                 # gain (occupants, electronics,
@@ -99,10 +131,36 @@ class Room:
     infiltration_fraction: float = DEFAULT_INFILTRATION_FRACTION
     # 0 ≤ infiltration_fraction ≤ 1.  Fraction of 1/r_external attributed
     # to wind-driven Sherman–Grimsrud infiltration at typical conditions.
-    # When equal to 0 the room has no wind sensitivity; when equal to 1
-    # the entire envelope loss is wind-driven (unusual but valid for a
-    # leaky single-room outbuilding).  Defaulted by the building's
-    # envelope-tightness preset; see const.ENVELOPE_TIGHTNESS_*.
+    # Clamped at ``MAX_INFILTRATION_FRACTION`` to keep the conductive
+    # path well-conditioned.
+
+    c_air_fraction: float = DEFAULT_C_AIR_FRACTION
+    # 0 ≤ c_air_fraction ≤ 1.  Share of ``thermal_mass`` attributed to
+    # the fast air node.  Smaller values produce a more dramatic
+    # fast/slow time-scale separation (heavier wall mass).
+
+    r_aw_fraction: float = DEFAULT_R_AW_FRACTION
+    # 0 ≤ r_aw_fraction ≤ 1.  Share of the conductive path attributed
+    # to the internal air↔wall film resistance R_aw.  Typically small
+    # (~5 %) since the internal film coefficient is large relative to
+    # wall conduction.
+
+    @property
+    def temperature(self) -> float:
+        """Backward-compat alias for ``air_temperature``.
+
+        Callers that ask for "the room temperature" almost always mean
+        the air temperature (what a thermistor would read), so this
+        property preserves the pre-A1 single-state API at the read
+        site.  Writers that set ``room.temperature`` only update the
+        air node — wall temperature stays consistent with the air on
+        cold-start initialisation.
+        """
+        return self.air_temperature
+
+    @temperature.setter
+    def temperature(self, value: float) -> None:
+        self.air_temperature = float(value)
 
 
 class HouseModel:
