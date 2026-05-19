@@ -25,7 +25,10 @@ import numpy as np
 
 from .const import (
     AIR_RHO_CP,
+    DEFAULT_C_AIR_FRACTION,
     DEFAULT_INFILTRATION_FRACTION,
+    DEFAULT_R_AW_FRACTION,
+    MAX_INFILTRATION_FRACTION,
     SHERMAN_GRIMSRUD_DT_TYPICAL,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_V_TYPICAL,
@@ -75,34 +78,111 @@ class Window:
     tilt: float = 90.0    # degrees from horizontal (90 = vertical wall)
 
 
-@dataclass
 class Room:
-    """Lumped-parameter thermal model of a single room."""
+    """Lumped-parameter thermal model of a single room.
 
-    name: str
-    thermal_mass: float                         # J/K
-    r_external: float                           # K/W (at the typical reference
-                                                # conditions:
-                                                # v=SHERMAN_GRIMSRUD_V_TYPICAL m/s,
-                                                # |ΔT|=SHERMAN_GRIMSRUD_DT_TYPICAL K).
-                                                # When no wind information is
-                                                # available the runtime UA equals
-                                                # exactly 1 / r_external.
-    connections: List[RoomConnection] = field(default_factory=list)
-    windows: List[Window] = field(default_factory=list)
-    temperature: float = 20.0                   # °C, current state
-    setpoint: float = 21.0                      # °C, desired temperature
-    internal_gain: float = 0.0                  # W, constant background heat
-                                                # gain (occupants, electronics,
-                                                # appliances).  Identified
-                                                # jointly with C and R_ext.
-    infiltration_fraction: float = DEFAULT_INFILTRATION_FRACTION
-    # 0 ≤ infiltration_fraction ≤ 1.  Fraction of 1/r_external attributed
-    # to wind-driven Sherman–Grimsrud infiltration at typical conditions.
-    # When equal to 0 the room has no wind sensitivity; when equal to 1
-    # the entire envelope loss is wind-driven (unusual but valid for a
-    # leaky single-room outbuilding).  Defaulted by the building's
-    # envelope-tightness preset; see const.ENVELOPE_TIGHTNESS_*.
+    Phase 1 A1 promotes each room from a single ``T`` node to a 2R2C
+    network with:
+
+    - a fast **air** node ``T_a`` (small ``C_a`` ≈ ``c_air_fraction × thermal_mass``),
+    - a slow **envelope** node ``T_w`` (large ``C_w`` ≈ ``(1 − c_air_fraction) × thermal_mass``),
+    - an internal film resistance ``R_aw`` coupling them, and
+    - a wall-to-outdoor resistance ``R_we`` carrying the room's
+      conductive heat loss to the outdoor.
+
+    The bundled ``thermal_mass`` and ``r_external`` remain the user-
+    facing typology inputs.  The split fractions
+    ``c_air_fraction`` and ``r_aw_fraction`` are optional (defaulted by
+    a sensible typology-neutral value) and can be overridden per room.
+
+    The split derivation (performed inside ``HouseModel``):
+
+    - ``c_air  = c_air_fraction × thermal_mass``
+    - ``c_wall = (1 − c_air_fraction) × thermal_mass``
+    - ``R_cond_total = r_external / (1 − infiltration_fraction)``
+    - ``r_aw  = r_aw_fraction × R_cond_total``
+    - ``r_we  = (1 − r_aw_fraction) × R_cond_total``
+
+    The ``R_cond_total`` factor reflects that only the *conductive*
+    share of the room's envelope path goes through the wall (the
+    infiltration share bypasses the wall and lands on the air node
+    directly, as configured by Phase 1 C1).
+
+    The constructor accepts ``temperature=`` as a legacy alias that
+    initialises *both* ``air_temperature`` and ``wall_temperature`` to
+    the same value (the natural cold-start convention) — this keeps the
+    pre-A1 construction call sites working unchanged.  The ``.temperature``
+    attribute is a live ``@property`` that reads/writes the air node,
+    matching what a room thermistor would measure.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        thermal_mass: float,
+        r_external: float,
+        connections: Optional[List["RoomConnection"]] = None,
+        windows: Optional[List["Window"]] = None,
+        air_temperature: Optional[float] = None,
+        wall_temperature: Optional[float] = None,
+        setpoint: float = 21.0,
+        internal_gain: float = 0.0,
+        infiltration_fraction: float = DEFAULT_INFILTRATION_FRACTION,
+        c_air_fraction: float = DEFAULT_C_AIR_FRACTION,
+        r_aw_fraction: float = DEFAULT_R_AW_FRACTION,
+        temperature: Optional[float] = None,
+    ) -> None:
+        self.name = name
+        self.thermal_mass = float(thermal_mass)
+        self.r_external = float(r_external)
+        self.connections = list(connections) if connections is not None else []
+        self.windows = list(windows) if windows is not None else []
+        self.setpoint = float(setpoint)
+        self.internal_gain = float(internal_gain)
+        self.infiltration_fraction = float(infiltration_fraction)
+        self.c_air_fraction = float(c_air_fraction)
+        self.r_aw_fraction = float(r_aw_fraction)
+
+        # Cold-start convention: when ``temperature`` is explicitly
+        # provided (legacy single-state API) it initialises BOTH nodes
+        # to that value.  Otherwise air / wall fall back to their
+        # explicit kwargs or the 20 °C default.
+        if temperature is not None:
+            self.air_temperature = float(temperature)
+            self.wall_temperature = float(temperature)
+        else:
+            self.air_temperature = float(20.0 if air_temperature is None else air_temperature)
+            self.wall_temperature = float(20.0 if wall_temperature is None else wall_temperature)
+
+    # ------------------------------------------------------------------
+    # Live-tracking accessor for the air-node temperature.  Reads and
+    # writes go through the air state so the legacy
+    # ``room.temperature`` callers stay correct under 2R2C.
+    # ------------------------------------------------------------------
+
+    @property
+    def temperature(self) -> float:
+        """Air-node temperature (what a room thermistor measures).
+
+        Live alias for ``air_temperature`` — reads return the current
+        air state; writes update only the air state.  The wall state
+        ``wall_temperature`` is separate and is reconstructed by the
+        EKF.
+        """
+        return self.air_temperature
+
+    @temperature.setter
+    def temperature(self, value: float) -> None:
+        self.air_temperature = float(value)
+
+    def __repr__(self) -> str:
+        return (
+            f"Room(name={self.name!r}, thermal_mass={self.thermal_mass}, "
+            f"r_external={self.r_external}, "
+            f"air_temperature={self.air_temperature}, "
+            f"wall_temperature={self.wall_temperature}, "
+            f"setpoint={self.setpoint})"
+        )
 
 
 class HouseModel:
@@ -125,6 +205,28 @@ class HouseModel:
         self._room_list: List[str] = [r.name for r in rooms]
         self._n = len(rooms)
 
+        # Derived per-room 2R2C parameters.  ``c_air_fraction`` and
+        # ``r_aw_fraction`` come from the Room dataclass (defaulted by
+        # typology); ``infiltration_fraction`` is clamped to keep the
+        # conductive path well-conditioned.
+        self._c_air = np.zeros(self._n)
+        self._c_wall = np.zeros(self._n)
+        self._r_aw = np.zeros(self._n)
+        self._r_we = np.zeros(self._n)
+        for i, name in enumerate(self._room_list):
+            room = self._rooms[name]
+            f_inf = float(np.clip(
+                room.infiltration_fraction, 0.0, MAX_INFILTRATION_FRACTION,
+            ))
+            cond_frac = max(1.0 - f_inf, 1e-3)
+            c_air_frac = float(np.clip(room.c_air_fraction, 1e-3, 1.0 - 1e-3))
+            r_aw_frac = float(np.clip(room.r_aw_fraction, 1e-3, 1.0 - 1e-3))
+            self._c_air[i] = c_air_frac * room.thermal_mass
+            self._c_wall[i] = (1.0 - c_air_frac) * room.thermal_mass
+            r_cond_total = room.r_external / cond_frac
+            self._r_aw[i] = r_aw_frac * r_cond_total
+            self._r_we[i] = (1.0 - r_aw_frac) * r_cond_total
+
         # Build state-space matrices once.  At the typical reference
         # conditions the assembled (A, B_ext) reproduces the bundled
         # 1/r_external behaviour exactly; the wind-driven overlay below is
@@ -136,6 +238,9 @@ class HouseModel:
         # This makes the wind-driven UA reduce to f_i / r_external_i at
         # typical conditions, which is the share of 1/r_external the
         # ``infiltration_fraction`` setting attributes to infiltration.
+        # Infiltration is a parallel path that lands on the *air* node
+        # (Phase 1 C1 + A1): cold infiltrating air mixes directly with
+        # the room air, not the envelope mass.
         self._leakage_area = np.array(
             [
                 max(0.0, room.infiltration_fraction)
@@ -159,13 +264,54 @@ class HouseModel:
         return self._room_list
 
     @property
+    def n(self) -> int:
+        """Number of rooms (state-vector size is ``2 * n``)."""
+        return self._n
+
+    @property
     def temperatures(self) -> Dict[str, float]:
-        return {name: self._rooms[name].temperature for name in self._room_list}
+        """Per-room *air* temperatures (the user-visible value).
+
+        Backward-compat accessor: callers that previously read the
+        single ``temperature`` state now see the air-node value, which
+        is what a thermistor would measure.  See ``wall_temperatures``
+        for the slow envelope node.
+        """
+        return {name: self._rooms[name].air_temperature for name in self._room_list}
+
+    @property
+    def wall_temperatures(self) -> Dict[str, float]:
+        """Per-room *wall* (envelope-node) temperatures.
+
+        The wall node is unobserved by direct measurement and is
+        reconstructed by the EKF from the dynamics.  Exposed here so
+        diagnostics and the dashboard can surface it as a separate
+        per-room sensor.
+        """
+        return {name: self._rooms[name].wall_temperature for name in self._room_list}
 
     def set_temperatures(self, temps: Dict[str, float]) -> None:
+        """Update the air-node temperatures from measurements.
+
+        Wall-node temperatures are not touched — the EKF reconstructs
+        them.  On a cold start when no prior wall estimate exists, the
+        caller should also call ``set_wall_temperatures`` to initialise
+        the wall to the same value as the air.
+        """
         for name, temp in temps.items():
             if name in self._rooms:
-                self._rooms[name].temperature = temp
+                self._rooms[name].air_temperature = float(temp)
+
+    def set_wall_temperatures(self, temps: Dict[str, float]) -> None:
+        """Update the wall-node temperatures explicitly.
+
+        Used by the EKF after a predict-update cycle to record the
+        latest wall-temperature estimate, and during cold-start
+        initialisation to set ``T_w = T_a`` per room.
+        """
+        for name, temp in temps.items():
+            if name in self._rooms:
+                self._rooms[name].wall_temperature = float(temp)
 
     # ------------------------------------------------------------------
     # Wind-driven infiltration overlay (Sherman–Grimsrud, Phase 1 C1)
@@ -216,36 +362,73 @@ class HouseModel:
 
     def _build_matrices(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Build the continuous-time state matrices for the lumped RC model.
+        Build the continuous-time state matrices for the 2R2C network.
 
-        State equation:
-            C * dT/dt = A * T + B_ext * T_outdoor + Q   (Q = heater + solar)
+        State ordering: ``x = [T_a_0, …, T_a_{n−1}, T_w_0, …, T_w_{n−1}]``
+        of length ``2n``.
+
+        Equations of motion (without the wind-driven infiltration
+        overlay, which is added at step time as a delta on the air
+        block — see ``infiltration_delta_ua``):
+
+            C_a_i Ṫ_a_i = Q_h_i + Q_s_i + Q_int_i + (T_w_i − T_a_i)/R_aw_i
+            C_w_i Ṫ_w_i = (T_a_i − T_w_i)/R_aw_i + (T_out − T_w_i)/R_we_i
+                                                 + Σ_j (T_w_j − T_w_i)/R_ij
 
         Returns
         -------
-        C : (n,) diagonal capacitance vector
-        A : (n, n) conductance matrix  (off-diagonal: R_ij, diagonal: -sum_j R_ij - R_i_ext)
-        B_ext : (n,) vector of outdoor conductances  (1/R_i_ext for each room)
+        C : (2n,) diagonal capacitance vector ``[C_a, C_w]``.
+        A : (2n, 2n) drift matrix with block structure::
+
+                A = [ -1/R_aw      +1/R_aw                  ]   ← air block
+                    [ +1/R_aw   -(1/R_aw + 1/R_we + ΣR_ij)  ]   ← wall block
+
+            Inter-room couplings appear in the wall–wall block:
+            ``A[n+i, n+j] += 1/R_ij``.
+
+        B_ext : (2n,) outdoor input vector with zero on the air block
+            (conductive coupling to outdoor goes wall → outdoor) and
+            ``1/R_we_i`` on the wall block.
         """
         n = self._n
-        C = np.zeros(n)
-        A = np.zeros((n, n))
-        B_ext = np.zeros(n)
+        C = np.zeros(2 * n)
+        A = np.zeros((2 * n, 2 * n))
+        B_ext = np.zeros(2 * n)
 
         idx = {name: i for i, name in enumerate(self._room_list)}
 
+        # Air block (rows 0..n−1) and wall block (rows n..2n−1).
         for name, room in self._rooms.items():
             i = idx[name]
-            C[i] = room.thermal_mass
-            g_ext = 1.0 / room.r_external
-            B_ext[i] = g_ext
-            A[i, i] -= g_ext
+            j_w = n + i  # wall index for room i
 
+            C[i] = self._c_air[i]
+            C[j_w] = self._c_wall[i]
+
+            g_aw = 1.0 / self._r_aw[i]
+            g_we = 1.0 / self._r_we[i]
+
+            # Air node: gain/loss to wall via internal film R_aw.
+            A[i, i] -= g_aw
+            A[i, j_w] += g_aw
+
+            # Wall node: gain/loss to air via R_aw + loss to outdoor via R_we.
+            A[j_w, i] += g_aw
+            A[j_w, j_w] -= g_aw
+            A[j_w, j_w] -= g_we
+
+            # Outdoor input on the wall block only.
+            B_ext[j_w] = g_we
+
+            # Inter-room conduction routes through the wall nodes
+            # (mass-to-mass partition coupling — locked design call;
+            # see roadmap §17.2).
             for conn in room.connections:
-                j = idx[conn.connected_room]
+                k = idx[conn.connected_room]
+                k_w = n + k
                 g = 1.0 / conn.r_value
-                A[i, j] += g
-                A[i, i] -= g
+                A[j_w, k_w] += g
+                A[j_w, j_w] -= g
 
         return C, A, B_ext
 
@@ -293,32 +476,46 @@ class HouseModel:
         Returns
         -------
         dict
-            New room temperatures {name: temp °C}.
+            New room *air* temperatures {name: temp °C}.  Wall
+            temperatures are also updated on each ``Room`` and can be
+            read via :attr:`HouseModel.wall_temperatures`.
         """
-        T = np.array([self._rooms[name].temperature for name in self._room_list])
-        Q = np.zeros(self._n)
+        n = self._n
+        # Pack current state: x = [T_a (n), T_w (n)].
+        T_air = np.array([self._rooms[name].air_temperature for name in self._room_list])
+        T_wall = np.array([self._rooms[name].wall_temperature for name in self._room_list])
+        x = np.concatenate([T_air, T_wall])
 
+        # Heat input lands on the air block only.  Q has shape (2n,) so
+        # it slots straight into the air rows; the wall block stays zero.
+        Q = np.zeros(2 * n)
         for name, power in heat_inputs.items():
             if name in self._rooms:
                 Q[self._room_list.index(name)] += power
-
         for name, gain in solar_gains.items():
             if name in self._rooms:
                 Q[self._room_list.index(name)] += gain
-
-        # Constant per-room internal gains (occupants, electronics, ...)
+        # Constant per-room internal gains (occupants, electronics, ...).
         for i, name in enumerate(self._room_list):
             Q[i] += self._rooms[name].internal_gain
 
-        # Wind-driven external-conductance overlay (delta from typical).
-        # Linearly-implicit treatment: the coefficient is frozen at the
-        # current state for this single ``dt`` step.
-        delta_ua = self.infiltration_delta_ua(outdoor_temp, wind_speed, T)
+        # Wind-driven external-conductance overlay (delta from typical),
+        # applied on the *air* block only (Phase 1 C1 + A1: infiltrating
+        # air mixes directly with the room air, not the envelope mass).
+        delta_ua = self.infiltration_delta_ua(outdoor_temp, wind_speed, T_air)
 
-        # dT/dt = C^{-1} * ((A - diag(δ)) T + (B_ext + δ) T_out + Q)
+        # Build the effective 2n×2n drift matrix.  The overlay subtracts
+        # δ from each air-block diagonal entry and adds δ to the air-block
+        # outdoor input; the wall block is unchanged.
+        A_eff = self._A.copy()
+        B_eff = self._B_ext.copy()
+        for i in range(n):
+            A_eff[i, i] -= delta_ua[i]
+            B_eff[i] += delta_ua[i]
+
         inv_C = 1.0 / self._C
-        F = (self._A - np.diag(delta_ua)) * inv_C[:, None]
-        bias = ((self._B_ext + delta_ua) * outdoor_temp + Q) * inv_C
+        F = A_eff * inv_C[:, None]
+        bias = (B_eff * outdoor_temp + Q) * inv_C
 
         def rhs(state: np.ndarray) -> np.ndarray:
             return F @ state + bias
@@ -326,12 +523,15 @@ class HouseModel:
         def jacobian(_state: np.ndarray) -> np.ndarray:
             return F
 
-        T_new = implicit_euler_step(rhs, jacobian, T, dt)
+        x_new = implicit_euler_step(rhs, jacobian, x, dt)
+        T_air_new = x_new[:n]
+        T_wall_new = x_new[n:]
 
-        new_temps = {}
+        new_temps: Dict[str, float] = {}
         for i, name in enumerate(self._room_list):
-            self._rooms[name].temperature = float(T_new[i])
-            new_temps[name] = float(T_new[i])
+            self._rooms[name].air_temperature = float(T_air_new[i])
+            self._rooms[name].wall_temperature = float(T_wall_new[i])
+            new_temps[name] = float(T_air_new[i])
 
         return new_temps
 
@@ -377,12 +577,19 @@ class HouseModel:
         list of dict
             Predicted temperatures {name: °C} for each step 1…horizon.
         """
-        # Save state, run prediction on a copy, restore state
-        saved = {name: room.temperature for name, room in self._rooms.items()}
+        # Save both air- and wall-node temperatures, run prediction on a
+        # copy, restore state.  The wall state is part of the model so
+        # it must be saved alongside the air state — otherwise repeated
+        # predict() calls would slowly drift the cached wall temperature.
+        saved_air = {n: r.air_temperature for n, r in self._rooms.items()}
+        saved_wall = {n: r.wall_temperature for n, r in self._rooms.items()}
         if initial_temps is not None:
             for name, temp in initial_temps.items():
                 if name in self._rooms:
-                    self._rooms[name].temperature = temp
+                    self._rooms[name].air_temperature = float(temp)
+                    # Cold-start wall = air; subsequent steps update it
+                    # naturally.
+                    self._rooms[name].wall_temperature = float(temp)
 
         predictions: List[Dict[str, float]] = []
         for k in range(horizon):
@@ -399,8 +606,9 @@ class HouseModel:
             predictions.append(dict(temps))
 
         # Restore original state
-        for name, temp in saved.items():
-            self._rooms[name].temperature = temp
+        for name in self._rooms:
+            self._rooms[name].air_temperature = saved_air[name]
+            self._rooms[name].wall_temperature = saved_wall[name]
 
         return predictions
 
@@ -438,15 +646,22 @@ class HouseModel:
         for name, room in self._rooms.items():
             breakdown: Dict[str, float] = {}
 
-            # Heat loss to outdoors
-            external_loss = (room.temperature - outdoor_temp) / room.r_external
+            # Heat loss to outdoors.  Reported as the quasi-steady-state
+            # equivalent (air → outdoor through the bundled 1/r_external)
+            # so the diagnostic stays comparable across the 1R1C → 2R2C
+            # transition.  The actual wall-to-outdoor flow at any given
+            # instant differs slightly because T_w ≠ T_a — that detail
+            # is exposed via the per-room ``wall_temperatures`` view.
+            external_loss = (room.air_temperature - outdoor_temp) / room.r_external
             breakdown["external_loss"] = round(external_loss, 2)
 
-            # Heat flow to each connected room
+            # Heat flow to each connected room.  Inter-room couplings
+            # route through wall nodes (mass-to-mass partitions), so we
+            # use wall temperatures here.
             total = external_loss
             for conn in room.connections:
-                other_temp = self._rooms[conn.connected_room].temperature
-                flow = (room.temperature - other_temp) / conn.r_value
+                other_wall = self._rooms[conn.connected_room].wall_temperature
+                flow = (room.wall_temperature - other_wall) / conn.r_value
                 breakdown[conn.connected_room] = round(flow, 2)
                 total += flow
 

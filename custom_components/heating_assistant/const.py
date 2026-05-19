@@ -12,9 +12,11 @@ CONF_CONTROLLER = "controller"
 
 # Room configuration keys
 CONF_ROOM_NAME = "name"
-CONF_THERMAL_MASS = "thermal_mass"      # J/K
+CONF_THERMAL_MASS = "thermal_mass"      # J/K (bundled total = c_air + c_wall)
 CONF_R_EXTERNAL = "r_external"          # K/W (typical-conditions total resistance to outdoors)
 CONF_INFILTRATION_FRACTION = "infiltration_fraction"  # 0–1, fraction of 1/r_external from wind-driven infiltration at typical conditions
+CONF_C_AIR_FRACTION = "c_air_fraction"  # 0–1, share of thermal_mass attributed to the (fast) air node in the 2R2C model
+CONF_R_AW_FRACTION = "r_aw_fraction"    # 0–1, share of the conductive path (r_external / (1 - infiltration_fraction)) attributed to the internal air↔wall film resistance R_aw; the remainder is R_we (wall↔outdoor)
 CONF_CONNECTIONS = "connections"        # list of {room, r_value}
 CONF_WINDOWS = "windows"               # list of {area, orientation, tilt}
 CONF_SETPOINT = "setpoint"             # °C
@@ -98,6 +100,47 @@ DEFAULT_ENVELOPE_TIGHTNESS = ENVELOPE_TIGHTNESS_TYPICAL
 DEFAULT_INFILTRATION_FRACTION = (
     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[DEFAULT_ENVELOPE_TIGHTNESS]
 )
+
+# 2R2C envelope split (Phase 1 A1).
+#
+# A typical residential room has a small fast-responding "air" thermal
+# mass (room air + light furniture + carpets) and a much larger
+# slow-responding "envelope" thermal mass (walls + floor slab + ceiling
+# + heavy furniture).  The fast/slow time-scale separation is what gives
+# real rooms their characteristic 5-min initial response and hour-to-day
+# settling tail — a single 1R1C node cannot reproduce both.
+#
+# The defaults below are typology-neutral values that work well for
+# typical European residential construction; the parameter estimator
+# refines them from data over time, and advanced users can override
+# them per-room via ``c_air_fraction`` and ``r_aw_fraction``.
+
+#: Share of total ``thermal_mass`` attributed to the air node.
+#:
+#: Air + light furniture is small relative to wall/slab mass, so the
+#: air node typically holds 3–10 % of the room's total heat capacity.
+#: 0.05 (5 %) is a reasonable typology-neutral default.  Higher values
+#: (~0.10) suit modern lightweight construction with no exposed mass;
+#: lower values (~0.03) suit massive constructions with heavy walls
+#: or slab floors.
+DEFAULT_C_AIR_FRACTION = 0.05
+
+#: Share of the *conductive* envelope path attributed to the internal
+#: air↔wall film resistance R_aw.
+#:
+#: The conductive path between room air and outdoor air can be split
+#: into an internal film, a wall conduction, and an external film.
+#: For typical room geometries (40–80 m² of internal wall surface, an
+#: internal film coefficient ~7–10 W/(m²·K)) R_aw is small relative to
+#: the wall conduction + external film, so the air↔wall film accounts
+#: for roughly 5 % of the conductive path resistance.
+DEFAULT_R_AW_FRACTION = 0.05
+
+#: Hard clamp on ``infiltration_fraction`` to keep the conductive path
+#: well-conditioned.  At ``infiltration_fraction = 1`` the conductive
+#: path resistance diverges (the wall has no path to outdoor); we
+#: never let users land in that degenerate region.
+MAX_INFILTRATION_FRACTION = 0.95
 
 #: Sherman–Grimsrud (LBL) infiltration coefficients.
 #:

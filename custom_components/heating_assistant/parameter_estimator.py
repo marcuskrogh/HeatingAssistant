@@ -852,9 +852,22 @@ class KalmanMLEstimator:
             return _SENTINEL, _zero_grad.copy()
 
         n = self._n
-        nx = int(model.nx)     # n or 2n (augmented)
+        nx = int(model.nx)     # 2n or 3n (Phase 1 A1: 2R2C with optional offsets)
         n_sub = 10
         h_sub = self._dt / n_sub
+
+        # Phase 1 A1 promoted the plant to 2R2C, doubling the physical
+        # state dimension (``F`` is now ``(2n, 2n)`` instead of ``(n, n)``).
+        # The analytical sensitivity machinery below
+        # (``dFdtheta`` / ``dfdtheta_val``) is hard-coded to the
+        # pre-A1 single-temperature-block layout and would broadcast
+        # incorrectly on the new doubled state.  Phase 4 will restructure
+        # the estimator on top of the 2R2C dynamics; until then we
+        # disable the analytical gradient and let the optimiser fall back
+        # to numerical differentiation.  The forward Kalman pass below
+        # still computes ``neg_ll`` correctly because it uses
+        # ``model.f`` and ``model.dfdx`` which are 2R2C-aware.
+        _skip_analytic_grad = (model._F.shape[0] > n)
 
         # ── Unpack theta ────────────────────────────────────────────────────
         log_mass, log_r, q_int, log_alpha, log_r_ij_vec = layout.unpack(theta)
@@ -878,27 +891,30 @@ class KalmanMLEstimator:
         n_pairs = len(layout.identifiable_pairs)
 
         # ── Precompute dFdtheta (constant – doesn't depend on x/u/d) ───────
-        # Shape (ntheta, nx, nx).  Only the top-left n×n block is nonzero.
+        # Shape (ntheta, nx, nx).  Disabled under 2R2C (Phase 1 A1) — the
+        # writes below would broadcast incorrectly across the doubled
+        # state dimension.  Phase 4 will re-derive these for 2R2C.
         dFdtheta = np.zeros((ntheta, nx, nx))
 
-        # log_mass[j]  → (∂F_n/∂log_mass_j)[j, :] = −F_n[j, :]
-        for j in range(n):
-            dFdtheta[j, j, :n] = -F_n[j, :]
+        if not _skip_analytic_grad:
+            # log_mass[j]  → (∂F_n/∂log_mass_j)[j, :] = −F_n[j, :]
+            for j in range(n):
+                dFdtheta[j, j, :n] = -F_n[j, :]
 
-        # log_r[j]  → (∂F_n/∂log_r_j)[j, j] = g_ext[j] / C_cap[j]
-        for j in range(n):
-            dFdtheta[n + j, j, j] = g_ext[j] / C_cap[j]
+            # log_r[j]  → (∂F_n/∂log_r_j)[j, j] = g_ext[j] / C_cap[j]
+            for j in range(n):
+                dFdtheta[n + j, j, j] = g_ext[j] / C_cap[j]
 
-        # q_int[j], log_alpha[k] → dFdtheta = 0  (already zero)
+            # q_int[j], log_alpha[k] → dFdtheta = 0  (already zero)
 
-        # log_r_ij[k] for pair (pi, pj):
-        for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
-            g_ij = float(g_ij_vec[k_rij])
-            t_idx = 3 * n + n_alpha + k_rij
-            dFdtheta[t_idx, pi, pi] = g_ij / C_cap[pi]
-            dFdtheta[t_idx, pj, pj] = g_ij / C_cap[pj]
-            dFdtheta[t_idx, pi, pj] = -g_ij / C_cap[pi]
-            dFdtheta[t_idx, pj, pi] = -g_ij / C_cap[pj]
+            # log_r_ij[k] for pair (pi, pj):
+            for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+                g_ij = float(g_ij_vec[k_rij])
+                t_idx = 3 * n + n_alpha + k_rij
+                dFdtheta[t_idx, pi, pi] = g_ij / C_cap[pi]
+                dFdtheta[t_idx, pj, pj] = g_ij / C_cap[pj]
+                dFdtheta[t_idx, pi, pj] = -g_ij / C_cap[pi]
+                dFdtheta[t_idx, pj, pi] = -g_ij / C_cap[pj]
 
         # ── Measurement Jacobian H (constant for this model) ────────────────
         _u0 = np.zeros(model.nu)
@@ -941,46 +957,48 @@ class KalmanMLEstimator:
                     return _SENTINEL, _zero_grad.copy()
 
                 # ── Compute dfdtheta (state-dependent) ─────────────────────
-                # Shape (ntheta, nx).  Only the T-block (first n rows) is
-                # nonzero – the b-block drift is always zero.
+                # Shape (ntheta, nx).  Disabled under 2R2C (Phase 1 A1) for
+                # the same reasons as dFdtheta above; Phase 4 will restore
+                # analytic gradients.
                 dfdtheta_val = np.zeros((ntheta, nx))
 
-                # log_mass[j]: ∂f_j/∂log_mass_j = −f_val[j]
-                for j in range(n):
-                    dfdtheta_val[j, j] = -f_val[j]
+                if not _skip_analytic_grad:
+                    # log_mass[j]: ∂f_j/∂log_mass_j = −f_val[j]
+                    for j in range(n):
+                        dfdtheta_val[j, j] = -f_val[j]
 
-                # log_r[j]: ∂f_j/∂log_r_j = (g_ext_j/C_j)(T_j − T_out)
-                for j in range(n):
-                    dfdtheta_val[n + j, j] = (g_ext[j] / C_cap[j]) * (
-                        T[j] - T_out_k
-                    )
+                    # log_r[j]: ∂f_j/∂log_r_j = (g_ext_j/C_j)(T_j − T_out)
+                    for j in range(n):
+                        dfdtheta_val[n + j, j] = (g_ext[j] / C_cap[j]) * (
+                            T[j] - T_out_k
+                        )
 
-                # q_int[j]: ∂f_j/∂q_int_j = G_d[j, 1+j] = 1/C_j
-                for j in range(n):
-                    dfdtheta_val[2 * n + j, j] = G_d_mat[j, 1 + j]
+                    # q_int[j]: ∂f_j/∂q_int_j = G_d[j, 1+j] = 1/C_j
+                    for j in range(n):
+                        dfdtheta_val[2 * n + j, j] = G_d_mat[j, 1 + j]
 
-                # log_alpha[k]: ∂f_{i_src}/∂log_alpha_k = heat_contrib of src k
-                for k_la, s_idx in enumerate(layout.identifiable_sources):
-                    src = self._sources[s_idx]
-                    i_src = model._room_idx[src.room]
-                    u_s = float(u_k[s_idx]) if s_idx < len(u_k) else 0.0
-                    u_scaled_s = heater_scales[s_idx] * u_s
-                    heat_c = (
-                        src.thermal_power(max(0.0, u_scaled_s), T_out_k)
-                        / C_cap[i_src]
-                    )
-                    dfdtheta_val[3 * n + k_la, i_src] = heat_c
+                    # log_alpha[k]: ∂f_{i_src}/∂log_alpha_k = heat_contrib of src k
+                    for k_la, s_idx in enumerate(layout.identifiable_sources):
+                        src = self._sources[s_idx]
+                        i_src = model._room_idx[src.room]
+                        u_s = float(u_k[s_idx]) if s_idx < len(u_k) else 0.0
+                        u_scaled_s = heater_scales[s_idx] * u_s
+                        heat_c = (
+                            src.thermal_power(max(0.0, u_scaled_s), T_out_k)
+                            / C_cap[i_src]
+                        )
+                        dfdtheta_val[3 * n + k_la, i_src] = heat_c
 
-                # log_r_ij[k]: ∂f_{pi}/∂log_r_ij_k = (g_ij/C_pi)(T_pi−T_pj)
-                for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
-                    g_ij = float(g_ij_vec[k_rij])
-                    t_idx = 3 * n + n_alpha + k_rij
-                    dfdtheta_val[t_idx, pi] = (g_ij / C_cap[pi]) * (
-                        T[pi] - T[pj]
-                    )
-                    dfdtheta_val[t_idx, pj] = (g_ij / C_cap[pj]) * (
-                        T[pj] - T[pi]
-                    )
+                    # log_r_ij[k]: ∂f_{pi}/∂log_r_ij_k = (g_ij/C_pi)(T_pi−T_pj)
+                    for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+                        g_ij = float(g_ij_vec[k_rij])
+                        t_idx = 3 * n + n_alpha + k_rij
+                        dfdtheta_val[t_idx, pi] = (g_ij / C_cap[pi]) * (
+                            T[pi] - T[pj]
+                        )
+                        dfdtheta_val[t_idx, pj] = (g_ij / C_cap[pj]) * (
+                            T[pj] - T[pi]
+                        )
 
                 # ── Propagate state and covariance (Euler) ──────────────────
                 P_dot = F_full @ P + P @ F_full.T + G_sig @ G_sig.T

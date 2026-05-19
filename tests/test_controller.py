@@ -53,10 +53,25 @@ def _make_model_and_sources():
     return model, sources
 
 
-def _aug_state(temps: list[float], offsets: list[float] | None = None) -> np.ndarray:
+def _aug_state(
+    temps: list[float],
+    offsets: list[float] | None = None,
+    walls: list[float] | None = None,
+) -> np.ndarray:
+    """Build an augmented 2R2C state vector ``[T_a, T_w, b]``.
+
+    Phase 1 A1 promoted the per-room state from one node to two
+    (air + wall), so the augmented vector grew from ``2n`` to ``3n``.
+    For tests that previously called ``_aug_state([20.0, 19.0])`` the
+    wall block now defaults to a copy of the air block (the natural
+    cold-start convention — wall and air start at the same value and
+    the EKF lets them diverge over time).
+    """
+    if walls is None:
+        walls = list(temps)
     if offsets is None:
         offsets = [0.0] * len(temps)
-    return np.array(list(temps) + list(offsets), dtype=float)
+    return np.array(list(temps) + list(walls) + list(offsets), dtype=float)
 
 
 # -- HouseThermalSDE tests ----------------------------------------------------
@@ -72,12 +87,14 @@ class TestHouseThermalSDE:
     def test_dimensions(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        assert sde.nx == 4
+        # Phase 1 A1: state grew from 2n ([T, b]) to 3n ([T_a, T_w, b]).
+        # nx = 2 rooms × 3 = 6.
+        assert sde.nx == 6
         assert sde.nu == 2
-        assert sde.nd == 3   # T_out + 2 solar
-        assert sde.nw == 4   # one noise per state (T + b)
-        assert sde.nz == 2   # controlled output = room temps
-        assert sde.nym == 2  # measured output = room temps
+        assert sde.nd == 3   # T_out + 2 solar/internal-gain channels
+        assert sde.nw == 6   # one noise per state
+        assert sde.nz == 2   # controlled output = air node per room
+        assert sde.nym == 2  # measured output = air node per room
 
     def test_drift_shape(self):
         model, sources = _make_model_and_sources()
@@ -87,31 +104,40 @@ class TestHouseThermalSDE:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         f = sde.f(x, u, d, p, 0.0)
-        assert f.shape == (4,)
+        # 2R2C augmented drift: 3n = 6 entries (air, wall, offset blocks).
+        assert f.shape == (6,)
 
     def test_drift_heating_increases_temperature(self):
-        """Full heating (u=1) should give positive drift when room is cold."""
+        """Full heating (u=1) should give positive drift on the air block
+        when the room is cold."""
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = _aug_state([15.0, 14.0])   # cold rooms
+        x = _aug_state([15.0, 14.0])   # cold rooms (air; wall starts equal)
         u = np.array([1.0, 1.0])     # full heating
         d = sde.disturbance_vector(0.0, {})
         p = np.array([])
         f = sde.f(x, u, d, p, 0.0)
-        assert np.all(f[:2] > 0.0), f"Expected positive drift with full heating, got {f}"
-        assert np.allclose(f[2:], 0.0)
+        # 2R2C: f = [air-drift (n), wall-drift (n), offset-drift (n)].
+        # Heat input lands on the air block → air drift positive.
+        assert np.all(f[:2] > 0.0), f"Expected positive air drift, got {f}"
+        # Offset block has zero drift (random-walk bias).
+        assert np.allclose(f[4:], 0.0)
 
     def test_drift_no_heat_cold_outside(self):
-        """No heating and cold outside: warm rooms should cool down."""
+        """No heating and cold outside: warm rooms should cool down on the
+        air node — and the wall node should also drift cold (it conducts
+        directly to outdoor via R_we)."""
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        x = _aug_state([20.0, 20.0])   # warm rooms
+        x = _aug_state([20.0, 20.0])   # warm rooms (air & wall start equal)
         u = np.zeros(sde.nu)         # no heating
         d = sde.disturbance_vector(-10.0, {})
         p = np.array([])
         f = sde.f(x, u, d, p, 0.0)
-        assert np.all(f[:2] < 0.0), f"Expected negative drift with cold outside, got {f}"
-        assert np.allclose(f[2:], 0.0)
+        # Wall block drifts negative (direct conduction to cold outdoor).
+        assert np.all(f[2:4] < 0.0), f"Expected negative wall drift, got {f}"
+        # Offset block has zero drift.
+        assert np.allclose(f[4:], 0.0)
 
     def test_sigma_shape(self):
         model, sources = _make_model_and_sources()
@@ -121,7 +147,8 @@ class TestHouseThermalSDE:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         sig = sde.sigma(x, u, d, p, 0.0)
-        assert sig.shape == (4, 4)
+        # 2R2C augmented: nx = 3n = 6 → σ is 6×6.
+        assert sig.shape == (6, 6)
 
     def test_sigma_is_scaled_identity(self):
         model, sources = _make_model_and_sources()
@@ -131,9 +158,11 @@ class TestHouseThermalSDE:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         sig = sde.sigma(x, u, d, p, 0.0)
-        expected = np.zeros((4, 4))
-        expected[:2, :2] = 0.1 * np.eye(2)
-        expected[2:, 2:] = 0.002 * np.eye(2)
+        # Block diagonal: 0.1·I_4 on the (air, wall) physical block,
+        # 0.002·I_2 on the offset block.
+        expected = np.zeros((6, 6))
+        expected[:4, :4] = 0.1 * np.eye(4)
+        expected[4:, 4:] = 0.002 * np.eye(2)
         np.testing.assert_array_almost_equal(sig, expected)
 
     def test_controlled_output_equals_state(self):
@@ -191,7 +220,8 @@ class TestHouseThermalSDE:
         assert np.all(eigvals > 0)
 
     def test_analytic_state_jacobian(self):
-        """dfdx should equal the structural matrix F."""
+        """``dfdx`` should mirror the structural 2n×2n matrix ``F`` on the
+        top-left physical block and be zero on the offset rows/columns."""
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.0, 17.0])
@@ -199,11 +229,20 @@ class TestHouseThermalSDE:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         J_analytic = sde.dfdx(x, u, d, p, 0.0)
-        np.testing.assert_array_almost_equal(J_analytic[:2, :2], sde._F)
-        np.testing.assert_array_equal(J_analytic[:2, 2:], np.zeros((2, 2)))
-        np.testing.assert_array_equal(J_analytic[2:, :], np.zeros((2, 4)))
+        # 2R2C augmented Jacobian is 3n × 3n = 6 × 6.
+        assert J_analytic.shape == (6, 6)
+        # Top-left 2n × 2n block matches the structural F.  No wind set,
+        # so the SG overlay is zero and J[:2n, :2n] == F exactly.
+        np.testing.assert_array_almost_equal(J_analytic[:4, :4], sde._F)
+        # Offset block (rows/cols 4..6) is all-zero (zero drift on b).
+        np.testing.assert_array_equal(J_analytic[:4, 4:], np.zeros((4, 2)))
+        np.testing.assert_array_equal(J_analytic[4:, :], np.zeros((2, 6)))
 
     def test_observation_jacobian_is_identity(self):
+        """``dhm/dx`` for the 2R2C measurement ``y = T_a + b`` is
+        ``[I_n, 0_n, I_n]``: identity on the air block, zero on the
+        wall block (unobserved), identity on the offset block.
+        """
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.0, 17.0])
@@ -211,7 +250,11 @@ class TestHouseThermalSDE:
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
         H = sde.dhmdx(x, u, d, p, 0.0)
-        np.testing.assert_array_equal(H, np.array([[1.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]]))
+        expected = np.array([
+            [1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        ])
+        np.testing.assert_array_equal(H, expected)
 
     def test_disturbance_vector_shape(self):
         model, sources = _make_model_and_sources()
