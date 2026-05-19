@@ -15,6 +15,7 @@ import homeassistant.helpers.config_validation as cv
 from ._options_flow import (
     BUILDING_AGE_TO_R_EXTERNAL,
     COMPASS_TO_DEGREES,
+    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
     ROOM_SIZE_TO_THERMAL_MASS,
     RoomFlowHelper,
     WindowFlowHelper,
@@ -29,6 +30,7 @@ from .const import (
     CONF_LATITUDE,
     CONF_MPC_ANALYTIC_DERIVATIVES,
     CONF_MPC_SOLVER,
+    CONF_INFILTRATION_FRACTION,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_R_EXTERNAL,
@@ -48,6 +50,7 @@ from .const import (
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
+    DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_HORIZON,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_MPC_SOLVER,
@@ -167,8 +170,16 @@ def _room_form_schema(
     sensors_default: str = "",
     room_size_default: str = "medium",
     building_age_default: str = "1980_1999",
+    envelope_tightness_default: str = DEFAULT_ENVELOPE_TIGHTNESS,
 ) -> vol.Schema:
-    """Schema shared by the add-room and edit-room forms."""
+    """Schema shared by the add-room and edit-room forms.
+
+    ``envelope_tightness`` (Phase 1 C1) is a preset that maps to the
+    per-room ``infiltration_fraction`` — the share of the bundled
+    ``1/r_external`` attributed to wind-driven air exchange.  Defaults
+    to ``"typical"`` so users who don't think about infiltration get
+    sensible behaviour out of the box.
+    """
     return vol.Schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
@@ -179,6 +190,9 @@ def _room_form_schema(
             vol.Required("building_age", default=building_age_default): vol.In(
                 list(BUILDING_AGE_TO_R_EXTERNAL)
             ),
+            vol.Required(
+                "envelope_tightness", default=envelope_tightness_default,
+            ): vol.In(list(ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION)),
         }
     )
 
@@ -346,12 +360,18 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             sensors = _parse_entity_ids(user_input.get(CONF_TEMP_SENSORS, ""))
+            tightness = user_input.get(
+                "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
+            )
             err = self._rooms.add(
                 name=user_input[CONF_ROOM_NAME],
                 sensors=sensors,
                 thermal_mass=ROOM_SIZE_TO_THERMAL_MASS[user_input["room_size"]],
                 r_external=BUILDING_AGE_TO_R_EXTERNAL[user_input["building_age"]],
                 setpoint=DEFAULT_ROOM_SETPOINT,
+                infiltration_fraction=(
+                    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
+                ),
             )
             if err is None:
                 return await self.async_step_manage_rooms()
@@ -391,12 +411,18 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             sensors = _parse_entity_ids(user_input.get(CONF_TEMP_SENSORS, ""))
+            tightness = user_input.get(
+                "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
+            )
             err = self._rooms.update_current(
                 name=user_input[CONF_ROOM_NAME],
                 sensors=sensors,
                 thermal_mass=ROOM_SIZE_TO_THERMAL_MASS[user_input["room_size"]],
                 r_external=BUILDING_AGE_TO_R_EXTERNAL[user_input["building_age"]],
                 setpoint=DEFAULT_ROOM_SETPOINT,
+                infiltration_fraction=(
+                    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
+                ),
             )
             if err is None:
                 return await self.async_step_manage_rooms()
@@ -407,6 +433,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     sensors_default=user_input.get(CONF_TEMP_SENSORS, ""),
                     room_size_default=user_input.get("room_size", "medium"),
                     building_age_default=user_input.get("building_age", "1980_1999"),
+                    envelope_tightness_default=tightness,
                 ),
                 errors={CONF_ROOM_NAME: err},
             )
@@ -414,6 +441,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         room_sensors = room.get(CONF_TEMP_SENSORS, [])
         if not room_sensors and room.get(CONF_TEMP_SENSOR):
             room_sensors = [room[CONF_TEMP_SENSOR]]
+        infiltration_fraction = float(room.get(
+            CONF_INFILTRATION_FRACTION,
+            ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[DEFAULT_ENVELOPE_TIGHTNESS],
+        ))
         schema = _room_form_schema(
             name_default=room.get(CONF_ROOM_NAME, ""),
             sensors_default=_format_entity_ids(room_sensors),
@@ -426,6 +457,11 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 float(room.get(CONF_R_EXTERNAL, DEFAULT_R_EXTERNAL)),
                 BUILDING_AGE_TO_R_EXTERNAL,
                 "1980_1999",
+            ),
+            envelope_tightness_default=_nearest_choice(
+                infiltration_fraction,
+                ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
+                DEFAULT_ENVELOPE_TIGHTNESS,
             ),
         )
         return self.async_show_form(step_id="room_detail", data_schema=schema)

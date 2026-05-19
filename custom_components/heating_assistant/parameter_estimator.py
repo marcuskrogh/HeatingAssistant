@@ -1165,6 +1165,12 @@ class KalmanMLEstimator:
                     # Internal gain is applied as an extra disturbance during
                     # the Kalman pass; keep the rebuilt model neutral.
                     internal_gain=0.0,
+                    # Phase 1 C1: preserve the configured infiltration share
+                    # so the rebuilt model's leakage-area derivation uses
+                    # the same typology as the original.  Not identified
+                    # in the current ML estimator — the fraction is a
+                    # configured preset.
+                    infiltration_fraction=r.infiltration_fraction,
                 ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(model, self._sources, self._dt)

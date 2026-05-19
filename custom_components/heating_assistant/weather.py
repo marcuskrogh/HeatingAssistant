@@ -272,6 +272,55 @@ def read_outdoor_temp(
     return fallback
 
 
+def read_wind_speed_now(hass: Any, weather_entity: Optional[str]) -> Optional[float]:
+    """Return the current outdoor wind speed [m/s] or ``None``.
+
+    Reads the ``wind_speed`` attribute on the configured weather entity.
+    Home Assistant weather entities expose wind in whatever unit the
+    integration provider chose, with the canonical ``wind_speed_unit``
+    attribute telling us what it is.  We normalise to m/s here so the
+    Sherman–Grimsrud infiltration overlay (Phase 1 C1) can use the value
+    directly.  Returns ``None`` when no entity is configured, the entity
+    is unavailable, or the value can't be parsed — the model then stays
+    on its typical-conditions external conductance.
+    """
+    if not weather_entity:
+        return None
+    state = hass.states.get(weather_entity)
+    if state is None or state.state in _UNAVAILABLE_STATES:
+        return None
+    raw = state.attributes.get("wind_speed")
+    val = coerce_float(raw)
+    if val is None:
+        return None
+
+    # Normalise common HA wind-speed units to m/s.  HA's canonical
+    # ``wind_speed_unit`` attribute is exposed by integrations such as
+    # Met.no, OpenWeatherMap and Tomorrow.io; older entities may omit it,
+    # in which case we assume m/s (HA's internal canonical unit).
+    unit = (state.attributes.get("wind_speed_unit") or "m/s").lower()
+    if unit in ("m/s", "ms", "meter/second", "meter_per_second"):
+        factor = 1.0
+    elif unit in ("km/h", "kph", "kilometer/hour", "kilometre/hour"):
+        factor = 1.0 / 3.6
+    elif unit in ("mph", "mi/h", "mile/hour"):
+        factor = 0.44704
+    elif unit in ("ft/s", "fps", "foot/second", "feet/second"):
+        factor = 0.3048
+    elif unit in ("kn", "kt", "knot", "knots"):
+        factor = 0.514444
+    else:
+        # Unrecognised unit — silently fall back to assuming m/s rather
+        # than risking a 3-orders-of-magnitude error.  Logged so that
+        # surprising unit conventions surface in diagnostics.
+        _LOGGER.debug(
+            "Unrecognised wind_speed_unit %r on %s; assuming m/s",
+            unit, weather_entity,
+        )
+        factor = 1.0
+    return max(0.0, val * factor)
+
+
 def read_cloud_cover_now(hass: Any, weather_entity: Optional[str]) -> Optional[float]:
     """Return the current cloud-cover fraction in [0, 1] or ``None``.
 

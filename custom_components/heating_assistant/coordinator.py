@@ -55,6 +55,7 @@ from .const import (
     CONF_SOURCE_TYPE,
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
+    CONF_INFILTRATION_FRACTION,
     CONF_R_VALUE,
     CONF_R_EXTERNAL,
     CONF_ROOM_NAME,
@@ -88,6 +89,7 @@ from .const import (
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
+    DEFAULT_INFILTRATION_FRACTION,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
@@ -164,6 +166,9 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                 connections=connections,
                 windows=windows,
                 setpoint=rc.get(CONF_SETPOINT, DEFAULT_SETPOINT),
+                infiltration_fraction=rc.get(
+                    CONF_INFILTRATION_FRACTION, DEFAULT_INFILTRATION_FRACTION,
+                ),
             )
         )
     return HouseModel(rooms)
@@ -455,6 +460,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # used to attenuate the clear-sky solar model.
         self.cloud_cover: Optional[float] = None
         self.outdoor_temp: float = 5.0
+        # Latest outdoor wind speed [m/s] from the weather entity.  Used
+        # by the Sherman–Grimsrud infiltration overlay (Phase 1 C1).
+        # ``None`` until the first coordinator cycle / when the weather
+        # entity does not expose wind data.
+        self.wind_speed: Optional[float] = None
         self.heat_flows: Dict[str, Dict[str, float]] = {}
         self.predictions: list = []
         self.outdoor_forecast: List[float] = []
@@ -787,6 +797,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             cloud_cover_now = self._read_cloud_cover_now()
             cloud_forecast = await self._async_read_cloud_forecast()
 
+            # 2c. Read current wind speed for the Sherman–Grimsrud
+            #     infiltration overlay (Phase 1 C1).  When the weather
+            #     entity does not expose ``wind_speed`` this returns
+            #     ``None`` and the controller's external conductance
+            #     falls back to its typical-conditions baseline.  Held
+            #     constant over the OCP horizon and the EKF sub-steps in
+            #     this cycle (a horizon-time-varying wind forecast is a
+            #     Phase 5 follow-up).
+            wind_speed_now = self._read_wind_speed_now()
+            self.wind_speed = wind_speed_now
+            if hasattr(self.controller, "set_wind_speed"):
+                self.controller.set_wind_speed(wind_speed_now)
+
             # 3. Compute current solar gains for visualization
             now = self.now_utc
             self.cloud_cover = cloud_cover_now
@@ -1004,6 +1027,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     def _read_cloud_cover_now(self) -> Optional[float]:
         return _weather.read_cloud_cover_now(self.hass, self._weather_entity)
+
+    def _read_wind_speed_now(self) -> Optional[float]:
+        return _weather.read_wind_speed_now(self.hass, self._weather_entity)
 
     # Backwards-compatible aliases for any caller / test that imported the
     # static helpers from the coordinator before the U3 weather extraction.

@@ -310,7 +310,13 @@ Each room is treated as a single, well-mixed thermal node — the **lumped-param
 
 The energy balance for room *i* is:
 
-$$C_i \cdot \frac{dT_i}{dt} = Q_{\text{heater},i}(t) + \sum_{j \in \text{adj}(i)} \frac{T_j(t) - T_i(t)}{R_{ij}} + \frac{T_{\text{outdoor}}(t) - T_i(t)}{R_{i,\text{ext}}} + Q_{\text{solar},i}(t)$$
+$$C_i \cdot \frac{dT_i}{dt} = Q_{\text{heater},i}(t) + \sum_{j \in \text{adj}(i)} \frac{T_j(t) - T_i(t)}{R_{ij}} + UA_{\text{ext},i}(v_w, \Delta T_i) \cdot (T_{\text{outdoor}}(t) - T_i(t)) + Q_{\text{solar},i}(t)$$
+
+The external conductance $UA_{\text{ext},i}$ separates into a constant **conductive** component and a **wind-driven infiltration** component (Phase 1 C1 — Sherman–Grimsrud / LBL model):
+
+$$UA_{\text{ext},i}(v_w, \Delta T_i) = (1 - f_i) \cdot \frac{1}{R_{i,\text{ext}}} + \rho c_p \cdot L_i \cdot \sqrt{C_s \, |\Delta T_i| + C_w \, v_w^2}$$
+
+Here $f_i$ is the room's `infiltration_fraction` (the share of $1/R_{i,\text{ext}}$ attributed to wind-driven exchange), and $L_i$ is the per-room effective leakage area calibrated so that the runtime $UA_{\text{ext},i}$ equals exactly $1/R_{i,\text{ext}}$ at the typical reference conditions $v_w = 3$ m/s, $|\Delta T| = 20$ K.  When no wind data is available the model falls back to the typical-conditions baseline, recovering the pre-C1 behaviour exactly.
 
 **Symbol table**
 
@@ -319,10 +325,18 @@ $$C_i \cdot \frac{dT_i}{dt} = Q_{\text{heater},i}(t) + \sum_{j \in \text{adj}(i)
 | $C_i$ | J/K | Effective thermal mass (heat capacity) of room *i*.  Includes air, furniture, walls. |
 | $T_i$ | °C | Current (lumped) temperature of room *i*. |
 | $T_{\text{outdoor}}$ | °C | Outdoor air temperature (read from a HA sensor). |
+| $v_w$ | m/s | Outdoor wind speed (read from the configured HA `weather.*` entity). |
+| $\Delta T_i$ | K | Temperature difference $T_i - T_{\text{outdoor}}$ at the start of the integration sub-step. |
 | $R_{ij}$ | K/W | Thermal resistance of the wall, floor, or ceiling between rooms *i* and *j*. |
-| $R_{i,\text{ext}}$ | K/W | Total thermal resistance between room *i* and the outdoor environment (walls + roof + ground). |
+| $R_{i,\text{ext}}$ | K/W | Calibrated total thermal resistance between room *i* and the outdoor environment at typical conditions. |
+| $f_i$ | – | `infiltration_fraction` ∈ [0, 1] — share of $1/R_{i,\text{ext}}$ from wind-driven exchange.  Defaulted by the envelope-tightness preset (`leaky` / `typical` / `tight` / `passive_house`). |
+| $L_i$ | m² | Effective leakage area, derived from $f_i$, $R_{i,\text{ext}}$ and the typical-conditions calibration. |
+| $\rho c_p$ | J/(m³·K) | Volumetric heat capacity of air, ≈ 1200. |
+| $C_s$, $C_w$ | (m/s)²/K, – | Sherman–Grimsrud stack and wind coefficients (single-storey residential defaults: $1.45 \times 10^{-4}$ and $3.19 \times 10^{-4}$). |
 | $Q_{\text{heater},i}$ | W | Sum of thermal power output from all heaters assigned to room *i*. |
 | $Q_{\text{solar},i}$ | W | Solar heat gain through all windows of room *i*. |
+
+The wind-driven term is held constant *within* each implicit-Euler sub-step (linearly-implicit treatment) and refreshed *between* sub-steps, so the predict step stays a single linear solve per sub-step despite $UA_{\text{ext},i}$ depending on $T_i$ via $|\Delta T_i|$.
 
 ### 3.2 State-space matrix form
 
