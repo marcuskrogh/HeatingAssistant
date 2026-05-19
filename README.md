@@ -304,56 +304,78 @@ Inside HeatingMPCController.compute():
 
 ## 3. Physics and Mathematical Models
 
-### 3.1 Lumped RC thermal model
+### 3.1 2R2C thermal model
 
-Each room is treated as a single, well-mixed thermal node — the **lumped-parameter** (or RC) approximation.  This is standard practice for building energy simulation at the room level and is described in detail in ISO 13790 and ASHRAE 90.1.
+Each room is treated as a **two-node** lumped-parameter network (Phase 1 A1):
 
-The energy balance for room *i* is:
+- a fast **air** node $T_{a,i}$ (small capacitance $C_{a,i}$) holds the air + light furniture, and
+- a slow **envelope** node $T_{w,i}$ (large capacitance $C_{w,i}$) holds the heavy mass — walls, slab, ceiling.
 
-$$C_i \cdot \frac{dT_i}{dt} = Q_{\text{heater},i}(t) + \sum_{j \in \text{adj}(i)} \frac{T_j(t) - T_i(t)}{R_{ij}} + UA_{\text{ext},i}(v_w, \Delta T_i) \cdot (T_{\text{outdoor}}(t) - T_i(t)) + Q_{\text{solar},i}(t)$$
+The two nodes are coupled by an internal-film resistance $R_{aw,i}$; the envelope conducts to the outdoor via $R_{we,i}$.  Heat input from heaters and solar gain through windows land on the **air** node (radiation absorbed by interior surfaces is folded into the air node for simplicity in v1); the air node also exchanges directly with the outdoor via the **infiltration** path (Phase 1 C1 — Sherman–Grimsrud / LBL model).  Inter-room couplings route through the **wall** nodes — partitions are mass, so they couple envelope-to-envelope (locked design call in roadmap §17.2 A1).
 
-The external conductance $UA_{\text{ext},i}$ separates into a constant **conductive** component and a **wind-driven infiltration** component (Phase 1 C1 — Sherman–Grimsrud / LBL model):
+The continuous-time energy balance per room is:
 
-$$UA_{\text{ext},i}(v_w, \Delta T_i) = (1 - f_i) \cdot \frac{1}{R_{i,\text{ext}}} + \rho c_p \cdot L_i \cdot \sqrt{C_s \, |\Delta T_i| + C_w \, v_w^2}$$
+$$C_{a,i} \cdot \frac{dT_{a,i}}{dt} = Q_{\text{heater},i} + Q_{\text{solar},i} + Q_{\text{int},i} + \frac{T_{w,i} - T_{a,i}}{R_{aw,i}} + UA_{\text{inf},i}(v_w, \Delta T_i) \cdot (T_{\text{outdoor}} - T_{a,i})$$
 
-Here $f_i$ is the room's `infiltration_fraction` (the share of $1/R_{i,\text{ext}}$ attributed to wind-driven exchange), and $L_i$ is the per-room effective leakage area calibrated so that the runtime $UA_{\text{ext},i}$ equals exactly $1/R_{i,\text{ext}}$ at the typical reference conditions $v_w = 3$ m/s, $|\Delta T| = 20$ K.  When no wind data is available the model falls back to the typical-conditions baseline, recovering the pre-C1 behaviour exactly.
+$$C_{w,i} \cdot \frac{dT_{w,i}}{dt} = \frac{T_{a,i} - T_{w,i}}{R_{aw,i}} + \frac{T_{\text{outdoor}} - T_{w,i}}{R_{we,i}} + \sum_{j \in \text{adj}(i)} \frac{T_{w,j} - T_{w,i}}{R_{ij}}$$
+
+The wind-driven infiltration conductance follows the LBL model:
+
+$$UA_{\text{inf},i}(v_w, \Delta T_i) = \rho c_p \cdot L_i \cdot \sqrt{C_s \, |\Delta T_i| + C_w \, v_w^2}$$
+
+**Calibration.**  The user's bundled $C_i$ (`thermal_mass`) and $R_{i,\text{ext}}$ (`r_external`) are typology-friendly inputs that get split inside `HouseModel`:
+
+- $C_{a,i} = f_{c,i} \cdot C_i$, $\quad C_{w,i} = (1 - f_{c,i}) \cdot C_i$
+- $R_{\text{cond,total},i} = R_{i,\text{ext}} / (1 - f_{\text{inf},i})$
+- $R_{aw,i} = f_{r,i} \cdot R_{\text{cond,total},i}$, $\quad R_{we,i} = (1 - f_{r,i}) \cdot R_{\text{cond,total},i}$
+- $L_i$ derived so that $UA_{\text{inf},i}$ at the typical reference conditions equals $f_{\text{inf},i} / R_{i,\text{ext}}$
+
+This calibration guarantees that **at the typical reference conditions** ($v_w = 3$ m/s, $|\Delta T| = 20$ K) the total air-to-outdoor heat flux equals exactly $(T_a - T_\text{out}) / R_{i,\text{ext}}$ — recovering the pre-A1 bundled behaviour as a special case.
 
 **Symbol table**
 
 | Symbol | Unit | Meaning |
 |--------|------|---------|
-| $C_i$ | J/K | Effective thermal mass (heat capacity) of room *i*.  Includes air, furniture, walls. |
-| $T_i$ | °C | Current (lumped) temperature of room *i*. |
-| $T_{\text{outdoor}}$ | °C | Outdoor air temperature (read from a HA sensor). |
+| $C_i$ | J/K | Bundled thermal mass (user input).  Split: $C_i = C_{a,i} + C_{w,i}$. |
+| $C_{a,i}$, $C_{w,i}$ | J/K | Air- and envelope-node capacitances.  Derived from $C_i$ and $f_{c,i}$. |
+| $T_{a,i}$, $T_{w,i}$ | °C | Air and envelope temperatures (state variables). |
+| $T_{\text{outdoor}}$ | °C | Outdoor air temperature. |
 | $v_w$ | m/s | Outdoor wind speed (read from the configured HA `weather.*` entity). |
-| $\Delta T_i$ | K | Temperature difference $T_i - T_{\text{outdoor}}$ at the start of the integration sub-step. |
-| $R_{ij}$ | K/W | Thermal resistance of the wall, floor, or ceiling between rooms *i* and *j*. |
-| $R_{i,\text{ext}}$ | K/W | Calibrated total thermal resistance between room *i* and the outdoor environment at typical conditions. |
-| $f_i$ | – | `infiltration_fraction` ∈ [0, 1] — share of $1/R_{i,\text{ext}}$ from wind-driven exchange.  Defaulted by the envelope-tightness preset (`leaky` / `typical` / `tight` / `passive_house`). |
-| $L_i$ | m² | Effective leakage area, derived from $f_i$, $R_{i,\text{ext}}$ and the typical-conditions calibration. |
+| $\Delta T_i$ | K | $T_{a,i} - T_{\text{outdoor}}$ at the start of each integration sub-step. |
+| $R_{aw,i}$ | K/W | Internal film resistance between air and envelope.  Derived from $R_{i,\text{ext}}$, $f_{\text{inf},i}$ and $f_{r,i}$. |
+| $R_{we,i}$ | K/W | Wall conduction resistance from envelope to outdoor (the conductive share of the envelope path). |
+| $R_{i,\text{ext}}$ | K/W | Bundled typical-conditions total resistance (user input). |
+| $R_{ij}$ | K/W | Inter-room (wall-to-wall) thermal resistance. |
+| $f_{c,i}$ | – | `c_air_fraction` ∈ [0, 1] — share of $C_i$ on the air node.  Default 0.05. |
+| $f_{r,i}$ | – | `r_aw_fraction` ∈ [0, 1] — share of the conductive path on $R_{aw,i}$.  Default 0.05. |
+| $f_{\text{inf},i}$ | – | `infiltration_fraction` ∈ [0, 0.95] — share of $1/R_{i,\text{ext}}$ from wind-driven exchange. |
+| $L_i$ | m² | Effective leakage area; derived from $f_{\text{inf},i}$, $R_{i,\text{ext}}$ and the typical-conditions calibration. |
 | $\rho c_p$ | J/(m³·K) | Volumetric heat capacity of air, ≈ 1200. |
 | $C_s$, $C_w$ | (m/s)²/K, – | Sherman–Grimsrud stack and wind coefficients (single-storey residential defaults: $1.45 \times 10^{-4}$ and $3.19 \times 10^{-4}$). |
-| $Q_{\text{heater},i}$ | W | Sum of thermal power output from all heaters assigned to room *i*. |
-| $Q_{\text{solar},i}$ | W | Solar heat gain through all windows of room *i*. |
+| $Q_{\text{heater},i}$, $Q_{\text{solar},i}$, $Q_{\text{int},i}$ | W | Heater output, solar gain through windows, identified internal gain — all on the air node. |
 
-The wind-driven term is held constant *within* each implicit-Euler sub-step (linearly-implicit treatment) and refreshed *between* sub-steps, so the predict step stays a single linear solve per sub-step despite $UA_{\text{ext},i}$ depending on $T_i$ via $|\Delta T_i|$.
+The wind-driven term is held constant *within* each implicit-Euler sub-step (linearly-implicit treatment) and refreshed *between* sub-steps, so the predict step stays a single linear solve per sub-step despite $UA_{\text{inf},i}$ depending on $T_{a,i}$ via $|\Delta T_i|$.
+
+**Why two nodes per room.**  A 1R1C lumped model cannot reproduce both the ~5-minute air response to heater input *and* the multi-hour settling tail of the envelope.  The 2R2C network has two eigenvalues, with a typical fast/slow time-constant separation of ~10–100×, which is what real residential rooms show.  This separation is what lets the MPC anticipate the slow-mode response and avoid the "too late, too much" overshoot pattern characteristic of single-node controllers.  See the explanation in [roadmap §17.2 A1](#172-phase-1--modelling-fidelity-the-new-default-plant-model) for the design rationale.
 
 ### 3.2 State-space matrix form
 
-For a house with *n* rooms, the set of coupled ODEs is assembled once at startup into a compact matrix form:
+For a house with *n* rooms, the 2R2C network assembles into a compact matrix form once at startup.  The state vector is $\mathbf{x} = [T_{a,1}, \ldots, T_{a,n}, \; T_{w,1}, \ldots, T_{w,n}]$ of length $2n$:
 
-$$\mathbf{C} \cdot \frac{d\mathbf{T}}{dt} = \mathbf{A} \cdot \mathbf{T} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{Q}(t)$$
+$$\mathbf{C} \cdot \frac{d\mathbf{x}}{dt} = \mathbf{A} \cdot \mathbf{x} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{Q}(t)$$
 
 where:
-- $\mathbf{C}$ is an *n*-vector of thermal masses (diagonal of the capacitance matrix).
-- $\mathbf{T}$ is the *n*-vector of room temperatures.
-- $\mathbf{A}$ is an $n \times n$ conductance matrix:
-  - off-diagonal element $A_{ij} = +1/R_{ij}$ (heat flowing in from room *j*)
-  - diagonal element $A_{ii} = -1/R_{i,\text{ext}} - \sum_j 1/R_{ij}$ (total heat flowing out)
-- $\mathbf{B}_{\text{ext}}$ is an *n*-vector of outdoor conductances ($1/R_{i,\text{ext}}$ for each room).
-- $\mathbf{Q}(t)$ is the *n*-vector of heater power plus solar gains.
 
-This representation makes each `step()` call a simple vector-matrix multiply — fast even for large houses.
+- $\mathbf{C}$ is a $2n$-vector of capacitances: $[C_{a,1}, \ldots, C_{a,n}, \; C_{w,1}, \ldots, C_{w,n}]$.
+- $\mathbf{A}$ is a $2n \times 2n$ block matrix:
+  - **Air block** (rows / columns $0$ to $n-1$): diagonal $-1/R_{aw,i}$; off-diagonals to the wall block carry $+1/R_{aw,i}$.
+  - **Wall block** (rows / columns $n$ to $2n-1$): diagonal $-1/R_{aw,i} - 1/R_{we,i} - \sum_j 1/R_{ij}$; off-diagonals to the air block carry $+1/R_{aw,i}$; off-diagonals to other wall nodes carry $+1/R_{ij}$ for connected rooms.
+- $\mathbf{B}_{\text{ext}}$ is a $2n$-vector with zero on the air block (the outdoor air does not directly drive the air node via the conductive path — only via the Sherman–Grimsrud overlay) and $1/R_{we,i}$ on the wall block.
+- $\mathbf{Q}(t)$ is the $2n$-vector of disturbances: heater + solar + internal gain on the air block; zero on the wall block.
+
+The Sherman–Grimsrud wind overlay is added at runtime as a per-room delta on the air-block diagonal of $\mathbf{A}$ and a matching $+\delta_i$ on the air-block of $\mathbf{B}_{\text{ext}}$.
+
+This block-structured representation makes each `step()` call a single $2n \times 2n$ linear solve — fast even for large houses, and exploits the implicit-Euler L-stability described in §3.3.
 
 ### 3.3 Continuous-discrete integration
 
