@@ -111,17 +111,20 @@ def test_room_temperature_property_writes_only_air() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_house_model_state_dimension_is_2n() -> None:
-    """Phase 1 A1: state vector grows from n to 2n (air + wall block per room).
-    HouseModel matrices reflect this."""
+def test_house_model_state_dimension_is_3n() -> None:
+    """Phase 1 A2: state vector grows from 2n (air + wall) to 3n (air +
+    wall + slab) — every room now carries a slab state, even
+    ``floor_type = none`` rooms (the slab there is effectively passive
+    via large R_sa / R_sg)."""
     rooms = [
         Room(name="a", thermal_mass=5e6, r_external=0.05),
         Room(name="b", thermal_mass=3e6, r_external=0.08),
     ]
     model = HouseModel(rooms)
-    assert model._C.shape == (4,)        # 2n = 4
-    assert model._A.shape == (4, 4)
-    assert model._B_ext.shape == (4,)
+    assert model._C.shape == (6,)        # 3n = 6
+    assert model._A.shape == (6, 6)
+    assert model._B_ext.shape == (6,)
+    assert model._B_ground.shape == (6,)
 
 
 def test_eigenvalues_show_fast_slow_separation() -> None:
@@ -325,12 +328,14 @@ def test_r_aw_plus_r_we_equals_total_conductive_path() -> None:
     )
 
 
-def test_c_air_plus_c_wall_equals_total_thermal_mass() -> None:
-    """Bundled ``thermal_mass`` splits into ``c_air + c_wall`` —
-    the sum is conserved regardless of split fraction."""
+def test_c_air_plus_c_wall_plus_c_slab_equals_total_thermal_mass() -> None:
+    """Phase 1 A2: bundled ``thermal_mass`` now splits into three nodes
+    (``c_air + c_wall + c_slab``).  The sum is conserved regardless of
+    split fractions or floor type."""
     M = 5e6
     model = _make_single_room(thermal_mass=M)
-    assert model._c_air[0] + model._c_wall[0] == pytest.approx(M, rel=1e-9)
+    total = model._c_air[0] + model._c_wall[0] + model._c_slab[0]
+    assert total == pytest.approx(M, rel=1e-9)
 
 
 def test_infiltration_fraction_clamped_at_max() -> None:

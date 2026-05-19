@@ -17,6 +17,10 @@ CONF_R_EXTERNAL = "r_external"          # K/W (typical-conditions total resistan
 CONF_INFILTRATION_FRACTION = "infiltration_fraction"  # 0–1, fraction of 1/r_external from wind-driven infiltration at typical conditions
 CONF_C_AIR_FRACTION = "c_air_fraction"  # 0–1, share of thermal_mass attributed to the (fast) air node in the 2R2C model
 CONF_R_AW_FRACTION = "r_aw_fraction"    # 0–1, share of the conductive path (r_external / (1 - infiltration_fraction)) attributed to the internal air↔wall film resistance R_aw; the remainder is R_we (wall↔outdoor)
+CONF_FLOOR_TYPE = "floor_type"          # "none" | "slab_on_grade" | "concrete" | "ufh"
+CONF_C_SLAB_FRACTION = "c_slab_fraction"  # 0–1, share of thermal_mass attributed to the slab node (Phase 1 A2)
+CONF_R_SA = "r_sa"                       # K/W, air↔slab film resistance (Phase 1 A2)
+CONF_R_SG = "r_sg"                       # K/W, slab↔ground conduction resistance (Phase 1 A2)
 CONF_CONNECTIONS = "connections"        # list of {room, r_value}
 CONF_WINDOWS = "windows"               # list of {area, orientation, tilt}
 CONF_SETPOINT = "setpoint"             # °C
@@ -141,6 +145,106 @@ DEFAULT_R_AW_FRACTION = 0.05
 #: path resistance diverges (the wall has no path to outdoor); we
 #: never let users land in that degenerate region.
 MAX_INFILTRATION_FRACTION = 0.95
+
+# Slab thermal model (Phase 1 A2 — slab node + B1 — UFH routing).
+#
+# A typical residential room with a concrete slab floor or underfloor
+# heating has a third major thermal node: the **slab** itself.  Slabs
+# have very large thermal capacitance (concrete is ~2.4 MJ/(m³·K), so a
+# 25 m² × 10 cm slab is ~60 MJ/K — comparable to or larger than the
+# whole rest of the envelope) and a separate heat-loss path to the
+# ground at a temperature that's largely decoupled from outdoor air.
+#
+# The slab node decouples cleanly from the wall block (different mass,
+# different boundary condition), so Phase 1 A2 introduces it as a
+# distinct third state per room.  Phase 1 B1 routes UFH heat sources
+# directly into the slab node (not the air), capturing the
+# characteristic 4–8 h "slab-then-air" lag of underfloor heating.
+
+#: Floor-type tokens.  Together with the floor-typology defaults
+#: below they drive the per-room slab parameter derivation in
+#: ``HouseModel``.
+FLOOR_TYPE_NONE = "none"                # no significant slab (e.g. suspended timber)
+FLOOR_TYPE_SLAB_ON_GRADE = "slab_on_grade"  # concrete slab in direct contact with ground
+FLOOR_TYPE_CONCRETE = "concrete"        # concrete floor over a conditioned/semi-conditioned space
+FLOOR_TYPE_UFH = "ufh"                  # underfloor heating — heat sources route into the slab
+DEFAULT_FLOOR_TYPE = FLOOR_TYPE_NONE
+
+#: Floor-type → default (c_slab_fraction, r_sa, r_sg) per room.
+#:
+#: c_slab_fraction is the share of the user's bundled ``thermal_mass``
+#: attributed to the slab.  For floors with no significant slab the
+#: share is a tiny non-zero value (the slab state stays effectively
+#: passive); for slab/UFH floors the share is large (50 % is typical
+#: for a concrete-floor room).  c_wall_fraction is derived as
+#: ``1 − c_air_fraction − c_slab_fraction``.
+#:
+#: r_sa is the air↔slab film resistance, dominated by the internal
+#: convective film coefficient (~7 W/(m²·K)) over the slab area.  For
+#: a 25 m² slab this is ~0.006 K/W; for "no slab" rooms a large value
+#: makes the slab effectively isolated from the air.
+#:
+#: r_sg is the slab↔ground conduction resistance through any insulation
+#: under the slab.  Default 0.05 K/W reflects a moderately-insulated
+#: slab-on-grade; uninsulated slabs sit closer to 0.10 K/W and well-
+#: insulated slabs are closer to 0.02 K/W.  Large value for non-slab
+#: rooms isolates the slab state from the ground.
+FLOOR_TYPE_DEFAULTS: dict = {
+    FLOOR_TYPE_NONE: {
+        "c_slab_fraction": 0.01,   # passive, decoupled
+        "r_sa": 1.0e6,             # effectively infinite — slab isolated from air
+        "r_sg": 1.0e6,             # effectively infinite — slab isolated from ground
+    },
+    FLOOR_TYPE_SLAB_ON_GRADE: {
+        "c_slab_fraction": 0.50,   # slab carries half the room's mass
+        "r_sa": 6.0e-3,            # large slab surface → low film resistance
+        "r_sg": 0.05,              # moderate slab insulation
+    },
+    FLOOR_TYPE_CONCRETE: {
+        "c_slab_fraction": 0.40,   # slab over a conditioned space — less ground coupling
+        "r_sa": 6.0e-3,
+        "r_sg": 0.20,              # weaker coupling to ground (above conditioned space)
+    },
+    FLOOR_TYPE_UFH: {
+        "c_slab_fraction": 0.50,   # UFH always implies a substantial slab
+        "r_sa": 6.0e-3,
+        "r_sg": 0.05,              # typical insulated UFH slab
+    },
+}
+
+DEFAULT_C_SLAB_FRACTION = FLOOR_TYPE_DEFAULTS[DEFAULT_FLOOR_TYPE]["c_slab_fraction"]
+DEFAULT_R_SA = FLOOR_TYPE_DEFAULTS[DEFAULT_FLOOR_TYPE]["r_sa"]
+DEFAULT_R_SG = FLOOR_TYPE_DEFAULTS[DEFAULT_FLOOR_TYPE]["r_sg"]
+
+# Ground-temperature model (Phase 1 A2).
+#
+# The slab node conducts to the ground at a temperature that's
+# decoupled from outdoor air on the timescale of weeks to months.  We
+# model T_g(t) as a sinusoidal annual cycle:
+#
+#     T_g(t) = T_g_mean + T_g_amp · cos(2π · (day_of_year − phase) / 365)
+#
+# with parameters defaulted for a typical temperate residential climate
+# (e.g. Northern Europe).  Users can override per-deployment via the
+# config (future config-flow follow-up); for v1 these defaults are
+# constants and the controller pushes T_g(now) into the model once per
+# coordinator cycle.
+
+#: Annual-mean ground temperature [°C] for the slab-depth band
+#: (~30 cm below grade).  Typical Northern European value; warmer
+#: climates have a higher mean.
+DEFAULT_GROUND_TEMP_MEAN = 10.0
+
+#: Annual amplitude of the ground-temperature cycle [°C].  Shallow
+#: slabs follow the outdoor swing damped to about 4–6 K; deeper soil
+#: converges to a near-constant value.  4 K is a sensible default for
+#: a 30 cm slab.
+DEFAULT_GROUND_TEMP_AMPLITUDE = 4.0
+
+#: Day of year at which ground temperature peaks.  Outdoor temperature
+#: typically peaks around day 200 (mid-July northern hemisphere); the
+#: slab lags by ~20 days due to thermal diffusion through the soil.
+DEFAULT_GROUND_TEMP_PEAK_DAY = 220
 
 #: Sherman–Grimsrud (LBL) infiltration coefficients.
 #:

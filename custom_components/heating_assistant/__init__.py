@@ -84,8 +84,12 @@ from .const import (
     CONF_LONGITUDE,
     CONF_MPC_ANALYTIC_DERIVATIVES,
     CONF_MPC_SOLVER,
+    CONF_C_SLAB_FRACTION,
+    CONF_FLOOR_TYPE,
     CONF_INFILTRATION_FRACTION,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_R_SA,
+    CONF_R_SG,
     CONF_WEATHER_ENTITY,
     CONF_R_EXTERNAL,
     CONF_R_VALUE,
@@ -137,9 +141,11 @@ from .const import (
     DEFAULT_FROST_PROTECTION,
     DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_HORIZON,
+    DEFAULT_FLOOR_TYPE,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_INFILTRATION_FRACTION,
+    FLOOR_TYPE_DEFAULTS,
     DEFAULT_MPC_SOLVER,
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
@@ -225,6 +231,20 @@ _ROOM_SCHEMA = vol.Schema(
             CONF_INFILTRATION_FRACTION,
             default=DEFAULT_INFILTRATION_FRACTION,
         ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+        # Slab / floor parameters (Phase 1 A2 + B1).
+        # ``floor_type`` is the typology switch; the three numeric
+        # fields below override the typology defaults from
+        # const.FLOOR_TYPE_DEFAULTS when explicitly set.  Leave them
+        # unset (or null) to use the typology defaults for the chosen
+        # floor type.
+        vol.Optional(CONF_FLOOR_TYPE, default=DEFAULT_FLOOR_TYPE): vol.In(
+            list(FLOOR_TYPE_DEFAULTS)
+        ),
+        vol.Optional(CONF_C_SLAB_FRACTION): vol.All(
+            vol.Coerce(float), vol.Range(min=0.0, max=1.0),
+        ),
+        vol.Optional(CONF_R_SA): vol.All(vol.Coerce(float), vol.Range(min=1e-9)),
+        vol.Optional(CONF_R_SG): vol.All(vol.Coerce(float), vol.Range(min=1e-9)),
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
         vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],

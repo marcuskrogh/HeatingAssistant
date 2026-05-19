@@ -55,7 +55,11 @@ from .const import (
     CONF_SOURCE_TYPE,
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
+    CONF_C_SLAB_FRACTION,
+    CONF_FLOOR_TYPE,
     CONF_INFILTRATION_FRACTION,
+    CONF_R_SA,
+    CONF_R_SG,
     CONF_R_VALUE,
     CONF_R_EXTERNAL,
     CONF_ROOM_NAME,
@@ -89,6 +93,7 @@ from .const import (
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
+    DEFAULT_FLOOR_TYPE,
     DEFAULT_INFILTRATION_FRACTION,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
@@ -105,6 +110,7 @@ from .const import (
 from .heat_sources import ElectricHeater, HeatPump, HeatSource
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import HeatingMPCController
+from .ground_temp import ground_temperature
 from .solar_model import room_solar_gains
 from .schedule import (
     EffectiveSetpoint,
@@ -169,6 +175,16 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                 infiltration_fraction=rc.get(
                     CONF_INFILTRATION_FRACTION, DEFAULT_INFILTRATION_FRACTION,
                 ),
+                # Phase 1 A2: optional floor / slab parameters.
+                # ``floor_type`` drives the typology defaults applied
+                # inside ``Room.__init__`` for the three slab numerics
+                # (``c_slab_fraction``, ``r_sa``, ``r_sg``); per-field
+                # overrides take precedence over the typology defaults
+                # when both are present.
+                floor_type=rc.get(CONF_FLOOR_TYPE, DEFAULT_FLOOR_TYPE),
+                c_slab_fraction=rc.get(CONF_C_SLAB_FRACTION),
+                r_sa=rc.get(CONF_R_SA),
+                r_sg=rc.get(CONF_R_SG),
             )
         )
     return HouseModel(rooms)
@@ -465,6 +481,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # ``None`` until the first coordinator cycle / when the weather
         # entity does not expose wind data.
         self.wind_speed: Optional[float] = None
+        # Latest ground temperature [°C] computed by the built-in
+        # sinusoidal model (Phase 1 A2 — see ``ground_temp.py``).  Used
+        # by the slab block of the per-room thermal model.  ``None``
+        # until the first cycle; the controller has its own annual-
+        # mean default until then.
+        self.ground_temp: Optional[float] = None
         self.heat_flows: Dict[str, Dict[str, float]] = {}
         self.predictions: list = []
         self.outdoor_forecast: List[float] = []
@@ -809,6 +831,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.wind_speed = wind_speed_now
             if hasattr(self.controller, "set_wind_speed"):
                 self.controller.set_wind_speed(wind_speed_now)
+
+            # 2d. Compute the current ground temperature from the
+            #     built-in sinusoidal model (Phase 1 A2).  No external
+            #     data needed — only the day of year.  Pushed to the
+            #     controller and held constant over the cycle, in line
+            #     with the wind-speed plumbing above.  Use
+            #     ``self.now_utc`` (stamped at the start of this update
+            #     cycle) rather than a fresh ``datetime.now`` so the
+            #     value stays consistent with every other "now" the
+            #     cycle uses.
+            ground_temp_now = ground_temperature(self.now_utc)
+            self.ground_temp = ground_temp_now
+            if hasattr(self.controller, "set_ground_temp"):
+                self.controller.set_ground_temp(ground_temp_now)
 
             # 3. Compute current solar gains for visualization
             now = self.now_utc

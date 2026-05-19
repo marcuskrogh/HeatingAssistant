@@ -1189,6 +1189,17 @@ class KalmanMLEstimator:
                     # in the current ML estimator — the fraction is a
                     # configured preset.
                     infiltration_fraction=r.infiltration_fraction,
+                    c_air_fraction=r.c_air_fraction,
+                    r_aw_fraction=r.r_aw_fraction,
+                    # Phase 1 A2: preserve the slab parameters so the
+                    # rebuilt model's slab block matches the original.
+                    # Like ``infiltration_fraction``, these are configured
+                    # typology presets — not identified by the v1 ML
+                    # estimator (Phase 4 follow-up).
+                    floor_type=r.floor_type,
+                    c_slab_fraction=r.c_slab_fraction,
+                    r_sa=r.r_sa,
+                    r_sg=r.r_sg,
                 ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(model, self._sources, self._dt)
@@ -1255,6 +1266,15 @@ class KalmanMLEstimator:
                     temperature=r.temperature,
                     setpoint=r.setpoint,
                     internal_gain=0.0,  # Applied via theta parameter in f()
+                    # Preserve Phase 1 C1 / A1 / A2 typology fields —
+                    # not identified in v1.
+                    infiltration_fraction=r.infiltration_fraction,
+                    c_air_fraction=r.c_air_fraction,
+                    r_aw_fraction=r.r_aw_fraction,
+                    floor_type=r.floor_type,
+                    c_slab_fraction=r.c_slab_fraction,
+                    r_sa=r.r_sa,
+                    r_sg=r.r_sg,
                 ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(
