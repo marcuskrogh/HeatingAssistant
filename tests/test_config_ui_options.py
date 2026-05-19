@@ -63,17 +63,22 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
     assert "IPOPT or SLSQP" in global_settings["mpc_solver"]
     assert global_settings["sigma_w"].startswith("SDE ")
     assert global_settings["sigma_b"].startswith("SDE ")
+    assert "window_open_debounce" in global_settings
+    assert "window_open_close_settle" in global_settings
+    assert "window_open_q_inflation" in global_settings
 
     add_room = strings["options"]["step"]["add_room"]["data"]
     room_detail = strings["options"]["step"]["room_detail"]["data"]
     manage_rooms_menu = strings["options"]["step"]["manage_rooms"]["menu_options"]
 
     assert "temp_sensors" in add_room
+    assert "window_sensors" in add_room
     assert "room_size" in add_room
     assert "building_age" in add_room
     assert "setpoint" not in add_room
 
     assert "temp_sensors" in room_detail
+    assert "window_sensors" in room_detail
     assert "room_size" in room_detail
     assert "building_age" in room_detail
     assert "setpoint" not in room_detail

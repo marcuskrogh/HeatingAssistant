@@ -43,6 +43,10 @@ from .const import (
     CONF_SIGMA_W,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_WINDOW_OPEN_CLOSE_SETTLE,
+    CONF_WINDOW_OPEN_DEBOUNCE,
+    CONF_WINDOW_OPEN_Q_INFLATION,
+    CONF_WINDOW_SENSORS,
     CONF_THERMAL_MASS,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -58,6 +62,9 @@ from .const import (
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
+    DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+    DEFAULT_WINDOW_OPEN_DEBOUNCE,
+    DEFAULT_WINDOW_OPEN_Q_INFLATION,
     DEFAULT_THERMAL_MASS,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
@@ -168,6 +175,7 @@ def _room_form_schema(
     *,
     name_default: str = "",
     sensors_default: str = "",
+    window_sensors_default: str = "",
     room_size_default: str = "medium",
     building_age_default: str = "1980_1999",
     envelope_tightness_default: str = DEFAULT_ENVELOPE_TIGHTNESS,
@@ -184,6 +192,7 @@ def _room_form_schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
             vol.Optional(CONF_TEMP_SENSORS, default=sensors_default): str,
+            vol.Optional(CONF_WINDOW_SENSORS, default=window_sensors_default): str,
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
@@ -313,6 +322,26 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     CONF_SIGMA_B,
                     default=current.get(CONF_SIGMA_B, DEFAULT_SIGMA_B),
                 ): vol.All(vol.Coerce(float), vol.Range(min=1e-8, max=1.0)),
+                vol.Optional(
+                    CONF_WINDOW_OPEN_DEBOUNCE,
+                    default=current.get(
+                        CONF_WINDOW_OPEN_DEBOUNCE, DEFAULT_WINDOW_OPEN_DEBOUNCE,
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                vol.Optional(
+                    CONF_WINDOW_OPEN_CLOSE_SETTLE,
+                    default=current.get(
+                        CONF_WINDOW_OPEN_CLOSE_SETTLE,
+                        DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+                    ),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                vol.Optional(
+                    CONF_WINDOW_OPEN_Q_INFLATION,
+                    default=current.get(
+                        CONF_WINDOW_OPEN_Q_INFLATION,
+                        DEFAULT_WINDOW_OPEN_Q_INFLATION,
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=1000.0)),
             }
         )
 
@@ -360,6 +389,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             sensors = _parse_entity_ids(user_input.get(CONF_TEMP_SENSORS, ""))
+            window_sensors = _parse_entity_ids(user_input.get(CONF_WINDOW_SENSORS, ""))
             tightness = user_input.get(
                 "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
             )
@@ -372,6 +402,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 infiltration_fraction=(
                     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
                 ),
+                window_sensors=window_sensors,
             )
             if err is None:
                 return await self.async_step_manage_rooms()
@@ -411,6 +442,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             sensors = _parse_entity_ids(user_input.get(CONF_TEMP_SENSORS, ""))
+            window_sensors = _parse_entity_ids(user_input.get(CONF_WINDOW_SENSORS, ""))
             tightness = user_input.get(
                 "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
             )
@@ -423,6 +455,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 infiltration_fraction=(
                     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
                 ),
+                window_sensors=window_sensors,
             )
             if err is None:
                 return await self.async_step_manage_rooms()
@@ -431,6 +464,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 data_schema=_room_form_schema(
                     name_default=user_input.get(CONF_ROOM_NAME, ""),
                     sensors_default=user_input.get(CONF_TEMP_SENSORS, ""),
+                    window_sensors_default=user_input.get(CONF_WINDOW_SENSORS, ""),
                     room_size_default=user_input.get("room_size", "medium"),
                     building_age_default=user_input.get("building_age", "1980_1999"),
                     envelope_tightness_default=tightness,
@@ -441,6 +475,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         room_sensors = room.get(CONF_TEMP_SENSORS, [])
         if not room_sensors and room.get(CONF_TEMP_SENSOR):
             room_sensors = [room[CONF_TEMP_SENSOR]]
+        room_window_sensors = room.get(CONF_WINDOW_SENSORS, [])
         infiltration_fraction = float(room.get(
             CONF_INFILTRATION_FRACTION,
             ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[DEFAULT_ENVELOPE_TIGHTNESS],
@@ -448,6 +483,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         schema = _room_form_schema(
             name_default=room.get(CONF_ROOM_NAME, ""),
             sensors_default=_format_entity_ids(room_sensors),
+            window_sensors_default=_format_entity_ids(room_window_sensors),
             room_size_default=_nearest_choice(
                 float(room.get(CONF_THERMAL_MASS, DEFAULT_THERMAL_MASS)),
                 ROOM_SIZE_TO_THERMAL_MASS,

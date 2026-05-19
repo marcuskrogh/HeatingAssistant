@@ -773,6 +773,14 @@ compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
    Return {source_name: fraction}
 ```
 
+**Open-window override (Phase 3 W1).** If a room has configured
+`window_sensors`, the coordinator runs a per-room state machine
+(`closed → pending_open → open → pending_closed → closed`). While the room is
+in `open`, every heat source assigned to that room is clamped to `u = 0` at
+dispatch, and the EKF process-noise covariance for that room is inflated by
+`window_open_q_inflation` so the estimator tracks rapid cooling instead of
+lagging.
+
 ---
 
 ## 5. Home Assistant Integration
@@ -789,6 +797,7 @@ For each room declared in `configuration.yaml` the integration creates:
 | `sensor.heating_assistant_<room_name>_temperature_measured` | sensor | Averaged room temperature measurement in °C | – |
 | `sensor.heating_assistant_<room_name>_temperature_filtered` | sensor | Kalman-filtered state estimate x̂⁺ in °C | thermal_mass, r_external |
 | `sensor.heating_assistant_<room_name>_setpoint` | sensor | Active setpoint in °C | forecast (timestamped, per-step setpoint over the MPC horizon) |
+| `sensor.heating_assistant_<room_name>_window_state` | sensor | Open-window state machine state (`closed` / `pending_open` / `open` / `pending_closed`) | – |
 | `sensor.heating_assistant_<room_name>_constraint_upper` | sensor | Soft-constraint upper bound (setpoint + offset) in °C | forecast (timestamped, per-step constraint_upper over the MPC horizon) |
 | `sensor.heating_assistant_<room_name>_constraint_lower` | sensor | Soft-constraint lower bound (setpoint − offset) in °C | forecast (timestamped, per-step constraint_lower over the MPC horizon) |
 | `sensor.heating_assistant_<room_name>_heating_power_measured` | sensor | Total active heating power in W | Per-source breakdown by source name |
@@ -1246,6 +1255,9 @@ heating_assistant:
 | `sigma_w` | float | No | `0.1` | EKF process-noise standard deviation [K/√s]. Increase when the thermal model is too “stiff” and does not adapt quickly enough to disturbances. UI/YAML range: `1e-6`–`10.0`. |
 | `sigma_v` | float | No | `0.5` | EKF measurement-noise standard deviation [K]. Increase when room sensors are noisy/spiky; decrease when sensors are stable and you want tighter measurement tracking. UI/YAML range: `1e-6`–`10.0`. |
 | `sigma_b` | float | No | `0.002` | EKF offset-state process-noise standard deviation [K/√s] for the integrated model-mismatch state. Increase to let the offset term adapt faster to persistent bias. UI/YAML range: `1e-8`–`1.0`. |
+| `window_open_debounce` | int | No | `60` | Time [s] a configured room window/door sensor must stay `on` before the room enters window-open override. |
+| `window_open_close_settle` | int | No | `30` | Time [s] all configured room window/door sensors must stay `off` before leaving window-open override. |
+| `window_open_q_inflation` | float | No | `10.0` | Covariance multiplier applied to EKF process noise for rooms currently in window-open override. Must be ≥ 1.0. |
 | `rooms` | list | No | `[]` | List of room definitions (see below). |
 | `heat_sources` | list | No | `[]` | List of heat source definitions (see below). |
 
@@ -1278,6 +1290,7 @@ rooms:
 | `setpoint` | float | No | `21.0` | Initial desired temperature [°C].  Can be overridden at runtime by the `climate.*` entity. |
 | `temp_sensor` | string | No | — | Entity ID of a single HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode.  Cannot be combined with `temp_sensors`. |
 | `temp_sensors` | list of strings | No | — | List of HA sensor entity IDs for the room.  The coordinator reads all of them at each update cycle and uses their **arithmetic mean** as the measured room temperature.  Useful when the room is large or has significant temperature gradients.  Cannot be combined with `temp_sensor`. |
+| `window_sensors` | list of strings | No | `[]` | Optional list of `binary_sensor.*` entity IDs (windows/doors). The room enters override `open` when any listed sensor stays `on` for `window_open_debounce`; while open, room heat-source commands are clamped to zero and the EKF process-noise covariance is inflated. |
 | `connections` | list | No | `[]` | List of thermal connections to adjacent rooms. |
 | `windows` | list | No | `[]` | List of window definitions for solar gain calculation. |
 | `schedule` | list | No | `[]` | Optional comfort schedule — a list of time-of-day periods that override the room's setpoint or switch its heat sources off (sleep / setback / away).  See [Section 10.6](#106-comfort-schedule-block-schedule). |

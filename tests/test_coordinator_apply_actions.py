@@ -95,6 +95,8 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
     # Initialise the Schmitt-trigger state dict (required by _apply_actions).
     # Caller may pre-seed individual sources to simulate a prior cycle.
     coord._cooling_active = dict(initial_cooling_state or {})
+    # Phase 3 W1 defaults: no active window override unless tests opt in.
+    coord._window_state = {name: "closed" for name in room_setpoints}
 
     await coord._apply_actions(outdoor_temp=5.0)
     return hass, coord

@@ -170,6 +170,28 @@ class TestHouseThermalSDE:
         expected[6:, 6:] = 0.002 * np.eye(2)
         np.testing.assert_array_almost_equal(sig, expected)
 
+    def test_sigma_applies_per_room_process_noise_covariance_scales(self):
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0, sigma_w=0.1)
+        sde.set_room_process_noise_covariance_scales(
+            {"living_room": 9.0, "bedroom": 1.0}
+        )
+        sig = sde.sigma(
+            _aug_state([18.0, 17.0]),
+            np.zeros(sde.nu),
+            sde.disturbance_vector(5.0, {}),
+            np.array([]),
+            0.0,
+        )
+        diag = np.diag(sig)
+        # State order: [T_a(2), T_w(2), T_s(2), b(2)].
+        assert diag[0] == pytest.approx(0.3)  # 0.1 * sqrt(9)
+        assert diag[1] == pytest.approx(0.1)
+        assert diag[2] == pytest.approx(0.3)
+        assert diag[3] == pytest.approx(0.1)
+        assert diag[4] == pytest.approx(0.3)
+        assert diag[5] == pytest.approx(0.1)
+
     def test_controlled_output_equals_state(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)

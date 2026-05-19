@@ -184,6 +184,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         n = len(self._room_list)
         self._n_rooms = n
         self._offset_state: np.ndarray = np.zeros(n, dtype=float)
+        # Per-room covariance scaling for process noise (Phase 3 W1).
+        # Values are covariance multipliers; 1.0 means no inflation.
+        self._room_q_scales: np.ndarray = np.ones(n, dtype=float)
 
         # 2R2C + slab state layout: ``x_phys = [T_a (n), T_w (n), T_s (n)]``
         # with ``nx_phys = 3n``.  When ``augment_offsets=True`` an
@@ -365,6 +368,27 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # Keep the inner HouseModel in sync so the standalone step()
         # path also sees the latest value (used by diagnostics).
         self._model.set_ground_temp(self._ground_temp)
+
+    def set_room_process_noise_covariance_scales(
+        self, scales_by_room: Dict[str, float],
+    ) -> None:
+        """Update per-room process-noise covariance multipliers.
+
+        ``scales_by_room[room]`` scales Q for that room's physical states
+        (air/wall/slab). Values <= 0 are ignored.
+        """
+        scales = np.ones(self._n_rooms, dtype=float)
+        for room_name, value in scales_by_room.items():
+            if room_name not in self._room_idx:
+                continue
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(val) or val <= 0.0:
+                continue
+            scales[self._room_idx[room_name]] = val
+        self._room_q_scales = scales
 
     def _infiltration_delta_ua(
         self, outdoor_temp: float, room_temps: np.ndarray,
@@ -580,10 +604,24 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """
         n = self._n_rooms
         m = self._n_filtered
+        std_scales = np.sqrt(np.maximum(self._room_q_scales, 0.0))
+        physical_std = np.concatenate([std_scales, std_scales, std_scales])
         if not self._augment_offsets:
-            return self._sigma_w * np.eye(3 * n + m)
+            diag = np.concatenate(
+                [
+                    self._sigma_w * physical_std,
+                    self._sigma_w * np.ones(m, dtype=float),
+                ]
+            )
+            return np.diag(diag)
         sig = np.zeros((self.nx, self.nw))
-        sig[:3 * n + m, :3 * n + m] = self._sigma_w * np.eye(3 * n + m)
+        diag_non_offset = np.concatenate(
+            [
+                self._sigma_w * physical_std,
+                self._sigma_w * np.ones(m, dtype=float),
+            ]
+        )
+        sig[:3 * n + m, :3 * n + m] = np.diag(diag_non_offset)
         sig[3 * n + m:, 3 * n + m:] = self._sigma_b * np.eye(n)
         return sig
 
@@ -1298,6 +1336,13 @@ class HeatingMPCController:
         """
         self._system.set_wind_speed(wind_speed)
         self._control_system.set_wind_speed(wind_speed)
+
+    def set_room_process_noise_covariance_scales(
+        self, scales_by_room: Dict[str, float],
+    ) -> None:
+        """Apply per-room EKF/OCP process-noise covariance multipliers."""
+        self._system.set_room_process_noise_covariance_scales(scales_by_room)
+        self._control_system.set_room_process_noise_covariance_scales(scales_by_room)
 
     @property
     def last_innovation(self) -> Optional[List[float]]:

@@ -76,6 +76,7 @@ async def async_setup_entry(
         entities.append(TemperatureOffsetSensor(coordinator, room_name))
         entities.append(TemperatureForecastSensor(coordinator, room_name))
         entities.append(SetpointSensor(coordinator, room_name))
+        entities.append(WindowStateSensor(coordinator, room_name))
         entities.append(ConstraintUpperSensor(coordinator, room_name))
         entities.append(ConstraintLowerSensor(coordinator, room_name))
         entities.append(HeatingPowerMeasuredSensor(coordinator, room_name))
@@ -276,6 +277,31 @@ class SetpointSensor(CoordinatorEntity, SensorEntity):
             field="setpoint",
             value=_setpoint_value,
         )
+
+
+class WindowStateSensor(CoordinatorEntity, SensorEntity):
+    """Per-room open-window state-machine state (Phase 3 W1)."""
+
+    _attr_icon = "mdi:window-open-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Window State"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_window_state"
+
+    @property
+    def native_value(self) -> str:
+        state = getattr(self._coordinator, "get_window_state", None)
+        if callable(state):
+            return state(self._room_name)
+        return "closed"
 
 
 class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):

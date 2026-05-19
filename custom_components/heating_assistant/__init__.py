@@ -135,7 +135,11 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
+    CONF_WINDOW_OPEN_CLOSE_SETTLE,
+    CONF_WINDOW_OPEN_DEBOUNCE,
+    CONF_WINDOW_OPEN_Q_INFLATION,
     CONF_WINDOW_ORIENTATION,
+    CONF_WINDOW_SENSORS,
     CONF_WINDOW_TILT,
     DEFAULT_COOLING_COP,
     DEFAULT_COOLING_EFFICIENCY,
@@ -170,6 +174,9 @@ from .const import (
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
+    DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+    DEFAULT_WINDOW_OPEN_DEBOUNCE,
+    DEFAULT_WINDOW_OPEN_Q_INFLATION,
     DOMAIN,
     HISTORY_BUFFER_SIZE,
     SCHEDULE_MODE_COMFORT,
@@ -280,6 +287,7 @@ _ROOM_SCHEMA = vol.Schema(
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
         vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],
+        vol.Optional(CONF_WINDOW_SENSORS, default=[]): [str],
         vol.Optional(CONF_CONNECTIONS, default=[]): [_CONNECTION_SCHEMA],
         vol.Optional(CONF_WINDOWS, default=[]): [_WINDOW_SCHEMA],
         vol.Optional(CONF_SCHEDULE, default=[]): [_SCHEDULE_PERIOD_SCHEMA],
@@ -367,6 +375,18 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_SIGMA_B, default=DEFAULT_SIGMA_B): vol.All(
                     vol.Coerce(float), vol.Range(min=1e-8, max=1.0)
                 ),
+                vol.Optional(
+                    CONF_WINDOW_OPEN_DEBOUNCE,
+                    default=DEFAULT_WINDOW_OPEN_DEBOUNCE,
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                vol.Optional(
+                    CONF_WINDOW_OPEN_CLOSE_SETTLE,
+                    default=DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                vol.Optional(
+                    CONF_WINDOW_OPEN_Q_INFLATION,
+                    default=DEFAULT_WINDOW_OPEN_Q_INFLATION,
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=1000.0)),
             }
         )
     },

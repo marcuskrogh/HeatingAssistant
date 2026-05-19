@@ -34,6 +34,7 @@ CONF_SETPOINT = "setpoint"             # °C
 CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_TEMP_SENSOR = "temp_sensor"       # HA entity_id for measured room temp
 CONF_TEMP_SENSORS = "temp_sensors"     # list of HA entity_ids for measured room temp
+CONF_WINDOW_SENSORS = "window_sensors"  # list of HA binary_sensor entity_ids for open-window override (Phase 3 W1)
 
 # Comfort schedule (time-of-day setpoint / setback) keys
 CONF_SCHEDULE = "schedule"                       # list of schedule periods on a room
@@ -369,6 +370,9 @@ CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # enable analytical-
 CONF_SIGMA_W = "sigma_w"                          # EKF/process model process-noise std dev [K/√s]
 CONF_SIGMA_V = "sigma_v"                          # EKF measurement-noise std dev [K]
 CONF_SIGMA_B = "sigma_b"                          # EKF offset-state process-noise std dev [K/√s]
+CONF_WINDOW_OPEN_DEBOUNCE = "window_open_debounce"            # seconds sensor must stay on before entering open-state
+CONF_WINDOW_OPEN_CLOSE_SETTLE = "window_open_close_settle"    # seconds sensors must stay off before leaving open-state
+CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multiplier for EKF process noise while room is open
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -395,6 +399,9 @@ DEFAULT_MPC_ANALYTIC_DERIVATIVES = True
 DEFAULT_SIGMA_W = 0.1
 DEFAULT_SIGMA_V = 0.5
 DEFAULT_SIGMA_B = 0.002
+DEFAULT_WINDOW_OPEN_DEBOUNCE = 60
+DEFAULT_WINDOW_OPEN_CLOSE_SETTLE = 30
+DEFAULT_WINDOW_OPEN_Q_INFLATION = 10.0
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
 

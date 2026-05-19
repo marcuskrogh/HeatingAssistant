@@ -22,6 +22,7 @@ from custom_components.heating_assistant.sensor import (
     TemperatureFilteredSensor,
     TemperatureMeasuredSensor,
     TemperatureOffsetSensor,
+    WindowStateSensor,
 )
 
 
@@ -98,6 +99,13 @@ def test_constraint_sensors_unique_ids():
     lower = ConstraintLowerSensor(coord, "living_room")
     assert upper._attr_unique_id == "heating_assistant_living_room_constraint_upper"
     assert lower._attr_unique_id == "heating_assistant_living_room_constraint_lower"
+
+
+def test_window_state_sensor_unique_id():
+    coord = _make_coordinator()
+    coord.get_window_state = lambda _room: "closed"
+    sensor = WindowStateSensor(coord, "living_room")
+    assert sensor._attr_unique_id == "heating_assistant_living_room_window_state"
 
 
 def test_measured_aliases_match_pattern():
@@ -192,6 +200,13 @@ def test_constraint_sensors_return_none_without_controller():
     lower = ConstraintLowerSensor(coord, "living_room")
     assert upper.native_value is None
     assert lower.native_value is None
+
+
+def test_window_state_sensor_returns_state_from_coordinator():
+    coord = _make_coordinator()
+    coord.get_window_state = lambda _room: "pending_open"
+    sensor = WindowStateSensor(coord, "living_room")
+    assert sensor.native_value == "pending_open"
 
 
 # ── MPC-failure visibility ──────────────────────────────────────────────
