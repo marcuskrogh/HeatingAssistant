@@ -25,6 +25,7 @@ class HeatSource(ABC):
         max_power: float,
         heater_entity: Optional[str] = None,
         power_scale: float = 1.0,
+        emitter_time_constant: float = 0.0,
     ) -> None:
         self.name = name
         self.room = room                     # name of the room this source heats
@@ -33,6 +34,22 @@ class HeatSource(ABC):
         # Multiplicative correction on actual delivered thermal power.
         # Identified jointly with thermal-mass and resistance parameters.
         self.power_scale = power_scale
+        # Phase 1 B2 (pragmatic emitter filter): first-order time
+        # constant [s] for the commanded-fraction → delivered-fraction
+        # filter.  Captures TRV / valve / water-loop / metal-mass lag
+        # without requiring supply-temperature telemetry.
+        #
+        # * 0 (default for electric resistive heaters) → no filter,
+        #   commanded fraction reaches the thermal node instantly.
+        # * 60 s (typical heat pump / fan-coil indoor unit) → fast
+        #   filter capturing fan-spin-up and refrigerant-loop response.
+        # * 600 s (~10 min, typical hydronic radiator) → slow filter
+        #   capturing water-loop and metal-mass dynamics.
+        #
+        # Values > 0 add one state variable per source to the EKF /
+        # OCP, so the controller can anticipate the lag rather than
+        # treating commanded power as instantaneous.
+        self.emitter_time_constant: float = float(emitter_time_constant)
         self._current_power: float = 0.0    # W
 
     # ------------------------------------------------------------------
@@ -104,8 +121,17 @@ class ElectricHeater(HeatSource):
         max_temp_offset: float = 5.0,
         heater_entity: Optional[str] = None,
         power_scale: float = 1.0,
+        emitter_time_constant: float = 0.0,
     ) -> None:
-        super().__init__(name, room, max_power, heater_entity, power_scale)
+        # Default τ_em = 0: electric resistive heaters have no thermal
+        # mass to speak of (a resistor goes from cold to hot in
+        # seconds), so the commanded fraction reaches the air node
+        # essentially instantly.  Pre-A2 / pre-B2 behaviour is
+        # preserved exactly when τ_em stays at 0.
+        super().__init__(
+            name, room, max_power, heater_entity, power_scale,
+            emitter_time_constant=emitter_time_constant,
+        )
         if not 0.0 < efficiency <= 1.0:
             raise ValueError(f"efficiency must be in (0, 1]; got {efficiency}")
         if max_temp_offset < 0.0:
@@ -198,8 +224,19 @@ class HeatPump(HeatSource):
         cooling_efficiency: float = 1.0,
         heating_efficiency: float = 1.0,
         power_scale: float = 1.0,
+        emitter_time_constant: float = 0.0,
     ) -> None:
-        super().__init__(name, room, max_power, heater_entity, power_scale)
+        # Phase 1 B2 default τ_em = 0 at the class level — the
+        # commanded fraction reaches the thermal node instantly.
+        # Typology-based defaults (heat-pump-internal-unit ≈ 60 s,
+        # hydronic-radiator ≈ 600 s) are applied in
+        # ``coordinator.build_heat_sources`` when the user hasn't
+        # explicitly set ``emitter_time_constant`` per-source, so
+        # direct test constructions stay backward-compatible.
+        super().__init__(
+            name, room, max_power, heater_entity, power_scale,
+            emitter_time_constant=emitter_time_constant,
+        )
         self.cop_rated = cop_rated
         self.cop_temp_ref = cop_temp_ref
         self.min_outdoor_temp = min_outdoor_temp

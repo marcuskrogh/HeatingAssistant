@@ -121,6 +121,7 @@ from .const import (
     CONF_SOURCE_NAME,
     CONF_SOURCE_ROOM,
     CONF_SOURCE_TURN_OFF_DEADBAND,
+    CONF_SOURCE_EMITTER_TIME_CONSTANT,
     CONF_SOURCE_TYPE,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
@@ -275,6 +276,14 @@ _SOURCE_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_SOURCE_COOLING_EFFICIENCY, default=DEFAULT_COOLING_EFFICIENCY): vol.All(
             vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+        ),
+        # Phase 1 B2 per-source emitter time constant.  When omitted the
+        # coordinator picks the typology default from
+        # ``SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU`` (electric → 0 s;
+        # heat-pump → 60 s).  Users on hydronic radiators driven by
+        # either source can override with τ ≈ 600 s here.
+        vol.Optional(CONF_SOURCE_EMITTER_TIME_CONSTANT): vol.All(
+            vol.Coerce(float), vol.Range(min=0.0),
         ),
         vol.Optional(CONF_SOURCE_HEATING_EFFICIENCY, default=DEFAULT_HEATING_EFFICIENCY): vol.All(
             vol.Coerce(float), vol.Range(min=0.0, max=1.0)

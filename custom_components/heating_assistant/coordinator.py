@@ -52,6 +52,7 @@ from .const import (
     CONF_SOURCE_TURN_OFF_DEADBAND,
     CONF_SOURCE_NAME,
     CONF_SOURCE_ROOM,
+    CONF_SOURCE_EMITTER_TIME_CONSTANT,
     CONF_SOURCE_TYPE,
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
@@ -105,6 +106,7 @@ from .const import (
     HISTORY_BUFFER_SIZE,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
+    SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
     UPDATE_INTERVAL,
 )
 from .heat_sources import ElectricHeater, HeatPump, HeatSource
@@ -203,6 +205,15 @@ def build_heat_sources(
         room = sc[CONF_SOURCE_ROOM]
         max_power = sc[CONF_SOURCE_MAX_POWER]
         entity = sc.get(CONF_SOURCE_HEATER_ENTITY)
+        # Phase 1 B2 emitter-filter time constant.  Per-source override
+        # via ``emitter_time_constant``; otherwise the typology default
+        # from ``SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU`` (electric → 0;
+        # heat-pump → 60 s).  Users on hydronic radiators can override
+        # with τ ≈ 600 s.
+        tau_em = float(sc.get(
+            CONF_SOURCE_EMITTER_TIME_CONSTANT,
+            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU.get(src_type, 0.0),
+        ))
 
         if src_type == SOURCE_TYPE_ELECTRIC:
             sources.append(
@@ -213,6 +224,7 @@ def build_heat_sources(
                     efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_EFFICIENCY),
                     max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
                     heater_entity=entity,
+                    emitter_time_constant=tau_em,
                 )
             )
         elif src_type == SOURCE_TYPE_HEAT_PUMP:
@@ -230,6 +242,7 @@ def build_heat_sources(
                     cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
                     heating_efficiency=sc.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY),
                     heater_entity=entity,
+                    emitter_time_constant=tau_em,
                 )
             )
         else:
