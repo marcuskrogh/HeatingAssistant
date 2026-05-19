@@ -1200,6 +1200,14 @@ class KalmanMLEstimator:
                     c_slab_fraction=r.c_slab_fraction,
                     r_sa=r.r_sa,
                     r_sg=r.r_sg,
+                    # Phase 1 C3 / C4 / C5 — finishing-pass envelope
+                    # corrections.  Carried as configured typology
+                    # presets (not identified in the v1 estimator; the
+                    # Phase 4 system-ID rework will revisit this).
+                    sky_radiative_ua=r.sky_radiative_ua,
+                    facade_absorptance=r.facade_absorptance,
+                    facade_solar_share=r.facade_solar_share,
+                    thermal_bridge_psi_l=r.thermal_bridge_psi_l,
                 ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(model, self._sources, self._dt)
@@ -1275,6 +1283,14 @@ class KalmanMLEstimator:
                     c_slab_fraction=r.c_slab_fraction,
                     r_sa=r.r_sa,
                     r_sg=r.r_sg,
+                    # Phase 1 C3 / C4 / C5 — finishing-pass envelope
+                    # corrections.  Carried as configured typology
+                    # presets (not identified in the v1 estimator; the
+                    # Phase 4 system-ID rework will revisit this).
+                    sky_radiative_ua=r.sky_radiative_ua,
+                    facade_absorptance=r.facade_absorptance,
+                    facade_solar_share=r.facade_solar_share,
+                    thermal_bridge_psi_l=r.thermal_bridge_psi_l,
                 ))
             model = HouseModel(new_rooms)
             return HouseThermalSystem(

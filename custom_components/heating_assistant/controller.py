@@ -204,7 +204,35 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._G_d: np.ndarray = np.zeros((3 * n, 1 + n))
         self._G_d[:, 0] = model._B_ext / self._C_cap
         for i in range(n):
+            # Air-block coupling: full window-solar gain lands on the air.
             self._G_d[i, 1 + i] = 1.0 / self._C_cap[i]
+            # Phase 1 C4 sol-air share: a fraction
+            # ``facade_solar_share × facade_absorptance`` of the room's
+            # window-derived solar gain ALSO lands on the wall block
+            # (capturing the opaque-facade sol-air effect).  Defaults
+            # to 0; opt-in per room.  Air-block share is unchanged so
+            # the conservation of total solar energy is broken
+            # intentionally — Phase 5 / 6 will introduce a proper
+            # per-surface geometry pipeline that separates window and
+            # opaque-wall irradiance cleanly.
+            facade_share = float(
+                model.rooms[self._room_list[i]].facade_solar_share
+            )
+            facade_alpha = float(
+                model.rooms[self._room_list[i]].facade_absorptance
+            )
+            if facade_share > 0.0 and facade_alpha > 0.0:
+                self._G_d[n + i, 1 + i] = (
+                    facade_share * facade_alpha / self._C_cap[n + i]
+                )
+
+        # Phase 1 C3 sky cooling-drift bias.  Mirrors the
+        # HouseModel-side constant (–sky_ua · ΔT_sky / C_wall per
+        # room, zero on air / slab / offset blocks).  Added directly
+        # to the drift in ``f`` so the EKF/OCP see the clear-night
+        # cooling effect; it doesn't enter ``dfdx`` because it's a
+        # constant w.r.t. state.
+        self._sky_offset_phys = np.array(model._B_sky_offset, dtype=float)
 
         # Ground-temperature input vector ``B_g / C`` (Phase 1 A2).
         # ``_B_ground`` has support only on the slab block of the
@@ -494,13 +522,16 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             target = (2 * n + i) if self._is_ufh[i] else i
             heat_contrib_phys[target] += p_w / self._C_cap[target]
 
-        # Physical 2R2C+slab drift on [T_a, T_w, T_s].
+        # Physical 2R2C+slab drift on [T_a, T_w, T_s].  Phase 1 C3
+        # adds the constant sky cooling-drift bias on the wall block
+        # via ``_sky_offset_phys`` (zero on air / slab when sky_ua = 0).
         T_phys = x[:3 * n]
         dT_phys = (
             self._F @ T_phys
             + heat_contrib_phys
             + self._G_d @ d_augmented
             + self._B_ground_scaled * self._ground_temp
+            + self._sky_offset_phys
         )
 
         # Sherman–Grimsrud wind-driven infiltration overlay — applies on

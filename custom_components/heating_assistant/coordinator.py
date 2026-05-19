@@ -57,6 +57,9 @@ from .const import (
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
     CONF_C_SLAB_FRACTION,
+    CONF_FACADE_ABSORPTANCE,
+    CONF_FACADE_COLOUR,
+    CONF_FACADE_SOLAR_SHARE,
     CONF_FLOOR_TYPE,
     CONF_INFILTRATION_FRACTION,
     CONF_R_SA,
@@ -65,6 +68,8 @@ from .const import (
     CONF_R_EXTERNAL,
     CONF_ROOM_NAME,
     CONF_SCHEDULE,
+    CONF_SKY_RADIATIVE_UA,
+    CONF_THERMAL_BRIDGE_PSI_L,
     CONF_SETPOINT,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
@@ -94,8 +99,14 @@ from .const import (
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
+    DEFAULT_FACADE_ABSORPTANCE,
+    DEFAULT_FACADE_COLOUR,
+    DEFAULT_FACADE_SOLAR_SHARE,
     DEFAULT_FLOOR_TYPE,
     DEFAULT_INFILTRATION_FRACTION,
+    DEFAULT_SKY_RADIATIVE_UA,
+    DEFAULT_THERMAL_BRIDGE_PSI_L,
+    FACADE_COLOUR_TO_ABSORPTANCE,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
     DEFAULT_THERMAL_MASS,
@@ -187,6 +198,28 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                 c_slab_fraction=rc.get(CONF_C_SLAB_FRACTION),
                 r_sa=rc.get(CONF_R_SA),
                 r_sg=rc.get(CONF_R_SG),
+                # Phase 1 C3 / C4 / C5 — finishing-pass envelope
+                # corrections.  ``facade_colour`` resolves into
+                # ``facade_absorptance`` via the colour preset map;
+                # an explicit ``facade_absorptance`` always wins.
+                # All three default off (zero) so existing installs
+                # see no behaviour change.
+                sky_radiative_ua=rc.get(
+                    CONF_SKY_RADIATIVE_UA, DEFAULT_SKY_RADIATIVE_UA,
+                ),
+                facade_absorptance=rc.get(
+                    CONF_FACADE_ABSORPTANCE,
+                    FACADE_COLOUR_TO_ABSORPTANCE.get(
+                        rc.get(CONF_FACADE_COLOUR, DEFAULT_FACADE_COLOUR),
+                        DEFAULT_FACADE_ABSORPTANCE,
+                    ),
+                ),
+                facade_solar_share=rc.get(
+                    CONF_FACADE_SOLAR_SHARE, DEFAULT_FACADE_SOLAR_SHARE,
+                ),
+                thermal_bridge_psi_l=rc.get(
+                    CONF_THERMAL_BRIDGE_PSI_L, DEFAULT_THERMAL_BRIDGE_PSI_L,
+                ),
             )
         )
     return HouseModel(rooms)
