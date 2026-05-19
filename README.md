@@ -369,7 +369,12 @@ This calibration guarantees that **at the typical reference conditions** ($v_w =
 | $\rho c_p$ | J/(m³·K) | Volumetric heat capacity of air, ≈ 1200. |
 | $C_s$, $C_w$ | (m/s)²/K, – | Sherman–Grimsrud stack and wind coefficients (single-storey residential defaults: $1.45 \times 10^{-4}$ and $3.19 \times 10^{-4}$). |
 | $Q_{\text{heater},i}^\text{air}$, $Q_{\text{heater},i}^\text{slab}$ | W | Heat-source output partitioned by `floor_type` (UFH rooms route to slab, others to air). |
-| $Q_{\text{solar},i}$, $Q_{\text{int},i}$ | W | Solar gain through windows and identified internal gain — both on the air node. |
+| $Q_{\text{solar},i}$, $Q_{\text{int},i}$ | W | Solar gain through windows and identified internal gain — both on the air node.  A fraction $\alpha_{f,i} \cdot \sigma_{f,i}$ of $Q_{\text{solar},i}$ is *also* routed to the wall node (opaque-facade sol-air contribution; §3.4). |
+| $UA_{\text{sky},i}$ | W/K | Long-wave radiative conductance from the envelope to the night sky (`sky_radiative_ua`).  Acts in parallel with $1/R_{we,i}$ and pulls the wall toward the effective sky temperature $T_{\text{outdoor}} - \Delta T_\text{sky}$.  Default 0. |
+| $\Delta T_\text{sky}$ | K | Sky-temperature depression below outdoor air (`DEFAULT_DELTA_T_SKY`).  Constant 6 K for the Phase 1 implementation; Phase 5 promotes it to a cloud-cover-driven term. |
+| $\alpha_{f,i}$ | – | Opaque-facade short-wave absorptance (`facade_absorptance`).  Resolved from a typology preset via `facade_colour` (`light` = 0.30, `medium` = 0.55, `dark` = 0.85). |
+| $\sigma_{f,i}$ | – | Share of the room's window-derived solar gain that lands on the opaque facade (`facade_solar_share`) ∈ [0, 1].  Default 0. |
+| $\psi L_i$ | W/K | Aggregated linear-thermal-bridge correction (`thermal_bridge_psi_l`).  Adds directly to the wall→outdoor conductance.  Default 0; identified from data with a strong prior centred on zero. |
 
 **Floor typology.**  `floor_type` selects sensible defaults for $f_{s,i}$, $R_{sa,i}$, $R_{sg,i}$ and the heat-source routing:
 
@@ -502,6 +507,26 @@ $$I_{\text{window}} = I_{\text{direct}} + I_{\text{diffuse}} \quad [\text{W/m}^2
 $$Q_{\text{solar}} = \text{SHGC} \cdot \text{area} \cdot I_{\text{window}} \quad [\text{W}]$$
 
 The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear double glazing).  This constant is defined in `solar_model.py` as `DEFAULT_SHGC` and can be changed at the module level if your windows have a different specification.
+
+#### Step 7 — Sol-air split onto the opaque facade (Phase 1 C4)
+
+The window-derived $Q_\text{solar}$ above is the *glazed* fraction; opaque facade absorptance (dark cladding, sun-warmed brickwork) is captured pragmatically by routing a configurable share of the *same* solar gain onto the wall node as well:
+
+$$Q_{\text{solar},i}^\text{air}  = Q_{\text{solar},i}$$
+
+$$Q_{\text{solar},i}^\text{wall} = \alpha_{f,i} \cdot \sigma_{f,i} \cdot Q_{\text{solar},i}$$
+
+where $\alpha_{f,i}$ is the opaque-facade short-wave absorptance (typology preset: `light` 0.30, `medium` 0.55, `dark` 0.85; or set explicitly via `facade_absorptance`) and $\sigma_{f,i}$ is `facade_solar_share` ∈ [0, 1].  Both default to **off** ($\sigma_{f,i} = 0$) so existing installs see no behaviour change.
+
+A full per-surface sol-air geometry model (independent orientation, area, $h_e$ per facade) is the Phase 5 / 6 follow-up.  In the meantime this share-based routing captures the dominant effect — south-facing-facade midday wall warming — with a single per-room knob.
+
+#### Step 8 — Long-wave radiation to sky (Phase 1 C3)
+
+A clear night sky behaves as a $\sim$ 6 K cooler radiator than the ambient air.  An additional radiative conductance $UA_{\text{sky},i}$ (`sky_radiative_ua`) is added in parallel with the wall→outdoor conductance, with the wall sinking toward the *effective sky temperature* $T_\text{outdoor} - \Delta T_\text{sky}$:
+
+$$\dot{T}_{w,i}\big|_\text{sky} = -\frac{UA_{\text{sky},i}}{C_{w,i}} \cdot \big(T_{w,i} - (T_\text{outdoor} - \Delta T_\text{sky})\big)$$
+
+This is implemented as a conductance bump on the wall block plus a constant cooling-drift bias $-UA_{\text{sky},i} \cdot \Delta T_\text{sky} / C_{w,i}$.  $\Delta T_\text{sky}$ is currently the constant `DEFAULT_DELTA_T_SKY = 6` K; Phase 5 replaces it with a cloud-cover-driven term.
 
 ### 3.5 Heat source models
 
@@ -3935,7 +3960,7 @@ landed in the same release:
 
 Each step assumes the previous steps are landed.
 
-- [ ] **Step 1 — N1: Implicit-Euler integrator (numerics first).**  Adopt
+- [x] **Step 1 — N1: Implicit-Euler integrator (numerics first).**  Adopt
   `mbc`'s implicit-Euler stepper for the EKF state propagation, the
   Riccati covariance update, and the OCP dynamics constraint.  Validate
   on the *current* 1R1C model before any structural change so the
@@ -3946,7 +3971,7 @@ Each step assumes the previous steps are landed.
   and implicit Euler passes.  README: §3.3 rewrite.  Tests: new
   explicit-vs-implicit equivalence suite under `tests/test_integrator.py`.
   Config UI: no change.
-- [ ] **Step 2 — C1: Infiltration vs conduction split.**  Replace the
+- [x] **Step 2 — C1: Infiltration vs conduction split.**  Replace the
   bundled $1/R_{i,\text{ext}}$ with a fixed conductive $UA_\text{cond}$
   and a wind-driven Sherman–Grimsrud infiltration term
   $\rho c_p \dot V_\text{inf}(v_w, \Delta T)$.  Identification jointly
@@ -3959,7 +3984,7 @@ Each step assumes the previous steps are landed.
   (`leaky` / `typical` / `tight` / `passive_house`) with
   auto-mapping to Sherman–Grimsrud coefficients; advanced users may
   override the raw values.
-- [ ] **Step 3 — A1: 1R1C → 2R2C envelope.**  Per-room split into
+- [x] **Step 3 — A1: 1R1C → 2R2C envelope.**  Per-room split into
   air node $T_a$ (small $C_a$, fast) and envelope node $T_w$ (large
   $C_w$, slow) coupled by $R_{aw}$, with the envelope conducting to
   outdoor via $R_{we}$.  All inter-room couplings route through $T_w$.
@@ -3976,7 +4001,7 @@ Each step assumes the previous steps are landed.
   building age; advanced users can override.  The dashboard hides
   $T_w$ from the default sensor list and exposes it only on the
   diagnostics view.
-- [ ] **Step 4 — A2 + B1: Slab node and UFH routing.**  Add a third
+- [x] **Step 4 — A2 + B1: Slab node and UFH routing.**  Add a third
   state $T_s$ per room with `floor_type ∈ {slab_on_grade, concrete,
   ufh}`, coupled to a built-in ground-temperature driver $T_g(t)$
   (sinusoidal annual + diffusion lag, no external data required).
@@ -3988,7 +4013,7 @@ Each step assumes the previous steps are landed.
   lag regression + ground-temperature driver test.  Config UI: new
   per-room `floor_type` selector defaulted by building age, with
   free-form override.
-- [ ] **Step 5 — B2 (pragmatic): Per-source first-order emitter
+- [x] **Step 5 — B2 (pragmatic): Per-source first-order emitter
   filter.**  Each heat source's commanded fraction is passed through
   a first-order filter with an identified time constant
   $\tau_\text{em}$ before reaching the air (or slab, for UFH) node.
@@ -4001,7 +4026,7 @@ Each step assumes the previous steps are landed.
   `emitter_time_constant` field with type-based default (electric =
   0 s; radiator = 600 s; fan-coil = 60 s).  The full water-loop
   emitter with $T_\text{supply}$ telemetry is deferred to Phase 6.
-- [ ] **Step 6 — Finishing pass: C3, C4, C5.**  Three small,
+- [x] **Step 6 — Finishing pass: C3, C4, C5.**  Three small,
   independent residual terms shipped together:
     - **C3 long-wave radiation to sky.**  Add a radiative
       conductance in parallel with conduction on outer surfaces,

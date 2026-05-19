@@ -26,10 +26,15 @@ import numpy as np
 from .const import (
     AIR_RHO_CP,
     DEFAULT_C_AIR_FRACTION,
+    DEFAULT_DELTA_T_SKY,
+    DEFAULT_FACADE_ABSORPTANCE,
+    DEFAULT_FACADE_SOLAR_SHARE,
     DEFAULT_FLOOR_TYPE,
     DEFAULT_GROUND_TEMP_MEAN,
     DEFAULT_INFILTRATION_FRACTION,
     DEFAULT_R_AW_FRACTION,
+    DEFAULT_SKY_RADIATIVE_UA,
+    DEFAULT_THERMAL_BRIDGE_PSI_L,
     FLOOR_TYPE_DEFAULTS,
     FLOOR_TYPE_NONE,
     FLOOR_TYPE_UFH,
@@ -140,6 +145,10 @@ class Room:
         c_slab_fraction: Optional[float] = None,
         r_sa: Optional[float] = None,
         r_sg: Optional[float] = None,
+        sky_radiative_ua: float = DEFAULT_SKY_RADIATIVE_UA,
+        facade_absorptance: float = DEFAULT_FACADE_ABSORPTANCE,
+        facade_solar_share: float = DEFAULT_FACADE_SOLAR_SHARE,
+        thermal_bridge_psi_l: float = DEFAULT_THERMAL_BRIDGE_PSI_L,
         temperature: Optional[float] = None,
     ) -> None:
         self.name = name
@@ -167,6 +176,26 @@ class Room:
         )
         self.r_sa = float(defaults["r_sa"] if r_sa is None else r_sa)
         self.r_sg = float(defaults["r_sg"] if r_sg is None else r_sg)
+
+        # Phase 1 C3 — long-wave to sky.  When > 0 the wall node gains
+        # an additional conductance ``sky_radiative_ua`` to a virtual
+        # "sky temperature" ``T_sky = T_outdoor − ΔT_sky``; default 0
+        # leaves the wall block's behaviour identical to pre-C3.
+        self.sky_radiative_ua: float = max(0.0, float(sky_radiative_ua))
+
+        # Phase 1 C4 — sol-air on opaque surfaces.  ``facade_absorptance``
+        # is the colour-derived solar absorptance α ∈ [0, 1];
+        # ``facade_solar_share`` is the fraction of the room's window-
+        # derived solar gain attributed to the opaque facade.  Both
+        # default to off (share = 0) — opt-in via the YAML field.
+        self.facade_absorptance: float = float(np.clip(facade_absorptance, 0.0, 1.0))
+        self.facade_solar_share: float = max(0.0, float(facade_solar_share))
+
+        # Phase 1 C5 — linear thermal-bridge correction.  Adds to the
+        # wall→outdoor conductance.  Default 0 with a strong
+        # parameter-estimation prior centred on 0 (Phase 4 will surface
+        # this in the identifiability diagnostics).
+        self.thermal_bridge_psi_l: float = max(0.0, float(thermal_bridge_psi_l))
 
         # Cold-start convention: when ``temperature`` is explicitly
         # provided (legacy single-state API) it initialises ALL three
@@ -279,6 +308,32 @@ class HouseModel:
             self._r_sa[i] = max(float(room.r_sa), 1e-9)
             self._r_sg[i] = max(float(room.r_sg), 1e-9)
 
+        # Phase 1 C3 / C4 / C5 — per-room envelope-correction terms.
+        # All three default to 0 (off); when non-zero they fold into
+        # the wall block of the state-space matrices and/or the
+        # per-cycle bias vectors.
+        self._sky_ua = np.array(
+            [self._rooms[name].sky_radiative_ua for name in self._room_list],
+            dtype=float,
+        )
+        self._thermal_bridge = np.array(
+            [self._rooms[name].thermal_bridge_psi_l for name in self._room_list],
+            dtype=float,
+        )
+        self._facade_absorptance = np.array(
+            [self._rooms[name].facade_absorptance for name in self._room_list],
+            dtype=float,
+        )
+        self._facade_solar_share = np.array(
+            [self._rooms[name].facade_solar_share for name in self._room_list],
+            dtype=float,
+        )
+
+        # Effective sky-temperature depression below outdoor air [K].
+        # Constant fallback for Phase 1; Phase 5 will promote it to a
+        # cloud-cover-driven term.
+        self._delta_t_sky: float = DEFAULT_DELTA_T_SKY
+
         # Current ground temperature [°C].  Pushed by the coordinator
         # once per cycle via ``set_ground_temp``; held constant over
         # the OCP horizon and the EKF sub-steps within a cycle.  The
@@ -289,8 +344,23 @@ class HouseModel:
         # Build state-space matrices once.  At the typical reference
         # conditions the assembled (A, B_ext, B_ground) reproduces the
         # bundled 1/r_external behaviour exactly; the wind-driven
-        # overlay below is zero at those conditions.
+        # overlay below is zero at those conditions.  Phase 1 C3 +
+        # C5 fold their conductance contributions into ``A`` and
+        # ``B_ext``; the sky cooling-drift (C3) lives on a separate
+        # ``_B_sky_offset`` constant vector applied at step / f time.
         self._C, self._A, self._B_ext, self._B_ground = self._build_matrices()
+
+        # Phase 1 C3 sky cooling-drift bias (per state row).  Non-zero
+        # only on wall-block rows of rooms with sky_radiative_ua > 0.
+        # Magnitude: −sky_radiative_ua · ΔT_sky / C_wall.  Acts as a
+        # constant negative drift on the wall — the clear-night
+        # cooling effect.
+        self._B_sky_offset = np.zeros(3 * self._n)
+        for i in range(self._n):
+            if self._sky_ua[i] > 0.0 and self._c_wall[i] > 0.0:
+                self._B_sky_offset[self._n + i] = (
+                    -self._sky_ua[i] * self._delta_t_sky / self._c_wall[i]
+                )
 
         # Per-room effective leakage area L_i (m²), derived so that
         #   ρ c_p · L_i · √(C_s·ΔT_typ + C_w·v_typ²) = f_i / r_external_i .
@@ -534,16 +604,29 @@ class HouseModel:
             A[i, j_w] += g_aw
             A[i, j_s] += g_sa
 
-            # Wall node: gain/loss to air via R_aw + loss to outdoor via R_we.
+            # Wall node: gain/loss to air via R_aw + loss to outdoor via
+            # R_we, sky radiation (C3) and thermal bridges (C5).  The
+            # latter two fold into the wall→outdoor conductance:
+            #     UA_wall→outdoor_total = 1/R_we + sky_ua + Ψ·L
+            # The sky-cooling drift  (−sky_ua · ΔT_sky)  is applied
+            # separately via ``_B_sky_offset`` so the conductance and
+            # the temperature-offset terms stay cleanly separable.
+            g_sky = float(self._sky_ua[i])
+            g_bridge = float(self._thermal_bridge[i])
+            g_outdoor_wall = g_we + g_sky + g_bridge
             A[j_w, i] += g_aw
-            A[j_w, j_w] -= g_aw + g_we
+            A[j_w, j_w] -= g_aw + g_outdoor_wall
 
             # Slab node: gain/loss to air via R_sa + loss to ground via R_sg.
             A[j_s, i] += g_sa
             A[j_s, j_s] -= g_sa + g_sg
 
-            # Outdoor input on the wall block.
-            B_ext[j_w] = g_we
+            # Outdoor input on the wall block.  The (T_outdoor − T_w)
+            # term on the wall's right-hand side gives an outdoor
+            # coupling of ``g_outdoor_wall`` (sky + thermal-bridge
+            # contributions both couple to outdoor at this stage —
+            # sky-cooling deviation comes from ``_B_sky_offset``).
+            B_ext[j_w] = g_outdoor_wall
             # Ground-temperature input on the slab block.
             B_ground[j_s] = g_sg
 
@@ -661,6 +744,21 @@ class HouseModel:
             A_eff[i, i] -= delta_ua[i]
             B_eff_ext[i] += delta_ua[i]
 
+        # Phase 1 C4 sol-air facade heat input on the wall block.
+        # ``solar_gains`` is the room-level *window* gain in W; we
+        # attribute a per-room fraction ``facade_solar_share`` of that
+        # to the opaque facade, weighted by absorptance α.  Lands on
+        # the wall block of Q.
+        for name, gain in solar_gains.items():
+            if name not in self._rooms:
+                continue
+            i_room = self._room_list.index(name)
+            share = self._facade_solar_share[i_room]
+            if share <= 0.0:
+                continue
+            alpha = self._facade_absorptance[i_room]
+            Q[n + i_room] += alpha * share * float(gain)
+
         inv_C = 1.0 / self._C
         F = A_eff * inv_C[:, None]
         bias = (
@@ -668,6 +766,11 @@ class HouseModel:
             + self._B_ground * self._ground_temp
             + Q
         ) * inv_C
+        # Phase 1 C3 sky cooling-drift bias — pre-divided by C_wall in
+        # the constructor, so add directly to the bias.  Constant
+        # (depends only on ΔT_sky and ``_sky_ua``) so it doesn't enter
+        # the Newton Jacobian.
+        bias = bias + self._B_sky_offset
 
         def rhs(state: np.ndarray) -> np.ndarray:
             return F @ state + bias

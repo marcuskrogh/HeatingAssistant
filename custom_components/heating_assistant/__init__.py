@@ -85,11 +85,16 @@ from .const import (
     CONF_MPC_ANALYTIC_DERIVATIVES,
     CONF_MPC_SOLVER,
     CONF_C_SLAB_FRACTION,
+    CONF_FACADE_ABSORPTANCE,
+    CONF_FACADE_COLOUR,
+    CONF_FACADE_SOLAR_SHARE,
     CONF_FLOOR_TYPE,
     CONF_INFILTRATION_FRACTION,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_R_SA,
     CONF_R_SG,
+    CONF_SKY_RADIATIVE_UA,
+    CONF_THERMAL_BRIDGE_PSI_L,
     CONF_WEATHER_ENTITY,
     CONF_R_EXTERNAL,
     CONF_R_VALUE,
@@ -142,10 +147,15 @@ from .const import (
     DEFAULT_FROST_PROTECTION,
     DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_HORIZON,
+    DEFAULT_FACADE_COLOUR,
+    DEFAULT_FACADE_SOLAR_SHARE,
     DEFAULT_FLOOR_TYPE,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_INFILTRATION_FRACTION,
+    DEFAULT_SKY_RADIATIVE_UA,
+    DEFAULT_THERMAL_BRIDGE_PSI_L,
+    FACADE_COLOUR_TO_ABSORPTANCE,
     FLOOR_TYPE_DEFAULTS,
     DEFAULT_MPC_SOLVER,
     DEFAULT_MIN_POWER,
@@ -246,6 +256,27 @@ _ROOM_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_R_SA): vol.All(vol.Coerce(float), vol.Range(min=1e-9)),
         vol.Optional(CONF_R_SG): vol.All(vol.Coerce(float), vol.Range(min=1e-9)),
+        # Phase 1 C3 / C4 / C5 — finishing-pass envelope corrections.
+        # All default off (zero) so existing installs see no behaviour
+        # change; opt in per room as desired.  ``facade_colour`` is a
+        # convenience preset that resolves into ``facade_absorptance``
+        # via ``FACADE_COLOUR_TO_ABSORPTANCE``; an explicit
+        # ``facade_absorptance`` always wins.
+        vol.Optional(
+            CONF_SKY_RADIATIVE_UA, default=DEFAULT_SKY_RADIATIVE_UA,
+        ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+        vol.Optional(
+            CONF_FACADE_COLOUR, default=DEFAULT_FACADE_COLOUR,
+        ): vol.In(list(FACADE_COLOUR_TO_ABSORPTANCE)),
+        vol.Optional(CONF_FACADE_ABSORPTANCE): vol.All(
+            vol.Coerce(float), vol.Range(min=0.0, max=1.0),
+        ),
+        vol.Optional(
+            CONF_FACADE_SOLAR_SHARE, default=DEFAULT_FACADE_SOLAR_SHARE,
+        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+        vol.Optional(
+            CONF_THERMAL_BRIDGE_PSI_L, default=DEFAULT_THERMAL_BRIDGE_PSI_L,
+        ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
         vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],

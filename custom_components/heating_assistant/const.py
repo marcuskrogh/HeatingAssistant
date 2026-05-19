@@ -21,6 +21,13 @@ CONF_FLOOR_TYPE = "floor_type"          # "none" | "slab_on_grade" | "concrete" 
 CONF_C_SLAB_FRACTION = "c_slab_fraction"  # 0–1, share of thermal_mass attributed to the slab node (Phase 1 A2)
 CONF_R_SA = "r_sa"                       # K/W, air↔slab film resistance (Phase 1 A2)
 CONF_R_SG = "r_sg"                       # K/W, slab↔ground conduction resistance (Phase 1 A2)
+# Phase 1 C3 / C4 / C5 — finishing-pass envelope terms (all default 0 / "off"
+# so existing installs see no behaviour change; opt in per room as desired).
+CONF_SKY_RADIATIVE_UA = "sky_radiative_ua"      # W/K, linearised long-wave coupling between wall and sky
+CONF_FACADE_COLOUR = "facade_colour"            # "light" | "medium" | "dark" | "custom"
+CONF_FACADE_ABSORPTANCE = "facade_absorptance"  # 0–1, solar absorptance of the opaque facade
+CONF_FACADE_SOLAR_SHARE = "facade_solar_share"  # 0–1, share of the room's window-derived solar gain attributed to the opaque facade (sol-air heat input on the wall node)
+CONF_THERMAL_BRIDGE_PSI_L = "thermal_bridge_psi_l"  # W/K, linear thermal-bridge correction added to wall↔outdoor conductance
 CONF_CONNECTIONS = "connections"        # list of {room, r_value}
 CONF_WINDOWS = "windows"               # list of {area, orientation, tilt}
 CONF_SETPOINT = "setpoint"             # °C
@@ -246,6 +253,84 @@ DEFAULT_GROUND_TEMP_AMPLITUDE = 4.0
 #: typically peaks around day 200 (mid-July northern hemisphere); the
 #: slab lags by ~20 days due to thermal diffusion through the soil.
 DEFAULT_GROUND_TEMP_PEAK_DAY = 220
+
+# Phase 1 C3 — long-wave radiation to sky.
+#
+# External walls and roof radiate to an effective "sky temperature"
+# that's cooler than outdoor air, especially on clear nights.  We
+# linearise the Stefan–Boltzmann ``ε σ A (T_w⁴ − T_sky⁴)`` term around
+# the operating range and treat it as a constant per-room conductance
+# ``sky_radiative_ua`` (W/K) coupling the wall node to a virtual
+# temperature ``T_sky = T_outdoor − ΔT_sky``.  Effect on the wall
+# heat balance:
+#
+#     (T_sky − T_w) · sky_radiative_ua
+#       = (T_outdoor − T_w) · sky_radiative_ua  − ΔT_sky · sky_radiative_ua
+#
+# The first term folds into the wall→outdoor conductance; the second
+# becomes a constant negative drift on the wall node (the
+# "clear-night cooling" effect).  Defaults to ``sky_radiative_ua = 0``
+# per room — opt-in via the YAML field.
+
+#: Effective sky-temperature depression below outdoor air [K].  Phase
+#: 1 v1 uses a constant fallback; Phase 5 will promote it to a
+#: cloud-cover-driven term (clear nights → ΔT_sky ≈ 12–20 K;
+#: overcast → 0 K).
+DEFAULT_DELTA_T_SKY = 6.0
+
+#: Per-room default ``sky_radiative_ua`` [W/K].  Conservative
+#: default-off so existing installs see no behaviour change.
+DEFAULT_SKY_RADIATIVE_UA = 0.0
+
+# Phase 1 C4 — sol-air on opaque surfaces.
+#
+# External walls and roof absorb a fraction ``α`` of incident solar
+# irradiance, effectively raising the surface temperature above the
+# outdoor air.  Standard engineering treatment is the "sol-air
+# temperature" ``T_sol-air = T_outdoor + α · G_inc / h_e``.  For Phase
+# 1 v1 we capture the dominant effect with two per-room knobs:
+#
+# * ``facade_absorptance`` — α in [0, 1], typology-defaulted by the
+#   ``facade_colour`` preset (light / medium / dark / custom).
+# * ``facade_solar_share`` — fraction of the room's window-derived
+#   solar gain attributed to the opaque facade's sol-air effect.
+#   Defaults to 0 (off); typical residential values are 0.2–0.6
+#   depending on the ratio of opaque-wall to window area.
+#
+# The full per-surface geometry pipeline (independent tilt / azimuth /
+# area per opaque facade element) is deferred to Phase 5 / 6 — the
+# v1 model is a single scalar per room.
+
+#: Facade-colour preset → solar absorptance ``α``.
+FACADE_COLOUR_LIGHT = "light"
+FACADE_COLOUR_MEDIUM = "medium"
+FACADE_COLOUR_DARK = "dark"
+FACADE_COLOUR_CUSTOM = "custom"
+FACADE_COLOUR_TO_ABSORPTANCE: dict = {
+    FACADE_COLOUR_LIGHT: 0.30,   # whitewashed render, pale cladding
+    FACADE_COLOUR_MEDIUM: 0.55,  # mid-tone brick, painted timber
+    FACADE_COLOUR_DARK: 0.85,    # dark brick, dark metal, weathered timber
+    FACADE_COLOUR_CUSTOM: 0.55,  # placeholder; user must set ``facade_absorptance``
+}
+DEFAULT_FACADE_COLOUR = FACADE_COLOUR_MEDIUM
+DEFAULT_FACADE_ABSORPTANCE = FACADE_COLOUR_TO_ABSORPTANCE[DEFAULT_FACADE_COLOUR]
+
+#: Per-room default ``facade_solar_share``.  Conservative default-off
+#: so the sol-air heat input is zero unless the user opts in.  A
+#: typical value once enabled is ~0.3 (the opaque facade contributes a
+#: small fraction of the window-derived solar gain to the wall node).
+DEFAULT_FACADE_SOLAR_SHARE = 0.0
+
+# Phase 1 C5 — linear thermal-bridge correction.
+#
+# Linear thermal bridges (window frames, balcony slabs, corner
+# junctions, …) add ``Ψ · L`` [W/K] to the wall→outdoor conductance.
+# Identified from data with default 0 and a strong prior centred on
+# zero; surfaces worst-bridge rooms in the parameter-confidence
+# diagnostics.
+
+#: Per-room default ``thermal_bridge_psi_l`` [W/K].
+DEFAULT_THERMAL_BRIDGE_PSI_L = 0.0
 
 #: Sherman–Grimsrud (LBL) infiltration coefficients.
 #:
