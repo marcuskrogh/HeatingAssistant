@@ -512,7 +512,29 @@ The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear dou
 | `none`, `slab_on_grade`, `concrete` | **Air node** ($T_a$) | Wall-mounted radiators, fan coils, air-source heat-pump internal unit, electric panel heaters |
 | `ufh` | **Slab node** ($T_s$) | Underfloor heating loops, slab-embedded electric mats |
 
-For UFH-routed sources, the heat-source model below still computes the same thermal output $Q_\text{thermal}(u, T_\text{out})$; only its destination state changes.  The characteristic 4–8 h slab→air lag of underfloor heating then emerges naturally from the slab dynamics: the slab heats first via $Q_\text{heater}^\text{slab}$, then transfers to the air via $R_{sa}$.
+For UFH-routed sources, the heat-source model below still computes the same thermal output $Q_\text{thermal}(\phi, T_\text{out})$; only its destination state changes.  The characteristic 4–8 h slab→air lag of underfloor heating then emerges naturally from the slab dynamics: the slab heats first via $Q_\text{heater}^\text{slab}$, then transfers to the air via $R_{sa}$.
+
+**Pragmatic emitter filter (Phase 1 B2).**  Each heat source carries an `emitter_time_constant` $\tau_\text{em} \ge 0$ that captures the dominant valve / metal-mass / water-loop lag without requiring supply-temperature telemetry.  When $\tau_\text{em} > 0$ the source's *commanded* fraction $u_j(t)$ is passed through a first-order filter to produce an *effective* fraction $\phi_j(t)$:
+
+$$\frac{d\phi_j}{dt} = \frac{u_j - \phi_j}{\tau_{\text{em},j}}$$
+
+The model's thermal-power calculation then uses $\phi_j$ in place of $u_j$:
+
+$$Q_j(t) = \text{thermal\_power}(\phi_j(t),\; T_\text{out})$$
+
+Adding the filter introduces one state variable per filtered source.  The EKF and OCP track $\phi$ alongside the temperature states, so the controller anticipates the emitter lag rather than treating commanded power as instantaneous.
+
+**Typology defaults**
+
+| Source type | Default $\tau_\text{em}$ | Rationale |
+|---|---|---|
+| `electric_heater` | 0 s | Resistive coils heat in seconds — effectively instantaneous. |
+| `heat_pump`       | 60 s | Indoor unit + refrigerant loop have ~1 minute of internal thermal mass. |
+| Hydronic radiator | 600 s (user-configured) | Water loop + metal mass; set explicitly via the per-source `emitter_time_constant` field. |
+
+When $\tau_\text{em} = 0$ the filter is bypassed — $u_j$ flows directly to `thermal_power`, recovering the pre-B2 behaviour for that source.
+
+The full water-loop / metal emitter model (with $T_\text{supply}(t)$ telemetry from the heat-source side) is the Phase 6 follow-up.  Until then this pragmatic filter captures the dominant first-order lag at near-zero implementation cost.
 
 #### Electric heater
 
