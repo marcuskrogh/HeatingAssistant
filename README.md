@@ -304,78 +304,108 @@ Inside HeatingMPCController.compute():
 
 ## 3. Physics and Mathematical Models
 
-### 3.1 2R2C thermal model
+### 3.1 2R2C + slab thermal model
 
-Each room is treated as a **two-node** lumped-parameter network (Phase 1 A1):
+Each room is treated as a **three-node** lumped-parameter network (Phase 1 A1 + A2):
 
-- a fast **air** node $T_{a,i}$ (small capacitance $C_{a,i}$) holds the air + light furniture, and
-- a slow **envelope** node $T_{w,i}$ (large capacitance $C_{w,i}$) holds the heavy mass — walls, slab, ceiling.
+- a fast **air** node $T_{a,i}$ (small capacitance $C_{a,i}$) holds the air + light furniture,
+- a slow **envelope** node $T_{w,i}$ (large capacitance $C_{w,i}$) holds the heavy mass in the walls / ceiling, and
+- a **slab** node $T_{s,i}$ (very large capacitance $C_{s,i}$) holds the floor mass.
 
-The two nodes are coupled by an internal-film resistance $R_{aw,i}$; the envelope conducts to the outdoor via $R_{we,i}$.  Heat input from heaters and solar gain through windows land on the **air** node (radiation absorbed by interior surfaces is folded into the air node for simplicity in v1); the air node also exchanges directly with the outdoor via the **infiltration** path (Phase 1 C1 — Sherman–Grimsrud / LBL model).  Inter-room couplings route through the **wall** nodes — partitions are mass, so they couple envelope-to-envelope (locked design call in roadmap §17.2 A1).
+The air and wall nodes are coupled by an internal-film resistance $R_{aw,i}$; the envelope conducts to the outdoor via $R_{we,i}$.  The air and slab nodes are coupled by a separate internal-film resistance $R_{sa,i}$; the slab conducts to a built-in ground-temperature driver $T_g(t)$ via $R_{sg,i}$.  Heat input from heaters lands on the **air** node by default, **except for UFH-equipped rooms (`floor_type = "ufh"`) where it lands on the slab** — the locked Phase 1 B1 routing change.  Solar gain through windows always lands on the air node (a Phase 1 C4 refinement may split it later).  The air node also exchanges directly with the outdoor via the **infiltration** path (Phase 1 C1 — Sherman–Grimsrud / LBL model).  Inter-room couplings route through the **wall** nodes only — partitions are mass, so they couple envelope-to-envelope; each room's slab sits on its own ground patch (locked design call in roadmap §17.2 A1 + A2).
 
 The continuous-time energy balance per room is:
 
-$$C_{a,i} \cdot \frac{dT_{a,i}}{dt} = Q_{\text{heater},i} + Q_{\text{solar},i} + Q_{\text{int},i} + \frac{T_{w,i} - T_{a,i}}{R_{aw,i}} + UA_{\text{inf},i}(v_w, \Delta T_i) \cdot (T_{\text{outdoor}} - T_{a,i})$$
+$$C_{a,i} \cdot \frac{dT_{a,i}}{dt} = Q_{\text{heater},i}^\text{air} + Q_{\text{solar},i} + Q_{\text{int},i} + \frac{T_{w,i} - T_{a,i}}{R_{aw,i}} + \frac{T_{s,i} - T_{a,i}}{R_{sa,i}} + UA_{\text{inf},i}(v_w, \Delta T_i) \cdot (T_{\text{outdoor}} - T_{a,i})$$
 
 $$C_{w,i} \cdot \frac{dT_{w,i}}{dt} = \frac{T_{a,i} - T_{w,i}}{R_{aw,i}} + \frac{T_{\text{outdoor}} - T_{w,i}}{R_{we,i}} + \sum_{j \in \text{adj}(i)} \frac{T_{w,j} - T_{w,i}}{R_{ij}}$$
+
+$$C_{s,i} \cdot \frac{dT_{s,i}}{dt} = Q_{\text{heater},i}^\text{slab} + \frac{T_{a,i} - T_{s,i}}{R_{sa,i}} + \frac{T_g(t) - T_{s,i}}{R_{sg,i}}$$
+
+where $Q_{\text{heater},i}^\text{air}$ and $Q_{\text{heater},i}^\text{slab}$ partition each room's heat-source output: all sources go to the air block unless the room is UFH (`floor_type = "ufh"`), in which case they go to the slab block.
 
 The wind-driven infiltration conductance follows the LBL model:
 
 $$UA_{\text{inf},i}(v_w, \Delta T_i) = \rho c_p \cdot L_i \cdot \sqrt{C_s \, |\Delta T_i| + C_w \, v_w^2}$$
 
+The ground-temperature driver $T_g(t)$ is a built-in sinusoidal annual cycle (no external data dependency):
+
+$$T_g(t) = \bar T_g + A_g \cdot \cos\!\left(2\pi \frac{d_\text{year}(t) - d_\text{peak}}{365}\right)$$
+
+with $\bar T_g = 10$ °C, $A_g = 4$ K and $d_\text{peak} = 220$ as defaults (temperate residential climate, ~30 cm slab depth).
+
 **Calibration.**  The user's bundled $C_i$ (`thermal_mass`) and $R_{i,\text{ext}}$ (`r_external`) are typology-friendly inputs that get split inside `HouseModel`:
 
-- $C_{a,i} = f_{c,i} \cdot C_i$, $\quad C_{w,i} = (1 - f_{c,i}) \cdot C_i$
+- $C_{a,i} = f_{c,i} \cdot C_i$, $\quad C_{s,i} = f_{s,i} \cdot C_i$, $\quad C_{w,i} = (1 - f_{c,i} - f_{s,i}) \cdot C_i$
 - $R_{\text{cond,total},i} = R_{i,\text{ext}} / (1 - f_{\text{inf},i})$
 - $R_{aw,i} = f_{r,i} \cdot R_{\text{cond,total},i}$, $\quad R_{we,i} = (1 - f_{r,i}) \cdot R_{\text{cond,total},i}$
+- $R_{sa,i}$, $R_{sg,i}$ defaulted by `floor_type` from `const.FLOOR_TYPE_DEFAULTS` (or set explicitly)
 - $L_i$ derived so that $UA_{\text{inf},i}$ at the typical reference conditions equals $f_{\text{inf},i} / R_{i,\text{ext}}$
 
-This calibration guarantees that **at the typical reference conditions** ($v_w = 3$ m/s, $|\Delta T| = 20$ K) the total air-to-outdoor heat flux equals exactly $(T_a - T_\text{out}) / R_{i,\text{ext}}$ — recovering the pre-A1 bundled behaviour as a special case.
+This calibration guarantees that **at the typical reference conditions** ($v_w = 3$ m/s, $|\Delta T| = 20$ K, ground temperature near its annual mean) the steady-state air-to-outdoor heat flux through the wall path equals $(T_a - T_\text{out}) / R_{i,\text{ext}}$, with the slab contributing a separate (small for non-slab rooms, larger for slab/UFH rooms) loss to ground.
 
 **Symbol table**
 
 | Symbol | Unit | Meaning |
 |--------|------|---------|
-| $C_i$ | J/K | Bundled thermal mass (user input).  Split: $C_i = C_{a,i} + C_{w,i}$. |
-| $C_{a,i}$, $C_{w,i}$ | J/K | Air- and envelope-node capacitances.  Derived from $C_i$ and $f_{c,i}$. |
-| $T_{a,i}$, $T_{w,i}$ | °C | Air and envelope temperatures (state variables). |
+| $C_i$ | J/K | Bundled thermal mass (user input).  Split: $C_i = C_{a,i} + C_{w,i} + C_{s,i}$. |
+| $C_{a,i}$, $C_{w,i}$, $C_{s,i}$ | J/K | Air-, envelope-, and slab-node capacitances. |
+| $T_{a,i}$, $T_{w,i}$, $T_{s,i}$ | °C | Air, envelope, and slab temperatures (state variables). |
 | $T_{\text{outdoor}}$ | °C | Outdoor air temperature. |
+| $T_g(t)$ | °C | Ground temperature from the built-in sinusoidal annual model. |
 | $v_w$ | m/s | Outdoor wind speed (read from the configured HA `weather.*` entity). |
 | $\Delta T_i$ | K | $T_{a,i} - T_{\text{outdoor}}$ at the start of each integration sub-step. |
-| $R_{aw,i}$ | K/W | Internal film resistance between air and envelope.  Derived from $R_{i,\text{ext}}$, $f_{\text{inf},i}$ and $f_{r,i}$. |
-| $R_{we,i}$ | K/W | Wall conduction resistance from envelope to outdoor (the conductive share of the envelope path). |
+| $R_{aw,i}$ | K/W | Internal film resistance between air and envelope. |
+| $R_{we,i}$ | K/W | Wall conduction resistance from envelope to outdoor. |
+| $R_{sa,i}$ | K/W | Internal film resistance between air and slab. |
+| $R_{sg,i}$ | K/W | Slab-to-ground conduction resistance. |
 | $R_{i,\text{ext}}$ | K/W | Bundled typical-conditions total resistance (user input). |
 | $R_{ij}$ | K/W | Inter-room (wall-to-wall) thermal resistance. |
 | $f_{c,i}$ | – | `c_air_fraction` ∈ [0, 1] — share of $C_i$ on the air node.  Default 0.05. |
+| $f_{s,i}$ | – | `c_slab_fraction` ∈ [0, 1] — share of $C_i$ on the slab node.  Defaulted by `floor_type`. |
 | $f_{r,i}$ | – | `r_aw_fraction` ∈ [0, 1] — share of the conductive path on $R_{aw,i}$.  Default 0.05. |
 | $f_{\text{inf},i}$ | – | `infiltration_fraction` ∈ [0, 0.95] — share of $1/R_{i,\text{ext}}$ from wind-driven exchange. |
 | $L_i$ | m² | Effective leakage area; derived from $f_{\text{inf},i}$, $R_{i,\text{ext}}$ and the typical-conditions calibration. |
 | $\rho c_p$ | J/(m³·K) | Volumetric heat capacity of air, ≈ 1200. |
 | $C_s$, $C_w$ | (m/s)²/K, – | Sherman–Grimsrud stack and wind coefficients (single-storey residential defaults: $1.45 \times 10^{-4}$ and $3.19 \times 10^{-4}$). |
-| $Q_{\text{heater},i}$, $Q_{\text{solar},i}$, $Q_{\text{int},i}$ | W | Heater output, solar gain through windows, identified internal gain — all on the air node. |
+| $Q_{\text{heater},i}^\text{air}$, $Q_{\text{heater},i}^\text{slab}$ | W | Heat-source output partitioned by `floor_type` (UFH rooms route to slab, others to air). |
+| $Q_{\text{solar},i}$, $Q_{\text{int},i}$ | W | Solar gain through windows and identified internal gain — both on the air node. |
+
+**Floor typology.**  `floor_type` selects sensible defaults for $f_{s,i}$, $R_{sa,i}$, $R_{sg,i}$ and the heat-source routing:
+
+| `floor_type` | $f_{s,i}$ | $R_{sa,i}$ [K/W] | $R_{sg,i}$ [K/W] | Heat routing |
+|---|---|---|---|---|
+| `none` (default) | 0.01 | $10^6$ (decoupled) | $10^6$ (decoupled) | air |
+| `slab_on_grade` | 0.50 | 0.006 | 0.05 | air |
+| `concrete` | 0.40 | 0.006 | 0.20 | air |
+| `ufh` | 0.50 | 0.006 | 0.05 | **slab** |
 
 The wind-driven term is held constant *within* each implicit-Euler sub-step (linearly-implicit treatment) and refreshed *between* sub-steps, so the predict step stays a single linear solve per sub-step despite $UA_{\text{inf},i}$ depending on $T_{a,i}$ via $|\Delta T_i|$.
 
-**Why two nodes per room.**  A 1R1C lumped model cannot reproduce both the ~5-minute air response to heater input *and* the multi-hour settling tail of the envelope.  The 2R2C network has two eigenvalues, with a typical fast/slow time-constant separation of ~10–100×, which is what real residential rooms show.  This separation is what lets the MPC anticipate the slow-mode response and avoid the "too late, too much" overshoot pattern characteristic of single-node controllers.  See the explanation in [roadmap §17.2 A1](#172-phase-1--modelling-fidelity-the-new-default-plant-model) for the design rationale.
+**Why three nodes per room.**  A 1R1C lumped model cannot reproduce both the ~5-minute air response to heater input *and* the multi-hour settling tail of the envelope.  A 2R2C network adds the slow envelope mode but treats slab and walls as a single bucket — fine for radiator-heated rooms, but UFH systems have a characteristic 4–8 h slab-to-air lag that the wall-block dynamics cannot capture.  The third (slab) node makes that lag explicit and lets the MPC anticipate it.  See [roadmap §17.2 A1 + A2](#172-phase-1--modelling-fidelity-the-new-default-plant-model) for the design rationale.
 
 ### 3.2 State-space matrix form
 
-For a house with *n* rooms, the 2R2C network assembles into a compact matrix form once at startup.  The state vector is $\mathbf{x} = [T_{a,1}, \ldots, T_{a,n}, \; T_{w,1}, \ldots, T_{w,n}]$ of length $2n$:
+For a house with *n* rooms, the 2R2C + slab network assembles into a compact matrix form once at startup.  The physical state vector is $\mathbf{x} = [T_{a,1}, \ldots, T_{a,n}, \; T_{w,1}, \ldots, T_{w,n}, \; T_{s,1}, \ldots, T_{s,n}]$ of length $3n$:
 
-$$\mathbf{C} \cdot \frac{d\mathbf{x}}{dt} = \mathbf{A} \cdot \mathbf{x} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{Q}(t)$$
+$$\mathbf{C} \cdot \frac{d\mathbf{x}}{dt} = \mathbf{A} \cdot \mathbf{x} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{B}_{\text{ground}} \cdot T_g(t) + \mathbf{Q}(t)$$
 
 where:
 
-- $\mathbf{C}$ is a $2n$-vector of capacitances: $[C_{a,1}, \ldots, C_{a,n}, \; C_{w,1}, \ldots, C_{w,n}]$.
-- $\mathbf{A}$ is a $2n \times 2n$ block matrix:
-  - **Air block** (rows / columns $0$ to $n-1$): diagonal $-1/R_{aw,i}$; off-diagonals to the wall block carry $+1/R_{aw,i}$.
-  - **Wall block** (rows / columns $n$ to $2n-1$): diagonal $-1/R_{aw,i} - 1/R_{we,i} - \sum_j 1/R_{ij}$; off-diagonals to the air block carry $+1/R_{aw,i}$; off-diagonals to other wall nodes carry $+1/R_{ij}$ for connected rooms.
-- $\mathbf{B}_{\text{ext}}$ is a $2n$-vector with zero on the air block (the outdoor air does not directly drive the air node via the conductive path — only via the Sherman–Grimsrud overlay) and $1/R_{we,i}$ on the wall block.
-- $\mathbf{Q}(t)$ is the $2n$-vector of disturbances: heater + solar + internal gain on the air block; zero on the wall block.
+- $\mathbf{C}$ is a $3n$-vector of capacitances: $[C_{a,1}, \ldots, C_{a,n}, \; C_{w,1}, \ldots, C_{w,n}, \; C_{s,1}, \ldots, C_{s,n}]$.
+- $\mathbf{A}$ is a $3n \times 3n$ block matrix with the following block structure (rows are air, wall, slab respectively):
+
+  $$\mathbf{A} = \begin{bmatrix} -\!\tfrac{1}{R_{aw}}\!-\!\tfrac{1}{R_{sa}} & +\tfrac{1}{R_{aw}} & +\tfrac{1}{R_{sa}} \\[2pt] +\tfrac{1}{R_{aw}} & -\!\tfrac{1}{R_{aw}}\!-\!\tfrac{1}{R_{we}}\!-\!\!\sum_j\!\tfrac{1}{R_{ij}} & 0 \\[2pt] +\tfrac{1}{R_{sa}} & 0 & -\!\tfrac{1}{R_{sa}}\!-\!\tfrac{1}{R_{sg}} \end{bmatrix}$$
+
+  Inter-room couplings appear only in the wall–wall block (off-diagonal $+1/R_{ij}$ for connected rooms).  The slab–slab block has no inter-room coupling — each slab sits on its own ground patch.
+
+- $\mathbf{B}_{\text{ext}}$ is a $3n$-vector with zero on the air and slab blocks and $1/R_{we,i}$ on the wall block.  The outdoor air drives the wall conductively; the air sees outdoor only via the Sherman–Grimsrud overlay; the slab sees the ground, not the outdoor.
+- $\mathbf{B}_{\text{ground}}$ is a $3n$-vector with $1/R_{sg,i}$ on the slab block and zero elsewhere.  The ground-temperature driver $T_g(t)$ couples into the slab only.
+- $\mathbf{Q}(t)$ is the $3n$-vector of disturbances: solar + internal gain on the air block; heater output on the air block for non-UFH rooms and on the slab block for UFH rooms (`floor_type = "ufh"`); the wall block stays zero.
 
 The Sherman–Grimsrud wind overlay is added at runtime as a per-room delta on the air-block diagonal of $\mathbf{A}$ and a matching $+\delta_i$ on the air-block of $\mathbf{B}_{\text{ext}}$.
 
-This block-structured representation makes each `step()` call a single $2n \times 2n$ linear solve — fast even for large houses, and exploits the implicit-Euler L-stability described in §3.3.
+This block-structured representation makes each `step()` call a single $3n \times 3n$ linear solve — fast even for large houses, and exploits the implicit-Euler L-stability described in §3.3.
 
 ### 3.3 Continuous-discrete integration
 
@@ -474,6 +504,15 @@ $$Q_{\text{solar}} = \text{SHGC} \cdot \text{area} \cdot I_{\text{window}} \quad
 The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear double glazing).  This constant is defined in `solar_model.py` as `DEFAULT_SHGC` and can be changed at the module level if your windows have a different specification.
 
 ### 3.5 Heat source models
+
+**Heat-source routing (Phase 1 B1).**  Each heat source's thermal output lands on one of two state-vector blocks depending on its room's `floor_type`:
+
+| `floor_type` | Heat lands on | Typical emitters |
+|---|---|---|
+| `none`, `slab_on_grade`, `concrete` | **Air node** ($T_a$) | Wall-mounted radiators, fan coils, air-source heat-pump internal unit, electric panel heaters |
+| `ufh` | **Slab node** ($T_s$) | Underfloor heating loops, slab-embedded electric mats |
+
+For UFH-routed sources, the heat-source model below still computes the same thermal output $Q_\text{thermal}(u, T_\text{out})$; only its destination state changes.  The characteristic 4–8 h slab→air lag of underfloor heating then emerges naturally from the slab dynamics: the slab heats first via $Q_\text{heater}^\text{slab}$, then transfers to the air via $R_{sa}$.
 
 #### Electric heater
 

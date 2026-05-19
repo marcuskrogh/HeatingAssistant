@@ -185,25 +185,33 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._n_rooms = n
         self._offset_state: np.ndarray = np.zeros(n, dtype=float)
 
-        # 2R2C state layout: ``x_phys = [T_a (n), T_w (n)]`` with
-        # ``nx_phys = 2n``.  When ``augment_offsets=True`` an additional
-        # block of per-room measurement-bias states is appended, giving
-        # ``nx = 3n``.  Capacitance, drift, and disturbance matrices are
-        # all derived from the 2n-state ``HouseModel`` so they share a
-        # single source of truth.
-        self._C_cap = np.array(model._C, dtype=float)        # (2n,)
-        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (2n, 2n)
+        # 2R2C + slab state layout: ``x_phys = [T_a (n), T_w (n), T_s (n)]``
+        # with ``nx_phys = 3n``.  When ``augment_offsets=True`` an
+        # additional block of per-room measurement-bias states is
+        # appended, giving ``nx = 4n``.  Capacitance, drift, and
+        # disturbance matrices are all derived from the 3n-state
+        # ``HouseModel`` so they share a single source of truth.
+        self._C_cap = np.array(model._C, dtype=float)                # (3n,)
+        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (3n, 3n)
 
-        # Continuous disturbance matrix G_d shape (2n, 1+n):
+        # Continuous disturbance matrix G_d shape (3n, 1+n):
         # column 0: outdoor temperature drives the wall block (only the
         # wall conducts to outdoor; the air node sees outdoor air only
-        # via the Sherman–Grimsrud overlay).
-        # columns 1..n: per-room heat-disturbance input (solar gain +
-        # identified internal gain) lands on the air block.
-        self._G_d: np.ndarray = np.zeros((2 * n, 1 + n))
+        # via the Sherman–Grimsrud overlay, and the slab is driven by
+        # ``T_g`` through ``_B_ground`` below).
+        # columns 1..n: per-room solar + identified internal gain on
+        # the air block.
+        self._G_d: np.ndarray = np.zeros((3 * n, 1 + n))
         self._G_d[:, 0] = model._B_ext / self._C_cap
         for i in range(n):
             self._G_d[i, 1 + i] = 1.0 / self._C_cap[i]
+
+        # Ground-temperature input vector ``B_g / C`` (Phase 1 A2).
+        # ``_B_ground`` has support only on the slab block of the
+        # state, so ``T_g`` enters the dynamics through
+        # ``B_ground * T_g / C_cap`` (added as a constant bias inside
+        # :meth:`f`).
+        self._B_ground_scaled: np.ndarray = model._B_ground / self._C_cap  # (3n,)
 
         # Sherman–Grimsrud per-room effective leakage area [m²].
         # Mirrors HouseModel._leakage_area; cached here so the controller
@@ -218,11 +226,26 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             dtype=float,
         )
 
+        # Per-room UFH flag (Phase 1 B1): when ``True`` the room's
+        # heat sources route their power into the slab block of the
+        # state, not the air block.  Cached at construction time so the
+        # hot-path drift function ``f`` doesn't repeatedly look it up.
+        self._is_ufh = np.array(
+            [model.rooms[name].is_ufh for name in self._room_list],
+            dtype=bool,
+        )
+
         # Wind speed [m/s] applied to the SG overlay; held constant over
         # the OCP horizon and across EKF sub-steps within one coordinator
         # cycle.  ``None`` (default) disables the overlay so the model
         # reduces exactly to its typical-conditions UA.
         self._wind_speed: Optional[float] = None
+
+        # Ground temperature [°C] applied to the slab block per cycle
+        # (Phase 1 A2).  Defaults to the model's current value so
+        # standalone controller use without an explicit coordinator
+        # push still produces sane behaviour.
+        self._ground_temp: float = float(model.ground_temp)
 
         # Cached measurement noise covariance.  Measurement size is one
         # per room (only the air node is observed).
@@ -232,10 +255,11 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def nx(self) -> int:
-        # Physical 2R2C: 2n states (T_a + T_w).  With offset augmentation
-        # we append per-room measurement biases, giving 3n.
+        # Physical 2R2C + slab: 3n states (T_a + T_w + T_s).  With
+        # offset augmentation we append per-room measurement biases,
+        # giving 4n.
         n = self._n_rooms
-        return 3 * n if self._augment_offsets else 2 * n
+        return 4 * n if self._augment_offsets else 3 * n
 
     @property
     def nu(self) -> int:
@@ -258,6 +282,17 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             self._wind_speed = None
         else:
             self._wind_speed = float(max(0.0, wind_speed))
+
+    def set_ground_temp(self, ground_temp: float) -> None:
+        """Push the current ground temperature [°C] into the model
+        (Phase 1 A2).  Held constant across EKF sub-steps and OCP
+        horizon steps within a coordinator cycle."""
+        if ground_temp is None or not np.isfinite(ground_temp):
+            return
+        self._ground_temp = float(ground_temp)
+        # Keep the inner HouseModel in sync so the standalone step()
+        # path also sees the latest value (used by diagnostics).
+        self._model.set_ground_temp(self._ground_temp)
 
     def _infiltration_delta_ua(
         self, outdoor_temp: float, room_temps: np.ndarray,
@@ -365,29 +400,34 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             u_scaled = u
             d_augmented = d
 
-        # Heat-source contribution — air block only.  ``self._C_cap[i]``
-        # for ``i < n`` is ``C_air,i`` (since C_cap mirrors HouseModel._C
-        # which is [C_air, C_wall]).
-        heat_contrib_phys = np.zeros(2 * n)
+        # Heat-source contribution.  Phase 1 B1 routes UFH sources
+        # into the slab block (T_s, indices 2n..3n) and non-UFH sources
+        # into the air block (T_a, indices 0..n).  ``self._C_cap``
+        # mirrors HouseModel._C which is [C_air (n), C_wall (n), C_slab (n)].
+        heat_contrib_phys = np.zeros(3 * n)
         for j, src in enumerate(self._sources):
             i = self._room_idx[src.room]
             u_j = float(u_scaled[j])
             if src.can_cool:
-                heat_contrib_phys[i] += (
-                    src.smooth_thermal_power(u_j, outdoor_temp, self._k_sigmoid)
-                    / self._C_cap[i]
-                )
+                p = src.smooth_thermal_power(u_j, outdoor_temp, self._k_sigmoid)
             else:
-                heat_contrib_phys[i] += (
-                    src.thermal_power(max(0.0, u_j), outdoor_temp) / self._C_cap[i]
-                )
+                p = src.thermal_power(max(0.0, u_j), outdoor_temp)
+            # Target block: slab if the room is UFH, otherwise air.
+            target = (2 * n + i) if self._is_ufh[i] else i
+            heat_contrib_phys[target] += p / self._C_cap[target]
 
-        # Physical 2R2C drift on [T_a, T_w].  ``self._F`` is the block
-        # 2n×2n drift matrix from HouseModel; ``self._G_d`` already
+        # Physical 2R2C+slab drift on [T_a, T_w, T_s].  ``self._F`` is
+        # the block 3n×3n drift matrix from HouseModel; ``self._G_d``
         # routes column 0 (outdoor) to the wall block and columns 1..n
-        # (solar + internal-gain) to the air block.
-        T_phys = x[:2 * n]
-        dT_phys = self._F @ T_phys + heat_contrib_phys + self._G_d @ d_augmented
+        # (solar + internal-gain) to the air block; the slab-side
+        # ground coupling is added below via ``B_ground_scaled``.
+        T_phys = x[:3 * n]
+        dT_phys = (
+            self._F @ T_phys
+            + heat_contrib_phys
+            + self._G_d @ d_augmented
+            + self._B_ground_scaled * self._ground_temp
+        )
 
         # Sherman–Grimsrud wind-driven infiltration overlay — applies on
         # the air block only.  Frozen at the current state (linearly-
@@ -409,19 +449,20 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         t: float,
     ) -> np.ndarray:
         """
-        Diffusion ``σ(x, u, d, p, t)`` for the augmented 2R2C state.
+        Diffusion ``σ(x, u, d, p, t)`` for the augmented 2R2C+slab state.
 
-        Without augmentation the noise covers the 2n physical nodes
-        (air + wall) with ``σ_w``.  With offset augmentation the
-        ``b``-block carries a smaller ``σ_b`` (slow random walk).  The
-        CD-EKF computes ``σ σᵀ`` for the continuous Lyapunov equation.
+        Without augmentation the noise covers the 3n physical nodes
+        (air + wall + slab) with ``σ_w``.  With offset augmentation the
+        ``b``-block (rows / columns 3n..4n) carries a smaller ``σ_b``
+        (slow random walk).  The CD-EKF computes ``σ σᵀ`` for the
+        continuous Lyapunov equation.
         """
         n = self._n_rooms
         if not self._augment_offsets:
-            return self._sigma_w * np.eye(2 * n)
+            return self._sigma_w * np.eye(3 * n)
         sig = np.zeros((self.nx, self.nw))
-        sig[:2 * n, :2 * n] = self._sigma_w * np.eye(2 * n)
-        sig[2 * n:, 2 * n:] = self._sigma_b * np.eye(n)
+        sig[:3 * n, :3 * n] = self._sigma_w * np.eye(3 * n)
+        sig[3 * n:, 3 * n:] = self._sigma_b * np.eye(n)
         return sig
 
     def g(
@@ -435,13 +476,13 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """Controlled output ``z = T_a + b`` (or ``z = T_a`` un-augmented).
 
         Only the air node is exposed for control — that's what users
-        perceive and what their setpoints refer to.  The wall node is
-        an internal model state.
+        perceive and what their setpoints refer to.  The wall and slab
+        nodes are internal model states.
         """
         n = self._n_rooms
-        if not self._augment_offsets or len(x) < 3 * n:
+        if not self._augment_offsets or len(x) < 4 * n:
             return x[:n].copy()
-        return x[:n] + x[2 * n: 3 * n]
+        return x[:n] + x[3 * n: 4 * n]
 
     def gm(
         self,
@@ -453,9 +494,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     ) -> np.ndarray:
         """Continuous-time output ``gm = T_a + b`` (matches ``g``)."""
         n = self._n_rooms
-        if not self._augment_offsets or len(x) < 3 * n:
+        if not self._augment_offsets or len(x) < 4 * n:
             return x[:n].copy()
-        return x[:n] + x[2 * n: 3 * n]
+        return x[:n] + x[3 * n: 4 * n]
 
     def hm(
         self,
@@ -467,13 +508,13 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     ) -> np.ndarray:
         """Measurement function ``ym = T_a + b``.
 
-        Only the air node is observed; the wall node is reconstructed
-        by the EKF from the dynamics in :meth:`f`.
+        Only the air node is observed; the wall and slab nodes are
+        reconstructed by the EKF from the dynamics in :meth:`f`.
         """
         n = self._n_rooms
-        if not self._augment_offsets or len(x) < 3 * n:
+        if not self._augment_offsets or len(x) < 4 * n:
             return x[:n].copy()
-        return x[:n] + x[2 * n: 3 * n]
+        return x[:n] + x[3 * n: 4 * n]
 
     # ── Analytic Jacobians (override default FD for efficiency) ──────────
 
@@ -485,16 +526,16 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """``∂f/∂x`` for the 2R2C state ``[T_a, T_w, b]``.
+        """``∂f/∂x`` for the 2R2C+slab state ``[T_a, T_w, T_s, b]``.
 
         The Sherman–Grimsrud wind overlay subtracts ``δᵢ / C_air,i`` from
         each air-block diagonal entry — under the linearly-implicit
         treatment the overlay UA is frozen at the current sub-step's
         state, so the Jacobian carries the frozen ``-δ`` contribution
-        exactly.  The wall block of ``self._F`` is unchanged by the
-        overlay (infiltration is an air-node phenomenon).  The offset
-        block (rows 2n..3n) has zero drift, so its Jacobian rows/columns
-        are zero.
+        exactly.  The wall, slab, and offset blocks of ``self._F`` are
+        unchanged by the overlay (infiltration is an air-node
+        phenomenon).  The offset block (rows / columns 3n..4n) has zero
+        drift, so its Jacobian rows / columns are zero.
         """
         n = self._n_rooms
         T_a = x[:n]
@@ -506,8 +547,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         F_eff[np.arange(n), np.arange(n)] -= delta_ua / self._C_cap[:n]
         if not self._augment_offsets:
             return F_eff
-        J = np.zeros((3 * n, 3 * n))
-        J[:2 * n, :2 * n] = F_eff
+        J = np.zeros((4 * n, 4 * n))
+        J[:3 * n, :3 * n] = F_eff
         return J
 
     def dhmdx(
@@ -518,23 +559,24 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float = 0.0,
     ) -> np.ndarray:
-        """``∂hm/∂x = [I_n, 0_n, I_n]`` for ``ym = T_a + b``.
+        """``∂hm/∂x = [I_n, 0_n, 0_n, I_n]`` for ``ym = T_a + b``.
 
-        Identity on the air block (rows 0..n-1 of state) and identity on
-        the offset block (rows 2n..3n-1).  The wall block (rows
-        n..2n-1) contributes nothing to the measurement — that's what
-        makes ``T_w`` unobserved and lets the EKF reconstruct it from
-        the dynamics.
+        Identity on the air block (rows 0..n−1) and identity on the
+        offset block (rows 3n..4n−1).  The wall (rows n..2n−1) and
+        slab (rows 2n..3n−1) blocks contribute nothing to the
+        measurement — that's what makes ``T_w`` and ``T_s`` unobserved
+        and lets the EKF reconstruct them from the dynamics.
         """
         n = self._n_rooms
         if not self._augment_offsets:
-            # Un-augmented: state is [T_a (n), T_w (n)]; measurement is T_a.
-            H = np.zeros((n, 2 * n))
+            # Un-augmented: state is [T_a (n), T_w (n), T_s (n)]; the
+            # measurement is ``T_a`` only.
+            H = np.zeros((n, 3 * n))
             H[:, :n] = np.eye(n)
             return H
-        H = np.zeros((n, 3 * n))
+        H = np.zeros((n, 4 * n))
         H[:, :n] = np.eye(n)            # T_a contribution
-        H[:, 2 * n: 3 * n] = np.eye(n)  # b contribution
+        H[:, 3 * n: 4 * n] = np.eye(n)  # b contribution
         return H
 
     # ── Application-layer helpers ────────────────────────────────────────
@@ -543,23 +585,26 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     def x(self) -> list[float]:
         """Current state vector as a list of floats.
 
-        Layout: ``[T_a (n), T_w (n)]`` un-augmented, or
-        ``[T_a (n), T_w (n), b (n)]`` augmented.
+        Layout: ``[T_a (n), T_w (n), T_s (n)]`` un-augmented, or
+        ``[T_a (n), T_w (n), T_s (n), b (n)]`` augmented.
         """
         air = [self._model.rooms[name].air_temperature for name in self._room_list]
         wall = [self._model.rooms[name].wall_temperature for name in self._room_list]
+        slab = [self._model.rooms[name].slab_temperature for name in self._room_list]
         if not self._augment_offsets:
-            return air + wall
-        return air + wall + self._offset_state.tolist()
+            return air + wall + slab
+        return air + wall + slab + self._offset_state.tolist()
 
     @x.setter
     def x(self, val: list[float]) -> None:
         n = self._n_rooms
-        # Accept three lengths:
-        # - n     : legacy "just air" (cold start before A1 was wired) —
-        #           initialise wall = air for each room.
-        # - 2n    : [T_a, T_w] (un-augmented physical state).
-        # - 3n    : [T_a, T_w, b] (augmented state).
+        # Accept lengths:
+        # - n     : legacy "just air" (cold start before A1/A2 wired) —
+        #           initialise wall = slab = air for each room.
+        # - 2n    : [T_a, T_w] (un-augmented A1 layout, pre-A2) —
+        #           initialise slab = air for each room.
+        # - 3n    : [T_a, T_w, T_s] (un-augmented physical state).
+        # - 4n    : [T_a, T_w, T_s, b] (augmented state).
         if len(val) < n:
             raise ValueError(f"Expected at least {n} state values, got {len(val)}")
 
@@ -570,12 +615,19 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             for i, name in enumerate(self._room_list):
                 self._model.rooms[name].wall_temperature = float(val[n + i])
         else:
-            # Cold start: wall = air per room.
             for i, name in enumerate(self._room_list):
                 self._model.rooms[name].wall_temperature = float(val[i])
 
-        if self._augment_offsets and len(val) >= 3 * n:
-            self._offset_state = np.array(val[2 * n: 3 * n], dtype=float)
+        if len(val) >= 3 * n:
+            for i, name in enumerate(self._room_list):
+                self._model.rooms[name].slab_temperature = float(val[2 * n + i])
+        else:
+            # Cold start: slab = air per room.
+            for i, name in enumerate(self._room_list):
+                self._model.rooms[name].slab_temperature = float(val[i])
+
+        if self._augment_offsets and len(val) >= 4 * n:
+            self._offset_state = np.array(val[3 * n: 4 * n], dtype=float)
 
     @property
     def x_ref(self) -> np.ndarray:
@@ -793,13 +845,17 @@ class HeatingMPCController:
         P0 = np.eye(n_x)  # initial state uncertainty [K²]
         if self._system._augment_offsets:
             # Air block (rows 0..n_rooms-1) starts tight — we trust the
-            # current measurement.  Wall block (rows n_rooms..2n_rooms-1)
-            # starts loose — the EKF has to reconstruct it from the
-            # dynamics, so it should not pretend to know more than it
-            # does.  Offset block (rows 2n_rooms..3n_rooms-1) starts
-            # moderately uncertain (same as today's 1R1C offset block).
-            P0[n_rooms: 2 * n_rooms, n_rooms: 2 * n_rooms] *= 16.0  # wall: large initial σ²
-            P0[2 * n_rooms:, 2 * n_rooms:] *= 4.0                   # offsets
+            # current measurement.  Wall block (rows n..2n) and slab
+            # block (rows 2n..3n) both start loose — the EKF has to
+            # reconstruct them from the dynamics, so they shouldn't
+            # pretend to know more than they do.  The slab is even
+            # more uncertain than the wall in a typical cold start
+            # (the ground temperature drives it on a months-long
+            # cycle).  Offset block (rows 3n..4n) starts moderately
+            # uncertain (same as the pre-A2 offset block).
+            P0[n_rooms: 2 * n_rooms, n_rooms: 2 * n_rooms] *= 16.0  # wall
+            P0[2 * n_rooms: 3 * n_rooms, 2 * n_rooms: 3 * n_rooms] *= 25.0  # slab
+            P0[3 * n_rooms:, 3 * n_rooms:] *= 4.0                   # offsets
         # Implicit-Euler scheme is L-stable on the stiff envelope dynamics
         # introduced by the 2R2C + slab work (Phase 1 A1/A2); see
         # README §3.3.  On the un-augmented 1R1C dynamics in production
@@ -1055,13 +1111,13 @@ class HeatingMPCController:
     def temperature_offsets(self) -> Dict[str, float]:
         """Estimated per-room integrated mismatch offsets ``b`` after EKF update.
 
-        State layout: ``[T_a (n), T_w (n), b (n)]``; offsets live at
-        indices ``2n..3n``.
+        Phase 1 A2 state layout: ``[T_a (n), T_w (n), T_s (n), b (n)]``;
+        offsets live at indices ``3n..4n``.
         """
         x_hat = self._ekf.x_hat
         n = self._system.nym
         return {
-            name: float(x_hat[2 * n + i])
+            name: float(x_hat[3 * n + i])
             for i, name in enumerate(self._system._room_list[:n])
         }
 
@@ -1069,17 +1125,35 @@ class HeatingMPCController:
     def wall_temperatures(self) -> Dict[str, float]:
         """Per-room *wall* (envelope-node) temperatures from the EKF.
 
-        Phase 1 A1 introduces a slow envelope node ``T_w`` that the EKF
+        Phase 1 A1 introduced a slow envelope node ``T_w`` that the EKF
         reconstructs from the dynamics (it isn't directly measured).
         Exposed here so diagnostics and the dashboard can surface it
-        as a per-room sensor.  State layout:
-        ``[T_a (n), T_w (n), b (n)]`` — wall block lives at indices
-        ``n..2n``.
+        as a per-room sensor.  State layout (Phase 1 A2):
+        ``[T_a (n), T_w (n), T_s (n), b (n)]`` — wall block lives at
+        indices ``n..2n``.
         """
         x_hat = self._ekf.x_hat
         n = self._system.nym
         return {
             name: float(x_hat[n + i])
+            for i, name in enumerate(self._system._room_list[:n])
+        }
+
+    @property
+    def slab_temperatures(self) -> Dict[str, float]:
+        """Per-room *slab* (floor-node) temperatures from the EKF.
+
+        Phase 1 A2 introduces a slow slab node ``T_s`` coupled to a
+        built-in ground-temperature driver.  Used by UFH-equipped rooms
+        as the emitter node (Phase 1 B1).  Exposed here so diagnostics
+        can surface it.  State layout:
+        ``[T_a (n), T_w (n), T_s (n), b (n)]`` — slab block lives at
+        indices ``2n..3n``.
+        """
+        x_hat = self._ekf.x_hat
+        n = self._system.nym
+        return {
+            name: float(x_hat[2 * n + i])
             for i, name in enumerate(self._system._room_list[:n])
         }
 
@@ -1139,18 +1213,18 @@ class HeatingMPCController:
     ) -> np.ndarray:
         """Map a state vector to the user-visible room (air) temperatures.
 
-        The 2R2C state layout is ``[T_a (n), T_w (n), b (n)]``.  The
-        visualisation surface tracks what users perceive — the air
-        node, augmented with the slow measurement bias — so the
+        Phase 1 A2 state layout: ``[T_a (n), T_w (n), T_s (n), b (n)]``.
+        The visualisation surface tracks what users perceive — the air
+        node augmented with the slow measurement bias — so the
         returned vector is ``T_a + b`` when augmented, otherwise just
-        the air block.  The wall node ``T_w`` is exposed separately
-        (see ``_wall_temperatures_from_state``) as a diagnostic.
+        the air block.  Wall and slab nodes are exposed separately as
+        diagnostics.
         """
         n = system.nym
         if len(x) < n:
             return np.zeros(n)
-        if system._augment_offsets and len(x) >= 3 * n:
-            return x[:n] + x[2 * n: 3 * n]
+        if system._augment_offsets and len(x) >= 4 * n:
+            return x[:n] + x[3 * n: 4 * n]
         return x[:n].copy()
 
     def _wall_temperatures_from_state(
@@ -1158,7 +1232,7 @@ class HeatingMPCController:
         system: HouseThermalSDE,
         x: np.ndarray,
     ) -> np.ndarray:
-        """Extract the wall-node temperatures from a 2R2C state vector.
+        """Extract the wall-node temperatures from a 2R2C+slab state.
 
         Returns the zero vector when the state vector is too short to
         contain a wall block — used as a safe fallback during early
@@ -1168,6 +1242,22 @@ class HeatingMPCController:
         if len(x) < 2 * n:
             return np.zeros(n)
         return x[n: 2 * n].copy()
+
+    def _slab_temperatures_from_state(
+        self,
+        system: HouseThermalSDE,
+        x: np.ndarray,
+    ) -> np.ndarray:
+        """Extract the slab-node temperatures from a 2R2C+slab state.
+
+        Returns the zero vector when the state vector is too short to
+        contain a slab block (Phase 1 A2; pre-A2 callers pass shorter
+        vectors).
+        """
+        n = system.nym
+        if len(x) < 3 * n:
+            return np.zeros(n)
+        return x[2 * n: 3 * n].copy()
 
     # ── Main entry point ─────────────────────────────────────────────────
 
@@ -1273,13 +1363,15 @@ class HeatingMPCController:
         self._last_innovation = (y - y_hat_prior).tolist()
         x_hat, _ = self._ekf.update(y, self._u_prev, d_traj[0], p)
         n_rooms = self._system.nym
-        # State layout is [T_a (n), T_w (n), b (n)]; the offset block
-        # starts at 2*n_rooms.  Also write the EKF's wall-temperature
-        # reconstruction back to the rooms so subsequent diagnostics
-        # and the next cycle's predict step see a consistent state.
-        self._system._offset_state = np.array(x_hat[2 * n_rooms:], dtype=float)
+        # Phase 1 A2 state layout: [T_a (n), T_w (n), T_s (n), b (n)].
+        # Offset block starts at 3*n_rooms.  Write the EKF's wall- and
+        # slab-temperature reconstructions back to the rooms so
+        # subsequent diagnostics and the next cycle's predict step see
+        # a consistent state.
+        self._system._offset_state = np.array(x_hat[3 * n_rooms:], dtype=float)
         for i, name in enumerate(self._system._room_list[:n_rooms]):
             self._system._model.rooms[name].wall_temperature = float(x_hat[n_rooms + i])
+            self._system._model.rooms[name].slab_temperature = float(x_hat[2 * n_rooms + i])
         x_hat_control = x_hat.copy()
 
         # ── Step 2: OCP solve (timed) ────────────────────────────────────
