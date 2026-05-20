@@ -396,6 +396,60 @@ class HouseModel:
             dtype=float,
         )
 
+    def rebuild_derived_parameters(self) -> None:
+        """Recompute all cached derived arrays from the current room attributes.
+
+        Must be called whenever ``room.thermal_mass``, ``room.r_external``,
+        or any connection's ``r_value`` is updated (e.g. after parameter
+        estimation).  Follow this with ``_build_matrices()`` to refresh the
+        state-space matrices and assign the results back to ``_C``, ``_A``,
+        ``_B_ext``, and ``_B_ground``.
+
+        Updates in-place:
+        * ``_c_air``, ``_c_wall``, ``_c_slab``  — thermal capacitances
+        * ``_r_aw``, ``_r_we``, ``_r_sa``, ``_r_sg``  — thermal resistances
+        * ``_leakage_area``  — Sherman–Grimsrud effective area
+        * ``_B_sky_offset``  — sky cooling-drift bias vector
+        """
+        for i, name in enumerate(self._room_list):
+            room = self._rooms[name]
+            f_inf = float(np.clip(
+                room.infiltration_fraction, 0.0, MAX_INFILTRATION_FRACTION,
+            ))
+            cond_frac = max(1.0 - f_inf, 1e-3)
+            c_air_frac = float(np.clip(room.c_air_fraction, 1e-3, 1.0 - 1e-3))
+            r_aw_frac = float(np.clip(room.r_aw_fraction, 1e-3, 1.0 - 1e-3))
+            c_slab_frac = float(np.clip(
+                room.c_slab_fraction,
+                1e-3,
+                1.0 - c_air_frac - 1e-3,
+            ))
+            self._c_air[i] = c_air_frac * room.thermal_mass
+            self._c_slab[i] = c_slab_frac * room.thermal_mass
+            self._c_wall[i] = (1.0 - c_air_frac - c_slab_frac) * room.thermal_mass
+            r_cond_total = room.r_external / cond_frac
+            self._r_aw[i] = r_aw_frac * r_cond_total
+            self._r_we[i] = (1.0 - r_aw_frac) * r_cond_total
+            self._r_sa[i] = max(float(room.r_sa), 1e-9)
+            self._r_sg[i] = max(float(room.r_sg), 1e-9)
+
+        # Leakage area depends on r_external.
+        for i, name in enumerate(self._room_list):
+            room = self._rooms[name]
+            self._leakage_area[i] = (
+                max(0.0, room.infiltration_fraction)
+                * (1.0 / room.r_external)
+                / (AIR_RHO_CP * _SG_FACTOR_TYPICAL)
+            )
+
+        # Sky cooling-drift bias depends on _c_wall (updated above).
+        self._B_sky_offset = np.zeros(3 * self._n)
+        for i in range(self._n):
+            if self._sky_ua[i] > 0.0 and self._c_wall[i] > 0.0:
+                self._B_sky_offset[self._n + i] = (
+                    -self._sky_ua[i] * self._delta_t_sky / self._c_wall[i]
+                )
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
