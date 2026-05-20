@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-20 05:07 UTC*
+*Generated: 2026-05-20 15:50 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,12 +18,12 @@ One control step consists of:
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | SLSQP    | SLSQP          |     368.6 |       242.6 |   1555.4 |   15 |
-| studio-1room           | IPOPT    | SLSQP          |     368.5 |       241.2 |   1557.7 |   15 |
-| two-bedroom-2room      | SLSQP    | SLSQP          |     492.9 |       404.3 |    796.2 |   15 |
-| two-bedroom-2room      | IPOPT    | SLSQP          |     494.9 |       404.1 |    800.4 |   15 |
-| full-house-5room       | SLSQP    | SLSQP          |    4308.0 |      3588.5 |   7679.9 |   15 |
-| full-house-5room       | IPOPT    | SLSQP          |    4314.1 |      3595.6 |   7713.4 |   15 |
+| studio-1room           | SLSQP    | SLSQP          |     355.4 |       249.3 |   1055.8 |   15 |
+| studio-1room           | IPOPT    | SLSQP          |     356.1 |       248.2 |   1049.4 |   15 |
+| two-bedroom-2room      | SLSQP    | SLSQP          |    1071.4 |       616.5 |   2403.1 |   15 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |    1069.8 |       614.6 |   2404.0 |   15 |
+| full-house-5room       | SLSQP    | SLSQP          |    4819.0 |      4053.2 |  10172.9 |   15 |
+| full-house-5room       | IPOPT    | SLSQP          |    4801.3 |      4039.7 |  10207.7 |   15 |
 
 **Configurations:**
 
@@ -46,9 +46,7 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | IPOPT    | IPOPT          |     910.2 |       910.2 |    910.2 |    1 |
-| two-bedroom-2room      | IPOPT    | IPOPT          |  130647.6 |    130647.6 | 130647.6 |    1 |
-| full-house-5room       | IPOPT    | IPOPT          |  422903.4 |    422903.4 | 422903.4 |    1 |
+
 
 **Configurations:**
 
@@ -64,12 +62,12 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 | Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |
 |-----------------------------|------------------------|------------|-----------------|-----------------|----------|
-| MPC.compute                 | studio-1room           | SLSQP    |        37.8 |       242.6 |    541.7% (slower) |
-| MPC.compute                 | studio-1room           | IPOPT    |        37.8 |       241.2 |    538.1% (slower) |
-| MPC.compute                 | two-bedroom-2room      | SLSQP    |        73.2 |       404.3 |    452.3% (slower) |
-| MPC.compute                 | two-bedroom-2room      | IPOPT    |        73.6 |       404.1 |    449.1% (slower) |
-| MPC.compute                 | full-house-5room       | SLSQP    |      5145.5 |      3588.5 |    -30.3% (faster) |
-| MPC.compute                 | full-house-5room       | IPOPT    |      5132.2 |      3595.6 |    -29.9% (faster) |
+| MPC.compute                 | studio-1room           | SLSQP    |       248.9 |       249.3 |      0.2% (slower) |
+| MPC.compute                 | studio-1room           | IPOPT    |       248.7 |       248.2 |     -0.2% (faster) |
+| MPC.compute                 | two-bedroom-2room      | SLSQP    |       619.1 |       616.5 |     -0.4% (faster) |
+| MPC.compute                 | two-bedroom-2room      | IPOPT    |       617.0 |       614.6 |     -0.4% (faster) |
+| MPC.compute                 | full-house-5room       | SLSQP    |      3999.0 |      4053.2 |      1.4% (slower) |
+| MPC.compute                 | full-house-5room       | IPOPT    |      4000.8 |      4039.7 |      1.0% (slower) |
 
 ---
 
