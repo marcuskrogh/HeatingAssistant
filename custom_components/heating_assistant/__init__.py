@@ -595,6 +595,15 @@ async def _async_auto_write_default_dashboard(
 
         base_dir = hass.config.path("dashboards")
         target = os.path.join(base_dir, DEFAULT_DASHBOARD_FILENAME)
+        if not marker and os.path.exists(target):
+            await marker_store.async_save(
+                {
+                    "written_at": datetime.now(tz=timezone.utc).isoformat(),
+                    "path": target,
+                    "format_version": _DASHBOARD_FORMAT_VERSION,
+                }
+            )
+            return target
 
         dashboard = build_dashboard_from_coordinator(coordinator)
         yaml_text = await hass.async_add_executor_job(dashboard_to_yaml, dashboard)
