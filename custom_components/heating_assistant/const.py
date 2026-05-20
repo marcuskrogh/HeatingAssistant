@@ -31,6 +31,8 @@ CONF_THERMAL_BRIDGE_PSI_L = "thermal_bridge_psi_l"  # W/K, linear thermal-bridge
 CONF_CONNECTIONS = "connections"        # list of {room, r_value}
 CONF_WINDOWS = "windows"               # list of {area, orientation, tilt}
 CONF_SETPOINT = "setpoint"             # °C
+CONF_COMFORT_CORRIDOR_LOW = "comfort_corridor_low"    # °C lower comfort bound for soft corridor MPC
+CONF_COMFORT_CORRIDOR_HIGH = "comfort_corridor_high"  # °C upper comfort bound for soft corridor MPC
 CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_TEMP_SENSOR = "temp_sensor"       # HA entity_id for measured room temp
 CONF_TEMP_SENSORS = "temp_sensors"     # list of HA entity_ids for measured room temp
@@ -378,6 +380,7 @@ CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multi
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
 DEFAULT_R_EXTERNAL = 0.05              # K/W
 DEFAULT_SETPOINT = 22.0                # °C
+DEFAULT_SETPOINT_PULL_WEIGHT = 1.0e-4  # weak setpoint attractor inside comfort corridor
 DEFAULT_HORIZON = 100                  # 100 steps ahead (~25 h at 15-min steps)
 DEFAULT_UPDATE_INTERVAL = 900          # OCP step / ZOH duration = coordinator / EKF update period (seconds)
 DEFAULT_EFFICIENCY = 1.0

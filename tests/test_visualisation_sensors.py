@@ -169,6 +169,14 @@ def test_constraint_lower_is_setpoint_minus_offset():
     assert sensor.native_value == pytest.approx(19.5)
 
 
+def test_constraint_sensors_use_explicit_comfort_corridor_when_present():
+    coord = _make_coordinator(setpoint=21.0, constraint_offset=1.5)
+    coord.model.rooms["living_room"].comfort_corridor_low = 20.2
+    coord.model.rooms["living_room"].comfort_corridor_high = 22.8
+    assert ConstraintLowerSensor(coord, "living_room").native_value == pytest.approx(20.2)
+    assert ConstraintUpperSensor(coord, "living_room").native_value == pytest.approx(22.8)
+
+
 def test_constraint_band_width_is_twice_offset():
     coord = _make_coordinator(setpoint=20.0, constraint_offset=2.0)
     upper = ConstraintUpperSensor(coord, "living_room").native_value

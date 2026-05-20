@@ -55,6 +55,8 @@ from .const import (
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
     CONF_SOURCE_TYPE,
     CONF_CONNECTIONS,
+    CONF_COMFORT_CORRIDOR_HIGH,
+    CONF_COMFORT_CORRIDOR_LOW,
     CONF_CONNECTED_ROOM,
     CONF_C_SLAB_FRACTION,
     CONF_FACADE_ABSORPTANCE,
@@ -192,6 +194,8 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                 connections=connections,
                 windows=windows,
                 setpoint=rc.get(CONF_SETPOINT, DEFAULT_SETPOINT),
+                comfort_corridor_low=rc.get(CONF_COMFORT_CORRIDOR_LOW),
+                comfort_corridor_high=rc.get(CONF_COMFORT_CORRIDOR_HIGH),
                 infiltration_fraction=rc.get(
                     CONF_INFILTRATION_FRACTION, DEFAULT_INFILTRATION_FRACTION,
                 ),

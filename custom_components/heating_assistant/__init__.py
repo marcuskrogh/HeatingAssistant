@@ -76,6 +76,8 @@ from homeassistant.helpers.storage import Store
 from .const import (
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
+    CONF_COMFORT_CORRIDOR_HIGH,
+    CONF_COMFORT_CORRIDOR_LOW,
     CONF_CONSTRAINT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
@@ -285,6 +287,8 @@ _ROOM_SCHEMA = vol.Schema(
             CONF_THERMAL_BRIDGE_PSI_L, default=DEFAULT_THERMAL_BRIDGE_PSI_L,
         ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
+        vol.Optional(CONF_COMFORT_CORRIDOR_LOW): vol.Coerce(float),
+        vol.Optional(CONF_COMFORT_CORRIDOR_HIGH): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
         vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],
         vol.Optional(CONF_WINDOW_SENSORS, default=[]): [str],

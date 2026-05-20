@@ -766,7 +766,8 @@ compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
 │
 ├─ CDTrackingOptimalControlProblem.solve(x̂, D)
 │   ├─ propagate: x[k+1] = x[k] + h·f(x[k],u[k],d[k],p,t)  (Euler sub-steps)
-│   ├─ NLP:  min Σ ‖z[k]-z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S + ρ_z·violation
+│   ├─ NLP: weak setpoint pull + input costs + soft comfort-corridor penalties
+│   │      min Σ ε‖z[k]-z_ref‖² + ‖u[k]‖²_R + ‖Δu[k]‖²_S + ρ_z·corridor_violation
 │   └─ solve via configurable NLP backend (default IPOPT; fallback SLSQP)  s.t.  0 ≤ u ≤ 1
 │
 └─ Apply u*[0] to heat sources (receding horizon)
@@ -1288,6 +1289,8 @@ rooms:
 | `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 14.1](#141-thermal-mass-thermal_mass) for guidance. |
 | `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 14.2](#142-external-thermal-resistance-r_external) for guidance. |
 | `setpoint` | float | No | `21.0` | Initial desired temperature [°C].  Can be overridden at runtime by the `climate.*` entity. |
+| `comfort_corridor_low` | float | No | `setpoint - constraint_offset` | Lower comfort bound [°C] used by the MPC soft-corridor objective. |
+| `comfort_corridor_high` | float | No | `setpoint + constraint_offset` | Upper comfort bound [°C] used by the MPC soft-corridor objective. |
 | `temp_sensor` | string | No | — | Entity ID of a single HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode.  Cannot be combined with `temp_sensors`. |
 | `temp_sensors` | list of strings | No | — | List of HA sensor entity IDs for the room.  The coordinator reads all of them at each update cycle and uses their **arithmetic mean** as the measured room temperature.  Useful when the room is large or has significant temperature gradients.  Cannot be combined with `temp_sensor`. |
 | `window_sensors` | list of strings | No | `[]` | Optional list of `binary_sensor.*` entity IDs (windows/doors). The room enters override `open` when any listed sensor stays `on` for `window_open_debounce`; while open, room heat-source commands are clamped to zero and the EKF process-noise covariance is inflated. |

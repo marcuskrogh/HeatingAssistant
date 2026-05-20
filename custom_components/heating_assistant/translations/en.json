@@ -68,7 +68,9 @@
           "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
           "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
           "room_size": "Approximate room size",
-          "building_age": "Approximate building age/insulation level"
+          "building_age": "Approximate building age/insulation level",
+          "comfort_corridor_low": "Comfort corridor low (°C)",
+          "comfort_corridor_high": "Comfort corridor high (°C)"
         }
       },
       "edit_room": {
@@ -84,7 +86,9 @@
           "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
           "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
           "room_size": "Approximate room size",
-          "building_age": "Approximate building age/insulation level"
+          "building_age": "Approximate building age/insulation level",
+          "comfort_corridor_low": "Comfort corridor low (°C)",
+          "comfort_corridor_high": "Comfort corridor high (°C)"
         }
       },
       "manage_room_windows": {
