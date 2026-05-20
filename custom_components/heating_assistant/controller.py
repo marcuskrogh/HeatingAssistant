@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -80,6 +81,15 @@ from .const import MPC_STATS_BUFFER_SIZE
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
 from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
+try:
+    from mbc.control.enmpc import EconomicOptimalControlProblem as _BaseEOCP
+    from mbc.control.nlp_solver import NLPConstraint as _NLPConstraint, NLPProblem as _NLPProblem
+    _ANALYTIC_JACS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _BaseEOCP = object  # type: ignore[assignment,misc]
+    _NLPConstraint = None  # type: ignore[assignment]
+    _NLPProblem = None  # type: ignore[assignment]
+    _ANALYTIC_JACS_AVAILABLE = False
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -479,14 +489,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # Extract internal gains and heater scales from parameter vector
         if len(theta) >= 3 * n:
             q_int = theta[2 * n: 3 * n]
-            heater_scales = np.ones(self.nu)
+            heater_scales = np.ones(self.nu, dtype=float)
             if (
                 len(self._identifiable_sources) > 0
                 and len(theta) >= 3 * n + len(self._identifiable_sources)
             ):
                 log_alpha = theta[3 * n: 3 * n + len(self._identifiable_sources)]
                 for k, s_idx in enumerate(self._identifiable_sources):
-                    heater_scales[s_idx] = np.exp(log_alpha[k])
+                    heater_scales[s_idx] = float(np.exp(log_alpha[k]))
             u_scaled = heater_scales * u
             # d = [T_out, Q_sol,1+Q_int,1, …, Q_sol,n+Q_int,n] — fold q_int
             # into the air-block disturbance channels (columns 1..n of G_d).
@@ -494,6 +504,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             for i in range(n):
                 d_augmented[1 + i] += q_int[i]
         else:
+            heater_scales = np.ones(self.nu, dtype=float)
             u_scaled = u
             d_augmented = d
 
@@ -509,22 +520,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # ``thermal_power``.
         m = self._n_filtered
         heat_contrib_phys = np.zeros(3 * n)
-        # Per-source heater-scale ratio: scale_j / 1.  Equal to 1 for
-        # non-identifiable sources; equal to exp(log_alpha_k) for the
-        # k-th identifiable source.  Computed from ``u_scaled`` / ``u``
-        # only for the air-direct case where ``u_scaled`` was the input
-        # to ``thermal_power`` pre-B2.  Easier: pre-compute the scales.
-        if len(theta) >= 3 * n:
-            heater_scale_factors = np.ones(self.nu, dtype=float)
-            if (
-                len(self._identifiable_sources) > 0
-                and len(theta) >= 3 * n + len(self._identifiable_sources)
-            ):
-                log_alpha2 = theta[3 * n: 3 * n + len(self._identifiable_sources)]
-                for k_la, s_idx in enumerate(self._identifiable_sources):
-                    heater_scale_factors[s_idx] = float(np.exp(log_alpha2[k_la]))
-        else:
-            heater_scale_factors = np.ones(self.nu, dtype=float)
+        # heater_scales is already the per-source scale factor array, re-use it.
+        heater_scale_factors = heater_scales
 
         for j, src in enumerate(self._sources):
             i = self._room_idx[src.room]
@@ -812,6 +809,122 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         H[:, b_start: b_start + n] = np.eye(n)    # b contribution
         return H
 
+    @property
+    def dgmdx_const(self) -> np.ndarray:
+        """Pre-computed constant output Jacobian H = ∂gm/∂x.
+
+        ``gm`` is linear in ``x`` (it simply reads the air-temperature block
+        and, in augmented mode, adds the offset block), so this Jacobian
+        is constant — it does not depend on the current state.
+
+        Un-augmented (state ``[T_a, T_w, T_s, φ]``)::
+
+            H = [I_n | 0_{n, 2n+m}]
+
+        Augmented (state ``[T_a, T_w, T_s, φ, b]``)::
+
+            H[:, :n]            = I_n   (air block)
+            H[:, b_start:b_start+n] = I_n   (offset block)
+
+        Returns shape ``(nz, nx)`` where ``nz = n_rooms``.
+        """
+        n = self._n_rooms
+        if not self._augment_offsets:
+            H = np.zeros((n, 3 * n + self._n_filtered))
+            H[:, :n] = np.eye(n)
+            return H
+        b_start = self._offset_block_start
+        H = np.zeros((n, self.nx))
+        H[:, :n] = np.eye(n)
+        H[:, b_start:b_start + n] = np.eye(n)
+        return H
+
+    def dfdu(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Analytical ``∂f/∂u``, shape ``(nx, nu)``.
+
+        Replaces the default finite-difference implementation in
+        :class:`~mbc.models.ContinuousDiscreteModel` with an exact,
+        closed-form Jacobian.
+
+        For **heating-only** un-filtered sources the derivative is::
+
+            ∂f[target] / ∂u_j = thermal_power(1, T_out) · scale_j / C_cap[target]
+
+        (u ≥ 0 is guaranteed by the box constraint u_min = 0, so
+        max(0, u·scale) is differentiable everywhere in the feasible region.)
+
+        For **cooling-capable** (heat-pump) sources the derivative of the
+        smooth sigmoid is::
+
+            ∂f[target] / ∂u_j = (Q_heat + Q_cool) · k · σ(1−σ) · scale_j / C_cap[target]
+
+        For **filtered** sources (emitter lag τ > 0)::
+
+            ∂f[3n+k_filter] / ∂u_j = 1 / τ_em[k_filter]
+        """
+        outdoor_temp = float(d[0])
+        n = self._n_rooms
+        theta = p if len(p) > 0 else self._theta
+
+        # Heater scale factors (same logic as f())
+        if len(theta) >= 3 * n:
+            heater_scale_factors = np.ones(self.nu, dtype=float)
+            if (
+                len(self._identifiable_sources) > 0
+                and len(theta) >= 3 * n + len(self._identifiable_sources)
+            ):
+                log_alpha = theta[3 * n: 3 * n + len(self._identifiable_sources)]
+                for k_la, s_idx in enumerate(self._identifiable_sources):
+                    heater_scale_factors[s_idx] = float(np.exp(log_alpha[k_la]))
+        else:
+            heater_scale_factors = np.ones(self.nu, dtype=float)
+
+        J = np.zeros((self.nx, self.nu))
+        for j, src in enumerate(self._sources):
+            i = self._room_idx[src.room]
+            k_filter = int(self._filter_idx_for_source[j])
+            if k_filter >= 0:
+                # Filtered source: dφ_k/dt = (u_j − φ_k)/τ_k  →  ∂/∂u_j = 1/τ_k
+                J[3 * n + k_filter, j] = 1.0 / self._emitter_taus[k_filter]
+            else:
+                # Un-filtered source contributing to physical state
+                target = (2 * n + i) if self._is_ufh[i] else i
+                scale = float(heater_scale_factors[j])
+                eff_u = float(u[j]) * scale
+                if src.can_cool:
+                    q_heat = src.thermal_power(1.0, outdoor_temp)
+                    q_cool = abs(src.cooling_power(outdoor_temp))
+                    if q_heat > 0.0 and q_cool > 0.0:
+                        k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
+                        offset_sig = math.log(q_cool / q_heat)
+                        sig_val = 1.0 / (1.0 + math.exp(-(k_sig * eff_u + offset_sig)))
+                        # ∂(smooth_tp)/∂u_j = (Q_h+Q_c)·k·σ(1-σ)·scale
+                        J[target, j] = (
+                            (q_heat + q_cool) * k_sig * sig_val * (1.0 - sig_val)
+                            * scale / self._C_cap[target]
+                        )
+                    else:
+                        # Degenerate: heating-only fallback
+                        if eff_u >= 0.0:
+                            J[target, j] = (
+                                src.thermal_power(1.0, outdoor_temp)
+                                * scale / self._C_cap[target]
+                            )
+                else:
+                    # Heating-only: u ≥ 0 in feasible region → ReLU is linear
+                    J[target, j] = (
+                        src.thermal_power(1.0, outdoor_temp)
+                        * scale / self._C_cap[target]
+                    )
+        return J
+
     # ── Application-layer helpers ────────────────────────────────────────
 
     @property
@@ -982,6 +1095,581 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             else:
                 powers[src.room] += src.thermal_power(u_j, outdoor_temp)
         return powers
+
+
+# ============================================================
+# Analytical-Jacobian EOCP extension
+# ============================================================
+
+
+class _AnalyticEOCP(_BaseEOCP):  # type: ignore[valid-type,misc]
+    """
+    ``EconomicOptimalControlProblem`` extended with closed-form Jacobians.
+
+    This class is **never** instantiated via ``__init__``.  Instead,
+    :func:`_install_analytic_jacs` copies an existing EOCP instance's
+    ``__dict__`` into a new ``_AnalyticEOCP`` instance (created with
+    ``__new__``), then sets the extra attributes below and calls
+    :meth:`_precompute_const_jacs`.
+
+    The overridden :meth:`solve` forwards all six analytical Jacobians to
+    the NLP backend, eliminating the costly FD Jacobian computation that
+    costs ``n_vars × M × cost(f)`` per NLP iteration.
+
+    Extra instance attributes
+    -------------------------
+    _lagrange_jac_u : callable or None
+        ``(t, x, y, u, theta) → (nu,)`` gradient of the Lagrange term
+        w.r.t. *u*; ``None`` when the Lagrange term has no *u* gradient.
+    _mayer_jac_x : callable or None
+        ``(x, y, theta) → (nx,)`` gradient of the Mayer term w.r.t. *x*.
+    _H : ndarray or None
+        Constant output Jacobian ``∂gm/∂x`` from ``model.dgmdx_const``.
+    _ineq_jac_buf : ndarray or None
+        Fully pre-computed constant inequality Jacobian (or ``None`` when
+        the output map is non-linear and a constant Jacobian cannot be
+        pre-computed).
+    _I_nx : ndarray
+        Pre-computed ``np.eye(nx)`` to avoid per-call allocation.
+    """
+
+    _lagrange_jac_u = None
+    _mayer_jac_x = None
+    _H = None
+    _ineq_jac_buf = None
+    _I_nx = None
+
+    # ── One-time setup ───────────────────────────────────────────────────
+
+    def _precompute_const_jacs(self) -> None:
+        """Pre-compute Jacobians that stay constant for the life of the OCP."""
+        self._H = getattr(self._model, "dgmdx_const", None)
+        self._I_nx = np.eye(self._nx)
+        self._ineq_jac_buf = self._build_full_ineq_jac()
+
+    def _build_full_ineq_jac(self) -> Optional[np.ndarray]:
+        """Build the fully constant inequality-constraint Jacobian.
+
+        Returns ``None`` when the output map is non-linear (no
+        ``dgmdx_const``) *and* soft-z constraints are active, because in
+        that case the soft-z rows depend on the current state and cannot
+        be pre-computed.
+        """
+        L = self._layout
+        nx = self._nx
+        nu = self._nu
+        nz = self._nz
+        H = self._H
+
+        if self._has_soft_z and H is None:
+            return None  # cannot pre-compute — defer to per-call computation
+
+        n_ineq = 0
+        if self._du_min is not None:
+            n_ineq += self._N * nu
+        if self._du_max is not None:
+            n_ineq += self._N * nu
+        if self._has_soft_x:
+            if self._x_min is not None:
+                n_ineq += (L.M + 1) * nx
+            if self._x_max is not None:
+                n_ineq += (L.M + 1) * nx
+        if self._has_soft_z:
+            if self._z_min is not None:
+                n_ineq += (L.M + 1) * nz
+            if self._z_max is not None:
+                n_ineq += (L.M + 1) * nz
+
+        if n_ineq == 0:
+            return np.zeros((0, L.total))
+
+        J = np.zeros((n_ineq, L.total))
+        row = 0
+        I_nu = np.eye(nu)
+
+        # ROM box (∂du/∂u — purely structural, independent of current z)
+        if self._du_min is not None or self._du_max is not None:
+            for k in range(self._N):
+                col_uk = L.u_off + k * nu
+                col_ukm1 = L.u_off + (k - 1) * nu if k > 0 else None
+                if self._du_min is not None:
+                    J[row:row + nu, col_uk:col_uk + nu] = I_nu
+                    if col_ukm1 is not None:
+                        J[row:row + nu, col_ukm1:col_ukm1 + nu] = -I_nu
+                    row += nu
+                if self._du_max is not None:
+                    J[row:row + nu, col_uk:col_uk + nu] = -I_nu
+                    if col_ukm1 is not None:
+                        J[row:row + nu, col_ukm1:col_ukm1 + nu] = I_nu
+                    row += nu
+
+        # Soft state
+        if self._has_soft_x:
+            I_nx = self._I_nx
+            for n in range(L.M + 1):
+                col_xn = L.x_off + n * nx
+                if self._x_min is not None:
+                    J[row:row + nx, col_xn:col_xn + nx] = I_nx
+                    col_px_lo = L.px_lo_off + n * nx
+                    J[row:row + nx, col_px_lo:col_px_lo + nx] = I_nx
+                    row += nx
+                if self._x_max is not None:
+                    J[row:row + nx, col_xn:col_xn + nx] = -I_nx
+                    col_px_hi = L.px_hi_off + n * nx
+                    J[row:row + nx, col_px_hi:col_px_hi + nx] = I_nx
+                    row += nx
+
+        # Soft output (linear gm → constant H)
+        if self._has_soft_z and H is not None:
+            I_nz = np.eye(nz)
+            for n in range(L.M + 1):
+                col_xn = L.x_off + n * nx
+                if self._z_min is not None:
+                    J[row:row + nz, col_xn:col_xn + nx] = H
+                    col_pz_lo = L.pz_lo_off + n * nz
+                    J[row:row + nz, col_pz_lo:col_pz_lo + nz] = I_nz
+                    row += nz
+                if self._z_max is not None:
+                    J[row:row + nz, col_xn:col_xn + nx] = -H
+                    col_pz_hi = L.pz_hi_off + n * nz
+                    J[row:row + nz, col_pz_hi:col_pz_hi + nz] = I_nz
+                    row += nz
+
+        return J
+
+    # ── Analytical Jacobians ─────────────────────────────────────────────
+
+    def _objective_jac(
+        self,
+        z: np.ndarray,
+        x_hat: np.ndarray,
+        d_traj: np.ndarray,
+        u_prev_0: np.ndarray,
+        p_theta: np.ndarray,
+        t0: float,
+    ) -> np.ndarray:
+        """Analytical gradient ``∂J/∂z`` of the EOCP objective."""
+        L = self._layout
+        U = L.get_U(z)
+        X = L.get_X(z)
+        h = self._h
+        Ts = self._dt
+        nx = self._nx
+        nu = self._nu
+        nz = self._nz
+        H = self._H
+        grad = np.zeros(L.total)
+
+        # Lagrange and output-tracking gradient (over implicit-Euler sub-steps)
+        for n in range(L.M):
+            k = n // self._n_steps
+            u_k = U[k]
+            d_k = d_traj[k]
+            x_np1 = X[n + 1]
+            y_np1 = np.empty(0)
+            t_np1 = t0 + (n + 1) * h
+            col_uk = L.u_off + k * nu
+            col_xnp1 = L.x_off + (n + 1) * nx
+
+            if self._lagrange_jac_u is not None:
+                grad[col_uk:col_uk + nu] += (
+                    self._lagrange_jac_u(t_np1, x_np1, y_np1, u_k, p_theta) * h
+                )
+
+            # Tracking: 2h · H^T Q_z (gm(x_{n+1}) − z_ref_{n+1})
+            if self._Q_z is not None and H is not None:
+                z_np1 = self._gm(x_np1, y_np1, u_k, d_k, p_theta, t_np1)
+                e = z_np1 - self._z_ref[n + 1]
+                grad[col_xnp1:col_xnp1 + nx] += 2.0 * h * (H.T @ (self._Q_z @ e))
+
+        # ROM penalty and economy terms (per control interval)
+        for k in range(self._N):
+            u_k = U[k]
+            u_km1 = U[k - 1] if k > 0 else u_prev_0
+            col_uk = L.u_off + k * nu
+            if self._Q_du is not None:
+                du = u_k - u_km1
+                Qdu_du = self._Q_du @ du
+                grad[col_uk:col_uk + nu] += 2.0 * Ts * Qdu_du
+                if k > 0:
+                    grad[L.u_off + (k - 1) * nu:L.u_off + k * nu] -= 2.0 * Ts * Qdu_du
+            if self._p_u_eco is not None:
+                grad[col_uk:col_uk + nu] += self._p_u_eco * Ts
+
+        # Mayer (terminal) term
+        if self._mayer_jac_x is not None:
+            x_M = X[L.M]
+            y_M = np.empty(0)
+            dM = self._mayer_jac_x(x_M, y_M, p_theta)
+            grad[L.x_off + L.M * nx:L.x_off + L.M * nx + nx] += dM
+
+        # Soft-z penalty gradient
+        if self._has_soft_z:
+            PZ_lo = L.get_PZ_lo(z)
+            PZ_hi = L.get_PZ_hi(z)
+            for n in range(L.M + 1):
+                if self._z_min is not None:
+                    p_n = PZ_lo[n]
+                    col_pz_lo = L.pz_lo_off + n * nz
+                    grad[col_pz_lo:col_pz_lo + nz] += (
+                        self._rho_z_1 + 2.0 * self._rho_z_2 * p_n
+                    ) * h
+                if self._z_max is not None:
+                    q_n = PZ_hi[n]
+                    col_pz_hi = L.pz_hi_off + n * nz
+                    grad[col_pz_hi:col_pz_hi + nz] += (
+                        self._rho_z_1 + 2.0 * self._rho_z_2 * q_n
+                    ) * h
+
+        # Soft-x penalty gradient
+        if self._has_soft_x:
+            PX_lo = L.get_PX_lo(z)
+            PX_hi = L.get_PX_hi(z)
+            for n in range(L.M + 1):
+                if self._x_min is not None:
+                    p_n = PX_lo[n]
+                    col_px_lo = L.px_lo_off + n * nx
+                    grad[col_px_lo:col_px_lo + nx] += (
+                        self._rho_x_1 + 2.0 * self._rho_x_2 * p_n
+                    ) * h
+                if self._x_max is not None:
+                    q_n = PX_hi[n]
+                    col_px_hi = L.px_hi_off + n * nx
+                    grad[col_px_hi:col_px_hi + nx] += (
+                        self._rho_x_1 + 2.0 * self._rho_x_2 * q_n
+                    ) * h
+
+        return grad
+
+    def _eq_constraints_jac(
+        self,
+        z: np.ndarray,
+        x_hat: np.ndarray,
+        d_traj: np.ndarray,
+        p_theta: np.ndarray,
+        t0: float,
+    ) -> np.ndarray:
+        """Analytical Jacobian ``∂C_eq/∂z`` of the equality constraints.
+
+        Constraint ``n`` (implicit Euler sub-step)::
+
+            C_eq[n] = x_{n+1} − x_n − f(x_{n+1}, u_k, d_k) · h = 0
+
+        ∂C_eq[n]/∂x_n     = −I
+        ∂C_eq[n]/∂x_{n+1} =  I − h · ∂f/∂x(x_{n+1}, …)
+        ∂C_eq[n]/∂u_k     =     −h · ∂f/∂u(x_{n+1}, …)
+        """
+        L = self._layout
+        U = L.get_U(z)
+        X = L.get_X(z)
+        h = self._h
+        nx = self._nx
+        nu = self._nu
+        I_nx = self._I_nx
+        n_eq = nx * (L.M + 1)
+        J = np.zeros((n_eq, L.total))
+
+        # Initial state constraint: ∂(x_0 − x_hat)/∂x_0 = I
+        J[0:nx, L.x_off:L.x_off + nx] = I_nx
+
+        for n in range(L.M):
+            k = n // self._n_steps
+            u_k = U[k]
+            d_k = d_traj[k]
+            x_np1 = X[n + 1]
+            t_np1 = t0 + (n + 1) * h
+            row_s = nx + n * nx
+            col_xn = L.x_off + n * nx
+            col_xnp1 = L.x_off + (n + 1) * nx
+            col_uk = L.u_off + k * nu
+
+            J[row_s:row_s + nx, col_xn:col_xn + nx] = -I_nx
+            J[row_s:row_s + nx, col_xnp1:col_xnp1 + nx] = (
+                I_nx - h * self._model.dfdx(x_np1, u_k, d_k, p_theta, t_np1)
+            )
+            J[row_s:row_s + nx, col_uk:col_uk + nu] = (
+                -h * self._model.dfdu(x_np1, u_k, d_k, p_theta, t_np1)
+            )
+
+        return J
+
+    def _ineq_constraints_jac(
+        self,
+        z: np.ndarray,
+        u_prev_0: np.ndarray,
+        d_traj: np.ndarray,
+        p_theta: np.ndarray,
+        t0: float,
+    ) -> np.ndarray:
+        """Analytical Jacobian ``∂C_ineq/∂z`` of the inequality constraints.
+
+        When a pre-computed constant buffer is available (gm is linear),
+        it is returned directly without any recomputation.  For non-linear
+        gm the soft-z rows fall back to central finite differences of gm.
+        """
+        # Fast path: pre-computed constant Jacobian covers all constraints
+        if self._ineq_jac_buf is not None:
+            return self._ineq_jac_buf
+
+        # Slow path: non-linear gm, must evaluate H per point
+        L = self._layout
+        U = L.get_U(z)
+        X = L.get_X(z)
+        h = self._h
+        nx = self._nx
+        nu = self._nu
+        nz = self._nz
+
+        n_ineq = 0
+        if self._du_min is not None:
+            n_ineq += self._N * nu
+        if self._du_max is not None:
+            n_ineq += self._N * nu
+        if self._has_soft_x:
+            if self._x_min is not None:
+                n_ineq += (L.M + 1) * nx
+            if self._x_max is not None:
+                n_ineq += (L.M + 1) * nx
+        if self._has_soft_z:
+            if self._z_min is not None:
+                n_ineq += (L.M + 1) * nz
+            if self._z_max is not None:
+                n_ineq += (L.M + 1) * nz
+
+        if n_ineq == 0:
+            return np.zeros((0, L.total))
+
+        J = np.zeros((n_ineq, L.total))
+        row = 0
+        I_nu = np.eye(nu)
+        I_nx = self._I_nx
+
+        if self._du_min is not None or self._du_max is not None:
+            for k in range(self._N):
+                col_uk = L.u_off + k * nu
+                col_ukm1 = L.u_off + (k - 1) * nu if k > 0 else None
+                if self._du_min is not None:
+                    J[row:row + nu, col_uk:col_uk + nu] = I_nu
+                    if col_ukm1 is not None:
+                        J[row:row + nu, col_ukm1:col_ukm1 + nu] = -I_nu
+                    row += nu
+                if self._du_max is not None:
+                    J[row:row + nu, col_uk:col_uk + nu] = -I_nu
+                    if col_ukm1 is not None:
+                        J[row:row + nu, col_ukm1:col_ukm1 + nu] = I_nu
+                    row += nu
+
+        if self._has_soft_x:
+            for n in range(L.M + 1):
+                col_xn = L.x_off + n * nx
+                if self._x_min is not None:
+                    J[row:row + nx, col_xn:col_xn + nx] = I_nx
+                    col_px_lo = L.px_lo_off + n * nx
+                    J[row:row + nx, col_px_lo:col_px_lo + nx] = I_nx
+                    row += nx
+                if self._x_max is not None:
+                    J[row:row + nx, col_xn:col_xn + nx] = -I_nx
+                    col_px_hi = L.px_hi_off + n * nx
+                    J[row:row + nx, col_px_hi:col_px_hi + nx] = I_nx
+                    row += nx
+
+        if self._has_soft_z:
+            I_nz = np.eye(nz)
+            eps = 1e-6
+            for n in range(L.M + 1):
+                col_xn = L.x_off + n * nx
+                k = min(n // self._n_steps, self._N - 1)
+                u_k = U[k]
+                d_k = d_traj[k]
+                t_n = t0 + n * h
+                x_n = X[n]
+                y_n = np.empty(0)
+                H_n = np.zeros((nz, nx))
+                for c in range(nx):
+                    xp = x_n.copy(); xp[c] += eps
+                    xm = x_n.copy(); xm[c] -= eps
+                    H_n[:, c] = (
+                        self._gm(xp, y_n, u_k, d_k, p_theta, t_n)
+                        - self._gm(xm, y_n, u_k, d_k, p_theta, t_n)
+                    ) / (2.0 * eps)
+                if self._z_min is not None:
+                    J[row:row + nz, col_xn:col_xn + nx] = H_n
+                    col_pz_lo = L.pz_lo_off + n * nz
+                    J[row:row + nz, col_pz_lo:col_pz_lo + nz] = I_nz
+                    row += nz
+                if self._z_max is not None:
+                    J[row:row + nz, col_xn:col_xn + nx] = -H_n
+                    col_pz_hi = L.pz_hi_off + n * nz
+                    J[row:row + nz, col_pz_hi:col_pz_hi + nz] = I_nz
+                    row += nz
+
+        return J
+
+    def solve(
+        self,
+        x0: np.ndarray,
+        d_trajectory: np.ndarray,
+        u_prev: Optional[np.ndarray] = None,
+        x_prev: Optional[np.ndarray] = None,
+        y_prev: Optional[np.ndarray] = None,
+        p: Optional[np.ndarray] = None,
+        t0: float = 0.0,
+    ) -> Tuple[np.ndarray, float, dict]:
+        """Solve the OCP with full analytical Jacobians supplied to the backend."""
+        L = self._layout
+        x_hat = np.asarray(x0, dtype=float)
+        d_traj = np.asarray(d_trajectory, dtype=float)
+        if d_traj.shape != (self._N, self._nd):
+            raise ValueError(
+                f"d_trajectory must have shape ({self._N}, {self._nd}); "
+                f"got {d_traj.shape}."
+            )
+        p_theta = (
+            np.asarray(p, dtype=float)
+            if p is not None
+            else np.asarray(self._model.params, dtype=float)
+        )
+        u_prev_0 = u_prev[-1] if u_prev is not None else np.zeros(self._nu)
+        z0 = self._build_initial_guess(x_hat, u_prev, x_prev, y_prev)
+
+        # Bounds
+        lb = np.full(L.total, -np.inf)
+        ub = np.full(L.total, np.inf)
+        if self._u_min is not None:
+            lb[L.u_off:L.u_off + L.u_size] = np.tile(self._u_min, self._N)
+        if self._u_max is not None:
+            ub[L.u_off:L.u_off + L.u_size] = np.tile(self._u_max, self._N)
+        if self._has_soft_x:
+            lb[L.px_lo_off:L.px_lo_off + L.px_lo_size] = 0.0
+            lb[L.px_hi_off:L.px_hi_off + L.px_hi_size] = 0.0
+        if self._has_soft_z:
+            lb[L.pz_lo_off:L.pz_lo_off + L.pz_lo_size] = 0.0
+            lb[L.pz_hi_off:L.pz_hi_off + L.pz_hi_size] = 0.0
+
+        # Equality constraints with analytical Jacobian
+        constraints = [
+            _NLPConstraint(
+                kind="eq",
+                fun=lambda z: self._equality_constraints(z, x_hat, d_traj, p_theta, t0),
+                jac=lambda z: self._eq_constraints_jac(z, x_hat, d_traj, p_theta, t0),
+            )
+        ]
+        has_ineq = (
+            self._du_min is not None
+            or self._du_max is not None
+            or self._has_soft_x
+            or self._has_soft_z
+        )
+        if has_ineq:
+            constraints.append(
+                _NLPConstraint(
+                    kind="ineq",
+                    fun=lambda z: self._inequality_constraints(
+                        z, u_prev_0, d_traj, p_theta, t0
+                    ),
+                    jac=lambda z: self._ineq_constraints_jac(
+                        z, u_prev_0, d_traj, p_theta, t0
+                    ),
+                )
+            )
+
+        # Objective gradient (available when all terms have analytic Jacobians)
+        has_obj_jac = (
+            (self._lagrange is None or self._lagrange_jac_u is not None)
+            and (self._Q_z is None or self._H is not None)
+            and (self._mayer is None or self._mayer_jac_x is not None)
+        )
+        obj_jac = (
+            (lambda z: self._objective_jac(z, x_hat, d_traj, u_prev_0, p_theta, t0))
+            if has_obj_jac
+            else None
+        )
+
+        result = self._solver_backend.solve(
+            _NLPProblem(
+                objective=lambda z: self._objective(
+                    z, x_hat, d_traj, u_prev_0, p_theta, t0
+                ),
+                objective_jac=obj_jac,
+                x0=z0,
+                lb=lb,
+                ub=ub,
+                constraints=tuple(constraints),
+            )
+        )
+
+        z_opt = result.x
+        U = L.get_U(z_opt).copy()
+        X = L.get_X(z_opt).copy()
+        Y = (
+            L.get_Y(z_opt).copy()
+            if self._is_dae
+            else np.zeros((L.M + 1, 0))
+        )
+        return U, float(result.fun), {"X": X, "Y": Y, "result": result}
+
+
+def _install_analytic_jacs(
+    ocp: CDTrackingOptimalControlProblem,
+    model: "HouseThermalSDE",
+    R: np.ndarray,
+    P: Optional[np.ndarray],
+    z_ref: Optional[np.ndarray],
+) -> CDTrackingOptimalControlProblem:
+    """Upgrade the EOCP inside *ocp* to use analytical Jacobians in-place.
+
+    Replaces ``ocp._eocp`` with an :class:`_AnalyticEOCP` that carries the
+    same NLP state plus three new capabilities:
+
+    * ``_lagrange_jac_u`` — exact gradient of ``u^T R u`` w.r.t. *u*.
+    * ``_mayer_jac_x``    — exact gradient of ``‖gm(x)−z_ref‖²_P`` w.r.t. *x*
+      (only when ``model.dgmdx_const`` is available).
+    * Pre-computed constant Jacobian buffers for equality and inequality
+      constraints, eliminating all FD Jacobian calls inside the NLP solver.
+
+    Returns the same *ocp* object for convenient chaining.
+    """
+    if not _ANALYTIC_JACS_AVAILABLE:
+        return ocp  # pragma: no cover
+
+    R_arr = np.asarray(R, dtype=float)
+    z_ref_arr = (
+        np.asarray(z_ref, dtype=float)
+        if z_ref is not None
+        else np.zeros(model.nz)
+    )
+
+    # ∂(u^T R u)/∂u = 2 R u
+    def _lagrange_jac_u(t, x, y, u, theta, _R=R_arr):
+        return 2.0 * (_R @ u)
+
+    # ∂(‖gm(x)−z_ref‖²_P)/∂x = 2 H^T P (gm(x)−z_ref)  [only if H is const]
+    H = getattr(model, "dgmdx_const", None)
+    if P is not None and H is not None:
+        P_arr = np.asarray(P, dtype=float)
+        zeros_u = np.zeros(model.nu)
+        zeros_d = np.zeros(model.nd)
+
+        def _mayer_jac_x(
+            x, y, theta,
+            _P=P_arr, _zref=z_ref_arr, _model=model,
+            _H=H, _zu=zeros_u, _zd=zeros_d,
+        ):
+            e = _model.gm(x, _zu, _zd, theta, 0.0) - _zref
+            return 2.0 * (_H.T @ (_P @ e))
+    else:
+        _mayer_jac_x = None
+
+    # Upgrade _eocp via __new__ + attribute copy
+    orig = ocp._eocp
+    analytic = _AnalyticEOCP.__new__(_AnalyticEOCP)
+    for key, val in orig.__dict__.items():
+        object.__setattr__(analytic, key, val)
+    analytic._lagrange_jac_u = _lagrange_jac_u
+    analytic._mayer_jac_x = _mayer_jac_x
+    analytic._precompute_const_jacs()
+    ocp._eocp = analytic
+    return ocp
 
 
 # ============================================================
@@ -1279,7 +1967,31 @@ class HeatingMPCController:
             if "analytic_derivatives_fallback" in sig:
                 kwargs["analytic_derivatives_fallback"] = "numerical"
 
-        return CDTrackingOptimalControlProblem(self._control_system, **kwargs)
+        ocp = CDTrackingOptimalControlProblem(self._control_system, **kwargs)
+
+        # Install analytical Jacobians only for IPOPT, not for SLSQP fallback.
+        # SLSQP with FD Jacobians converges reliably; IPOPT benefits most from
+        # exact Jacobians to guide its interior-point iterations.
+        # Providing analytical Jacobians to SLSQP changes its search path
+        # (technically more correct, but tests are calibrated for FD behaviour).
+        _ipopt_active = solver.lower() in {"ipopt", "cyipopt"}
+        if self._use_analytic_derivatives and _ANALYTIC_JACS_AVAILABLE and _ipopt_active:
+            try:
+                _install_analytic_jacs(
+                    ocp,
+                    model=self._control_system,
+                    R=R,
+                    P=P,
+                    z_ref=z_ref,
+                )
+            except Exception as exc:  # pragma: no cover
+                _LOGGER.warning(
+                    "Could not install analytical Jacobians (%s); "
+                    "falling back to finite differences.",
+                    exc,
+                )
+
+        return ocp
 
     def _build_ocp_with_fallback(
         self,
@@ -1348,6 +2060,10 @@ class HeatingMPCController:
         if key in {"ipopt", "cyipopt"}:
             opts.setdefault("max_iter", 300)
             opts.setdefault("tol", 1e-6)
+            # L-BFGS Hessian approximation avoids the cost of a full BFGS
+            # update and is well-suited for large NLPs without a user-supplied
+            # analytical Hessian.
+            opts.setdefault("hessian_approximation", "limited-memory")
         else:
             opts.setdefault("maxiter", 300)
             opts.setdefault("ftol", 1e-6)

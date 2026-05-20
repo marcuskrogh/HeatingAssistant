@@ -417,6 +417,129 @@ class TestHouseThermalSDE:
         f_noinput = sde.f(x, np.zeros(2), d, p, 0.0)
         np.testing.assert_array_almost_equal(f, f_noinput)
 
+    # ── Analytical Jacobian (dfdu) tests ─────────────────────────────────
+
+    def test_dfdu_shape(self):
+        """dfdu must return an (nx, nu) matrix."""
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = _aug_state([20.0, 19.0])
+        u = np.array([0.5, 0.3])
+        d = sde.disturbance_vector(5.0, {})
+        p = np.array([])
+        J = sde.dfdu(x, u, d, p, 0.0)
+        assert J.shape == (sde.nx, sde.nu)
+
+    def test_dfdu_matches_central_differences_electric_heaters(self):
+        """Analytical dfdu must match FD Jacobian for heating-only sources."""
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = _aug_state([20.0, 19.0])
+        u = np.array([0.5, 0.3])  # strictly positive (feasible region)
+        d = sde.disturbance_vector(5.0, {})
+        p = np.array([])
+        J_analytic = sde.dfdu(x, u, d, p, 0.0)
+        J_fd = _central_difference_jacobian(
+            lambda u_: sde.f(x, u_, d, p, 0.0), u,
+        )
+        np.testing.assert_allclose(J_analytic, J_fd, atol=1e-4, rtol=1e-3)
+
+    def test_dfdu_matches_central_differences_heat_pump(self):
+        """Analytical dfdu must match FD Jacobian for a cooling-capable source."""
+        living = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
+        model = HouseModel([living])
+        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
+        sde = HouseThermalSDE(model, [hp], dt=900.0)
+        x = _aug_state([20.0])
+        d = sde.disturbance_vector(5.0, {})
+        p = np.array([])
+        for u_val in [0.5, 0.0, -0.5]:
+            u = np.array([u_val])
+            J_analytic = sde.dfdu(x, u, d, p, 0.0)
+            J_fd = _central_difference_jacobian(
+                lambda u_: sde.f(x, u_, d, p, 0.0), u,
+            )
+            np.testing.assert_allclose(J_analytic, J_fd, atol=1e-4, rtol=1e-3,
+                                       err_msg=f"u={u_val}")
+
+    def test_dgmdx_const_shape_unaugmented(self):
+        """dgmdx_const must have shape (nz, nx) for un-augmented model."""
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
+        n = sde._n_rooms
+        H = sde.dgmdx_const
+        assert H.shape == (n, sde.nx)
+        # First n columns are identity, rest are zero
+        np.testing.assert_array_equal(H[:, :n], np.eye(n))
+        np.testing.assert_array_equal(H[:, n:], np.zeros((n, sde.nx - n)))
+
+    def test_dgmdx_const_shape_augmented(self):
+        """dgmdx_const must have shape (nz, nx) for augmented model."""
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=True)
+        n = sde._n_rooms
+        H = sde.dgmdx_const
+        assert H.shape == (n, sde.nx)
+        # Air block: H[:, :n] = I
+        np.testing.assert_array_equal(H[:, :n], np.eye(n))
+        # Offset block: H[:, b_start:b_start+n] = I
+        b_start = sde._offset_block_start
+        np.testing.assert_array_equal(H[:, b_start:b_start + n], np.eye(n))
+        # All other columns are zero
+        mask = np.zeros(sde.nx, dtype=bool)
+        mask[:n] = True
+        mask[b_start:b_start + n] = True
+        np.testing.assert_array_equal(H[:, ~mask], np.zeros((n, (~mask).sum())))
+
+    def test_dgmdx_const_matches_gm_finite_diff(self):
+        """dgmdx_const must equal the finite-difference Jacobian of gm."""
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=True)
+        x = _aug_state([20.0, 19.0])
+        u_dummy = np.zeros(sde.nu)
+        d_dummy = sde.disturbance_vector(5.0, {})
+        p_dummy = np.array([])
+        H_const = sde.dgmdx_const
+        H_fd = _central_difference_jacobian(
+            lambda xv: sde.gm(xv, u_dummy, d_dummy, p_dummy, 0.0), x,
+        )
+        np.testing.assert_allclose(H_const, H_fd, atol=1e-8)
+
+    # ── _AnalyticEOCP installation tests ─────────────────────────────────
+
+    def test_analytic_jacs_installed_for_ipopt(self):
+        """_install_analytic_jacs upgrades the EOCP when IPOPT is the solver."""
+        pytest.importorskip("cyipopt")
+        from custom_components.heating_assistant.controller import (
+            _AnalyticEOCP, _ANALYTIC_JACS_AVAILABLE,
+        )
+        assert _ANALYTIC_JACS_AVAILABLE
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(
+            model, sources, horizon=3, dt=900,
+            solver="ipopt",
+            use_analytic_derivatives=True,
+        )
+        assert isinstance(ctrl._ocp._eocp, _AnalyticEOCP), (
+            "EOCP should be upgraded to _AnalyticEOCP when IPOPT is active "
+            "and use_analytic_derivatives=True"
+        )
+
+    def test_analytic_jacs_not_installed_for_slsqp(self):
+        """_AnalyticEOCP must NOT be installed when solver is SLSQP."""
+        from custom_components.heating_assistant.controller import (
+            _AnalyticEOCP,
+        )
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(
+            model, sources, horizon=3, dt=900,
+            solver="SLSQP",
+            use_analytic_derivatives=True,
+        )
+        assert not isinstance(ctrl._ocp._eocp, _AnalyticEOCP), (
+            "_AnalyticEOCP must not be installed for SLSQP solver"
+        )
+
 
 class TestContinuousDiscreteEKF:
     """Tests for the continuous-discrete EKF with HouseThermalSDE."""
