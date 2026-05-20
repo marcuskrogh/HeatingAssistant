@@ -954,6 +954,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     @property
     def room_offsets(self) -> Dict[str, float]:
         """Estimated integrated mismatch offsets b for each room [°C]."""
+        if not self._augment_offsets or len(self._offset_state) < self._n_rooms:
+            return {name: 0.0 for name in self._room_list}
         return {
             name: float(self._offset_state[i])
             for i, name in enumerate(self._room_list)
@@ -1092,18 +1094,20 @@ class HeatingMPCController:
             )
 
         # Build the nonlinear continuous-discrete model
+        # Runtime controller path uses the un-augmented state to keep the EKF/OCP
+        # dimension as small as possible for predictable solve times.
         self._system = HouseThermalSDE(
             model, heat_sources, dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
-            augment_offsets=True,
+            augment_offsets=False,
             n_int_steps=n_int_steps,
         )
         self._control_system = HouseThermalSDE(
             model, heat_sources, dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
-            augment_offsets=True,
+            augment_offsets=False,
             n_int_steps=n_int_steps,
         )
         n_x = self._system.nx
@@ -1433,6 +1437,11 @@ class HeatingMPCController:
         """
         x_hat = self._ekf.x_hat
         n = self._system.nym
+        if not self._system._augment_offsets:
+            return {
+                name: 0.0
+                for name in self._system._room_list[:n]
+            }
         b_start = self._system._offset_block_start
         return {
             name: float(x_hat[b_start + i])
@@ -1697,7 +1706,10 @@ class HeatingMPCController:
         # diagnostics and the next cycle's predict step see a
         # consistent state.
         b_start = 3 * n_rooms + m_filter
-        self._system._offset_state = np.array(x_hat[b_start:], dtype=float)
+        if self._system._augment_offsets:
+            self._system._offset_state = np.array(x_hat[b_start:], dtype=float)
+        else:
+            self._system._offset_state = np.zeros(n_rooms, dtype=float)
         if m_filter > 0:
             self._system._filter_state = np.array(
                 x_hat[3 * n_rooms: 3 * n_rooms + m_filter], dtype=float,

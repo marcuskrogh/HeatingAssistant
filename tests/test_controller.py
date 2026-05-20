@@ -78,6 +78,24 @@ def _aug_state(
     )
 
 
+def _central_difference_jacobian(
+    fun,
+    x: np.ndarray,
+    eps: float = 1e-6,
+) -> np.ndarray:
+    """Central-difference Jacobian for vector-valued ``fun(x)``."""
+    x = np.asarray(x, dtype=float)
+    y0 = np.asarray(fun(x), dtype=float)
+    J = np.zeros((y0.size, x.size), dtype=float)
+    for i in range(x.size):
+        dx = np.zeros_like(x)
+        dx[i] = eps
+        y_plus = np.asarray(fun(x + dx), dtype=float)
+        y_minus = np.asarray(fun(x - dx), dtype=float)
+        J[:, i] = (y_plus - y_minus) / (2.0 * eps)
+    return J
+
+
 # -- HouseThermalSDE tests ----------------------------------------------------
 
 class TestHouseThermalSDE:
@@ -283,6 +301,36 @@ class TestHouseThermalSDE:
             [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
         ])
         np.testing.assert_array_equal(H, expected)
+
+    def test_analytic_state_jacobian_matches_finite_difference_unaugmented(self):
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
+        x = np.array([18.0, 17.0, 18.0, 17.0, 18.0, 17.0], dtype=float)
+        u = np.array([0.4, 0.3], dtype=float)
+        d = sde.disturbance_vector(5.0, {})
+        p = np.array([])
+
+        J_analytic = sde.dfdx(x, u, d, p, 0.0)
+        J_fd = _central_difference_jacobian(
+            lambda state: sde.f(state, u, d, p, 0.0),
+            x,
+        )
+        np.testing.assert_allclose(J_analytic, J_fd, rtol=5e-4, atol=5e-6)
+
+    def test_observation_jacobian_matches_finite_difference_unaugmented(self):
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
+        x = np.array([18.0, 17.0, 18.0, 17.0, 18.0, 17.0], dtype=float)
+        u = np.zeros(sde.nu)
+        d = sde.disturbance_vector(5.0, {})
+        p = np.array([])
+
+        H_analytic = sde.dhmdx(x, u, d, p, 0.0)
+        H_fd = _central_difference_jacobian(
+            lambda state: sde.hm(state, u, d, p, 0.0),
+            x,
+        )
+        np.testing.assert_allclose(H_analytic, H_fd, rtol=1e-6, atol=1e-8)
 
     def test_disturbance_vector_shape(self):
         model, sources = _make_model_and_sources()
@@ -583,7 +631,14 @@ class TestHeatingMPCController:
         assert len(ctrl.solar_forecast) == 4  # N+1: covers now through now+N*dt
         assert len(ctrl.heating_schedule) == 3
 
-    def test_filtered_temperatures_include_estimated_offset(self):
+    def test_controller_uses_unaugmented_states_for_runtime_efficiency(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        assert ctrl._system._augment_offsets is False
+        assert ctrl._control_system._augment_offsets is False
+        assert ctrl._system.nx == 6
+
+    def test_filtered_temperatures_use_air_state_when_offsets_disabled(self):
         room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
         model = HouseModel([room])
         ctrl = HeatingMPCController(
@@ -592,11 +647,11 @@ class TestHeatingMPCController:
             horizon=2,
             dt=900,
         )
-        ctrl._ekf._x_np = _aug_state([20.0], [1.0])
+        ctrl._ekf._x_np = np.array([20.0, 20.0, 20.0], dtype=float)
 
-        assert ctrl.filtered_temperatures["living_room"] == pytest.approx(21.0)
+        assert ctrl.filtered_temperatures["living_room"] == pytest.approx(20.0)
 
-    def test_predictions_include_estimated_offset(self):
+    def test_predictions_use_air_state_when_offsets_disabled(self):
         room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
         model = HouseModel([room])
         ctrl = HeatingMPCController(
@@ -605,13 +660,13 @@ class TestHeatingMPCController:
             horizon=2,
             dt=900,
         )
-        biased_state = _aug_state([20.0], [1.0])
-        ctrl._ekf._x_np = biased_state.copy()
+        x_state = np.array([20.0, 20.0, 20.0], dtype=float)
+        ctrl._ekf._x_np = x_state.copy()
         ctrl._ekf.predict = lambda *args, **kwargs: None
 
         def _update(*args, **kwargs):
-            ctrl._ekf._x_np = biased_state.copy()
-            return biased_state.copy(), ctrl._ekf.P
+            ctrl._ekf._x_np = x_state.copy()
+            return x_state.copy(), ctrl._ekf.P
 
         ctrl._ekf.update = _update
         ctrl._ocp.solve = lambda *args, **kwargs: (
@@ -627,7 +682,15 @@ class TestHeatingMPCController:
             outdoor_forecast=[20.0, 20.0],
         )
 
-        assert [step["living_room"] for step in ctrl.predictions] == pytest.approx([21.0, 21.0])
+        assert [step["living_room"] for step in ctrl.predictions] == pytest.approx([20.0, 20.0])
+
+    def test_ipopt_backend_is_active_when_available(self):
+        pytest.importorskip("cyipopt")
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, solver="ipopt")
+        backend_name = type(ctrl._ocp._eocp._solver_backend).__name__.lower()
+        assert "ipopt" in backend_name
+        assert ctrl.solver_active.lower() in {"ipopt", "cyipopt"}
 
     def test_predictions_contain_all_rooms(self):
         model, sources = _make_model_and_sources()
