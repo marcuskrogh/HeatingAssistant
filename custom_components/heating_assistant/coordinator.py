@@ -749,7 +749,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         conn.r_value = float(r_val)
 
         # Rebuild state-space matrices to reflect the updated parameters.
-        self.model._C, self.model._A, self.model._B_ext = self.model._build_matrices()
+        (
+            self.model._C,
+            self.model._A,
+            self.model._B_ext,
+            self.model._B_ground,
+        ) = self.model._build_matrices()
 
         self._estimation_timestamp = snapshot.get("estimated_at")
         self._estimation_log_likelihood = snapshot.get("log_likelihood")
@@ -2022,6 +2027,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.model._C,
             self.model._A,
             self.model._B_ext,
+            self.model._B_ground,
         ) = self.model._build_matrices()
 
         # Rebuild the MPC controller with the updated model

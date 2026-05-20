@@ -56,7 +56,8 @@ def _make_model(rooms):
     model._C = None
     model._A = None
     model._B_ext = None
-    model._build_matrices = lambda: (None, None, None)
+    model._B_ground = None
+    model._build_matrices = lambda: ("C", "A", "B_ext", "B_ground")
     return model
 
 
@@ -265,6 +266,10 @@ def test_restore_estimated_parameters_applies_to_model():
     assert coordinator.model.rooms["lr"].r_external == pytest.approx(0.02)
     assert coordinator.model.rooms["lr"].internal_gain == pytest.approx(80.0)
     assert src.power_scale == pytest.approx(1.4)
+    assert coordinator.model._C == "C"
+    assert coordinator.model._A == "A"
+    assert coordinator.model._B_ext == "B_ext"
+    assert coordinator.model._B_ground == "B_ground"
     assert coordinator._estimation_timestamp == "2025-01-01T00:00:00+00:00"
     assert coordinator._estimation_log_likelihood == pytest.approx(-55.0)
 
