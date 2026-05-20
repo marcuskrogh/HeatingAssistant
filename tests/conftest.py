@@ -271,6 +271,8 @@ class _ClimateEntityFeatureStub:
     """Minimal HA ClimateEntityFeature stub with bit-flag-like values."""
     TARGET_TEMPERATURE = 1
     TARGET_TEMPERATURE_RANGE = 2
+    TURN_ON = 4
+    TURN_OFF = 8
 
 
 class _HVACModeStub:
