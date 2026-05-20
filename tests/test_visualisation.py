@@ -766,6 +766,12 @@ class TestCoordinatorUpdateResilience:
         coordinator = object.__new__(HeatingAssistantCoordinator)
         coordinator.hass = MagicMock()
         coordinator._temp_sensors = {}
+        coordinator._window_sensors = {}
+        coordinator._window_state = {"studio": "closed"}
+        coordinator._window_state_since = {}
+        coordinator._window_open_debounce = 0.0
+        coordinator._window_open_close_settle = 0.0
+        coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
         coordinator._update_interval = 900
@@ -822,6 +828,12 @@ class TestCoordinatorUpdateResilience:
             return_value=SimpleNamespace(state="unknown")
         )
         coordinator._temp_sensors = {"studio": ["sensor.studio_temp"]}
+        coordinator._window_sensors = {}
+        coordinator._window_state = {"studio": "closed"}
+        coordinator._window_state_since = {}
+        coordinator._window_open_debounce = 0.0
+        coordinator._window_open_close_settle = 0.0
+        coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
         coordinator._update_interval = 900
@@ -877,6 +889,12 @@ class TestCoordinatorUpdateResilience:
         coordinator = object.__new__(HeatingAssistantCoordinator)
         coordinator.hass = MagicMock()
         coordinator._temp_sensors = {}
+        coordinator._window_sensors = {}
+        coordinator._window_state = {"studio": "closed"}
+        coordinator._window_state_since = {}
+        coordinator._window_open_debounce = 0.0
+        coordinator._window_open_close_settle = 0.0
+        coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
         coordinator._update_interval = 900
@@ -934,6 +952,12 @@ class TestCoordinatorUpdateResilience:
         coordinator = object.__new__(HeatingAssistantCoordinator)
         coordinator.hass = MagicMock()
         coordinator._temp_sensors = {}
+        coordinator._window_sensors = {}
+        coordinator._window_state = {"studio": "closed"}
+        coordinator._window_state_since = {}
+        coordinator._window_open_debounce = 0.0
+        coordinator._window_open_close_settle = 0.0
+        coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
         coordinator._update_interval = 900

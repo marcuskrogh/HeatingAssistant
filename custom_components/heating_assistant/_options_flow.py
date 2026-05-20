@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from .const import (
+    CONF_COMFORT_CORRIDOR_HIGH,
+    CONF_COMFORT_CORRIDOR_LOW,
     CONF_ENVELOPE_TIGHTNESS,
     CONF_INFILTRATION_FRACTION,
     CONF_ROOM_NAME,
@@ -22,6 +24,7 @@ from .const import (
     CONF_THERMAL_MASS,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
+    CONF_WINDOW_SENSORS,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
     DEFAULT_ENVELOPE_TIGHTNESS,
@@ -173,6 +176,9 @@ class RoomFlowHelper:
         r_external: float,
         setpoint: float,
         infiltration_fraction: Optional[float] = None,
+        comfort_corridor_low: Optional[float] = None,
+        comfort_corridor_high: Optional[float] = None,
+        window_sensors: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Append a new room.  Returns an error key on duplicate, else ``None``.
 
@@ -194,8 +200,14 @@ class RoomFlowHelper:
         }
         if infiltration_fraction is not None:
             new_room[CONF_INFILTRATION_FRACTION] = float(infiltration_fraction)
+        if comfort_corridor_low is not None:
+            new_room[CONF_COMFORT_CORRIDOR_LOW] = float(comfort_corridor_low)
+        if comfort_corridor_high is not None:
+            new_room[CONF_COMFORT_CORRIDOR_HIGH] = float(comfort_corridor_high)
         if sensors:
             new_room[CONF_TEMP_SENSOR] = sensors[0]
+        if window_sensors is not None:
+            new_room[CONF_WINDOW_SENSORS] = list(window_sensors)
         self.rooms.append(new_room)
         return None
 
@@ -208,6 +220,9 @@ class RoomFlowHelper:
         r_external: float,
         setpoint: float,
         infiltration_fraction: Optional[float] = None,
+        comfort_corridor_low: Optional[float] = None,
+        comfort_corridor_high: Optional[float] = None,
+        window_sensors: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Update the currently-selected room.  Returns an error key or ``None``."""
         if self.current_idx is None:
@@ -225,6 +240,12 @@ class RoomFlowHelper:
         room[CONF_THERMAL_MASS] = thermal_mass
         room[CONF_R_EXTERNAL] = r_external
         room[CONF_SETPOINT] = setpoint
+        if window_sensors is not None:
+            room[CONF_WINDOW_SENSORS] = list(window_sensors)
+        if comfort_corridor_low is not None:
+            room[CONF_COMFORT_CORRIDOR_LOW] = float(comfort_corridor_low)
+        if comfort_corridor_high is not None:
+            room[CONF_COMFORT_CORRIDOR_HIGH] = float(comfort_corridor_high)
         if infiltration_fraction is not None:
             room[CONF_INFILTRATION_FRACTION] = float(infiltration_fraction)
         elif CONF_INFILTRATION_FRACTION in room:

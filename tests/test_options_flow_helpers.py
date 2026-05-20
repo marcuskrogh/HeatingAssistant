@@ -22,6 +22,8 @@ from custom_components.heating_assistant._options_flow import (
     window_display,
 )
 from custom_components.heating_assistant.const import (
+    CONF_COMFORT_CORRIDOR_HIGH,
+    CONF_COMFORT_CORRIDOR_LOW,
     CONF_ROOM_NAME,
     CONF_SETPOINT,
     CONF_R_EXTERNAL,
@@ -31,6 +33,7 @@ from custom_components.heating_assistant.const import (
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
+    CONF_WINDOW_SENSORS,
     CONF_WINDOW_TILT,
 )
 
@@ -144,6 +147,36 @@ def test_room_helper_add_without_sensors_omits_singular_key():
     assert CONF_TEMP_SENSOR not in helper.rooms[0]
 
 
+def test_room_helper_add_stores_window_sensors():
+    helper = RoomFlowHelper()
+    err = helper.add(
+        name="bedroom",
+        sensors=["sensor.bedroom"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["small"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["pre_1940"],
+        setpoint=21.0,
+        window_sensors=["binary_sensor.bedroom_window"],
+    )
+    assert err is None
+    assert helper.rooms[0][CONF_WINDOW_SENSORS] == ["binary_sensor.bedroom_window"]
+
+
+def test_room_helper_add_stores_comfort_corridor_bounds():
+    helper = RoomFlowHelper()
+    err = helper.add(
+        name="study",
+        sensors=["sensor.study"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["small"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["pre_1940"],
+        setpoint=21.0,
+        comfort_corridor_low=19.0,
+        comfort_corridor_high=23.0,
+    )
+    assert err is None
+    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_LOW] == 19.0
+    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_HIGH] == 23.0
+
+
 def test_room_helper_add_rejects_case_insensitive_duplicates():
     helper = RoomFlowHelper()
     _add_kitchen(helper)
@@ -192,6 +225,43 @@ def test_room_helper_update_current_modifies_in_place():
     assert room[CONF_TEMP_SENSOR] == "sensor.k1"
     assert room[CONF_THERMAL_MASS] == ROOM_SIZE_TO_THERMAL_MASS["large"]
     assert room[CONF_SETPOINT] == 23.0
+
+
+def test_room_helper_update_current_updates_window_sensors():
+    helper = RoomFlowHelper()
+    _add_kitchen(helper)
+    helper.select("kitchen")
+    err = helper.update_current(
+        name="kitchen",
+        sensors=["sensor.kitchen"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["medium"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["1980_1999"],
+        setpoint=22.0,
+        window_sensors=["binary_sensor.kitchen_window", "binary_sensor.kitchen_door"],
+    )
+    assert err is None
+    assert helper.rooms[0][CONF_WINDOW_SENSORS] == [
+        "binary_sensor.kitchen_window",
+        "binary_sensor.kitchen_door",
+    ]
+
+
+def test_room_helper_update_current_updates_comfort_corridor_bounds():
+    helper = RoomFlowHelper()
+    _add_kitchen(helper)
+    helper.select("kitchen")
+    err = helper.update_current(
+        name="kitchen",
+        sensors=["sensor.kitchen"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["medium"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["1980_1999"],
+        setpoint=22.0,
+        comfort_corridor_low=20.0,
+        comfort_corridor_high=24.0,
+    )
+    assert err is None
+    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_LOW] == 20.0
+    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_HIGH] == 24.0
 
 
 def test_room_helper_update_clearing_sensors_drops_singular_key():

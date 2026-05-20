@@ -82,6 +82,7 @@ from mbc.estimation import ContinuousDiscreteEKF
 from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
 
 from .const import (
+    DEFAULT_SETPOINT_PULL_WEIGHT,
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
@@ -184,6 +185,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         n = len(self._room_list)
         self._n_rooms = n
         self._offset_state: np.ndarray = np.zeros(n, dtype=float)
+        # Per-room covariance scaling for process noise (Phase 3 W1).
+        # Values are covariance multipliers; 1.0 means no inflation.
+        self._room_q_scales: np.ndarray = np.ones(n, dtype=float)
 
         # 2R2C + slab state layout: ``x_phys = [T_a (n), T_w (n), T_s (n)]``
         # with ``nx_phys = 3n``.  When ``augment_offsets=True`` an
@@ -365,6 +369,27 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # Keep the inner HouseModel in sync so the standalone step()
         # path also sees the latest value (used by diagnostics).
         self._model.set_ground_temp(self._ground_temp)
+
+    def set_room_process_noise_covariance_scales(
+        self, scales_by_room: Dict[str, float],
+    ) -> None:
+        """Update per-room process-noise covariance multipliers.
+
+        ``scales_by_room[room]`` scales Q for that room's physical states
+        (air/wall/slab). Values <= 0 are ignored.
+        """
+        scales = np.ones(self._n_rooms, dtype=float)
+        for room_name, value in scales_by_room.items():
+            if room_name not in self._room_idx:
+                continue
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(val) or val <= 0.0:
+                continue
+            scales[self._room_idx[room_name]] = val
+        self._room_q_scales = scales
 
     def _infiltration_delta_ua(
         self, outdoor_temp: float, room_temps: np.ndarray,
@@ -580,10 +605,24 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """
         n = self._n_rooms
         m = self._n_filtered
+        std_scales = np.sqrt(np.maximum(self._room_q_scales, 0.0))
+        physical_std = np.concatenate([std_scales, std_scales, std_scales])
         if not self._augment_offsets:
-            return self._sigma_w * np.eye(3 * n + m)
+            diag = np.concatenate(
+                [
+                    self._sigma_w * physical_std,
+                    self._sigma_w * np.ones(m, dtype=float),
+                ]
+            )
+            return np.diag(diag)
         sig = np.zeros((self.nx, self.nw))
-        sig[:3 * n + m, :3 * n + m] = self._sigma_w * np.eye(3 * n + m)
+        diag_non_offset = np.concatenate(
+            [
+                self._sigma_w * physical_std,
+                self._sigma_w * np.ones(m, dtype=float),
+            ]
+        )
+        sig[:3 * n + m, :3 * n + m] = np.diag(diag_non_offset)
         sig[3 * n + m:, 3 * n + m:] = self._sigma_b * np.eye(n)
         return sig
 
@@ -850,6 +889,34 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             [self._model.rooms[name].setpoint for name in self._room_list]
         )
 
+    def comfort_corridor_bounds(
+        self,
+        fallback_offset: float,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Per-room comfort corridor bounds used for soft output constraints.
+
+        Rooms can provide explicit ``comfort_corridor_low/high``. When those
+        fields are absent, the legacy band ``setpoint ± fallback_offset`` is
+        used so existing configurations migrate without manual edits.
+        """
+        lows: List[float] = []
+        highs: List[float] = []
+        for name in self._room_list:
+            room = self._model.rooms[name]
+            low = getattr(room, "comfort_corridor_low", None)
+            high = getattr(room, "comfort_corridor_high", None)
+            if low is None or high is None:
+                sp = float(room.setpoint)
+                low = sp - float(fallback_offset)
+                high = sp + float(fallback_offset)
+            low_f = float(low)
+            high_f = float(high)
+            if low_f > high_f:
+                low_f, high_f = high_f, low_f
+            lows.append(low_f)
+            highs.append(high_f)
+        return np.array(lows, dtype=float), np.array(highs, dtype=float)
+
     @property
     def u_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -983,6 +1050,7 @@ class HeatingMPCController:
         latitude: float = 55.0,
         longitude: float = 12.0,
         energy_weight: float = 0.01,
+        setpoint_pull_weight: float = DEFAULT_SETPOINT_PULL_WEIGHT,
         smoothing_weight: float = 0.1,
         constraint_offset: float = 2.0,
         terminal_weight: float = 100.0,
@@ -1000,6 +1068,7 @@ class HeatingMPCController:
         self._latitude = latitude
         self._longitude = longitude
         self._constraint_offset = constraint_offset
+        self._setpoint_pull_weight = float(setpoint_pull_weight)
         self._solver_requested = solver
         self._solver_active = solver
         self._solver_options = dict(solver_options) if solver_options is not None else {}
@@ -1087,7 +1156,7 @@ class HeatingMPCController:
         )
 
         # ── OCP cost matrices ───────────────────────────────────────────
-        Q = np.eye(n_z)                      # stage output tracking
+        Q = self._setpoint_pull_weight * np.eye(n_z)  # weak stage setpoint pull
         R = energy_weight * np.eye(n_u)      # input cost
         S = (smoothing_weight * np.eye(n_u)
              if smoothing_weight > 0.0 else None)  # ROM penalty
@@ -1110,6 +1179,9 @@ class HeatingMPCController:
 
         # Reference and bounds for the OCP
         z_ref = self._control_system.x_ref.copy()
+        z_min, z_max = self._control_system.comfort_corridor_bounds(
+            fallback_offset=self._constraint_offset,
+        )
         u_min, u_max = self._control_system.u_bounds
 
         # ── CDTrackingOptimalControlProblem ─────────────────────────────
@@ -1120,6 +1192,9 @@ class HeatingMPCController:
             P=P,
             S=S,
             z_ref=z_ref,
+            z_min=z_min,
+            z_max=z_max,
+            rho_z=1e4,
             u_min=u_min,
             u_max=u_max,
             n_steps=ocp_n_steps,
@@ -1161,6 +1236,9 @@ class HeatingMPCController:
         P: np.ndarray,
         S: Optional[np.ndarray],
         z_ref: np.ndarray,
+        z_min: np.ndarray,
+        z_max: np.ndarray,
+        rho_z: float,
         u_min: np.ndarray,
         u_max: np.ndarray,
         n_steps: int,
@@ -1174,6 +1252,9 @@ class HeatingMPCController:
             "P": P,
             "S": S,
             "z_ref": z_ref,
+            "z_min": z_min,
+            "z_max": z_max,
+            "rho_z": rho_z,
             "u_min": u_min,
             "u_max": u_max,
             "n_steps": n_steps,
@@ -1205,6 +1286,9 @@ class HeatingMPCController:
         P: np.ndarray,
         S: Optional[np.ndarray],
         z_ref: np.ndarray,
+        z_min: np.ndarray,
+        z_max: np.ndarray,
+        rho_z: float,
         u_min: np.ndarray,
         u_max: np.ndarray,
         n_steps: int,
@@ -1220,6 +1304,9 @@ class HeatingMPCController:
                 P=P,
                 S=S,
                 z_ref=z_ref,
+                z_min=z_min,
+                z_max=z_max,
+                rho_z=rho_z,
                 u_min=u_min,
                 u_max=u_max,
                 n_steps=n_steps,
@@ -1242,6 +1329,9 @@ class HeatingMPCController:
                 P=P,
                 S=S,
                 z_ref=z_ref,
+                z_min=z_min,
+                z_max=z_max,
+                rho_z=rho_z,
                 u_min=u_min,
                 u_max=u_max,
                 n_steps=n_steps,
@@ -1298,6 +1388,13 @@ class HeatingMPCController:
         """
         self._system.set_wind_speed(wind_speed)
         self._control_system.set_wind_speed(wind_speed)
+
+    def set_room_process_noise_covariance_scales(
+        self, scales_by_room: Dict[str, float],
+    ) -> None:
+        """Apply per-room EKF/OCP process-noise covariance multipliers."""
+        self._system.set_room_process_noise_covariance_scales(scales_by_room)
+        self._control_system.set_room_process_noise_covariance_scales(scales_by_room)
 
     @property
     def last_innovation(self) -> Optional[List[float]]:
@@ -1556,6 +1653,9 @@ class HeatingMPCController:
 
         # ── Update setpoint reference in OCP (setpoints may have changed) ──
         z_ref = self._control_system.x_ref
+        z_min, z_max = self._control_system.comfort_corridor_bounds(
+            fallback_offset=self._constraint_offset,
+        )
         # NOTE: mbc's CDTrackingOptimalControlProblem has no public API for
         # updating the reference trajectory after construction, so we reach
         # into the internal EconomicOptimalControlProblem.  This is technical
@@ -1563,6 +1663,9 @@ class HeatingMPCController:
         _eocp = self._ocp._eocp
         _M = _eocp._N * _eocp._n_steps
         _eocp._z_ref = np.tile(z_ref, (_M + 1, 1))
+        _eocp._z_min = np.asarray(z_min, dtype=float)
+        _eocp._z_max = np.asarray(z_max, dtype=float)
+        _eocp._has_soft_z = True
         # Also update the Mayer (terminal cost) function's captured _zref.
         # CDTrackingOptimalControlProblem defines _mayer as:
         #   def _mayer(x, y, theta, _P=P_arr, _zref=z_ref_arr, _model=model, ...)
@@ -1630,6 +1733,9 @@ class HeatingMPCController:
                 P=self._P,
                 S=self._S,
                 z_ref=self._control_system.x_ref.copy(),
+                z_min=z_min,
+                z_max=z_max,
+                rho_z=1e4,
                 u_min=self._control_system.u_bounds[0],
                 u_max=self._control_system.u_bounds[1],
                 n_steps=self._ocp_n_steps,

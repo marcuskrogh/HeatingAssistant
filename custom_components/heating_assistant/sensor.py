@@ -76,6 +76,7 @@ async def async_setup_entry(
         entities.append(TemperatureOffsetSensor(coordinator, room_name))
         entities.append(TemperatureForecastSensor(coordinator, room_name))
         entities.append(SetpointSensor(coordinator, room_name))
+        entities.append(WindowStateSensor(coordinator, room_name))
         entities.append(ConstraintUpperSensor(coordinator, room_name))
         entities.append(ConstraintLowerSensor(coordinator, room_name))
         entities.append(HeatingPowerMeasuredSensor(coordinator, room_name))
@@ -278,6 +279,31 @@ class SetpointSensor(CoordinatorEntity, SensorEntity):
         )
 
 
+class WindowStateSensor(CoordinatorEntity, SensorEntity):
+    """Per-room open-window state-machine state (Phase 3 W1)."""
+
+    _attr_icon = "mdi:window-open-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – Window State"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_window_state"
+
+    @property
+    def native_value(self) -> str:
+        state = getattr(self._coordinator, "get_window_state", None)
+        if callable(state):
+            return state(self._room_name)
+        return "closed"
+
+
 class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):
     """Shared base for the MPC soft-constraint bound sensors.
 
@@ -383,10 +409,18 @@ def _constraint_bound(
     room_name: str,
     sign: float,
 ) -> Optional[float]:
-    """Compute setpoint ± constraint_offset for a room, or None if unknown."""
+    """Compute effective comfort-corridor bound for a room, or None if unknown."""
     room = coordinator.model.rooms.get(room_name)
     if room is None:
         return None
+    if sign < 0:
+        low = getattr(room, "comfort_corridor_low", None)
+        if low is not None:
+            return float(low)
+    else:
+        high = getattr(room, "comfort_corridor_high", None)
+        if high is not None:
+            return float(high)
     controller = getattr(coordinator, "controller", None)
     offset = getattr(controller, "constraint_offset", None)
     if offset is None:

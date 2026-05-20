@@ -25,6 +25,7 @@ import numpy as np
 
 from .const import (
     AIR_RHO_CP,
+    DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_C_AIR_FRACTION,
     DEFAULT_DELTA_T_SKY,
     DEFAULT_FACADE_ABSORPTANCE,
@@ -137,6 +138,8 @@ class Room:
         wall_temperature: Optional[float] = None,
         slab_temperature: Optional[float] = None,
         setpoint: float = 21.0,
+        comfort_corridor_low: Optional[float] = None,
+        comfort_corridor_high: Optional[float] = None,
         internal_gain: float = 0.0,
         infiltration_fraction: float = DEFAULT_INFILTRATION_FRACTION,
         c_air_fraction: float = DEFAULT_C_AIR_FRACTION,
@@ -157,6 +160,19 @@ class Room:
         self.connections = list(connections) if connections is not None else []
         self.windows = list(windows) if windows is not None else []
         self.setpoint = float(setpoint)
+        default_low = float(setpoint) - DEFAULT_CONSTRAINT_OFFSET
+        default_high = float(setpoint) + DEFAULT_CONSTRAINT_OFFSET
+        self.comfort_corridor_low = float(
+            default_low if comfort_corridor_low is None else comfort_corridor_low
+        )
+        self.comfort_corridor_high = float(
+            default_high if comfort_corridor_high is None else comfort_corridor_high
+        )
+        if self.comfort_corridor_low > self.comfort_corridor_high:
+            self.comfort_corridor_low, self.comfort_corridor_high = (
+                self.comfort_corridor_high,
+                self.comfort_corridor_low,
+            )
         self.internal_gain = float(internal_gain)
         self.infiltration_fraction = float(infiltration_fraction)
         self.c_air_fraction = float(c_air_fraction)

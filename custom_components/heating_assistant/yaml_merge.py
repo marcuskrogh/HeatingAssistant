@@ -31,6 +31,9 @@ from .const import (
     CONF_TERMINAL_WEIGHT,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
+    CONF_WINDOW_OPEN_CLOSE_SETTLE,
+    CONF_WINDOW_OPEN_DEBOUNCE,
+    CONF_WINDOW_OPEN_Q_INFLATION,
     DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
@@ -42,6 +45,9 @@ from .const import (
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_UPDATE_INTERVAL,
+    DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+    DEFAULT_WINDOW_OPEN_DEBOUNCE,
+    DEFAULT_WINDOW_OPEN_Q_INFLATION,
 )
 
 
@@ -95,6 +101,24 @@ def merge_yaml_into_entry_data(
     _fill_default(merged, yaml_cfg, CONF_SIGMA_W, DEFAULT_SIGMA_W)
     _fill_default(merged, yaml_cfg, CONF_SIGMA_V, DEFAULT_SIGMA_V)
     _fill_default(merged, yaml_cfg, CONF_SIGMA_B, DEFAULT_SIGMA_B)
+    _fill_default(
+        merged,
+        yaml_cfg,
+        CONF_WINDOW_OPEN_DEBOUNCE,
+        DEFAULT_WINDOW_OPEN_DEBOUNCE,
+    )
+    _fill_default(
+        merged,
+        yaml_cfg,
+        CONF_WINDOW_OPEN_CLOSE_SETTLE,
+        DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+    )
+    _fill_default(
+        merged,
+        yaml_cfg,
+        CONF_WINDOW_OPEN_Q_INFLATION,
+        DEFAULT_WINDOW_OPEN_Q_INFLATION,
+    )
 
     # ── Site location: YAML fills in only when absent and YAML provides it.
     if CONF_LATITUDE not in merged and CONF_LATITUDE in yaml_cfg:

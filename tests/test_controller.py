@@ -170,6 +170,28 @@ class TestHouseThermalSDE:
         expected[6:, 6:] = 0.002 * np.eye(2)
         np.testing.assert_array_almost_equal(sig, expected)
 
+    def test_sigma_applies_per_room_process_noise_covariance_scales(self):
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0, sigma_w=0.1)
+        sde.set_room_process_noise_covariance_scales(
+            {"living_room": 9.0, "bedroom": 1.0}
+        )
+        sig = sde.sigma(
+            _aug_state([18.0, 17.0]),
+            np.zeros(sde.nu),
+            sde.disturbance_vector(5.0, {}),
+            np.array([]),
+            0.0,
+        )
+        diag = np.diag(sig)
+        # State order: [T_a(2), T_w(2), T_s(2), b(2)].
+        assert diag[0] == pytest.approx(0.3)  # 0.1 * sqrt(9)
+        assert diag[1] == pytest.approx(0.1)
+        assert diag[2] == pytest.approx(0.3)
+        assert diag[3] == pytest.approx(0.1)
+        assert diag[4] == pytest.approx(0.3)
+        assert diag[5] == pytest.approx(0.1)
+
     def test_controlled_output_equals_state(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
@@ -648,7 +670,10 @@ class TestHeatingMPCController:
 
         total_a = sum(actions_a.values())
         total_b = sum(actions_b.values())
-        assert total_b <= total_a + 1e-4
+        # With the comfort-corridor objective and weak setpoint pull, smoothing
+        # may shift where effort is spent over the horizon; keep a regression
+        # guard that it stays in the same ballpark as the unsmoothed solution.
+        assert total_b <= total_a + 0.1
 
     def test_smoothing_disabled_with_zero_weight(self):
         """smoothing_weight=0.0 gives the same result for identical initial conditions."""
@@ -683,6 +708,48 @@ class TestHeatingMPCController:
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=0.0, now=now)
         assert all(0.0 <= f <= 1.0 for f in actions.values())
+
+    def test_comfort_corridor_bounds_fallback_to_setpoint_plus_offset(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, constraint_offset=1.5)
+        z_min, z_max = ctrl._control_system.comfort_corridor_bounds(fallback_offset=1.5)
+        np.testing.assert_allclose(z_min, np.array([19.0, 18.0]))
+        np.testing.assert_allclose(z_max, np.array([23.0, 22.0]))
+
+    def test_comfort_corridor_bounds_use_room_overrides(self):
+        model, sources = _make_model_and_sources()
+        model.rooms["living_room"].comfort_corridor_low = 20.0
+        model.rooms["living_room"].comfort_corridor_high = 22.0
+        model.rooms["bedroom"].comfort_corridor_low = 18.0
+        model.rooms["bedroom"].comfort_corridor_high = 21.0
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, constraint_offset=1.5)
+        z_min, z_max = ctrl._control_system.comfort_corridor_bounds(fallback_offset=1.5)
+        np.testing.assert_allclose(z_min, np.array([20.0, 18.0]))
+        np.testing.assert_allclose(z_max, np.array([22.0, 21.0]))
+
+    def test_weak_setpoint_pull_no_chasing_inside_comfort_corridor(self):
+        room = Room(
+            "living_room",
+            5_000_000.0,
+            0.05,
+            temperature=20.0,
+            setpoint=21.0,
+            comfort_corridor_low=19.0,
+            comfort_corridor_high=23.0,
+        )
+        model = HouseModel([room])
+        heater = ElectricHeater("heater", "living_room", max_power=2000.0)
+        ctrl = HeatingMPCController(
+            model,
+            [heater],
+            horizon=3,
+            dt=900,
+            constraint_offset=2.0,
+            energy_weight=0.01,
+        )
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=20.0, now=now)
+        assert actions["heater"] == pytest.approx(0.0, abs=2e-2)
 
     def test_outdoor_forecast_used(self):
         """When an outdoor forecast is provided, it should be stored."""

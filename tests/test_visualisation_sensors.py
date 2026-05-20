@@ -22,6 +22,7 @@ from custom_components.heating_assistant.sensor import (
     TemperatureFilteredSensor,
     TemperatureMeasuredSensor,
     TemperatureOffsetSensor,
+    WindowStateSensor,
 )
 
 
@@ -100,6 +101,13 @@ def test_constraint_sensors_unique_ids():
     assert lower._attr_unique_id == "heating_assistant_living_room_constraint_lower"
 
 
+def test_window_state_sensor_unique_id():
+    coord = _make_coordinator()
+    coord.get_window_state = lambda _room: "closed"
+    sensor = WindowStateSensor(coord, "living_room")
+    assert sensor._attr_unique_id == "heating_assistant_living_room_window_state"
+
+
 def test_measured_aliases_match_pattern():
     coord = _make_coordinator()
     assert HeatingPowerMeasuredSensor(coord, "living_room")._attr_unique_id == (
@@ -161,6 +169,14 @@ def test_constraint_lower_is_setpoint_minus_offset():
     assert sensor.native_value == pytest.approx(19.5)
 
 
+def test_constraint_sensors_use_explicit_comfort_corridor_when_present():
+    coord = _make_coordinator(setpoint=21.0, constraint_offset=1.5)
+    coord.model.rooms["living_room"].comfort_corridor_low = 20.2
+    coord.model.rooms["living_room"].comfort_corridor_high = 22.8
+    assert ConstraintLowerSensor(coord, "living_room").native_value == pytest.approx(20.2)
+    assert ConstraintUpperSensor(coord, "living_room").native_value == pytest.approx(22.8)
+
+
 def test_constraint_band_width_is_twice_offset():
     coord = _make_coordinator(setpoint=20.0, constraint_offset=2.0)
     upper = ConstraintUpperSensor(coord, "living_room").native_value
@@ -192,6 +208,13 @@ def test_constraint_sensors_return_none_without_controller():
     lower = ConstraintLowerSensor(coord, "living_room")
     assert upper.native_value is None
     assert lower.native_value is None
+
+
+def test_window_state_sensor_returns_state_from_coordinator():
+    coord = _make_coordinator()
+    coord.get_window_state = lambda _room: "pending_open"
+    sensor = WindowStateSensor(coord, "living_room")
+    assert sensor.native_value == "pending_open"
 
 
 # ── MPC-failure visibility ──────────────────────────────────────────────

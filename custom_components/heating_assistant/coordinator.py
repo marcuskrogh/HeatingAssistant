@@ -55,6 +55,8 @@ from .const import (
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
     CONF_SOURCE_TYPE,
     CONF_CONNECTIONS,
+    CONF_COMFORT_CORRIDOR_HIGH,
+    CONF_COMFORT_CORRIDOR_LOW,
     CONF_CONNECTED_ROOM,
     CONF_C_SLAB_FRACTION,
     CONF_FACADE_ABSORPTANCE,
@@ -73,6 +75,10 @@ from .const import (
     CONF_SETPOINT,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_WINDOW_OPEN_CLOSE_SETTLE,
+    CONF_WINDOW_OPEN_DEBOUNCE,
+    CONF_WINDOW_OPEN_Q_INFLATION,
+    CONF_WINDOW_SENSORS,
     CONF_TERMINAL_WEIGHT,
     CONF_THERMAL_MASS,
     CONF_WINDOWS,
@@ -99,6 +105,9 @@ from .const import (
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
+    DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+    DEFAULT_WINDOW_OPEN_DEBOUNCE,
+    DEFAULT_WINDOW_OPEN_Q_INFLATION,
     DEFAULT_FACADE_ABSORPTANCE,
     DEFAULT_FACADE_COLOUR,
     DEFAULT_FACADE_SOLAR_SHARE,
@@ -185,6 +194,8 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                 connections=connections,
                 windows=windows,
                 setpoint=rc.get(CONF_SETPOINT, DEFAULT_SETPOINT),
+                comfort_corridor_low=rc.get(CONF_COMFORT_CORRIDOR_LOW),
+                comfort_corridor_high=rc.get(CONF_COMFORT_CORRIDOR_HIGH),
                 infiltration_fraction=rc.get(
                     CONF_INFILTRATION_FRACTION, DEFAULT_INFILTRATION_FRACTION,
                 ),
@@ -309,6 +320,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_SIGMA_W,
         CONF_SIGMA_V,
         CONF_SIGMA_B,
+        CONF_WINDOW_OPEN_DEBOUNCE,
+        CONF_WINDOW_OPEN_CLOSE_SETTLE,
+        CONF_WINDOW_OPEN_Q_INFLATION,
     }
 
     def __init__(
@@ -353,6 +367,30 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._sigma_b: float = float(
             options.get(CONF_SIGMA_B, data.get(CONF_SIGMA_B, DEFAULT_SIGMA_B))
+        )
+        self._window_open_debounce: float = float(
+            options.get(
+                CONF_WINDOW_OPEN_DEBOUNCE,
+                data.get(CONF_WINDOW_OPEN_DEBOUNCE, DEFAULT_WINDOW_OPEN_DEBOUNCE),
+            )
+        )
+        self._window_open_close_settle: float = float(
+            options.get(
+                CONF_WINDOW_OPEN_CLOSE_SETTLE,
+                data.get(
+                    CONF_WINDOW_OPEN_CLOSE_SETTLE,
+                    DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+                ),
+            )
+        )
+        self._window_open_q_inflation: float = float(
+            options.get(
+                CONF_WINDOW_OPEN_Q_INFLATION,
+                data.get(
+                    CONF_WINDOW_OPEN_Q_INFLATION,
+                    DEFAULT_WINDOW_OPEN_Q_INFLATION,
+                ),
+            )
         )
         self._mpc_solver: str = _normalize_solver_name(
             options.get(CONF_MPC_SOLVER)
@@ -477,6 +515,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 mapping[room_name] = sensors
         return mapping
 
+    @staticmethod
+    def _build_window_sensor_map(
+        rooms_cfg: List[Dict[str, Any]],
+    ) -> Dict[str, List[str]]:
+        """Return ``{room_name: [binary_sensor_id, ...]}`` for window/door override."""
+        mapping: Dict[str, List[str]] = {}
+        for rc in rooms_cfg:
+            room_name = rc[CONF_ROOM_NAME]
+            sensors = [s for s in rc.get(CONF_WINDOW_SENSORS, []) if isinstance(s, str)]
+            # Deduplicate while preserving order.
+            deduped: List[str] = []
+            for sensor_id in sensors:
+                if sensor_id not in deduped:
+                    deduped.append(sensor_id)
+            if deduped:
+                mapping[room_name] = deduped
+        return mapping
+
     def _init_room_state(self, rooms_cfg: List[Dict[str, Any]]) -> None:
         """Initialise per-room flags and parsed comfort schedules.
 
@@ -494,6 +550,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._room_schedule: Dict[str, RoomSchedule] = {}
         self._base_setpoint: Dict[str, float] = {}
         self._schedule_enabled: Dict[str, bool] = {}
+        self._window_sensors: Dict[str, List[str]] = self._build_window_sensor_map(rooms_cfg)
+        self._window_state: Dict[str, str] = {name: "closed" for name in room_names}
+        self._window_state_since: Dict[str, datetime] = {}
         # Last applied effective setpoint per room — exposed for diagnostics.
         self._effective_setpoint: Dict[str, EffectiveSetpoint] = {}
         for rc in rooms_cfg:
@@ -503,6 +562,65 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 rc.get(CONF_SETPOINT, DEFAULT_SETPOINT)
             )
             self._schedule_enabled[room_name] = True
+
+    def _read_binary_sensor_on(self, entity_id: str) -> bool:
+        """Return True when the given binary sensor is currently ``on``."""
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return False
+        return str(state.state).lower() == "on"
+
+    def _set_window_state(
+        self,
+        room_name: str,
+        state: str,
+        now_utc: datetime,
+    ) -> None:
+        """Set per-room window state and timestamp the transition."""
+        self._window_state[room_name] = state
+        self._window_state_since[room_name] = now_utc
+
+    def _update_window_state_machine(self, now_utc: datetime) -> None:
+        """Advance the per-room window state machine for Phase 3 W1."""
+        for room_name in self.model.room_names:
+            sensors = self._window_sensors.get(room_name, [])
+            if not sensors:
+                self._window_state[room_name] = "closed"
+                self._window_state_since.pop(room_name, None)
+                continue
+
+            any_open = any(self._read_binary_sensor_on(entity_id) for entity_id in sensors)
+            state = self._window_state.get(room_name, "closed")
+            since = self._window_state_since.get(room_name, now_utc)
+            elapsed = (now_utc - since).total_seconds()
+
+            if state == "closed":
+                if any_open:
+                    self._set_window_state(room_name, "pending_open", now_utc)
+                continue
+            if state == "pending_open":
+                if not any_open:
+                    self._set_window_state(room_name, "closed", now_utc)
+                elif elapsed >= self._window_open_debounce:
+                    self._set_window_state(room_name, "open", now_utc)
+                continue
+            if state == "open":
+                if not any_open:
+                    self._set_window_state(room_name, "pending_closed", now_utc)
+                continue
+            if state == "pending_closed":
+                if any_open:
+                    self._set_window_state(room_name, "open", now_utc)
+                elif elapsed >= self._window_open_close_settle:
+                    self._set_window_state(room_name, "closed", now_utc)
+
+    def get_window_state(self, room_name: str) -> str:
+        """Return the current window override state for a room."""
+        return self._window_state.get(room_name, "closed")
+
+    def is_window_override_active(self, room_name: str) -> bool:
+        """Return True while the room is in the ``open`` window state."""
+        return self.get_window_state(room_name) == "open"
 
     def _init_runtime_buffers(self) -> None:
         """Initialise per-cycle and visualisation state.
@@ -744,6 +862,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if CONF_SIGMA_B in pending:
             self._sigma_b = float(pending.get(CONF_SIGMA_B, self._sigma_b))
             rebuild_controller = True
+        if CONF_WINDOW_OPEN_DEBOUNCE in pending:
+            self._window_open_debounce = float(
+                pending.get(CONF_WINDOW_OPEN_DEBOUNCE, self._window_open_debounce)
+            )
+        if CONF_WINDOW_OPEN_CLOSE_SETTLE in pending:
+            self._window_open_close_settle = float(
+                pending.get(
+                    CONF_WINDOW_OPEN_CLOSE_SETTLE, self._window_open_close_settle,
+                )
+            )
+        if CONF_WINDOW_OPEN_Q_INFLATION in pending:
+            self._window_open_q_inflation = float(
+                pending.get(
+                    CONF_WINDOW_OPEN_Q_INFLATION, self._window_open_q_inflation,
+                )
+            )
         if CONF_MPC_SOLVER in pending:
             self._mpc_solver = _normalize_solver_name(
                 pending.get(CONF_MPC_SOLVER, self._mpc_solver)
@@ -854,6 +988,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #     sees the current temperature.
             now_local = datetime.now()
             self._apply_schedule(now_local)
+            self._update_window_state_machine(self.now_utc)
 
             # 2. Read outdoor temperature
             outdoor_temp = self._read_outdoor_temp()
@@ -877,6 +1012,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.wind_speed = wind_speed_now
             if hasattr(self.controller, "set_wind_speed"):
                 self.controller.set_wind_speed(wind_speed_now)
+            if hasattr(self.controller, "set_room_process_noise_covariance_scales"):
+                q_scale = {
+                    room_name: (
+                        self._window_open_q_inflation
+                        if self.is_window_override_active(room_name)
+                        else 1.0
+                    )
+                    for room_name in self.model.room_names
+                }
+                self.controller.set_room_process_noise_covariance_scales(q_scale)
 
             # 2d. Compute the current ground temperature from the
             #     built-in sinusoidal model (Phase 1 A2).  No external
@@ -955,6 +1100,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.solar_forecast = []
                 self.filtered_temperatures = {}
                 kalman_innovation = None
+
+            # Dispatch-layer W1 override: clamp all sources in open-window
+            # rooms to u=0 before history write and actuator commands.
+            for src in self.heat_sources:
+                if self.is_window_override_active(src.room):
+                    self.actions[src.name] = 0.0
 
             # 5. Store heat-flow breakdown (independent of MPC solve success)
             self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
@@ -1124,11 +1275,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         for src in self.heat_sources:
             fraction = self.actions.get(src.name, 0.0)
             room_enabled = self.is_room_enabled(src.room)
+            window_override_active = self.is_window_override_active(src.room)
+            effective_room_enabled = room_enabled and not window_override_active
             controller = getattr(self, "controller", None)
 
             # If the room is disabled, force fraction to 0 (turn off).
-            if not room_enabled:
+            if not effective_room_enabled:
                 fraction = 0.0
+                if controller is not None:
+                    controller.notify_applied_u(src.name, 0.0)
 
             entity_id = src.heater_entity
             if not entity_id:
@@ -1160,7 +1315,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 #       (HP idles with no temperature gap)
                 #   - fraction > 0  → heat mode, offset-based setpoint
                 if isinstance(src, HeatPump):
-                    if not room_enabled:
+                    if not effective_room_enabled:
                         # Room explicitly disabled (user toggle or active "off"
                         # schedule period without frost-protection demand) —
                         # force the heat pump fully off.
@@ -1353,7 +1508,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     room_temp = self.model.rooms[src.room].temperature
                     room_setpoint = self.get_room_setpoint(src.room)
 
-                    if not self.is_room_enabled(src.room):
+                    if not effective_room_enabled:
                         # Room explicitly disabled – turn the entity off.
                         await self.hass.services.async_call(
                             "climate",
@@ -1420,13 +1575,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     {
                         "entity_id": entity_id,
                         # Disabled/off-scheduled room should always apply zero output.
-                        "value": 0 if not room_enabled else round(fraction * 100),
+                        "value": 0 if not effective_room_enabled else round(fraction * 100),
                     },
                     blocking=False,
                 )
             elif domain == "switch":
                 # Disabled/off-scheduled room should always switch the unit off.
-                if not room_enabled:
+                if not effective_room_enabled:
                     service = "turn_off"
                 else:
                     service = "turn_on" if fraction > 0.5 else "turn_off"

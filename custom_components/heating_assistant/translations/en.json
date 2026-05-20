@@ -15,7 +15,10 @@
           "mpc_analytic_derivatives": "Enable analytical derivatives (recommended for IPOPT)",
           "sigma_w": "SDE process-noise std dev (sigma_w, K/√s)",
           "sigma_v": "Temperature measurement-noise std dev (sigma_v, K)",
-          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)"
+          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)",
+          "window_open_debounce": "Window open debounce (seconds)",
+          "window_open_close_settle": "Window close settle time (seconds)",
+          "window_open_q_inflation": "Window-open EKF process-noise covariance multiplier"
         }
       }
     },
@@ -42,7 +45,10 @@
           "mpc_analytic_derivatives": "Enable analytical derivatives (recommended for IPOPT)",
           "sigma_w": "SDE process-noise std dev (sigma_w, K/√s)",
           "sigma_v": "Temperature measurement-noise std dev (sigma_v, K)",
-          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)"
+          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)",
+          "window_open_debounce": "Window open debounce (seconds)",
+          "window_open_close_settle": "Window close settle time (seconds)",
+          "window_open_q_inflation": "Window-open EKF process-noise covariance multiplier"
         }
       },
       "manage_rooms": {
@@ -60,8 +66,11 @@
         "data": {
           "name": "Room name (unique identifier)",
           "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
+          "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
           "room_size": "Approximate room size",
-          "building_age": "Approximate building age/insulation level"
+          "building_age": "Approximate building age/insulation level",
+          "comfort_corridor_low": "Comfort corridor low (°C)",
+          "comfort_corridor_high": "Comfort corridor high (°C)"
         }
       },
       "edit_room": {
@@ -75,8 +84,11 @@
         "data": {
           "name": "Room name",
           "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
+          "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
           "room_size": "Approximate room size",
-          "building_age": "Approximate building age/insulation level"
+          "building_age": "Approximate building age/insulation level",
+          "comfort_corridor_low": "Comfort corridor low (°C)",
+          "comfort_corridor_high": "Comfort corridor high (°C)"
         }
       },
       "manage_room_windows": {
