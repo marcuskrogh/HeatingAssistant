@@ -749,6 +749,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         conn.r_value = float(r_val)
 
         # Rebuild state-space matrices to reflect the updated parameters.
+        # Must call rebuild_derived_parameters() first so the cached per-room
+        # arrays (_c_air, _c_wall, _r_aw, _r_we, _leakage_area, _B_sky_offset)
+        # are re-derived from the new room.thermal_mass / room.r_external values
+        # before _build_matrices() reads them.
+        self.model.rebuild_derived_parameters()
         (
             self.model._C,
             self.model._A,
@@ -2022,7 +2027,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "Applied estimated inter-room resistances: %s", estimated_inter_room_r
             )
 
-        # Rebuild the internal model matrices (A, B_ext, C_cap)
+        # Rebuild the internal model matrices (A, B_ext, C_cap).
+        # Must call rebuild_derived_parameters() first so the cached per-room
+        # arrays (_c_air, _c_wall, _r_aw, _r_we, _leakage_area, _B_sky_offset)
+        # are re-derived from the new room.thermal_mass / room.r_external values
+        # before _build_matrices() reads them.
+        self.model.rebuild_derived_parameters()
         (
             self.model._C,
             self.model._A,

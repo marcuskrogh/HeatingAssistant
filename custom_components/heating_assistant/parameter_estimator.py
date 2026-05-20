@@ -1420,9 +1420,21 @@ class KalmanMLEstimator:
         """Build x0/P0 matching system dimensions (supports augmented states)."""
         nx = int(system.nx)
         nym = int(system.nym)
+        n = self._n
         x0 = np.zeros(nx, dtype=float)
         n_copy = min(nym, len(first_measurement), nx)
         x0[:n_copy] = np.array(first_measurement[:n_copy], dtype=float)
+
+        # For 2R2C+slab models (nx = 3n or 4n) the wall block (indices n..2n)
+        # and slab block (2n..3n) are unobserved.  Initialising them at 0 K
+        # rather than at the room air temperature causes a large transient in
+        # the forward EKF pass that corrupts the log-likelihood and can bias
+        # parameter estimates.  Warm-start both latent blocks at the first
+        # measured air temperature so the initial model error is small.
+        if nx >= 2 * n and n_copy >= n:
+            x0[n: 2 * n] = x0[:n]          # wall ← air
+        if nx >= 3 * n and n_copy >= n:
+            x0[2 * n: 3 * n] = x0[:n]      # slab ← air
 
         P0 = np.eye(nx, dtype=float) * self._R_var * 10.0
         if nx > nym:
