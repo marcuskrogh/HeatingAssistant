@@ -380,6 +380,52 @@ class TestMPCPerformance:
                     "full-house-5room"
                 )
 
+    def test_full_house_5room_horizon16(self):
+        """5-room house, horizon=16, dt=900s — the problem-statement scenario.
+
+        This is the primary regression guard for the numerical-efficiency
+        improvements (analytical Jacobians + L-BFGS Hessian for IPOPT).
+        With SLSQP the budget is generous (40 s); the real speedup is visible
+        when IPOPT with analytical Jacobians is available.
+        """
+        for solver in self._SOLVERS:
+            model, sources = _full_house()
+            rooms = [r.name for r in model.rooms.values()]
+            ctrl = HeatingMPCController(
+                model, sources,
+                horizon=16,
+                dt=900.0,
+                solver=solver,
+                use_analytic_derivatives=True,
+            )
+
+            def run():
+                ctrl.compute(
+                    outdoor_temp=-5.0,
+                    solar_gains={name: 0.0 for name in rooms},
+                    now=self._NOW,
+                )
+
+            run()  # warm-up
+
+            mean_ms, median_ms, p95_ms = _time_it(run, _MPC_REPS)
+            _record(
+                "full-house-5room-N16",
+                "MPC.compute",
+                solver,
+                ctrl.solver_active,
+                _MPC_REPS,
+                mean_ms,
+                median_ms,
+                p95_ms,
+            )
+
+            if ctrl.solver_active.upper() == "SLSQP":
+                assert median_ms < 40_000, (
+                    f"MPC.compute median {median_ms:.0f}ms exceeds 40 000ms for "
+                    "full-house-5room-N16 with SLSQP"
+                )
+
 
 # ---------------------------------------------------------------------------
 # Parameter estimation performance tests
@@ -573,6 +619,7 @@ def _write_benchmarks_md() -> None:
         "| `studio-1room` | 1 | 1 electric heater | 6 | 1 |",
         "| `two-bedroom-2room` | 2 (connected) | 2 electric heaters | 6 | 2 |",
         "| `full-house-5room` | 5 (interconnected) | 1 heat pump + 4 electric heaters | 8 | 5 |",
+        "| `full-house-5room-N16` | 5 (interconnected) | 1 heat pump + 4 electric heaters | **16** | 5 |",
         "",
         "---",
         "",

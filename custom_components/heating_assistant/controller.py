@@ -47,8 +47,9 @@ HeatingMPCController
 
 from __future__ import annotations
 
-import inspect
+
 import logging
+import math
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -79,7 +80,7 @@ from .const import MPC_STATS_BUFFER_SIZE
 # ── Import nonlinear model-based control components from mbc ─────────────────
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
-from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
+from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController, NLPScalingPolicy
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -479,14 +480,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # Extract internal gains and heater scales from parameter vector
         if len(theta) >= 3 * n:
             q_int = theta[2 * n: 3 * n]
-            heater_scales = np.ones(self.nu)
+            heater_scales = np.ones(self.nu, dtype=float)
             if (
                 len(self._identifiable_sources) > 0
                 and len(theta) >= 3 * n + len(self._identifiable_sources)
             ):
                 log_alpha = theta[3 * n: 3 * n + len(self._identifiable_sources)]
                 for k, s_idx in enumerate(self._identifiable_sources):
-                    heater_scales[s_idx] = np.exp(log_alpha[k])
+                    heater_scales[s_idx] = float(np.exp(log_alpha[k]))
             u_scaled = heater_scales * u
             # d = [T_out, Q_sol,1+Q_int,1, …, Q_sol,n+Q_int,n] — fold q_int
             # into the air-block disturbance channels (columns 1..n of G_d).
@@ -494,6 +495,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             for i in range(n):
                 d_augmented[1 + i] += q_int[i]
         else:
+            heater_scales = np.ones(self.nu, dtype=float)
             u_scaled = u
             d_augmented = d
 
@@ -509,22 +511,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # ``thermal_power``.
         m = self._n_filtered
         heat_contrib_phys = np.zeros(3 * n)
-        # Per-source heater-scale ratio: scale_j / 1.  Equal to 1 for
-        # non-identifiable sources; equal to exp(log_alpha_k) for the
-        # k-th identifiable source.  Computed from ``u_scaled`` / ``u``
-        # only for the air-direct case where ``u_scaled`` was the input
-        # to ``thermal_power`` pre-B2.  Easier: pre-compute the scales.
-        if len(theta) >= 3 * n:
-            heater_scale_factors = np.ones(self.nu, dtype=float)
-            if (
-                len(self._identifiable_sources) > 0
-                and len(theta) >= 3 * n + len(self._identifiable_sources)
-            ):
-                log_alpha2 = theta[3 * n: 3 * n + len(self._identifiable_sources)]
-                for k_la, s_idx in enumerate(self._identifiable_sources):
-                    heater_scale_factors[s_idx] = float(np.exp(log_alpha2[k_la]))
-        else:
-            heater_scale_factors = np.ones(self.nu, dtype=float)
+        # heater_scales is already the per-source scale factor array, re-use it.
+        heater_scale_factors = heater_scales
 
         for j, src in enumerate(self._sources):
             i = self._room_idx[src.room]
@@ -811,6 +799,159 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         H[:, :n] = np.eye(n)                      # T_a contribution
         H[:, b_start: b_start + n] = np.eye(n)    # b contribution
         return H
+
+    @property
+    def dgmdx_const(self) -> np.ndarray:
+        """Pre-computed constant output Jacobian H = ∂gm/∂x.
+
+        ``gm`` is linear in ``x`` (it simply reads the air-temperature block
+        and, in augmented mode, adds the offset block), so this Jacobian
+        is constant — it does not depend on the current state.
+
+        Un-augmented (state ``[T_a, T_w, T_s, φ]``)::
+
+            H = [I_n | 0_{n, 2n+m}]
+
+        Augmented (state ``[T_a, T_w, T_s, φ, b]``)::
+
+            H[:, :n]            = I_n   (air block)
+            H[:, b_start:b_start+n] = I_n   (offset block)
+
+        Returns shape ``(nz, nx)`` where ``nz = n_rooms``.
+        """
+        n = self._n_rooms
+        if not self._augment_offsets:
+            H = np.zeros((n, 3 * n + self._n_filtered))
+            H[:, :n] = np.eye(n)
+            return H
+        b_start = self._offset_block_start
+        H = np.zeros((n, self.nx))
+        H[:, :n] = np.eye(n)
+        H[:, b_start:b_start + n] = np.eye(n)
+        return H
+
+    def dgmdx(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Analytical ``∂gm/∂x``, shape ``(nz, nx)``.
+
+        ``gm`` is a linear function of the state ``x`` (it reads the
+        air-temperature and, in augmented mode, the offset block), so the
+        Jacobian is constant and equal to :attr:`dgmdx_const`.  This
+        method overrides the default finite-difference implementation in
+        :class:`~mbc.models.ContinuousDiscreteModel` and is called by the
+        mbc EOCP for the Mayer-term gradient and the soft-output
+        constraint Jacobian.
+        """
+        return self.dgmdx_const
+
+    def dgmdu(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Analytical ``∂gm/∂u``, shape ``(nz, nu)``.
+
+        ``gm`` does not depend on ``u`` — the output is purely a function
+        of the state ``x``.  Returns a zero matrix of shape ``(nz, nu)``.
+        This overrides the default finite-difference in
+        :class:`~mbc.models.ContinuousDiscreteModel`.
+        """
+        return np.zeros((self.nz, self.nu))
+
+    def dfdu(
+        self,
+        x: np.ndarray,
+        u: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Analytical ``∂f/∂u``, shape ``(nx, nu)``.
+
+        Replaces the default finite-difference implementation in
+        :class:`~mbc.models.ContinuousDiscreteModel` with an exact,
+        closed-form Jacobian.
+
+        For **heating-only** un-filtered sources the derivative is::
+
+            ∂f[target] / ∂u_j = thermal_power(1, T_out) · scale_j / C_cap[target]
+
+        (u ≥ 0 is guaranteed by the box constraint u_min = 0, so
+        max(0, u·scale) is differentiable everywhere in the feasible region.)
+
+        For **cooling-capable** (heat-pump) sources the derivative of the
+        smooth sigmoid is::
+
+            ∂f[target] / ∂u_j = (Q_heat + Q_cool) · k · σ(1−σ) · scale_j / C_cap[target]
+
+        For **filtered** sources (emitter lag τ > 0)::
+
+            ∂f[3n+k_filter] / ∂u_j = 1 / τ_em[k_filter]
+        """
+        outdoor_temp = float(d[0])
+        n = self._n_rooms
+        theta = p if len(p) > 0 else self._theta
+
+        # Heater scale factors (same logic as f())
+        if len(theta) >= 3 * n:
+            heater_scale_factors = np.ones(self.nu, dtype=float)
+            if (
+                len(self._identifiable_sources) > 0
+                and len(theta) >= 3 * n + len(self._identifiable_sources)
+            ):
+                log_alpha = theta[3 * n: 3 * n + len(self._identifiable_sources)]
+                for k_la, s_idx in enumerate(self._identifiable_sources):
+                    heater_scale_factors[s_idx] = float(np.exp(log_alpha[k_la]))
+        else:
+            heater_scale_factors = np.ones(self.nu, dtype=float)
+
+        J = np.zeros((self.nx, self.nu))
+        for j, src in enumerate(self._sources):
+            i = self._room_idx[src.room]
+            k_filter = int(self._filter_idx_for_source[j])
+            if k_filter >= 0:
+                # Filtered source: dφ_k/dt = (u_j − φ_k)/τ_k  →  ∂/∂u_j = 1/τ_k
+                J[3 * n + k_filter, j] = 1.0 / self._emitter_taus[k_filter]
+            else:
+                # Un-filtered source contributing to physical state
+                target = (2 * n + i) if self._is_ufh[i] else i
+                scale = float(heater_scale_factors[j])
+                eff_u = float(u[j]) * scale
+                if src.can_cool:
+                    q_heat = src.thermal_power(1.0, outdoor_temp)
+                    q_cool = abs(src.cooling_power(outdoor_temp))
+                    if q_heat > 0.0 and q_cool > 0.0:
+                        k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
+                        offset_sig = math.log(q_cool / q_heat)
+                        sig_val = 1.0 / (1.0 + math.exp(-(k_sig * eff_u + offset_sig)))
+                        # ∂(smooth_tp)/∂u_j = (Q_h+Q_c)·k·σ(1-σ)·scale
+                        J[target, j] = (
+                            (q_heat + q_cool) * k_sig * sig_val * (1.0 - sig_val)
+                            * scale / self._C_cap[target]
+                        )
+                    else:
+                        # Degenerate: heating-only fallback
+                        if eff_u >= 0.0:
+                            J[target, j] = (
+                                src.thermal_power(1.0, outdoor_temp)
+                                * scale / self._C_cap[target]
+                            )
+                else:
+                    # Heating-only: u ≥ 0 in feasible region → ReLU is linear
+                    J[target, j] = (
+                        src.thermal_power(1.0, outdoor_temp)
+                        * scale / self._C_cap[target]
+                    )
+        return J
 
     # ── Application-layer helpers ────────────────────────────────────────
 
@@ -1268,18 +1409,17 @@ class HeatingMPCController:
         if solver_options:
             kwargs["solver_options"] = solver_options
 
-        # Forward-compatible analytical-derivative plumbing:
-        # pass hooks only when the installed mbc API explicitly supports them.
-        if self._use_analytic_derivatives:
-            sig = inspect.signature(CDTrackingOptimalControlProblem.__init__).parameters
-            if "use_analytic_derivatives" in sig:
-                kwargs["use_analytic_derivatives"] = True
-            if "derivative_fallback" in sig:
-                kwargs["derivative_fallback"] = "numerical"
-            if "analytic_derivatives_fallback" in sig:
-                kwargs["analytic_derivatives_fallback"] = "numerical"
+        # For IPOPT scale the NLP objective by 1/rho_z so that the dominant
+        # soft-penalty term O(rho_z) is normalised to O(1).  Without this the
+        # objective can reach ~10^6–10^7 while IPOPT's absolute dual-
+        # infeasibility tolerance is 1e-6, a gap that prevents convergence
+        # within the iteration budget.  SLSQP is unaffected by this scaling.
+        if solver.lower() in {"ipopt", "cyipopt"}:
+            kwargs["solver_scaling"] = NLPScalingPolicy(objective_scale=1.0 / rho_z)
 
-        return CDTrackingOptimalControlProblem(self._control_system, **kwargs)
+        ocp = CDTrackingOptimalControlProblem(self._control_system, **kwargs)
+
+        return ocp
 
     def _build_ocp_with_fallback(
         self,
@@ -1348,6 +1488,10 @@ class HeatingMPCController:
         if key in {"ipopt", "cyipopt"}:
             opts.setdefault("max_iter", 300)
             opts.setdefault("tol", 1e-6)
+            # Disable IPOPT's own gradient-based rescaling; we already
+            # normalise the objective via NLPScalingPolicy so double-scaling
+            # would distort the gradient magnitudes and slow convergence.
+            opts.setdefault("nlp_scaling_method", "none")
         else:
             opts.setdefault("maxiter", 300)
             opts.setdefault("ftol", 1e-6)
