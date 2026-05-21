@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from .const import (
-    CONF_CONSTRAINT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -28,13 +27,13 @@ from .const import (
     CONF_SIGMA_V,
     CONF_SIGMA_W,
     CONF_SMOOTHING_WEIGHT,
+    CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_TERMINAL_WEIGHT,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
     CONF_WINDOW_OPEN_CLOSE_SETTLE,
     CONF_WINDOW_OPEN_DEBOUNCE,
     CONF_WINDOW_OPEN_Q_INFLATION,
-    DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
@@ -43,6 +42,7 @@ from .const import (
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
     DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
@@ -92,7 +92,7 @@ def merge_yaml_into_entry_data(
     _fill_default(merged, yaml_cfg, CONF_HORIZON, DEFAULT_HORIZON)
     _fill_default(merged, yaml_cfg, CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
     _fill_default(merged, yaml_cfg, CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
-    _fill_default(merged, yaml_cfg, CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)
+    _fill_default(merged, yaml_cfg, CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
     _fill_default(merged, yaml_cfg, CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
     _fill_default(merged, yaml_cfg, CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)
     _fill_default(
