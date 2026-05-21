@@ -867,17 +867,15 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
                 entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
             forecast.append(entry)
 
-        # Expose the MPC constraint offset for dashboard constraint-band
-        # visualisation (setpoint ± constraint_offset).
-        constraint_offset = 2.0  # default
-        if hasattr(self._coordinator, "controller"):
-            constraint_offset = self._coordinator.controller.constraint_offset
+        # Expose the per-room comfort offset for dashboard constraint-band
+        # visualisation (setpoint ± comfort_offset).
+        comfort_offset = getattr(room, "comfort_offset", 2.0)
 
         return {
             "trajectory": trajectory,
             "forecast": forecast,
             "setpoint": room.setpoint,
-            "constraint_offset": constraint_offset,
+            "comfort_offset": comfort_offset,
             "current_temperature": now_temp,
             "horizon_steps": len(predictions),
             "step_seconds": dt,
