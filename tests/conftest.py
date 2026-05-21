@@ -65,6 +65,7 @@ if not _mbc_available:
     _mbc_control.CDTrackingOptimalControlProblem = object  # type: ignore[attr-defined]
     _mbc_control.OptimalControlProblem = object  # type: ignore[attr-defined]
     _mbc_control.CDNMPCController = object  # type: ignore[attr-defined]
+    _mbc_control.NLPScalingPolicy = object  # type: ignore[attr-defined]
 
     _mbc_id = sys.modules["mbc.identification"]
     _mbc_id.CDParameterEstimator = object  # type: ignore[attr-defined]

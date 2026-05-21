@@ -812,15 +812,14 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
         )
         series.append(
             {
-                "entity": _eid("sensor", room.name, "heating_power_forecast"),
+                "entity": _eid("sensor", room.name, "temperature_forecast"),
                 "name": f"{room.name} Plan",
                 "data_generator": _forecast_generator("heating_power"),
                 "yaxis_id": "power",
-                "type": "area",
                 "curve": "stepline",
                 "color": color,
-                "stroke_width": 1,
-                "opacity": 0.25,
+                "stroke_width": 2,
+                "opacity": 0.85,
                 "float_precision": 0,
                 "show": {"in_header": i == 0},
             }
