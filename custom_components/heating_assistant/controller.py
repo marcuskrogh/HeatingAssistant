@@ -80,7 +80,7 @@ from .const import MPC_STATS_BUFFER_SIZE
 # ── Import nonlinear model-based control components from mbc ─────────────────
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
-from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
+from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController, NLPScalingPolicy
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -1409,6 +1409,14 @@ class HeatingMPCController:
         if solver_options:
             kwargs["solver_options"] = solver_options
 
+        # For IPOPT scale the NLP objective by 1/rho_z so that the dominant
+        # soft-penalty term O(rho_z) is normalised to O(1).  Without this the
+        # objective can reach ~10^6–10^7 while IPOPT's absolute dual-
+        # infeasibility tolerance is 1e-6, a gap that prevents convergence
+        # within the iteration budget.  SLSQP is unaffected by this scaling.
+        if solver.lower() in {"ipopt", "cyipopt"}:
+            kwargs["solver_scaling"] = NLPScalingPolicy(objective_scale=1.0 / rho_z)
+
         ocp = CDTrackingOptimalControlProblem(self._control_system, **kwargs)
 
         return ocp
@@ -1480,6 +1488,10 @@ class HeatingMPCController:
         if key in {"ipopt", "cyipopt"}:
             opts.setdefault("max_iter", 300)
             opts.setdefault("tol", 1e-6)
+            # Disable IPOPT's own gradient-based rescaling; we already
+            # normalise the objective via NLPScalingPolicy so double-scaling
+            # would distort the gradient magnitudes and slow convergence.
+            opts.setdefault("nlp_scaling_method", "none")
         else:
             opts.setdefault("maxiter", 300)
             opts.setdefault("ftol", 1e-6)
