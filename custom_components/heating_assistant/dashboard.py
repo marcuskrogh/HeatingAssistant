@@ -726,7 +726,7 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
         series.append(
             {
                 "entity": _eid("sensor", room.name, "temperature_forecast"),
-                "name": f"{room.name} fc.",
+                "name": f"{room.name} Forecast",
                 "data_generator": _forecast_generator("temperature"),
                 "yaxis_id": "temp",
                 "color": color,
@@ -735,7 +735,7 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
                 "opacity": 0.85,
                 "curve": "smooth",
                 "float_precision": 2,
-                "show": {"in_legend": False, "in_header": False},
+                "show": {"in_header": i == 0},
             }
         )
         series.append(
@@ -813,7 +813,7 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
         series.append(
             {
                 "entity": _eid("sensor", room.name, "heating_power_forecast"),
-                "name": "Forecast",
+                "name": "Plan",
                 "data_generator": _forecast_generator("heating_power"),
                 "yaxis_id": "power",
                 "type": "area",
@@ -822,7 +822,7 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
                 "stroke_width": 1,
                 "opacity": 0.25,
                 "float_precision": 0,
-                "show": {"in_legend": i == 0, "in_header": False},
+                "show": {"in_header": i == 0},
             }
         )
     return {
