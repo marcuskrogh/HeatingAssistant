@@ -119,14 +119,17 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
     def hvac_action(self) -> HVACAction:
         """Return the current action based on the active heater / cooler power.
 
-        - ``OFF`` when the room is disabled.
+        - ``OFF`` when the room is disabled (hvac_mode = OFF).
         - ``HEATING`` when at least one source is producing positive
-          thermal power.
+          thermal power [W].
         - ``COOLING`` when at least one source is producing negative
           thermal power (heat removal in dry / fan-only / cool mode) or
           the coordinator's cooling-active flag is set for any source in
           the room.
-        - ``IDLE`` otherwise.
+        - ``IDLE`` otherwise — the room is enabled but no source is
+          actively producing or removing heat at this instant (e.g. during
+          defrost, ramping up, or waiting for a trigger). This does not
+          mean the heater is OFF; it means the thermal output is zero right now.
         """
         if self.hvac_mode == HVACMode.OFF:
             return HVACAction.OFF

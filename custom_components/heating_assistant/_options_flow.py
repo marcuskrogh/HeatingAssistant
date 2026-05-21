@@ -12,8 +12,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from .const import (
-    CONF_COMFORT_CORRIDOR_HIGH,
-    CONF_COMFORT_CORRIDOR_LOW,
+    CONF_COMFORT_OFFSET,
     CONF_ENVELOPE_TIGHTNESS,
     CONF_INFILTRATION_FRACTION,
     CONF_ROOM_NAME,
@@ -27,6 +26,7 @@ from .const import (
     CONF_WINDOW_SENSORS,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
+    DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_WINDOW_TILT,
     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
@@ -176,8 +176,7 @@ class RoomFlowHelper:
         r_external: float,
         setpoint: float,
         infiltration_fraction: Optional[float] = None,
-        comfort_corridor_low: Optional[float] = None,
-        comfort_corridor_high: Optional[float] = None,
+        comfort_offset: Optional[float] = None,
         window_sensors: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Append a new room.  Returns an error key on duplicate, else ``None``.
@@ -186,6 +185,10 @@ class RoomFlowHelper:
         ``1/r_external`` that the Phase 1 C1 overlay attributes to
         wind-driven air exchange.  When ``None`` the default for the
         configured envelope-tightness preset is used.
+
+        ``comfort_offset`` is the symmetric ±offset from the setpoint
+        defining the comfort region [setpoint - offset, setpoint + offset].
+        When ``None``, defaults to DEFAULT_COMFORT_OFFSET.
         """
         name = name.strip()
         if self.is_duplicate(name):
@@ -200,10 +203,10 @@ class RoomFlowHelper:
         }
         if infiltration_fraction is not None:
             new_room[CONF_INFILTRATION_FRACTION] = float(infiltration_fraction)
-        if comfort_corridor_low is not None:
-            new_room[CONF_COMFORT_CORRIDOR_LOW] = float(comfort_corridor_low)
-        if comfort_corridor_high is not None:
-            new_room[CONF_COMFORT_CORRIDOR_HIGH] = float(comfort_corridor_high)
+        if comfort_offset is not None:
+            new_room[CONF_COMFORT_OFFSET] = float(comfort_offset)
+        else:
+            new_room[CONF_COMFORT_OFFSET] = float(DEFAULT_COMFORT_OFFSET)
         if sensors:
             new_room[CONF_TEMP_SENSOR] = sensors[0]
         if window_sensors is not None:
@@ -220,8 +223,7 @@ class RoomFlowHelper:
         r_external: float,
         setpoint: float,
         infiltration_fraction: Optional[float] = None,
-        comfort_corridor_low: Optional[float] = None,
-        comfort_corridor_high: Optional[float] = None,
+        comfort_offset: Optional[float] = None,
         window_sensors: Optional[List[str]] = None,
     ) -> Optional[str]:
         """Update the currently-selected room.  Returns an error key or ``None``."""
@@ -242,10 +244,10 @@ class RoomFlowHelper:
         room[CONF_SETPOINT] = setpoint
         if window_sensors is not None:
             room[CONF_WINDOW_SENSORS] = list(window_sensors)
-        if comfort_corridor_low is not None:
-            room[CONF_COMFORT_CORRIDOR_LOW] = float(comfort_corridor_low)
-        if comfort_corridor_high is not None:
-            room[CONF_COMFORT_CORRIDOR_HIGH] = float(comfort_corridor_high)
+        if comfort_offset is not None:
+            room[CONF_COMFORT_OFFSET] = float(comfort_offset)
+        else:
+            room[CONF_COMFORT_OFFSET] = room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
         if infiltration_fraction is not None:
             room[CONF_INFILTRATION_FRACTION] = float(infiltration_fraction)
         elif CONF_INFILTRATION_FRACTION in room:

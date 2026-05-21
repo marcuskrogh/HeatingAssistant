@@ -409,20 +409,15 @@ def _constraint_bound(
     room_name: str,
     sign: float,
 ) -> Optional[float]:
-    """Compute effective comfort-corridor bound for a room, or None if unknown."""
+    """Compute effective comfort-region bound for a room, or None if unknown.
+
+    The comfort region is defined as [setpoint - offset, setpoint + offset]
+    where offset is per-room and moves with the setpoint.
+    """
     room = coordinator.model.rooms.get(room_name)
     if room is None:
         return None
-    if sign < 0:
-        low = getattr(room, "comfort_corridor_low", None)
-        if low is not None:
-            return float(low)
-    else:
-        high = getattr(room, "comfort_corridor_high", None)
-        if high is not None:
-            return float(high)
-    controller = getattr(coordinator, "controller", None)
-    offset = getattr(controller, "constraint_offset", None)
+    offset = getattr(room, "comfort_offset", None)
     if offset is None:
         return None
     return float(room.setpoint) + sign * float(offset)

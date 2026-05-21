@@ -31,8 +31,7 @@ CONF_THERMAL_BRIDGE_PSI_L = "thermal_bridge_psi_l"  # W/K, linear thermal-bridge
 CONF_CONNECTIONS = "connections"        # list of {room, r_value}
 CONF_WINDOWS = "windows"               # list of {area, orientation, tilt}
 CONF_SETPOINT = "setpoint"             # °C
-CONF_COMFORT_CORRIDOR_LOW = "comfort_corridor_low"    # °C lower comfort bound for soft corridor MPC
-CONF_COMFORT_CORRIDOR_HIGH = "comfort_corridor_high"  # °C upper comfort bound for soft corridor MPC
+CONF_COMFORT_OFFSET = "comfort_offset"  # °C symmetric offset from setpoint for comfort region
 CONF_SETPOINT_ENTITY = "setpoint_entity"
 CONF_TEMP_SENSOR = "temp_sensor"       # HA entity_id for measured room temp
 CONF_TEMP_SENSORS = "temp_sensors"     # list of HA entity_ids for measured room temp
@@ -363,9 +362,9 @@ CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
 CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = OCP step = EKF step (seconds)
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
-CONF_CONSTRAINT_OFFSET = "constraint_offset"      # °C offset for soft output constraints
 CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (energy saving vs. tracking)
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (dampens rapid input changes)
+CONF_SOFT_CONSTRAINT_WEIGHT = "soft_constraint_weight"  # scalar multiplier ρ_z = energy_weight × soft_constraint_weight
 CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
 CONF_MPC_SOLVER = "mpc_solver"                    # NLP solver backend ("ipopt" | "SLSQP")
 CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # enable analytical-derivative hooks when backend supports them
@@ -393,9 +392,10 @@ DEFAULT_IDLE_OFFSET = 1.0              # °C below internal temp for idle setpoi
 DEFAULT_COOLING_COP = 2.5              # rated cooling COP (EER) for heat pumps
 DEFAULT_COOLING_EFFICIENCY = 1.0       # fraction of max cooling capacity used (0–1)
 DEFAULT_HEATING_EFFICIENCY = 1.0       # fraction of max heating capacity used (0–1)
-DEFAULT_CONSTRAINT_OFFSET = 2.0        # °C symmetric soft output constraint offset
+DEFAULT_COMFORT_OFFSET = 2.0           # °C symmetric comfort region offset from setpoint (per-room)
 DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
+DEFAULT_SOFT_CONSTRAINT_WEIGHT = 1000.0  # multiplier for soft constraint penalty: ρ_z = energy_weight × soft_constraint_weight
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_MPC_SOLVER = "ipopt"
 DEFAULT_MPC_ANALYTIC_DERIVATIVES = True
