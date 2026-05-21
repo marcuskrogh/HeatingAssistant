@@ -74,11 +74,9 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    CONF_COMFORT_OFFSET,
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
-    CONF_COMFORT_CORRIDOR_HIGH,
-    CONF_COMFORT_CORRIDOR_LOW,
-    CONF_CONSTRAINT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -96,6 +94,7 @@ from .const import (
     CONF_R_SA,
     CONF_R_SG,
     CONF_SKY_RADIATIVE_UA,
+    CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_THERMAL_BRIDGE_PSI_L,
     CONF_WEATHER_ENTITY,
     CONF_R_EXTERNAL,
@@ -143,11 +142,11 @@ from .const import (
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_SENSORS,
     CONF_WINDOW_TILT,
+    DEFAULT_COMFORT_OFFSET,
     DEFAULT_COOLING_COP,
     DEFAULT_COOLING_EFFICIENCY,
     DEFAULT_COP_RATED,
     DEFAULT_COP_TEMP_REF,
-    DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_FROST_PROTECTION,
@@ -171,6 +170,7 @@ from .const import (
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
     DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_THERMAL_MASS,
     DEFAULT_TURN_OFF_DEADBAND,
@@ -287,8 +287,7 @@ _ROOM_SCHEMA = vol.Schema(
             CONF_THERMAL_BRIDGE_PSI_L, default=DEFAULT_THERMAL_BRIDGE_PSI_L,
         ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
-        vol.Optional(CONF_COMFORT_CORRIDOR_LOW): vol.Coerce(float),
-        vol.Optional(CONF_COMFORT_CORRIDOR_HIGH): vol.Coerce(float),
+        vol.Optional(CONF_COMFORT_OFFSET, default=DEFAULT_COMFORT_OFFSET): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
         vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],
         vol.Optional(CONF_WINDOW_SENSORS, default=[]): [str],
@@ -358,7 +357,7 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_SMOOTHING_WEIGHT, default=DEFAULT_SMOOTHING_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
                 vol.Optional(
-                    CONF_CONSTRAINT_OFFSET, default=DEFAULT_CONSTRAINT_OFFSET
+                    CONF_SOFT_CONSTRAINT_WEIGHT, default=DEFAULT_SOFT_CONSTRAINT_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
                 vol.Optional(
                     CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
