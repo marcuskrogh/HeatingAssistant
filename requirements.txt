@@ -12,4 +12,4 @@
 numpy
 scipy
 cvxopt
-mbc[ipopt] @ git+https://github.com/marcuskrogh/mbc.git@7497f8276a6f1410b9a0cbfe7ef36d33e0b9f683
+mbc[ipopt] @ git+https://github.com/marcuskrogh/mbc.git@a472a841c09951b5c460aa1f6ed38d1bb442b5a9
