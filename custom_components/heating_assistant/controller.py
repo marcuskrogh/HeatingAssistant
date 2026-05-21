@@ -1388,6 +1388,7 @@ class HeatingMPCController:
         u_max: np.ndarray,
         n_steps: int,
         dt: float,
+        use_analytic_derivatives: bool = True,
     ) -> CDTrackingOptimalControlProblem:
         solver_options = self._solver_options_for(solver)
         kwargs: Dict[str, Any] = {
@@ -1413,9 +1414,15 @@ class HeatingMPCController:
         # soft-penalty term O(rho_z) is normalised to O(1).  Without this the
         # objective can reach ~10^6–10^7 while IPOPT's absolute dual-
         # infeasibility tolerance is 1e-6, a gap that prevents convergence
-        # within the iteration budget.  SLSQP is unaffected by this scaling.
+        # within the iteration budget.  SLSQP uses different tolerance logic
+        # and does not benefit from this scaling.
         if solver.lower() in {"ipopt", "cyipopt"}:
             kwargs["solver_scaling"] = NLPScalingPolicy(objective_scale=1.0 / rho_z)
+
+        # Note: mbc.CDTrackingOptimalControlProblem automatically detects and uses
+        # analytical Jacobians if model.dfdu, model.dgmdx, and model.dgmdu are
+        # defined. The use_analytic_derivatives flag is stored in the controller
+        # for diagnostic/introspection purposes but doesn't need to be passed to OCP.
 
         ocp = CDTrackingOptimalControlProblem(self._control_system, **kwargs)
 
@@ -1455,6 +1462,7 @@ class HeatingMPCController:
                 u_max=u_max,
                 n_steps=n_steps,
                 dt=dt,
+                use_analytic_derivatives=self._use_analytic_derivatives,
             )
         except (ImportError, ModuleNotFoundError, RuntimeError, ValueError) as err:
             if self._solver_active.lower() not in {"ipopt", "cyipopt"}:
@@ -1480,6 +1488,7 @@ class HeatingMPCController:
                 u_max=u_max,
                 n_steps=n_steps,
                 dt=dt,
+                use_analytic_derivatives=self._use_analytic_derivatives,
             )
 
     def _solver_options_for(self, solver: str) -> Dict[str, Any]:
@@ -1488,10 +1497,14 @@ class HeatingMPCController:
         if key in {"ipopt", "cyipopt"}:
             opts.setdefault("max_iter", 300)
             opts.setdefault("tol", 1e-6)
-            # Disable IPOPT's own gradient-based rescaling; we already
-            # normalise the objective via NLPScalingPolicy so double-scaling
-            # would distort the gradient magnitudes and slow convergence.
-            opts.setdefault("nlp_scaling_method", "none")
+            # Use mbc's user-scaling to properly normalise the soft-output
+            # penalty term (O(1e4)) relative to the energy term (O(1e3)).
+            # This provides better numerical conditioning for L-BFGS Hessian.
+            opts.setdefault("nlp_scaling_method", "user-scaling")
+            # Dual infeasibility tolerance is the bottleneck when the objective
+            # has orders-of-magnitude imbalance; relax it slightly to allow
+            # faster convergence without sacrificing solution quality.
+            opts.setdefault("dual_inf_tol", 1e-4)
         else:
             opts.setdefault("maxiter", 300)
             opts.setdefault("ftol", 1e-6)
@@ -1896,6 +1909,7 @@ class HeatingMPCController:
                 u_max=self._control_system.u_bounds[1],
                 n_steps=self._ocp_n_steps,
                 dt=self._dt,
+                use_analytic_derivatives=self._use_analytic_derivatives,
             )
             u_opt, _, _info = self._ocp.solve(
                 x_hat_control, d_traj,

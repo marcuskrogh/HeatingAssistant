@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-21 05:39 UTC*
+*Generated: 2026-05-21 07:06 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,13 +18,14 @@ One control step consists of:
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | SLSQP    | SLSQP          |      54.1 |        33.0 |    129.0 |   15 |
-| studio-1room           | IPOPT    | IPOPT          |     645.0 |       597.9 |   1188.1 |   15 |
-| two-bedroom-2room      | SLSQP    | SLSQP          |      82.6 |        50.9 |    263.9 |   15 |
-| two-bedroom-2room      | IPOPT    | IPOPT          |    2472.0 |      2393.6 |   3435.8 |   15 |
-| full-house-5room       | SLSQP    | SLSQP          |     824.3 |       756.6 |   1206.7 |   15 |
-| full-house-5room       | IPOPT    | IPOPT          |   28171.4 |     28087.0 |  29569.7 |   15 |
-| full-house-5room-N16   | SLSQP    | SLSQP          |    5812.8 |      5382.8 |   9080.9 |   15 |
+| studio-1room           | SLSQP    | SLSQP          |      41.6 |        38.6 |     69.3 |   15 |
+| studio-1room           | IPOPT    | SLSQP          |      41.0 |        40.5 |     64.3 |   15 |
+| two-bedroom-2room      | SLSQP    | SLSQP          |     159.3 |       148.3 |    276.5 |   15 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |     159.1 |       136.0 |    272.7 |   15 |
+| full-house-5room       | SLSQP    | SLSQP          |    1935.5 |      1754.2 |   3898.2 |   15 |
+| full-house-5room       | IPOPT    | SLSQP          |    2220.2 |      1866.8 |   4616.4 |   15 |
+| full-house-5room-N16   | SLSQP    | SLSQP          |    8084.1 |      6789.9 |  12921.4 |   15 |
+| full-house-5room-N16   | IPOPT    | SLSQP          |    8112.2 |      6728.4 |  13110.6 |   15 |
 
 **Configurations:**
 
@@ -64,45 +65,7 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 | Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |
 |-----------------------------|------------------------|------------|-----------------|-----------------|----------|
-| MPC.compute                 | studio-1room           | SLSQP    |       247.1 |        33.0 |    -86.6% (faster) |
-| MPC.compute                 | studio-1room           | IPOPT    |       249.0 |       597.9 |    140.1% (slower) |
-| MPC.compute                 | two-bedroom-2room      | SLSQP    |       616.8 |        50.9 |    -91.7% (faster) |
-| MPC.compute                 | two-bedroom-2room      | IPOPT    |       615.7 |      2393.6 |    288.8% (slower) |
-| MPC.compute                 | full-house-5room       | SLSQP    |      4012.4 |       756.6 |    -81.1% (faster) |
-| MPC.compute                 | full-house-5room       | IPOPT    |      4012.3 |     28087.0 |    600.0% (slower) |
-
----
-
-## Analysis: SLSQP vs IPOPT (mbc v0.1 with analytical Jacobians)
-
-### SLSQP — dramatic speedup from analytical Jacobians
-
-The previous baseline (old `BENCHMARKS.md`) was measured with **finite-difference Jacobians** (the
-old mbc fallback).  With mbc v0.1 the EOCP calls `model.dfdu`, `model.dgmdx`, and `model.dgmdu`
-directly for every NLP iteration, eliminating all FD calls.  Result: **81–92 % reduction** in
-SLSQP solve time across all scenarios.
-
-### IPOPT — slower than SLSQP due to convergence issues with L-BFGS
-
-The old IPOPT rows in the previous file showed **IPOPT→SLSQP** (falling back, because cyipopt was
-not available).  The new runs use **real IPOPT (cyipopt 1.7.0)** for the first time.
-
-IPOPT is slower than SLSQP here for two reasons:
-
-1. **L-BFGS Hessian + poor NLP scaling** — the soft-output slack penalty (`rho_z = 1e4`) creates
-   an objective ≈ 10⁶–10⁷ while the input-energy term is O(10³), a 3–4 order-of-magnitude
-   imbalance.  IPOPT's dual infeasibility (KKT conditions) is hard to satisfy in this regime with a
-   limited-memory Hessian approximation, leading to 300 iterations at ≈ 2 ms/iter for the 1-room
-   case and ≈ 28 s for the 5-room case.
-2. **Interior-point method overhead** — for these small NLPs (58–380 decision variables) the
-   interior-point overhead per iteration outweighs the benefit of second-order information.
-
-**Consequence:** SLSQP remains the more efficient solver for the current NLP formulation unless
-NLP scaling is improved (e.g. `nlp_scaling_method = "user-scaling"`) or the soft-penalty
-coefficients are rebalanced.
-
-The `full-house-5room-N16` IPOPT scenario was not measured (estimated > 60 s/call; impractical for
-CI).
+| MPC.compute                 | full-house-5room       | SLSQP    |     18025.5 |      1754.2 |    -90.3% (faster) |
 
 ---
 
@@ -112,8 +75,6 @@ CI).
   import time (the module is already loaded).
 - Solver convergence time depends on the warm-start; the
   first call (warm-up) is typically the slowest and is excluded.
-- The previous IPOPT rows in the comparison table showed **IPOPT→SLSQP** (fallback); the new
-  IPOPT rows show **IPOPT→IPOPT** (real IPOPT, first measurement).
 - Parameter estimation timing depends heavily on the number of identifiable
   parameters (which the estimator detects automatically from the data).
 - Parameter estimation tests are marked `slow` and can be skipped in
