@@ -529,6 +529,24 @@ def test_overview_temperature_chart_covers_every_room(two_room_spec):
     assert f"sensor.{DOMAIN}_bedroom_temperature_filtered" in entities
 
 
+def test_overview_power_chart_forecast_series_are_room_specific(two_room_spec):
+    overview = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
+    )
+    power_card = next(
+        c for c in _iter_cards(overview)
+        if c.get("type") == "custom:apexcharts-card"
+        and c.get("header", {}).get("title") == "Power – All Rooms"
+    )
+    plan_series = [
+        s for s in power_card["series"]
+        if s.get("entity", "").endswith("_heating_power_forecast")
+    ]
+    names = {s["name"] for s in plan_series}
+    assert "Living Room Plan" in names
+    assert "Bedroom Plan" in names
+
+
 def test_diagnostics_loglik_panel_exposes_sensor_and_button_per_room(two_room_spec):
     diag = next(
         v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Diagnostics"
