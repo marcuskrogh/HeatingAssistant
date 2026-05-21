@@ -741,7 +741,7 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
         series.append(
             {
                 "entity": _eid("sensor", room.name, "constraint_upper"),
-                "name": f"{room.name} bounds" if i == 0 else None,
+                "name": "Comfort bounds",
                 "data_generator": _forecast_generator("constraint_upper"),
                 "yaxis_id": "temp",
                 "color": color,
@@ -755,7 +755,7 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
         series.append(
             {
                 "entity": _eid("sensor", room.name, "constraint_lower"),
-                "name": f"{room.name} bounds",
+                "name": "Comfort bounds",
                 "data_generator": _forecast_generator("constraint_lower"),
                 "yaxis_id": "temp",
                 "color": color,
@@ -813,7 +813,7 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
         series.append(
             {
                 "entity": _eid("sensor", room.name, "heating_power_forecast"),
-                "name": f"{room.name} plan" if i == 0 else None,
+                "name": "Forecast",
                 "data_generator": _forecast_generator("heating_power"),
                 "yaxis_id": "power",
                 "type": "area",
