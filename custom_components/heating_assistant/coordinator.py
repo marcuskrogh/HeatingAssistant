@@ -979,7 +979,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     if state and state.state not in ("unknown", "unavailable"):
                         try:
                             readings.append(float(state.state))
-                        except ValueError:
+                        except (ValueError, TypeError):
                             _LOGGER.warning(
                                 "Cannot parse temperature from entity %s: %r",
                                 entity_id,

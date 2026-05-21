@@ -876,6 +876,61 @@ class TestCoordinatorUpdateResilience:
         assert coordinator.measured_temperatures == {}
 
     @pytest.mark.asyncio
+    async def test_none_sensor_state_is_ignored(self):
+        model = make_single_room_model()
+        source = ElectricHeater("heater", "studio", 2000)
+
+        coordinator = object.__new__(HeatingAssistantCoordinator)
+        coordinator.hass = MagicMock()
+        coordinator.hass.states.get = MagicMock(return_value=SimpleNamespace(state=None))
+        coordinator._temp_sensors = {"studio": ["sensor.studio_temp"]}
+        coordinator._window_sensors = {}
+        coordinator._window_state = {"studio": "closed"}
+        coordinator._window_state_since = {}
+        coordinator._window_open_debounce = 0.0
+        coordinator._window_open_close_settle = 0.0
+        coordinator._window_open_q_inflation = 1.0
+        coordinator._latitude = 0.0
+        coordinator._longitude = 0.0
+        coordinator._update_interval = 900
+        coordinator.model = model
+        coordinator.heat_sources = [source]
+        coordinator.actions = {}
+        coordinator.solar_gains = {}
+        coordinator.outdoor_temp = 5.0
+        coordinator.heat_flows = {}
+        coordinator.predictions = []
+        coordinator.outdoor_forecast = []
+        coordinator.solar_forecast = []
+        coordinator.heating_schedule = []
+        coordinator.measured_temperatures = {"studio": 15.0}
+        coordinator.filtered_temperatures = {}
+        coordinator._room_schedule = {}
+        coordinator._base_setpoint = {}
+        coordinator._effective_setpoint = {}
+        coordinator._schedule_disabled = {}
+        coordinator._schedule_enabled = {}
+        coordinator._weather_entity = None
+        coordinator._read_cloud_cover_now = MagicMock(return_value=None)
+        coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
+        coordinator._history_buffer = deque(maxlen=10)
+        coordinator._read_outdoor_temp = MagicMock(return_value=4.0)
+        coordinator._async_read_weather_forecast = AsyncMock(return_value=None)
+        coordinator._apply_actions = AsyncMock()
+        coordinator.controller = MagicMock()
+        coordinator.controller.compute.return_value = {"heater": 0.0}
+        coordinator.controller.predictions = []
+        coordinator.controller.outdoor_forecast = []
+        coordinator.controller.solar_forecast = []
+        coordinator.controller.heating_schedule = []
+        coordinator.controller.last_innovation = None
+        coordinator.controller.filtered_temperatures = {}
+
+        await coordinator._async_update_data()
+
+        assert coordinator.measured_temperatures == {}
+
+    @pytest.mark.asyncio
     async def test_compute_failure_clears_forecasts_to_make_failure_visible(self):
         """When the MPC solver fails the coordinator clears the forecast and
         filtered fields so dashboards show a visible gap at the failure
