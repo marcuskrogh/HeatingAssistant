@@ -1315,7 +1315,7 @@ class HeatingMPCController:
         # Keep OCP integration steps lower than EKF steps to bound NLP size and
         # preserve controller runtime on larger houses; EKF still uses full
         # n_int_steps for state-estimation fidelity.
-        OCP_MAX_INTEGRATION_STEPS = 2
+        OCP_MAX_INTEGRATION_STEPS = 1
         ocp_n_steps = min(n_int_steps, OCP_MAX_INTEGRATION_STEPS)
         self._ocp_n_steps = ocp_n_steps
         self._Q = Q
@@ -1494,7 +1494,7 @@ class HeatingMPCController:
         opts = dict(self._solver_options)
         key = solver.lower()
         if key in {"ipopt", "cyipopt"}:
-            opts.setdefault("max_iter", 300)
+            opts.setdefault("max_iter", 200)
             opts.setdefault("tol", 1e-6)
             # Use mbc's user-scaling to properly normalise the soft-output
             # penalty term (O(1e4)) relative to the energy term (O(1e3)).
@@ -1505,7 +1505,7 @@ class HeatingMPCController:
             # faster convergence without sacrificing solution quality.
             opts.setdefault("dual_inf_tol", 1e-4)
         else:
-            opts.setdefault("maxiter", 300)
+            opts.setdefault("maxiter", 200)
             opts.setdefault("ftol", 1e-6)
         return opts
 
