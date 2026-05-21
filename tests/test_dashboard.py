@@ -538,9 +538,13 @@ def test_overview_power_chart_forecast_series_are_room_specific(two_room_spec):
         if c.get("type") == "custom:apexcharts-card"
         and c.get("header", {}).get("title") == "Power – All Rooms"
     )
+    # Forecast plan series use the temperature_forecast entity (which embeds
+    # heating_power in every forecast entry) so they render correctly alongside
+    # the temperature overview chart's entity subscriptions.
     plan_series = [
         s for s in power_card["series"]
-        if s.get("entity", "").endswith("_heating_power_forecast")
+        if s.get("entity", "").endswith("_temperature_forecast")
+        and "heating_power" in s.get("data_generator", "")
     ]
     names = {s["name"] for s in plan_series}
     assert "Living Room Plan" in names
