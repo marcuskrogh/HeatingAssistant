@@ -897,42 +897,49 @@ class TestHeatingMPCController:
         actions = ctrl.compute(outdoor_temp=0.0, now=now)
         assert all(0.0 <= f <= 1.0 for f in actions.values())
 
-    def test_constraint_offset_configurable(self):
-        """constraint_offset should be accepted and affect behaviour."""
+    def test_soft_constraint_weight_configurable(self):
+        """soft_constraint_weight should be accepted and affect behaviour."""
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900,
-                                    constraint_offset=1.0)
+                                    soft_constraint_weight=1000.0)
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=0.0, now=now)
         assert all(0.0 <= f <= 1.0 for f in actions.values())
 
-    def test_comfort_corridor_bounds_fallback_to_setpoint_plus_offset(self):
+    def test_comfort_corridor_bounds_use_per_room_offsets(self):
         model, sources = _make_model_and_sources()
-        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, constraint_offset=1.5)
-        z_min, z_max = ctrl._control_system.comfort_corridor_bounds(fallback_offset=1.5)
-        np.testing.assert_allclose(z_min, np.array([19.0, 18.0]))
-        np.testing.assert_allclose(z_max, np.array([23.0, 22.0]))
+        # Set per-room comfort offsets
+        model.rooms["living_room"].comfort_offset = 2.0
+        model.rooms["bedroom"].comfort_offset = 1.5
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        z_min, z_max = ctrl._control_system.comfort_corridor_bounds()
+        # living_room: setpoint 21.0, offset 2.0 → [19.0, 23.0]
+        # bedroom: setpoint 20.0, offset 1.5 → [18.5, 21.5]
+        np.testing.assert_allclose(z_min, np.array([19.0, 18.5]))
+        np.testing.assert_allclose(z_max, np.array([23.0, 21.5]))
 
-    def test_comfort_corridor_bounds_use_room_overrides(self):
+    def test_comfort_corridor_bounds_with_different_setpoints(self):
         model, sources = _make_model_and_sources()
-        model.rooms["living_room"].comfort_corridor_low = 20.0
-        model.rooms["living_room"].comfort_corridor_high = 22.0
-        model.rooms["bedroom"].comfort_corridor_low = 18.0
-        model.rooms["bedroom"].comfort_corridor_high = 21.0
-        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, constraint_offset=1.5)
-        z_min, z_max = ctrl._control_system.comfort_corridor_bounds(fallback_offset=1.5)
-        np.testing.assert_allclose(z_min, np.array([20.0, 18.0]))
-        np.testing.assert_allclose(z_max, np.array([22.0, 21.0]))
+        # Set different setpoints for each room with same offset
+        model.rooms["living_room"].setpoint = 21.0
+        model.rooms["living_room"].comfort_offset = 1.5
+        model.rooms["bedroom"].setpoint = 20.0
+        model.rooms["bedroom"].comfort_offset = 1.5
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        z_min, z_max = ctrl._control_system.comfort_corridor_bounds()
+        # living_room: setpoint 21.0, offset 1.5 → [19.5, 22.5]
+        # bedroom: setpoint 20.0, offset 1.5 → [18.5, 21.5]
+        np.testing.assert_allclose(z_min, np.array([19.5, 18.5]))
+        np.testing.assert_allclose(z_max, np.array([22.5, 21.5]))
 
     def test_weak_setpoint_pull_no_chasing_inside_comfort_corridor(self):
         room = Room(
             "living_room",
             5_000_000.0,
             0.05,
-            temperature=20.0,
+            air_temperature=20.0,
             setpoint=21.0,
-            comfort_corridor_low=19.0,
-            comfort_corridor_high=23.0,
+            comfort_offset=2.0,
         )
         model = HouseModel([room])
         heater = ElectricHeater("heater", "living_room", max_power=2000.0)
@@ -941,7 +948,7 @@ class TestHeatingMPCController:
             [heater],
             horizon=3,
             dt=900,
-            constraint_offset=2.0,
+            soft_constraint_weight=1000.0,
             energy_weight=0.01,
         )
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
