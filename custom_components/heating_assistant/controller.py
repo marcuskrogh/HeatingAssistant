@@ -1032,30 +1032,27 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     def comfort_corridor_bounds(
         self,
-        fallback_offset: float,
+        fallback_offset: float = 0.0,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Per-room comfort corridor bounds used for soft output constraints.
 
-        Rooms can provide explicit ``comfort_corridor_low/high``. When those
-        fields are absent, the legacy band ``setpoint ± fallback_offset`` is
-        used so existing configurations migrate without manual edits.
+        Each room's comfort region is [setpoint - offset, setpoint + offset]
+        where offset is the per-room comfort_offset attribute. The fallback_offset
+        parameter is ignored (kept for API compatibility).
         """
         lows: List[float] = []
         highs: List[float] = []
         for name in self._room_list:
             room = self._model.rooms[name]
-            low = getattr(room, "comfort_corridor_low", None)
-            high = getattr(room, "comfort_corridor_high", None)
-            if low is None or high is None:
-                sp = float(room.setpoint)
-                low = sp - float(fallback_offset)
-                high = sp + float(fallback_offset)
-            low_f = float(low)
-            high_f = float(high)
-            if low_f > high_f:
-                low_f, high_f = high_f, low_f
-            lows.append(low_f)
-            highs.append(high_f)
+            sp = float(room.setpoint)
+            offset = getattr(room, "comfort_offset", None)
+            if offset is None:
+                # Fallback should never happen with proper initialization
+                offset = 2.0
+            low = sp - float(offset)
+            high = sp + float(offset)
+            lows.append(low)
+            highs.append(high)
         return np.array(lows, dtype=float), np.array(highs, dtype=float)
 
     @property
@@ -1175,8 +1172,10 @@ class HeatingMPCController:
     longitude         : site longitude [°]
     energy_weight     : weight on ‖u‖²_R (input energy cost)
     smoothing_weight  : weight on ‖Δu‖²_S (ROM penalty; 0 disables)
-    constraint_offset : symmetric half-width δ for soft output constraints
-                        SP − δ ≤ z ≤ SP + δ.  Default: 2.0 °C.
+    soft_constraint_weight : multiplier for soft constraint penalty:
+                        ρ_z = energy_weight × soft_constraint_weight.
+                        Controls how strictly the comfort region bounds are enforced.
+                        Default: 1000.0.
     sigma_w           : process-noise std dev for the SDE / EKF [K/√s].
     sigma_v           : measurement-noise std dev [K].
     sigma_b           : offset-state process-noise std dev [K/√s].
@@ -1195,7 +1194,7 @@ class HeatingMPCController:
         energy_weight: float = 0.01,
         setpoint_pull_weight: float = DEFAULT_SETPOINT_PULL_WEIGHT,
         smoothing_weight: float = 0.1,
-        constraint_offset: float = 2.0,
+        soft_constraint_weight: float = 1000.0,
         terminal_weight: float = 100.0,
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
@@ -1210,7 +1209,9 @@ class HeatingMPCController:
         self._dt = dt
         self._latitude = latitude
         self._longitude = longitude
-        self._constraint_offset = constraint_offset
+        self._energy_weight = float(energy_weight)
+        self._soft_constraint_weight = float(soft_constraint_weight)
+        self._rho_z = self._energy_weight * self._soft_constraint_weight
         self._setpoint_pull_weight = float(setpoint_pull_weight)
         self._solver_requested = solver
         self._solver_active = solver
@@ -1324,9 +1325,7 @@ class HeatingMPCController:
 
         # Reference and bounds for the OCP
         z_ref = self._control_system.x_ref.copy()
-        z_min, z_max = self._control_system.comfort_corridor_bounds(
-            fallback_offset=self._constraint_offset,
-        )
+        z_min, z_max = self._control_system.comfort_corridor_bounds()
         u_min, u_max = self._control_system.u_bounds
 
         # ── CDTrackingOptimalControlProblem ─────────────────────────────
@@ -1339,7 +1338,7 @@ class HeatingMPCController:
             z_ref=z_ref,
             z_min=z_min,
             z_max=z_max,
-            rho_z=1e4,
+            rho_z=self._rho_z,
             u_min=u_min,
             u_max=u_max,
             n_steps=ocp_n_steps,
@@ -1512,10 +1511,6 @@ class HeatingMPCController:
 
     # ── Visualisation properties ─────────────────────────────────────────
 
-    @property
-    def constraint_offset(self) -> float:
-        """Symmetric offset δ around the setpoint for soft output constraints [°C]."""
-        return self._constraint_offset
 
     @property
     def terminal_weight(self) -> float:
@@ -1819,9 +1814,7 @@ class HeatingMPCController:
 
         # ── Update setpoint reference in OCP (setpoints may have changed) ──
         z_ref = self._control_system.x_ref
-        z_min, z_max = self._control_system.comfort_corridor_bounds(
-            fallback_offset=self._constraint_offset,
-        )
+        z_min, z_max = self._control_system.comfort_corridor_bounds()
         # NOTE: mbc's CDTrackingOptimalControlProblem has no public API for
         # updating the reference trajectory after construction, so we reach
         # into the internal EconomicOptimalControlProblem.  This is technical
@@ -1904,7 +1897,7 @@ class HeatingMPCController:
                 z_ref=self._control_system.x_ref.copy(),
                 z_min=z_min,
                 z_max=z_max,
-                rho_z=1e4,
+                rho_z=self._rho_z,
                 u_min=self._control_system.u_bounds[0],
                 u_max=self._control_system.u_bounds[1],
                 n_steps=self._ocp_n_steps,

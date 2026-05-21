@@ -22,7 +22,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
-    CONF_CONSTRAINT_OFFSET,
+    CONF_COMFORT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_ESTIMATED_PARAMS,
     CONF_HEAT_SOURCES,
@@ -36,6 +36,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
+    CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -55,8 +56,6 @@ from .const import (
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
     CONF_SOURCE_TYPE,
     CONF_CONNECTIONS,
-    CONF_COMFORT_CORRIDOR_HIGH,
-    CONF_COMFORT_CORRIDOR_LOW,
     CONF_CONNECTED_ROOM,
     CONF_C_SLAB_FRACTION,
     CONF_FACADE_ABSORPTANCE,
@@ -85,7 +84,7 @@ from .const import (
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
-    DEFAULT_CONSTRAINT_OFFSET,
+    DEFAULT_COMFORT_OFFSET,
     DEFAULT_COOLING_COP,
     DEFAULT_COOLING_EFFICIENCY,
     DEFAULT_HEATING_EFFICIENCY,
@@ -99,6 +98,7 @@ from .const import (
     DEFAULT_MPC_SOLVER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -194,8 +194,7 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                 connections=connections,
                 windows=windows,
                 setpoint=rc.get(CONF_SETPOINT, DEFAULT_SETPOINT),
-                comfort_corridor_low=rc.get(CONF_COMFORT_CORRIDOR_LOW),
-                comfort_corridor_high=rc.get(CONF_COMFORT_CORRIDOR_HIGH),
+                comfort_offset=rc.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET),
                 infiltration_fraction=rc.get(
                     CONF_INFILTRATION_FRACTION, DEFAULT_INFILTRATION_FRACTION,
                 ),
@@ -311,9 +310,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_WEATHER_ENTITY,
         CONF_LATITUDE,
         CONF_LONGITUDE,
-        CONF_CONSTRAINT_OFFSET,
         CONF_ENERGY_WEIGHT,
         CONF_SMOOTHING_WEIGHT,
+        CONF_SOFT_CONSTRAINT_WEIGHT,
         CONF_TERMINAL_WEIGHT,
         CONF_MPC_SOLVER,
         CONF_MPC_ANALYTIC_DERIVATIVES,
@@ -357,7 +356,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
-        self._constraint_offset: float = data.get(CONF_CONSTRAINT_OFFSET, DEFAULT_CONSTRAINT_OFFSET)
+        self._soft_constraint_weight: float = data.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
         self._sigma_w: float = float(
             options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
@@ -469,7 +468,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             longitude=self._longitude,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
-            constraint_offset=self._constraint_offset,
+            soft_constraint_weight=self._soft_constraint_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -787,7 +786,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             longitude=self._longitude,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
-            constraint_offset=self._constraint_offset,
+            soft_constraint_weight=self._soft_constraint_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -843,9 +842,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._latitude = float(pending.get(CONF_LATITUDE, self._latitude))
         if CONF_LONGITUDE in pending:
             self._longitude = float(pending.get(CONF_LONGITUDE, self._longitude))
-        if CONF_CONSTRAINT_OFFSET in pending:
-            self._constraint_offset = float(
-                pending.get(CONF_CONSTRAINT_OFFSET, self._constraint_offset)
+        if CONF_SOFT_CONSTRAINT_WEIGHT in pending:
+            self._soft_constraint_weight = float(
+                pending.get(CONF_SOFT_CONSTRAINT_WEIGHT, self._soft_constraint_weight)
             )
             rebuild_controller = True
         if CONF_ENERGY_WEIGHT in pending:
@@ -944,7 +943,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             longitude=self._longitude,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
-            constraint_offset=self._constraint_offset,
+            soft_constraint_weight=self._soft_constraint_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -2051,7 +2050,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             longitude=self._longitude,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
-            constraint_offset=self._constraint_offset,
+            soft_constraint_weight=self._soft_constraint_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
