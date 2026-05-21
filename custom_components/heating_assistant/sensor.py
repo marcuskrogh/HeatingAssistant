@@ -845,16 +845,17 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         n_outdoor = len(outdoor_forecast)
         for i, pred in enumerate(predictions):
             temp = pred.get(self._room_name)
-            if temp is None:
-                continue
-            temp_rounded = round(temp, 2)
-            trajectory.append(temp_rounded)
+            # Include this step in the forecast even if temperature is missing,
+            # to keep time stamps correct (i always represents the actual step number)
             step_time = now + timedelta(seconds=dt * (i + 1))
             entry: Dict[str, Any] = {
                 "time": step_time.isoformat(),
-                "temperature": temp_rounded,
                 "setpoint": room.setpoint,
             }
+            if temp is not None:
+                temp_rounded = round(temp, 2)
+                trajectory.append(temp_rounded)
+                entry["temperature"] = temp_rounded
             if i < n_sched:
                 entry["heating_power"] = round(
                     heating_schedule[i].get(self._room_name, 0.0), 1
@@ -867,17 +868,15 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
                 entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
             forecast.append(entry)
 
-        # Expose the MPC constraint offset for dashboard constraint-band
-        # visualisation (setpoint ± constraint_offset).
-        constraint_offset = 2.0  # default
-        if hasattr(self._coordinator, "controller"):
-            constraint_offset = self._coordinator.controller.constraint_offset
+        # Expose the per-room comfort offset for dashboard constraint-band
+        # visualisation (setpoint ± comfort_offset).
+        comfort_offset = getattr(room, "comfort_offset", 2.0)
 
         return {
             "trajectory": trajectory,
             "forecast": forecast,
             "setpoint": room.setpoint,
-            "constraint_offset": constraint_offset,
+            "comfort_offset": comfort_offset,
             "current_temperature": now_temp,
             "horizon_steps": len(predictions),
             "step_seconds": dt,
