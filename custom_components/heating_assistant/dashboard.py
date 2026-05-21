@@ -701,11 +701,10 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
 def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
     """All-rooms temperature chart for the overview view.
 
-    Each room contributes two series: its filtered-estimate history (solid
-    line) and its MPC forecast (dashed line drawn from the
-    ``temperature_forecast`` attribute). Setpoints are not plotted here so
-    the chart stays readable when there are many rooms; users get the
-    full triplet on the per-room subview.
+    Each room contributes four series: its filtered-estimate history (solid
+    line), its MPC forecast (dashed line), and constraint bounds (upper/lower).
+    Setpoints are not plotted here so the chart stays readable when there are
+    many rooms; users get the full triplet on the per-room subview.
     """
     palette = _ROOM_PALETTE
     series: List[Dict[str, Any]] = []
@@ -739,6 +738,34 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
                 "show": {"in_legend": False, "in_header": False},
             }
         )
+        series.append(
+            {
+                "entity": _eid("sensor", room.name, "constraint_upper"),
+                "name": f"{room.name} bounds" if i == 0 else None,
+                "data_generator": _forecast_generator("constraint_upper"),
+                "yaxis_id": "temp",
+                "color": color,
+                "stroke_width": 1,
+                "opacity": 0.4,
+                "curve": "stepline",
+                "float_precision": 1,
+                "show": {"in_legend": i == 0, "in_header": False},
+            }
+        )
+        series.append(
+            {
+                "entity": _eid("sensor", room.name, "constraint_lower"),
+                "name": f"{room.name} bounds",
+                "data_generator": _forecast_generator("constraint_lower"),
+                "yaxis_id": "temp",
+                "color": color,
+                "stroke_width": 1,
+                "opacity": 0.4,
+                "curve": "stepline",
+                "float_precision": 1,
+                "show": {"in_legend": False, "in_header": False},
+            }
+        )
     return {
         "type": "custom:apexcharts-card",
         "header": {"show": True, "title": "Room Temperatures", "show_states": True},
@@ -759,7 +786,11 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
 
 
 def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
-    """All-rooms heating-power chart (stacked area) for the overview view."""
+    """All-rooms heating-power chart (stacked area) for the overview view.
+
+    Each room contributes two series: measured power (history) and forecasted
+    power (MPC plan over the control horizon).
+    """
     palette = _ROOM_PALETTE
     series: List[Dict[str, Any]] = []
     for i, room in enumerate(spec.rooms):
@@ -777,6 +808,21 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
                 "float_precision": 0,
                 **_history_series_kwargs(),
                 "show": {"in_header": True},
+            }
+        )
+        series.append(
+            {
+                "entity": _eid("sensor", room.name, "heating_power_forecast"),
+                "name": f"{room.name} plan" if i == 0 else None,
+                "data_generator": _forecast_generator("heating_power"),
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": color,
+                "stroke_width": 1,
+                "opacity": 0.25,
+                "float_precision": 0,
+                "show": {"in_legend": i == 0, "in_header": False},
             }
         )
     return {
