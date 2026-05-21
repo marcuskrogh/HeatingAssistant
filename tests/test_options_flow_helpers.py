@@ -22,8 +22,7 @@ from custom_components.heating_assistant._options_flow import (
     window_display,
 )
 from custom_components.heating_assistant.const import (
-    CONF_COMFORT_CORRIDOR_HIGH,
-    CONF_COMFORT_CORRIDOR_LOW,
+    CONF_COMFORT_OFFSET,
     CONF_ROOM_NAME,
     CONF_SETPOINT,
     CONF_R_EXTERNAL,
@@ -161,7 +160,7 @@ def test_room_helper_add_stores_window_sensors():
     assert helper.rooms[0][CONF_WINDOW_SENSORS] == ["binary_sensor.bedroom_window"]
 
 
-def test_room_helper_add_stores_comfort_corridor_bounds():
+def test_room_helper_add_stores_comfort_offset():
     helper = RoomFlowHelper()
     err = helper.add(
         name="study",
@@ -169,12 +168,10 @@ def test_room_helper_add_stores_comfort_corridor_bounds():
         thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["small"],
         r_external=BUILDING_AGE_TO_R_EXTERNAL["pre_1940"],
         setpoint=21.0,
-        comfort_corridor_low=19.0,
-        comfort_corridor_high=23.0,
+        comfort_offset=2.0,
     )
     assert err is None
-    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_LOW] == 19.0
-    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_HIGH] == 23.0
+    assert helper.rooms[0][CONF_COMFORT_OFFSET] == 2.0
 
 
 def test_room_helper_add_rejects_case_insensitive_duplicates():
@@ -246,7 +243,7 @@ def test_room_helper_update_current_updates_window_sensors():
     ]
 
 
-def test_room_helper_update_current_updates_comfort_corridor_bounds():
+def test_room_helper_update_current_updates_comfort_offset():
     helper = RoomFlowHelper()
     _add_kitchen(helper)
     helper.select("kitchen")
@@ -256,12 +253,10 @@ def test_room_helper_update_current_updates_comfort_corridor_bounds():
         thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["medium"],
         r_external=BUILDING_AGE_TO_R_EXTERNAL["1980_1999"],
         setpoint=22.0,
-        comfort_corridor_low=20.0,
-        comfort_corridor_high=24.0,
+        comfort_offset=2.0,
     )
     assert err is None
-    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_LOW] == 20.0
-    assert helper.rooms[0][CONF_COMFORT_CORRIDOR_HIGH] == 24.0
+    assert helper.rooms[0][CONF_COMFORT_OFFSET] == 2.0
 
 
 def test_room_helper_update_clearing_sensors_drops_singular_key():
