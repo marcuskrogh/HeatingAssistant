@@ -1414,14 +1414,15 @@ class HeatingMPCController:
         # soft-penalty term O(rho_z) is normalised to O(1).  Without this the
         # objective can reach ~10^6–10^7 while IPOPT's absolute dual-
         # infeasibility tolerance is 1e-6, a gap that prevents convergence
-        # within the iteration budget.  SLSQP is unaffected by this scaling.
+        # within the iteration budget.  SLSQP uses different tolerance logic
+        # and does not benefit from this scaling.
         if solver.lower() in {"ipopt", "cyipopt"}:
             kwargs["solver_scaling"] = NLPScalingPolicy(objective_scale=1.0 / rho_z)
 
-        # Enable analytical Jacobians if available; mbc will use model.dfdu,
-        # model.dgmdx, and model.dgmdu directly instead of finite differences.
-        if use_analytic_derivatives:
-            kwargs["use_analytic_derivatives"] = True
+        # Note: mbc.CDTrackingOptimalControlProblem automatically detects and uses
+        # analytical Jacobians if model.dfdu, model.dgmdx, and model.dgmdu are
+        # defined. The use_analytic_derivatives flag is stored in the controller
+        # for diagnostic/introspection purposes but doesn't need to be passed to OCP.
 
         ocp = CDTrackingOptimalControlProblem(self._control_system, **kwargs)
 
