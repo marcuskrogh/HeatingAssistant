@@ -11,14 +11,14 @@ through a first-order filter with an identified time constant
 Sources with ``τ_em = 0`` (the default for electric resistive heaters,
 and the pre-B2 behaviour) bypass the filter — ``u`` flows directly to
 ``thermal_power``.  Sources with ``τ_em > 0`` add one filter state to
-the augmented state vector at indices ``3n..3n+m`` (where ``m`` is the
+the augmented state vector at indices ``n..n+m`` (where ``m`` is the
 number of filtered sources).
 
 These tests pin down:
 
   * Default τ_em values per source type (electric=0, heat-pump=0 at the
     class level; coordinator applies typology defaults).
-  * State vector growth: nx = 4n + m augmented; m = 0 when all sources
+  * State vector growth: nx = 2n + m augmented; m = 0 when all sources
     have τ_em = 0.
   * Filter dynamics: dφ/dt = (u - φ) / τ approaches u with time
     constant τ.
@@ -127,13 +127,13 @@ def test_coordinator_electric_typology_default_is_zero() -> None:
 
 
 def test_nx_unchanged_when_all_sources_unfiltered() -> None:
-    """With every source at τ_em = 0, the state vector size is the
-    same as pre-B2: 4n augmented, 3n un-augmented."""
+    """With every source at τ_em = 0, the state vector size is 2n
+    augmented (1R1C: T + offset), n un-augmented."""
     room = Room("a", thermal_mass=5e6, r_external=0.05, temperature=20.0)
     model = HouseModel([room])
     src = ElectricHeater("h", "a", max_power=1000.0)  # τ_em = 0
     sde = HouseThermalSDE(model, [src], dt=900.0)
-    assert sde.nx == 4  # 4n with n=1, m=0
+    assert sde.nx == 2  # 2n with n=1, m=0
 
 
 def test_nx_grows_by_m_when_sources_have_tau_em() -> None:
@@ -142,7 +142,7 @@ def test_nx_grows_by_m_when_sources_have_tau_em() -> None:
     model = HouseModel([room])
     src = HeatPump("p", "a", max_power=3000.0, emitter_time_constant=60.0)
     sde = HouseThermalSDE(model, [src], dt=900.0)
-    assert sde.nx == 5  # 4n + m = 4 + 1
+    assert sde.nx == 3  # 2n + m = 2 + 1
 
 
 def test_nx_mixed_filtered_unfiltered() -> None:
@@ -156,7 +156,7 @@ def test_nx_mixed_filtered_unfiltered() -> None:
     ]
     sde = HouseThermalSDE(model, sources, dt=900.0)
     assert sde._n_filtered == 2
-    assert sde.nx == 4 + 2  # 4n + m
+    assert sde.nx == 2 + 2  # 2n + m
 
 
 def test_filter_idx_for_source_mapping() -> None:
@@ -180,13 +180,11 @@ def test_filter_idx_for_source_mapping() -> None:
 
 
 def _aug(temps, phis=None, offsets=None):
-    """Build an augmented state vector ``[T_a, T_w, T_s, φ, b]``."""
+    """Build an augmented 1R1C state vector ``[T, φ, b]``."""
     n = len(temps)
-    walls = list(temps)
-    slabs = list(temps)
     phis = list(phis) if phis is not None else []
     offsets = list(offsets) if offsets is not None else [0.0] * n
-    return np.array(list(temps) + walls + slabs + phis + offsets, dtype=float)
+    return np.array(list(temps) + phis + offsets, dtype=float)
 
 
 def test_filter_dynamics_drift_toward_commanded_fraction() -> None:
@@ -195,14 +193,14 @@ def test_filter_dynamics_drift_toward_commanded_fraction() -> None:
     model = HouseModel([room])
     src = HeatPump("p", "a", max_power=3000.0, emitter_time_constant=60.0)
     sde = HouseThermalSDE(model, [src], dt=900.0)
-    # Augmented state [T_a, T_w, T_s, φ, b] with φ = 0.2.
+    # Augmented state [T, φ, b] with φ = 0.2 (n=1, so filter at index 1).
     x = _aug([20.0], phis=[0.2])
     u = np.array([0.8])  # commanded > current filter
     d = sde.disturbance_vector(5.0, {})
     p = np.array([])
     f = sde.f(x, u, d, p, 0.0)
-    # Filter drift sits at index 3 (3n+0 with n=1).
-    phi_drift = f[3]
+    # Filter drift sits at index n=1 (n+0 with n=1).
+    phi_drift = f[1]
     expected = (0.8 - 0.2) / 60.0
     assert phi_drift == pytest.approx(expected, rel=1e-9)
 
@@ -216,7 +214,7 @@ def test_filter_dynamics_zero_at_steady_state() -> None:
     x = _aug([20.0], phis=[0.5])
     u = np.array([0.5])
     f = sde.f(x, u, sde.disturbance_vector(5.0, {}), np.array([]), 0.0)
-    assert f[3] == pytest.approx(0.0, abs=1e-12)
+    assert f[1] == pytest.approx(0.0, abs=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -241,11 +239,10 @@ def test_heat_input_uses_filter_state_not_commanded_u() -> None:
     u = np.array([1.0])  # commanded full power, but the filter is at 0
     d = sde.disturbance_vector(20.0, {})  # outdoor = room → no conduction loss
     f = sde.f(x, u, d, np.array([]), 0.0)
-    # Air drift comes only from the wall and slab couplings.  At
-    # T_a = T_w = T_s and no heat input, those couplings are zero.
+    # At T = T_out and no heat input (φ = 0), conduction loss is zero.
     assert f[0] == pytest.approx(0.0, abs=1e-9)
     # Filter drift is positive, pointing toward u = 1.
-    assert f[3] == pytest.approx(1.0 / 60.0, rel=1e-9)
+    assert f[1] == pytest.approx(1.0 / 60.0, rel=1e-9)
 
 
 def test_filtered_source_warms_room_only_after_filter_ramps() -> None:
@@ -271,7 +268,7 @@ def test_filtered_source_warms_room_only_after_filter_ramps() -> None:
     C_air = sde._C_cap[0]
     assert f_low[0] == pytest.approx(800.0 / C_air, rel=1e-6)
     # Filter drift is negative (φ ramping down toward u = 0).
-    assert f_low[3] < 0.0
+    assert f_low[1] < 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -280,34 +277,27 @@ def test_filtered_source_warms_room_only_after_filter_ramps() -> None:
 
 
 def test_ufh_filtered_heat_lands_on_slab_block() -> None:
-    """When a UFH room has a filtered heater, ``thermal_power(φ)``
-    lands on the slab block (Phase 1 B1) — not on the air block."""
-    room = Room(
-        "a", thermal_mass=5e6, r_external=0.05,
-        floor_type="ufh", temperature=20.0,
-    )
+    """In the 1R1C model all filtered heat lands on the single temperature
+    node.  Verify that ``thermal_power(φ)`` appears in ``f[0]`` (the
+    temperature drift) and the filter drift is zero when φ = u."""
+    room = Room("a", thermal_mass=5e6, r_external=0.05, temperature=20.0)
     model = HouseModel([room])
     src = ElectricHeater(
-        "ufh", "a", max_power=2000.0,
+        "h", "a", max_power=2000.0,
         efficiency=1.0,
-        emitter_time_constant=600.0,  # hydronic-loop lag
+        emitter_time_constant=600.0,
     )
     sde = HouseThermalSDE(model, [src], dt=900.0)
-    # Push T_g = 20 °C so the slab's ground-coupling drift is zero at
-    # the test's initial condition (T_s = 20).  This isolates the
-    # heat-input contribution we want to measure.
-    sde.set_ground_temp(20.0)
-    # φ = 0.6 → 1200 W → onto slab.
+    # φ = 0.6 → 1200 W → onto temperature node.
     x = _aug([20.0], phis=[0.6])
     u = np.array([0.6])  # at steady state, φ = u
     d = sde.disturbance_vector(20.0, {})
     f = sde.f(x, u, d, np.array([]), 0.0)
-    n = 1
-    # Slab block (index 2n+0 = 2) drifts positive from 1200 W.
-    C_slab = sde._C_cap[2 * n + 0]
-    assert f[2 * n + 0] == pytest.approx(1200.0 / C_slab, rel=1e-6)
-    # Air block (index 0) drifts only via slab coupling — much smaller.
-    assert f[0] < f[2 * n + 0]
+    # Temperature node (index 0) drifts positive from 1200 W.
+    C = sde._C_cap[0]
+    assert f[0] == pytest.approx(1200.0 / C, rel=1e-6)
+    # Filter drift is zero (φ = u at steady state).
+    assert f[1] == pytest.approx(0.0, abs=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -325,8 +315,8 @@ def test_dfdx_filter_diagonal_is_minus_inv_tau() -> None:
     x = _aug([20.0], phis=[0.5])
     u = np.array([0.5])
     J = sde.dfdx(x, u, sde.disturbance_vector(5.0, {}), np.array([]), 0.0)
-    # Filter block diagonal at index 3 (3n with n=1) is -1/60.
-    assert J[3, 3] == pytest.approx(-1.0 / 60.0, rel=1e-9)
+    # Filter block diagonal at index 1 (n with n=1) is -1/60.
+    assert J[1, 1] == pytest.approx(-1.0 / 60.0, rel=1e-9)
 
 
 def test_dfdx_filter_to_air_cross_coupling_for_non_ufh_source() -> None:
@@ -346,22 +336,16 @@ def test_dfdx_filter_to_air_cross_coupling_for_non_ufh_source() -> None:
     J = sde.dfdx(x, u, sde.disturbance_vector(5.0, {}), np.array([]), 0.0)
     # ∂Q/∂φ for an electric heater is P_max × efficiency = 1000 W.
     expected = 1000.0 / sde._C_cap[0]
-    assert J[0, 3] == pytest.approx(expected, rel=1e-3)
-    # The slab block stays untouched for a non-UFH room.
-    n = 1
-    assert J[2 * n + 0, 3] == pytest.approx(0.0, abs=1e-9)
+    assert J[0, 1] == pytest.approx(expected, rel=1e-3)
 
 
-def test_dfdx_filter_to_slab_cross_coupling_for_ufh_source() -> None:
-    """In a UFH room, ∂(f_T_s)/∂φ > 0 (filter→slab cross-coupling)
-    and ∂(f_T_a)/∂φ ≈ 0."""
-    room = Room(
-        "a", thermal_mass=5e6, r_external=0.05,
-        floor_type="ufh", temperature=20.0,
-    )
+def test_dfdx_filter_to_temperature_node_cross_coupling() -> None:
+    """In 1R1C, filtered heat always goes to the single temperature node.
+    Verify ∂(f_T)/∂φ = P_max / C > 0."""
+    room = Room("a", thermal_mass=5e6, r_external=0.05, temperature=20.0)
     model = HouseModel([room])
     src = ElectricHeater(
-        "ufh", "a", max_power=2000.0,
+        "h", "a", max_power=2000.0,
         efficiency=1.0,
         emitter_time_constant=600.0,
     )
@@ -369,24 +353,21 @@ def test_dfdx_filter_to_slab_cross_coupling_for_ufh_source() -> None:
     x = _aug([20.0], phis=[0.5])
     u = np.array([0.5])
     J = sde.dfdx(x, u, sde.disturbance_vector(5.0, {}), np.array([]), 0.0)
-    n = 1
-    # ∂(f_T_s)/∂φ = 2000 / C_slab.
-    expected = 2000.0 / sde._C_cap[2 * n + 0]
-    assert J[2 * n + 0, 3] == pytest.approx(expected, rel=1e-3)
-    # ∂(f_T_a)/∂φ for the UFH source is zero (no direct air coupling).
-    assert J[0, 3] == pytest.approx(0.0, abs=1e-9)
+    # ∂(f_T)/∂φ = P_max / C.
+    expected = 2000.0 / sde._C_cap[0]
+    assert J[0, 1] == pytest.approx(expected, rel=1e-3)
 
 
 def test_dfdx_unfiltered_source_does_not_change_jacobian_block_size() -> None:
     """When ``m = 0`` the Jacobian shape is unchanged from the pre-B2
-    layout (4n × 4n augmented)."""
+    layout (2n × 2n augmented for 1R1C)."""
     room = Room("a", thermal_mass=5e6, r_external=0.05, temperature=20.0)
     model = HouseModel([room])
     src = ElectricHeater("h", "a", max_power=1000.0)  # τ_em = 0
     sde = HouseThermalSDE(model, [src], dt=900.0)
     x = _aug([20.0])
     J = sde.dfdx(x, np.array([0.5]), sde.disturbance_vector(5.0, {}), np.array([]), 0.0)
-    assert J.shape == (4, 4)
+    assert J.shape == (2, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -401,11 +382,11 @@ def test_x_setter_extracts_filter_block() -> None:
     model = HouseModel([room])
     src = HeatPump("p", "a", max_power=3000.0, emitter_time_constant=60.0)
     sde = HouseThermalSDE(model, [src], dt=900.0)
-    # Augmented: [T_a (1), T_w (1), T_s (1), φ (1), b (1)] = length 5.
-    sde.x = [20.0, 19.0, 18.0, 0.42, 0.1]
+    # Augmented 1R1C: [T (1), φ (1), b (1)] = length 3.
+    sde.x = [20.0, 0.42, 0.1]
     out = sde.x
-    assert len(out) == 5
-    assert out[3] == pytest.approx(0.42)
+    assert len(out) == 3
+    assert out[1] == pytest.approx(0.42)
 
 
 def test_x_setter_cold_start_initialises_filter_to_zero() -> None:
@@ -414,6 +395,6 @@ def test_x_setter_cold_start_initialises_filter_to_zero() -> None:
     model = HouseModel([room])
     src = HeatPump("p", "a", max_power=3000.0, emitter_time_constant=60.0)
     sde = HouseThermalSDE(model, [src], dt=900.0)
-    sde.x = [20.0]  # only air
+    sde.x = [20.0]  # cold start: only temperature
     out = sde.x
-    assert out[3] == pytest.approx(0.0)
+    assert out[1] == pytest.approx(0.0)

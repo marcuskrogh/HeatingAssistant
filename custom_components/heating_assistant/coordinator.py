@@ -749,15 +749,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         # Rebuild state-space matrices to reflect the updated parameters.
         # Must call rebuild_derived_parameters() first so the cached per-room
-        # arrays (_c_air, _c_wall, _r_aw, _r_we, _leakage_area, _B_sky_offset)
-        # are re-derived from the new room.thermal_mass / room.r_external values
-        # before _build_matrices() reads them.
+        # arrays (_leakage_area, _B_sky_offset) are re-derived from the new
+        # room.thermal_mass / room.r_external values before _build_matrices()
+        # reads them.
         self.model.rebuild_derived_parameters()
         (
             self.model._C,
             self.model._A,
             self.model._B_ext,
-            self.model._B_ground,
         ) = self.model._build_matrices()
 
         self._estimation_timestamp = snapshot.get("estimated_at")
@@ -2026,17 +2025,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "Applied estimated inter-room resistances: %s", estimated_inter_room_r
             )
 
-        # Rebuild the internal model matrices (A, B_ext, C_cap).
+        # Rebuild the internal model matrices (A, B_ext, C).
         # Must call rebuild_derived_parameters() first so the cached per-room
-        # arrays (_c_air, _c_wall, _r_aw, _r_we, _leakage_area, _B_sky_offset)
-        # are re-derived from the new room.thermal_mass / room.r_external values
-        # before _build_matrices() reads them.
+        # arrays (_leakage_area, _B_sky_offset) are re-derived from the new
+        # room.thermal_mass / room.r_external values before _build_matrices()
+        # reads them.
         self.model.rebuild_derived_parameters()
         (
             self.model._C,
             self.model._A,
             self.model._B_ext,
-            self.model._B_ground,
         ) = self.model._build_matrices()
 
         # Rebuild the MPC controller with the updated model
