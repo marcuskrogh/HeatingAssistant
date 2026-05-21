@@ -26,10 +26,9 @@ from ._options_flow import (
     window_display as _window_display,
 )
 from .const import (
+    CONF_COMFORT_OFFSET,
     CONF_HORIZON,
     CONF_LATITUDE,
-    CONF_COMFORT_CORRIDOR_HIGH,
-    CONF_COMFORT_CORRIDOR_LOW,
     CONF_MPC_ANALYTIC_DERIVATIVES,
     CONF_MPC_SOLVER,
     CONF_INFILTRATION_FRACTION,
@@ -56,8 +55,8 @@ from .const import (
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
+    DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENVELOPE_TIGHTNESS,
-    DEFAULT_CONSTRAINT_OFFSET,
     DEFAULT_HORIZON,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_MPC_SOLVER,
@@ -182,8 +181,7 @@ def _room_form_schema(
     room_size_default: str = "medium",
     building_age_default: str = "1980_1999",
     envelope_tightness_default: str = DEFAULT_ENVELOPE_TIGHTNESS,
-    corridor_low_default: float = DEFAULT_ROOM_SETPOINT - DEFAULT_CONSTRAINT_OFFSET,
-    corridor_high_default: float = DEFAULT_ROOM_SETPOINT + DEFAULT_CONSTRAINT_OFFSET,
+    comfort_offset_default: float = DEFAULT_COMFORT_OFFSET,
 ) -> vol.Schema:
     """Schema shared by the add-room and edit-room forms.
 
@@ -208,11 +206,8 @@ def _room_form_schema(
                 "envelope_tightness", default=envelope_tightness_default,
             ): vol.In(list(ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION)),
             vol.Required(
-                CONF_COMFORT_CORRIDOR_LOW, default=corridor_low_default,
-            ): vol.Coerce(float),
-            vol.Required(
-                CONF_COMFORT_CORRIDOR_HIGH, default=corridor_high_default,
-            ): vol.Coerce(float),
+                CONF_COMFORT_OFFSET, default=comfort_offset_default,
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=10.0)),
         }
     )
 
@@ -413,8 +408,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 infiltration_fraction=(
                     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
                 ),
-                comfort_corridor_low=user_input[CONF_COMFORT_CORRIDOR_LOW],
-                comfort_corridor_high=user_input[CONF_COMFORT_CORRIDOR_HIGH],
+                comfort_offset=user_input[CONF_COMFORT_OFFSET],
                 window_sensors=window_sensors,
             )
             if err is None:
@@ -468,8 +462,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 infiltration_fraction=(
                     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
                 ),
-                comfort_corridor_low=user_input[CONF_COMFORT_CORRIDOR_LOW],
-                comfort_corridor_high=user_input[CONF_COMFORT_CORRIDOR_HIGH],
+                comfort_offset=user_input[CONF_COMFORT_OFFSET],
                 window_sensors=window_sensors,
             )
             if err is None:
@@ -483,13 +476,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     room_size_default=user_input.get("room_size", "medium"),
                     building_age_default=user_input.get("building_age", "1980_1999"),
                     envelope_tightness_default=tightness,
-                    corridor_low_default=user_input.get(
-                        CONF_COMFORT_CORRIDOR_LOW,
-                        DEFAULT_ROOM_SETPOINT - DEFAULT_CONSTRAINT_OFFSET,
-                    ),
-                    corridor_high_default=user_input.get(
-                        CONF_COMFORT_CORRIDOR_HIGH,
-                        DEFAULT_ROOM_SETPOINT + DEFAULT_CONSTRAINT_OFFSET,
+                    comfort_offset_default=user_input.get(
+                        CONF_COMFORT_OFFSET,
+                        DEFAULT_COMFORT_OFFSET,
                     ),
                 ),
                 errors={CONF_ROOM_NAME: err},
@@ -522,17 +511,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
                 DEFAULT_ENVELOPE_TIGHTNESS,
             ),
-            corridor_low_default=float(
-                room.get(
-                    CONF_COMFORT_CORRIDOR_LOW,
-                    room.get(CONF_SETPOINT, DEFAULT_ROOM_SETPOINT) - DEFAULT_CONSTRAINT_OFFSET,
-                )
-            ),
-            corridor_high_default=float(
-                room.get(
-                    CONF_COMFORT_CORRIDOR_HIGH,
-                    room.get(CONF_SETPOINT, DEFAULT_ROOM_SETPOINT) + DEFAULT_CONSTRAINT_OFFSET,
-                )
+            comfort_offset_default=float(
+                room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
             ),
         )
         return self.async_show_form(step_id="room_detail", data_schema=schema)
