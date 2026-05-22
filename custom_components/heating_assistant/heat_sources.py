@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+_T_SUPPLY_K: float = 308.15  # Assumed supply temperature 35 °C in Kelvin
+
+
 class HeatSource(ABC):
     """Abstract base class for a controllable heat source."""
 
@@ -138,10 +141,11 @@ class ElectricHeater(HeatSource):
             raise ValueError(f"max_temp_offset must be >= 0; got {max_temp_offset}")
         self.efficiency = efficiency
         self.max_temp_offset = max_temp_offset
+        self._gain: float = max_power * efficiency * power_scale
 
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """Thermal power = electrical power × efficiency × power_scale."""
-        return self.max_power * setpoint_fraction * self.efficiency * self.power_scale
+        return self._gain * setpoint_fraction
 
     def target_temperature(self, setpoint_fraction: float, internal_temp: float) -> float:
         """Target setpoint = internal_temp + fraction × max_temp_offset."""
@@ -247,6 +251,17 @@ class HeatPump(HeatSource):
         self.cooling_efficiency = cooling_efficiency
         self.heating_efficiency = heating_efficiency
 
+        # Precomputed constants (cop_rated is fixed at construction time)
+        self._electric_max: float = max_power / cop_rated if cop_rated > 0 else 0.0
+        self._q_cool_const: float = (
+            self._electric_max * cooling_cop * cooling_efficiency * power_scale
+        )
+        # Precomputed Carnot-ratio scale factor: cop(T_out) = _cop_scale * T_supply / denom
+        _T_ref_K = cop_temp_ref + 273.15
+        self._cop_scale: float = cop_rated * max(_T_SUPPLY_K - _T_ref_K, 1.0) / _T_SUPPLY_K
+        # Base thermal output at COP=1 (used in thermal_power / smooth_thermal_power)
+        self._q_heat_base: float = self._electric_max * heating_efficiency * power_scale
+
     @property
     def can_cool(self) -> bool:
         """Returns True if this heat pump supports active cooling (EER > 0)."""
@@ -256,7 +271,7 @@ class HeatPump(HeatSource):
         """Return the estimated COP at the given outdoor temperature."""
         if outdoor_temp < self.min_outdoor_temp:
             return 0.0
-        return max(1.0, _cop_at_temp(self.cop_rated, self.cop_temp_ref, outdoor_temp))
+        return max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
 
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """
@@ -269,9 +284,10 @@ class HeatPump(HeatSource):
         If the computed output is positive but below ``min_power`` the heat
         pump cannot operate and the method returns 0.
         """
-        electric_max = self.max_power / self.cop_rated  # rated electrical input [W]
-        actual_cop = self.cop(outdoor_temp)
-        power = electric_max * setpoint_fraction * actual_cop * self.heating_efficiency * self.power_scale
+        if outdoor_temp < self.min_outdoor_temp:
+            return 0.0
+        cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
+        power = self._q_heat_base * setpoint_fraction * cop_now
         if 0.0 < power < self.min_power:
             return 0.0
         return power
@@ -301,9 +317,7 @@ class HeatPump(HeatSource):
         """
         if self.cop_rated <= 0:
             return 0.0
-        electric_max = self.max_power / self.cop_rated
-        cooling_capacity_max = electric_max * self.cooling_cop
-        return -cooling_capacity_max * self.cooling_efficiency * self.power_scale
+        return -self._q_cool_const
 
     def target_temperature(
         self, setpoint_fraction: float, internal_temp: float,
@@ -415,12 +429,15 @@ class HeatPump(HeatSource):
             Thermal power [W].  Positive values represent heat addition;
             negative values represent heat removal (cooling).
         """
-        q_heat = self.thermal_power(1.0, outdoor_temp)
-        q_cool = abs(self.cooling_power(outdoor_temp))
+        if outdoor_temp < self.min_outdoor_temp:
+            return 0.0
+        cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
+        q_heat = self._q_heat_base * cop_now
+        q_cool = self._q_cool_const
 
         if q_heat <= 0.0 or q_cool <= 0.0:
             # Degenerate case: fall back to linear heating-only model
-            return self.thermal_power(max(0.0, u), outdoor_temp)
+            return q_heat * max(0.0, u)
 
         # Adaptive sharpness: compensates for capacity asymmetry so that
         # both u=+1 (heating) and u=-1 (cooling) saturate to ~σ(k_base)
