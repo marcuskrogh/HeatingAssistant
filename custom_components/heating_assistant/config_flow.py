@@ -80,13 +80,16 @@ DEFAULT_ROOM_SETPOINT = 22.0
 
 
 def _normalize_solver(value: Any) -> str:
-    """Normalize solver value for persisted options."""
+    """Return the canonical solver name for persisted options.
+
+    The QP backend is always used; legacy values ("ipopt", "slsqp") are
+    accepted and stored unchanged so existing config entries round-trip
+    without error.  The controller ignores the value internally.
+    """
     if value is None:
         return DEFAULT_MPC_SOLVER
     solver = str(value).lower()
-    if solver == "cyipopt":
-        return "ipopt"
-    if solver in {"slsqp", "ipopt"}:
+    if solver in {"slsqp", "ipopt", "cyipopt", "qp"}:
         return solver
     return DEFAULT_MPC_SOLVER
 
@@ -136,10 +139,6 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
                     vol.Coerce(int), vol.Range(min=1, max=100)
                 ),
-                vol.Optional(
-                    CONF_MPC_ANALYTIC_DERIVATIVES,
-                    default=DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-                ): bool,
                 vol.Optional(CONF_SIGMA_W, default=DEFAULT_SIGMA_W): vol.All(
                     vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
                 ),
@@ -280,13 +279,12 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     async def async_step_global_settings(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Form for site / timing / solver / noise settings."""
+        """Form for site / timing / noise settings."""
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_init()
 
         current = self._data
-        solver_default = _normalize_solver(current.get(CONF_MPC_SOLVER))
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -305,17 +303,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     CONF_HORIZON,
                     default=current.get(CONF_HORIZON, DEFAULT_HORIZON),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-                vol.Optional(
-                    CONF_MPC_SOLVER,
-                    default=solver_default,
-                ): vol.In(["slsqp", "ipopt"]),
-                vol.Optional(
-                    CONF_MPC_ANALYTIC_DERIVATIVES,
-                    default=current.get(
-                        CONF_MPC_ANALYTIC_DERIVATIVES,
-                        DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-                    ),
-                ): bool,
                 vol.Optional(
                     CONF_SIGMA_W,
                     default=current.get(CONF_SIGMA_W, DEFAULT_SIGMA_W),

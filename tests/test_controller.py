@@ -1,4 +1,4 @@
-"""Unit tests for the nonlinear CD-NMPC controller."""
+"""Unit tests for the linearised CD-MPC controller."""
 
 import sys
 import os
@@ -18,7 +18,7 @@ from custom_components.heating_assistant.thermal_model import (
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
-from mbc.control import CDTrackingOptimalControlProblem, CDNMPCController
+from mbc.control import CDTrackingOptimalControlProblem, CDLinearizedMPCController
 from custom_components.heating_assistant.controller import (
     HouseThermalSDE,
     HeatingMPCController,
@@ -696,7 +696,7 @@ class TestHeatingMPCController:
             assert 0.0 <= frac <= 1.0, f"Fraction out of range for {name}: {frac}"
 
     def test_fractions_are_continuous(self):
-        """Continuous NLP optimisation; fractions are not grid-restricted."""
+        """QP optimisation; fractions are continuous, not grid-restricted."""
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900,
                                     energy_weight=0.001)
@@ -759,7 +759,8 @@ class TestHeatingMPCController:
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert ctrl._system._augment_offsets is False
         assert ctrl._control_system._augment_offsets is False
-        assert ctrl._system.nx == 6
+        # 1R1C un-augmented: one temperature state per room, no filter states
+        assert ctrl._system.nx == 2
 
     def test_filtered_temperatures_use_air_state_when_offsets_disabled(self):
         room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
@@ -783,20 +784,21 @@ class TestHeatingMPCController:
             horizon=2,
             dt=900,
         )
-        x_state = np.array([20.0, 20.0, 20.0], dtype=float)
-        ctrl._ekf._x_np = x_state.copy()
-        ctrl._ekf.predict = lambda *args, **kwargs: None
+        # Intercept the linearised MPC step so we can control what predictions
+        # are returned without running the actual QP.
+        n_u = ctrl._system.nu
+        n_x = ctrl._system.nx
+        N = ctrl._horizon
+        x_ss = np.array(ctrl._ekf.x_hat)  # current EKF state (20.0)
 
-        def _update(*args, **kwargs):
-            ctrl._ekf._x_np = x_state.copy()
-            return x_state.copy(), ctrl._ekf.P
+        def _fake_step(y, d, p=None, t=0.0):
+            u_abs = np.zeros(n_u)
+            U_abs = np.zeros((N, n_u))
+            # Return constant state = x_ss (temperature stays at 20.0)
+            X_abs = np.tile(x_ss, (N, 1))
+            return u_abs, U_abs, X_abs
 
-        ctrl._ekf.update = _update
-        ctrl._ocp.solve = lambda *args, **kwargs: (
-            np.zeros((ctrl._horizon, ctrl._system.nu)),
-            None,
-            {},
-        )
+        ctrl._mpc.step = _fake_step
 
         ctrl.compute(
             outdoor_temp=20.0,
@@ -806,14 +808,6 @@ class TestHeatingMPCController:
         )
 
         assert [step["living_room"] for step in ctrl.predictions] == pytest.approx([20.0, 20.0])
-
-    def test_ipopt_backend_is_active_when_available(self):
-        pytest.importorskip("cyipopt")
-        model, sources = _make_model_and_sources()
-        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900, solver="ipopt")
-        backend_name = type(ctrl._ocp._eocp._solver_backend).__name__.lower()
-        assert "ipopt" in backend_name
-        assert ctrl.solver_active.lower() in {"ipopt", "cyipopt"}
 
     def test_predictions_contain_all_rooms(self):
         model, sources = _make_model_and_sources()
@@ -932,6 +926,9 @@ class TestHeatingMPCController:
         )
         model = HouseModel([room])
         heater = ElectricHeater("heater", "living_room", max_power=2000.0)
+        # terminal_weight=1 isolates the stage-cost weak-pull effect without the
+        # terminal-cost amplification (100× stage) dominating.  Stage energy cost
+        # (0.01) >> stage tracking cost (1e-4) → optimal u ≈ 0 inside corridor.
         ctrl = HeatingMPCController(
             model,
             [heater],
@@ -939,6 +936,7 @@ class TestHeatingMPCController:
             dt=900,
             soft_constraint_weight=1000.0,
             energy_weight=0.01,
+            terminal_weight=1,
         )
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=20.0, now=now)
@@ -953,15 +951,15 @@ class TestHeatingMPCController:
         ctrl.compute(outdoor_temp=-4.0, now=now, outdoor_forecast=forecast)
         assert ctrl.outdoor_forecast == forecast
 
-    def test_uses_nonlinear_sde_model(self):
-        """HeatingMPCController should use HouseThermalSDE internally."""
+    def test_uses_linearised_mpc(self):
+        """HeatingMPCController should use CDLinearizedMPCController internally."""
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl._system, HouseThermalSDE)
         assert isinstance(ctrl._control_system, HouseThermalSDE)
         assert ctrl._control_system.nx == ctrl._system.nx
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
-        assert isinstance(ctrl._ocp, CDTrackingOptimalControlProblem)
+        assert isinstance(ctrl._mpc, CDLinearizedMPCController)
 
     def test_negative_smoothing_weight_raises(self):
         model, sources = _make_model_and_sources()
@@ -969,62 +967,13 @@ class TestHeatingMPCController:
             HeatingMPCController(model, sources, horizon=2, dt=900,
                                  smoothing_weight=-0.1)
 
-    def test_solver_selection_is_exposed(self):
+    def test_solver_and_derivative_flags_exposed(self):
+        """solver_requested, solver_active and use_analytic_derivatives are readable."""
         model, sources = _make_model_and_sources()
-        ctrl = HeatingMPCController(
-            model,
-            sources,
-            horizon=2,
-            dt=900,
-            solver="SLSQP",
-            solver_options={"maxiter": 42},
-        )
-        assert ctrl.solver_requested == "SLSQP"
-        assert ctrl.solver_active == "SLSQP"
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        assert isinstance(ctrl.solver_requested, str)
+        assert isinstance(ctrl.solver_active, str)
         assert ctrl.use_analytic_derivatives is True
-        assert ctrl._ocp._eocp._solver_backend._options["maxiter"] == 42
-
-    def test_default_solver_prefers_ipopt_but_falls_back_on_build_failure(self):
-        model, sources = _make_model_and_sources()
-        original_build = HeatingMPCController._build_ocp
-
-        def _flaky_build(ctrl_self, **kwargs):
-            if str(kwargs["solver"]).lower() in {"ipopt", "cyipopt"}:
-                raise RuntimeError("IPOPT backend unavailable at initialization")
-            return original_build(ctrl_self, **kwargs)
-
-        with patch.object(HeatingMPCController, "_build_ocp", new=_flaky_build):
-            ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-
-        assert ctrl.solver_requested == "ipopt"
-        assert ctrl.solver_active == "SLSQP"
-
-    def test_ipopt_runtime_error_falls_back_to_slsqp(self):
-        model, sources = _make_model_and_sources()
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
-        original_solve = CDTrackingOptimalControlProblem.solve
-
-        def _flaky_solve(ocp_self, *args, **kwargs):
-            backend_name = type(ocp_self._eocp._solver_backend).__name__.lower()
-            if "ipopt" in backend_name:
-                raise RuntimeError(
-                    "IPOPT backend requested but cyipopt is not available."
-                )
-            return original_solve(ocp_self, *args, **kwargs)
-
-        with patch.object(CDTrackingOptimalControlProblem, "solve", new=_flaky_solve):
-            ctrl = HeatingMPCController(
-                model,
-                sources,
-                horizon=2,
-                dt=900,
-                solver="ipopt",
-            )
-            actions = ctrl.compute(outdoor_temp=0.0, now=now)
-
-        assert ctrl.solver_requested == "ipopt"
-        assert ctrl.solver_active == "SLSQP"
-        assert all(0.0 <= frac <= 1.0 for frac in actions.values())
 
     def test_mpc_requests_cooling_when_above_setpoint(self):
         """When a cooling-capable heat pump room is well above setpoint, the
@@ -1192,14 +1141,12 @@ class TestSolarForecastIndexing:
             expected_solar_0, rel=1e-6
         ), "solar_forecast[0] must reflect current (now) solar gains"
 
-    def test_mayer_zref_updated_on_setpoint_change(self):
-        """After compute(), the Mayer terminal cost _zref must track current setpoints.
+    def test_setpoint_reference_updated_on_setpoint_change(self):
+        """After compute(), the MPC x_ref must track the current setpoints.
 
-        The Mayer closure captures z_ref_arr at OCP construction time.  Without
-        the fix, the terminal cost always pulls toward the *initial* setpoints
-        even after the user changes them via the climate entity.  The fix updates
-        the captured numpy array in-place so both stage and terminal costs use
-        the same up-to-date reference.
+        CDLinearizedMPCController.x_ref is updated via the property setter
+        at the start of each compute() call so stage and terminal costs
+        always use the latest setpoints.
         """
         room = Room(
             "living_room", 5_000_000.0, 0.05,
@@ -1211,26 +1158,13 @@ class TestSolarForecastIndexing:
             horizon=4, dt=900,
         )
 
-        # Sanity-check: initial Mayer _zref matches initial setpoint.
-        # _mayer signature: def _mayer(x, y, theta, _P=P_arr, _zref=z_ref_arr, ...)
-        # __defaults__[1] is the _zref default argument (the captured z_ref_arr array).
-        mayer = ctrl._ocp._eocp._mayer
-        assert mayer is not None, "Mayer function must be present when terminal_weight > 0"
-        assert mayer.__defaults__[1][0] == pytest.approx(21.0), (  # index 1 → _zref
-            "Initial Mayer _zref must equal the initial setpoint"
-        )
+        # Initial x_ref matches initial setpoint
+        assert ctrl._mpc.x_ref[0] == pytest.approx(21.0)
 
-        # Change setpoint and recompute
+        # Change setpoint and recompute — x_ref must be updated
         model.rooms["living_room"].setpoint = 25.0
         ctrl.compute(outdoor_temp=0.0, now=self._NOW)
-
-        # Both the stage reference and the Mayer terminal reference must be 25.0
-        assert ctrl._ocp._eocp._z_ref[0][0] == pytest.approx(25.0), (
-            "_eocp._z_ref (stage cost) must be updated to the new setpoint"
-        )
-        assert mayer.__defaults__[1][0] == pytest.approx(25.0), (  # index 1 → _zref
-            "Mayer _zref (terminal cost) must be updated to the new setpoint"
-        )
+        assert ctrl._mpc.x_ref[0] == pytest.approx(25.0)
 
 
 class TestKalmanInnovation:
