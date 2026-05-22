@@ -576,7 +576,8 @@ class KalmanMLEstimator:
         def _regularization_fn(theta: np.ndarray) -> float:
             lm, lr, qi, la, lrij = layout.unpack(theta)
             return self._compute_regularization(
-                lm, lr, qi, la, lrij, layout.identifiable_pairs
+                lm, lr, qi, la, lrij, layout.identifiable_pairs,
+                layout.identifiable_sources,
             )
 
         # ── Custom perturbation: scale q_int by 200 for physical restarts ──
@@ -754,7 +755,7 @@ class KalmanMLEstimator:
             else:
                 reg = self._compute_regularization(
                     log_mass, log_r, q_int, log_alpha, log_r_ij,
-                    identifiable_pairs,
+                    identifiable_pairs, identifiable_sources,
                 )
                 log_ll_val = round(float(-(best_f - reg)), 3)
         except Exception:
@@ -852,21 +853,14 @@ class KalmanMLEstimator:
             return _SENTINEL, _zero_grad.copy()
 
         n = self._n
-        nx = int(model.nx)     # 2n or 3n (Phase 1 A1: 2R2C with optional offsets)
+        nx = int(model.nx)     # n for 1R1C (no augmented offset states)
         n_sub = 10
         h_sub = self._dt / n_sub
 
-        # Phase 1 A1 promoted the plant to 2R2C, doubling the physical
-        # state dimension (``F`` is now ``(2n, 2n)`` instead of ``(n, n)``).
-        # The analytical sensitivity machinery below
-        # (``dFdtheta`` / ``dfdtheta_val``) is hard-coded to the
-        # pre-A1 single-temperature-block layout and would broadcast
-        # incorrectly on the new doubled state.  Phase 4 will restructure
-        # the estimator on top of the 2R2C dynamics; until then we
-        # disable the analytical gradient and let the optimiser fall back
-        # to numerical differentiation.  The forward Kalman pass below
-        # still computes ``neg_ll`` correctly because it uses
-        # ``model.f`` and ``model.dfdx`` which are 2R2C-aware.
+        # Analytical gradient is valid when the drift Jacobian _F has the
+        # expected (n, n) shape for the 1R1C model.  If the model ever
+        # reverts to a larger state (e.g. 2R2C), the sensitivity writes
+        # below would broadcast incorrectly, so we gate on shape equality.
         _skip_analytic_grad = (model._F.shape[0] > n)
 
         # ── Unpack theta ────────────────────────────────────────────────────
@@ -891,9 +885,6 @@ class KalmanMLEstimator:
         n_pairs = len(layout.identifiable_pairs)
 
         # ── Precompute dFdtheta (constant – doesn't depend on x/u/d) ───────
-        # Shape (ntheta, nx, nx).  Disabled under 2R2C (Phase 1 A1) — the
-        # writes below would broadcast incorrectly across the doubled
-        # state dimension.  Phase 4 will re-derive these for 2R2C.
         dFdtheta = np.zeros((ntheta, nx, nx))
 
         if not _skip_analytic_grad:
@@ -1126,10 +1117,9 @@ class KalmanMLEstimator:
 
         a, b = layout.idx_log_alpha
         if a < b:
-            # Mirror the prior-slice logic from _compute_regularization
             la_prior = np.array(
-                [self._log_alpha_prior_full[s] for s in range(self._n_u)]
-            )[: b - a]
+                [self._log_alpha_prior_full[s] for s in layout.identifiable_sources]
+            )
             grad[a:b] = 2.0 * lam * (log_alpha - la_prior)
 
         a, b = layout.idx_log_r_ij
@@ -1361,6 +1351,7 @@ class KalmanMLEstimator:
         log_alpha: np.ndarray,
         log_r_ij: np.ndarray,
         identifiable_pairs: List[Tuple[int, int]],
+        identifiable_sources: Optional[List[int]] = None,
     ) -> float:
         """Gaussian regularisation toward priors for all parameters.
 
@@ -1368,11 +1359,14 @@ class KalmanMLEstimator:
         q_int penalty is divided by 100² so the prior std corresponds to
         ~100 W rather than 1 W.
         """
-        log_alpha_prior = np.array(
-            [self._log_alpha_prior_full[s]
-             for s in range(self._n_u)
-             if s < self._n_u and len(log_alpha) > 0]
-        )[: len(log_alpha)] if len(log_alpha) else np.array([])
+        if identifiable_sources is not None and len(log_alpha):
+            log_alpha_prior = np.array(
+                [self._log_alpha_prior_full[s] for s in identifiable_sources]
+            )
+        else:
+            log_alpha_prior = np.array([]) if not len(log_alpha) else np.array(
+                [self._log_alpha_prior_full[s] for s in range(len(log_alpha))]
+            )
 
         r_ij_priors = np.array([
             self._connection_r_priors[self._connection_pairs.index(p)]
@@ -1407,16 +1401,10 @@ class KalmanMLEstimator:
         n_copy = min(nym, len(first_measurement), nx)
         x0[:n_copy] = np.array(first_measurement[:n_copy], dtype=float)
 
-        # For 2R2C+slab models (nx = 3n or 4n) the wall block (indices n..2n)
-        # and slab block (2n..3n) are unobserved.  Initialising them at 0 K
-        # rather than at the room air temperature causes a large transient in
-        # the forward EKF pass that corrupts the log-likelihood and can bias
-        # parameter estimates.  Warm-start both latent blocks at the first
-        # measured air temperature so the initial model error is small.
         if nx >= 2 * n and n_copy >= n:
-            x0[n: 2 * n] = x0[:n]          # wall ← air
+            x0[n: 2 * n] = x0[:n]          # warm-start latent block ← air
         if nx >= 3 * n and n_copy >= n:
-            x0[2 * n: 3 * n] = x0[:n]      # slab ← air
+            x0[2 * n: 3 * n] = x0[:n]      # warm-start second latent block ← air
 
         P0 = np.eye(nx, dtype=float) * self._R_var * 10.0
         if nx > nym:

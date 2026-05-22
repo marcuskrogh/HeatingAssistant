@@ -454,17 +454,6 @@ class TestJointInternalGainAndHeaterScale:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason=(
-        "Phase 1 A1 promoted the plant to 2R2C; the analytic-gradient "
-        "machinery in parameter_estimator._cd_ped_neg_ll_and_grad is "
-        "hard-coded to the pre-A1 single-temperature-block layout and "
-        "is disabled under 2R2C — the optimiser falls back to "
-        "numerical differentiation while it's off.  Phase 4 "
-        "(System ID rework) will re-derive sensitivities for the "
-        "2R2C dynamics; these tests should be re-enabled then."
-    )
-)
 class TestAnalyticalGradient:
     """
     Verify that _cd_ped_neg_ll_and_grad returns a gradient that matches
