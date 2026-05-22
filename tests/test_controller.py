@@ -791,7 +791,7 @@ class TestHeatingMPCController:
         N = ctrl._horizon
         x_ss = np.array(ctrl._ekf.x_hat)  # current EKF state (20.0)
 
-        def _fake_step(y, d, p=None, t=0.0):
+        def _fake_step(y, d, p=None, t=0.0, D_forecast=None):
             u_abs = np.zeros(n_u)
             U_abs = np.zeros((N, n_u))
             # Return constant state = x_ss (temperature stays at 20.0)
