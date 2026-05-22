@@ -247,6 +247,12 @@ class HeatPump(HeatSource):
         self.cooling_efficiency = cooling_efficiency
         self.heating_efficiency = heating_efficiency
 
+        # Precomputed constants (cop_rated is fixed at construction time)
+        self._electric_max: float = max_power / cop_rated if cop_rated > 0 else 0.0
+        self._q_cool_const: float = (
+            self._electric_max * cooling_cop * cooling_efficiency * power_scale
+        )
+
     @property
     def can_cool(self) -> bool:
         """Returns True if this heat pump supports active cooling (EER > 0)."""
@@ -269,9 +275,8 @@ class HeatPump(HeatSource):
         If the computed output is positive but below ``min_power`` the heat
         pump cannot operate and the method returns 0.
         """
-        electric_max = self.max_power / self.cop_rated  # rated electrical input [W]
         actual_cop = self.cop(outdoor_temp)
-        power = electric_max * setpoint_fraction * actual_cop * self.heating_efficiency * self.power_scale
+        power = self._electric_max * setpoint_fraction * actual_cop * self.heating_efficiency * self.power_scale
         if 0.0 < power < self.min_power:
             return 0.0
         return power
@@ -301,9 +306,7 @@ class HeatPump(HeatSource):
         """
         if self.cop_rated <= 0:
             return 0.0
-        electric_max = self.max_power / self.cop_rated
-        cooling_capacity_max = electric_max * self.cooling_cop
-        return -cooling_capacity_max * self.cooling_efficiency * self.power_scale
+        return -self._q_cool_const
 
     def target_temperature(
         self, setpoint_fraction: float, internal_temp: float,
@@ -416,7 +419,7 @@ class HeatPump(HeatSource):
             negative values represent heat removal (cooling).
         """
         q_heat = self.thermal_power(1.0, outdoor_temp)
-        q_cool = abs(self.cooling_power(outdoor_temp))
+        q_cool = self._q_cool_const
 
         if q_heat <= 0.0 or q_cool <= 0.0:
             # Degenerate case: fall back to linear heating-only model

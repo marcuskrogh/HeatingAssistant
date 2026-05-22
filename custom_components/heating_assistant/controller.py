@@ -290,6 +290,58 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # per room.
         self._Rm: np.ndarray = (sigma_v ** 2) * np.eye(n)
 
+        # ── Precomputed quantities for hot-path functions ─────────────────
+
+        m = self._n_filtered
+
+        # Offset block start index (avoids property dispatch in g/gm/hm/dfdx)
+        self._offset_block_start: int = n + m
+
+        # Per-source fixed lookups — replace per-call dict/cast overhead
+        self._src_room_idx: np.ndarray = np.array(
+            [self._room_idx[src.room] for src in self._sources], dtype=int
+        )
+        self._src_C_cap: np.ndarray = self._C_cap[self._src_room_idx]
+        self._src_can_cool: list = [src.can_cool for src in self._sources]
+
+        # Filter block constants
+        if m > 0:
+            self._neg_inv_taus: np.ndarray = -1.0 / self._emitter_taus
+            self._inv_emitter_taus: np.ndarray = 1.0 / self._emitter_taus
+            self._filter_diag_idx: np.ndarray = np.arange(n, n + m)
+        else:
+            self._neg_inv_taus = np.zeros(0)
+            self._inv_emitter_taus = np.zeros(0)
+            self._filter_diag_idx = np.zeros(0, dtype=int)
+
+        # Identifiable sources as numpy array for vectorized scale extraction
+        self._n_identifiable: int = len(self._identifiable_sources)
+        self._identifiable_sources_arr: np.ndarray = np.array(
+            self._identifiable_sources, dtype=int
+        )
+
+        # Constant measurement/output Jacobian H = dhm/dx = dgm/dx
+        b_start = n + m
+        if not augment_offsets:
+            _H = np.zeros((n, n + m))
+            _H[:, :n] = np.eye(n)
+        else:
+            _H = np.zeros((n, 2 * n + m))
+            _H[:, :n] = np.eye(n)
+            _H[:, b_start:b_start + n] = np.eye(n)
+        self._H_const: np.ndarray = _H
+
+        # Sherman–Grimsrud precomputed constants
+        self._AIR_RHO_CP_leakage: np.ndarray = AIR_RHO_CP * self._leakage_area
+        self._ua_inf_typ: np.ndarray = self._AIR_RHO_CP_leakage * _SG_FACTOR_TYPICAL
+        self._zeros_n_rooms: np.ndarray = np.zeros(n)
+
+        # Diagonal index array for in-place F-matrix update in dfdx
+        self._diag_n_idx: np.ndarray = np.arange(n)
+
+        # Total state dimension (avoids nx property dispatch in g/gm/hm)
+        self._nx: int = 2 * n + m if augment_offsets else n + m
+
     # ── ContinuousDiscreteModel abstract dimensions ───────────────────────
 
     @property
@@ -362,16 +414,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         ``HouseModel``.
         """
         if self._wind_speed is None:
-            return np.zeros(self._n_rooms)
+            return self._zeros_n_rooms
         v = self._wind_speed
         dT_abs = np.abs(room_temps - outdoor_temp)
         sg = np.sqrt(
             SHERMAN_GRIMSRUD_STACK_COEF * dT_abs
             + SHERMAN_GRIMSRUD_WIND_COEF * v * v
         )
-        ua_inf = AIR_RHO_CP * self._leakage_area * sg
-        ua_inf_typ = AIR_RHO_CP * self._leakage_area * _SG_FACTOR_TYPICAL
-        return ua_inf - ua_inf_typ
+        return self._AIR_RHO_CP_leakage * sg - self._ua_inf_typ
 
     @property
     def nz(self) -> int:
@@ -429,60 +479,39 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         n = self._n_rooms
         T_phys = x[:n]
 
-        # Use p if provided, otherwise fall back to self._theta
         theta = p if len(p) > 0 else self._theta
 
         # Extract internal gains and heater scales from parameter vector
         if len(theta) >= 3 * n:
             q_int = theta[2 * n: 3 * n]
-            heater_scales = np.ones(self.nu, dtype=float)
-            if (
-                len(self._identifiable_sources) > 0
-                and len(theta) >= 3 * n + len(self._identifiable_sources)
-            ):
-                log_alpha = theta[3 * n: 3 * n + len(self._identifiable_sources)]
-                for k, s_idx in enumerate(self._identifiable_sources):
-                    heater_scales[s_idx] = float(np.exp(log_alpha[k]))
+            heater_scales = self._get_heater_scales(theta)
             u_scaled = heater_scales * u
-            # d = [T_out, Q_sol,1+Q_int,1, …, Q_sol,n+Q_int,n] — fold q_int
-            # into the disturbance channels (columns 1..n of G_d).
+            # Fold q_int into disturbance channels 1..n of G_d.
             d_augmented = d.copy()
-            for i in range(n):
-                d_augmented[1 + i] += q_int[i]
+            d_augmented[1: 1 + n] += q_int
         else:
-            heater_scales = np.ones(self.nu, dtype=float)
+            heater_scales = None
             u_scaled = u
             d_augmented = d
 
-        # Heat-source contribution.  All sources go to the single
-        # temperature node in 1R1C.  Phase 1 B2: for sources with
-        # τ_em > 0 we use the filter state ``φ_j`` as the effective
-        # commanded fraction rather than the raw ``u_j``.
+        # Heat-source contribution (1R1C: all sources reach the single node).
+        # Phase 1 B2: filtered sources use filter state φ_j as effective fraction.
         m = self._n_filtered
         heat_contrib = np.zeros(n)
-        heater_scale_factors = heater_scales
 
         for j, src in enumerate(self._sources):
-            i = self._room_idx[src.room]
-            k_filter = int(self._filter_idx_for_source[j])
+            k_filter = self._filter_idx_for_source[j]
             if k_filter >= 0:
-                # Filtered source — feed the filter state φ_j into
-                # ``thermal_power`` (heater-scale multiplied).
-                eff_u = heater_scale_factors[j] * float(x[n + k_filter])
+                eff_u = (heater_scales[j] if heater_scales is not None else 1.0) * x[n + k_filter]
             else:
-                # Un-filtered source — use the (heater-scaled) commanded
-                # fraction directly.
-                eff_u = float(u_scaled[j])
-            if src.can_cool:
-                p_w = src.smooth_thermal_power(
-                    eff_u, outdoor_temp, self._k_sigmoid,
-                )
+                eff_u = u_scaled[j]
+            if self._src_can_cool[j]:
+                p_w = src.smooth_thermal_power(eff_u, outdoor_temp, self._k_sigmoid)
             else:
                 p_w = src.thermal_power(max(0.0, eff_u), outdoor_temp)
-            heat_contrib[i] += p_w / self._C_cap[i]
+            heat_contrib[self._src_room_idx[j]] += p_w / self._src_C_cap[j]
 
-        # Physical 1R1C drift on T.  Phase 1 C3 adds the constant
-        # sky cooling-drift bias via ``_sky_offset_phys``.
+        # Physical 1R1C drift on T.
         dT_phys = (
             self._F @ T_phys
             + heat_contrib
@@ -495,22 +524,15 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         dT_phys += (delta_ua / self._C_cap) * (outdoor_temp - T_phys)
 
         # Phase 1 B2: filter-block drift  dφ/dt = (u_cmd - φ) / τ_em.
-        # One ODE per filtered source; the filter state lives at
-        # indices n..n+m of x.
         if m > 0:
             phi = x[n: n + m]
-            u_cmd_filtered = np.array(
-                [float(u[self._filtered_source_indices[k]]) for k in range(m)],
-                dtype=float,
-            )
-            dphi = (u_cmd_filtered - phi) / self._emitter_taus
+            dphi = (u[self._filtered_source_indices] - phi) / self._emitter_taus
         else:
-            dphi = np.zeros(0)
+            dphi = self._zeros_n_rooms[:0]
 
         if not self._augment_offsets:
             return np.concatenate([dT_phys, dphi])
-        db = np.zeros(n)
-        return np.concatenate([dT_phys, dphi, db])
+        return np.concatenate([dT_phys, dphi, self._zeros_n_rooms])
 
     def sigma(
         self,
@@ -551,16 +573,17 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         sig[n + m:, n + m:] = self._sigma_b * np.eye(n)
         return sig
 
-    @property
-    def _offset_block_start(self) -> int:
-        """Index of the first offset-block state in ``x``.
-
-        1R1C state layout is ``[T (n), φ (m), b (n)]``.  The offset
-        block starts at ``n + m``; this helper keeps the indexing
-        consistent across ``g`` / ``gm`` / ``hm`` / ``dhmdx`` /
-        the EKF write-back path.
-        """
-        return self._n_rooms + self._n_filtered
+    def _get_heater_scales(self, theta: np.ndarray) -> np.ndarray:
+        """Extract per-source scale factors from parameter vector."""
+        n = self._n_rooms
+        n_id = self._n_identifiable
+        if n_id > 0 and len(theta) >= 3 * n + n_id:
+            scales = np.ones(self.nu, dtype=float)
+            scales[self._identifiable_sources_arr] = np.exp(
+                theta[3 * n: 3 * n + n_id]
+            )
+            return scales
+        return np.ones(self.nu, dtype=float)
 
     def g(
         self,
@@ -577,7 +600,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         filter nodes are internal model states.
         """
         n = self._n_rooms
-        if not self._augment_offsets or len(x) < self.nx:
+        if not self._augment_offsets or len(x) < self._nx:
             return x[:n].copy()
         b_start = self._offset_block_start
         return x[:n] + x[b_start: b_start + n]
@@ -592,7 +615,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     ) -> np.ndarray:
         """Continuous-time output ``gm = T_a + b`` (matches ``g``)."""
         n = self._n_rooms
-        if not self._augment_offsets or len(x) < self.nx:
+        if not self._augment_offsets or len(x) < self._nx:
             return x[:n].copy()
         b_start = self._offset_block_start
         return x[:n] + x[b_start: b_start + n]
@@ -611,7 +634,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         are reconstructed by the EKF from the dynamics in :meth:`f`.
         """
         n = self._n_rooms
-        if not self._augment_offsets or len(x) < self.nx:
+        if not self._augment_offsets or len(x) < self._nx:
             return x[:n].copy()
         b_start = self._offset_block_start
         return x[:n] + x[b_start: b_start + n]
@@ -656,47 +679,35 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         outdoor_temp = float(d[0])
         delta_ua = self._infiltration_delta_ua(outdoor_temp, T_phys)
         F_eff = self._F.copy()
-        F_eff[np.arange(n), np.arange(n)] -= delta_ua / self._C_cap
+        F_eff[self._diag_n_idx, self._diag_n_idx] -= delta_ua / self._C_cap
 
         nx_unaug = n + m
-        size = self.nx
-        J = np.zeros((size, size))
-        # Physical-block diagonal carries the (possibly SG-corrected) F.
+        J = np.zeros((self._nx, self._nx))
         J[:n, :n] = F_eff
 
         if m > 0:
-            # Cross-coupling: ∂(heat_contrib at room i) / ∂φ_j.
             theta = p if len(p) > 0 else self._theta
-            heater_scale_factors = np.ones(self.nu, dtype=float)
-            if len(theta) >= 3 * n and len(self._identifiable_sources) > 0 and len(theta) >= 3 * n + len(self._identifiable_sources):
-                log_alpha2 = theta[3 * n: 3 * n + len(self._identifiable_sources)]
-                for k_la, s_idx in enumerate(self._identifiable_sources):
-                    heater_scale_factors[s_idx] = float(np.exp(log_alpha2[k_la]))
+            heater_scale_factors = self._get_heater_scales(theta)
 
             eps = 1e-6
             for k, j in enumerate(self._filtered_source_indices):
                 src = self._sources[j]
-                phi_j = float(x[n + k])
-                eff_plus = heater_scale_factors[j] * (phi_j + eps)
-                eff_minus = heater_scale_factors[j] * (phi_j - eps)
-                if src.can_cool:
-                    p_plus = src.smooth_thermal_power(
-                        eff_plus, outdoor_temp, self._k_sigmoid,
-                    )
-                    p_minus = src.smooth_thermal_power(
-                        eff_minus, outdoor_temp, self._k_sigmoid,
-                    )
+                phi_j = x[n + k]
+                scale_j = heater_scale_factors[j]
+                eff_plus = scale_j * (phi_j + eps)
+                eff_minus = scale_j * (phi_j - eps)
+                if self._src_can_cool[j]:
+                    p_plus = src.smooth_thermal_power(eff_plus, outdoor_temp, self._k_sigmoid)
+                    p_minus = src.smooth_thermal_power(eff_minus, outdoor_temp, self._k_sigmoid)
                 else:
                     p_plus = src.thermal_power(max(0.0, eff_plus), outdoor_temp)
                     p_minus = src.thermal_power(max(0.0, eff_minus), outdoor_temp)
                 dpdphi = (p_plus - p_minus) / (2.0 * eps)
-                i_room = self._room_idx[src.room]
-                # ∂f_i / ∂φ_j  =  (∂Q_j/∂φ_j) / C_i
+                i_room = self._src_room_idx[j]
                 J[i_room, n + k] += dpdphi / self._C_cap[i_room]
 
-            # Filter-block diagonal: -1/τ_em.
-            for k in range(m):
-                J[n + k, n + k] = -1.0 / self._emitter_taus[k]
+            # Filter-block diagonal: -1/τ_em (precomputed).
+            J[self._filter_diag_idx, self._filter_diag_idx] = self._neg_inv_taus
 
         if not self._augment_offsets:
             return J[:nx_unaug, :nx_unaug]
@@ -716,17 +727,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         the offset block (rows ``b_start..b_start+n``).  The filter
         block contributes nothing to the measurement.
         """
-        n = self._n_rooms
-        if not self._augment_offsets:
-            # Un-augmented: state is [T (n), φ (m)].
-            H = np.zeros((n, n + self._n_filtered))
-            H[:, :n] = np.eye(n)
-            return H
-        b_start = self._offset_block_start
-        H = np.zeros((n, self.nx))
-        H[:, :n] = np.eye(n)                      # T contribution
-        H[:, b_start: b_start + n] = np.eye(n)    # b contribution
-        return H
+        return self._H_const
 
     @property
     def dgmdx_const(self) -> np.ndarray:
@@ -747,16 +748,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
         Returns shape ``(nz, nx)`` where ``nz = n_rooms``.
         """
-        n = self._n_rooms
-        if not self._augment_offsets:
-            H = np.zeros((n, n + self._n_filtered))
-            H[:, :n] = np.eye(n)
-            return H
-        b_start = self._offset_block_start
-        H = np.zeros((n, self.nx))
-        H[:, :n] = np.eye(n)
-        H[:, b_start:b_start + n] = np.eye(n)
-        return H
+        return self._H_const
 
     def dgmdx(
         self,
@@ -828,56 +820,33 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         outdoor_temp = float(d[0])
         n = self._n_rooms
         theta = p if len(p) > 0 else self._theta
+        heater_scale_factors = self._get_heater_scales(theta)
 
-        # Heater scale factors (same logic as f())
-        if len(theta) >= 3 * n:
-            heater_scale_factors = np.ones(self.nu, dtype=float)
-            if (
-                len(self._identifiable_sources) > 0
-                and len(theta) >= 3 * n + len(self._identifiable_sources)
-            ):
-                log_alpha = theta[3 * n: 3 * n + len(self._identifiable_sources)]
-                for k_la, s_idx in enumerate(self._identifiable_sources):
-                    heater_scale_factors[s_idx] = float(np.exp(log_alpha[k_la]))
-        else:
-            heater_scale_factors = np.ones(self.nu, dtype=float)
-
-        J = np.zeros((self.nx, self.nu))
+        J = np.zeros((self._nx, self.nu))
         for j, src in enumerate(self._sources):
-            i = self._room_idx[src.room]
-            k_filter = int(self._filter_idx_for_source[j])
+            i = self._src_room_idx[j]
+            k_filter = self._filter_idx_for_source[j]
             if k_filter >= 0:
                 # Filtered source: dφ_k/dt = (u_j − φ_k)/τ_k  →  ∂/∂u_j = 1/τ_k
-                J[n + k_filter, j] = 1.0 / self._emitter_taus[k_filter]
+                J[n + k_filter, j] = self._inv_emitter_taus[k_filter]
             else:
-                # Un-filtered source contributing to physical state
-                scale = float(heater_scale_factors[j])
-                eff_u = float(u[j]) * scale
-                if src.can_cool:
+                scale = heater_scale_factors[j]
+                eff_u = u[j] * scale
+                if self._src_can_cool[j]:
                     q_heat = src.thermal_power(1.0, outdoor_temp)
-                    q_cool = abs(src.cooling_power(outdoor_temp))
+                    q_cool = src._q_cool_const
                     if q_heat > 0.0 and q_cool > 0.0:
                         k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
                         offset_sig = math.log(q_cool / q_heat)
                         sig_val = 1.0 / (1.0 + math.exp(-(k_sig * eff_u + offset_sig)))
-                        # ∂(smooth_tp)/∂u_j = (Q_h+Q_c)·k·σ(1-σ)·scale
                         J[i, j] = (
                             (q_heat + q_cool) * k_sig * sig_val * (1.0 - sig_val)
                             * scale / self._C_cap[i]
                         )
-                    else:
-                        # Degenerate: heating-only fallback
-                        if eff_u >= 0.0:
-                            J[i, j] = (
-                                src.thermal_power(1.0, outdoor_temp)
-                                * scale / self._C_cap[i]
-                            )
+                    elif eff_u >= 0.0:
+                        J[i, j] = src.thermal_power(1.0, outdoor_temp) * scale / self._C_cap[i]
                 else:
-                    # Heating-only: u ≥ 0 in feasible region → ReLU is linear
-                    J[i, j] = (
-                        src.thermal_power(1.0, outdoor_temp)
-                        * scale / self._C_cap[i]
-                    )
+                    J[i, j] = src.thermal_power(1.0, outdoor_temp) * scale / self._C_cap[i]
         return J
 
     # ── Application-layer helpers ────────────────────────────────────────
