@@ -1559,15 +1559,10 @@ class HeatingMPCController:
 
         self._u_prev = u_abs.copy()
 
-        # ── Build predicted trajectory for visualisation ─────────────────
-        # X_abs[k] is the absolute predicted state at horizon step k+1.
-        self._predictions = []
-        for k in range(N):
-            x_k = X_abs[k]
-            temps_k = x_k[:n_rooms]
-            self._predictions.append(
-                {name: float(temps_k[i]) for i, name in enumerate(room_list)}
-            )
+        # ── Build predicted trajectory using nonlinear model simulation ────
+        self._predictions = self._compute_nonlinear_predictions(
+            U_abs, outdoor_seq, solar_seq, room_list, n_rooms
+        )
 
         # ── Heating schedule ─────────────────────────────────────────────
         self._heating_schedule = [
@@ -1655,3 +1650,66 @@ class HeatingMPCController:
             )
             for name in self._system._room_list
         }
+
+    def _compute_nonlinear_predictions(
+        self,
+        U_abs: np.ndarray,
+        outdoor_seq: List[float],
+        solar_seq: List[Dict[str, float]],
+        room_list: List[str],
+        n_rooms: int,
+    ) -> List[Dict[str, float]]:
+        """Compute nonlinear model predictions using the optimal control sequence.
+
+        Simulates the nonlinear thermal model forward over the horizon using the
+        optimal control inputs from the MPC and the forecasted disturbances
+        (outdoor temperature and solar gains).
+
+        Parameters
+        ----------
+        U_abs : np.ndarray
+            Optimal control sequence [N, m] where N is the horizon length
+            and m is the number of control inputs.
+        outdoor_seq : list of float
+            Outdoor temperature forecast over the horizon [°C].
+        solar_seq : list of dict
+            Solar gain forecasts per room over the horizon [W].
+        room_list : list of str
+            Names of the rooms.
+        n_rooms : int
+            Number of rooms.
+
+        Returns
+        -------
+        list of dict
+            Predicted temperatures {room_name: temp_°C} for each horizon step.
+        """
+        predictions = []
+        x_curr = self._ekf.x_hat.copy()
+        p = np.array([], dtype=float)
+
+        N = len(outdoor_seq)
+        for k in range(N):
+            u_k = U_abs[k] if k < len(U_abs) else U_abs[-1]
+            outdoor_temp = outdoor_seq[k]
+            solar_gains = solar_seq[k] if k < len(solar_seq) else solar_seq[-1]
+
+            d_k = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
+
+            # Simulate one step forward using the nonlinear model
+            rhs = lambda x: self._system.f(x, u_k, d_k, p, 0.0)
+            jacobian = lambda x: self._system.dfdx(x, u_k, d_k, p, 0.0)
+
+            x_next = implicit_euler_substeps(
+                rhs, jacobian, x_curr, self._dt, self._system._n_int_steps
+            )
+
+            # Extract room temperatures (first n_rooms states)
+            temps_k = x_next[:n_rooms]
+            predictions.append(
+                {name: float(temps_k[i]) for i, name in enumerate(room_list)}
+            )
+
+            x_curr = x_next
+
+        return predictions
