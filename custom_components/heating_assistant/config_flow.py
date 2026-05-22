@@ -27,10 +27,9 @@ from ._options_flow import (
 )
 from .const import (
     CONF_COMFORT_OFFSET,
+    CONF_ENERGY_WEIGHT,
     CONF_HORIZON,
     CONF_LATITUDE,
-    CONF_MPC_ANALYTIC_DERIVATIVES,
-    CONF_MPC_SOLVER,
     CONF_INFILTRATION_FRACTION,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
@@ -42,8 +41,11 @@ from .const import (
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
+    CONF_SMOOTHING_WEIGHT,
+    CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_TERMINAL_WEIGHT,
     CONF_WINDOW_OPEN_CLOSE_SETTLE,
     CONF_WINDOW_OPEN_DEBOUNCE,
     CONF_WINDOW_OPEN_Q_INFLATION,
@@ -56,14 +58,16 @@ from .const import (
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
     DEFAULT_COMFORT_OFFSET,
+    DEFAULT_ENERGY_WEIGHT,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_HORIZON,
-    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-    DEFAULT_MPC_SOLVER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
+    DEFAULT_SMOOTHING_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
     DEFAULT_WINDOW_OPEN_DEBOUNCE,
     DEFAULT_WINDOW_OPEN_Q_INFLATION,
@@ -79,19 +83,6 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_ROOM_SETPOINT = 22.0
 
 
-def _normalize_solver(value: Any) -> str:
-    """Return the canonical solver name for persisted options.
-
-    The QP backend is always used; legacy values ("ipopt", "slsqp") are
-    accepted and stored unchanged so existing config entries round-trip
-    without error.  The controller ignores the value internally.
-    """
-    if value is None:
-        return DEFAULT_MPC_SOLVER
-    solver = str(value).lower()
-    if solver in {"slsqp", "ipopt", "cyipopt", "qp"}:
-        return solver
-    return DEFAULT_MPC_SOLVER
 
 
 # ---------------------------------------------------------------------------
@@ -135,18 +126,6 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_WEATHER_ENTITY, default=""): str,
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
-                ),
-                vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=100)
-                ),
-                vol.Optional(CONF_SIGMA_W, default=DEFAULT_SIGMA_W): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
-                ),
-                vol.Optional(CONF_SIGMA_V, default=DEFAULT_SIGMA_V): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
-                ),
-                vol.Optional(CONF_SIGMA_B, default=DEFAULT_SIGMA_B): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-8, max=1.0)
                 ),
             }
         )
@@ -257,9 +236,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         if not self._initialized:
             current = self.config_entry.options or self.config_entry.data
             self._data = dict(current)
-            self._data[CONF_MPC_SOLVER] = _normalize_solver(
-                self._data.get(CONF_MPC_SOLVER)
-            )
             # Rooms may live in options (UI-configured) or data (YAML/initial).
             opts = self.config_entry.options
             data = self.config_entry.data
@@ -269,7 +245,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_menu(
             step_id="init",
-            menu_options=["global_settings", "manage_rooms", "save"],
+            menu_options=["global_settings", "mpc_tuning", "manage_rooms", "save"],
         )
 
     # ------------------------------------------------------------------
@@ -299,10 +275,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     CONF_UPDATE_INTERVAL,
                     default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
                 ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
-                vol.Optional(
-                    CONF_HORIZON,
-                    default=current.get(CONF_HORIZON, DEFAULT_HORIZON),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                 vol.Optional(
                     CONF_SIGMA_W,
                     default=current.get(CONF_SIGMA_W, DEFAULT_SIGMA_W),
@@ -344,13 +316,52 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     # Save & close
     # ------------------------------------------------------------------
 
+    async def async_step_mpc_tuning(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Form for MPC controller and model tuning parameters."""
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_init()
+
+        current = self._data
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_HORIZON,
+                    default=current.get(CONF_HORIZON, DEFAULT_HORIZON),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                vol.Optional(
+                    CONF_ENERGY_WEIGHT,
+                    default=current.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Optional(
+                    CONF_SMOOTHING_WEIGHT,
+                    default=current.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                vol.Optional(
+                    CONF_SOFT_CONSTRAINT_WEIGHT,
+                    default=current.get(
+                        CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10000.0)),
+                vol.Optional(
+                    CONF_TERMINAL_WEIGHT,
+                    default=current.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10000.0)),
+            }
+        )
+
+        return self.async_show_form(step_id="mpc_tuning", data_schema=schema)
+
+    # ------------------------------------------------------------------
+    # Save & close
+    # ------------------------------------------------------------------
+
     async def async_step_save(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
         """Persist all accumulated changes and close the options flow."""
-        self._data[CONF_MPC_SOLVER] = _normalize_solver(
-            self._data.get(CONF_MPC_SOLVER)
-        )
         self._data[CONF_ROOMS] = self._rooms.rooms
         return self.async_create_entry(title="", data=self._data)
 

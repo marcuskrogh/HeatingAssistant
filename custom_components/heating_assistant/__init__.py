@@ -82,8 +82,6 @@ from .const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_MPC_ANALYTIC_DERIVATIVES,
-    CONF_MPC_SOLVER,
     CONF_C_SLAB_FRACTION,
     CONF_FACADE_ABSORPTANCE,
     CONF_FACADE_COLOUR,
@@ -156,13 +154,11 @@ from .const import (
     DEFAULT_FACADE_SOLAR_SHARE,
     DEFAULT_FLOOR_TYPE,
     DEFAULT_MAX_TEMP_OFFSET,
-    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
     DEFAULT_INFILTRATION_FRACTION,
     DEFAULT_SKY_RADIATIVE_UA,
     DEFAULT_THERMAL_BRIDGE_PSI_L,
     FACADE_COLOUR_TO_ABSORPTANCE,
     FLOOR_TYPE_DEFAULTS,
-    DEFAULT_MPC_SOLVER,
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
@@ -362,13 +358,6 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(
                     CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                vol.Optional(CONF_MPC_SOLVER, default=DEFAULT_MPC_SOLVER): vol.All(
-                    str, lambda value: value.lower(), vol.In(["slsqp", "ipopt", "cyipopt"])
-                ),
-                vol.Optional(
-                    CONF_MPC_ANALYTIC_DERIVATIVES,
-                    default=DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-                ): cv.boolean,
                 vol.Optional(CONF_SIGMA_W, default=DEFAULT_SIGMA_W): vol.All(
                     vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
                 ),

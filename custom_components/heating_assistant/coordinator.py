@@ -29,8 +29,6 @@ from .const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_MPC_ANALYTIC_DERIVATIVES,
-    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -94,8 +92,6 @@ from .const import (
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
     DEFAULT_MIN_POWER,
-    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-    DEFAULT_MPC_SOLVER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
@@ -153,16 +149,6 @@ def _coerce_interval_seconds(value: Any) -> float:
     return float(value)
 
 
-def _normalize_solver_name(value: Any) -> str:
-    """Normalize solver names to canonical values used by the controller."""
-    if value is None:
-        return DEFAULT_MPC_SOLVER
-    key = str(value).strip().lower()
-    if key in {"ipopt", "cyipopt"}:
-        return key
-    if key in {"slsqp", "scipy", "scipy-minimize"}:
-        return "SLSQP"
-    return DEFAULT_MPC_SOLVER
 
 
 def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
@@ -314,8 +300,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_SMOOTHING_WEIGHT,
         CONF_SOFT_CONSTRAINT_WEIGHT,
         CONF_TERMINAL_WEIGHT,
-        CONF_MPC_SOLVER,
-        CONF_MPC_ANALYTIC_DERIVATIVES,
         CONF_SIGMA_W,
         CONF_SIGMA_V,
         CONF_SIGMA_B,
@@ -391,18 +375,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 ),
             )
         )
-        self._mpc_solver: str = _normalize_solver_name(
-            options.get(CONF_MPC_SOLVER)
-            or data.get(CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)
-        )
-        self._mpc_analytic_derivatives: bool = bool(
-            options.get(CONF_MPC_ANALYTIC_DERIVATIVES)
-            if CONF_MPC_ANALYTIC_DERIVATIVES in options
-            else data.get(
-                CONF_MPC_ANALYTIC_DERIVATIVES,
-                DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-            )
-        )
         self._last_runtime_config: Dict[str, Any] = {**dict(data), **dict(options)}
         self._pending_runtime_reconfiguration: Dict[str, Any] = {}
 
@@ -473,8 +445,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
-            solver=self._mpc_solver,
-            use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
         self._init_room_state(rooms_cfg)
@@ -790,8 +760,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
-            solver=self._mpc_solver,
-            use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
@@ -886,18 +854,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     CONF_WINDOW_OPEN_Q_INFLATION, self._window_open_q_inflation,
                 )
             )
-        if CONF_MPC_SOLVER in pending:
-            self._mpc_solver = _normalize_solver_name(
-                pending.get(CONF_MPC_SOLVER, self._mpc_solver)
-            )
-            rebuild_controller = True
-        if CONF_MPC_ANALYTIC_DERIVATIVES in pending:
-            self._mpc_analytic_derivatives = bool(
-                pending.get(
-                    CONF_MPC_ANALYTIC_DERIVATIVES, self._mpc_analytic_derivatives
-                )
-            )
-            rebuild_controller = True
 
         if rebuild_controller:
             self._build_controller()
@@ -947,8 +903,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
-            solver=self._mpc_solver,
-            use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
         self._estimation_timestamp = None
@@ -2053,8 +2007,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
-            solver=self._mpc_solver,
-            use_analytic_derivatives=self._mpc_analytic_derivatives,
         )
 
         _LOGGER.info(
