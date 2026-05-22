@@ -1014,6 +1014,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             }
 
             # 4. Run MPC controller
+            # Collect heat sources whose rooms are currently off so the
+            # controller can zero them out in both the first-step action and
+            # the full predicted heating schedule before returning.
+            disabled_src_names = {
+                src.name
+                for src in self.heat_sources
+                if not self.is_room_enabled(src.room)
+                or self.is_window_override_active(src.room)
+            }
             try:
                 self.actions = self.controller.compute(
                     outdoor_temp=outdoor_temp,
@@ -1022,6 +1031,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     outdoor_forecast=outdoor_forecast,
                     cloud_forecast=cloud_forecast,
                     cloud_cover_now=cloud_cover_now,
+                    disabled_sources=disabled_src_names or None,
                 )
                 self.predictions = self.controller.predictions
                 self.outdoor_forecast = self.controller.outdoor_forecast
