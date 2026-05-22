@@ -1697,8 +1697,9 @@ class HeatingMPCController:
             d_k = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
 
             # Simulate one step forward using the nonlinear model
-            rhs = lambda x: self._system.f(x, u_k, d_k, p, 0.0)
-            jacobian = lambda x: self._system.dfdx(x, u_k, d_k, p, 0.0)
+            # Use default arguments to capture current values in closures
+            rhs = lambda x, u=u_k, d=d_k: self._system.f(x, u, d, p, 0.0)
+            jacobian = lambda x, u=u_k, d=d_k: self._system.dfdx(x, u, d, p, 0.0)
 
             x_next = implicit_euler_substeps(
                 rhs, jacobian, x_curr, self._dt, self._system._n_int_steps
