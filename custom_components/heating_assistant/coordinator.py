@@ -25,6 +25,7 @@ from .const import (
     CONF_COMFORT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_ESTIMATED_PARAMS,
+    CONF_TRACKING_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
     CONF_LATITUDE,
@@ -91,6 +92,7 @@ from .const import (
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
+    DEFAULT_TRACKING_WEIGHT,
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
@@ -296,6 +298,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_WEATHER_ENTITY,
         CONF_LATITUDE,
         CONF_LONGITUDE,
+        CONF_TRACKING_WEIGHT,
         CONF_ENERGY_WEIGHT,
         CONF_SMOOTHING_WEIGHT,
         CONF_SOFT_CONSTRAINT_WEIGHT,
@@ -338,6 +341,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             options.get(CONF_HORIZON)
             or data.get(CONF_HORIZON, DEFAULT_HORIZON)
         )
+        self._tracking_weight: float = data.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT)
         self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._soft_constraint_weight: float = data.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
@@ -438,6 +442,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
@@ -753,6 +758,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
@@ -809,6 +815,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._latitude = float(pending.get(CONF_LATITUDE, self._latitude))
         if CONF_LONGITUDE in pending:
             self._longitude = float(pending.get(CONF_LONGITUDE, self._longitude))
+        if CONF_TRACKING_WEIGHT in pending:
+            self._tracking_weight = float(
+                pending.get(CONF_TRACKING_WEIGHT, self._tracking_weight)
+            )
+            rebuild_controller = True
         if CONF_SOFT_CONSTRAINT_WEIGHT in pending:
             self._soft_constraint_weight = float(
                 pending.get(CONF_SOFT_CONSTRAINT_WEIGHT, self._soft_constraint_weight)
@@ -896,6 +907,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
@@ -2000,6 +2012,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,

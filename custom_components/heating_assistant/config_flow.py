@@ -29,6 +29,7 @@ from .const import (
     CONF_COMFORT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_HORIZON,
+    CONF_TRACKING_WEIGHT,
     CONF_LATITUDE,
     CONF_INFILTRATION_FRACTION,
     CONF_LONGITUDE,
@@ -60,6 +61,7 @@ from .const import (
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_ENVELOPE_TIGHTNESS,
+    DEFAULT_TRACKING_WEIGHT,
     DEFAULT_HORIZON,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SIGMA_B,
@@ -332,19 +334,23 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     default=current.get(CONF_HORIZON, DEFAULT_HORIZON),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                 vol.Optional(
+                    CONF_TRACKING_WEIGHT,
+                    default=current.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                vol.Optional(
                     CONF_ENERGY_WEIGHT,
                     default=current.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
                 vol.Optional(
                     CONF_SMOOTHING_WEIGHT,
                     default=current.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
                 vol.Optional(
                     CONF_SOFT_CONSTRAINT_WEIGHT,
                     default=current.get(
                         CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10000.0)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
                 vol.Optional(
                     CONF_TERMINAL_WEIGHT,
                     default=current.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
