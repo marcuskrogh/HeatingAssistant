@@ -44,9 +44,10 @@
         "title": "MPC Tuning & Model Parameters",
         "data": {
           "horizon": "MPC prediction horizon (steps) — 100 steps ≈ 25 hours at 15-min intervals",
-          "energy_weight": "Energy weight (0–1) — higher values prioritize energy saving over comfort",
-          "smoothing_weight": "Smoothing weight (0–1) — dampens rapid changes in heating/cooling",
-          "soft_constraint_weight": "Soft constraint weight (multiplier) — penalty for violating comfort bounds",
+          "tracking_weight": "Tracking weight — weight on ‖z − setpoint‖² (Q diagonal); set to 0 to disable setpoint tracking",
+          "energy_weight": "Input regularisation weight — weight on ‖u‖² (penalises heater power use)",
+          "smoothing_weight": "Input rate-of-movement weight — weight on ‖Δu‖²; set to 0 to disable",
+          "soft_constraint_weight": "Soft output bound violation weight — direct penalty ρ for comfort-corridor violations",
           "terminal_weight": "Terminal weight (multiplier) — cost weight applied at the prediction horizon end"
         }
       },

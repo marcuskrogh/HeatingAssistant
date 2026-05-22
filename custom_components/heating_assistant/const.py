@@ -362,9 +362,10 @@ CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
 CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = OCP step = EKF step (seconds)
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
-CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (energy saving vs. tracking)
-CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (dampens rapid input changes)
-CONF_SOFT_CONSTRAINT_WEIGHT = "soft_constraint_weight"  # scalar multiplier ρ_z = energy_weight × soft_constraint_weight
+CONF_TRACKING_WEIGHT = "tracking_weight"          # scalar weight on ‖z − z_ref‖² (setpoint tracking cost Q diagonal)
+CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (input regularisation cost R diagonal)
+CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (input rate-of-movement cost S diagonal)
+CONF_SOFT_CONSTRAINT_WEIGHT = "soft_constraint_weight"  # direct penalty ρ for soft output bound violations
 CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
 CONF_MPC_SOLVER = "mpc_solver"                    # kept for backwards compat; QP backend always used
 CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # kept for backwards compat; always True
@@ -379,7 +380,8 @@ CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multi
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
 DEFAULT_R_EXTERNAL = 0.05              # K/W
 DEFAULT_SETPOINT = 22.0                # °C
-DEFAULT_SETPOINT_PULL_WEIGHT = 1.0e-4  # weak setpoint attractor inside comfort corridor
+DEFAULT_SETPOINT_PULL_WEIGHT = 1.0e-4  # kept for internal back-compat; use DEFAULT_TRACKING_WEIGHT
+DEFAULT_TRACKING_WEIGHT = 1.0e-4       # weight on ‖z − z_ref‖² (Q diagonal); 0 turns off tracking entirely
 DEFAULT_HORIZON = 100                  # 100 steps ahead (~25 h at 15-min steps)
 DEFAULT_UPDATE_INTERVAL = 900          # OCP step / ZOH duration = coordinator / EKF update period (seconds)
 DEFAULT_EFFICIENCY = 1.0
@@ -393,9 +395,9 @@ DEFAULT_COOLING_COP = 2.5              # rated cooling COP (EER) for heat pumps
 DEFAULT_COOLING_EFFICIENCY = 1.0       # fraction of max cooling capacity used (0–1)
 DEFAULT_HEATING_EFFICIENCY = 1.0       # fraction of max heating capacity used (0–1)
 DEFAULT_COMFORT_OFFSET = 2.0           # °C symmetric comfort region offset from setpoint (per-room)
-DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
-DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
-DEFAULT_SOFT_CONSTRAINT_WEIGHT = 1000.0  # multiplier for soft constraint penalty: ρ_z = energy_weight × soft_constraint_weight
+DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (input regularisation)
+DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-movement damping)
+DEFAULT_SOFT_CONSTRAINT_WEIGHT = 10.0  # direct soft output-bound violation penalty ρ (was energy_weight × 1000 = 10)
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_MPC_SOLVER = "qp"              # QP backend; legacy "ipopt"/"slsqp" values accepted but ignored
 DEFAULT_MPC_ANALYTIC_DERIVATIVES = True  # always True; kept for backwards compat

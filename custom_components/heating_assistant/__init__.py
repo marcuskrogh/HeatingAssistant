@@ -94,6 +94,7 @@ from .const import (
     CONF_SKY_RADIATIVE_UA,
     CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_THERMAL_BRIDGE_PSI_L,
+    CONF_TRACKING_WEIGHT,
     CONF_WEATHER_ENTITY,
     CONF_R_EXTERNAL,
     CONF_R_VALUE,
@@ -168,6 +169,7 @@ from .const import (
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
+    DEFAULT_TRACKING_WEIGHT,
     DEFAULT_THERMAL_MASS,
     DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_UPDATE_INTERVAL,
@@ -346,6 +348,9 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
                     vol.Coerce(int), vol.Range(min=1, max=100)
                 ),
+                vol.Optional(
+                    CONF_TRACKING_WEIGHT, default=DEFAULT_TRACKING_WEIGHT
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
                 vol.Optional(
                     CONF_ENERGY_WEIGHT, default=DEFAULT_ENERGY_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
