@@ -411,12 +411,18 @@ def _constraint_bound(
 ) -> Optional[float]:
     """Compute effective comfort-region bound for a room, or None if unknown.
 
-    The comfort region is defined as [setpoint - offset, setpoint + offset]
-    where offset is per-room and moves with the setpoint.
+    Precedence:
+      1. Explicit ``room.comfort_corridor_high`` / ``comfort_corridor_low``
+         (set externally or by occupancy/mode overrides).
+      2. Derived bound ``room.setpoint ± room.comfort_offset``.
     """
     room = coordinator.model.rooms.get(room_name)
     if room is None:
         return None
+    explicit_attr = "comfort_corridor_high" if sign > 0 else "comfort_corridor_low"
+    explicit = getattr(room, explicit_attr, None)
+    if explicit is not None:
+        return float(explicit)
     offset = getattr(room, "comfort_offset", None)
     if offset is None:
         return None
@@ -2170,7 +2176,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 
         controller = self._coordinator.controller
         solve_times = []
-        for sample in controller._solve_times:
+        for sample in controller.solve_times:
             seconds = self._solve_time_seconds(sample)
             if seconds is not None:
                 solve_times.append(seconds)
@@ -2186,7 +2192,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
             "mean_solve_time_s": round(mean_t, 4) if mean_t is not None else None,
             "max_solve_time_s": round(max_t, 4) if max_t is not None else None,
             "n_solves": n,
-            "horizon": self._coordinator.controller._horizon,
+            "horizon": self._coordinator.controller.horizon,
             "dt_s": self._coordinator.dt,
         }
 

@@ -38,6 +38,7 @@ def _make_coordinator(
     room = SimpleNamespace(
         temperature=measured,
         setpoint=setpoint,
+        comfort_offset=constraint_offset,
         thermal_mass=5_000_000.0,
         r_external=0.05,
         windows=[],
@@ -201,9 +202,9 @@ def test_temperature_measured_none_before_first_cycle():
     assert sensor.native_value is None
 
 
-def test_constraint_sensors_return_none_without_controller():
+def test_constraint_sensors_return_none_without_comfort_offset():
     coord = _make_coordinator()
-    coord.controller = None
+    del coord.model.rooms["living_room"].comfort_offset
     upper = ConstraintUpperSensor(coord, "living_room")
     lower = ConstraintLowerSensor(coord, "living_room")
     assert upper.native_value is None
@@ -316,10 +317,10 @@ def test_setpoint_forecast_empty_without_horizon():
 
 
 def test_constraint_forecast_omits_value_when_offset_missing():
-    """If ``constraint_offset`` is unavailable the per-step value field is
+    """If ``comfort_offset`` is absent the per-step value field is
     dropped (entries still have timestamps) and the scalar state is None."""
     coord = _make_coordinator()
-    coord.controller = None
+    del coord.model.rooms["living_room"].comfort_offset
     sensor = ConstraintUpperSensor(coord, "living_room")
     assert sensor.native_value is None
     fc = sensor.extra_state_attributes["forecast"]

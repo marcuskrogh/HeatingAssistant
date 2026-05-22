@@ -366,8 +366,8 @@ CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (dampens rapid input changes)
 CONF_SOFT_CONSTRAINT_WEIGHT = "soft_constraint_weight"  # scalar multiplier ρ_z = energy_weight × soft_constraint_weight
 CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
-CONF_MPC_SOLVER = "mpc_solver"                    # NLP solver backend ("ipopt" | "SLSQP")
-CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # enable analytical-derivative hooks when backend supports them
+CONF_MPC_SOLVER = "mpc_solver"                    # kept for backwards compat; QP backend always used
+CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # kept for backwards compat; always True
 CONF_SIGMA_W = "sigma_w"                          # EKF/process model process-noise std dev [K/√s]
 CONF_SIGMA_V = "sigma_v"                          # EKF measurement-noise std dev [K]
 CONF_SIGMA_B = "sigma_b"                          # EKF offset-state process-noise std dev [K/√s]
@@ -397,8 +397,8 @@ DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (energy saving)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-change damping)
 DEFAULT_SOFT_CONSTRAINT_WEIGHT = 1000.0  # multiplier for soft constraint penalty: ρ_z = energy_weight × soft_constraint_weight
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
-DEFAULT_MPC_SOLVER = "ipopt"
-DEFAULT_MPC_ANALYTIC_DERIVATIVES = True
+DEFAULT_MPC_SOLVER = "qp"              # QP backend; legacy "ipopt"/"slsqp" values accepted but ignored
+DEFAULT_MPC_ANALYTIC_DERIVATIVES = True  # always True; kept for backwards compat
 DEFAULT_SIGMA_W = 0.1
 DEFAULT_SIGMA_V = 0.5
 DEFAULT_SIGMA_B = 0.002

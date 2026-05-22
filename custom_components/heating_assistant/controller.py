@@ -1267,6 +1267,16 @@ class HeatingMPCController:
     # ── Visualisation / diagnostic properties ────────────────────────────
 
     @property
+    def horizon(self) -> int:
+        """MPC prediction horizon (number of steps)."""
+        return self._horizon
+
+    @property
+    def solve_times(self) -> deque:
+        """Rolling buffer of recent QP solve times [s] (read-only view)."""
+        return self._solve_times
+
+    @property
     def terminal_weight(self) -> float:
         """Terminal cost weight (P = terminal_weight * Q) in effect for this controller."""
         return self._terminal_weight
