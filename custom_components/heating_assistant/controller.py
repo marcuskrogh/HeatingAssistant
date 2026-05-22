@@ -89,7 +89,11 @@ from .const import MPC_STATS_BUFFER_SIZE
 from cvxopt import matrix as _cvxmat
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
-from mbc.control import CDLinearizedMPCController
+from mbc.control import (
+    CDLinearizedMPCController,
+    linearize_cd_model,
+    discretize_cd_linearization,
+)
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -1075,6 +1079,90 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         return self.update(y, u, d, p, mask=mask)
 
 
+# ── Forecast-aware MPC controller ───────────────────────────────────────────
+
+class _ForecastAwareMPCController(CDLinearizedMPCController):
+    """CDLinearizedMPCController extended to accept a time-varying disturbance
+    forecast over the prediction horizon.
+
+    When ``D_forecast`` (shape ``(N, nd)``) is passed to ``step()``, the
+    deviation disturbance fed to the QP is ``D_dev[k] = D_forecast[k] - d_ss``
+    instead of the constant-hold zero vector.
+    """
+
+    def step(
+        self,
+        y: np.ndarray,
+        d: np.ndarray,
+        p: Optional[np.ndarray] = None,
+        t: float = 0.0,
+        D_forecast: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        y = np.asarray(y, dtype=float).reshape(self._model.nym)
+        d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
+        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
+
+        est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
+        x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
+
+        x_ss = x_hat.copy()
+        u_ss = self._u_prev.copy()
+        d_ss = d_now.copy()
+
+        lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
+        disc = discretize_cd_linearization(lin, self._dt)
+
+        x_ref_dev = self._x_ref_abs - x_ss
+        self._lin_model.update(
+            Ad=disc["Ad"],
+            Bd=disc["Bd"],
+            Ed=disc["Ed"],
+            Cm=disc["Cm"],
+            Cz=disc["Cz"],
+            Qd=disc["Qd"],
+            Rm=np.asarray(self._model.Rm, dtype=float),
+            x_ss=x_ss,
+            u_ss=u_ss,
+            d_ss=d_ss,
+            x_ref=x_ref_dev,
+        )
+
+        if D_forecast is not None:
+            D_abs = np.asarray(D_forecast, dtype=float).reshape(self._N, self._model.nd)
+            D_dev_np = D_abs - d_ss.reshape(1, -1)
+        else:
+            D_dev_np = np.zeros((self._N, self._model.nd), dtype=float)
+
+        self._last_D_dev = D_dev_np.copy()
+        D_dev = _cvxmat(D_dev_np.reshape(-1).tolist(), (self._N * self._model.nd, 1))
+
+        x0_dev = np.zeros(self._model.nx, dtype=float)
+        u_prev_dev = _cvxmat(np.zeros(self._model.nu).tolist(), (self._model.nu, 1))
+
+        U_dev, X_dev = self._ocp.solve(
+            x0=x0_dev,
+            D=D_dev,
+            x_ref=x_ref_dev,
+            u_prev=u_prev_dev,
+        )
+
+        U_dev_np = np.array(list(U_dev), dtype=float).reshape(self._N, self._model.nu)
+        X_dev_np = np.array(list(X_dev), dtype=float).reshape(self._N, self._model.nx)
+
+        U_abs = U_dev_np + u_ss.reshape(1, -1)
+        X_abs = X_dev_np + x_ss.reshape(1, -1)
+        u_abs = U_abs[0].copy()
+
+        u_min_abs, u_max_abs = self._lin_model.abs_u_bounds
+        u_abs = np.minimum(np.maximum(u_abs, u_min_abs), u_max_abs)
+        U_abs[0] = u_abs
+
+        self._u_prev = u_abs.copy()
+        self._d_prev = d_now.copy()
+
+        return u_abs, U_abs, X_abs
+
+
 # ============================================================
 # House-heating linearised MPC facade
 # ============================================================
@@ -1232,8 +1320,8 @@ class HeatingMPCController:
         x_ref = np.zeros(n_x)
         x_ref[:n_rooms] = [model.rooms[name].setpoint for name in room_list]
 
-        # ── CDLinearizedMPCController ────────────────────────────────────
-        self._mpc = CDLinearizedMPCController(
+        # ── MPC controller (forecast-aware variant) ──────────────────────
+        self._mpc = _ForecastAwareMPCController(
             model=self._control_system,
             estimator=self._ekf,
             N=horizon,
@@ -1518,6 +1606,15 @@ class HeatingMPCController:
         # ── Current disturbance vector ───────────────────────────────────
         d = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
 
+        # ── Disturbance forecast matrix for the OCP ──────────────────────
+        # D_forecast[k] = disturbance during horizon step k (k=0..N-1).
+        # solar_seq has N+1 entries; solar_seq[k] = solar at now + k*dt,
+        # so solar_seq[k] describes the conditions during step k.
+        D_forecast = np.array([
+            self._control_system.disturbance_vector(outdoor_seq[k], solar_seq[k])
+            for k in range(N)
+        ], dtype=float)
+
         # ── Update setpoint reference in MPC (setpoints may have changed) ──
         n_x = self._system.nx
         x_ref_abs = np.zeros(n_x)
@@ -1526,9 +1623,9 @@ class HeatingMPCController:
         ]
         self._mpc.x_ref = x_ref_abs
 
-        # ── QP solve via CDLinearizedMPCController ────────────────────────
+        # ── QP solve with disturbance forecast ───────────────────────────
         _t0 = time.perf_counter()
-        u_abs, U_abs, X_abs = self._mpc.step(y, d, p, 0.0)
+        u_abs, U_abs, X_abs = self._mpc.step(y, d, p, 0.0, D_forecast=D_forecast)
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1
 
