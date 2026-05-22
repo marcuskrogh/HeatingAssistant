@@ -61,7 +61,7 @@ import math
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -1552,6 +1552,7 @@ class HeatingMPCController:
         outdoor_forecast: Optional[List[float]] = None,
         cloud_forecast: Optional[List[float]] = None,
         cloud_cover_now: Optional[float] = None,
+        disabled_sources: Optional[Set[str]] = None,
     ) -> Dict[str, float]:
         """
         Compute optimal control actions for the current time step.
@@ -1573,6 +1574,11 @@ class HeatingMPCController:
         cloud_cover_now : float, optional
             Current cloud-cover fraction in [0, 1].  Used for the k=0 entry
             of the solar schedule when solar_gains was not pre-computed.
+        disabled_sources : set of str, optional
+            Names of heat sources whose rooms are currently off (schedule off,
+            user toggle, or window override).  Their QP outputs are zeroed
+            out before the actions dict and heating schedule are built, so
+            sensors report 0 W for both current and predicted inputs.
 
         Returns
         -------
@@ -1635,6 +1641,18 @@ class HeatingMPCController:
 
         # Capture innovation from the EKF wrapper
         self._last_innovation = self._ekf.last_innovation
+
+        # ── Zero out disabled sources ─────────────────────────────────────
+        # Rooms in off-mode (schedule, user toggle, or window override) must
+        # always produce 0 W.  Zero both the first-step action and the full
+        # horizon trajectory so that the heating schedule sensors show 0 for
+        # all future steps as well.  _u_prev is set from u_abs below, so the
+        # EKF automatically picks up the correct applied value next cycle.
+        if disabled_sources:
+            for j, src in enumerate(self._sources):
+                if src.name in disabled_sources:
+                    u_abs[j] = 0.0
+                    U_abs[:, j] = 0.0
 
         # ── Apply actions to heat sources ────────────────────────────────
         actions: Dict[str, float] = {}

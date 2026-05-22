@@ -1232,3 +1232,85 @@ class TestTerminalWeight:
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl.terminal_weight, float)
+
+
+class TestDisabledSources:
+    """disabled_sources zeroes actions and heating schedule for off rooms."""
+
+    def _make_cold_model_and_sources(self):
+        """Two rooms well below setpoint so the QP naturally wants to heat both."""
+        living = Room(
+            "living_room", 5_000_000.0, 0.05,
+            connections=[RoomConnection("bedroom", 0.2)],
+            temperature=15.0, setpoint=21.0,
+        )
+        bedroom = Room(
+            "bedroom", 3_000_000.0, 0.08,
+            connections=[RoomConnection("living_room", 0.2)],
+            temperature=15.0, setpoint=20.0,
+        )
+        model = HouseModel([living, bedroom])
+        sources = [
+            ElectricHeater("lr_heater", "living_room", max_power=2000.0),
+            ElectricHeater("br_heater", "bedroom", max_power=1500.0),
+        ]
+        return model, sources
+
+    def test_disabled_source_action_is_zero(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
+        assert actions["br_heater"] == pytest.approx(0.0)
+
+    def test_enabled_source_action_is_nonzero(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
+        assert actions["lr_heater"] > 0.0
+
+    def test_disabled_source_heating_schedule_all_zeros(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
+        for step in ctrl.heating_schedule:
+            assert step.get("bedroom", 0.0) == pytest.approx(0.0), (
+                f"Expected 0 W predicted for disabled bedroom, got {step}"
+            )
+
+    def test_enabled_source_heating_schedule_nonzero(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
+        first_step = ctrl.heating_schedule[0]
+        assert first_step.get("living_room", 0.0) > 0.0
+
+    def test_disabled_source_current_power_is_zero(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources={"br_heater"})
+        br_heater = next(s for s in sources if s.name == "br_heater")
+        assert br_heater.current_power == pytest.approx(0.0)
+
+    def test_no_disabled_sources_behaves_normally(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=0.0, now=now, disabled_sources=None)
+        assert actions["lr_heater"] > 0.0
+        assert actions["br_heater"] > 0.0
+
+    def test_all_disabled_all_actions_zero(self):
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(
+            outdoor_temp=0.0, now=now,
+            disabled_sources={"lr_heater", "br_heater"},
+        )
+        assert actions["lr_heater"] == pytest.approx(0.0)
+        assert actions["br_heater"] == pytest.approx(0.0)
