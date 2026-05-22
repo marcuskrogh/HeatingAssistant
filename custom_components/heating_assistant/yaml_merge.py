@@ -19,8 +19,6 @@ from .const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_MPC_ANALYTIC_DERIVATIVES,
-    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOMS,
     CONF_SIGMA_B,
@@ -36,8 +34,6 @@ from .const import (
     CONF_WINDOW_OPEN_Q_INFLATION,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
-    DEFAULT_MPC_ANALYTIC_DERIVATIVES,
-    DEFAULT_MPC_SOLVER,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -94,10 +90,6 @@ def merge_yaml_into_entry_data(
     _fill_default(merged, yaml_cfg, CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
     _fill_default(merged, yaml_cfg, CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
     _fill_default(merged, yaml_cfg, CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
-    _fill_default(merged, yaml_cfg, CONF_MPC_SOLVER, DEFAULT_MPC_SOLVER)
-    _fill_default(
-        merged, yaml_cfg, CONF_MPC_ANALYTIC_DERIVATIVES, DEFAULT_MPC_ANALYTIC_DERIVATIVES
-    )
     _fill_default(merged, yaml_cfg, CONF_SIGMA_W, DEFAULT_SIGMA_W)
     _fill_default(merged, yaml_cfg, CONF_SIGMA_V, DEFAULT_SIGMA_V)
     _fill_default(merged, yaml_cfg, CONF_SIGMA_B, DEFAULT_SIGMA_B)

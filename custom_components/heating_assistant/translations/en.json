@@ -9,16 +9,7 @@
           "longitude": "Longitude (degrees, positive = East)",
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID (leave blank to use HA default)",
           "weather_entity": "Weather forecast entity ID (leave blank to disable forecast)",
-          "update_interval": "Control time step (seconds, 60–3600) — how often the MPC re-solves and applies actions (ZOH duration = EKF step = OCP step)",
-          "horizon": "MPC prediction horizon (steps)",
-          "mpc_solver": "MPC solver backend",
-          "mpc_analytic_derivatives": "Enable analytical derivatives (recommended for IPOPT)",
-          "sigma_w": "SDE process-noise std dev (sigma_w, K/√s)",
-          "sigma_v": "Temperature measurement-noise std dev (sigma_v, K)",
-          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)",
-          "window_open_debounce": "Window open debounce (seconds)",
-          "window_open_close_settle": "Window close settle time (seconds)",
-          "window_open_q_inflation": "Window-open EKF process-noise covariance multiplier"
+          "update_interval": "Control time step (seconds, 60–3600) — how often the MPC re-solves and applies actions (ZOH duration = EKF step = OCP step)"
         }
       }
     },
@@ -30,6 +21,7 @@
         "title": "Heating Assistant – Options",
         "menu_options": {
           "global_settings": "Global settings",
+          "mpc_tuning": "MPC tuning & model parameters",
           "manage_rooms": "Configure rooms",
           "save": "Save & close"
         }
@@ -40,15 +32,22 @@
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID (optional when weather forecast entity is set)",
           "weather_entity": "Weather forecast entity ID (optional; if not set, outdoor sensor is required)",
           "update_interval": "Control time step (seconds, 60–3600)",
-          "horizon": "MPC prediction horizon (steps)",
-          "mpc_solver": "MPC solver backend (IPOPT or SLSQP; cyipopt is just an IPOPT Python binding)",
-          "mpc_analytic_derivatives": "Enable analytical derivatives (recommended for IPOPT)",
-          "sigma_w": "SDE process-noise std dev (sigma_w, K/√s)",
-          "sigma_v": "Temperature measurement-noise std dev (sigma_v, K)",
-          "sigma_b": "SDE offset-drift process-noise std dev (sigma_b, K/√s)",
+          "sigma_w": "EKF process-noise std dev (sigma_w, K/√s) — higher values allow faster parameter changes",
+          "sigma_v": "Temperature measurement-noise std dev (sigma_v, K) — reflects sensor uncertainty",
+          "sigma_b": "EKF offset-drift process-noise std dev (sigma_b, K/√s) — higher values allow calibration drift",
           "window_open_debounce": "Window open debounce (seconds)",
           "window_open_close_settle": "Window close settle time (seconds)",
           "window_open_q_inflation": "Window-open EKF process-noise covariance multiplier"
+        }
+      },
+      "mpc_tuning": {
+        "title": "MPC Tuning & Model Parameters",
+        "data": {
+          "horizon": "MPC prediction horizon (steps) — 100 steps ≈ 25 hours at 15-min intervals",
+          "energy_weight": "Energy weight (0–1) — higher values prioritize energy saving over comfort",
+          "smoothing_weight": "Smoothing weight (0–1) — dampens rapid changes in heating/cooling",
+          "soft_constraint_weight": "Soft constraint weight (multiplier) — penalty for violating comfort bounds",
+          "terminal_weight": "Terminal weight (multiplier) — cost weight applied at the prediction horizon end"
         }
       },
       "manage_rooms": {
