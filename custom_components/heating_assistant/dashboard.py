@@ -812,7 +812,7 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
         )
         series.append(
             {
-                "entity": _eid("sensor", room.name, "temperature_forecast"),
+                "entity": _eid("sensor", room.name, "heating_power_forecast"),
                 "name": f"{room.name} Plan",
                 "data_generator": _forecast_generator("heating_power"),
                 "yaxis_id": "power",
@@ -1396,7 +1396,20 @@ def build_dashboard_from_coordinator(coordinator: Any) -> Dict[str, Any]:
             kind_str = "electric_heater"
         sources.append(HeatSourceSpec(name=src.name, room=src.room, kind=kind_str))
 
-    return build_dashboard(DashboardSpec(rooms=tuple(rooms), sources=tuple(sources)))
+    horizon = getattr(coordinator, "_horizon", None)
+    dt = getattr(coordinator, "dt", None) or getattr(coordinator, "_update_interval", None)
+    if horizon is not None and dt is not None:
+        forecast_hours = horizon * float(dt) / 3600.0
+    else:
+        forecast_hours = 3.0
+
+    return build_dashboard(
+        DashboardSpec(
+            rooms=tuple(rooms),
+            sources=tuple(sources),
+            forecast_hours=forecast_hours,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

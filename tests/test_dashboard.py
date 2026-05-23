@@ -538,12 +538,9 @@ def test_overview_power_chart_forecast_series_are_room_specific(two_room_spec):
         if c.get("type") == "custom:apexcharts-card"
         and c.get("header", {}).get("title") == "Power – All Rooms"
     )
-    # Forecast plan series use the temperature_forecast entity (which embeds
-    # heating_power in every forecast entry) so they render correctly alongside
-    # the temperature overview chart's entity subscriptions.
     plan_series = [
         s for s in power_card["series"]
-        if s.get("entity", "").endswith("_temperature_forecast")
+        if s.get("entity", "").endswith("_heating_power_forecast")
         and "heating_power" in s.get("data_generator", "")
     ]
     names = {s["name"] for s in plan_series}
@@ -588,3 +585,36 @@ def test_build_from_coordinator_handles_missing_schedule_map():
 
     dashboard = build_dashboard_from_coordinator(FakeCoordinator())
     assert dashboard["title"] == "Heating Assistant"
+
+
+def test_build_from_coordinator_scales_forecast_to_mpc_horizon():
+    """graph_span on all apex charts must reflect horizon * dt, not the 3 h default."""
+    class FakeModel:
+        room_names = ["Office"]
+
+    class FakeCoordinator:
+        model = FakeModel()
+        heat_sources = []
+        _room_schedule = {}
+        _horizon = 24       # 24 steps
+        dt = 600.0          # 600 s each → 4 h forecast window
+
+    dashboard = build_dashboard_from_coordinator(FakeCoordinator())
+    # Expected: history_hours=6 (default) + forecast_hours=4 → graph_span "10h"
+    expected_span = "10h"
+    for card in _iter_cards(dashboard):
+        if card.get("type") != "custom:apexcharts-card" or "graph_span" not in card:
+            continue
+        # Only check MPC prediction charts that read entity.attributes.forecast.
+        # Pure-history cards (residuals) and fixed-window cards (open-loop trace,
+        # which reads entity.attributes.simulation) use different span formulae.
+        has_forecast = any(
+            "attributes.forecast" in (s.get("data_generator") or "")
+            for s in card.get("series", [])
+        )
+        if not has_forecast:
+            continue
+        assert card["graph_span"] == expected_span, (
+            f"Card {card.get('header', {}).get('title')!r} has "
+            f"graph_span={card['graph_span']!r}, expected {expected_span!r}"
+        )
