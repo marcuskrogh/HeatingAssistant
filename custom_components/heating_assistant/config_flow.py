@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 
 from ._options_flow import (
@@ -174,8 +175,26 @@ def _room_form_schema(
     return vol.Schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
-            vol.Optional(CONF_TEMP_SENSORS, default=sensors_default): str,
-            vol.Optional(CONF_WINDOW_SENSORS, default=window_sensors_default): str,
+            vol.Optional(
+                CONF_TEMP_SENSORS,
+                default=sensors_default,
+                description={"suggested_value": sensors_default}
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    multiple=True,
+                )
+            ),
+            vol.Optional(
+                CONF_WINDOW_SENSORS,
+                default=window_sensors_default,
+                description={"suggested_value": window_sensors_default}
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="binary_sensor",
+                    multiple=True,
+                )
+            ),
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
@@ -226,6 +245,25 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self._data: Dict[str, Any] = {}
         self._rooms: RoomFlowHelper = RoomFlowHelper()
         self._initialized: bool = False
+
+    @staticmethod
+    def _normalize_entity_list(
+        value: Any, format_output: bool = False
+    ) -> Any:
+        """Normalize entity list from either selector (list) or string format.
+
+        EntitySelector returns a list of entity IDs, but we also support
+        comma-separated strings for backward compatibility.
+        """
+        if isinstance(value, list):
+            if format_output:
+                return _format_entity_ids(value)
+            return value
+        if isinstance(value, str):
+            if format_output:
+                return value
+            return _parse_entity_ids(value)
+        return [] if not format_output else ""
 
     # ------------------------------------------------------------------
     # Main menu
@@ -332,7 +370,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_HORIZON,
                     default=current.get(CONF_HORIZON, DEFAULT_HORIZON),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                 vol.Optional(
                     CONF_TRACKING_WEIGHT,
                     default=current.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT),
@@ -398,8 +436,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            sensors = _parse_entity_ids(user_input.get(CONF_TEMP_SENSORS, ""))
-            window_sensors = _parse_entity_ids(user_input.get(CONF_WINDOW_SENSORS, ""))
+            sensors = self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, []))
+            window_sensors = self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, []))
             tightness = user_input.get(
                 "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
             )
@@ -452,8 +490,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_manage_rooms()
 
         if user_input is not None:
-            sensors = _parse_entity_ids(user_input.get(CONF_TEMP_SENSORS, ""))
-            window_sensors = _parse_entity_ids(user_input.get(CONF_WINDOW_SENSORS, ""))
+            sensors = self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, []))
+            window_sensors = self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, []))
             tightness = user_input.get(
                 "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
             )
@@ -471,12 +509,14 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             )
             if err is None:
                 return await self.async_step_manage_rooms()
+            sensors_display = self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, []), format_output=True)
+            window_sensors_display = self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, []), format_output=True)
             return self.async_show_form(
                 step_id="room_detail",
                 data_schema=_room_form_schema(
                     name_default=user_input.get(CONF_ROOM_NAME, ""),
-                    sensors_default=user_input.get(CONF_TEMP_SENSORS, ""),
-                    window_sensors_default=user_input.get(CONF_WINDOW_SENSORS, ""),
+                    sensors_default=sensors_display,
+                    window_sensors_default=window_sensors_display,
                     room_size_default=user_input.get("room_size", "medium"),
                     building_age_default=user_input.get("building_age", "1980_1999"),
                     envelope_tightness_default=tightness,
