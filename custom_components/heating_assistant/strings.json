@@ -29,26 +29,26 @@
       "global_settings": {
         "title": "Global Settings",
         "data": {
-          "outdoor_temp_entity": "Outdoor temperature sensor entity ID (optional when weather forecast entity is set)",
-          "weather_entity": "Weather forecast entity ID (optional; if not set, outdoor sensor is required)",
-          "update_interval": "Control time step (seconds, 60–3600)",
-          "sigma_w": "EKF process-noise std dev (sigma_w, K/√s) — higher values allow faster parameter changes",
-          "sigma_v": "Temperature measurement-noise std dev (sigma_v, K) — reflects sensor uncertainty",
-          "sigma_b": "EKF offset-drift process-noise std dev (sigma_b, K/√s) — higher values allow calibration drift",
-          "window_open_debounce": "Window open debounce (seconds)",
-          "window_open_close_settle": "Window close settle time (seconds)",
-          "window_open_q_inflation": "Window-open EKF process-noise covariance multiplier"
+          "outdoor_temp_entity": "Outdoor temperature sensor (optional when weather forecast is set)",
+          "weather_entity": "Weather forecast (optional; either this or outdoor temperature sensor is required)",
+          "update_interval": "Control update interval (seconds, 60–3600) — how often the system recalculates heating control",
+          "sigma_w": "Model variability tolerance — higher values let the system adapt faster to changing conditions",
+          "sigma_v": "Temperature sensor uncertainty (°C) — reflect your sensor's accuracy",
+          "sigma_b": "Calibration drift tolerance — higher values allow sensor calibration to drift over time",
+          "window_open_debounce": "Window open delay (seconds) — sensor must stay open this long before activating window mode",
+          "window_open_close_settle": "Window close delay (seconds) — sensor must stay closed this long before leaving window mode",
+          "window_open_q_inflation": "Open-window uncertainty multiplier — higher values make the controller more cautious when a window is open"
         }
       },
       "mpc_tuning": {
-        "title": "MPC Tuning & Model Parameters",
+        "title": "Controller Tuning",
         "data": {
-          "horizon": "MPC prediction horizon (steps) — 100 steps ≈ 25 hours at 15-min intervals",
-          "tracking_weight": "Tracking weight — weight on ‖z − setpoint‖² (Q diagonal); set to 0 to disable setpoint tracking",
-          "energy_weight": "Input regularisation weight — weight on ‖u‖² (penalises heater power use)",
-          "smoothing_weight": "Input rate-of-movement weight — weight on ‖Δu‖²; set to 0 to disable",
-          "soft_constraint_weight": "Soft output bound violation weight — direct penalty ρ for comfort-corridor violations",
-          "terminal_weight": "Terminal weight (multiplier) — cost weight applied at the prediction horizon end"
+          "horizon": "Look-ahead time (steps) — 100 steps ≈ 25 hours at 15-min intervals",
+          "tracking_weight": "Setpoint tracking importance — 0 = comfort range only, higher = stricter setpoint control",
+          "energy_weight": "Energy efficiency preference — higher values reduce heating costs but may sacrifice comfort",
+          "smoothing_weight": "Comfort smoothing — higher values reduce rapid heating/cooling cycles",
+          "soft_constraint_weight": "Comfort corridor flexibility — higher values strictly enforce the comfort temperature range",
+          "terminal_weight": "End-of-period behavior weight — controls heating behavior as prediction ends"
         }
       },
       "manage_rooms": {
@@ -57,6 +57,7 @@
           "add_room": "Add room",
           "edit_room": "Edit room",
           "manage_room_windows": "Configure room windows",
+          "manage_room_heaters": "Configure room heaters",
           "remove_room": "Remove room",
           "finish_rooms": "Back to main menu"
         }
@@ -64,13 +65,13 @@
       "add_room": {
         "title": "Add Room",
         "data": {
-          "name": "Room name (unique identifier)",
-          "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
-          "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
-          "room_size": "Approximate room size",
-          "building_age": "Approximate building age/insulation level",
-          "comfort_corridor_low": "Comfort corridor low (°C)",
-          "comfort_corridor_high": "Comfort corridor high (°C)"
+          "name": "Room name",
+          "temp_sensors": "Temperature sensors (select one or more)",
+          "window_sensors": "Window/door sensors (select for open-window detection)",
+          "room_size": "Approximate room size (affects estimated thermal mass)",
+          "building_age": "Approximate building construction period (affects estimated insulation)",
+          "envelope_tightness": "Building air tightness — leaky buildings lose more heat from wind",
+          "comfort_offset": "Comfort range (±°C from setpoint) — temperature can vary within this band"
         }
       },
       "edit_room": {
@@ -83,12 +84,12 @@
         "title": "Edit Room",
         "data": {
           "name": "Room name",
-          "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
-          "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
-          "room_size": "Approximate room size",
-          "building_age": "Approximate building age/insulation level",
-          "comfort_corridor_low": "Comfort corridor low (°C)",
-          "comfort_corridor_high": "Comfort corridor high (°C)"
+          "temp_sensors": "Temperature sensors (select one or more)",
+          "window_sensors": "Window/door sensors (select for open-window detection)",
+          "room_size": "Approximate room size (affects estimated thermal mass)",
+          "building_age": "Approximate building construction period (affects estimated insulation)",
+          "envelope_tightness": "Building air tightness — leaky buildings lose more heat from wind",
+          "comfort_offset": "Comfort range (±°C from setpoint) — temperature can vary within this band"
         }
       },
       "manage_room_windows": {
@@ -123,6 +124,65 @@
         "title": "Remove Window",
         "data": {
           "window_idx": "Window to remove"
+        }
+      },
+      "manage_room_heaters": {
+        "title": "Select Room for Heaters",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "manage_heaters": {
+        "title": "Heaters",
+        "menu_options": {
+          "add_heater": "Add heater",
+          "edit_heater": "Edit heater",
+          "remove_heater": "Remove heater",
+          "finish_heaters": "Done with heaters"
+        }
+      },
+      "add_heater": {
+        "title": "Add Heater",
+        "data": {
+          "name": "Heater name",
+          "type": "Type of heater",
+          "max_power": "Maximum heating power (watts)",
+          "heater_entity": "Heater control switch (Home Assistant switch entity)",
+          "efficiency": "Electric heater efficiency (0–1, where 1 = 100%)",
+          "cop_rated": "Heat pump rated COP at reference temperature (higher = more efficient)",
+          "cop_temp_ref": "Reference outdoor temperature for COP (°C)",
+          "min_power": "Heat pump minimum output (watts) — 0 = no minimum",
+          "max_temp_offset": "Heat pump maximum output modulation (°C)",
+          "turn_off_deadband": "Turn off threshold (°C above setpoint) — 0 = disabled",
+          "emitter_time_constant": "Response time lag (seconds) — radiators ~600s, fan coils ~60s, resistive ~0s"
+        }
+      },
+      "edit_heater": {
+        "title": "Select Heater to Edit",
+        "data": {
+          "heater_idx": "Heater"
+        }
+      },
+      "heater_detail": {
+        "title": "Edit Heater",
+        "data": {
+          "name": "Heater name",
+          "type": "Type of heater",
+          "max_power": "Maximum heating power (watts)",
+          "heater_entity": "Heater control switch (Home Assistant switch entity)",
+          "efficiency": "Electric heater efficiency (0–1, where 1 = 100%)",
+          "cop_rated": "Heat pump rated COP at reference temperature (higher = more efficient)",
+          "cop_temp_ref": "Reference outdoor temperature for COP (°C)",
+          "min_power": "Heat pump minimum output (watts) — 0 = no minimum",
+          "max_temp_offset": "Heat pump maximum output modulation (°C)",
+          "turn_off_deadband": "Turn off threshold (°C above setpoint) — 0 = disabled",
+          "emitter_time_constant": "Response time lag (seconds) — radiators ~600s, fan coils ~60s, resistive ~0s"
+        }
+      },
+      "remove_heater": {
+        "title": "Remove Heater",
+        "data": {
+          "heater_idx": "Heater to remove"
         }
       }
     },

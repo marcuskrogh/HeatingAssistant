@@ -26,10 +26,30 @@ from .const import (
     CONF_WINDOW_SENSORS,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
+    CONF_HEAT_SOURCES,
+    CONF_SOURCE_NAME,
+    CONF_SOURCE_TYPE,
+    CONF_SOURCE_MAX_POWER,
+    CONF_SOURCE_EFFICIENCY,
+    CONF_SOURCE_COP_RATED,
+    CONF_SOURCE_COP_TEMP_REF,
+    CONF_SOURCE_MIN_POWER,
+    CONF_SOURCE_HEATER_ENTITY,
+    CONF_SOURCE_MAX_TEMP_OFFSET,
+    CONF_SOURCE_TURN_OFF_DEADBAND,
+    CONF_SOURCE_EMITTER_TIME_CONSTANT,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_WINDOW_TILT,
+    DEFAULT_EFFICIENCY,
+    DEFAULT_COP_RATED,
+    DEFAULT_COP_TEMP_REF,
+    DEFAULT_MIN_POWER,
+    DEFAULT_MAX_TEMP_OFFSET,
+    DEFAULT_TURN_OFF_DEADBAND,
     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
+    SOURCE_TYPE_ELECTRIC,
+    SOURCE_TYPE_HEAT_PUMP,
 )
 
 # ---------------------------------------------------------------------------
@@ -321,3 +341,144 @@ class WindowFlowHelper:
     ) -> Dict[str, str]:
         """Return ``{idx_str: human_label}`` for the remove-window selector."""
         return {str(i): labeller(room_name, i, w) for i, w in enumerate(self.windows)}
+
+
+# ---------------------------------------------------------------------------
+# Heater CRUD helper
+# ---------------------------------------------------------------------------
+
+
+def heater_display(room_name: str, idx: int, heater: Dict[str, Any]) -> str:
+    """Human-readable heater label for the remove-heater selector."""
+    name = heater.get(CONF_SOURCE_NAME, f"Heater {idx + 1}")
+    source_type = heater.get(CONF_SOURCE_TYPE, "Unknown")
+    source_type_label = "Heat Pump" if source_type == SOURCE_TYPE_HEAT_PUMP else "Electric Heater"
+    return f"{room_name} · {name} ({source_type_label})"
+
+
+class HeaterFlowHelper:
+    """Mutate the heat sources list of a room or globally.
+
+    Can operate on room-level heat sources (when initialized with a room dict)
+    or global heat sources (when initialized with heat_sources list directly).
+    """
+
+    def __init__(self, room_or_sources: Dict[str, Any] | List[Dict[str, Any]] | None = None) -> None:
+        if room_or_sources is None:
+            self._room = None
+            self._heat_sources_list = []
+        elif isinstance(room_or_sources, dict) and CONF_HEAT_SOURCES not in room_or_sources:
+            # It's a room dict
+            self._room = room_or_sources
+            self._heat_sources_list = self._room.setdefault(CONF_HEAT_SOURCES, [])
+        elif isinstance(room_or_sources, list):
+            # It's a heat sources list
+            self._room = None
+            self._heat_sources_list = room_or_sources
+        else:
+            # It's a dict with CONF_HEAT_SOURCES (unlikely but handle it)
+            self._room = None
+            self._heat_sources_list = room_or_sources.get(CONF_HEAT_SOURCES, [])
+
+    @property
+    def heat_sources(self) -> List[Dict[str, Any]]:
+        return self._heat_sources_list
+
+    def __bool__(self) -> bool:
+        return bool(self._heat_sources_list)
+
+    def __len__(self) -> int:
+        return len(self._heat_sources_list)
+
+    def add(
+        self,
+        *,
+        name: str,
+        source_type: str,
+        max_power: float,
+        heater_entity: str,
+        efficiency: float | None = None,
+        cop_rated: float | None = None,
+        cop_temp_ref: float | None = None,
+        min_power: float | None = None,
+        max_temp_offset: float | None = None,
+        turn_off_deadband: float | None = None,
+        emitter_time_constant: float | None = None,
+    ) -> None:
+        """Append a new heater to the room."""
+        new_heater: Dict[str, Any] = {
+            CONF_SOURCE_NAME: name.strip(),
+            CONF_SOURCE_TYPE: source_type,
+            CONF_SOURCE_MAX_POWER: float(max_power),
+            CONF_SOURCE_HEATER_ENTITY: heater_entity,
+        }
+        if efficiency is not None:
+            new_heater[CONF_SOURCE_EFFICIENCY] = float(efficiency)
+        if cop_rated is not None:
+            new_heater[CONF_SOURCE_COP_RATED] = float(cop_rated)
+        if cop_temp_ref is not None:
+            new_heater[CONF_SOURCE_COP_TEMP_REF] = float(cop_temp_ref)
+        if min_power is not None:
+            new_heater[CONF_SOURCE_MIN_POWER] = float(min_power)
+        if max_temp_offset is not None:
+            new_heater[CONF_SOURCE_MAX_TEMP_OFFSET] = float(max_temp_offset)
+        if turn_off_deadband is not None:
+            new_heater[CONF_SOURCE_TURN_OFF_DEADBAND] = float(turn_off_deadband)
+        if emitter_time_constant is not None:
+            new_heater[CONF_SOURCE_EMITTER_TIME_CONSTANT] = float(emitter_time_constant)
+        self._heat_sources_list.append(new_heater)
+
+    def update(
+        self,
+        idx: int,
+        *,
+        name: str,
+        source_type: str,
+        max_power: float,
+        heater_entity: str,
+        efficiency: float | None = None,
+        cop_rated: float | None = None,
+        cop_temp_ref: float | None = None,
+        min_power: float | None = None,
+        max_temp_offset: float | None = None,
+        turn_off_deadband: float | None = None,
+        emitter_time_constant: float | None = None,
+    ) -> bool:
+        """Update heater at idx. Returns False if out of range."""
+        if not (0 <= idx < len(self._heat_sources_list)):
+            return False
+        heater = self._heat_sources_list[idx]
+        heater[CONF_SOURCE_NAME] = name.strip()
+        heater[CONF_SOURCE_TYPE] = source_type
+        heater[CONF_SOURCE_MAX_POWER] = float(max_power)
+        heater[CONF_SOURCE_HEATER_ENTITY] = heater_entity
+        if efficiency is not None:
+            heater[CONF_SOURCE_EFFICIENCY] = float(efficiency)
+        if cop_rated is not None:
+            heater[CONF_SOURCE_COP_RATED] = float(cop_rated)
+        if cop_temp_ref is not None:
+            heater[CONF_SOURCE_COP_TEMP_REF] = float(cop_temp_ref)
+        if min_power is not None:
+            heater[CONF_SOURCE_MIN_POWER] = float(min_power)
+        if max_temp_offset is not None:
+            heater[CONF_SOURCE_MAX_TEMP_OFFSET] = float(max_temp_offset)
+        if turn_off_deadband is not None:
+            heater[CONF_SOURCE_TURN_OFF_DEADBAND] = float(turn_off_deadband)
+        if emitter_time_constant is not None:
+            heater[CONF_SOURCE_EMITTER_TIME_CONSTANT] = float(emitter_time_constant)
+        return True
+
+    def remove(self, idx: int) -> bool:
+        """Remove the heater at idx. Returns False if out of range."""
+        if 0 <= idx < len(self._heat_sources_list):
+            self._heat_sources_list.pop(idx)
+            return True
+        return False
+
+    def display_options(
+        self,
+        room_name: str,
+        labeller: Callable[[str, int, Dict[str, Any]], str] = heater_display,
+    ) -> Dict[str, str]:
+        """Return ``{idx_str: human_label}`` for the remove-heater selector."""
+        return {str(i): labeller(room_name, i, h) for i, h in enumerate(self._heat_sources_list)}
