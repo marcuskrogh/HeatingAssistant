@@ -20,9 +20,11 @@ from ._options_flow import (
     ROOM_SIZE_TO_THERMAL_MASS,
     RoomFlowHelper,
     WindowFlowHelper,
+    HeaterFlowHelper,
     degrees_to_compass as _degrees_to_compass,
     nearest_choice as _nearest_choice,
     window_display as _window_display,
+    heater_display as _heater_display,
 )
 from .const import (
     CONF_COMFORT_OFFSET,
@@ -57,6 +59,17 @@ from .const import (
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
+    CONF_SOURCE_NAME,
+    CONF_SOURCE_TYPE,
+    CONF_SOURCE_MAX_POWER,
+    CONF_SOURCE_EFFICIENCY,
+    CONF_SOURCE_COP_RATED,
+    CONF_SOURCE_COP_TEMP_REF,
+    CONF_SOURCE_MIN_POWER,
+    CONF_SOURCE_HEATER_ENTITY,
+    CONF_SOURCE_MAX_TEMP_OFFSET,
+    CONF_SOURCE_TURN_OFF_DEADBAND,
+    CONF_SOURCE_EMITTER_TIME_CONSTANT,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_ENVELOPE_TIGHTNESS,
@@ -75,8 +88,16 @@ from .const import (
     DEFAULT_THERMAL_MASS,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WINDOW_TILT,
+    DEFAULT_EFFICIENCY,
+    DEFAULT_COP_RATED,
+    DEFAULT_COP_TEMP_REF,
+    DEFAULT_MIN_POWER,
+    DEFAULT_MAX_TEMP_OFFSET,
+    DEFAULT_TURN_OFF_DEADBAND,
     DOMAIN,
     NAME,
+    SOURCE_TYPE_ELECTRIC,
+    SOURCE_TYPE_HEAT_PUMP,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -216,6 +237,58 @@ def _window_form_schema() -> vol.Schema:
     )
 
 
+def _heater_form_schema(
+    *,
+    name_default: str = "",
+    type_default: str = SOURCE_TYPE_HEAT_PUMP,
+    max_power_default: float = 5000.0,
+    heater_entity_default: str = "",
+    efficiency_default: float = DEFAULT_EFFICIENCY,
+    cop_rated_default: float = DEFAULT_COP_RATED,
+    cop_temp_ref_default: float = DEFAULT_COP_TEMP_REF,
+    min_power_default: float = DEFAULT_MIN_POWER,
+    max_temp_offset_default: float = DEFAULT_MAX_TEMP_OFFSET,
+    turn_off_deadband_default: float = 0.0,
+    emitter_time_constant_default: float = 60.0,
+) -> vol.Schema:
+    """Schema for adding/editing a heat source (heater)."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_SOURCE_NAME, default=name_default): str,
+            vol.Required(CONF_SOURCE_TYPE, default=type_default): vol.In(
+                [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP]
+            ),
+            vol.Required(
+                CONF_SOURCE_MAX_POWER, default=max_power_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=100.0, max=100000.0)),
+            vol.Required(CONF_SOURCE_HEATER_ENTITY, default=heater_entity_default): EntitySelector(
+                EntitySelectorConfig(domain="switch")
+            ),
+            vol.Optional(
+                CONF_SOURCE_EFFICIENCY, default=efficiency_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1.0)),
+            vol.Optional(
+                CONF_SOURCE_COP_RATED, default=cop_rated_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10.0)),
+            vol.Optional(
+                CONF_SOURCE_COP_TEMP_REF, default=cop_temp_ref_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=-20.0, max=20.0)),
+            vol.Optional(
+                CONF_SOURCE_MIN_POWER, default=min_power_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100000.0)),
+            vol.Optional(
+                CONF_SOURCE_MAX_TEMP_OFFSET, default=max_temp_offset_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20.0)),
+            vol.Optional(
+                CONF_SOURCE_TURN_OFF_DEADBAND, default=turn_off_deadband_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
+            vol.Optional(
+                CONF_SOURCE_EMITTER_TIME_CONSTANT, default=emitter_time_constant_default
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=600.0)),
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Options flow
 # ---------------------------------------------------------------------------
@@ -258,7 +331,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     async def async_step_global_settings(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Form for site / timing / noise settings."""
+        """Form for site / timing / sensor settings."""
         if user_input is not None:
             self._data.update(user_input)
             return await self.async_step_init()
@@ -270,6 +343,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         # (EntitySelector rejects "" as an invalid entity ID).
         outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
         weather = current.get(CONF_WEATHER_ENTITY) or None
+        outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
 
         schema = vol.Schema(
             {
@@ -389,7 +463,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         """Room management menu."""
         menu_options: List[str] = ["add_room"]
         if self._rooms:
-            menu_options += ["edit_room", "manage_room_windows", "remove_room"]
+            menu_options += ["edit_room", "manage_room_windows", "manage_room_heaters", "remove_room"]
         menu_options.append("finish_rooms")
         return self.async_show_menu(step_id="manage_rooms", menu_options=menu_options)
 
@@ -630,4 +704,174 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
         """Return to the rooms menu from the windows sub-flow."""
+        return await self.async_step_manage_rooms()
+
+    # ------------------------------------------------------------------
+    # Heater management
+    # ------------------------------------------------------------------
+
+    def _current_heaters(self) -> Optional[HeaterFlowHelper]:
+        room = self._rooms.current_room()
+        return HeaterFlowHelper(room) if room is not None else None
+
+    async def async_step_manage_room_heaters(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Select room before entering the heaters sub-flow."""
+        if not self._rooms:
+            return await self.async_step_manage_rooms()
+
+        if user_input is not None:
+            if self._rooms.select(user_input["room_name"]):
+                return await self.async_step_manage_heaters()
+            return await self.async_step_manage_rooms()
+
+        names = self._rooms.names()
+        schema = vol.Schema(
+            {vol.Required("room_name", default=names[0]): vol.In(names)}
+        )
+        return self.async_show_form(step_id="manage_room_heaters", data_schema=schema)
+
+    async def async_step_manage_heaters(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Heater management menu for the currently-selected room."""
+        heaters = self._current_heaters()
+        if heaters is None:
+            return await self.async_step_manage_room_heaters()
+        menu_options: List[str] = ["add_heater"]
+        if heaters:
+            menu_options += ["edit_heater", "remove_heater"]
+        menu_options.append("finish_heaters")
+        return self.async_show_menu(
+            step_id="manage_heaters", menu_options=menu_options
+        )
+
+    async def async_step_add_heater(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Form to add a heater to the current room."""
+        heaters = self._current_heaters()
+        if heaters is None:
+            return await self.async_step_manage_room_heaters()
+
+        if user_input is not None:
+            heaters.add(
+                name=user_input[CONF_SOURCE_NAME],
+                source_type=user_input[CONF_SOURCE_TYPE],
+                max_power=user_input[CONF_SOURCE_MAX_POWER],
+                heater_entity=user_input[CONF_SOURCE_HEATER_ENTITY],
+                efficiency=user_input.get(CONF_SOURCE_EFFICIENCY),
+                cop_rated=user_input.get(CONF_SOURCE_COP_RATED),
+                cop_temp_ref=user_input.get(CONF_SOURCE_COP_TEMP_REF),
+                min_power=user_input.get(CONF_SOURCE_MIN_POWER),
+                max_temp_offset=user_input.get(CONF_SOURCE_MAX_TEMP_OFFSET),
+                turn_off_deadband=user_input.get(CONF_SOURCE_TURN_OFF_DEADBAND),
+                emitter_time_constant=user_input.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
+            )
+            return await self.async_step_manage_heaters()
+
+        return self.async_show_form(
+            step_id="add_heater", data_schema=_heater_form_schema()
+        )
+
+    async def async_step_edit_heater(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Select which heater to edit."""
+        heaters = self._current_heaters()
+        if heaters is None or not heaters:
+            return await self.async_step_manage_heaters()
+
+        if user_input is not None:
+            heater_idx = int(user_input["heater_idx"])
+            room = self._rooms.current_room()
+            if room is not None:
+                heater = heaters.heat_sources[heater_idx] if 0 <= heater_idx < len(heaters.heat_sources) else None
+                if heater is None:
+                    return await self.async_step_manage_heaters()
+                return await self.async_step_heater_detail(heater_idx=heater_idx)
+            return await self.async_step_manage_heaters()
+
+        room = self._rooms.current_room() or {}
+        heater_options = heaters.display_options(
+            room.get(CONF_ROOM_NAME, "Room")
+        )
+        schema = vol.Schema(
+            {vol.Required("heater_idx", default="0"): vol.In(heater_options)}
+        )
+        return self.async_show_form(step_id="edit_heater", data_schema=schema)
+
+    async def async_step_heater_detail(
+        self, user_input: Optional[Dict[str, Any]] = None, heater_idx: Optional[int] = None
+    ) -> ConfigFlowResult:
+        """Edit a heater's configuration."""
+        heaters = self._current_heaters()
+        if heaters is None:
+            return await self.async_step_manage_room_heaters()
+
+        if heater_idx is None:
+            return await self.async_step_edit_heater()
+
+        heater = heaters.heat_sources[heater_idx] if 0 <= heater_idx < len(heaters.heat_sources) else None
+        if heater is None:
+            return await self.async_step_manage_heaters()
+
+        if user_input is not None:
+            heaters.update(
+                heater_idx,
+                name=user_input[CONF_SOURCE_NAME],
+                source_type=user_input[CONF_SOURCE_TYPE],
+                max_power=user_input[CONF_SOURCE_MAX_POWER],
+                heater_entity=user_input[CONF_SOURCE_HEATER_ENTITY],
+                efficiency=user_input.get(CONF_SOURCE_EFFICIENCY),
+                cop_rated=user_input.get(CONF_SOURCE_COP_RATED),
+                cop_temp_ref=user_input.get(CONF_SOURCE_COP_TEMP_REF),
+                min_power=user_input.get(CONF_SOURCE_MIN_POWER),
+                max_temp_offset=user_input.get(CONF_SOURCE_MAX_TEMP_OFFSET),
+                turn_off_deadband=user_input.get(CONF_SOURCE_TURN_OFF_DEADBAND),
+                emitter_time_constant=user_input.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
+            )
+            return await self.async_step_manage_heaters()
+
+        schema = _heater_form_schema(
+            name_default=heater.get(CONF_SOURCE_NAME, ""),
+            type_default=heater.get(CONF_SOURCE_TYPE, SOURCE_TYPE_HEAT_PUMP),
+            max_power_default=float(heater.get(CONF_SOURCE_MAX_POWER, 5000.0)),
+            heater_entity_default=heater.get(CONF_SOURCE_HEATER_ENTITY, ""),
+            efficiency_default=float(heater.get(CONF_SOURCE_EFFICIENCY, DEFAULT_EFFICIENCY)),
+            cop_rated_default=float(heater.get(CONF_SOURCE_COP_RATED, DEFAULT_COP_RATED)),
+            cop_temp_ref_default=float(heater.get(CONF_SOURCE_COP_TEMP_REF, DEFAULT_COP_TEMP_REF)),
+            min_power_default=float(heater.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER)),
+            max_temp_offset_default=float(heater.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET)),
+            turn_off_deadband_default=float(heater.get(CONF_SOURCE_TURN_OFF_DEADBAND, 0.0)),
+            emitter_time_constant_default=float(heater.get(CONF_SOURCE_EMITTER_TIME_CONSTANT, 60.0)),
+        )
+        return self.async_show_form(step_id="heater_detail", data_schema=schema)
+
+    async def async_step_remove_heater(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Select and remove a heater from the current room."""
+        heaters = self._current_heaters()
+        if heaters is None or not heaters:
+            return await self.async_step_manage_heaters()
+
+        if user_input is not None:
+            heaters.remove(int(user_input["heater_idx"]))
+            return await self.async_step_manage_heaters()
+
+        room = self._rooms.current_room() or {}
+        heater_options = heaters.display_options(
+            room.get(CONF_ROOM_NAME, "Room")
+        )
+        schema = vol.Schema(
+            {vol.Required("heater_idx", default="0"): vol.In(heater_options)}
+        )
+        return self.async_show_form(step_id="remove_heater", data_schema=schema)
+
+    async def async_step_finish_heaters(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Return to the rooms menu from the heaters sub-flow."""
         return await self.async_step_manage_rooms()
