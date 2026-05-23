@@ -154,21 +154,8 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # ---------------------------------------------------------------------------
 
 
-def _get_entity_selector_field(domain: str, multiple: bool = True):
-    """Create an entity selector field or fallback to string for compatibility."""
-    try:
-        return selector.EntitySelector(
-            selector.EntitySelectorConfig(
-                domain=domain,
-                multiple=multiple,
-            )
-        )
-    except (AttributeError, ImportError):
-        return str
-
-
-def _ensure_list(value: Any) -> Any:
-    """Convert comma-separated string to list if needed."""
+def _normalize_to_list(value: Any) -> list:
+    """Convert entity input to list format."""
     if isinstance(value, list):
         return value
     if isinstance(value, str):
@@ -176,6 +163,30 @@ def _ensure_list(value: Any) -> Any:
             return []
         return [e.strip() for e in value.split(",")]
     return []
+
+
+def _normalize_to_string(value: Any) -> str:
+    """Convert entity input to string format."""
+    if isinstance(value, list):
+        return ", ".join(value) if value else ""
+    return str(value).strip()
+
+
+def _get_entity_selector_field(domain: str, multiple: bool = True):
+    """Create an entity selector field or fallback to string for compatibility."""
+    try:
+        # Try to create entity selector for newer HA versions
+        selector_field = selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain=domain,
+                multiple=multiple,
+            )
+        )
+        # Return the selector to provide better UX in newer HA versions
+        return vol.Any(selector_field, cv.string)
+    except Exception:
+        # Fallback to string validator for older HA versions
+        return cv.string
 
 
 def _room_form_schema(
@@ -196,18 +207,19 @@ def _room_form_schema(
     to ``"typical"`` so users who don't think about infiltration get
     sensible behaviour out of the box.
     """
-    sensors_default = _ensure_list(sensors_default or [])
-    window_sensors_default = _ensure_list(window_sensors_default or [])
+    # Convert defaults to string format for display in form
+    sensors_default = _normalize_to_string(sensors_default or [])
+    window_sensors_default = _normalize_to_string(window_sensors_default or [])
 
     return vol.Schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
             vol.Optional(
                 CONF_TEMP_SENSORS, default=sensors_default
-            ): _get_entity_selector_field("sensor", multiple=True),
+            ): vol.All(_get_entity_selector_field("sensor", multiple=True), _normalize_to_list),
             vol.Optional(
                 CONF_WINDOW_SENSORS, default=window_sensors_default
-            ): _get_entity_selector_field("binary_sensor", multiple=True),
+            ): vol.All(_get_entity_selector_field("binary_sensor", multiple=True), _normalize_to_list),
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
@@ -263,14 +275,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     def _normalize_entity_list(value: Any) -> Any:
         """Normalize entity list from either selector (list) or string format.
 
-        EntitySelector returns a list of entity IDs. We also support
-        comma-separated strings for backward compatibility, always returning a list.
+        EntitySelector or form input may return a list or comma-separated string.
+        Always returns a list for storage.
         """
-        if isinstance(value, list):
-            return value
-        if isinstance(value, str):
-            return _parse_entity_ids(value)
-        return []
+        return _normalize_to_list(value)
 
     # ------------------------------------------------------------------
     # Main menu
