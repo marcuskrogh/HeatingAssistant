@@ -72,14 +72,16 @@ from .solar_model import room_solar_gains
 
 def _select_cloud_for_step(
     cloud_forecast: Optional[List[float]], k: int,
+    fallback: Optional[float] = None,
 ) -> Optional[float]:
     """Pick the cloud-cover fraction for horizon step k from a forecast list.
 
     Returns ``cloud_forecast[k]`` when in range, the last entry when ``k``
-    runs past the forecast (persistence), or None when no forecast was given.
+    runs past the forecast (persistence), or ``fallback`` when no forecast
+    was given (typically the current measured cloud cover).
     """
     if not cloud_forecast:
-        return None
+        return fallback
     if k < len(cloud_forecast):
         return cloud_forecast[k]
     return cloud_forecast[-1]
@@ -1699,7 +1701,7 @@ class HeatingMPCController:
             outdoor_seq = list(outdoor_forecast[:N])
         else:
             outdoor_seq = self._forecast_outdoor(outdoor_temp)
-        solar_seq = self._forecast_solar(now, cloud_forecast=cloud_forecast)
+        solar_seq = self._forecast_solar(now, cloud_forecast=cloud_forecast, cloud_cover_now=cloud_cover_now)
 
         # Store forecasts for visualisation
         self._outdoor_forecast = list(outdoor_seq)
@@ -1822,6 +1824,7 @@ class HeatingMPCController:
         self,
         now: datetime,
         cloud_forecast: Optional[List[float]] = None,
+        cloud_cover_now: Optional[float] = None,
     ) -> List[Dict[str, float]]:
         """Solar gain forecast using the geometric solar model.
 
@@ -1836,11 +1839,16 @@ class HeatingMPCController:
         the clear-sky irradiance is attenuated per the Kasten-Czeplak factor.
         Step k uses cloud_forecast[k] for k < len(cloud_forecast); steps
         beyond the supplied forecast hold the last value (persistence).
+
+        When cloud_forecast is None but cloud_cover_now is provided, every
+        step uses cloud_cover_now (persistence fallback) so the solar
+        forecast reflects the currently-observed cloudiness rather than
+        assuming a clear sky.
         """
         schedules = []
         for k in range(self._horizon + 1):  # N+1 entries: k = 0 ... N
             t = now + timedelta(seconds=self._dt * k)
-            cc = _select_cloud_for_step(cloud_forecast, k)
+            cc = _select_cloud_for_step(cloud_forecast, k, fallback=cloud_cover_now)
             schedules.append({
                 name: room_solar_gains(
                     self._system._model.rooms[name].windows,

@@ -380,8 +380,8 @@ CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multi
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
 DEFAULT_R_EXTERNAL = 0.05              # K/W
 DEFAULT_SETPOINT = 22.0                # °C
-DEFAULT_SETPOINT_PULL_WEIGHT = 1.0e-4  # kept for internal back-compat; use DEFAULT_TRACKING_WEIGHT
-DEFAULT_TRACKING_WEIGHT = 1.0e-4       # weight on ‖z − z_ref‖² (Q diagonal); 0 turns off tracking entirely
+DEFAULT_SETPOINT_PULL_WEIGHT = 0.0     # kept for internal back-compat; use DEFAULT_TRACKING_WEIGHT
+DEFAULT_TRACKING_WEIGHT = 0.0          # weight on ‖z − z_ref‖² (Q diagonal); 0 = zone control (comfort-corridor only)
 DEFAULT_HORIZON = 100                  # 100 steps ahead (~25 h at 15-min steps)
 DEFAULT_UPDATE_INTERVAL = 900          # OCP step / ZOH duration = coordinator / EKF update period (seconds)
 DEFAULT_EFFICIENCY = 1.0

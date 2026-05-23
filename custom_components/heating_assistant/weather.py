@@ -120,6 +120,7 @@ def parse_forecast_field(
     fallback_field: Optional[str] = None,
     fallback_coerce: Optional[Callable[[Any], Optional[float]]] = None,
     now: Optional[datetime] = None,
+    current_value: Optional[float] = None,
 ) -> Optional[List[float]]:
     """Parse a forecast field into ``horizon`` values interpolated to MPC steps.
 
@@ -144,6 +145,14 @@ def parse_forecast_field(
         before discarding the entry.
     now : datetime, optional
         Reference time for interpolation.  Defaults to current UTC.
+    current_value : float, optional
+        Observed value at ``now``.  When provided it is prepended to the
+        forecast entries as an anchor point at ``t = now``, so the
+        interpolated series starts from the current observation and ramps
+        smoothly toward the first forecast entry rather than jumping.
+        When no forecast entries are available but ``current_value`` is
+        given, the function returns a persistence forecast
+        (all steps = ``current_value``) instead of ``None``.
 
     Returns
     -------
@@ -154,6 +163,7 @@ def parse_forecast_field(
     if now is None:
         now = datetime.now(tz=timezone.utc)
 
+    now_ts = now.timestamp()
     entries: List[Tuple[float, float]] = []
     for entry in forecast_data:
         dt_str = entry.get("datetime")
@@ -180,12 +190,18 @@ def parse_forecast_field(
         except (ValueError, TypeError):
             continue
 
+    # Anchor at the current observation so the interpolated series starts
+    # from the measured value and ramps smoothly into the forecast rather
+    # than jumping at t=now.  When no forecast entries were parsed, this
+    # single point turns the function into a persistence forecast.
+    if current_value is not None:
+        entries.append((now_ts, float(current_value)))
+
     if not entries:
         return None
 
     entries.sort(key=lambda e: e[0])
 
-    now_ts = now.timestamp()
     return [
         interpolate_forecast(entries, now_ts + dt * (k + 1)) for k in range(horizon)
     ]
@@ -213,12 +229,21 @@ def parse_cloud_forecast(
     horizon: int,
     dt: float,
     now: Optional[datetime] = None,
+    current_cloud_cover: Optional[float] = None,
 ) -> Optional[List[float]]:
     """Parse raw weather forecast entries into interpolated horizon cloud-cover.
 
     Returns fractions in [0, 1].  Prefers the numeric ``cloud_coverage`` field;
     falls back to mapping the per-entry ``condition`` string when the
     percentage is missing on individual entries.
+
+    Parameters
+    ----------
+    current_cloud_cover : float, optional
+        Observed cloud-cover fraction at ``now``.  When provided it is
+        prepended as an anchor so the series transitions smoothly from the
+        current observation.  When no forecast entries are available it
+        produces a persistence forecast instead of returning ``None``.
     """
     return parse_forecast_field(
         forecast_data,
@@ -229,6 +254,7 @@ def parse_cloud_forecast(
         fallback_field="condition",
         fallback_coerce=_coerce_condition,
         now=now,
+        current_value=current_cloud_cover,
     )
 
 
