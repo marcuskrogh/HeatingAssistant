@@ -579,10 +579,14 @@ async def _async_auto_write_default_dashboard(
             hass, version=1, key=f"{DOMAIN}_dashboard_marker_{entry.entry_id}"
         )
         marker = await marker_store.async_load()
+        config_horizon = coordinator._horizon
+        config_dt = coordinator.dt
         if (
             marker
             and marker.get("written_at")
             and marker.get("format_version", 1) >= _DASHBOARD_FORMAT_VERSION
+            and marker.get("horizon") == config_horizon
+            and marker.get("dt") == config_dt
         ):
             return marker.get("path") if marker.get("path") else None
 
@@ -594,6 +598,8 @@ async def _async_auto_write_default_dashboard(
                     "written_at": datetime.now(tz=timezone.utc).isoformat(),
                     "path": target,
                     "format_version": _DASHBOARD_FORMAT_VERSION,
+                    "horizon": config_horizon,
+                    "dt": config_dt,
                 }
             )
             return target
@@ -613,6 +619,8 @@ async def _async_auto_write_default_dashboard(
                 "written_at": datetime.now(tz=timezone.utc).isoformat(),
                 "path": target,
                 "format_version": _DASHBOARD_FORMAT_VERSION,
+                "horizon": config_horizon,
+                "dt": config_dt,
             }
         )
 
