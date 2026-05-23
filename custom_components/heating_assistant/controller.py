@@ -1039,23 +1039,32 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         p: np.ndarray,
         t: float,
     ) -> np.ndarray:
-        """Steady-state input that would maintain the current temperature.
+        """Steady-state input that would maintain the temperature in x.
 
         Solves f_T(x, u_eq, d) = 0 for the temperature block by inverting
         each source's power function exactly:
         - Cooling-capable sources: closed-form sigmoid inverse.
         - Heating-only sources: linear inverse.
 
-        The result is clipped to each source's [u_min, u_max].  Filtered
-        sources (τ_em > 0) are handled by holding φ (the filter state) as
-        the equilibrium commanded input because u_eq = φ in steady state.
+        The result is clipped to each source's [u_min, u_max].
 
-        This is used as the QP linearisation point instead of u_prev so that
-        the sigmoid's local gradient matches the expected operating region,
-        reducing model mismatch during large transients.
+        For filtered sources (τ_em > 0) the equilibrium satisfies φ_ss = u_eq
+        (the filter state equals the commanded input at steady state).  The
+        same inversion logic is used as for un-filtered sources; the returned
+        u_eq[j] is both the commanded input and the equilibrium filter state.
+        Callers that build the operating-point state x_ss should set
+        x_ss[n + k_filter] = u_eq[j] for each filtered source j.
+
+        This is used as the QP linearisation point so that the sigmoid's
+        local gradient matches the expected operating region, reducing model
+        mismatch during large transients.
         """
         # Temperature tendency at zero commanded input captures net heat loss
         # (structural exchange + disturbances, no heat-source contribution).
+        # For filtered sources the heat contribution in f() uses the filter
+        # state φ (from x), not u.  With φ = 0 at the setpoint, drift_zero
+        # gives the full q_req each source must supply — correct for both
+        # current-state and setpoint-state calls.
         u_zero = np.zeros(self.nu, dtype=float)
         drift_zero = self.f(x, u_zero, d, p, t)
 
@@ -1067,15 +1076,6 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         u_eq = np.zeros(self.nu, dtype=float)
         for j, src in enumerate(self._sources):
             i = self._src_room_idx[j]
-            k_filter = self._filter_idx_for_source[j]
-
-            if k_filter >= 0:
-                # Filtered source: at steady state u_eq = φ, so use the
-                # current filter state as the equilibrium commanded input.
-                phi = float(x[n + k_filter])
-                u_eq[j] = max(-1.0 if self._src_can_cool[j] else 0.0,
-                              min(1.0, phi))
-                continue
 
             scale = heater_scales[j] if heater_scales is not None else 1.0
             # Required power [W] to neutralise the net heat loss in this room.
@@ -1179,20 +1179,28 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
         x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
 
-        x_ss = x_hat.copy()
-        # Use the equilibrium input (maintains current temperature) rather than
-        # u_prev as the linearisation point.  At u_prev = 0 (just left off
-        # mode) the sigmoid's local gradient is ~2× the true average gain over
-        # [0, 1], causing the QP to systematically under-apply heating and
-        # producing oscillatory transient behaviour.  u_eq centres the
-        # linearisation on the physical operating point.
+        # Use the setpoint as the linearisation operating point rather than the
+        # current estimated state.  During transients (cold start, post-off
+        # recovery) x_hat can be far from the setpoint, causing the sigmoid's
+        # local gradient to be evaluated at an extreme and unrepresentative
+        # point.  Linearising at the setpoint gives stable Jacobians regardless
+        # of transient magnitude.
+        n = self._model._n_rooms
+        x_ss = self._x_ref_abs.copy()          # setpoint temperatures; φ = 0
         u_ss = self._model.compute_u_eq(x_ss, d_now, p_, t)
+        # Align filter states to their equilibrium: at steady state φ_ss = u_ss.
+        for j in range(self._model.nu):
+            k_f = self._model._filter_idx_for_source[j]
+            if k_f >= 0:
+                x_ss[n + k_f] = u_ss[j]
         d_ss = d_now.copy()
 
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
         disc = discretize_cd_linearization(lin, self._dt)
 
-        x_ref_dev = self._x_ref_abs - x_ss
+        # x_ss IS the setpoint; driving deviation to zero is identical to
+        # tracking x_ref_abs in absolute coordinates.
+        x_ref_dev = np.zeros(self._model.nx, dtype=float)
         self._lin_model.update(
             Ad=disc["Ad"],
             Bd=disc["Bd"],
@@ -1216,11 +1224,12 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         self._last_D_dev = D_dev_np.copy()
         D_dev = _cvxmat(D_dev_np.reshape(-1).tolist(), (self._N * self._model.nd, 1))
 
-        x0_dev = np.zeros(self._model.nx, dtype=float)
-        # Express previous applied input as a deviation from the new u_ss so
-        # the rate-of-move penalty (S term) correctly discourages large jumps
-        # from the last physical action, even though the linearisation point
-        # has changed.
+        # Non-zero initial condition: the full tracking error from the setpoint.
+        # Combined with x_ref_dev = 0, the QP drives x_hat toward x_ss over
+        # the horizon.  The previous input is expressed as a deviation from the
+        # new u_ss so the rate-of-move (S) penalty correctly discourages large
+        # jumps from the last physical action.
+        x0_dev = (x_hat - x_ss).astype(float)
         u_prev_dev_np = self._u_prev - u_ss
         u_prev_dev = _cvxmat(u_prev_dev_np.tolist(), (self._model.nu, 1))
 

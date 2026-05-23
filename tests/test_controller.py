@@ -1461,3 +1461,59 @@ class TestLinearisationBoundsClipping:
             assert p >= -q_cool_max * 1.01, (
                 f"Step {k}: cooling power {p:.0f} W below physical min {-q_cool_max:.0f} W"
             )
+
+
+class TestSetpointLinearisation:
+    """The MPC must linearise at the setpoint, not the current estimated state.
+
+    This matters most during transients: a cold room (T_hat << T_set) would
+    cause the sigmoid to be evaluated at an extreme point if we linearised at
+    T_hat, giving wrong Jacobians and oscillatory recovery.  Linearising at
+    the setpoint gives stable Jacobians regardless of transient magnitude.
+    """
+
+    def _make_ctrl(self, room_temp=10.0, setpoint=21.0, horizon=4):
+        room = Room(
+            "living_room",
+            thermal_mass=5_000_000.0,
+            r_external=0.05,
+            connections=[],
+            temperature=room_temp,
+            setpoint=setpoint,
+        )
+        model = HouseModel([room])
+        hp = HeatPump("hp", "living_room", max_power=6000.0, cop_rated=3.5,
+                      cop_temp_ref=7.0, cooling_cop=2.5)
+        ctrl = HeatingMPCController(model, [hp], horizon=horizon, dt=900)
+        return ctrl
+
+    def test_linearisation_point_is_setpoint_temperature(self):
+        """After a step, the lin-model operating-point temperature must equal
+        the setpoint, not the current (cold) room temperature."""
+        ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=-5.0, now=now)
+        x_ss = ctrl._mpc._lin_model.x_ss
+        # Temperature component of the operating point must be the setpoint.
+        assert x_ss[0] == pytest.approx(21.0, abs=0.1), (
+            f"x_ss[0] = {x_ss[0]:.2f} should be setpoint 21.0, not room temp 5.0"
+        )
+
+    def test_cold_room_requests_near_max_heating(self):
+        """A very cold room (10 °C below setpoint) should receive near-maximum
+        heating on the first step, not the attenuated output caused by a bad
+        linearisation at the cold operating point."""
+        ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=-5.0, now=now)
+        u_hp = actions["hp"]
+        assert u_hp > 0.7, (
+            f"Expected near-max heating for cold room (u > 0.7), got u = {u_hp:.3f}"
+        )
+
+    def test_x_ref_is_unchanged_by_setpoint_linearisation(self):
+        """The MPC's x_ref must remain equal to the setpoints array (not x_hat)."""
+        ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=-5.0, now=now)
+        assert ctrl._mpc.x_ref[0] == pytest.approx(21.0)
