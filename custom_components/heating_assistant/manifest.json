@@ -8,7 +8,7 @@
     "numpy>=1.21.0",
     "scipy>=1.9.0",
     "cvxopt>=1.3.0",
-    "mbc @ git+https://github.com/marcuskrogh/mbc.git@d668cf30870966ad2eed5df8b65c3976b69b40c0"
+    "mbc @ git+https://github.com/marcuskrogh/mbc.git@cc1598d5bb4bd157dca6cca114910aa178db2cbe"
   ],
   "dependencies": [],
   "codeowners": ["@marcuskrogh"],
