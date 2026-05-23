@@ -154,6 +154,19 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # ---------------------------------------------------------------------------
 
 
+def _get_entity_selector_field(domain: str, multiple: bool = True):
+    """Create an entity selector field or fallback to string for compatibility."""
+    try:
+        return selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain=domain,
+                multiple=multiple,
+            )
+        )
+    except (AttributeError, ImportError):
+        return str
+
+
 def _room_form_schema(
     *,
     name_default: str = "",
@@ -176,25 +189,11 @@ def _room_form_schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
             vol.Optional(
-                CONF_TEMP_SENSORS,
-                default=sensors_default,
-                description={"suggested_value": sensors_default}
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor",
-                    multiple=True,
-                )
-            ),
+                CONF_TEMP_SENSORS, default=sensors_default
+            ): _get_entity_selector_field("sensor", multiple=True),
             vol.Optional(
-                CONF_WINDOW_SENSORS,
-                default=window_sensors_default,
-                description={"suggested_value": window_sensors_default}
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="binary_sensor",
-                    multiple=True,
-                )
-            ),
+                CONF_WINDOW_SENSORS, default=window_sensors_default
+            ): _get_entity_selector_field("binary_sensor", multiple=True),
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
