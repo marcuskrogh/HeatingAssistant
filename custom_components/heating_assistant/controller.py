@@ -88,7 +88,7 @@ def _select_cloud_for_step(
 from .const import MPC_STATS_BUFFER_SIZE
 
 # ── Import model-based control components from mbc ────────────────────────────
-from cvxopt import matrix as _cvxmat
+from cvxopt import matrix as _cvxmat, solvers as _cvxsolvers
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
 from mbc.control import (
@@ -96,6 +96,14 @@ from mbc.control import (
     linearize_cd_model,
     discretize_cd_linearization,
 )
+from mbc.control.ocp import (
+    OptimalControlProblem,
+    _block_diag,
+    _block_diag_terminal,
+    _tile_column,
+    _build_D_diff,
+)
+from mbc._utils import _eye, _zeros, _np_to_cvx
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -1155,6 +1163,178 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         return self.update(y, u, d, p, mask=mask)
 
 
+# ── Absolute-input OCP ───────────────────────────────────────────────────────
+
+class _AbsoluteInputOCP(OptimalControlProblem):
+    """OCP that penalises the absolute input ‖u_abs‖²_R instead of ‖u_dev‖²_R.
+
+    In deviation coordinates u_dev = u_abs − u_ss, the cost term
+    ‖u_dev + u_ss‖²_R = ‖u_abs‖²_R expands to
+
+        ‖u_dev‖²_R  +  2·u_ss'·R·u_dev  +  ‖u_ss‖²_R
+
+    The Hessian (R_bar) is unchanged.  The linear correction
+    ``R_bar · tile(u_ss, N)`` is added to the QP gradient f_u before
+    solving so the dynamics linearisation at (x_ss, u_ss, d_ss) is fully
+    preserved.  Pass ``u_ss`` to :meth:`solve`; if omitted the call falls
+    back to the standard parent behaviour.
+    """
+
+    def solve(
+        self,
+        x0,
+        D,
+        x_ref,
+        u_prev=None,
+        u_ss: Optional[np.ndarray] = None,
+    ):
+        if u_ss is None or np.allclose(u_ss, 0.0):
+            return super().solve(x0, D, x_ref, u_prev)
+
+        N = self._N
+        nx = self._model.nx
+        nu = self._model.nu
+        nd = self._model.nd
+        Cz = _np_to_cvx(self._model.Cz)
+        nz = Cz.size[0]
+
+        if isinstance(x0, np.ndarray):
+            x0 = _np_to_cvx(x0.reshape(-1, 1))
+        if isinstance(x_ref, np.ndarray):
+            x_ref = _np_to_cvx(x_ref.reshape(-1, 1))
+
+        Ad = _np_to_cvx(self._model.Ad)
+        Bd = _np_to_cvx(self._model.Bd)
+        Ed = _np_to_cvx(self._model.Ed)
+
+        # State-prediction matrices  X = Ψ x₀ + Γ U + Λ D
+        Ad_pow = [_eye(nx)]
+        for _ in range(N):
+            Ad_pow.append(Ad * Ad_pow[-1])
+
+        Psi    = _zeros(N * nx, nx)
+        Gamma  = _zeros(N * nx, N * nu)
+        Lambda = _zeros(N * nx, N * nd)
+
+        for k in range(N):
+            for i in range(nx):
+                for j in range(nx):
+                    Psi[k * nx + i, j] = Ad_pow[k + 1][i, j]
+            for j_step in range(k + 1):
+                Ak_j = Ad_pow[k - j_step]
+                AB = Ak_j * Bd
+                AE = Ak_j * Ed
+                for i in range(nx):
+                    for jj in range(nu):
+                        Gamma[k * nx + i, j_step * nu + jj] = AB[i, jj]
+                    for jj in range(nd):
+                        Lambda[k * nx + i, j_step * nd + jj] = AE[i, jj]
+
+        Cz_bar = _block_diag(Cz, N)
+        CG = Cz_bar * Gamma
+        CP = Cz_bar * Psi
+        CL = Cz_bar * Lambda
+
+        Q_bar = _block_diag_terminal(self._Q, self._P, N)
+        R_bar = _block_diag(self._R, N)
+
+        z_ref    = Cz * x_ref
+        z_ref_bar = _tile_column(z_ref, N)
+        Z_free   = CP * x0 + CL * D
+        e_free   = Z_free - z_ref_bar
+
+        H_uu = CG.T * Q_bar * CG + R_bar
+        f_u  = CG.T * Q_bar * e_free
+
+        # Linear correction: penalise ‖u_dev + u_ss‖²_R instead of ‖u_dev‖²_R.
+        # Expanding gives the extra linear term 2·u_ss'·R·u_dev, which adds
+        # R·u_ss to every nu-block of the N·nu gradient vector.
+        R_u_ss = self._R * _np_to_cvx(u_ss.reshape(-1, 1))  # (nu, 1)
+        for k in range(N):
+            for i in range(nu):
+                f_u[k * nu + i] = f_u[k * nu + i] + R_u_ss[i]
+
+        if self._S is not None:
+            if u_prev is None:
+                u_prev = _zeros(nu, 1)
+            d0_shift = _zeros(N * nu, 1)
+            d0_shift[:nu] = -u_prev
+            H_uu += self._D_diff.T * self._S_bar * self._D_diff
+            f_u  += self._D_diff.T * self._S_bar * d0_shift
+
+        # Full QP decision variable Z = [U; ε]
+        n_U   = N * nu
+        n_eps = N * nz
+        n_Z   = n_U + n_eps
+
+        H = _zeros(n_Z, n_Z)
+        for i in range(n_U):
+            for j in range(n_U):
+                H[i, j] = H_uu[i, j]
+        for i in range(n_eps):
+            H[n_U + i, n_U + i] = self._rho
+
+        f = _zeros(n_Z, 1)
+        for i in range(n_U):
+            f[i] = f_u[i]
+
+        # Input box and soft output constraints (identical to parent)
+        u_min_np, u_max_np = self._model.u_bounds
+        u_min_tiled = _tile_column(_np_to_cvx(u_min_np.reshape(-1, 1)), N)
+        u_max_tiled = _tile_column(_np_to_cvx(u_max_np.reshape(-1, 1)), N)
+
+        z_min = z_ref - _cvxmat(self._y_offset, (nz, 1))
+        z_max = z_ref + _cvxmat(self._y_offset, (nz, 1))
+        z_min_tiled = _tile_column(z_min, N)
+        z_max_tiled = _tile_column(z_max, N)
+
+        n_ineq = 2 * n_U + 2 * n_eps + n_eps
+        G_qp = _zeros(n_ineq, n_Z)
+        h_qp = _zeros(n_ineq, 1)
+
+        row = 0
+        for i in range(n_U):
+            G_qp[row + i, i] = -1.0
+            h_qp[row + i] = -u_min_tiled[i]
+        row += n_U
+        for i in range(n_U):
+            G_qp[row + i, i] = 1.0
+            h_qp[row + i] = u_max_tiled[i]
+        row += n_U
+        for i in range(n_eps):
+            for j in range(n_U):
+                G_qp[row + i, j] = -CG[i, j]
+            G_qp[row + i, n_U + i] = -1.0
+            h_qp[row + i] = -z_min_tiled[i] + Z_free[i]
+        row += n_eps
+        for i in range(n_eps):
+            for j in range(n_U):
+                G_qp[row + i, j] = CG[i, j]
+            G_qp[row + i, n_U + i] = -1.0
+            h_qp[row + i] = z_max_tiled[i] - Z_free[i]
+        row += n_eps
+        for i in range(n_eps):
+            G_qp[row + i, n_U + i] = -1.0
+            h_qp[row + i] = 0.0
+
+        sol = _cvxsolvers.qp(H, f, G_qp, h_qp)
+
+        if sol["status"] != "optimal":
+            import warnings
+            warnings.warn(
+                f"_AbsoluteInputOCP.solve: QP solver returned status "
+                f"'{sol['status']}'; returning zero inputs as fallback.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            U_flat = _zeros(n_U, 1)
+        else:
+            U_flat = sol["x"][:n_U]
+
+        X_flat = Psi * x0 + Gamma * U_flat + Lambda * D
+        return U_flat, X_flat
+
+
 # ── Forecast-aware MPC controller ───────────────────────────────────────────
 
 class _ForecastAwareMPCController(CDLinearizedMPCController):
@@ -1164,7 +1344,26 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
     When ``D_forecast`` (shape ``(N, nd)``) is passed to ``step()``, the
     deviation disturbance fed to the QP is ``D_dev[k] = D_forecast[k] - d_ss``
     instead of the constant-hold zero vector.
+
+    Uses ``_AbsoluteInputOCP`` so the R-cost penalises the absolute input
+    ``‖u_abs‖²_R`` rather than the deviation ``‖u_dev‖²_R``.  With Q = 0 this
+    gives pure zone control: the minimum-cost inside the comfort corridor is
+    u_abs = 0 (no heating or cooling).
     """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        ocp = self._ocp
+        self._ocp = _AbsoluteInputOCP(
+            model=self._lin_model,
+            N=self._N,
+            Q=ocp._Q,
+            R=ocp._R,
+            P=ocp._P,
+            S=ocp._S,
+            rho=ocp._rho,
+            y_offset=ocp._y_offset,
+        )
 
     def step(
         self,
@@ -1181,20 +1380,19 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
         x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
 
-        # Use the setpoint as the state linearisation point for stability of the
-        # Jacobians during transients (see original comment above).
-        # u_ss is set to ZERO rather than the equilibrium input.  With u_dev =
-        # u_abs − u_ss = u_abs − 0 = u_abs, the R-cost ‖u_dev‖²_R becomes
-        # ‖u_abs‖²_R: the energy penalty is on the absolute input, not the
-        # deviation from the equilibrium.  With Q = 0 this gives pure zone
-        # control — the minimum cost inside the comfort corridor is u_abs = 0.
-        # The linearisation mismatch (f(x_ss, 0, d_ss) ≠ 0 because zero input
-        # does not hold the room at setpoint) is small relative to the EKF
-        # correction bandwidth; D_dev still correctly propagates forecast changes
-        # in solar/outdoor temperature.
+        # Linearise at the equilibrium (x_ss = setpoint, u_ss = u_eq, d_ss = d_now)
+        # so the Jacobians are accurate during transients.  _AbsoluteInputOCP adds
+        # the linear correction R·u_ss to the QP gradient so the R-cost penalises
+        # ‖u_dev + u_ss‖²_R = ‖u_abs‖²_R instead of ‖u_dev‖²_R (which would
+        # drive u_abs → u_ss, not zero).  With Q = 0 this gives pure zone control.
         n = self._model._n_rooms
-        x_ss = self._x_ref_abs.copy()          # setpoint temperatures; φ = 0
-        u_ss = np.zeros(self._model.nu, dtype=float)
+        x_ss = self._x_ref_abs.copy()          # setpoint temperatures
+        u_ss = self._model.compute_u_eq(x_ss, d_now, p_, t)
+        # At equilibrium each filtered source's lag state equals u_eq[j].
+        for j in range(self._model.nu):
+            k_f = self._model._filter_idx_for_source[j]
+            if k_f >= 0:
+                x_ss[n + k_f] = u_ss[j]
         d_ss = d_now.copy()
 
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
@@ -1228,9 +1426,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
 
         # Non-zero initial condition: the full tracking error from the setpoint.
         # Combined with x_ref_dev = 0, the QP drives x_hat toward x_ss over
-        # the horizon.  With u_ss = 0, u_prev_dev = u_prev (absolute), so the
-        # S-penalty ‖u[0] − u_prev‖²_S discourages large jumps from the last
-        # physical action in absolute terms.
+        # the horizon.  u_prev_dev = u_prev − u_ss converts the previous
+        # absolute action to deviation coordinates for the S-penalty.
         x0_dev = (x_hat - x_ss).astype(float)
         u_prev_dev_np = self._u_prev - u_ss
         u_prev_dev = _cvxmat(u_prev_dev_np.tolist(), (self._model.nu, 1))
@@ -1240,6 +1437,7 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             D=D_dev,
             x_ref=x_ref_dev,
             u_prev=u_prev_dev,
+            u_ss=u_ss,
         )
 
         U_dev_np = np.array(list(U_dev), dtype=float).reshape(self._N, self._model.nu)
@@ -1248,13 +1446,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         U_abs = U_dev_np + u_ss.reshape(1, -1)
         X_abs = X_dev_np + x_ss.reshape(1, -1)
 
-        # Clip the entire predicted trajectory to hard input bounds.  The QP
-        # encodes deviation bounds relative to the initial u_ss (= 0 at
-        # construction) and does not update them when u_ss changes; combined
-        # with u_ss ≠ 0 this can produce U_abs values outside [u_min, u_max]
-        # for all horizon steps.  Using self._model.u_bounds (the authoritative
-        # physical limits) rather than self._lin_model.abs_u_bounds avoids
-        # the stale-offset issue.
+        # Safety clip: QP enforces deviation bounds shifted by u_ss; clamp with
+        # absolute physical limits as a guard against numerical drift.
         u_min_arr, u_max_arr = self._model.u_bounds
         U_abs = np.clip(U_abs, u_min_arr.reshape(1, -1), u_max_arr.reshape(1, -1))
         u_abs = U_abs[0].copy()
