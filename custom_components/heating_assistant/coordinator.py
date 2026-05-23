@@ -972,7 +972,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #     and cloud-cover (used to attenuate the clear-sky solar model)
             outdoor_forecast = await self._async_read_weather_forecast()
             cloud_cover_now = self._read_cloud_cover_now()
-            cloud_forecast = await self._async_read_cloud_forecast()
+            cloud_forecast = await self._async_read_cloud_forecast(cloud_cover_now=cloud_cover_now)
 
             # 2c. Read current wind speed for the Sherman–Grimsrud
             #     infiltration overlay (Phase 1 C1).  When the weather
@@ -1192,12 +1192,21 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             return None
         return _weather.parse_temperature_forecast(forecast_data, self._horizon, self.dt)
 
-    async def _async_read_cloud_forecast(self) -> Optional[List[float]]:
-        """Read cloud-cover forecast (fraction in [0, 1]) from the weather entity."""
+    async def _async_read_cloud_forecast(
+        self, cloud_cover_now: Optional[float] = None
+    ) -> Optional[List[float]]:
+        """Read cloud-cover forecast (fraction in [0, 1]) from the weather entity.
+
+        When ``cloud_cover_now`` is provided it is used as an anchor in the
+        interpolation (smooth ramp from the current observation to the first
+        forecast entry) and as a persistence fallback when no forecast data
+        is available.
+        """
         forecast_data = await self._async_get_forecast_entries()
-        if not forecast_data:
-            return None
-        return _weather.parse_cloud_forecast(forecast_data, self._horizon, self.dt)
+        return _weather.parse_cloud_forecast(
+            forecast_data or [], self._horizon, self.dt,
+            current_cloud_cover=cloud_cover_now,
+        )
 
     async def _async_get_forecast_entries(self) -> Optional[list]:
         """Fetch raw forecast entries from the configured weather entity and
