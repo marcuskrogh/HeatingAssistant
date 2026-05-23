@@ -10,7 +10,6 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 
 from ._options_flow import (
@@ -125,8 +124,8 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
                 vol.Required(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
-                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): _get_entity_validator(multiple=False),
-                vol.Optional(CONF_WEATHER_ENTITY, default=""): _get_entity_validator(multiple=False),
+                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): str,
+                vol.Optional(CONF_WEATHER_ENTITY, default=""): str,
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
@@ -154,8 +153,8 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # ---------------------------------------------------------------------------
 
 
-def _normalize_to_list(value: Any) -> list:
-    """Convert entity input to list format."""
+def _normalize_entity_ids_to_list(value: Any) -> list:
+    """Convert comma-separated string to list of entity IDs."""
     if isinstance(value, list):
         return value
     if isinstance(value, str):
@@ -165,27 +164,13 @@ def _normalize_to_list(value: Any) -> list:
     return []
 
 
-def _normalize_to_string(value: Any) -> str:
-    """Convert entity input to string format."""
+def _format_entity_ids_for_display(value: Any) -> str:
+    """Convert list of entity IDs to comma-separated string for display."""
     if isinstance(value, list):
         return ", ".join(value) if value else ""
-    return str(value).strip()
-
-
-def _get_entity_validator(multiple: bool = True):
-    """Get a validator for entity input that handles both lists and strings."""
-    def validator(value: Any) -> Any:
-        """Validate and normalize entity input."""
-        if isinstance(value, list):
-            return value
-        if isinstance(value, str):
-            if not value.strip():
-                return [] if multiple else ""
-            if multiple:
-                return [e.strip() for e in value.split(",")]
-            return value.strip()
-        return [] if multiple else ""
-    return validator
+    if isinstance(value, str):
+        return value
+    return ""
 
 
 def _room_form_schema(
@@ -207,18 +192,14 @@ def _room_form_schema(
     sensible behaviour out of the box.
     """
     # Convert defaults to string format for display in form
-    sensors_default = _normalize_to_string(sensors_default or [])
-    window_sensors_default = _normalize_to_string(window_sensors_default or [])
+    sensors_default = _format_entity_ids_for_display(sensors_default or [])
+    window_sensors_default = _format_entity_ids_for_display(window_sensors_default or [])
 
     return vol.Schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
-            vol.Optional(
-                CONF_TEMP_SENSORS, default=sensors_default
-            ): _get_entity_validator(multiple=True),
-            vol.Optional(
-                CONF_WINDOW_SENSORS, default=window_sensors_default
-            ): _get_entity_validator(multiple=True),
+            vol.Optional(CONF_TEMP_SENSORS, default=sensors_default): str,
+            vol.Optional(CONF_WINDOW_SENSORS, default=window_sensors_default): str,
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
@@ -271,13 +252,12 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self._initialized: bool = False
 
     @staticmethod
-    def _normalize_entity_list(value: Any) -> Any:
-        """Normalize entity list from either selector (list) or string format.
+    def _normalize_entity_list(value: Any) -> list:
+        """Normalize entity list from string or list format to list.
 
-        EntitySelector or form input may return a list or comma-separated string.
-        Always returns a list for storage.
+        Accepts comma-separated strings or lists, always returns a list for storage.
         """
-        return _normalize_to_list(value)
+        return _normalize_entity_ids_to_list(value)
 
     # ------------------------------------------------------------------
     # Main menu
@@ -320,11 +300,11 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_OUTDOOR_TEMP_ENTITY,
                     default=current.get(CONF_OUTDOOR_TEMP_ENTITY, ""),
-                ): _get_entity_validator(multiple=False),
+                ): str,
                 vol.Optional(
                     CONF_WEATHER_ENTITY,
                     default=current.get(CONF_WEATHER_ENTITY, ""),
-                ): _get_entity_validator(multiple=False),
+                ): str,
                 vol.Optional(
                     CONF_UPDATE_INTERVAL,
                     default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
