@@ -1181,20 +1181,20 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
         x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
 
-        # Use the setpoint as the linearisation operating point rather than the
-        # current estimated state.  During transients (cold start, post-off
-        # recovery) x_hat can be far from the setpoint, causing the sigmoid's
-        # local gradient to be evaluated at an extreme and unrepresentative
-        # point.  Linearising at the setpoint gives stable Jacobians regardless
-        # of transient magnitude.
+        # Use the setpoint as the state linearisation point for stability of the
+        # Jacobians during transients (see original comment above).
+        # u_ss is set to ZERO rather than the equilibrium input.  With u_dev =
+        # u_abs − u_ss = u_abs − 0 = u_abs, the R-cost ‖u_dev‖²_R becomes
+        # ‖u_abs‖²_R: the energy penalty is on the absolute input, not the
+        # deviation from the equilibrium.  With Q = 0 this gives pure zone
+        # control — the minimum cost inside the comfort corridor is u_abs = 0.
+        # The linearisation mismatch (f(x_ss, 0, d_ss) ≠ 0 because zero input
+        # does not hold the room at setpoint) is small relative to the EKF
+        # correction bandwidth; D_dev still correctly propagates forecast changes
+        # in solar/outdoor temperature.
         n = self._model._n_rooms
         x_ss = self._x_ref_abs.copy()          # setpoint temperatures; φ = 0
-        u_ss = self._model.compute_u_eq(x_ss, d_now, p_, t)
-        # Align filter states to their equilibrium: at steady state φ_ss = u_ss.
-        for j in range(self._model.nu):
-            k_f = self._model._filter_idx_for_source[j]
-            if k_f >= 0:
-                x_ss[n + k_f] = u_ss[j]
+        u_ss = np.zeros(self._model.nu, dtype=float)
         d_ss = d_now.copy()
 
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
@@ -1228,9 +1228,9 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
 
         # Non-zero initial condition: the full tracking error from the setpoint.
         # Combined with x_ref_dev = 0, the QP drives x_hat toward x_ss over
-        # the horizon.  The previous input is expressed as a deviation from the
-        # new u_ss so the rate-of-move (S) penalty correctly discourages large
-        # jumps from the last physical action.
+        # the horizon.  With u_ss = 0, u_prev_dev = u_prev (absolute), so the
+        # S-penalty ‖u[0] − u_prev‖²_S discourages large jumps from the last
+        # physical action in absolute terms.
         x0_dev = (x_hat - x_ss).astype(float)
         u_prev_dev_np = self._u_prev - u_ss
         u_prev_dev = _cvxmat(u_prev_dev_np.tolist(), (self._model.nu, 1))
