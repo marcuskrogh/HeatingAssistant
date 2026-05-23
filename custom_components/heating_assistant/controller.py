@@ -106,6 +106,26 @@ from .thermal_model import _SG_FACTOR_TYPICAL
 
 _LOGGER = logging.getLogger(__name__)
 
+# ── Patch mbc._utils._np_to_cvx ───────────────────────────────────────────────
+# cvxopt stores matrices in column-major (Fortran) order.  When matrix() is
+# given a list-of-lists it treats each sub-list as a COLUMN, so passing
+# a.tolist() (list of rows) transposes the matrix.  Flatten in 'F' order to
+# supply elements column-by-column as cvxopt expects.
+# This patches both the canonical location and the name already imported into
+# mbc.control.ocp so all existing call sites are corrected.
+def _np_to_cvx_fixed(a: np.ndarray):
+    from cvxopt import matrix as _cvx_matrix
+    if a.ndim == 1:
+        return _cvx_matrix(a.tolist(), (len(a), 1), tc="d")
+    rows, cols = a.shape
+    return _cvx_matrix(a.flatten(order="F").tolist(), (rows, cols), tc="d")
+
+import mbc._utils as _mbc_utils
+import mbc.control.ocp as _mbc_ocp
+_mbc_utils._np_to_cvx = _np_to_cvx_fixed
+_mbc_ocp._np_to_cvx = _np_to_cvx_fixed
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 # ============================================================
 # House-heating SDE model
