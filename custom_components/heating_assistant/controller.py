@@ -1032,6 +1032,80 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                 powers[src.room] += src.thermal_power(u_j, outdoor_temp)
         return powers
 
+    def compute_u_eq(
+        self,
+        x: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Steady-state input that would maintain the current temperature.
+
+        Solves f_T(x, u_eq, d) = 0 for the temperature block by inverting
+        each source's power function exactly:
+        - Cooling-capable sources: closed-form sigmoid inverse.
+        - Heating-only sources: linear inverse.
+
+        The result is clipped to each source's [u_min, u_max].  Filtered
+        sources (τ_em > 0) are handled by holding φ (the filter state) as
+        the equilibrium commanded input because u_eq = φ in steady state.
+
+        This is used as the QP linearisation point instead of u_prev so that
+        the sigmoid's local gradient matches the expected operating region,
+        reducing model mismatch during large transients.
+        """
+        # Temperature tendency at zero commanded input captures net heat loss
+        # (structural exchange + disturbances, no heat-source contribution).
+        u_zero = np.zeros(self.nu, dtype=float)
+        drift_zero = self.f(x, u_zero, d, p, t)
+
+        outdoor_temp = float(d[0])
+        n = self._n_rooms
+        theta = p if len(p) > 0 else self._theta
+        heater_scales = self._get_heater_scales(theta)
+
+        u_eq = np.zeros(self.nu, dtype=float)
+        for j, src in enumerate(self._sources):
+            i = self._src_room_idx[j]
+            k_filter = self._filter_idx_for_source[j]
+
+            if k_filter >= 0:
+                # Filtered source: at steady state u_eq = φ, so use the
+                # current filter state as the equilibrium commanded input.
+                phi = float(x[n + k_filter])
+                u_eq[j] = max(-1.0 if self._src_can_cool[j] else 0.0,
+                              min(1.0, phi))
+                continue
+
+            scale = heater_scales[j] if heater_scales is not None else 1.0
+            # Required power [W] to neutralise the net heat loss in this room.
+            # drift_zero[i] < 0 means the room is losing heat → q_req > 0.
+            q_req = -drift_zero[i] * self._C_cap[i]
+
+            if self._src_can_cool[j]:
+                q_heat = src.thermal_power(1.0, outdoor_temp)
+                q_cool = src._q_cool_const
+                if q_heat > 0.0 and q_cool > 0.0:
+                    k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
+                    offset_sig = math.log(q_cool / q_heat)
+                    # Clamp to the feasible power range then invert the sigmoid.
+                    q_clamped = max(-q_cool, min(q_heat, q_req / scale))
+                    sig_target = (q_clamped + q_cool) / (q_heat + q_cool)
+                    sig_target = max(1e-9, min(1.0 - 1e-9, sig_target))
+                    eff_u_eq = (math.log(sig_target / (1.0 - sig_target)) - offset_sig) / k_sig
+                    u_eq[j] = max(-1.0, min(1.0, eff_u_eq / scale))
+                else:
+                    # Degenerate: fall back to linear inverse.
+                    p_rated = src.thermal_power(1.0, outdoor_temp)
+                    if p_rated > 0.0:
+                        u_eq[j] = max(0.0, min(1.0, q_req / (p_rated * scale)))
+            else:
+                p_rated = src.thermal_power(1.0, outdoor_temp)
+                if p_rated > 0.0:
+                    u_eq[j] = max(0.0, min(1.0, q_req / (p_rated * scale)))
+
+        return u_eq
+
 
 # ── Helper ───────────────────────────────────────────────────────────────────
 
@@ -1106,7 +1180,13 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
 
         x_ss = x_hat.copy()
-        u_ss = self._u_prev.copy()
+        # Use the equilibrium input (maintains current temperature) rather than
+        # u_prev as the linearisation point.  At u_prev = 0 (just left off
+        # mode) the sigmoid's local gradient is ~2× the true average gain over
+        # [0, 1], causing the QP to systematically under-apply heating and
+        # producing oscillatory transient behaviour.  u_eq centres the
+        # linearisation on the physical operating point.
+        u_ss = self._model.compute_u_eq(x_ss, d_now, p_, t)
         d_ss = d_now.copy()
 
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
@@ -1137,7 +1217,12 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         D_dev = _cvxmat(D_dev_np.reshape(-1).tolist(), (self._N * self._model.nd, 1))
 
         x0_dev = np.zeros(self._model.nx, dtype=float)
-        u_prev_dev = _cvxmat(np.zeros(self._model.nu).tolist(), (self._model.nu, 1))
+        # Express previous applied input as a deviation from the new u_ss so
+        # the rate-of-move penalty (S term) correctly discourages large jumps
+        # from the last physical action, even though the linearisation point
+        # has changed.
+        u_prev_dev_np = self._u_prev - u_ss
+        u_prev_dev = _cvxmat(u_prev_dev_np.tolist(), (self._model.nu, 1))
 
         U_dev, X_dev = self._ocp.solve(
             x0=x0_dev,
@@ -1151,11 +1236,17 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
 
         U_abs = U_dev_np + u_ss.reshape(1, -1)
         X_abs = X_dev_np + x_ss.reshape(1, -1)
-        u_abs = U_abs[0].copy()
 
-        u_min_abs, u_max_abs = self._lin_model.abs_u_bounds
-        u_abs = np.minimum(np.maximum(u_abs, u_min_abs), u_max_abs)
-        U_abs[0] = u_abs
+        # Clip the entire predicted trajectory to hard input bounds.  The QP
+        # encodes deviation bounds relative to the initial u_ss (= 0 at
+        # construction) and does not update them when u_ss changes; combined
+        # with u_ss ≠ 0 this can produce U_abs values outside [u_min, u_max]
+        # for all horizon steps.  Using self._model.u_bounds (the authoritative
+        # physical limits) rather than self._lin_model.abs_u_bounds avoids
+        # the stale-offset issue.
+        u_min_arr, u_max_arr = self._model.u_bounds
+        U_abs = np.clip(U_abs, u_min_arr.reshape(1, -1), u_max_arr.reshape(1, -1))
+        u_abs = U_abs[0].copy()
 
         self._u_prev = u_abs.copy()
         self._d_prev = d_now.copy()
