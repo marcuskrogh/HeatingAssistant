@@ -301,6 +301,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self._data: Dict[str, Any] = {}
         self._rooms: RoomFlowHelper = RoomFlowHelper()
         self._initialized: bool = False
+        self._selected_heater_idx: Optional[int] = None
 
     # ------------------------------------------------------------------
     # Main menu
@@ -784,14 +785,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_manage_heaters()
 
         if user_input is not None:
-            heater_idx = int(user_input["heater_idx"])
-            room = self._rooms.current_room()
-            if room is not None:
-                heater = heaters.heat_sources[heater_idx] if 0 <= heater_idx < len(heaters.heat_sources) else None
-                if heater is None:
-                    return await self.async_step_manage_heaters()
-                return await self.async_step_heater_detail(heater_idx=heater_idx)
-            return await self.async_step_manage_heaters()
+            self._selected_heater_idx = int(user_input["heater_idx"])
+            return await self.async_step_heater_detail()
 
         room = self._rooms.current_room() or {}
         heater_options = heaters.display_options(
@@ -803,23 +798,23 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="edit_heater", data_schema=schema)
 
     async def async_step_heater_detail(
-        self, user_input: Optional[Dict[str, Any]] = None, heater_idx: Optional[int] = None
+        self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
         """Edit a heater's configuration."""
         heaters = self._current_heaters()
         if heaters is None:
             return await self.async_step_manage_room_heaters()
 
-        if heater_idx is None:
+        idx = self._selected_heater_idx
+        if idx is None or not (0 <= idx < len(heaters.heat_sources)):
+            self._selected_heater_idx = None
             return await self.async_step_edit_heater()
 
-        heater = heaters.heat_sources[heater_idx] if 0 <= heater_idx < len(heaters.heat_sources) else None
-        if heater is None:
-            return await self.async_step_manage_heaters()
+        heater = heaters.heat_sources[idx]
 
         if user_input is not None:
             heaters.update(
-                heater_idx,
+                idx,
                 name=user_input[CONF_SOURCE_NAME],
                 source_type=user_input[CONF_SOURCE_TYPE],
                 max_power=user_input[CONF_SOURCE_MAX_POWER],
@@ -832,6 +827,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 turn_off_deadband=user_input.get(CONF_SOURCE_TURN_OFF_DEADBAND),
                 emitter_time_constant=user_input.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
             )
+            self._selected_heater_idx = None
             return await self.async_step_manage_heaters()
 
         schema = _heater_form_schema(
