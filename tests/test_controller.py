@@ -1019,6 +1019,48 @@ class TestHeatingMPCController:
             "Heating-only heat pump must not receive a negative (cooling) fraction"
         )
 
+    def test_heat_pump_filter_state_cooling_reduced_inside_comfort(self):
+        """Regression: mbc _np_to_cvx transposition bug caused Ad to be stored
+        column-swapped in the OCP, breaking the filter-state → temperature
+        coupling.  The OCP therefore failed to predict that a large negative
+        filter state (stored cooling) would drive the room temperature below the
+        comfort corridor, and kept commanding near-full cooling.
+
+        With the fix the MPC correctly sees the temperature will drop below the
+        lower comfort bound and substantially reduces the cooling command.
+        """
+        room = Room(
+            "living", thermal_mass=5_000_000.0, r_external=0.05,
+            air_temperature=21.0, setpoint=21.0, comfort_offset=2.0,
+        )
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "living", max_power=3000.0,
+            emitter_time_constant=1200.0, cooling_cop=2.5,
+        )
+        ctrl = HeatingMPCController(
+            model, [hp], horizon=8, dt=900, soft_constraint_weight=1000.0,
+        )
+
+        # Simulate: heat pump has been cooling at full power.
+        # Filter state phi = -1.0, so stored cooling will drive temperature
+        # below comfort [19, 23] °C over the next few steps.
+        ctrl._ekf._x_np = np.array([21.0, -1.0])
+        ctrl._mpc._u_prev = np.array([-1.0])
+
+        now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(
+            outdoor_temp=20.0, solar_gains={"living": 0.0}, now=now,
+        )
+
+        # The MPC must substantially reduce cooling (action well above -0.5).
+        # The buggy transposed-Ad version returned -0.65 because it could not
+        # see the filter state driving the temperature out of the comfort band.
+        assert actions["hp"] > -0.5, (
+            f"Expected cooling to be reduced when filter state drives temperature "
+            f"below comfort; got {actions['hp']:.4f} (buggy version: ~-0.65)"
+        )
+
 
 class TestTotalComputes:
     """total_computes increments on every compute() call and never saturates."""
