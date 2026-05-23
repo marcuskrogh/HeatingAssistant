@@ -125,8 +125,8 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
                 vol.Required(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
-                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): _get_entity_selector_field("sensor", multiple=False),
-                vol.Optional(CONF_WEATHER_ENTITY, default=""): _get_entity_selector_field("weather", multiple=False),
+                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): _get_entity_validator(multiple=False),
+                vol.Optional(CONF_WEATHER_ENTITY, default=""): _get_entity_validator(multiple=False),
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
@@ -172,21 +172,20 @@ def _normalize_to_string(value: Any) -> str:
     return str(value).strip()
 
 
-def _get_entity_selector_field(domain: str, multiple: bool = True):
-    """Create an entity selector field or fallback to string for compatibility."""
-    try:
-        # Try to create entity selector for newer HA versions
-        selector_field = selector.EntitySelector(
-            selector.EntitySelectorConfig(
-                domain=domain,
-                multiple=multiple,
-            )
-        )
-        # Return the selector to provide better UX in newer HA versions
-        return vol.Any(selector_field, cv.string)
-    except Exception:
-        # Fallback to string validator for older HA versions
-        return cv.string
+def _get_entity_validator(multiple: bool = True):
+    """Get a validator for entity input that handles both lists and strings."""
+    def validator(value: Any) -> Any:
+        """Validate and normalize entity input."""
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            if not value.strip():
+                return [] if multiple else ""
+            if multiple:
+                return [e.strip() for e in value.split(",")]
+            return value.strip()
+        return [] if multiple else ""
+    return validator
 
 
 def _room_form_schema(
@@ -216,10 +215,10 @@ def _room_form_schema(
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
             vol.Optional(
                 CONF_TEMP_SENSORS, default=sensors_default
-            ): vol.All(_get_entity_selector_field("sensor", multiple=True), _normalize_to_list),
+            ): _get_entity_validator(multiple=True),
             vol.Optional(
                 CONF_WINDOW_SENSORS, default=window_sensors_default
-            ): vol.All(_get_entity_selector_field("binary_sensor", multiple=True), _normalize_to_list),
+            ): _get_entity_validator(multiple=True),
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
@@ -321,11 +320,11 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_OUTDOOR_TEMP_ENTITY,
                     default=current.get(CONF_OUTDOOR_TEMP_ENTITY, ""),
-                ): _get_entity_selector_field("sensor", multiple=False),
+                ): _get_entity_validator(multiple=False),
                 vol.Optional(
                     CONF_WEATHER_ENTITY,
                     default=current.get(CONF_WEATHER_ENTITY, ""),
-                ): _get_entity_selector_field("weather", multiple=False),
+                ): _get_entity_validator(multiple=False),
                 vol.Optional(
                     CONF_UPDATE_INTERVAL,
                     default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
