@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
 import homeassistant.helpers.config_validation as cv
 
 from ._options_flow import (
@@ -20,9 +21,7 @@ from ._options_flow import (
     RoomFlowHelper,
     WindowFlowHelper,
     degrees_to_compass as _degrees_to_compass,
-    format_entity_ids as _format_entity_ids,
     nearest_choice as _nearest_choice,
-    parse_entity_ids as _parse_entity_ids,
     window_display as _window_display,
 )
 from .const import (
@@ -85,6 +84,19 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_ROOM_SETPOINT = 22.0
 
 
+def _coerce_to_list(value: Any) -> list:
+    """Ensure a value is a list of entity ID strings.
+
+    Handles three cases that arise from stored data:
+    - Already a list  → returned as-is.
+    - Comma-separated string → split into a list.
+    - None / empty    → empty list.
+    """
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        return [e.strip() for e in value.split(",") if e.strip()]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -103,20 +115,13 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """
-        Step 1: Basic site settings (location, outdoor sensor, time step).
-
-        Room and heat-source configuration is provided via YAML in
-        ``configuration.yaml`` (see README for the schema), or can be
-        configured after setup via the integration's options flow.
-        """
+        """Step 1: Basic site settings (location, outdoor sensor, time step)."""
         errors: Dict[str, str] = {}
 
         if user_input is not None:
             self._data.update(user_input)
             return self.async_create_entry(title=NAME, data=self._data)
 
-        # Pre-fill with HA's configured location
         ha_lat = self.hass.config.latitude
         ha_lon = self.hass.config.longitude
 
@@ -124,8 +129,12 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
                 vol.Required(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
-                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): str,
-                vol.Optional(CONF_WEATHER_ENTITY, default=""): str,
+                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): EntitySelector(
+                    EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional(CONF_WEATHER_ENTITY): EntitySelector(
+                    EntitySelectorConfig(domain="weather")
+                ),
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
@@ -147,30 +156,8 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 # ---------------------------------------------------------------------------
-# Schema builders (kept here so the OptionsFlow stays readable; the
-# vol.Schema constructions are HA-side and so don't belong in the pure
-# helper module).
+# Schema builders
 # ---------------------------------------------------------------------------
-
-
-def _normalize_entity_ids_to_list(value: Any) -> list:
-    """Convert comma-separated string to list of entity IDs."""
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str):
-        if not value.strip():
-            return []
-        return [e.strip() for e in value.split(",")]
-    return []
-
-
-def _format_entity_ids_for_display(value: Any) -> str:
-    """Convert list of entity IDs to comma-separated string for display."""
-    if isinstance(value, list):
-        return ", ".join(value) if value else ""
-    if isinstance(value, str):
-        return value
-    return ""
 
 
 def _room_form_schema(
@@ -183,23 +170,20 @@ def _room_form_schema(
     envelope_tightness_default: str = DEFAULT_ENVELOPE_TIGHTNESS,
     comfort_offset_default: float = DEFAULT_COMFORT_OFFSET,
 ) -> vol.Schema:
-    """Schema shared by the add-room and edit-room forms.
-
-    ``envelope_tightness`` (Phase 1 C1) is a preset that maps to the
-    per-room ``infiltration_fraction`` — the share of the bundled
-    ``1/r_external`` attributed to wind-driven air exchange.  Defaults
-    to ``"typical"`` so users who don't think about infiltration get
-    sensible behaviour out of the box.
-    """
-    # Convert defaults to string format for display in form
-    sensors_default = _format_entity_ids_for_display(sensors_default or [])
-    window_sensors_default = _format_entity_ids_for_display(window_sensors_default or [])
+    """Schema shared by the add-room and edit-room forms."""
+    # EntitySelector(multiple=True) requires a list as the default value.
+    sensors_list = _coerce_to_list(sensors_default)
+    window_sensors_list = _coerce_to_list(window_sensors_default)
 
     return vol.Schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
-            vol.Optional(CONF_TEMP_SENSORS, default=sensors_default): str,
-            vol.Optional(CONF_WINDOW_SENSORS, default=window_sensors_default): str,
+            vol.Optional(CONF_TEMP_SENSORS, default=sensors_list): EntitySelector(
+                EntitySelectorConfig(domain="sensor", multiple=True)
+            ),
+            vol.Optional(CONF_WINDOW_SENSORS, default=window_sensors_list): EntitySelector(
+                EntitySelectorConfig(domain="binary_sensor", multiple=True)
+            ),
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
@@ -238,26 +222,12 @@ def _window_form_schema() -> vol.Schema:
 
 
 class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
-    """Multi-step options flow: global settings + room/window management.
-
-    The flow methods are thin orchestrators — room/window validation and
-    mutation live in :class:`RoomFlowHelper` and :class:`WindowFlowHelper`
-    (see ``_options_flow.py``) so they can be unit-tested without HA's
-    flow framework.
-    """
+    """Multi-step options flow: global settings + room/window management."""
 
     def __init__(self) -> None:
         self._data: Dict[str, Any] = {}
         self._rooms: RoomFlowHelper = RoomFlowHelper()
         self._initialized: bool = False
-
-    @staticmethod
-    def _normalize_entity_list(value: Any) -> list:
-        """Normalize entity list from string or list format to list.
-
-        Accepts comma-separated strings or lists, always returns a list for storage.
-        """
-        return _normalize_entity_ids_to_list(value)
 
     # ------------------------------------------------------------------
     # Main menu
@@ -270,7 +240,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         if not self._initialized:
             current = self.config_entry.options or self.config_entry.data
             self._data = dict(current)
-            # Rooms may live in options (UI-configured) or data (YAML/initial).
             opts = self.config_entry.options
             data = self.config_entry.data
             rooms_source = opts.get(CONF_ROOMS) or data.get(CONF_ROOMS) or []
@@ -295,16 +264,23 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_init()
 
         current = self._data
+
+        # For single-entity optional selectors we use description.suggested_value
+        # to pre-fill the picker without setting an empty string as the default
+        # (EntitySelector rejects "" as an invalid entity ID).
+        outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
+        weather = current.get(CONF_WEATHER_ENTITY) or None
+
         schema = vol.Schema(
             {
                 vol.Optional(
                     CONF_OUTDOOR_TEMP_ENTITY,
-                    default=current.get(CONF_OUTDOOR_TEMP_ENTITY, ""),
-                ): str,
+                    description={"suggested_value": outdoor_temp},
+                ): EntitySelector(EntitySelectorConfig(domain="sensor")),
                 vol.Optional(
                     CONF_WEATHER_ENTITY,
-                    default=current.get(CONF_WEATHER_ENTITY, ""),
-                ): str,
+                    description={"suggested_value": weather},
+                ): EntitySelector(EntitySelectorConfig(domain="weather")),
                 vol.Optional(
                     CONF_UPDATE_INTERVAL,
                     default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
@@ -347,7 +323,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="global_settings", data_schema=schema)
 
     # ------------------------------------------------------------------
-    # Save & close
+    # MPC tuning
     # ------------------------------------------------------------------
 
     async def async_step_mpc_tuning(
@@ -430,11 +406,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            sensors = self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, []))
-            window_sensors = self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, []))
-            tightness = user_input.get(
-                "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
-            )
+            # EntitySelector(multiple=True) already returns a list.
+            sensors = _coerce_to_list(user_input.get(CONF_TEMP_SENSORS, []))
+            window_sensors = _coerce_to_list(user_input.get(CONF_WINDOW_SENSORS, []))
+            tightness = user_input.get("envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS)
             err = self._rooms.add(
                 name=user_input[CONF_ROOM_NAME],
                 sensors=sensors,
@@ -484,11 +459,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_manage_rooms()
 
         if user_input is not None:
-            sensors = self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, []))
-            window_sensors = self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, []))
-            tightness = user_input.get(
-                "envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS,
-            )
+            sensors = _coerce_to_list(user_input.get(CONF_TEMP_SENSORS, []))
+            window_sensors = _coerce_to_list(user_input.get(CONF_WINDOW_SENSORS, []))
+            tightness = user_input.get("envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS)
             err = self._rooms.update_current(
                 name=user_input[CONF_ROOM_NAME],
                 sensors=sensors,
@@ -503,27 +476,28 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             )
             if err is None:
                 return await self.async_step_manage_rooms()
+            # Re-show the form with the values the user just entered.
             return self.async_show_form(
                 step_id="room_detail",
                 data_schema=_room_form_schema(
                     name_default=user_input.get(CONF_ROOM_NAME, ""),
-                    sensors_default=self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, [])),
-                    window_sensors_default=self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, [])),
+                    sensors_default=sensors,
+                    window_sensors_default=window_sensors,
                     room_size_default=user_input.get("room_size", "medium"),
                     building_age_default=user_input.get("building_age", "1980_1999"),
                     envelope_tightness_default=tightness,
                     comfort_offset_default=user_input.get(
-                        CONF_COMFORT_OFFSET,
-                        DEFAULT_COMFORT_OFFSET,
+                        CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET,
                     ),
                 ),
                 errors={CONF_ROOM_NAME: err},
             )
 
-        room_sensors = room.get(CONF_TEMP_SENSORS, [])
-        if not room_sensors and room.get(CONF_TEMP_SENSOR):
-            room_sensors = [room[CONF_TEMP_SENSOR]]
-        room_window_sensors = room.get(CONF_WINDOW_SENSORS, [])
+        # Pre-fill with values already stored for this room.
+        room_sensors = _coerce_to_list(
+            room.get(CONF_TEMP_SENSORS) or room.get(CONF_TEMP_SENSOR, [])
+        )
+        room_window_sensors = _coerce_to_list(room.get(CONF_WINDOW_SENSORS, []))
         infiltration_fraction = float(room.get(
             CONF_INFILTRATION_FRACTION,
             ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[DEFAULT_ENVELOPE_TIGHTNESS],
