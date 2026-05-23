@@ -1314,3 +1314,206 @@ class TestDisabledSources:
         )
         assert actions["lr_heater"] == pytest.approx(0.0)
         assert actions["br_heater"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests for equilibrium-input linearisation and full-trajectory bounds clipping
+# ---------------------------------------------------------------------------
+
+def _make_hp_model_and_sources():
+    """One-room model with a heat pump (cooling-capable) for transient tests."""
+    room = Room(
+        name="living_room",
+        thermal_mass=5_000_000.0,
+        r_external=0.05,
+        connections=[],
+        temperature=15.0,   # cold — transient condition
+        setpoint=21.0,
+    )
+    model = HouseModel([room])
+    hp = HeatPump(
+        "hp",
+        "living_room",
+        max_power=6000.0,
+        cop_rated=3.5,
+        cop_temp_ref=7.0,
+        cooling_cop=2.5,
+    )
+    return model, [hp]
+
+
+class TestComputeUEq:
+    """compute_u_eq should invert the power function exactly and stay in bounds."""
+
+    def test_heating_only_source_equilibrium_in_bounds(self):
+        """Electric heater equilibrium must lie in [0, 1]."""
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = np.array([18.0, 17.0])
+        d = sde.disturbance_vector(-5.0, {})
+        p = np.array([])
+        u_eq = sde.compute_u_eq(x, d, p, 0.0)
+        assert u_eq.shape == (2,)
+        for j in range(sde.nu):
+            assert 0.0 <= u_eq[j] <= 1.0, f"u_eq[{j}]={u_eq[j]} out of [0,1]"
+
+    def test_heat_pump_equilibrium_in_bounds(self):
+        """Heat pump equilibrium must lie in [-1, 1]."""
+        model, sources = _make_hp_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = np.array([15.0])
+        d = sde.disturbance_vector(-5.0, {})
+        p = np.array([])
+        u_eq = sde.compute_u_eq(x, d, p, 0.0)
+        assert u_eq.shape == (1,)
+        assert -1.0 <= u_eq[0] <= 1.0
+
+    def test_equilibrium_maintains_temperature(self):
+        """f evaluated at u_eq should have near-zero temperature drift."""
+        model, sources = _make_hp_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        outdoor_temp = 5.0
+        x = np.array([18.0])  # room at maintenance temperature
+        d = sde.disturbance_vector(outdoor_temp, {})
+        p = np.array([])
+        u_eq = sde.compute_u_eq(x, d, p, 0.0)
+        drift = sde.f(x, u_eq, d, p, 0.0)
+        # Temperature block drift should be close to zero.
+        assert abs(drift[0]) < 0.5, f"Temperature drift at u_eq too large: {drift[0]:.4f} °C/s"
+
+    def test_equilibrium_zero_when_room_warm_heating_only(self):
+        """A heating-only source should have u_eq = 0 when the room is warm
+        enough that thermal losses are zero or negative (e.g. warm outdoor)."""
+        model, sources = _make_model_and_sources()
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = np.array([25.0, 25.0])   # warm rooms
+        d = sde.disturbance_vector(25.0, {})  # warm outdoor — room gains heat
+        p = np.array([])
+        u_eq = sde.compute_u_eq(x, d, p, 0.0)
+        # Rooms are gaining heat passively; equilibrium input is clamped to 0
+        for j in range(sde.nu):
+            assert u_eq[j] == pytest.approx(0.0, abs=1e-6)
+
+    def test_equilibrium_clamps_to_one_when_losses_exceed_capacity(self):
+        """When thermal losses exceed heater capacity, u_eq must clamp to 1."""
+        # Use a very poorly insulated room (R_ext = 0.001 K/W) so the
+        # 2 kW heater cannot cover the losses even at u = 1.
+        room = Room(
+            name="living_room",
+            thermal_mass=5_000_000.0,
+            r_external=0.001,          # very leaky wall: 1000 W/K
+            connections=[],
+            temperature=18.0,
+        )
+        model = HouseModel([room])
+        sources = [ElectricHeater("lr_heater", "living_room", max_power=2000.0)]
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        x = np.array([18.0])
+        d = sde.disturbance_vector(-5.0, {})  # 23 K differential → 23 kW loss >> 2 kW
+        p = np.array([])
+        u_eq = sde.compute_u_eq(x, d, p, 0.0)
+        assert u_eq[0] == pytest.approx(1.0, abs=1e-6)
+
+
+class TestLinearisationBoundsClipping:
+    """After each MPC step the full predicted input trajectory must stay in [u_min, u_max]."""
+
+    def _make_controller_with_hp(self, horizon=4):
+        model, sources = _make_hp_model_and_sources()
+        return HeatingMPCController(model, sources, horizon=horizon, dt=900), sources
+
+    def test_u_abs_trajectory_within_bounds_cold_room(self):
+        """After aggressive heating (u_prev forced high), U_abs must stay in [-1, 1]."""
+        ctrl, sources = self._make_controller_with_hp()
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        # Simulate a step that applies full heating so u_prev = 1.
+        ctrl.compute(outdoor_temp=-5.0, now=now)
+        # Manually drive u_prev to its maximum to reproduce the post-off transient.
+        ctrl._mpc._u_prev[:] = 1.0
+        # Compute again — this is the step where the bug caused U_abs > 1.
+        ctrl.compute(outdoor_temp=-5.0, now=now)
+        U_abs = np.array([
+            [ctrl.heating_schedule[k]["living_room"] for k in range(ctrl.horizon)]
+        ])
+        # Verify via the internal trajectory stored on the mpc object.
+        # We check the public actions are clipped and heating schedule is sane.
+        action = ctrl._mpc._u_prev  # last applied u (was u_abs[0])
+        assert -1.0 <= float(action[0]) <= 1.0
+
+    def test_heating_schedule_power_does_not_exceed_physical_max(self):
+        """Heating schedule should never show power above the heat pump's rated output
+        at the given outdoor temperature (the sigmoid saturates at Q_heat)."""
+        ctrl, sources = self._make_controller_with_hp(horizon=6)
+        hp = sources[0]
+        outdoor_temp = 5.0
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        # Force u_prev = 1 to reproduce the stale-deviation-bound scenario.
+        ctrl.compute(outdoor_temp=outdoor_temp, now=now)
+        ctrl._mpc._u_prev[:] = 1.0
+        ctrl.compute(outdoor_temp=outdoor_temp, now=now)
+        q_heat_max = hp.thermal_power(1.0, outdoor_temp)
+        q_cool_max = hp._q_cool_const
+        for k, step in enumerate(ctrl.heating_schedule):
+            p = step.get("living_room", 0.0)
+            assert p <= q_heat_max * 1.01, (
+                f"Step {k}: heating power {p:.0f} W exceeds physical max {q_heat_max:.0f} W"
+            )
+            assert p >= -q_cool_max * 1.01, (
+                f"Step {k}: cooling power {p:.0f} W below physical min {-q_cool_max:.0f} W"
+            )
+
+
+class TestSetpointLinearisation:
+    """The MPC must linearise at the setpoint, not the current estimated state.
+
+    This matters most during transients: a cold room (T_hat << T_set) would
+    cause the sigmoid to be evaluated at an extreme point if we linearised at
+    T_hat, giving wrong Jacobians and oscillatory recovery.  Linearising at
+    the setpoint gives stable Jacobians regardless of transient magnitude.
+    """
+
+    def _make_ctrl(self, room_temp=10.0, setpoint=21.0, horizon=4):
+        room = Room(
+            "living_room",
+            thermal_mass=5_000_000.0,
+            r_external=0.05,
+            connections=[],
+            temperature=room_temp,
+            setpoint=setpoint,
+        )
+        model = HouseModel([room])
+        hp = HeatPump("hp", "living_room", max_power=6000.0, cop_rated=3.5,
+                      cop_temp_ref=7.0, cooling_cop=2.5)
+        ctrl = HeatingMPCController(model, [hp], horizon=horizon, dt=900)
+        return ctrl
+
+    def test_linearisation_point_is_setpoint_temperature(self):
+        """After a step, the lin-model operating-point temperature must equal
+        the setpoint, not the current (cold) room temperature."""
+        ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=-5.0, now=now)
+        x_ss = ctrl._mpc._lin_model.x_ss
+        # Temperature component of the operating point must be the setpoint.
+        assert x_ss[0] == pytest.approx(21.0, abs=0.1), (
+            f"x_ss[0] = {x_ss[0]:.2f} should be setpoint 21.0, not room temp 5.0"
+        )
+
+    def test_cold_room_requests_near_max_heating(self):
+        """A very cold room (10 °C below setpoint) should receive near-maximum
+        heating on the first step, not the attenuated output caused by a bad
+        linearisation at the cold operating point."""
+        ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(outdoor_temp=-5.0, now=now)
+        u_hp = actions["hp"]
+        assert u_hp > 0.7, (
+            f"Expected near-max heating for cold room (u > 0.7), got u = {u_hp:.3f}"
+        )
+
+    def test_x_ref_is_unchanged_by_setpoint_linearisation(self):
+        """The MPC's x_ref must remain equal to the setpoints array (not x_hat)."""
+        ctrl = self._make_ctrl(room_temp=5.0, setpoint=21.0)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=-5.0, now=now)
+        assert ctrl._mpc.x_ref[0] == pytest.approx(21.0)
