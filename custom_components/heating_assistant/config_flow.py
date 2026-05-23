@@ -125,8 +125,8 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
                 vol.Required(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
-                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): str,
-                vol.Optional(CONF_WEATHER_ENTITY, default=""): str,
+                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY, default=""): _get_entity_selector_field("sensor", multiple=False),
+                vol.Optional(CONF_WEATHER_ENTITY, default=""): _get_entity_selector_field("weather", multiple=False),
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
                     vol.Coerce(int), vol.Range(min=60, max=3600)
                 ),
@@ -154,24 +154,46 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # ---------------------------------------------------------------------------
 
 
+def _normalize_to_list(value: Any) -> list:
+    """Convert entity input to list format."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        if not value.strip():
+            return []
+        return [e.strip() for e in value.split(",")]
+    return []
+
+
+def _normalize_to_string(value: Any) -> str:
+    """Convert entity input to string format."""
+    if isinstance(value, list):
+        return ", ".join(value) if value else ""
+    return str(value).strip()
+
+
 def _get_entity_selector_field(domain: str, multiple: bool = True):
     """Create an entity selector field or fallback to string for compatibility."""
     try:
-        return selector.EntitySelector(
+        # Try to create entity selector for newer HA versions
+        selector_field = selector.EntitySelector(
             selector.EntitySelectorConfig(
                 domain=domain,
                 multiple=multiple,
             )
         )
-    except (AttributeError, ImportError):
-        return str
+        # Return the selector to provide better UX in newer HA versions
+        return vol.Any(selector_field, cv.string)
+    except Exception:
+        # Fallback to string validator for older HA versions
+        return cv.string
 
 
 def _room_form_schema(
     *,
     name_default: str = "",
-    sensors_default: str = "",
-    window_sensors_default: str = "",
+    sensors_default: Any = None,
+    window_sensors_default: Any = None,
     room_size_default: str = "medium",
     building_age_default: str = "1980_1999",
     envelope_tightness_default: str = DEFAULT_ENVELOPE_TIGHTNESS,
@@ -185,15 +207,19 @@ def _room_form_schema(
     to ``"typical"`` so users who don't think about infiltration get
     sensible behaviour out of the box.
     """
+    # Convert defaults to string format for display in form
+    sensors_default = _normalize_to_string(sensors_default or [])
+    window_sensors_default = _normalize_to_string(window_sensors_default or [])
+
     return vol.Schema(
         {
             vol.Required(CONF_ROOM_NAME, default=name_default): str,
             vol.Optional(
                 CONF_TEMP_SENSORS, default=sensors_default
-            ): _get_entity_selector_field("sensor", multiple=True),
+            ): vol.All(_get_entity_selector_field("sensor", multiple=True), _normalize_to_list),
             vol.Optional(
                 CONF_WINDOW_SENSORS, default=window_sensors_default
-            ): _get_entity_selector_field("binary_sensor", multiple=True),
+            ): vol.All(_get_entity_selector_field("binary_sensor", multiple=True), _normalize_to_list),
             vol.Required("room_size", default=room_size_default): vol.In(
                 list(ROOM_SIZE_TO_THERMAL_MASS)
             ),
@@ -246,23 +272,13 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self._initialized: bool = False
 
     @staticmethod
-    def _normalize_entity_list(
-        value: Any, format_output: bool = False
-    ) -> Any:
+    def _normalize_entity_list(value: Any) -> Any:
         """Normalize entity list from either selector (list) or string format.
 
-        EntitySelector returns a list of entity IDs, but we also support
-        comma-separated strings for backward compatibility.
+        EntitySelector or form input may return a list or comma-separated string.
+        Always returns a list for storage.
         """
-        if isinstance(value, list):
-            if format_output:
-                return _format_entity_ids(value)
-            return value
-        if isinstance(value, str):
-            if format_output:
-                return value
-            return _parse_entity_ids(value)
-        return [] if not format_output else ""
+        return _normalize_to_list(value)
 
     # ------------------------------------------------------------------
     # Main menu
@@ -305,11 +321,11 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_OUTDOOR_TEMP_ENTITY,
                     default=current.get(CONF_OUTDOOR_TEMP_ENTITY, ""),
-                ): str,
+                ): _get_entity_selector_field("sensor", multiple=False),
                 vol.Optional(
                     CONF_WEATHER_ENTITY,
                     default=current.get(CONF_WEATHER_ENTITY, ""),
-                ): str,
+                ): _get_entity_selector_field("weather", multiple=False),
                 vol.Optional(
                     CONF_UPDATE_INTERVAL,
                     default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
@@ -508,14 +524,12 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             )
             if err is None:
                 return await self.async_step_manage_rooms()
-            sensors_display = self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, []), format_output=True)
-            window_sensors_display = self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, []), format_output=True)
             return self.async_show_form(
                 step_id="room_detail",
                 data_schema=_room_form_schema(
                     name_default=user_input.get(CONF_ROOM_NAME, ""),
-                    sensors_default=sensors_display,
-                    window_sensors_default=window_sensors_display,
+                    sensors_default=self._normalize_entity_list(user_input.get(CONF_TEMP_SENSORS, [])),
+                    window_sensors_default=self._normalize_entity_list(user_input.get(CONF_WINDOW_SENSORS, [])),
                     room_size_default=user_input.get("room_size", "medium"),
                     building_age_default=user_input.get("building_age", "1980_1999"),
                     envelope_tightness_default=tightness,
@@ -537,8 +551,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         ))
         schema = _room_form_schema(
             name_default=room.get(CONF_ROOM_NAME, ""),
-            sensors_default=_format_entity_ids(room_sensors),
-            window_sensors_default=_format_entity_ids(room_window_sensors),
+            sensors_default=room_sensors,
+            window_sensors_default=room_window_sensors,
             room_size_default=_nearest_choice(
                 float(room.get(CONF_THERMAL_MASS, DEFAULT_THERMAL_MASS)),
                 ROOM_SIZE_TO_THERMAL_MASS,
