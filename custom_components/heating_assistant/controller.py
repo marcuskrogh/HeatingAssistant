@@ -978,15 +978,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def u_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Input box constraints.
-
-        For cooling-capable sources (``src.can_cool is True``) the lower
-        bound is −1 (full cooling); for heating-only sources it is 0.
-        The upper bound is always 1 (full heating).
-        """
-        u_min = np.array([-1.0 if src.can_cool else 0.0 for src in self._sources])
-        return u_min, np.ones(self.nu)
+        """Input box constraints derived from each source's configured hvac_mode."""
+        u_min = np.array([src.u_min for src in self._sources])
+        u_max = np.array([src.u_max for src in self._sources])
+        return u_min, u_max
 
     def disturbance_vector(
         self,
@@ -1958,8 +1953,7 @@ class HeatingMPCController:
         # ── Apply actions to heat sources ────────────────────────────────
         actions: Dict[str, float] = {}
         for j, src in enumerate(self._sources):
-            u_lo = -1.0 if src.can_cool else 0.0
-            frac = float(np.clip(u_abs[j], u_lo, 1.0))
+            frac = float(np.clip(u_abs[j], src.u_min, src.u_max))
             actions[src.name] = frac
             if src.can_cool:
                 # Track the smooth-sigmoid power so sensors and the EKF are
@@ -2010,8 +2004,7 @@ class HeatingMPCController:
         """
         for j, src in enumerate(self._sources):
             if src.name == source_name:
-                u_lo = -1.0 if src.can_cool else 0.0
-                clipped = float(np.clip(u_applied, u_lo, 1.0))
+                clipped = float(np.clip(u_applied, src.u_min, src.u_max))
                 self._u_prev[j] = clipped
                 self._mpc._u_prev[j] = clipped
                 break

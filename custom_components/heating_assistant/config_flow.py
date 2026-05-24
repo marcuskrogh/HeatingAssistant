@@ -68,7 +68,11 @@ from .const import (
     CONF_SOURCE_MIN_POWER,
     CONF_SOURCE_HEATER_ENTITY,
     CONF_SOURCE_MAX_TEMP_OFFSET,
-    CONF_SOURCE_TURN_OFF_DEADBAND,
+    CONF_SOURCE_HVAC_MODE,
+    DEFAULT_SOURCE_HVAC_MODE,
+    SOURCE_HVAC_MODE_HEAT,
+    SOURCE_HVAC_MODE_COOL,
+    SOURCE_HVAC_MODE_HEAT_COOL,
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENERGY_WEIGHT,
@@ -248,7 +252,7 @@ def _heater_form_schema(
     cop_temp_ref_default: float = DEFAULT_COP_TEMP_REF,
     min_power_default: float = DEFAULT_MIN_POWER,
     max_temp_offset_default: float = DEFAULT_MAX_TEMP_OFFSET,
-    turn_off_deadband_default: float = 0.0,
+    hvac_mode_default: str = DEFAULT_SOURCE_HVAC_MODE,
     emitter_time_constant_default: float = 60.0,
 ) -> vol.Schema:
     """Schema for adding/editing a heat source (heater)."""
@@ -280,8 +284,8 @@ def _heater_form_schema(
                 CONF_SOURCE_MAX_TEMP_OFFSET, default=max_temp_offset_default
             ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20.0)),
             vol.Optional(
-                CONF_SOURCE_TURN_OFF_DEADBAND, default=turn_off_deadband_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=10.0)),
+                CONF_SOURCE_HVAC_MODE, default=hvac_mode_default
+            ): vol.In([SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL]),
             vol.Optional(
                 CONF_SOURCE_EMITTER_TIME_CONSTANT, default=emitter_time_constant_default
             ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=600.0)),
@@ -767,7 +771,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 cop_temp_ref=user_input.get(CONF_SOURCE_COP_TEMP_REF),
                 min_power=user_input.get(CONF_SOURCE_MIN_POWER),
                 max_temp_offset=user_input.get(CONF_SOURCE_MAX_TEMP_OFFSET),
-                turn_off_deadband=user_input.get(CONF_SOURCE_TURN_OFF_DEADBAND),
+                hvac_mode=user_input.get(CONF_SOURCE_HVAC_MODE),
                 emitter_time_constant=user_input.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
             )
             return await self.async_step_manage_heaters()
@@ -824,7 +828,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 cop_temp_ref=user_input.get(CONF_SOURCE_COP_TEMP_REF),
                 min_power=user_input.get(CONF_SOURCE_MIN_POWER),
                 max_temp_offset=user_input.get(CONF_SOURCE_MAX_TEMP_OFFSET),
-                turn_off_deadband=user_input.get(CONF_SOURCE_TURN_OFF_DEADBAND),
+                hvac_mode=user_input.get(CONF_SOURCE_HVAC_MODE),
                 emitter_time_constant=user_input.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
             )
             self._selected_heater_idx = None
@@ -840,7 +844,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             cop_temp_ref_default=float(heater.get(CONF_SOURCE_COP_TEMP_REF, DEFAULT_COP_TEMP_REF)),
             min_power_default=float(heater.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER)),
             max_temp_offset_default=float(heater.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET)),
-            turn_off_deadband_default=float(heater.get(CONF_SOURCE_TURN_OFF_DEADBAND, 0.0)),
+            hvac_mode_default=heater.get(CONF_SOURCE_HVAC_MODE, DEFAULT_SOURCE_HVAC_MODE),
             emitter_time_constant_default=float(heater.get(CONF_SOURCE_EMITTER_TIME_CONSTANT, 60.0)),
         )
         return self.async_show_form(step_id="heater_detail", data_schema=schema)

@@ -121,6 +121,16 @@ class HeatSource(ABC):
         """Returns True if this source can actively remove heat from the room."""
         return False
 
+    @property
+    def u_min(self) -> float:
+        """Lower bound on the control input."""
+        return 0.0
+
+    @property
+    def u_max(self) -> float:
+        """Upper bound on the control input."""
+        return 1.0
+
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(name={self.name!r}, room={self.room!r}, "
@@ -247,7 +257,7 @@ class HeatPump(HeatSource):
         min_outdoor_temp: float = -20.0,
         min_power: float = 0.0,
         max_temp_offset: float = 5.0,
-        turn_off_deadband: float = 1.0,
+        hvac_mode: str = "heat_cool",
         heater_entity: Optional[str] = None,
         cooling_cop: float = 2.5,
         cooling_efficiency: float = 1.0,
@@ -271,7 +281,7 @@ class HeatPump(HeatSource):
         self.min_outdoor_temp = min_outdoor_temp
         self.min_power = min_power
         self.max_temp_offset = max_temp_offset
-        self.turn_off_deadband = turn_off_deadband
+        self.hvac_mode = hvac_mode
         self.cooling_cop = cooling_cop
         self.cooling_efficiency = cooling_efficiency
         self.heating_efficiency = heating_efficiency
@@ -291,8 +301,16 @@ class HeatPump(HeatSource):
 
     @property
     def can_cool(self) -> bool:
-        """Returns True if this heat pump supports active cooling (EER > 0)."""
-        return self.cooling_cop > 0
+        """Returns True when the configured hvac_mode includes cooling."""
+        return self.hvac_mode in ("cool", "heat_cool") and self.cooling_cop > 0
+
+    @property
+    def u_min(self) -> float:
+        return 0.0 if self.hvac_mode == "heat" else -1.0
+
+    @property
+    def u_max(self) -> float:
+        return 0.0 if self.hvac_mode == "cool" else 1.0
 
     def cop(self, outdoor_temp: float) -> float:
         """Return the estimated COP at the given outdoor temperature."""
@@ -346,68 +364,19 @@ class HeatPump(HeatSource):
             return 0.0
         return -self._q_cool_const
 
-    def target_temperature(
-        self, setpoint_fraction: float, internal_temp: float,
-    ) -> float:
+    def target_temperature(self, fraction: float, internal_temp: float) -> float:
         """
-        Compute the temperature setpoint to send to the heat pump's climate
-        entity so that it produces the desired fraction of its maximum
-        thermal output.
+        Compute the climate-entity setpoint from the control fraction.
 
-        The heat pump modulates its output based on the gap between its
-        internal setpoint and its own temperature sensor.  This method
-        returns::
+        T_target = T_internal + fraction × max_temp_offset
 
-            T_target = T_hp + fraction × max_temp_offset
-
-        where *T_hp* is the heat pump's own temperature reading (which may
-        differ from HeatingAssistant's room sensor) and *max_temp_offset*
-        is the configured maximum temperature differential at full power.
-
-        Parameters
-        ----------
-        setpoint_fraction : float
-            Desired power as a fraction of maximum [0, 1].
-        internal_temp : float
-            The heat pump's own internal temperature reading [°C].
-
-        Returns
-        -------
-        float
-            Target temperature [°C] to set on the heat pump climate entity.
+        fraction is clamped to [u_min, u_max]:
+          - positive → setpoint above internal → HP heats
+          - zero     → setpoint equals internal → HP idles
+          - negative → setpoint below internal → HP cools
         """
-        setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
-        return internal_temp + setpoint_fraction * self.max_temp_offset
-
-    def target_temperature_cooling(
-        self, cooling_fraction: float, internal_temp: float,
-    ) -> float:
-        """
-        Compute the temperature setpoint to send to the heat pump's climate
-        entity when operating in cooling mode.
-
-        The heat pump is driven to cool by setting its target below its own
-        internal sensor reading.  This method returns::
-
-            T_target = T_hp − cooling_fraction × max_temp_offset
-
-        where a *cooling_fraction* of 0 means no cooling and 1 means maximum
-        cooling intensity.
-
-        Parameters
-        ----------
-        cooling_fraction : float
-            Desired cooling intensity as a fraction of maximum [0, 1].
-        internal_temp : float
-            The heat pump's own internal temperature reading [°C].
-
-        Returns
-        -------
-        float
-            Target temperature [°C] to set on the heat pump climate entity.
-        """
-        cooling_fraction = max(0.0, min(1.0, cooling_fraction))
-        return internal_temp - cooling_fraction * self.max_temp_offset
+        fraction = max(self.u_min, min(self.u_max, fraction))
+        return internal_temp + fraction * self.max_temp_offset
 
     def smooth_thermal_power(
         self, u: float, outdoor_temp: float, k_base: float = 5.0,

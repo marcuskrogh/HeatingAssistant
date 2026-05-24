@@ -351,15 +351,25 @@ class TestHouseThermalSDE:
         assert lb[0] == pytest.approx(-1.0)
         assert ub[0] == pytest.approx(1.0)
 
-    def test_u_bounds_heat_pump_no_cooling(self):
-        """A HeatPump with cooling_cop=0 should have lower bound 0 (no cooling)."""
+    def test_u_bounds_heat_pump_heat_only_mode(self):
+        """hvac_mode='heat' → lower bound 0, upper bound 1."""
         living = Room("living_room", 5_000_000.0, 0.05, temperature=22.0, setpoint=21.0)
         model = HouseModel([living])
-        sources = [HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=0.0)]
+        sources = [HeatPump("hp", "living_room", max_power=5000.0, hvac_mode="heat")]
         sde = HouseThermalSDE(model, sources, dt=900.0)
         lb, ub = sde.u_bounds
         assert lb[0] == pytest.approx(0.0)
         assert ub[0] == pytest.approx(1.0)
+
+    def test_u_bounds_heat_pump_cool_only_mode(self):
+        """hvac_mode='cool' → lower bound -1, upper bound 0."""
+        living = Room("living_room", 5_000_000.0, 0.05, temperature=22.0, setpoint=21.0)
+        model = HouseModel([living])
+        sources = [HeatPump("hp", "living_room", max_power=5000.0, hvac_mode="cool")]
+        sde = HouseThermalSDE(model, sources, dt=900.0)
+        lb, ub = sde.u_bounds
+        assert lb[0] == pytest.approx(-1.0)
+        assert ub[0] == pytest.approx(0.0)
 
     def test_drift_cooling_decreases_temperature(self):
         """With u = -1 (full cooling via smooth sigmoid), drift must be negative
@@ -1005,18 +1015,18 @@ class TestHeatingMPCController:
             "Expected negative current_power on heat pump in cooling mode"
         )
 
-    def test_no_cooling_when_cooling_cop_zero(self):
-        """A heat pump with cooling_cop=0 must not receive negative fractions."""
+    def test_no_cooling_when_heat_only_mode(self):
+        """A heat pump configured with hvac_mode='heat' must not receive negative fractions."""
         living = Room(
             "living_room", 5_000_000.0, 0.05, temperature=27.0, setpoint=21.0,
         )
         model = HouseModel([living])
-        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=0.0)
+        hp = HeatPump("hp", "living_room", max_power=5000.0, hvac_mode="heat")
         ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
         now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
         actions = ctrl.compute(outdoor_temp=25.0, now=now)
         assert actions["hp"] >= 0.0, (
-            "Heating-only heat pump must not receive a negative (cooling) fraction"
+            "Heat-only heat pump must not receive a negative (cooling) fraction"
         )
 
     def test_heat_pump_filter_state_cooling_reduced_inside_comfort(self):
