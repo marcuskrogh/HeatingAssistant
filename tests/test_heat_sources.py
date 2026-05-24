@@ -156,10 +156,13 @@ class TestHeatPump:
         assert hp.target_temperature(0.5, 20.0) == pytest.approx(22.0)
 
     def test_target_temperature_clamps_fraction(self):
-        """Fractions above 1.0 or below 0.0 are clamped."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        """Fractions outside [u_min, u_max] are clamped."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
+                      hvac_mode="heat_cool")
+        # Above u_max=1: clamped to 1.0
         assert hp.target_temperature(1.5, 20.0) == pytest.approx(25.0)
-        assert hp.target_temperature(-0.5, 20.0) == pytest.approx(20.0)
+        # Below u_min=-1: clamped to -1.0
+        assert hp.target_temperature(-1.5, 20.0) == pytest.approx(15.0)
 
     def test_max_temp_offset_default(self):
         """Default max_temp_offset should be 5.0 °C."""
@@ -172,15 +175,45 @@ class TestHeatPump:
         assert hp.max_temp_offset == 8.0
         assert hp.target_temperature(1.0, 20.0) == pytest.approx(28.0)
 
-    def test_turn_off_deadband_default(self):
-        """Default turn_off_deadband should be 1.0 °C."""
+    def test_hvac_mode_default(self):
+        """Default hvac_mode should be 'heat_cool'."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
-        assert hp.turn_off_deadband == 1.0
+        assert hp.hvac_mode == "heat_cool"
 
-    def test_custom_turn_off_deadband(self):
-        """Custom turn_off_deadband is stored correctly."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, turn_off_deadband=2.5)
-        assert hp.turn_off_deadband == 2.5
+    def test_hvac_mode_heat(self):
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat")
+        assert hp.hvac_mode == "heat"
+        assert hp.u_min == 0.0
+        assert hp.u_max == 1.0
+
+    def test_hvac_mode_cool(self):
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="cool")
+        assert hp.hvac_mode == "cool"
+        assert hp.u_min == -1.0
+        assert hp.u_max == 0.0
+
+    def test_hvac_mode_heat_cool(self):
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool")
+        assert hp.u_min == -1.0
+        assert hp.u_max == 1.0
+
+    def test_target_temperature_negative_fraction(self):
+        """Negative fraction drives setpoint below internal temp (cooling)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool",
+                      max_temp_offset=5.0)
+        assert hp.target_temperature(-0.5, 25.0) == pytest.approx(22.5)
+
+    def test_target_temperature_clamped_to_u_max(self):
+        """Fraction above u_max is clamped (heat mode: u_max=1)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat",
+                      max_temp_offset=5.0)
+        assert hp.target_temperature(2.0, 20.0) == pytest.approx(25.0)
+
+    def test_target_temperature_clamped_to_u_min_cool(self):
+        """In cool mode positive fractions are clamped to u_max=0."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="cool",
+                      max_temp_offset=5.0)
+        assert hp.target_temperature(0.5, 25.0) == pytest.approx(25.0)
 
     def test_cooling_power_default(self):
         """Cooling power = -(max_power / cop_rated) × cooling_cop × cooling_efficiency.
@@ -238,8 +271,18 @@ class TestHeatPump:
     # -- can_cool property -------------------------------------------------
 
     def test_can_cool_true_by_default(self):
-        """Default cooling_cop=2.5 means the pump can cool."""
+        """Default hvac_mode='heat_cool' and cooling_cop=2.5 → can_cool=True."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.can_cool is True
+
+    def test_can_cool_false_when_heat_only_mode(self):
+        """hvac_mode='heat' → can_cool=False even with cooling_cop > 0."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat")
+        assert hp.can_cool is False
+
+    def test_can_cool_true_when_cool_only_mode(self):
+        """hvac_mode='cool' → can_cool=True."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="cool")
         assert hp.can_cool is True
 
     def test_can_cool_false_when_cooling_cop_zero(self):
@@ -252,28 +295,25 @@ class TestHeatPump:
         heater = ElectricHeater("h1", "living_room", max_power=2000.0)
         assert heater.can_cool is False
 
-    # -- target_temperature_cooling ----------------------------------------
+    # -- target_temperature unified (heat_cool mode) -----------------------
 
-    def test_target_temperature_cooling_full(self):
-        """At cooling_fraction=1.0 the full max_temp_offset is subtracted."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
-        assert hp.target_temperature_cooling(1.0, 23.0) == pytest.approx(18.0)
+    def test_target_temperature_full_cooling(self):
+        """fraction=-1.0 subtracts the full max_temp_offset."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
+                      hvac_mode="heat_cool")
+        assert hp.target_temperature(-1.0, 23.0) == pytest.approx(18.0)
 
-    def test_target_temperature_cooling_zero(self):
-        """At cooling_fraction=0.0 the target equals the internal temperature."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
-        assert hp.target_temperature_cooling(0.0, 23.0) == pytest.approx(23.0)
+    def test_target_temperature_zero_is_internal(self):
+        """fraction=0 → setpoint equals the internal temperature."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
+                      hvac_mode="heat_cool")
+        assert hp.target_temperature(0.0, 23.0) == pytest.approx(23.0)
 
-    def test_target_temperature_cooling_half(self):
-        """At cooling_fraction=0.5 half the max_temp_offset is subtracted."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=4.0)
-        assert hp.target_temperature_cooling(0.5, 24.0) == pytest.approx(22.0)
-
-    def test_target_temperature_cooling_clamps_fraction(self):
-        """Fractions outside [0, 1] are clamped."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
-        assert hp.target_temperature_cooling(1.5, 20.0) == pytest.approx(15.0)
-        assert hp.target_temperature_cooling(-0.5, 20.0) == pytest.approx(20.0)
+    def test_target_temperature_half_cooling(self):
+        """fraction=-0.5 subtracts half the max_temp_offset."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=4.0,
+                      hvac_mode="heat_cool")
+        assert hp.target_temperature(-0.5, 24.0) == pytest.approx(22.0)
 
     # -- smooth_thermal_power ----------------------------------------------
 

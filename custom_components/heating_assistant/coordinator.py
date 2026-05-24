@@ -50,7 +50,8 @@ from .const import (
     CONF_SOURCE_MAX_POWER,
     CONF_SOURCE_MAX_TEMP_OFFSET,
     CONF_SOURCE_MIN_POWER,
-    CONF_SOURCE_TURN_OFF_DEADBAND,
+    CONF_SOURCE_HVAC_MODE,
+    DEFAULT_SOURCE_HVAC_MODE,
     CONF_SOURCE_NAME,
     CONF_SOURCE_ROOM,
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
@@ -102,7 +103,6 @@ from .const import (
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
     DEFAULT_TERMINAL_WEIGHT,
-    DEFAULT_TURN_OFF_DEADBAND,
     DEFAULT_IDLE_OFFSET,
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
     DEFAULT_WINDOW_OPEN_DEBOUNCE,
@@ -269,7 +269,7 @@ def build_heat_sources(
                     cop_temp_ref=sc.get(CONF_SOURCE_COP_TEMP_REF, DEFAULT_COP_TEMP_REF),
                     min_power=sc.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER),
                     max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    turn_off_deadband=sc.get(CONF_SOURCE_TURN_OFF_DEADBAND, DEFAULT_TURN_OFF_DEADBAND),
+                    hvac_mode=sc.get(CONF_SOURCE_HVAC_MODE, DEFAULT_SOURCE_HVAC_MODE),
                     cooling_cop=sc.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP),
                     cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
                     heating_efficiency=sc.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY),
@@ -611,10 +611,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         by sensor entities between ticks; the empty initial values are what
         the sensors see before the first cycle completes.
         """
-        # Latest control actions (source_name → fraction 0‑1)
+        # Latest control actions (source_name → fraction in [u_min, u_max])
         self.actions: Dict[str, float] = {}
-        # Track which heat sources are in cooling mode (source_name → bool)
-        self._cooling_active: Dict[str, bool] = {}
 
         # Visualization data
         self.solar_gains: Dict[str, float] = {}
@@ -1320,10 +1318,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 #   - fraction > 0  → heat mode, offset-based setpoint
                 if isinstance(src, HeatPump):
                     if not effective_room_enabled:
-                        # Room explicitly disabled (user toggle or active "off"
-                        # schedule period without frost-protection demand) —
-                        # force the heat pump fully off.
-                        self._cooling_active[src.name] = False
                         src.set_power(0.0, outdoor_temp)
                         if controller is not None:
                             controller.notify_applied_u(src.name, 0.0)
@@ -1335,10 +1329,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
                         continue
 
-                    room_temp = self.model.rooms[src.room].temperature
-                    room_setpoint = self.get_room_setpoint(src.room)
-
-                    # Read the heat pump's own internal temperature
+                    # Read the HP's own internal temperature sensor.
                     hp_internal_temp: Optional[float] = None
                     attrs = getattr(state, "attributes", {})
                     raw = attrs.get("current_temperature")
@@ -1348,149 +1339,48 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         except (ValueError, TypeError):
                             pass
 
-                    # ── Schmitt-trigger dead band (applies to BOTH directions) ──
-                    # Evaluate the two-threshold hysteresis gate first, before
-                    # inspecting the MPC fraction.  This ensures the dead band
-                    # prevents jitter in both transitions:
-                    #
-                    #   heating → cooling : only enter when
-                    #       room_temp > setpoint + deadband
-                    #   cooling → heating : only exit when
-                    #       room_temp < setpoint − deadband
-                    #
-                    # A negative MPC fraction (active cooling request) is honoured
-                    # only once the upper threshold has been crossed.  This stops
-                    # the heat pump toggling mode when the temperature is close to
-                    # the setpoint from either side.
-                    currently_cooling = getattr(
-                        self, '_cooling_active', {}
-                    ).get(src.name, False)
-                    if currently_cooling:
-                        if room_temp < room_setpoint - src.turn_off_deadband:
-                            currently_cooling = False
-                    else:
-                        if room_temp > room_setpoint + src.turn_off_deadband:
-                            currently_cooling = True
-                    self._cooling_active[src.name] = currently_cooling
+                    base_temp = (
+                        hp_internal_temp
+                        if hp_internal_temp is not None
+                        else self.model.rooms[src.room].temperature
+                    )
 
-                    # Resolve the best available cooling mode once (used below).
+                    # Map the configured hvac_mode to the best HA mode string
+                    # the entity actually supports.
                     supported_modes = attrs.get("hvac_modes", [])
-                    if "cool" in supported_modes:
-                        cooling_mode = "cool"
-                    elif "dry" in supported_modes:
-                        cooling_mode = "dry"
-                    elif "fan_only" in supported_modes or not supported_modes:
-                        cooling_mode = "fan_only"
+                    if src.hvac_mode == "heat_cool":
+                        if "heat_cool" in supported_modes:
+                            hvac_mode_str = "heat_cool"
+                        elif "auto" in supported_modes:
+                            hvac_mode_str = "auto"
+                        else:
+                            hvac_mode_str = "heat_cool"
+                    elif src.hvac_mode == "cool":
+                        if "cool" in supported_modes:
+                            hvac_mode_str = "cool"
+                        elif "dry" in supported_modes:
+                            hvac_mode_str = "dry"
+                        else:
+                            hvac_mode_str = "fan_only"
                     else:
-                        _LOGGER.warning(
-                            "Heat pump %r supports neither 'cool', 'dry' nor "
-                            "'fan_only' modes (%r); defaulting to 'fan_only'",
-                            entity_id, supported_modes,
-                        )
-                        cooling_mode = "fan_only"
+                        hvac_mode_str = "heat"
 
-                    if currently_cooling:
-                        # Dead band permits cooling.  Decide between active
-                        # (MPC-requested, fraction < 0) and passive (temperature
-                        # above upper threshold but MPC fraction ≥ 0).
-                        if fraction < 0.0:
-                            # Active cooling: use the MPC-computed fraction to
-                            # set the HP setpoint proportionally below its own
-                            # internal sensor.  _current_power is already set by
-                            # controller.compute() — no override needed here.
-                            cooling_fraction = abs(fraction)
-                            if hp_internal_temp is not None:
-                                target_temp = src.target_temperature_cooling(
-                                    cooling_fraction, hp_internal_temp,
-                                )
-                            else:
-                                target_temp = src.target_temperature_cooling(
-                                    cooling_fraction, room_temp,
-                                )
-                        else:
-                            # Passive cooling: room is above the upper dead-band
-                            # threshold but MPC is not requesting active cooling.
-                            # Drive the HP setpoint below its internal sensor by
-                            # an offset that grows with overshoot.  Notify the
-                            # controller so the CD-EKF uses the correct u_prev.
-                            overshoot = max(0.0, room_temp - room_setpoint)
-                            idle_offset = DEFAULT_IDLE_OFFSET + overshoot
-                            if hp_internal_temp is not None:
-                                target_temp = hp_internal_temp - idle_offset
-                            else:
-                                target_temp = room_temp - idle_offset
+                    # Proportional setpoint: base_temp + fraction × max_temp_offset.
+                    # fraction is already clamped to [u_min, u_max] by the controller.
+                    target_temp = src.target_temperature(fraction, base_temp)
 
-                            # Override power so the thermal model accounts for
-                            # heat removal.
-                            cooling_power = src.cooling_power(outdoor_temp)
-                            src.set_power(0.0, outdoor_temp)
-                            src._current_power = cooling_power  # negative = heat removal
-                            if controller is not None:
-                                controller.notify_applied_u(src.name, -1.0)
-
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": cooling_mode},
-                            blocking=False,
-                        )
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_temperature",
-                            {"entity_id": entity_id, "temperature": target_temp},
-                            blocking=False,
-                        )
-
-                    elif fraction > 0.0:
-                        # Active heating: dead band cleared, MPC requests heat.
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": "heat"},
-                            blocking=False,
-                        )
-
-                        if hp_internal_temp is not None:
-                            target_temp = src.target_temperature(
-                                fraction, hp_internal_temp,
-                            )
-                        else:
-                            target_temp = src.target_temperature(
-                                fraction, room_temp,
-                            )
-
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_temperature",
-                            {"entity_id": entity_id, "temperature": target_temp},
-                            blocking=False,
-                        )
-
-                    else:
-                        # Idle: either fraction == 0, or fraction < 0 but the
-                        # dead band is preventing a switch to cooling because the
-                        # temperature has not yet crossed the upper threshold.
-                        # Keep the HP in heat mode with the setpoint below its
-                        # own reading so it produces near-zero output while
-                        # keeping the refrigerant circuit warm for fast response.
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": "heat"},
-                            blocking=False,
-                        )
-
-                        if hp_internal_temp is not None:
-                            target_temp = hp_internal_temp - DEFAULT_IDLE_OFFSET
-                        else:
-                            target_temp = self.model.rooms[src.room].temperature - DEFAULT_IDLE_OFFSET
-
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_temperature",
-                            {"entity_id": entity_id, "temperature": target_temp},
-                            blocking=False,
-                        )
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_hvac_mode",
+                        {"entity_id": entity_id, "hvac_mode": hvac_mode_str},
+                        blocking=False,
+                    )
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_temperature",
+                        {"entity_id": entity_id, "temperature": target_temp},
+                        blocking=False,
+                    )
                 else:
                     # Non-heat-pump climate entity (e.g. electric heater
                     # with a built-in thermostat).

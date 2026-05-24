@@ -36,7 +36,8 @@ from .const import (
     CONF_SOURCE_MIN_POWER,
     CONF_SOURCE_HEATER_ENTITY,
     CONF_SOURCE_MAX_TEMP_OFFSET,
-    CONF_SOURCE_TURN_OFF_DEADBAND,
+    CONF_SOURCE_HVAC_MODE,
+    DEFAULT_SOURCE_HVAC_MODE,
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENVELOPE_TIGHTNESS,
@@ -402,7 +403,7 @@ class HeaterFlowHelper:
         cop_temp_ref: float | None = None,
         min_power: float | None = None,
         max_temp_offset: float | None = None,
-        turn_off_deadband: float | None = None,
+        hvac_mode: str | None = None,
         emitter_time_constant: float | None = None,
     ) -> None:
         """Append a new heater to the room."""
@@ -422,8 +423,8 @@ class HeaterFlowHelper:
             new_heater[CONF_SOURCE_MIN_POWER] = float(min_power)
         if max_temp_offset is not None:
             new_heater[CONF_SOURCE_MAX_TEMP_OFFSET] = float(max_temp_offset)
-        if turn_off_deadband is not None:
-            new_heater[CONF_SOURCE_TURN_OFF_DEADBAND] = float(turn_off_deadband)
+        if hvac_mode is not None:
+            new_heater[CONF_SOURCE_HVAC_MODE] = str(hvac_mode)
         if emitter_time_constant is not None:
             new_heater[CONF_SOURCE_EMITTER_TIME_CONSTANT] = float(emitter_time_constant)
         self._heat_sources_list.append(new_heater)
@@ -441,7 +442,7 @@ class HeaterFlowHelper:
         cop_temp_ref: float | None = None,
         min_power: float | None = None,
         max_temp_offset: float | None = None,
-        turn_off_deadband: float | None = None,
+        hvac_mode: str | None = None,
         emitter_time_constant: float | None = None,
     ) -> bool:
         """Update heater at idx. Returns False if out of range."""
@@ -462,8 +463,8 @@ class HeaterFlowHelper:
             heater[CONF_SOURCE_MIN_POWER] = float(min_power)
         if max_temp_offset is not None:
             heater[CONF_SOURCE_MAX_TEMP_OFFSET] = float(max_temp_offset)
-        if turn_off_deadband is not None:
-            heater[CONF_SOURCE_TURN_OFF_DEADBAND] = float(turn_off_deadband)
+        if hvac_mode is not None:
+            heater[CONF_SOURCE_HVAC_MODE] = str(hvac_mode)
         if emitter_time_constant is not None:
             heater[CONF_SOURCE_EMITTER_TIME_CONSTANT] = float(emitter_time_constant)
         return True
