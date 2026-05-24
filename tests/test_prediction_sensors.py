@@ -29,6 +29,7 @@ def _make_room_coordinator():
     sources = [SimpleNamespace(room="living_room", current_power=900.0)]
     coord = SimpleNamespace(
         predictions=[{"living_room": 20.6}, {"living_room": 20.7}],
+        linearised_predictions=[{"living_room": 20.58}, {"living_room": 20.68}],
         heating_schedule=[{"living_room": 1234.0}, {"living_room": 1100.0}],
         solar_forecast=[
             {"living_room": 50.0},
@@ -194,6 +195,7 @@ def test_temperature_forecast_reports_unknown_when_predictions_empty():
     room = SimpleNamespace(temperature=19.42, setpoint=21.0, windows=[])
     coord = SimpleNamespace(
         predictions=[],
+        linearised_predictions=[],
         heating_schedule=[],
         solar_forecast=[],
         outdoor_forecast=[],

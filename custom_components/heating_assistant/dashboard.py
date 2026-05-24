@@ -275,10 +275,10 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "curve": "stepline",
                 "show": {"in_legend": False, "in_header": False},
             },
-            # Forecast: predicted temperature trajectory
+            # Forecast: predicted temperature trajectory (nonlinear model)
             {
                 "entity": forecast,
-                "name": "Predicted",
+                "name": "Predicted (nonlinear)",
                 "data_generator": _forecast_generator("temperature"),
                 "yaxis_id": "temp",
                 "color": "#1E88E5",
@@ -286,6 +286,19 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "curve": "smooth",
                 "float_precision": 2,
                 "show": {"in_header": True},
+            },
+            # Forecast: linearised model temperature trajectory (what the MPC sees)
+            {
+                "entity": forecast,
+                "name": "Predicted (linearised)",
+                "data_generator": _forecast_generator("linearised_temperature"),
+                "yaxis_id": "temp",
+                "color": "#FF8F00",
+                "stroke_width": 2,
+                "stroke_dash": 4,
+                "curve": "smooth",
+                "float_precision": 2,
+                "show": {"in_header": False},
             },
         ],
     }

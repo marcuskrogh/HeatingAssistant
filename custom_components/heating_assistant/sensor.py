@@ -817,6 +817,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         outdoor_forecast = self._coordinator.outdoor_forecast
         solar_forecast = self._coordinator.solar_forecast
         heating_schedule = self._coordinator.heating_schedule
+        linearised_predictions = self._coordinator.linearised_predictions
 
         # Current heating power for this room (actual, not planned)
         current_heating = sum(
@@ -849,6 +850,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         n_sched = len(heating_schedule)
         n_solar = len(solar_forecast)
         n_outdoor = len(outdoor_forecast)
+        n_lin = len(linearised_predictions)
         for i, pred in enumerate(predictions):
             temp = pred.get(self._room_name)
             # Include this step in the forecast even if temperature is missing,
@@ -872,6 +874,10 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
                 )
             if i < n_outdoor:
                 entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
+            if i < n_lin:
+                lin_temp = linearised_predictions[i].get(self._room_name)
+                if lin_temp is not None:
+                    entry["linearised_temperature"] = round(lin_temp, 2)
             forecast.append(entry)
 
         # Expose the per-room comfort offset for dashboard constraint-band
