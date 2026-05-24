@@ -359,3 +359,77 @@ class TestHeatPump:
         p_half = hp.thermal_power(0.5, outdoor_temp=7.0)
         p_full = hp.thermal_power(1.0, outdoor_temp=7.0)
         assert p_full == pytest.approx(2.0 * p_half, rel=1e-6)
+
+    # -- max_power ceiling (regression: power must never exceed max_power) ---
+
+    def test_thermal_power_never_exceeds_max_power_at_warm_outdoor_temp(self):
+        """Regression: warm outdoor temps raise COP above rated value, which used
+        to push thermal_power beyond max_power. The output must be capped."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        # At 15 °C the COP exceeds 3.5, which previously caused ~8 400 W output.
+        power = hp.thermal_power(1.0, outdoor_temp=15.0)
+        assert power <= 6000.0, f"thermal_power exceeded max_power: {power} W"
+
+    def test_thermal_power_never_exceeds_max_power_across_temp_range(self):
+        """thermal_power must stay ≤ max_power for all outdoor temperatures."""
+        max_power = 6000.0
+        hp = HeatPump(
+            "hp1", "living_room", max_power=max_power,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        for t_out in range(-10, 25):
+            power = hp.thermal_power(1.0, outdoor_temp=float(t_out))
+            assert power <= max_power + 1e-9, (
+                f"thermal_power exceeded max_power at {t_out} °C: {power} W"
+            )
+
+    def test_thermal_power_never_exceeds_max_power_with_power_scale(self):
+        """power_scale shifts both the base and the ceiling proportionally."""
+        max_power = 6000.0
+        scale = 1.3
+        hp = HeatPump(
+            "hp1", "living_room", max_power=max_power,
+            cop_rated=3.5, cop_temp_ref=7.0, power_scale=scale,
+        )
+        ceiling = max_power * scale
+        for t_out in range(-10, 25):
+            power = hp.thermal_power(1.0, outdoor_temp=float(t_out))
+            assert power <= ceiling + 1e-9, (
+                f"thermal_power exceeded ceiling at {t_out} °C: {power} W"
+            )
+
+    def test_smooth_thermal_power_never_exceeds_max_power_at_warm_outdoor_temp(self):
+        """smooth_thermal_power must also respect the max_power ceiling."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        phi = hp.smooth_thermal_power(1.0, outdoor_temp=15.0)
+        assert phi <= 6000.0 + 1e-9, (
+            f"smooth_thermal_power exceeded max_power at 15 °C: {phi} W"
+        )
+
+    def test_smooth_thermal_power_never_exceeds_max_power_across_temp_range(self):
+        """smooth_thermal_power must stay ≤ max_power for all outdoor temperatures."""
+        max_power = 6000.0
+        hp = HeatPump(
+            "hp1", "living_room", max_power=max_power,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        for t_out in range(-10, 25):
+            phi = hp.smooth_thermal_power(1.0, outdoor_temp=float(t_out))
+            assert phi <= max_power + 1e-9, (
+                f"smooth_thermal_power exceeded max_power at {t_out} °C: {phi} W"
+            )
+
+    def test_thermal_power_still_reaches_max_power_at_rated_conditions(self):
+        """After the fix, full power at rated outdoor temp must still equal max_power."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        power = hp.thermal_power(1.0, outdoor_temp=7.0)
+        assert power == pytest.approx(6000.0, rel=0.01)

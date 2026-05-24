@@ -261,6 +261,8 @@ class HeatPump(HeatSource):
         self._cop_scale: float = cop_rated * max(_T_SUPPLY_K - _T_ref_K, 1.0) / _T_SUPPLY_K
         # Base thermal output at COP=1 (used in thermal_power / smooth_thermal_power)
         self._q_heat_base: float = self._electric_max * heating_efficiency * power_scale
+        # Hard ceiling: rated thermal output must never be exceeded regardless of outdoor COP
+        self._q_heat_max: float = max_power * heating_efficiency * power_scale
 
     @property
     def can_cool(self) -> bool:
@@ -287,7 +289,7 @@ class HeatPump(HeatSource):
         if outdoor_temp < self.min_outdoor_temp:
             return 0.0
         cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
-        power = self._q_heat_base * setpoint_fraction * cop_now
+        power = min(self._q_heat_base * cop_now, self._q_heat_max) * setpoint_fraction
         if 0.0 < power < self.min_power:
             return 0.0
         return power
@@ -432,7 +434,7 @@ class HeatPump(HeatSource):
         if outdoor_temp < self.min_outdoor_temp:
             return 0.0
         cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
-        q_heat = self._q_heat_base * cop_now
+        q_heat = min(self._q_heat_base * cop_now, self._q_heat_max)
         q_cool = self._q_cool_const
 
         if q_heat <= 0.0 or q_cool <= 0.0:
