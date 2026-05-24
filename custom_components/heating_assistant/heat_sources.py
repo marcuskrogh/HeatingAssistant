@@ -17,6 +17,31 @@ from typing import Optional
 
 _T_SUPPLY_K: float = 308.15  # Assumed supply temperature 35 °C in Kelvin
 
+# Dimensionless sharpness for the smooth power ceiling (higher → sharper).
+# At x = cap the output is cap · (1 − ln 2 / k); with k = 50 the bias is ≈ 1.4 %.
+# The derivative is sigmoid(k · (x/cap − 1)), which the L-BFGS-B solver
+# can exploit without any non-differentiable kink.
+_SOFT_CEIL_K: float = 50.0
+
+
+def _soft_ceiling(x: float, cap: float) -> float:
+    """Smooth C∞ ceiling: differentiable approximation to min(x, cap).
+
+    Uses a normalised softplus so the sharpness is dimensionless:
+
+        f(x) = cap − (cap / k) · log(1 + exp(k · (1 − x / cap)))
+        f′(x) = sigmoid(k · (x / cap − 1))
+
+    The function is always ≤ cap, approaches x for x ≪ cap, and approaches
+    cap for x ≫ cap.  Numerically stable for all finite x.
+    """
+    if cap <= 0.0:
+        return 0.0
+    t = _SOFT_CEIL_K * (1.0 - x / cap)
+    # Numerically stable softplus: avoids exp overflow for large positive t.
+    sp = t + math.log1p(math.exp(-t)) if t > 0.0 else math.log1p(math.exp(t))
+    return cap - (cap / _SOFT_CEIL_K) * sp
+
 
 class HeatSource(ABC):
     """Abstract base class for a controllable heat source."""
@@ -289,7 +314,7 @@ class HeatPump(HeatSource):
         if outdoor_temp < self.min_outdoor_temp:
             return 0.0
         cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
-        power = min(self._q_heat_base * cop_now, self._q_heat_max) * setpoint_fraction
+        power = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max) * setpoint_fraction
         if 0.0 < power < self.min_power:
             return 0.0
         return power
@@ -434,7 +459,7 @@ class HeatPump(HeatSource):
         if outdoor_temp < self.min_outdoor_temp:
             return 0.0
         cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
-        q_heat = min(self._q_heat_base * cop_now, self._q_heat_max)
+        q_heat = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max)
         q_cool = self._q_cool_const
 
         if q_heat <= 0.0 or q_cool <= 0.0:

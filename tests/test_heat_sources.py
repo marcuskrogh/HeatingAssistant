@@ -1,5 +1,6 @@
 """Unit tests for heat-source models."""
 
+import math
 import sys
 import os
 import numpy as np
@@ -11,6 +12,8 @@ from custom_components.heating_assistant.heat_sources import (
     ElectricHeater,
     HeatPump,
     _cop_at_temp,
+    _soft_ceiling,
+    _SOFT_CEIL_K,
 )
 
 
@@ -426,10 +429,48 @@ class TestHeatPump:
             )
 
     def test_thermal_power_still_reaches_max_power_at_rated_conditions(self):
-        """After the fix, full power at rated outdoor temp must still equal max_power."""
+        """Full power at rated outdoor temp must be within 2 % of max_power.
+
+        The soft ceiling has a known bias of ln(2)/k ≈ 1.4 % at the rated
+        point (where q_cop == q_max), so we allow 2 % tolerance here.
+        """
         hp = HeatPump(
             "hp1", "living_room", max_power=6000.0,
             cop_rated=3.5, cop_temp_ref=7.0,
         )
         power = hp.thermal_power(1.0, outdoor_temp=7.0)
-        assert power == pytest.approx(6000.0, rel=0.01)
+        assert power == pytest.approx(6000.0, rel=0.02)
+
+    # -- _soft_ceiling unit tests ------------------------------------------
+
+    def test_soft_ceiling_below_cap_is_identity(self):
+        """Well below the cap the output tracks the input almost exactly."""
+        cap = 6000.0
+        x = cap * 0.1
+        assert _soft_ceiling(x, cap) == pytest.approx(x, rel=1e-4)
+
+    def test_soft_ceiling_above_cap_saturates(self):
+        """Well above the cap the output is essentially equal to cap."""
+        cap = 6000.0
+        x = cap * 3.0
+        assert _soft_ceiling(x, cap) == pytest.approx(cap, rel=1e-4)
+
+    def test_soft_ceiling_never_exceeds_cap(self):
+        """Output must be ≤ cap for all inputs."""
+        cap = 6000.0
+        for x in [0.0, 1000.0, 5000.0, 6000.0, 8000.0, 20000.0]:
+            assert _soft_ceiling(x, cap) <= cap + 1e-9
+
+    def test_soft_ceiling_derivative_is_sigmoid(self):
+        """Derivative at any point must equal sigmoid(k·(x/cap − 1))."""
+        cap = 6000.0
+        for x in [1000.0, 4000.0, 6000.0, 8000.0, 12000.0]:
+            dx = 0.01
+            numerical = (_soft_ceiling(x + dx, cap) - _soft_ceiling(x - dx, cap)) / (2 * dx)
+            # df/dx = sigmoid(k·(1 − x/cap));  sign opposite to the soft-max convention
+            analytical = 1.0 / (1.0 + math.exp(_SOFT_CEIL_K * (x / cap - 1.0)))
+            assert numerical == pytest.approx(analytical, rel=1e-3)
+
+    def test_soft_ceiling_zero_cap_returns_zero(self):
+        """A zero cap should return 0 without division errors."""
+        assert _soft_ceiling(5000.0, 0.0) == pytest.approx(0.0)
