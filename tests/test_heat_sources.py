@@ -1,5 +1,6 @@
 """Unit tests for heat-source models."""
 
+import math
 import sys
 import os
 import numpy as np
@@ -11,6 +12,8 @@ from custom_components.heating_assistant.heat_sources import (
     ElectricHeater,
     HeatPump,
     _cop_at_temp,
+    _soft_ceiling,
+    _SOFT_CEIL_K,
 )
 
 
@@ -359,3 +362,115 @@ class TestHeatPump:
         p_half = hp.thermal_power(0.5, outdoor_temp=7.0)
         p_full = hp.thermal_power(1.0, outdoor_temp=7.0)
         assert p_full == pytest.approx(2.0 * p_half, rel=1e-6)
+
+    # -- max_power ceiling (regression: power must never exceed max_power) ---
+
+    def test_thermal_power_never_exceeds_max_power_at_warm_outdoor_temp(self):
+        """Regression: warm outdoor temps raise COP above rated value, which used
+        to push thermal_power beyond max_power. The output must be capped."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        # At 15 °C the COP exceeds 3.5, which previously caused ~8 400 W output.
+        power = hp.thermal_power(1.0, outdoor_temp=15.0)
+        assert power <= 6000.0, f"thermal_power exceeded max_power: {power} W"
+
+    def test_thermal_power_never_exceeds_max_power_across_temp_range(self):
+        """thermal_power must stay ≤ max_power for all outdoor temperatures."""
+        max_power = 6000.0
+        hp = HeatPump(
+            "hp1", "living_room", max_power=max_power,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        for t_out in range(-10, 25):
+            power = hp.thermal_power(1.0, outdoor_temp=float(t_out))
+            assert power <= max_power + 1e-9, (
+                f"thermal_power exceeded max_power at {t_out} °C: {power} W"
+            )
+
+    def test_thermal_power_never_exceeds_max_power_with_power_scale(self):
+        """power_scale shifts both the base and the ceiling proportionally."""
+        max_power = 6000.0
+        scale = 1.3
+        hp = HeatPump(
+            "hp1", "living_room", max_power=max_power,
+            cop_rated=3.5, cop_temp_ref=7.0, power_scale=scale,
+        )
+        ceiling = max_power * scale
+        for t_out in range(-10, 25):
+            power = hp.thermal_power(1.0, outdoor_temp=float(t_out))
+            assert power <= ceiling + 1e-9, (
+                f"thermal_power exceeded ceiling at {t_out} °C: {power} W"
+            )
+
+    def test_smooth_thermal_power_never_exceeds_max_power_at_warm_outdoor_temp(self):
+        """smooth_thermal_power must also respect the max_power ceiling."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        phi = hp.smooth_thermal_power(1.0, outdoor_temp=15.0)
+        assert phi <= 6000.0 + 1e-9, (
+            f"smooth_thermal_power exceeded max_power at 15 °C: {phi} W"
+        )
+
+    def test_smooth_thermal_power_never_exceeds_max_power_across_temp_range(self):
+        """smooth_thermal_power must stay ≤ max_power for all outdoor temperatures."""
+        max_power = 6000.0
+        hp = HeatPump(
+            "hp1", "living_room", max_power=max_power,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        for t_out in range(-10, 25):
+            phi = hp.smooth_thermal_power(1.0, outdoor_temp=float(t_out))
+            assert phi <= max_power + 1e-9, (
+                f"smooth_thermal_power exceeded max_power at {t_out} °C: {phi} W"
+            )
+
+    def test_thermal_power_still_reaches_max_power_at_rated_conditions(self):
+        """Full power at rated outdoor temp must be within 2 % of max_power.
+
+        The soft ceiling has a known bias of ln(2)/k ≈ 1.4 % at the rated
+        point (where q_cop == q_max), so we allow 2 % tolerance here.
+        """
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        power = hp.thermal_power(1.0, outdoor_temp=7.0)
+        assert power == pytest.approx(6000.0, rel=0.02)
+
+    # -- _soft_ceiling unit tests ------------------------------------------
+
+    def test_soft_ceiling_below_cap_is_identity(self):
+        """Well below the cap the output tracks the input almost exactly."""
+        cap = 6000.0
+        x = cap * 0.1
+        assert _soft_ceiling(x, cap) == pytest.approx(x, rel=1e-4)
+
+    def test_soft_ceiling_above_cap_saturates(self):
+        """Well above the cap the output is essentially equal to cap."""
+        cap = 6000.0
+        x = cap * 3.0
+        assert _soft_ceiling(x, cap) == pytest.approx(cap, rel=1e-4)
+
+    def test_soft_ceiling_never_exceeds_cap(self):
+        """Output must be ≤ cap for all inputs."""
+        cap = 6000.0
+        for x in [0.0, 1000.0, 5000.0, 6000.0, 8000.0, 20000.0]:
+            assert _soft_ceiling(x, cap) <= cap + 1e-9
+
+    def test_soft_ceiling_derivative_is_sigmoid(self):
+        """Derivative at any point must equal sigmoid(k·(x/cap − 1))."""
+        cap = 6000.0
+        for x in [1000.0, 4000.0, 6000.0, 8000.0, 12000.0]:
+            dx = 0.01
+            numerical = (_soft_ceiling(x + dx, cap) - _soft_ceiling(x - dx, cap)) / (2 * dx)
+            # df/dx = sigmoid(k·(1 − x/cap));  sign opposite to the soft-max convention
+            analytical = 1.0 / (1.0 + math.exp(_SOFT_CEIL_K * (x / cap - 1.0)))
+            assert numerical == pytest.approx(analytical, rel=1e-3)
+
+    def test_soft_ceiling_zero_cap_returns_zero(self):
+        """A zero cap should return 0 without division errors."""
+        assert _soft_ceiling(5000.0, 0.0) == pytest.approx(0.0)
