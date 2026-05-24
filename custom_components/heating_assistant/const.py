@@ -456,3 +456,6 @@ SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
 #: entry.data key that stores the latest persisted estimation snapshot so that
 #: estimated parameters survive a full Home Assistant restart.
 CONF_ESTIMATED_PARAMS = "estimated_params"
+#: entry.data key that stores user-modified room setpoints so they survive a
+#: full Home Assistant restart and the end of a scheduled "off" period.
+CONF_PERSISTED_SETPOINTS = "persisted_setpoints"

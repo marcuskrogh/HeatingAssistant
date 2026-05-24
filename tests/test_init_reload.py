@@ -48,6 +48,7 @@ async def test_unload_stashes_runtime_state_for_reload():
     coordinator._history_buffer = [{"step": 1}, {"step": 2}]
     coordinator._room_enabled = {"living_room": False, "kitchen": True}
     coordinator._schedule_enabled = {"living_room": False}
+    coordinator._base_setpoint = {"living_room": 24.0, "kitchen": 20.0}
 
     hass.data[DOMAIN] = {entry.entry_id: coordinator}
 
@@ -61,6 +62,7 @@ async def test_unload_stashes_runtime_state_for_reload():
     assert stash["history_buffer"] == [{"step": 1}, {"step": 2}]
     assert stash["room_enabled"] == {"living_room": False, "kitchen": True}
     assert stash["schedule_enabled"] == {"living_room": False}
+    assert stash["base_setpoint"] == {"living_room": 24.0, "kitchen": 20.0}
 
 
 @pytest.mark.asyncio
@@ -76,15 +78,22 @@ async def test_setup_entry_restores_stashed_state(monkeypatch):
                 "history_buffer": [{"step": 7}],
                 "room_enabled": {"living_room": False, "removed_room": False},
                 "schedule_enabled": {"living_room": False},
+                "base_setpoint": {"living_room": 24.0, "removed_room": 21.0},
             }
         },
     }
+
+    class _FakeRoom:
+        def __init__(self):
+            self.setpoint = 22.0
 
     class _Coordinator:
         def __init__(self, *_args, **_kwargs):
             self._history_buffer = []
             self._room_enabled = {"living_room": True, "kitchen": True}
             self._schedule_enabled = {"living_room": True, "kitchen": True}
+            self._base_setpoint = {"living_room": 22.0, "kitchen": 20.0}
+            self.model = SimpleNamespace(rooms={"living_room": _FakeRoom(), "kitchen": _FakeRoom()})
 
         async def async_config_entry_first_refresh(self):
             return None
@@ -98,6 +107,8 @@ async def test_setup_entry_restores_stashed_state(monkeypatch):
     # Only rooms still present are restored; "removed_room" is dropped.
     assert coordinator._room_enabled == {"living_room": False, "kitchen": True}
     assert coordinator._schedule_enabled == {"living_room": False, "kitchen": True}
+    assert coordinator._base_setpoint == {"living_room": 24.0, "kitchen": 20.0}
+    assert coordinator.model.rooms["living_room"].setpoint == 24.0
     # Stash is consumed.
     assert entry.entry_id not in hass.data[DOMAIN]["_reload_state"]
 
@@ -114,6 +125,8 @@ async def test_setup_entry_attaches_update_listener(monkeypatch):
             self._history_buffer = []
             self._room_enabled = {}
             self._schedule_enabled = {}
+            self._base_setpoint = {}
+            self.model = SimpleNamespace(rooms={})
 
         async def async_config_entry_first_refresh(self):
             return None
