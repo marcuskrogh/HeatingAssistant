@@ -3,13 +3,13 @@
     "step": {
       "user": {
         "title": "Heating Assistant – Site Settings",
-        "description": "Configure the basic settings for Heating Assistant. Room and heat-source definitions are provided in configuration.yaml.",
+        "description": "Configure the basic settings for Heating Assistant. Room and heat source definitions are provided in configuration.yaml or can be configured after setup.",
         "data": {
           "latitude": "Latitude (degrees, positive = North)",
           "longitude": "Longitude (degrees, positive = East)",
-          "outdoor_temp_entity": "Outdoor temperature sensor entity ID (leave blank to use HA default)",
-          "weather_entity": "Weather forecast entity ID (leave blank to disable forecast)",
-          "update_interval": "Control time step (seconds, 60–3600) — how often the MPC re-solves and applies actions (ZOH duration = EKF step = OCP step)"
+          "outdoor_temp_entity": "Outdoor temperature sensor (optional if weather forecast is available)",
+          "weather_entity": "Weather forecast (optional; either this or outdoor temperature sensor is needed)",
+          "update_interval": "How often to recalculate heating control (seconds, 60–3600)"
         }
       }
     },
@@ -18,10 +18,10 @@
   "options": {
     "step": {
       "init": {
-        "title": "Heating Assistant – Options",
+        "title": "Heating Assistant Options",
         "menu_options": {
           "global_settings": "Global settings",
-          "mpc_tuning": "MPC tuning & model parameters",
+          "mpc_tuning": "Controller tuning",
           "manage_rooms": "Configure rooms",
           "save": "Save & close"
         }
@@ -29,26 +29,26 @@
       "global_settings": {
         "title": "Global Settings",
         "data": {
-          "outdoor_temp_entity": "Outdoor temperature sensor (optional when weather forecast is set)",
-          "weather_entity": "Weather forecast (optional; either this or outdoor temperature sensor is required)",
-          "update_interval": "Control update interval (seconds, 60–3600) — how often the system recalculates heating control",
-          "sigma_w": "Model variability tolerance — higher values let the system adapt faster to changing conditions",
-          "sigma_v": "Temperature sensor uncertainty (°C) — reflect your sensor's accuracy",
-          "sigma_b": "Calibration drift tolerance — higher values allow sensor calibration to drift over time",
-          "window_open_debounce": "Window open delay (seconds) — sensor must stay open this long before activating window mode",
-          "window_open_close_settle": "Window close delay (seconds) — sensor must stay closed this long before leaving window mode",
-          "window_open_q_inflation": "Open-window uncertainty multiplier — higher values make the controller more cautious when a window is open"
+          "outdoor_temp_entity": "Outdoor temperature sensor (optional if weather forecast is set)",
+          "weather_entity": "Weather forecast (optional; one of these is required)",
+          "update_interval": "Control update interval (seconds, 60–3600) — how often the system recalculates heating",
+          "sigma_w": "System model flexibility (K/√s) — higher allows faster adaptation to changing conditions",
+          "sigma_v": "Temperature sensor accuracy (K) — higher reflects less accurate sensors",
+          "sigma_b": "Sensor drift compensation (K/√s) — higher allows calibration changes over time",
+          "window_open_debounce": "Window open confirmation time (seconds) — how long a window must stay open to activate window mode",
+          "window_open_close_settle": "Window close confirmation time (seconds) — how long a window must stay closed to exit window mode",
+          "window_open_q_inflation": "Window-open uncertainty level — higher makes the system more cautious when windows are open"
         }
       },
       "mpc_tuning": {
         "title": "Controller Tuning",
         "data": {
-          "horizon": "Look-ahead time (steps) — 100 steps ≈ 25 hours at 15-min intervals",
-          "tracking_weight": "Setpoint tracking importance — 0 = comfort range only, higher = stricter setpoint control",
-          "energy_weight": "Energy efficiency preference — higher values reduce heating costs but may sacrifice comfort",
-          "smoothing_weight": "Comfort smoothing — higher values reduce rapid heating/cooling cycles",
-          "soft_constraint_weight": "Comfort corridor flexibility — higher values strictly enforce the comfort temperature range",
-          "terminal_weight": "End-of-period behavior weight — controls heating behavior as prediction ends"
+          "horizon": "Prediction time horizon (steps) — higher looks further ahead (100 steps ≈ 25 hours at 15-min intervals)",
+          "tracking_weight": "Target temperature priority (0–∞) — 0 = comfort band only, higher = keep closer to setpoint",
+          "energy_weight": "Energy cost priority (0–∞) — higher values reduce heating costs but may sacrifice comfort",
+          "smoothing_weight": "Comfort smoothing (0–∞) — higher prevents rapid heating/cooling cycles",
+          "soft_constraint_weight": "Comfort band enforcement (0–∞) — higher strictly enforces staying in the comfort temperature range",
+          "terminal_weight": "End-of-window behavior (1–10000) — how much to prioritize state at the end of prediction"
         }
       },
       "manage_rooms": {
@@ -66,12 +66,12 @@
         "title": "Add Room",
         "data": {
           "name": "Room name",
-          "temp_sensors": "Temperature sensors (select one or more)",
-          "window_sensors": "Window/door sensors (select for open-window detection)",
-          "room_size": "Approximate room size (affects estimated thermal mass)",
-          "building_age": "Approximate building construction period (affects estimated insulation)",
-          "envelope_tightness": "Building air tightness — leaky buildings lose more heat from wind",
-          "comfort_offset": "Comfort range (±°C from setpoint) — temperature can vary within this band"
+          "temp_sensors": "Temperature sensors",
+          "window_sensors": "Window/door sensors (for detecting open windows)",
+          "room_size": "Approximate room size",
+          "building_age": "Approximate building construction period (affects insulation)",
+          "envelope_tightness": "Building air tightness — how much heat is lost through air leaks and wind",
+          "comfort_offset": "Comfort temperature band (±°C from setpoint)"
         }
       },
       "edit_room": {
@@ -84,12 +84,12 @@
         "title": "Edit Room",
         "data": {
           "name": "Room name",
-          "temp_sensors": "Temperature sensors (select one or more)",
-          "window_sensors": "Window/door sensors (select for open-window detection)",
-          "room_size": "Approximate room size (affects estimated thermal mass)",
-          "building_age": "Approximate building construction period (affects estimated insulation)",
-          "envelope_tightness": "Building air tightness — leaky buildings lose more heat from wind",
-          "comfort_offset": "Comfort range (±°C from setpoint) — temperature can vary within this band"
+          "temp_sensors": "Temperature sensors",
+          "window_sensors": "Window/door sensors (for detecting open windows)",
+          "room_size": "Approximate room size",
+          "building_age": "Approximate building construction period (affects insulation)",
+          "envelope_tightness": "Building air tightness — how much heat is lost through air leaks and wind",
+          "comfort_offset": "Comfort temperature band (±°C from setpoint)"
         }
       },
       "manage_room_windows": {
@@ -116,8 +116,8 @@
         "title": "Add Window",
         "data": {
           "area": "Window area (m²)",
-          "orientation": "Orientation (compass direction the window faces)",
-          "tilt": "Tilt from horizontal (°) — 90 = vertical wall"
+          "orientation": "Which direction does it face? (compass direction)",
+          "tilt": "Window angle (°) — 90 = vertical (normal wall), 0 = horizontal (roof)"
         }
       },
       "remove_window": {
@@ -127,62 +127,62 @@
         }
       },
       "manage_room_heaters": {
-        "title": "Select Room for Heaters",
+        "title": "Select Room for Heat Sources",
         "data": {
           "room_name": "Room"
         }
       },
       "manage_heaters": {
-        "title": "Heaters",
+        "title": "Heat Sources",
         "menu_options": {
-          "add_heater": "Add heater",
-          "edit_heater": "Edit heater",
-          "remove_heater": "Remove heater",
-          "finish_heaters": "Done with heaters"
+          "add_heater": "Add heat source",
+          "edit_heater": "Edit heat source",
+          "remove_heater": "Remove heat source",
+          "finish_heaters": "Done with heat sources"
         }
       },
       "add_heater": {
-        "title": "Add Heater",
+        "title": "Add Heat Source",
         "data": {
-          "name": "Heater name",
-          "type": "Type of heater",
-          "max_power": "Maximum heating power (watts)",
-          "heater_entity": "Heater control switch (Home Assistant switch entity)",
-          "efficiency": "Electric heater efficiency (0–1, where 1 = 100%)",
-          "cop_rated": "Heat pump rated COP at reference temperature (higher = more efficient)",
-          "cop_temp_ref": "Reference outdoor temperature for COP (°C)",
-          "min_power": "Heat pump minimum output (watts) — 0 = no minimum",
-          "max_temp_offset": "Heat pump maximum output modulation (°C)",
-          "turn_off_deadband": "Turn off threshold (°C above setpoint) — 0 = disabled",
-          "emitter_time_constant": "Response time lag (seconds) — radiators ~600s, fan coils ~60s, resistive ~0s"
+          "name": "Heat source name",
+          "type": "Type (electric heater or heat pump)",
+          "max_power": "Maximum power output (watts)",
+          "heater_entity": "Control switch (Home Assistant switch entity)",
+          "efficiency": "Efficiency rating (0–1, electric heaters only)",
+          "cop_rated": "Rated COP at reference temperature (heat pumps only — higher is more efficient)",
+          "cop_temp_ref": "Reference outdoor temperature for COP rating (°C, heat pumps only)",
+          "min_power": "Minimum power output (watts, heat pumps only) — 0 = no minimum",
+          "max_temp_offset": "Maximum temperature offset for power control (°C, heat pumps only)",
+          "turn_off_deadband": "How far above setpoint before turning off (°C) — 0 = disabled",
+          "emitter_time_constant": "Response time delay (seconds) — radiators ~600s, fan coils ~60s, resistive heaters ~0s"
         }
       },
       "edit_heater": {
-        "title": "Select Heater to Edit",
+        "title": "Select Heat Source to Edit",
         "data": {
-          "heater_idx": "Heater"
+          "heater_idx": "Heat source"
         }
       },
       "heater_detail": {
-        "title": "Edit Heater",
+        "title": "Edit Heat Source",
         "data": {
-          "name": "Heater name",
-          "type": "Type of heater",
-          "max_power": "Maximum heating power (watts)",
-          "heater_entity": "Heater control switch (Home Assistant switch entity)",
-          "efficiency": "Electric heater efficiency (0–1, where 1 = 100%)",
-          "cop_rated": "Heat pump rated COP at reference temperature (higher = more efficient)",
-          "cop_temp_ref": "Reference outdoor temperature for COP (°C)",
-          "min_power": "Heat pump minimum output (watts) — 0 = no minimum",
-          "max_temp_offset": "Heat pump maximum output modulation (°C)",
-          "turn_off_deadband": "Turn off threshold (°C above setpoint) — 0 = disabled",
-          "emitter_time_constant": "Response time lag (seconds) — radiators ~600s, fan coils ~60s, resistive ~0s"
+          "name": "Heat source name",
+          "type": "Type (electric heater or heat pump)",
+          "max_power": "Maximum power output (watts)",
+          "heater_entity": "Control switch (Home Assistant switch entity)",
+          "efficiency": "Efficiency rating (0–1, electric heaters only)",
+          "cop_rated": "Rated COP at reference temperature (heat pumps only — higher is more efficient)",
+          "cop_temp_ref": "Reference outdoor temperature for COP rating (°C, heat pumps only)",
+          "min_power": "Minimum power output (watts, heat pumps only) — 0 = no minimum",
+          "max_temp_offset": "Maximum temperature offset for power control (°C, heat pumps only)",
+          "turn_off_deadband": "How far above setpoint before turning off (°C) — 0 = disabled",
+          "emitter_time_constant": "Response time delay (seconds) — radiators ~600s, fan coils ~60s, resistive heaters ~0s"
         }
       },
       "remove_heater": {
-        "title": "Remove Heater",
+        "title": "Remove Heat Source",
         "data": {
-          "heater_idx": "Heater to remove"
+          "heater_idx": "Heat source to remove"
         }
       }
     },
