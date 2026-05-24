@@ -153,7 +153,7 @@
           "cop_temp_ref": "Reference outdoor temperature for COP rating (°C, heat pumps only)",
           "min_power": "Minimum power output (watts, heat pumps only) — 0 = no minimum",
           "max_temp_offset": "Maximum temperature offset for power control (°C, heat pumps only)",
-          "turn_off_deadband": "How far above setpoint before turning off (°C) — 0 = disabled",
+          "hvac_mode": "Operating mode (heat pumps only — heat only, cool only, or heat & cool)",
           "emitter_time_constant": "Response time delay (seconds) — radiators ~600s, fan coils ~60s, resistive heaters ~0s"
         }
       },
@@ -175,7 +175,7 @@
           "cop_temp_ref": "Reference outdoor temperature for COP rating (°C, heat pumps only)",
           "min_power": "Minimum power output (watts, heat pumps only) — 0 = no minimum",
           "max_temp_offset": "Maximum temperature offset for power control (°C, heat pumps only)",
-          "turn_off_deadband": "How far above setpoint before turning off (°C) — 0 = disabled",
+          "hvac_mode": "Operating mode (heat pumps only — heat only, cool only, or heat & cool)",
           "emitter_time_constant": "Response time delay (seconds) — radiators ~600s, fan coils ~60s, resistive heaters ~0s"
         }
       },
