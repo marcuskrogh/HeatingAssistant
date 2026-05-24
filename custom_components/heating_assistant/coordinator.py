@@ -635,6 +635,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.ground_temp: Optional[float] = None
         self.heat_flows: Dict[str, Dict[str, float]] = {}
         self.predictions: list = []
+        self.linearised_predictions: list = []
         self.outdoor_forecast: List[float] = []
         self.solar_forecast: list = []
         self.heating_schedule: list = []
@@ -1054,6 +1055,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     disabled_sources=disabled_src_names or None,
                 )
                 self.predictions = self.controller.predictions
+                self.linearised_predictions = self.controller.linearised_predictions
                 self.outdoor_forecast = self.controller.outdoor_forecast
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
@@ -1088,6 +1090,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 else:
                     self.outdoor_forecast = [outdoor_temp] * self._horizon
                 self.predictions = []
+                self.linearised_predictions = []
                 self.heating_schedule = []
                 self.solar_forecast = []
                 self.filtered_temperatures = {}

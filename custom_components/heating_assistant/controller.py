@@ -1647,6 +1647,7 @@ class HeatingMPCController:
 
         # Visualisation data (populated after each compute())
         self._predictions: List[Dict[str, float]] = []
+        self._linearised_predictions: List[Dict[str, float]] = []
         self._outdoor_forecast: List[float] = []
         self._solar_forecast: List[Dict[str, float]] = []
         self._heating_schedule: List[Dict[str, float]] = []
@@ -1751,6 +1752,11 @@ class HeatingMPCController:
     def predictions(self) -> List[Dict[str, float]]:
         """Latest predicted temperature trajectory [{room: degC}, ...]."""
         return self._predictions
+
+    @property
+    def linearised_predictions(self) -> List[Dict[str, float]]:
+        """Latest linearised model temperature trajectory [{room: degC}, ...]."""
+        return self._linearised_predictions
 
     @property
     def outdoor_forecast(self) -> List[float]:
@@ -1977,6 +1983,9 @@ class HeatingMPCController:
         self._predictions = self._compute_nonlinear_predictions(
             U_abs, outdoor_seq, solar_seq, room_list, n_rooms
         )
+        self._linearised_predictions = self._extract_linearised_predictions(
+            X_abs, room_list, n_rooms
+        )
 
         # ── Heating schedule ─────────────────────────────────────────────
         self._heating_schedule = [
@@ -2070,6 +2079,26 @@ class HeatingMPCController:
             )
             for name in self._system._room_list
         }
+
+    def _extract_linearised_predictions(
+        self,
+        X_abs: np.ndarray,
+        room_list: List[str],
+        n_rooms: int,
+    ) -> List[Dict[str, float]]:
+        """Extract room temperature predictions from the linearised QP state trajectory.
+
+        X_abs[k] is the absolute state at horizon step k+1 as predicted by the
+        linearised model used inside the MPC solver.  The first n_rooms elements
+        of each state vector are the room temperatures.
+        """
+        predictions = []
+        for k in range(len(X_abs)):
+            temps_k = X_abs[k, :n_rooms]
+            predictions.append(
+                {name: float(temps_k[i]) for i, name in enumerate(room_list)}
+            )
+        return predictions
 
     def _compute_nonlinear_predictions(
         self,
