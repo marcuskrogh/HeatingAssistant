@@ -124,6 +124,65 @@
         "data": {
           "window_idx": "Window to remove"
         }
+      },
+      "manage_room_heaters": {
+        "title": "Select Room for Heat Sources",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "manage_heaters": {
+        "title": "Heat Sources",
+        "menu_options": {
+          "add_heater": "Add heat source",
+          "edit_heater": "Edit heat source",
+          "remove_heater": "Remove heat source",
+          "finish_heaters": "Done with heat sources"
+        }
+      },
+      "add_heater": {
+        "title": "Add Heat Source",
+        "data": {
+          "name": "Heat source name",
+          "type": "Type (electric heater or heat pump)",
+          "max_power": "Maximum power output (watts)",
+          "heater_entity": "Control switch (Home Assistant switch entity)",
+          "efficiency": "Efficiency rating (0–1, electric heaters only)",
+          "cop_rated": "Rated COP at reference temperature (heat pumps only — higher is more efficient)",
+          "cop_temp_ref": "Reference outdoor temperature for COP rating (°C, heat pumps only)",
+          "min_power": "Minimum power output (watts, heat pumps only) — 0 = no minimum",
+          "max_temp_offset": "Maximum temperature offset for power control (°C, heat pumps only)",
+          "hvac_mode": "Operating mode (heat pumps only — heat only, cool only, or heat & cool)",
+          "emitter_time_constant": "Response time delay (seconds) — radiators ~600s, fan coils ~60s, resistive heaters ~0s"
+        }
+      },
+      "edit_heater": {
+        "title": "Select Heat Source to Edit",
+        "data": {
+          "heater_idx": "Heat source"
+        }
+      },
+      "heater_detail": {
+        "title": "Edit Heat Source",
+        "data": {
+          "name": "Heat source name",
+          "type": "Type (electric heater or heat pump)",
+          "max_power": "Maximum power output (watts)",
+          "heater_entity": "Control switch (Home Assistant switch entity)",
+          "efficiency": "Efficiency rating (0–1, electric heaters only)",
+          "cop_rated": "Rated COP at reference temperature (heat pumps only — higher is more efficient)",
+          "cop_temp_ref": "Reference outdoor temperature for COP rating (°C, heat pumps only)",
+          "min_power": "Minimum power output (watts, heat pumps only) — 0 = no minimum",
+          "max_temp_offset": "Maximum temperature offset for power control (°C, heat pumps only)",
+          "hvac_mode": "Operating mode (heat pumps only — heat only, cool only, or heat & cool)",
+          "emitter_time_constant": "Response time delay (seconds) — radiators ~600s, fan coils ~60s, resistive heaters ~0s"
+        }
+      },
+      "remove_heater": {
+        "title": "Remove Heat Source",
+        "data": {
+          "heater_idx": "Heat source to remove"
+        }
       }
     },
     "error": {
