@@ -25,6 +25,7 @@ from .const import (
     CONF_COMFORT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_ESTIMATED_PARAMS,
+    CONF_PERSISTED_SETPOINTS,
     CONF_TRACKING_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -536,6 +537,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 rc.get(CONF_SETPOINT, DEFAULT_SETPOINT)
             )
             self._schedule_enabled[room_name] = True
+
+        # Overlay with user-modified setpoints persisted across restarts.
+        persisted: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_SETPOINTS, {})
+        for room_name, value in persisted.items():
+            if room_name in self._base_setpoint:
+                self._base_setpoint[room_name] = float(value)
+                self.model.rooms[room_name].setpoint = float(value)
 
     def _read_binary_sensor_on(self, entity_id: str) -> bool:
         """Return True when the given binary sensor is currently ``on``."""
@@ -1604,6 +1612,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         value = float(setpoint)
         self._base_setpoint[room_name] = value
         self.model.rooms[room_name].setpoint = value
+        # Persist so the setpoint survives HA restarts and scheduled off periods.
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={**dict(real_entry.data), CONF_PERSISTED_SETPOINTS: dict(self._base_setpoint)},
+            )
 
     def get_room_setpoint(self, room_name: str) -> float:
         """Return the current (live) setpoint for a room."""

@@ -488,6 +488,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for room, value in reload_state.get("schedule_enabled", {}).items():
             if room in coordinator._schedule_enabled:
                 coordinator._schedule_enabled[room] = value
+        for room, value in reload_state.get("base_setpoint", {}).items():
+            if room in coordinator._base_setpoint:
+                coordinator._base_setpoint[room] = float(value)
+                coordinator.model.rooms[room].setpoint = float(value)
     else:
         # No in-memory state means this is a full HA restart (not a reload).
         # Try to restore the history buffer from persistent storage so that
@@ -732,6 +736,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "history_buffer": list(coordinator._history_buffer),
                 "room_enabled": dict(coordinator._room_enabled),
                 "schedule_enabled": dict(coordinator._schedule_enabled),
+                "base_setpoint": dict(coordinator._base_setpoint),
             }
             # Persist the history buffer to HA's persistent storage so that it
             # survives a full Home Assistant restart (not just an in-memory reload).
