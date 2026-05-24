@@ -127,7 +127,7 @@
         }
       },
       "manage_room_heaters": {
-        "title": "Select Room for Heaters",
+        "title": "Select Room for Heat Sources",
         "data": {
           "room_name": "Room"
         }
