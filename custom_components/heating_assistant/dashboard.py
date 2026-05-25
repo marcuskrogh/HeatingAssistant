@@ -153,6 +153,20 @@ def _forecast_generator(field: str) -> str:
     )
 
 
+def _comfort_top_cap_generator() -> str:
+    """Return a top-cap series used to shade above the comfort corridor."""
+    return (
+        "const fc = entity.attributes.forecast;\n"
+        "if (!fc) return [];\n"
+        "const upper = fc.map(f => Number(f.constraint_upper)).filter(v => Number.isFinite(v));\n"
+        "const lower = fc.map(f => Number(f.constraint_lower)).filter(v => Number.isFinite(v));\n"
+        "if (!upper.length) return [];\n"
+        "const span = lower.length ? Math.max(...upper) - Math.min(...lower) : 0;\n"
+        "const cap = Math.max(...upper) + Math.max(2.0, span * 0.5);\n"
+        "return fc.map(f => [new Date(f.time).getTime(), cap]);"
+    )
+
+
 def _history_series_kwargs() -> Dict[str, Any]:
     """README-style options for a series that draws from recorder history."""
     return {
@@ -258,21 +272,40 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
             {
                 "entity": upper,
                 "name": "Constraints",
-                "data_generator": _forecast_generator("constraint_upper"),
+                "data_generator": _comfort_top_cap_generator(),
                 "yaxis_id": "temp",
-                "color": "#1565C0",
-                "stroke_width": 1,
+                "type": "area",
+                "color": "#E53935",
+                "opacity": 0.16,
+                "stroke_width": 0,
                 "curve": "stepline",
                 "show": {"in_header": False},
             },
-            # Forecast: lower constraint – hidden from legend; upper entry covers it
+            # Forecast: upper comfort bound – redraws feasible corridor with
+            # card background to leave only outside regions shaded.
+            {
+                "entity": upper,
+                "name": "Constraints",
+                "data_generator": _forecast_generator("constraint_upper"),
+                "yaxis_id": "temp",
+                "type": "area",
+                "color": "var(--card-background-color)",
+                "opacity": 1.0,
+                "stroke_width": 0,
+                "curve": "stepline",
+                "show": {"in_legend": False, "in_header": False},
+            },
+            # Forecast: lower comfort bound – redraws lower out-of-corridor
+            # region in red, still with no boundary line.
             {
                 "entity": lower,
                 "name": "Constraints",
                 "data_generator": _forecast_generator("constraint_lower"),
                 "yaxis_id": "temp",
-                "color": "#1565C0",
-                "stroke_width": 1,
+                "type": "area",
+                "color": "#E53935",
+                "opacity": 0.16,
+                "stroke_width": 0,
                 "curve": "stepline",
                 "show": {"in_legend": False, "in_header": False},
             },

@@ -208,6 +208,44 @@ def test_room_temperature_chart_plots_schedule_driven_setpoint_and_constraints(t
     assert "constraint_lower" in constraint_lower["data_generator"]
 
 
+def test_room_temperature_chart_shades_outside_comfort_region_without_constraint_lines(two_room_spec):
+    view = _room_view(build_dashboard(two_room_spec), "Living Room")
+    temp_card = next(
+        c for c in _iter_cards(view)
+        if c.get("type") == "custom:apexcharts-card"
+        and c.get("header", {}).get("title") == "Living Room – Temperature"
+    )
+    constraints = [
+        s for s in temp_card["series"]
+        if s.get("name") == "Constraints"
+    ]
+    assert len(constraints) == 3
+
+    upper_shade = next(
+        s for s in constraints
+        if s.get("color") == "#E53935"
+        and "constraint_upper" in (s.get("data_generator") or "")
+        and "constraint_lower" in (s.get("data_generator") or "")
+    )
+    corridor_clear = next(
+        s for s in constraints
+        if s.get("color") == "var(--card-background-color)"
+    )
+    lower_shade = next(
+        s for s in constraints
+        if s.get("color") == "#E53935"
+        and "constraint_lower" in (s.get("data_generator") or "")
+        and "constraint_upper" not in (s.get("data_generator") or "")
+    )
+
+    assert upper_shade.get("type") == "area"
+    assert corridor_clear.get("type") == "area"
+    assert lower_shade.get("type") == "area"
+    assert upper_shade.get("stroke_width") == 0
+    assert corridor_clear.get("stroke_width") == 0
+    assert lower_shade.get("stroke_width") == 0
+
+
 def test_room_view_does_not_reference_legacy_climate_suffix(two_room_spec):
     """Regression guard for the entity_id bug: the climate card must use
     ``climate.heating_assistant_living_room`` (HA's slug of the name), not
