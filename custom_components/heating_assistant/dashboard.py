@@ -40,6 +40,7 @@ class HeatSourceSpec:
     name: str
     room: str
     kind: str = "electric_heater"  # "electric_heater" | "heat_pump"
+    entity_id: Optional[str] = None  # HA entity_id of the physical device
 
 
 @dataclass(frozen=True)
@@ -953,16 +954,33 @@ def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
     }
 
 
+def _heat_sources_card(room: RoomSpec, spec: DashboardSpec) -> Optional[Dict[str, Any]]:
+    """Entities card listing the physical HA devices for each heat source in the room."""
+    room_sources = [s for s in spec.sources if s.room == room.name and s.entity_id]
+    if not room_sources:
+        return None
+    icon = "mdi:heat-pump" if any(s.kind == "heat_pump" for s in room_sources) else "mdi:radiator"
+    return {
+        "type": "entities",
+        "title": "Heating device",
+        "state_color": True,
+        "icon": icon,
+        "entities": [{"entity": s.entity_id, "name": s.name} for s in room_sources],
+    }
+
+
 def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
     """Per-room subview with MPC triplet, fit gauges, residuals, parameters."""
+    _control_cards: List[Dict[str, Any]] = [
+        {"type": "heading", "heading": "Control & comfort", "heading_style": "title"},
+        _thermostat_card(room),
+    ]
+    _hs_card = _heat_sources_card(room, spec)
+    if _hs_card is not None:
+        _control_cards.append(_hs_card)
+
     sections: List[Dict[str, Any]] = [
-        {
-            "type": "grid",
-            "cards": [
-                {"type": "heading", "heading": "Control & comfort", "heading_style": "title"},
-                _thermostat_card(room),
-            ],
-        },
+        {"type": "grid", "cards": _control_cards},
         {
             "type": "grid",
             "cards": [
@@ -1407,7 +1425,12 @@ def build_dashboard_from_coordinator(coordinator: Any) -> Dict[str, Any]:
             kind_str = "electric_heater"
         else:
             kind_str = "electric_heater"
-        sources.append(HeatSourceSpec(name=src.name, room=src.room, kind=kind_str))
+        sources.append(HeatSourceSpec(
+            name=src.name,
+            room=src.room,
+            kind=kind_str,
+            entity_id=getattr(src, "heater_entity", None),
+        ))
 
     horizon = getattr(coordinator, "_horizon", None)
     dt = getattr(coordinator, "dt", None) or getattr(coordinator, "_update_interval", None)

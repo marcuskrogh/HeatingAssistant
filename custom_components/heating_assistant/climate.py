@@ -78,14 +78,22 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
         self._coordinator = coordinator
         self._attr_name = f"Heating Assistant – {room_name}"
         self._attr_unique_id = f"{DOMAIN}_{room_name}_climate"
-        # Expose HEAT_COOL for rooms that have at least one heat pump
-        # (heat pumps can cool via dry / fan-only); other rooms remain
-        # heat-only.
-        if any(
-            isinstance(s, HeatPump) and s.room == room_name
-            for s in coordinator.heat_sources
-        ):
-            self._attr_hvac_modes = [HVACMode.HEAT_COOL, HVACMode.HEAT, HVACMode.OFF]
+        # Expose HEAT_COOL (and COOL when the pump supports it) for rooms
+        # that have at least one heat pump; other rooms remain heat-only.
+        heat_pump_sources = [
+            s for s in coordinator.heat_sources
+            if isinstance(s, HeatPump) and s.room == room_name
+        ]
+        if heat_pump_sources:
+            if any(s.can_cool for s in heat_pump_sources):
+                self._attr_hvac_modes = [
+                    HVACMode.HEAT_COOL,
+                    HVACMode.HEAT,
+                    HVACMode.COOL,
+                    HVACMode.OFF,
+                ]
+            else:
+                self._attr_hvac_modes = [HVACMode.HEAT_COOL, HVACMode.HEAT, HVACMode.OFF]
         else:
             self._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
 
@@ -170,7 +178,7 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
         """
         if hvac_mode == HVACMode.OFF:
             self._coordinator.set_room_enabled(self._room_name, False)
-        elif hvac_mode in (HVACMode.HEAT, HVACMode.HEAT_COOL):
+        elif hvac_mode in (HVACMode.HEAT, HVACMode.HEAT_COOL, HVACMode.COOL):
             self._coordinator.set_room_enabled(self._room_name, True)
             if self._coordinator.get_room_setpoint(self._room_name) <= MIN_TEMP:
                 self._coordinator.set_room_setpoint(self._room_name, DEFAULT_SETPOINT)

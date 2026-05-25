@@ -71,8 +71,12 @@ def _make_entity(heat_sources, enabled=True, room="living_room"):
     ent._coordinator = coord
     ent._attr_name = f"Heating Assistant – {room}"
     ent._attr_unique_id = f"heating_assistant_{room}_climate"
-    if any(isinstance(s, HeatPump) and s.room == room for s in heat_sources):
-        ent._attr_hvac_modes = [HVACMode.HEAT_COOL, HVACMode.HEAT, HVACMode.OFF]
+    heat_pump_sources = [s for s in heat_sources if isinstance(s, HeatPump) and s.room == room]
+    if heat_pump_sources:
+        if any(s.can_cool for s in heat_pump_sources):
+            ent._attr_hvac_modes = [HVACMode.HEAT_COOL, HVACMode.HEAT, HVACMode.COOL, HVACMode.OFF]
+        else:
+            ent._attr_hvac_modes = [HVACMode.HEAT_COOL, HVACMode.HEAT, HVACMode.OFF]
     else:
         ent._attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     return ent, coord
@@ -135,6 +139,17 @@ class TestHvacModes:
         ent, _ = _make_entity([hp])
         assert HVACMode.HEAT_COOL in ent._attr_hvac_modes
         assert ent.hvac_mode == HVACMode.HEAT_COOL
+
+    def test_heat_pump_with_cooling_advertises_cool(self):
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool", cooling_cop=2.5)
+        ent, _ = _make_entity([hp])
+        assert HVACMode.COOL in ent._attr_hvac_modes
+        assert HVACMode.HEAT_COOL in ent._attr_hvac_modes
+
+    def test_heat_pump_heat_only_does_not_advertise_cool(self):
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat")
+        ent, _ = _make_entity([hp])
+        assert HVACMode.COOL not in ent._attr_hvac_modes
 
     def test_off_when_disabled(self):
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
