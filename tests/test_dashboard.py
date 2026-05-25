@@ -651,7 +651,7 @@ def test_now_marker_line_is_enabled_without_now_text_label(two_room_spec):
         now_cfg = card.get("now")
         if not isinstance(now_cfg, dict) or not now_cfg.get("show"):
             continue
-        assert now_cfg.get("stroke_width") == 2
+        assert "stroke_width" not in now_cfg
         assert now_cfg.get("label") == ""
 
 
