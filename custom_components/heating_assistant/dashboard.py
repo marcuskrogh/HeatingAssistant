@@ -205,7 +205,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
         },
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
-        "now": {"show": True, "color": "#424242", "stroke_width": 2},
+        "now": {"show": True, "label": "", "color": "#424242", "stroke_width": 2},
         "apex_config": {
             "xaxis": {"labels": {"show": False}},
         },
@@ -354,7 +354,7 @@ def _mpc_control_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         },
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
-        "now": {"show": True, "color": "#424242", "stroke_width": 2},
+        "now": {"show": True, "label": "", "color": "#424242", "stroke_width": 2},
         "yaxis": [
             {
                 "id": "power",
@@ -410,7 +410,7 @@ def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         },
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
-        "now": {"show": True, "color": "#424242", "stroke_width": 2},
+        "now": {"show": True, "label": "", "color": "#424242", "stroke_width": 2},
         "yaxis": [
             {"id": "temp", "apex_config": {"title": {"text": "Outdoor Temp (°C)"}}},
             {
@@ -821,7 +821,7 @@ def _overview_temperature_chart(spec: DashboardSpec) -> Dict[str, Any]:
         "header": {"show": True, "title": "Room Temperatures", "show_states": True},
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
-        "now": {"show": True, "color": "#424242", "stroke_width": 2},
+        "now": {"show": True, "label": "", "color": "#424242", "stroke_width": 2},
         "yaxis": [
             {
                 "id": "temp",
@@ -879,7 +879,7 @@ def _overview_power_chart(spec: DashboardSpec) -> Dict[str, Any]:
         "header": {"show": True, "title": "Power – All Rooms", "show_states": True},
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
-        "now": {"show": True, "color": "#424242", "stroke_width": 2},
+        "now": {"show": True, "label": "", "color": "#424242", "stroke_width": 2},
         "yaxis": [
             {
                 "id": "power",
@@ -952,7 +952,7 @@ def _system_weather_strip(spec: DashboardSpec) -> Dict[str, Any]:
         "header": {"show": True, "title": "Outdoor & Solar", "show_states": True},
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
-        "now": {"show": True, "color": "#424242", "stroke_width": 2},
+        "now": {"show": True, "label": "", "color": "#424242", "stroke_width": 2},
         "yaxis": [
             {"id": "temp", "apex_config": {"title": {"text": "Outdoor Temp (°C)"}}},
             {

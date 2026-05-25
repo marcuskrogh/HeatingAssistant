@@ -652,7 +652,7 @@ def test_now_marker_line_is_enabled_without_now_text_label(two_room_spec):
         if not isinstance(now_cfg, dict) or not now_cfg.get("show"):
             continue
         assert now_cfg.get("stroke_width") == 2
-        assert "label" not in now_cfg
+        assert now_cfg.get("label") == ""
 
 
 def test_dashboard_to_yaml_preserves_view_order(two_room_spec):
