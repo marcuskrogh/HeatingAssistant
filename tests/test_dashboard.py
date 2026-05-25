@@ -254,8 +254,8 @@ def test_room_temperature_chart_hides_labels_below_plot(two_room_spec):
         and c.get("header", {}).get("title") == "Living Room – Temperature"
     )
     apex_config = temp_card.get("apex_config", {})
-    assert apex_config.get("legend", {}).get("show") is False
     assert apex_config.get("xaxis", {}).get("labels", {}).get("show") is False
+    assert "legend" not in apex_config
 
 
 def test_room_view_does_not_reference_legacy_climate_suffix(two_room_spec):
