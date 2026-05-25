@@ -1004,7 +1004,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             try:
                 self._apply_schedule(now_local)
                 control_traj = self._compute_control_trajectory(
-                    now_local, self._horizon, float(self._update_interval)
+                    now_local, self._horizon, float(self.dt)
                 )
                 self._control_trajectory = control_traj
             except Exception:
