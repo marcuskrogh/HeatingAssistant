@@ -30,9 +30,11 @@ def _stub_module(name: str) -> types.ModuleType:
 
 _MBC_PACKAGES = [
     "mbc",
+    "mbc._utils",
     "mbc.models",
     "mbc.estimation",
     "mbc.control",
+    "mbc.control.ocp",
     "mbc.identification",
 ]
 
@@ -69,6 +71,18 @@ if not _mbc_available:
     _mbc_control.NLPScalingPolicy = object  # type: ignore[attr-defined]
     _mbc_control.linearize_cd_model = lambda *a, **kw: None  # type: ignore[attr-defined]
     _mbc_control.discretize_cd_linearization = lambda *a, **kw: None  # type: ignore[attr-defined]
+
+    _mbc_control_ocp = sys.modules["mbc.control.ocp"]
+    _mbc_control_ocp.OptimalControlProblem = object  # type: ignore[attr-defined]
+    _mbc_control_ocp._block_diag = lambda *a, **kw: None  # type: ignore[attr-defined]
+    _mbc_control_ocp._block_diag_terminal = lambda *a, **kw: None  # type: ignore[attr-defined]
+    _mbc_control_ocp._tile_column = lambda *a, **kw: None  # type: ignore[attr-defined]
+    _mbc_control_ocp._build_D_diff = lambda *a, **kw: None  # type: ignore[attr-defined]
+
+    _mbc_utils = sys.modules["mbc._utils"]
+    _mbc_utils._eye = lambda n: None  # type: ignore[attr-defined]
+    _mbc_utils._zeros = lambda m, n: None  # type: ignore[attr-defined]
+    _mbc_utils._np_to_cvx = lambda x: None  # type: ignore[attr-defined]
 
     _mbc_id = sys.modules["mbc.identification"]
     _mbc_id.CDParameterEstimator = object  # type: ignore[attr-defined]

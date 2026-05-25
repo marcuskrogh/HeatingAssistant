@@ -1182,8 +1182,15 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         x_ref,
         u_prev=None,
         u_ss: Optional[np.ndarray] = None,
+        x_ref_dev_seq: Optional[np.ndarray] = None,
+        offset_seq: Optional[np.ndarray] = None,
+        q_scale_seq: Optional[np.ndarray] = None,
+        r_scale_seq: Optional[np.ndarray] = None,
     ):
-        if u_ss is None or np.allclose(u_ss, 0.0):
+        # Fast path: no time-varying parameters and no u_ss correction.
+        if (
+            u_ss is None or np.allclose(u_ss, 0.0)
+        ) and x_ref_dev_seq is None and offset_seq is None and q_scale_seq is None and r_scale_seq is None:
             return super().solve(x0, D, x_ref, u_prev)
 
         N = self._N
@@ -1230,11 +1237,54 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         CP = Cz_bar * Psi
         CL = Cz_bar * Lambda
 
-        Q_bar = _block_diag_terminal(self._Q, self._P, N)
-        R_bar = _block_diag(self._R, N)
+        # ── Time-varying cost matrices ────────────────────────────────────
+        # Build Q_bar, R_bar, z_ref_bar, z_min_tiled, z_max_tiled for the QP.
+        # When no time-varying parameters are provided these collapse to the
+        # same result as the original static helpers, preserving correctness
+        # and backward compatibility.
+        has_varying = (
+            x_ref_dev_seq is not None
+            or offset_seq is not None
+            or q_scale_seq is not None
+            or r_scale_seq is not None
+        )
 
-        z_ref    = Cz * x_ref
-        z_ref_bar = _tile_column(z_ref, N)
+        if has_varying:
+            # Q_bar: block-diagonal with per-step, per-output Q weights.
+            # Terminal step uses P = terminal_weight × Q_base per element.
+            Q_bar = _zeros(N * nz, N * nz)
+            for k in range(N):
+                base_diag = self._P if k == N - 1 else self._Q
+                for i in range(nz):
+                    val = base_diag[i, i]
+                    if q_scale_seq is not None:
+                        val *= float(q_scale_seq[k, i])
+                    Q_bar[k * nz + i, k * nz + i] = val
+
+            # R_bar: block-diagonal with per-step, per-source R weights.
+            R_bar = _zeros(N * nu, N * nu)
+            for k in range(N):
+                for i in range(nu):
+                    val = self._R[i, i]
+                    if r_scale_seq is not None:
+                        val *= float(r_scale_seq[k, i])
+                    R_bar[k * nu + i, k * nu + i] = val
+
+            # z_ref_bar: stacked per-step reference in deviation coordinates.
+            if x_ref_dev_seq is not None:
+                z_ref_bar = _cvxmat(
+                    np.asarray(x_ref_dev_seq, dtype=float).reshape(-1).tolist(),
+                    (N * nz, 1),
+                )
+            else:
+                z_ref = Cz * x_ref
+                z_ref_bar = _tile_column(z_ref, N)
+        else:
+            Q_bar = _block_diag_terminal(self._Q, self._P, N)
+            R_bar = _block_diag(self._R, N)
+            z_ref = Cz * x_ref
+            z_ref_bar = _tile_column(z_ref, N)
+
         Z_free   = CP * x0 + CL * D
         e_free   = Z_free - z_ref_bar
 
@@ -1242,12 +1292,14 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         f_u  = CG.T * Q_bar * e_free
 
         # Linear correction: penalise ‖u_dev + u_ss‖²_R instead of ‖u_dev‖²_R.
-        # Expanding gives the extra linear term 2·u_ss'·R·u_dev, which adds
-        # R·u_ss to every nu-block of the N·nu gradient vector.
-        R_u_ss = self._R * _np_to_cvx(u_ss.reshape(-1, 1))  # (nu, 1)
-        for k in range(N):
-            for i in range(nu):
-                f_u[k * nu + i] = f_u[k * nu + i] + R_u_ss[i]
+        # Each nu-block of the gradient gets R[i,i] * r_scale[k] * u_ss[i].
+        if u_ss is not None and not np.allclose(u_ss, 0.0):
+            for k in range(N):
+                for i in range(nu):
+                    r_val = self._R[i, i]
+                    if r_scale_seq is not None:
+                        r_val *= float(r_scale_seq[k, i])
+                    f_u[k * nu + i] = f_u[k * nu + i] + r_val * u_ss[i]
 
         if self._S is not None:
             if u_prev is None:
@@ -1273,15 +1325,35 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         for i in range(n_U):
             f[i] = f_u[i]
 
-        # Input box and soft output constraints (identical to parent)
+        # Input box constraints (unchanged)
         u_min_np, u_max_np = self._model.u_bounds
         u_min_tiled = _tile_column(_np_to_cvx(u_min_np.reshape(-1, 1)), N)
         u_max_tiled = _tile_column(_np_to_cvx(u_max_np.reshape(-1, 1)), N)
 
-        z_min = z_ref - _cvxmat(self._y_offset, (nz, 1))
-        z_max = z_ref + _cvxmat(self._y_offset, (nz, 1))
-        z_min_tiled = _tile_column(z_min, N)
-        z_max_tiled = _tile_column(z_max, N)
+        # Soft output constraints: time-varying corridor centred on z_ref[k]
+        # with half-width offset[k] per room.  Falls back to static scalar
+        # self._y_offset when no offset_seq is provided.
+        if has_varying:
+            z_min_data: List[float] = []
+            z_max_data: List[float] = []
+            for k in range(N):
+                if x_ref_dev_seq is not None:
+                    z_ref_k = np.asarray(x_ref_dev_seq[k], dtype=float)
+                else:
+                    z_ref_k = np.array(list(Cz * x_ref), dtype=float).flatten()
+                if offset_seq is not None:
+                    off_k = np.asarray(offset_seq[k], dtype=float)
+                else:
+                    off_k = np.full(nz, self._y_offset, dtype=float)
+                z_min_data.extend((z_ref_k - off_k).tolist())
+                z_max_data.extend((z_ref_k + off_k).tolist())
+            z_min_tiled = _cvxmat(z_min_data, (N * nz, 1))
+            z_max_tiled = _cvxmat(z_max_data, (N * nz, 1))
+        else:
+            z_min = z_ref - _cvxmat(self._y_offset, (nz, 1))
+            z_max = z_ref + _cvxmat(self._y_offset, (nz, 1))
+            z_min_tiled = _tile_column(z_min, N)
+            z_max_tiled = _tile_column(z_max, N)
 
         n_ineq = 2 * n_U + 2 * n_eps + n_eps
         G_qp = _zeros(n_ineq, n_Z)
@@ -1367,7 +1439,26 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         p: Optional[np.ndarray] = None,
         t: float = 0.0,
         D_forecast: Optional[np.ndarray] = None,
+        x_ref_abs_seq: Optional[np.ndarray] = None,
+        offset_seq: Optional[np.ndarray] = None,
+        q_scale_seq: Optional[np.ndarray] = None,
+        r_scale_seq: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Run one MPC step.
+
+        Parameters
+        ----------
+        x_ref_abs_seq : (N, n_rooms) ndarray, optional
+            Absolute setpoint for each room at each horizon step.  When
+            provided the QP uses a time-varying reference instead of the
+            static ``x_ref_abs``.  ``None`` falls back to static behaviour.
+        offset_seq : (N, n_rooms) ndarray, optional
+            Comfort corridor half-width [°C] for each room at each step.
+        q_scale_seq : (N, n_rooms) ndarray, optional
+            Per-step multiplier applied to the global Q diagonal per room.
+        r_scale_seq : (N, n_sources) ndarray, optional
+            Per-step multiplier applied to the global R diagonal per source.
+        """
         y = np.asarray(y, dtype=float).reshape(self._model.nym)
         d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
         p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
@@ -1393,8 +1484,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
         disc = discretize_cd_linearization(lin, self._dt)
 
-        # x_ss IS the setpoint; driving deviation to zero is identical to
-        # tracking x_ref_abs in absolute coordinates.
+        # x_ss IS the current setpoint; driving deviation to zero is identical
+        # to tracking x_ref_abs in absolute coordinates.
         x_ref_dev = np.zeros(self._model.nx, dtype=float)
         self._lin_model.update(
             Ad=disc["Ad"],
@@ -1427,12 +1518,27 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         u_prev_dev_np = self._u_prev - u_ss
         u_prev_dev = _cvxmat(u_prev_dev_np.tolist(), (self._model.nu, 1))
 
+        # Convert absolute time-varying setpoints to deviation coordinates so
+        # the QP sees them relative to the linearisation point x_ss.
+        # x_ref_dev_seq[k] = x_ref_abs_seq[k, :nz] − x_ss[:nz]
+        if x_ref_abs_seq is not None:
+            nz = self._model.nz
+            x_ref_dev_seq = (
+                np.asarray(x_ref_abs_seq, dtype=float) - x_ss[:nz].reshape(1, -1)
+            )
+        else:
+            x_ref_dev_seq = None
+
         U_dev, X_dev = self._ocp.solve(
             x0=x0_dev,
             D=D_dev,
             x_ref=x_ref_dev,
             u_prev=u_prev_dev,
             u_ss=u_ss,
+            x_ref_dev_seq=x_ref_dev_seq,
+            offset_seq=offset_seq,
+            q_scale_seq=q_scale_seq,
+            r_scale_seq=r_scale_seq,
         )
 
         U_dev_np = np.array(list(U_dev), dtype=float).reshape(self._N, self._model.nu)
@@ -1630,6 +1736,12 @@ class HeatingMPCController:
             rho=rho,
             y_offset=y_offset,
         )
+
+        # Store global cost weights so the trajectory builder can use them
+        # to convert per-period multipliers to absolute values if needed,
+        # and so backward-compatibility checks can detect the static case.
+        self._tracking_weight: float = float(tracking_weight)
+        self._energy_weight: float = float(energy_weight)
 
         # ── Warm-start / bookkeeping ─────────────────────────────────────
         self._u_prev: np.ndarray = np.zeros(n_u)
@@ -1849,6 +1961,7 @@ class HeatingMPCController:
         cloud_forecast: Optional[List[float]] = None,
         cloud_cover_now: Optional[float] = None,
         disabled_sources: Optional[Set[str]] = None,
+        control_trajectory: Optional[Any] = None,
     ) -> Dict[str, float]:
         """
         Compute optimal control actions for the current time step.
@@ -1865,6 +1978,13 @@ class HeatingMPCController:
         outdoor_forecast : list of float, optional
             External outdoor temperature forecast for each horizon step.
             If provided, must have length >= horizon.
+        control_trajectory : ControlTrajectory, optional
+            Schedule-projected per-step control parameters from the
+            coordinator.  When provided the MPC cost uses time-varying
+            setpoints, comfort corridors, and cost weights over the
+            horizon.  When None the controller falls back to the current
+            static setpoint / corridor (identical to pre-schedule-aware
+            behaviour).
         cloud_forecast : list of float, optional
             Cloud-cover fraction in [0, 1] for each horizon step.
         cloud_cover_now : float, optional
@@ -1929,9 +2049,40 @@ class HeatingMPCController:
         ]
         self._mpc.x_ref = x_ref_abs
 
+        # ── Build time-varying arrays from schedule trajectory (if provided) ──
+        # x_ref_abs_seq : (N, n_rooms)  absolute setpoints per step
+        # offset_seq    : (N, n_rooms)  comfort corridor half-widths per step
+        # q_scale_seq   : (N, n_rooms)  Q multipliers per step
+        # r_scale_seq   : (N, n_sources) R multipliers per step (mapped room → source)
+        if control_trajectory is not None:
+            x_ref_abs_seq = np.zeros((N, n_rooms), dtype=float)
+            offset_seq = np.zeros((N, n_rooms), dtype=float)
+            q_scale_seq = np.ones((N, n_rooms), dtype=float)
+            r_scale_seq = np.ones((N, len(self._sources)), dtype=float)
+
+            for i, name in enumerate(room_list):
+                x_ref_abs_seq[:, i] = control_trajectory.setpoints[name]
+                offset_seq[:, i] = control_trajectory.comfort_offsets[name]
+                q_scale_seq[:, i] = control_trajectory.q_scales[name]
+
+            for j, src in enumerate(self._sources):
+                r_scale_seq[:, j] = control_trajectory.r_scales[src.room]
+        else:
+            x_ref_abs_seq = None
+            offset_seq = None
+            q_scale_seq = None
+            r_scale_seq = None
+
         # ── QP solve with disturbance forecast ───────────────────────────
         _t0 = time.perf_counter()
-        u_abs, U_abs, X_abs = self._mpc.step(y, d, p, 0.0, D_forecast=D_forecast)
+        u_abs, U_abs, X_abs = self._mpc.step(
+            y, d, p, 0.0,
+            D_forecast=D_forecast,
+            x_ref_abs_seq=x_ref_abs_seq,
+            offset_seq=offset_seq,
+            q_scale_seq=q_scale_seq,
+            r_scale_seq=r_scale_seq,
+        )
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1
 
