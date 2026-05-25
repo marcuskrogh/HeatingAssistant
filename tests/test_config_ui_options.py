@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from custom_components.heating_assistant.config_flow import (
+    _build_period_dict,
+    _is_valid_time_string,
+)
 from custom_components.heating_assistant.const import DEFAULT_SETPOINT
 
 
@@ -88,3 +92,57 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
     assert "setpoint" not in room_detail
 
     assert "manage_room_windows" in manage_rooms_menu
+
+
+def test_period_time_validation_helper_accepts_hh_mm_and_rejects_invalid() -> None:
+    assert _is_valid_time_string("06:30") is True
+    assert _is_valid_time_string("23:59") is True
+    assert _is_valid_time_string("24:00") is False
+    assert _is_valid_time_string("not-a-time") is False
+
+
+def test_build_period_dict_omits_defaults_and_keeps_overrides() -> None:
+    room_setpoint = 22.0
+    room_comfort_offset = 2.0
+    period = _build_period_dict(
+        {
+            "name": "morning",
+            "mode": "comfort",
+            "start": "06:00",
+            "end": "08:00",
+            "days": [],
+            "setpoint": 23.0,
+            "comfort_offset": 1.5,
+            "tracking_weight": 2.0,
+            "energy_weight": 0.7,
+            "frost_protection": 12.0,
+        },
+        room_setpoint=room_setpoint,
+        room_comfort_offset=room_comfort_offset,
+    )
+    assert period["setpoint"] == 23.0
+    assert period["comfort_offset"] == 1.5
+    assert period["tracking_weight"] == 2.0
+    assert period["energy_weight"] == 0.7
+    assert "days" not in period
+
+    period_defaults = _build_period_dict(
+        {
+            "name": "defaultish",
+            "mode": "comfort",
+            "start": "08:00",
+            "end": "09:00",
+            "days": [],
+            "setpoint": room_setpoint,
+            "comfort_offset": room_comfort_offset,
+            "tracking_weight": 1.0,
+            "energy_weight": 1.0,
+            "frost_protection": 12.0,
+        },
+        room_setpoint=room_setpoint,
+        room_comfort_offset=room_comfort_offset,
+    )
+    assert "setpoint" not in period_defaults
+    assert "comfort_offset" not in period_defaults
+    assert "tracking_weight" not in period_defaults
+    assert "energy_weight" not in period_defaults

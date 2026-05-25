@@ -535,7 +535,7 @@ class ScheduleFlowHelper:
         return len(self.periods)
 
     def period_display(self, period: Dict[str, Any]) -> str:
-        """E.g. 'night: 22:00–06:00 (off, Mon–Fri)'"""
+        """Return a compact period summary with control-impacting overrides."""
         name = period.get(CONF_SCHEDULE_NAME, "?")
         start = period.get(CONF_SCHEDULE_START, "?")
         end = period.get(CONF_SCHEDULE_END, "?")
@@ -548,7 +548,28 @@ class ScheduleFlowHelper:
             day_str = f", {day_labels}"
         else:
             day_str = ""
-        return f"{name}: {start}–{end} ({mode}{day_str})"
+
+        details: List[str] = []
+        if mode == SCHEDULE_MODE_OFF:
+            frost = period.get(CONF_SCHEDULE_FROST_PROTECTION)
+            if frost is not None:
+                details.append(f"frost {float(frost):g}°C")
+        else:
+            setpoint = period.get(CONF_SCHEDULE_SETPOINT)
+            if setpoint is not None:
+                details.append(f"sp {float(setpoint):g}°C")
+            comfort_offset = period.get(CONF_SCHEDULE_COMFORT_OFFSET)
+            if comfort_offset is not None:
+                details.append(f"±{float(comfort_offset):g}°C")
+            tracking_weight = period.get(CONF_SCHEDULE_TRACKING_WEIGHT)
+            if tracking_weight is not None:
+                details.append(f"Q×{float(tracking_weight):g}")
+            energy_weight = period.get(CONF_SCHEDULE_ENERGY_WEIGHT)
+            if energy_weight is not None:
+                details.append(f"R×{float(energy_weight):g}")
+
+        detail_str = f"; {', '.join(details)}" if details else ""
+        return f"{name}: {start}–{end} ({mode}{day_str}{detail_str})"
 
     def display_options(self) -> Dict[str, str]:
         """Return ``{idx_str: human_label}`` for period selection lists."""

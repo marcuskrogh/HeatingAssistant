@@ -194,6 +194,15 @@ def _coerce_to_list(value: Any) -> list:
     return []
 
 
+def _is_valid_time_string(value: str) -> bool:
+    """Return True when ``value`` parses as HH:MM(/:SS), False otherwise."""
+    try:
+        _parse_time(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Initial config flow
 # ---------------------------------------------------------------------------
@@ -1077,9 +1086,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             start_str = user_input.get(CONF_SCHEDULE_START, "")
             end_str = user_input.get(CONF_SCHEDULE_END, "")
-            if _parse_time(start_str) is None:
+            if not _is_valid_time_string(start_str):
                 errors[CONF_SCHEDULE_START] = "invalid_time"
-            if _parse_time(end_str) is None:
+            if not _is_valid_time_string(end_str):
                 errors[CONF_SCHEDULE_END] = "invalid_time"
 
             if not errors:
@@ -1143,9 +1152,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             start_str = user_input.get(CONF_SCHEDULE_START, "")
             end_str = user_input.get(CONF_SCHEDULE_END, "")
-            if _parse_time(start_str) is None:
+            if not _is_valid_time_string(start_str):
                 errors[CONF_SCHEDULE_START] = "invalid_time"
-            if _parse_time(end_str) is None:
+            if not _is_valid_time_string(end_str):
                 errors[CONF_SCHEDULE_END] = "invalid_time"
 
             if not errors:

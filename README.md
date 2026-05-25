@@ -1425,6 +1425,12 @@ Every coordinator update tick the integration evaluates each room's schedule:
 3. For `off` periods, the room is marked disabled and any configured heaters are commanded off — exactly the same path used when you toggle the climate entity to OFF in the UI.  Frost protection re-enables heating only if the measurement drops to the configured floor.
 4. When no period matches, the room reverts to its **base setpoint** — the value last set via the climate entity (or the `setpoint` field in the room block).
 
+| Scenario | MPC horizon reference used for optimisation | Heater execution |
+|---|---|---|
+| Current or future `comfort` period with setpoint/offset/weights override | Uses the period's schedule-projected setpoint, comfort corridor and Q/R multipliers per step. | Normal MPC actuation. |
+| Future `off` period | **No new off-target is introduced**; controller carries forward the last comfort reference through off steps (no anticipatory preheat/cool toward an off window). | Source outputs are forced to 0 during off execution, except frost-protection floor recovery. |
+| Schedule suspended via `set_schedule_enabled: false` | Uses current effective values as a flat trajectory (schedule projection bypassed). | Room follows normal enabled/manual logic without schedule-driven disable. |
+
 **Preheat is automatic**
 
 Because the controller is an MPC with a prediction horizon, it sees upcoming setpoint changes and starts heating **before** the next comfort period begins.  How early depends on the horizon (`horizon` × `update_interval`).  At the default settings (6 steps × 15 min = 1.5 h of look-ahead) the room is typically warm by the time the schedule transitions.  For longer preheat windows, increase `horizon` and/or shorten `update_interval`.

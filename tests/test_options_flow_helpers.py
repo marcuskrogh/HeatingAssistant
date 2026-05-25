@@ -14,6 +14,7 @@ from custom_components.heating_assistant._options_flow import (
     COMPASS_TO_DEGREES,
     ROOM_SIZE_TO_THERMAL_MASS,
     RoomFlowHelper,
+    ScheduleFlowHelper,
     WindowFlowHelper,
     degrees_to_compass,
     format_entity_ids,
@@ -29,11 +30,23 @@ from custom_components.heating_assistant.const import (
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
     CONF_THERMAL_MASS,
+    CONF_SCHEDULE,
+    CONF_SCHEDULE_NAME,
+    CONF_SCHEDULE_START,
+    CONF_SCHEDULE_END,
+    CONF_SCHEDULE_MODE,
+    CONF_SCHEDULE_SETPOINT,
+    CONF_SCHEDULE_COMFORT_OFFSET,
+    CONF_SCHEDULE_TRACKING_WEIGHT,
+    CONF_SCHEDULE_ENERGY_WEIGHT,
+    CONF_SCHEDULE_FROST_PROTECTION,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_SENSORS,
     CONF_WINDOW_TILT,
+    SCHEDULE_MODE_COMFORT,
+    SCHEDULE_MODE_OFF,
 )
 
 
@@ -399,3 +412,51 @@ def test_window_helper_display_options_uses_room_name_and_indexes():
     assert "Window 2" in options["1"]
     assert "facing N" in options["0"]
     assert "facing S" in options["1"]
+
+
+# ── ScheduleFlowHelper ────────────────────────────────────────────────────
+
+
+def test_schedule_helper_period_display_includes_comfort_overrides():
+    room = {
+        CONF_ROOM_NAME: "bedroom",
+        CONF_SCHEDULE: [
+            {
+                CONF_SCHEDULE_NAME: "morning",
+                CONF_SCHEDULE_START: "06:00",
+                CONF_SCHEDULE_END: "08:00",
+                CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+                CONF_SCHEDULE_SETPOINT: 21.5,
+                CONF_SCHEDULE_COMFORT_OFFSET: 1.0,
+                CONF_SCHEDULE_TRACKING_WEIGHT: 2.0,
+                CONF_SCHEDULE_ENERGY_WEIGHT: 0.8,
+            }
+        ],
+    }
+    helper = ScheduleFlowHelper(room)
+    label = helper.period_display(room[CONF_SCHEDULE][0])
+    assert "morning: 06:00–08:00" in label
+    assert "(comfort" in label
+    assert "sp 21.5°C" in label
+    assert "±1°C" in label
+    assert "Q×2" in label
+    assert "R×0.8" in label
+
+
+def test_schedule_helper_period_display_includes_off_frost_override():
+    room = {
+        CONF_ROOM_NAME: "bedroom",
+        CONF_SCHEDULE: [
+            {
+                CONF_SCHEDULE_NAME: "night",
+                CONF_SCHEDULE_START: "22:00",
+                CONF_SCHEDULE_END: "06:00",
+                CONF_SCHEDULE_MODE: SCHEDULE_MODE_OFF,
+                CONF_SCHEDULE_FROST_PROTECTION: 11.5,
+            }
+        ],
+    }
+    helper = ScheduleFlowHelper(room)
+    label = helper.period_display(room[CONF_SCHEDULE][0])
+    assert "(off" in label
+    assert "frost 11.5°C" in label
