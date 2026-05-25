@@ -206,9 +206,6 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "", "color": "#424242"},
-        "apex_config": {
-            "xaxis": {"labels": {"show": False}},
-        },
         "yaxis": [
             {
                 "id": "temp",
@@ -229,7 +226,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "curve": "smooth",
                 "float_precision": 2,
                 **_history_series_kwargs(),
-                "show": {"in_header": True},
+                "show": {"in_header": True, "in_legend": False},
             },
             # History: measured y(k) — rendered as a thin line with no
             # stroke + raw markers (avoids `type: scatter`, which the
@@ -243,7 +240,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "float_precision": 2,
                 "extend_to": "now",
                 "group_by": {"func": "raw", "fill": "null"},
-                "show": {"in_header": False},
+                "show": {"in_header": False, "in_legend": False},
             },
             # History: setpoint
             {
@@ -256,7 +253,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "curve": "stepline",
                 "float_precision": 1,
                 **_history_series_kwargs(),
-                "show": {"in_header": False},
+                "show": {"in_header": False, "in_legend": False},
             },
             # Forecast: setpoint over the MPC horizon – hidden from legend; history entry covers it
             {
@@ -271,7 +268,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "float_precision": 1,
                 "show": {"in_legend": False, "in_header": False},
             },
-            # Forecast: upper constraint – appears once in legend as "Constraints"
+            # Forecast: upper constraint
             {
                 "entity": upper,
                 "name": "Constraints",
@@ -282,7 +279,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "opacity": 0.16,
                 "stroke_width": 0,
                 "curve": "stepline",
-                "show": {"in_header": False},
+                "show": {"in_header": False, "in_legend": False},
             },
             # Forecast: upper comfort bound – redraws feasible corridor with
             # card background to leave only outside regions shaded.
@@ -322,7 +319,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "stroke_width": 3,
                 "curve": "smooth",
                 "float_precision": 2,
-                "show": {"in_header": True},
+                "show": {"in_header": True, "in_legend": False},
             },
             # Forecast: linearised model temperature trajectory (what the MPC sees)
             {
@@ -335,7 +332,7 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "stroke_dash": 4,
                 "curve": "smooth",
                 "float_precision": 2,
-                "show": {"in_header": False},
+                "show": {"in_header": False, "in_legend": False},
             },
         ],
     }

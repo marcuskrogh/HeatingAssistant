@@ -246,16 +246,18 @@ def test_room_temperature_chart_shades_outside_comfort_region_without_constraint
     assert lower_shade.get("stroke_width") == 0
 
 
-def test_room_temperature_chart_hides_labels_below_plot(two_room_spec):
+def test_room_temperature_chart_has_no_legend(two_room_spec):
     view = _room_view(build_dashboard(two_room_spec), "Living Room")
     temp_card = next(
         c for c in _iter_cards(view)
         if c.get("type") == "custom:apexcharts-card"
         and c.get("header", {}).get("title") == "Living Room – Temperature"
     )
-    apex_config = temp_card.get("apex_config", {})
-    assert apex_config.get("xaxis", {}).get("labels", {}).get("show") is False
-    assert "legend" not in apex_config
+    for series in temp_card.get("series", []):
+        assert series.get("show", {}).get("in_legend") is False, (
+            f"Series {series.get('name')!r} should have in_legend: false"
+        )
+    assert "apex_config" not in temp_card
 
 
 def test_room_view_does_not_reference_legacy_climate_suffix(two_room_spec):
