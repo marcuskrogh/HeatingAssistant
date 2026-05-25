@@ -12,10 +12,13 @@ The coordinator
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+import numpy as np
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -134,15 +137,32 @@ from .controller import HeatingMPCController
 from .ground_temp import ground_temperature
 from .solar_model import room_solar_gains
 from .schedule import (
+    EffectiveControlParams,
     EffectiveSetpoint,
     RoomSchedule,
     build_schedule,
+    control_params_at,
     next_transition,
+    resolve_effective_control_params,
     resolve_effective_setpoint,
 )
 from . import weather as _weather
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class ControlTrajectory:
+    """Per-step schedule-projected control parameters for the MPC horizon.
+
+    All arrays have shape ``(N,)`` where N is the prediction horizon.
+    Room-keyed dicts contain one array per configured room.
+    """
+
+    setpoints: Dict[str, "np.ndarray"]        # room → per-step setpoint [°C]
+    comfort_offsets: Dict[str, "np.ndarray"]  # room → per-step corridor half-width [°C]
+    q_scales: Dict[str, "np.ndarray"]         # room → per-step Q multiplier [–]
+    r_scales: Dict[str, "np.ndarray"]         # room → per-step R multiplier [–]
 
 
 def _coerce_interval_seconds(value: Any) -> float:
@@ -525,16 +545,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._room_schedule: Dict[str, RoomSchedule] = {}
         self._base_setpoint: Dict[str, float] = {}
         self._schedule_enabled: Dict[str, bool] = {}
+        # Per-room default comfort_offset, used as fallback when no schedule
+        # period overrides it and to seed the control trajectory builder.
+        self._room_comfort_offset: Dict[str, float] = {}
         self._window_sensors: Dict[str, List[str]] = self._build_window_sensor_map(rooms_cfg)
         self._window_state: Dict[str, str] = {name: "closed" for name in room_names}
         self._window_state_since: Dict[str, datetime] = {}
-        # Last applied effective setpoint per room — exposed for diagnostics.
-        self._effective_setpoint: Dict[str, EffectiveSetpoint] = {}
+        # Last applied effective control params per room — exposed for diagnostics.
+        self._effective_setpoint: Dict[str, EffectiveControlParams] = {}
         for rc in rooms_cfg:
             room_name = rc[CONF_ROOM_NAME]
             self._room_schedule[room_name] = build_schedule(rc.get(CONF_SCHEDULE))
             self._base_setpoint[room_name] = float(
                 rc.get(CONF_SETPOINT, DEFAULT_SETPOINT)
+            )
+            self._room_comfort_offset[room_name] = float(
+                rc.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
             )
             self._schedule_enabled[room_name] = True
 
@@ -969,6 +995,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #     sees the current temperature.
             now_local = datetime.now()
             self._apply_schedule(now_local)
+            control_traj = self._compute_control_trajectory(
+                now_local, self._horizon, float(self._update_interval)
+            )
             self._update_window_state_machine(self.now_utc)
 
             # 2. Read outdoor temperature
@@ -1051,6 +1080,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     cloud_forecast=cloud_forecast,
                     cloud_cover_now=cloud_cover_now,
                     disabled_sources=disabled_src_names or None,
+                    control_trajectory=control_traj,
                 )
                 self.predictions = self.controller.predictions
                 self.linearised_predictions = self.controller.linearised_predictions
@@ -1570,24 +1600,107 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 room_name, self.model.rooms[room_name].setpoint
             )
             measured = self.model.rooms[room_name].temperature
+            default_offset = self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
 
             if schedule is None or schedule.is_empty or not self._schedule_enabled.get(
                 room_name, True
             ):
-                effective = EffectiveSetpoint(
-                    setpoint=base, enabled=True, period_name=None, mode=None,
+                effective = EffectiveControlParams(
+                    setpoint=base,
+                    comfort_offset=default_offset,
+                    tracking_weight=1.0,
+                    energy_weight=1.0,
+                    enabled=True,
+                    period_name=None,
+                    mode=None,
                 )
             else:
-                effective = resolve_effective_setpoint(
+                effective = resolve_effective_control_params(
                     schedule=schedule,
                     base_setpoint=base,
                     measured_temp=measured,
                     now=now,
+                    default_comfort_offset=default_offset,
                 )
 
             self.model.rooms[room_name].setpoint = effective.setpoint
+            self.model.rooms[room_name].comfort_offset = effective.comfort_offset
             self._schedule_disabled[room_name] = not effective.enabled
             self._effective_setpoint[room_name] = effective
+
+    def _compute_control_trajectory(
+        self,
+        now_local: datetime,
+        N: int,
+        dt_seconds: float,
+    ) -> ControlTrajectory:
+        """Build per-step control parameters for the full MPC horizon.
+
+        For each room and each horizon step k the resolved comfort setpoint,
+        corridor half-width, tracking-weight multiplier and energy-weight
+        multiplier are projected forward by consulting the room's schedule at
+        ``now_local + k * dt_seconds``.
+
+        Off periods are transparent: when a future step falls in an ``off``
+        period the last known comfort values are carried forward unchanged.
+        This produces the same reference the static (non-schedule-aware) MPC
+        would use while leaving the ``disabled_sources`` zeroing mechanism
+        fully responsible for off-period execution.
+        """
+        traj = ControlTrajectory(
+            setpoints={},
+            comfort_offsets={},
+            q_scales={},
+            r_scales={},
+        )
+
+        for room_name in self.model.room_names:
+            schedule = self._room_schedule.get(room_name)
+            base_sp = self._base_setpoint.get(room_name, DEFAULT_SETPOINT)
+            default_offset = self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
+
+            sp_seq = np.empty(N, dtype=float)
+            off_seq = np.empty(N, dtype=float)
+            qw_seq = np.empty(N, dtype=float)
+            rw_seq = np.empty(N, dtype=float)
+
+            # Anchor: current effective params (already resolved by _apply_schedule)
+            current = self._effective_setpoint.get(room_name)
+            last_sp = current.setpoint if current is not None else base_sp
+            last_off = current.comfort_offset if current is not None else default_offset
+            last_qw = current.tracking_weight if current is not None else 1.0
+            last_rw = current.energy_weight if current is not None else 1.0
+
+            for k in range(N):
+                t_k = now_local + timedelta(seconds=k * dt_seconds)
+                if not self._schedule_enabled.get(room_name, True):
+                    # Schedule suspended — use current effective values throughout.
+                    pass
+                else:
+                    params = control_params_at(
+                        schedule=schedule,
+                        base_setpoint=base_sp,
+                        t_future=t_k,
+                        default_comfort_offset=default_offset,
+                    )
+                    if params is not None:
+                        last_sp = params.setpoint
+                        last_off = params.comfort_offset
+                        last_qw = params.tracking_weight
+                        last_rw = params.energy_weight
+                    # Off period (params is None): carry forward unchanged.
+
+                sp_seq[k] = last_sp
+                off_seq[k] = last_off
+                qw_seq[k] = last_qw
+                rw_seq[k] = last_rw
+
+            traj.setpoints[room_name] = sp_seq
+            traj.comfort_offsets[room_name] = off_seq
+            traj.q_scales[room_name] = qw_seq
+            traj.r_scales[room_name] = rw_seq
+
+        return traj
 
     def has_schedule(self, room_name: str) -> bool:
         """Return True when ``room_name`` has at least one schedule period."""
@@ -1617,7 +1730,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # MPC reference; otherwise the user would have to wait one cycle.
         self._apply_schedule(datetime.now())
 
-    def active_schedule_period(self, room_name: str) -> Optional[EffectiveSetpoint]:
+    def active_schedule_period(self, room_name: str) -> Optional[EffectiveControlParams]:
         """Return the most recently resolved effective setpoint for the room."""
         return self._effective_setpoint.get(room_name)
 

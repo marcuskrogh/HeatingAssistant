@@ -48,13 +48,17 @@ from datetime import datetime, time, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .const import (
+    CONF_SCHEDULE_COMFORT_OFFSET,
     CONF_SCHEDULE_DAYS,
     CONF_SCHEDULE_END,
+    CONF_SCHEDULE_ENERGY_WEIGHT,
     CONF_SCHEDULE_FROST_PROTECTION,
     CONF_SCHEDULE_MODE,
     CONF_SCHEDULE_NAME,
     CONF_SCHEDULE_SETPOINT,
     CONF_SCHEDULE_START,
+    CONF_SCHEDULE_TRACKING_WEIGHT,
+    DEFAULT_COMFORT_OFFSET,
     DEFAULT_FROST_PROTECTION,
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
@@ -119,6 +123,9 @@ class SchedulePeriod:
     setpoint: Optional[float] = None
     frost_protection: float = DEFAULT_FROST_PROTECTION
     days: frozenset[int] = field(default_factory=lambda: frozenset(range(7)))
+    comfort_offset: Optional[float] = None   # °C half-width; None = use room default
+    tracking_weight: Optional[float] = None  # Q multiplier; None = 1.0 (no change)
+    energy_weight: Optional[float] = None    # R multiplier; None = 1.0 (no change)
 
     @property
     def wraps_midnight(self) -> bool:
@@ -214,6 +221,33 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
         frost = float(entry.get(CONF_SCHEDULE_FROST_PROTECTION, DEFAULT_FROST_PROTECTION))
         days = _parse_days(entry.get(CONF_SCHEDULE_DAYS))
 
+        comfort_offset = entry.get(CONF_SCHEDULE_COMFORT_OFFSET)
+        if comfort_offset is not None:
+            comfort_offset = float(comfort_offset)
+            if comfort_offset <= 0:
+                raise ValueError(
+                    f"Schedule entry {name!r}: comfort_offset must be > 0; "
+                    f"got {comfort_offset}"
+                )
+
+        tracking_weight = entry.get(CONF_SCHEDULE_TRACKING_WEIGHT)
+        if tracking_weight is not None:
+            tracking_weight = float(tracking_weight)
+            if tracking_weight < 0:
+                raise ValueError(
+                    f"Schedule entry {name!r}: tracking_weight must be >= 0; "
+                    f"got {tracking_weight}"
+                )
+
+        energy_weight = entry.get(CONF_SCHEDULE_ENERGY_WEIGHT)
+        if energy_weight is not None:
+            energy_weight = float(energy_weight)
+            if energy_weight < 0:
+                raise ValueError(
+                    f"Schedule entry {name!r}: energy_weight must be >= 0; "
+                    f"got {energy_weight}"
+                )
+
         periods.append(
             SchedulePeriod(
                 name=name,
@@ -223,6 +257,9 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
                 setpoint=setpoint,
                 frost_protection=frost,
                 days=days,
+                comfort_offset=comfort_offset,
+                tracking_weight=tracking_weight,
+                energy_weight=energy_weight,
             )
         )
 
@@ -230,13 +267,21 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
 
 
 @dataclass(frozen=True)
-class EffectiveSetpoint:
+class EffectiveControlParams:
     """The result of resolving a schedule for a single room at a single time.
 
     Attributes
     ----------
     setpoint : float
         The temperature [°C] the controller should track at this instant.
+    comfort_offset : float
+        Soft constraint corridor half-width [°C] for this period.
+    tracking_weight : float
+        Multiplier on the global Q (setpoint-tracking aggressiveness).
+        1.0 means unchanged; 2.0 means twice as aggressive.
+    energy_weight : float
+        Multiplier on the global R (energy-use penalty).
+        1.0 means unchanged; 2.0 means twice as expensive.
     enabled : bool
         Whether the room's heat sources are allowed to run.  ``False`` when
         an ``off`` period is active and frost protection is not triggered.
@@ -248,18 +293,28 @@ class EffectiveSetpoint:
     """
 
     setpoint: float
+    comfort_offset: float
+    tracking_weight: float
+    energy_weight: float
     enabled: bool
     period_name: Optional[str] = None
     mode: Optional[str] = None
 
 
-def resolve_effective_setpoint(
+# Backward-compatible alias used by existing callers that only need setpoint/enabled.
+EffectiveSetpoint = EffectiveControlParams
+
+
+def resolve_effective_control_params(
     schedule: RoomSchedule,
     base_setpoint: float,
     measured_temp: Optional[float],
     now: datetime,
-) -> EffectiveSetpoint:
-    """Resolve the effective setpoint and enabled flag for a single room.
+    default_comfort_offset: float = DEFAULT_COMFORT_OFFSET,
+    default_tracking_weight: float = 1.0,
+    default_energy_weight: float = 1.0,
+) -> EffectiveControlParams:
+    """Resolve the full set of effective control parameters for a single room.
 
     Parameters
     ----------
@@ -274,16 +329,37 @@ def resolve_effective_setpoint(
         a missing reading.
     now : datetime
         Reference time-of-day used to look up the active period.
+    default_comfort_offset : float
+        Room-level comfort corridor half-width to fall back to when the
+        active period does not specify one.
+    default_tracking_weight : float
+        Global Q multiplier to use when the active period does not specify
+        one.  Defaults to 1.0 (no change from global setting).
+    default_energy_weight : float
+        Global R multiplier to use when the active period does not specify
+        one.  Defaults to 1.0 (no change from global setting).
     """
     if schedule.is_empty:
-        return EffectiveSetpoint(
-            setpoint=base_setpoint, enabled=True, period_name=None, mode=None,
+        return EffectiveControlParams(
+            setpoint=base_setpoint,
+            comfort_offset=default_comfort_offset,
+            tracking_weight=default_tracking_weight,
+            energy_weight=default_energy_weight,
+            enabled=True,
+            period_name=None,
+            mode=None,
         )
 
     period = schedule.active(now)
     if period is None:
-        return EffectiveSetpoint(
-            setpoint=base_setpoint, enabled=True, period_name=None, mode=None,
+        return EffectiveControlParams(
+            setpoint=base_setpoint,
+            comfort_offset=default_comfort_offset,
+            tracking_weight=default_tracking_weight,
+            energy_weight=default_energy_weight,
+            enabled=True,
+            period_name=None,
+            mode=None,
         )
 
     if period.is_off:
@@ -291,22 +367,131 @@ def resolve_effective_setpoint(
         # the measurement drops below it.  This way an "off" period never
         # lets pipes freeze.
         if measured_temp is not None and measured_temp <= period.frost_protection:
-            return EffectiveSetpoint(
+            return EffectiveControlParams(
                 setpoint=period.frost_protection,
+                comfort_offset=default_comfort_offset,
+                tracking_weight=default_tracking_weight,
+                energy_weight=default_energy_weight,
                 enabled=True,
                 period_name=period.name,
                 mode=period.mode,
             )
-        return EffectiveSetpoint(
+        return EffectiveControlParams(
             setpoint=period.frost_protection,
+            comfort_offset=default_comfort_offset,
+            tracking_weight=default_tracking_weight,
+            energy_weight=default_energy_weight,
             enabled=False,
             period_name=period.name,
             mode=period.mode,
         )
 
     setpoint = period.setpoint if period.setpoint is not None else base_setpoint
-    return EffectiveSetpoint(
+    comfort_offset = (
+        period.comfort_offset
+        if period.comfort_offset is not None
+        else default_comfort_offset
+    )
+    tracking_weight = (
+        period.tracking_weight
+        if period.tracking_weight is not None
+        else default_tracking_weight
+    )
+    energy_weight = (
+        period.energy_weight
+        if period.energy_weight is not None
+        else default_energy_weight
+    )
+    return EffectiveControlParams(
         setpoint=setpoint,
+        comfort_offset=comfort_offset,
+        tracking_weight=tracking_weight,
+        energy_weight=energy_weight,
+        enabled=True,
+        period_name=period.name,
+        mode=period.mode,
+    )
+
+
+def resolve_effective_setpoint(
+    schedule: RoomSchedule,
+    base_setpoint: float,
+    measured_temp: Optional[float],
+    now: datetime,
+    default_comfort_offset: float = DEFAULT_COMFORT_OFFSET,
+    default_tracking_weight: float = 1.0,
+    default_energy_weight: float = 1.0,
+) -> EffectiveControlParams:
+    """Backward-compatible wrapper around :func:`resolve_effective_control_params`."""
+    return resolve_effective_control_params(
+        schedule=schedule,
+        base_setpoint=base_setpoint,
+        measured_temp=measured_temp,
+        now=now,
+        default_comfort_offset=default_comfort_offset,
+        default_tracking_weight=default_tracking_weight,
+        default_energy_weight=default_energy_weight,
+    )
+
+
+def control_params_at(
+    schedule: RoomSchedule,
+    base_setpoint: float,
+    t_future: datetime,
+    default_comfort_offset: float = DEFAULT_COMFORT_OFFSET,
+    default_tracking_weight: float = 1.0,
+    default_energy_weight: float = 1.0,
+) -> Optional[EffectiveControlParams]:
+    """Return effective comfort control parameters at a future time.
+
+    Returns ``None`` when ``t_future`` falls in an ``off`` period — the
+    caller is responsible for carry-forward logic in that case.  No frost
+    protection evaluation is performed (measured temperature is unknown
+    for future instants).
+    """
+    if schedule is None or schedule.is_empty:
+        return EffectiveControlParams(
+            setpoint=base_setpoint,
+            comfort_offset=default_comfort_offset,
+            tracking_weight=default_tracking_weight,
+            energy_weight=default_energy_weight,
+            enabled=True,
+        )
+
+    period = schedule.active(t_future)
+    if period is None:
+        return EffectiveControlParams(
+            setpoint=base_setpoint,
+            comfort_offset=default_comfort_offset,
+            tracking_weight=default_tracking_weight,
+            energy_weight=default_energy_weight,
+            enabled=True,
+        )
+
+    if period.is_off:
+        return None  # caller applies carry-forward
+
+    setpoint = period.setpoint if period.setpoint is not None else base_setpoint
+    comfort_offset = (
+        period.comfort_offset
+        if period.comfort_offset is not None
+        else default_comfort_offset
+    )
+    tracking_weight = (
+        period.tracking_weight
+        if period.tracking_weight is not None
+        else default_tracking_weight
+    )
+    energy_weight = (
+        period.energy_weight
+        if period.energy_weight is not None
+        else default_energy_weight
+    )
+    return EffectiveControlParams(
+        setpoint=setpoint,
+        comfort_offset=comfort_offset,
+        tracking_weight=tracking_weight,
+        energy_weight=energy_weight,
         enabled=True,
         period_name=period.name,
         mode=period.mode,

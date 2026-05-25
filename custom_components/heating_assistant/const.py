@@ -46,6 +46,9 @@ CONF_SCHEDULE_DAYS = "days"                      # optional weekday list, defaul
 CONF_SCHEDULE_SETPOINT = "setpoint"              # °C, optional override for active period
 CONF_SCHEDULE_MODE = "mode"                      # "comfort" (default) | "off"
 CONF_SCHEDULE_FROST_PROTECTION = "frost_protection"  # °C floor enforced while mode == "off"
+CONF_SCHEDULE_COMFORT_OFFSET = "comfort_offset"  # °C half-width of soft constraint corridor; None = use room default
+CONF_SCHEDULE_TRACKING_WEIGHT = "tracking_weight"  # multiplier on global Q (setpoint tracking aggressiveness); None = 1.0
+CONF_SCHEDULE_ENERGY_WEIGHT = "energy_weight"    # multiplier on global R (energy use penalty); None = 1.0
 
 # Connection configuration keys
 CONF_CONNECTED_ROOM = "room"

@@ -57,6 +57,8 @@
           "add_room": "Add room",
           "edit_room": "Edit room",
           "manage_room_windows": "Configure room windows",
+          "manage_room_heaters": "Configure room heat sources",
+          "manage_room_schedule": "Manage schedule",
           "remove_room": "Remove room",
           "finish_rooms": "Back to main menu"
         }
@@ -183,10 +185,68 @@
         "data": {
           "heater_idx": "Heat source to remove"
         }
+      },
+      "manage_room_schedule": {
+        "title": "Select Room for Schedule",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "manage_schedule": {
+        "title": "Schedule",
+        "menu_options": {
+          "add_period": "Add period",
+          "select_edit_period": "Edit period",
+          "remove_period": "Remove period",
+          "finish_schedule": "Done with schedule"
+        }
+      },
+      "add_period": {
+        "title": "Add Schedule Period",
+        "data": {
+          "name": "Period name",
+          "mode": "Mode (comfort or off)",
+          "start": "Start time (HH:MM)",
+          "end": "End time (HH:MM)",
+          "days": "Days (leave empty for all days)",
+          "setpoint": "Target temperature (°C, leave at room default if not overriding)",
+          "comfort_offset": "Comfort band (±°C, leave at room default if not overriding)",
+          "tracking_weight": "Tracking weight multiplier (1.0 = use global default)",
+          "energy_weight": "Energy weight multiplier (1.0 = use global default)",
+          "frost_protection": "Frost protection temperature (°C, used when mode is off)"
+        }
+      },
+      "select_edit_period": {
+        "title": "Select Period to Edit",
+        "data": {
+          "period_idx": "Period"
+        }
+      },
+      "edit_period": {
+        "title": "Edit Schedule Period",
+        "data": {
+          "name": "Period name",
+          "mode": "Mode (comfort or off)",
+          "start": "Start time (HH:MM)",
+          "end": "End time (HH:MM)",
+          "days": "Days (leave empty for all days)",
+          "setpoint": "Target temperature (°C, leave at room default if not overriding)",
+          "comfort_offset": "Comfort band (±°C, leave at room default if not overriding)",
+          "tracking_weight": "Tracking weight multiplier (1.0 = use global default)",
+          "energy_weight": "Energy weight multiplier (1.0 = use global default)",
+          "frost_protection": "Frost protection temperature (°C, used when mode is off)"
+        }
+      },
+      "remove_period": {
+        "title": "Remove Schedule Period",
+        "data": {
+          "period_idx": "Period to remove"
+        }
       }
     },
     "error": {
-      "duplicate_room": "A room with this name already exists."
+      "duplicate_room": "A room with this name already exists.",
+      "invalid_time": "Invalid time format. Use HH:MM (e.g. 22:00)."
     }
   },
   "services": {

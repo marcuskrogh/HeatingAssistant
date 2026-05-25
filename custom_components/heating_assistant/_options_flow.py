@@ -39,6 +39,19 @@ from .const import (
     CONF_SOURCE_HVAC_MODE,
     DEFAULT_SOURCE_HVAC_MODE,
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
+    CONF_SCHEDULE,
+    CONF_SCHEDULE_NAME,
+    CONF_SCHEDULE_START,
+    CONF_SCHEDULE_END,
+    CONF_SCHEDULE_MODE,
+    CONF_SCHEDULE_DAYS,
+    CONF_SCHEDULE_SETPOINT,
+    CONF_SCHEDULE_FROST_PROTECTION,
+    CONF_SCHEDULE_COMFORT_OFFSET,
+    CONF_SCHEDULE_TRACKING_WEIGHT,
+    CONF_SCHEDULE_ENERGY_WEIGHT,
+    SCHEDULE_MODE_COMFORT,
+    SCHEDULE_MODE_OFF,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_WINDOW_TILT,
@@ -483,3 +496,78 @@ class HeaterFlowHelper:
     ) -> Dict[str, str]:
         """Return ``{idx_str: human_label}`` for the remove-heater selector."""
         return {str(i): labeller(room_name, i, h) for i, h in enumerate(self._heat_sources_list)}
+
+
+# ---------------------------------------------------------------------------
+# Schedule CRUD helper
+# ---------------------------------------------------------------------------
+
+_DAY_ABBR_TO_LABEL: Dict[str, str] = {
+    "mon": "Mon",
+    "tue": "Tue",
+    "wed": "Wed",
+    "thu": "Thu",
+    "fri": "Fri",
+    "sat": "Sat",
+    "sun": "Sun",
+}
+
+
+class ScheduleFlowHelper:
+    """Mutate the ``CONF_SCHEDULE`` list of a single, already-selected room.
+
+    The room dict is held by reference so changes propagate to whoever owns it
+    (typically a :class:`RoomFlowHelper`).
+    """
+
+    def __init__(self, room: Dict[str, Any]) -> None:
+        self._room = room
+        self._room.setdefault(CONF_SCHEDULE, [])
+
+    @property
+    def periods(self) -> List[Dict[str, Any]]:
+        return self._room[CONF_SCHEDULE]
+
+    def __bool__(self) -> bool:
+        return bool(self.periods)
+
+    def __len__(self) -> int:
+        return len(self.periods)
+
+    def period_display(self, period: Dict[str, Any]) -> str:
+        """E.g. 'night: 22:00–06:00 (off, Mon–Fri)'"""
+        name = period.get(CONF_SCHEDULE_NAME, "?")
+        start = period.get(CONF_SCHEDULE_START, "?")
+        end = period.get(CONF_SCHEDULE_END, "?")
+        mode = period.get(CONF_SCHEDULE_MODE, SCHEDULE_MODE_COMFORT)
+        days = period.get(CONF_SCHEDULE_DAYS)
+        if days:
+            day_labels = ", ".join(
+                _DAY_ABBR_TO_LABEL.get(d, d) for d in days
+            )
+            day_str = f", {day_labels}"
+        else:
+            day_str = ""
+        return f"{name}: {start}–{end} ({mode}{day_str})"
+
+    def display_options(self) -> Dict[str, str]:
+        """Return ``{idx_str: human_label}`` for period selection lists."""
+        return {str(i): self.period_display(p) for i, p in enumerate(self.periods)}
+
+    def add(self, period_data: Dict[str, Any]) -> None:
+        """Append a new period to the schedule."""
+        self.periods.append(dict(period_data))
+
+    def update(self, idx: int, period_data: Dict[str, Any]) -> bool:
+        """Replace the period at ``idx``.  Returns False if out of range."""
+        if 0 <= idx < len(self.periods):
+            self.periods[idx] = dict(period_data)
+            return True
+        return False
+
+    def remove(self, idx: int) -> bool:
+        """Remove the period at ``idx``.  Returns False if out of range."""
+        if 0 <= idx < len(self.periods):
+            self.periods.pop(idx)
+            return True
+        return False
