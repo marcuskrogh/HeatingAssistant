@@ -246,6 +246,18 @@ def test_room_temperature_chart_shades_outside_comfort_region_without_constraint
     assert lower_shade.get("stroke_width") == 0
 
 
+def test_room_temperature_chart_hides_labels_below_plot(two_room_spec):
+    view = _room_view(build_dashboard(two_room_spec), "Living Room")
+    temp_card = next(
+        c for c in _iter_cards(view)
+        if c.get("type") == "custom:apexcharts-card"
+        and c.get("header", {}).get("title") == "Living Room – Temperature"
+    )
+    apex_config = temp_card.get("apex_config", {})
+    assert apex_config.get("legend", {}).get("show") is False
+    assert apex_config.get("xaxis", {}).get("labels", {}).get("show") is False
+
+
 def test_room_view_does_not_reference_legacy_climate_suffix(two_room_spec):
     """Regression guard for the entity_id bug: the climate card must use
     ``climate.heating_assistant_living_room`` (HA's slug of the name), not
@@ -629,6 +641,18 @@ def test_dashboard_to_yaml_round_trips(two_room_spec):
     assert isinstance(yaml_text, str) and yaml_text.startswith("title:")
     loaded = yaml_module.safe_load(yaml_text)
     assert loaded == dashboard
+
+
+def test_now_marker_line_is_enabled_without_now_text_label(two_room_spec):
+    dashboard = build_dashboard(two_room_spec)
+    for card in _iter_cards(dashboard):
+        if card.get("type") != "custom:apexcharts-card":
+            continue
+        now_cfg = card.get("now")
+        if not isinstance(now_cfg, dict) or not now_cfg.get("show"):
+            continue
+        assert now_cfg.get("stroke_width") == 2
+        assert "label" not in now_cfg
 
 
 def test_dashboard_to_yaml_preserves_view_order(two_room_spec):
