@@ -7,9 +7,23 @@ from pathlib import Path
 
 from custom_components.heating_assistant.config_flow import (
     _build_period_dict,
+    _flatten_sections,
     _is_valid_time_string,
+    _normalise_time_string,
 )
-from custom_components.heating_assistant.const import DEFAULT_SETPOINT
+from custom_components.heating_assistant._options_flow import (
+    BUILDING_AGE_TO_R_EXTERNAL,
+    ROOM_SIZE_TO_THERMAL_MASS,
+    RoomFlowHelper,
+)
+from custom_components.heating_assistant.const import (
+    CONF_FACADE_COLOUR,
+    CONF_FACADE_SOLAR_SHARE,
+    CONF_FLOOR_TYPE,
+    CONF_SKY_RADIATIVE_UA,
+    CONF_THERMAL_BRIDGE_PSI_L,
+    DEFAULT_SETPOINT,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -56,42 +70,135 @@ def test_options_flow_source_has_expected_room_and_solver_updates() -> None:
 
 
 def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None:
-    """strings.json and en.json should both contain the updated labels."""
+    """strings.json and en.json should both contain the modernised labels.
+
+    The modernised UI moves jargon-heavy explanations from labels into
+    ``data_description`` helper text below each field, and groups advanced
+    fields into ``sections``.  These assertions lock that layout in.
+    """
     strings = json.loads(STRINGS_PATH.read_text(encoding="utf-8"))
     en = json.loads(EN_TRANSLATION_PATH.read_text(encoding="utf-8"))
     assert strings == en
 
-    global_settings = strings["options"]["step"]["global_settings"]["data"]
-    assert "optional when weather forecast entity is set" in global_settings["outdoor_temp_entity"]
-    assert "if not set, outdoor sensor is required" in global_settings["weather_entity"]
-    assert "IPOPT or SLSQP" in global_settings["mpc_solver"]
-    assert global_settings["sigma_w"].startswith("SDE ")
-    assert global_settings["sigma_b"].startswith("SDE ")
-    assert "window_open_debounce" in global_settings
-    assert "window_open_close_settle" in global_settings
-    assert "window_open_q_inflation" in global_settings
+    # ── Global settings: top-level basics + sections for advanced parts ──
+    global_step = strings["options"]["step"]["global_settings"]
+    global_basics = global_step["data"]
+    global_basics_desc = global_step["data_description"]
+    global_sections = global_step["sections"]
 
+    # Basics live at the top level with friendly labels and helper text.
+    for key in ("outdoor_temp_entity", "weather_entity", "update_interval"):
+        assert key in global_basics
+        assert key in global_basics_desc
+        assert global_basics[key]  # non-empty label
+        assert global_basics_desc[key]  # non-empty description
+
+    assert "optional" in global_basics_desc["outdoor_temp_entity"].lower()
+    assert "outdoor temperature sensor" in global_basics_desc["weather_entity"].lower()
+
+    # Advanced estimation is its own collapsed section.
+    est = global_sections["advanced_estimation"]
+    assert {"name", "description", "data", "data_description"} <= set(est.keys())
+    for key in ("sigma_w", "sigma_v", "sigma_b"):
+        assert key in est["data"]
+        assert key in est["data_description"]
+        # Labels are friendly — no greek / SDE jargon.
+        assert "σ" not in est["data"][key]
+        assert not est["data"][key].startswith("SDE")
+
+    # Window detection settings are also in their own section.
+    wd = global_sections["window_detection"]
+    for key in (
+        "window_open_debounce",
+        "window_open_close_settle",
+        "window_open_q_inflation",
+    ):
+        assert key in wd["data"]
+        assert key in wd["data_description"]
+
+    # ── MPC tuning: comfort/energy basics + advanced controller section ──
+    mpc_step = strings["options"]["step"]["mpc_tuning"]
+    mpc_sections = mpc_step["sections"]
+    comfort = mpc_sections["comfort_vs_energy"]
+    assert "tracking_weight" in comfort["data"]
+    assert "energy_weight" in comfort["data"]
+    advanced_ctrl = mpc_sections["advanced_controller"]
+    for key in ("horizon", "smoothing_weight", "soft_constraint_weight", "terminal_weight"):
+        assert key in advanced_ctrl["data"]
+
+    # ── Rooms: capabilities preserved, plus advanced envelope section ──
     add_room = strings["options"]["step"]["add_room"]["data"]
+    add_room_desc = strings["options"]["step"]["add_room"]["data_description"]
+    add_room_sections = strings["options"]["step"]["add_room"]["sections"]
     room_detail = strings["options"]["step"]["room_detail"]["data"]
+    room_detail_sections = strings["options"]["step"]["room_detail"]["sections"]
     manage_rooms_menu = strings["options"]["step"]["manage_rooms"]["menu_options"]
 
-    assert "temp_sensors" in add_room
-    assert "window_sensors" in add_room
-    assert "comfort_corridor_low" in add_room
-    assert "comfort_corridor_high" in add_room
-    assert "room_size" in add_room
-    assert "building_age" in add_room
+    for key in (
+        "temp_sensors",
+        "window_sensors",
+        "room_size",
+        "building_age",
+        "envelope_tightness",
+        "comfort_offset",
+        "name",
+    ):
+        assert key in add_room
+        assert key in add_room_desc
+        assert key in room_detail
     assert "setpoint" not in add_room
-
-    assert "temp_sensors" in room_detail
-    assert "window_sensors" in room_detail
-    assert "comfort_corridor_low" in room_detail
-    assert "comfort_corridor_high" in room_detail
-    assert "room_size" in room_detail
-    assert "building_age" in room_detail
     assert "setpoint" not in room_detail
+    # Comfort band replaces the legacy comfort_corridor_{low,high} keys.
+    assert "comfort_corridor_low" not in add_room
+    assert "comfort_corridor_high" not in add_room
+
+    # Floor / facade refinements live in the collapsed advanced section.
+    adv_envelope = add_room_sections["advanced_envelope"]
+    for key in (
+        "floor_type",
+        "facade_colour",
+        "facade_solar_share",
+        "thermal_bridge_psi_l",
+        "sky_radiative_ua",
+    ):
+        assert key in adv_envelope["data"]
+        assert key in adv_envelope["data_description"]
+        assert key in room_detail_sections["advanced_envelope"]["data"]
 
     assert "manage_room_windows" in manage_rooms_menu
+
+    # ── Schedule periods use the time picker (no HH:MM in labels). ──
+    period_data = strings["options"]["step"]["add_period"]["data"]
+    period_sections = strings["options"]["step"]["add_period"]["sections"]
+    for key in ("start", "end"):
+        assert key in period_data
+        # The TimeSelector renders a native time picker — no need to spell
+        # the format out in the label.
+        assert "HH:MM" not in period_data[key]
+    for key in ("tracking_weight", "energy_weight", "frost_protection"):
+        assert key in period_sections["advanced_period"]["data"]
+
+    # ── Selector translation keys exist for dropdowns. ──
+    selector = strings["selector"]
+    for key in (
+        "room_size",
+        "building_age",
+        "envelope_tightness",
+        "orientation",
+        "source_type",
+        "hvac_mode",
+        "schedule_mode",
+        "floor_type",
+        "facade_colour",
+    ):
+        assert key in selector
+        assert "options" in selector[key]
+        assert selector[key]["options"]  # non-empty
+
+    # ── Reconfigure step is present in the config flow. ──
+    assert "reconfigure" in strings["config"]["step"]
+    reconfigure_sections = strings["config"]["step"]["reconfigure"]["sections"]
+    assert {"location", "sensors", "timing"} <= set(reconfigure_sections.keys())
 
 
 def test_period_time_validation_helper_accepts_hh_mm_and_rejects_invalid() -> None:
@@ -146,3 +253,108 @@ def test_build_period_dict_omits_defaults_and_keeps_overrides() -> None:
     assert "comfort_offset" not in period_defaults
     assert "tracking_weight" not in period_defaults
     assert "energy_weight" not in period_defaults
+
+
+def test_build_period_dict_normalises_time_selector_output() -> None:
+    """``TimeSelector`` returns ``HH:MM:SS``; stored values stay HH:MM."""
+    period = _build_period_dict(
+        {
+            "name": "evening",
+            "mode": "comfort",
+            "start": "18:30:00",
+            "end": "22:00:45",
+            "days": [],
+            "setpoint": 22.0,
+            "comfort_offset": 2.0,
+            "tracking_weight": 1.0,
+            "energy_weight": 1.0,
+            "frost_protection": 12.0,
+        },
+        room_setpoint=22.0,
+        room_comfort_offset=2.0,
+    )
+    assert period["start"] == "18:30"
+    assert period["end"] == "22:00"
+
+
+def test_normalise_time_string_passthrough_and_trim() -> None:
+    assert _normalise_time_string("06:00") == "06:00"
+    assert _normalise_time_string("06:00:00") == "06:00"
+    assert _normalise_time_string("23:59:59") == "23:59"
+
+
+def test_flatten_sections_lifts_nested_dicts_top_level_wins() -> None:
+    """Sectioned form input is flattened, with top-level keys taking precedence."""
+    flat = _flatten_sections(
+        {
+            "outdoor_temp_entity": "sensor.outside",
+            "sensors": {
+                "weather_entity": "weather.home",
+                # Should not clobber a top-level value with the same name.
+                "outdoor_temp_entity": "sensor.IGNORED",
+            },
+            "timing": {"update_interval": 900},
+        },
+        ("sensors", "timing"),
+    )
+    assert flat == {
+        "outdoor_temp_entity": "sensor.outside",
+        "weather_entity": "weather.home",
+        "update_interval": 900,
+    }
+
+
+def test_flatten_sections_handles_none() -> None:
+    assert _flatten_sections(None, ("sensors",)) == {}
+
+
+def test_room_helper_stores_advanced_envelope_only_when_non_default() -> None:
+    """Floor/facade/bridge knobs should only appear in the room dict when set."""
+    helper = RoomFlowHelper()
+    err = helper.add(
+        name="bedroom",
+        sensors=["sensor.bedroom"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["medium"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["2000_plus"],
+        setpoint=22.0,
+        floor_type="ufh",  # non-default → stored
+        facade_colour="medium",  # default → stripped
+        facade_solar_share=0.0,  # default → stripped
+        thermal_bridge_psi_l=2.5,  # non-default → stored
+        sky_radiative_ua=0.0,  # default → stripped
+    )
+    assert err is None
+    room = helper.rooms[0]
+    assert room[CONF_FLOOR_TYPE] == "ufh"
+    assert room[CONF_THERMAL_BRIDGE_PSI_L] == 2.5
+    assert CONF_FACADE_COLOUR not in room
+    assert CONF_FACADE_SOLAR_SHARE not in room
+    assert CONF_SKY_RADIATIVE_UA not in room
+
+
+def test_room_helper_update_strips_advanced_when_user_chooses_defaults() -> None:
+    """Editing a room back to defaults must remove previously-stored overrides."""
+    helper = RoomFlowHelper()
+    helper.add(
+        name="bedroom",
+        sensors=["sensor.bedroom"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["medium"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["2000_plus"],
+        setpoint=22.0,
+        floor_type="ufh",
+        thermal_bridge_psi_l=2.5,
+    )
+    assert helper.select("bedroom") is True
+
+    helper.update_current(
+        name="bedroom",
+        sensors=["sensor.bedroom"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["medium"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["2000_plus"],
+        setpoint=22.0,
+        floor_type="none",  # the default → strip
+        thermal_bridge_psi_l=0.0,  # the default → strip
+    )
+    room = helper.rooms[0]
+    assert CONF_FLOOR_TYPE not in room
+    assert CONF_THERMAL_BRIDGE_PSI_L not in room

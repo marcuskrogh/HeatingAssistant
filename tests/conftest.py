@@ -162,9 +162,92 @@ _exc.ConfigEntryAuthFailed = Exception  # type: ignore[attr-defined]
 # homeassistant.config_entries
 _ce = sys.modules["homeassistant.config_entries"]
 _ce.ConfigEntry = object  # type: ignore[attr-defined]
-_ce.ConfigFlow = object  # type: ignore[attr-defined]
-_ce.OptionsFlow = object  # type: ignore[attr-defined]
+
+
+class _ConfigFlowStub:
+    """Stub ConfigFlow that accepts `domain=` kwarg via __init_subclass__."""
+
+    def __init_subclass__(cls, *, domain=None, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+
+class _OptionsFlowStub:
+    pass
+
+
+_ce.ConfigFlow = _ConfigFlowStub  # type: ignore[attr-defined]
+_ce.OptionsFlow = _OptionsFlowStub  # type: ignore[attr-defined]
 _ce.SOURCE_USER = "user"  # type: ignore[attr-defined]
+_ce.ConfigFlowResult = dict  # type: ignore[attr-defined]
+
+# homeassistant.helpers.selector – passthrough stubs sufficient for import
+_stub_module("homeassistant.helpers.selector")
+_sel = sys.modules["homeassistant.helpers.selector"]
+
+
+class _SelectorPassthrough:
+    """Generic stub that swallows any kwargs and returns a callable."""
+
+    def __init__(self, *args, **kwargs):
+        self._args = args
+        self._kwargs = kwargs
+
+    def __call__(self, value):
+        return value
+
+
+for _attr in [
+    "EntitySelector",
+    "EntitySelectorConfig",
+    "NumberSelector",
+    "NumberSelectorConfig",
+    "SelectSelector",
+    "SelectSelectorConfig",
+    "TextSelector",
+    "TextSelectorConfig",
+    "TimeSelector",
+    "TimeSelectorConfig",
+    "BooleanSelector",
+    "BooleanSelectorConfig",
+    "ObjectSelector",
+    "ObjectSelectorConfig",
+]:
+    setattr(_sel, _attr, _SelectorPassthrough)
+
+
+class _NumberSelectorModeStub:
+    BOX = "box"
+    SLIDER = "slider"
+
+
+class _SelectSelectorModeStub:
+    LIST = "list"
+    DROPDOWN = "dropdown"
+
+
+class _TextSelectorTypeStub:
+    TEXT = "text"
+    NUMBER = "number"
+    PASSWORD = "password"
+    EMAIL = "email"
+    URL = "url"
+
+
+_sel.NumberSelectorMode = _NumberSelectorModeStub  # type: ignore[attr-defined]
+_sel.SelectSelectorMode = _SelectSelectorModeStub  # type: ignore[attr-defined]
+_sel.TextSelectorType = _TextSelectorTypeStub  # type: ignore[attr-defined]
+
+
+class _SectionStub:
+    """Stub for homeassistant.data_entry_flow.section (used to group fields)."""
+
+    def __init__(self, schema=None, options=None, **kwargs):
+        self.schema = schema
+        self.options = options or {}
+
+
+_stub_module("homeassistant.data_entry_flow")
+sys.modules["homeassistant.data_entry_flow"].section = _SectionStub  # type: ignore[attr-defined]
 
 # homeassistant.const
 _const = sys.modules["homeassistant.const"]
