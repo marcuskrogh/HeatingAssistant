@@ -181,6 +181,33 @@ def test_room_view_temperature_chart_references_canonical_entities(two_room_spec
     assert not missing, f"Missing entity references on room view: {missing}"
 
 
+def test_room_temperature_chart_plots_schedule_driven_setpoint_and_constraints(two_room_spec):
+    view = _room_view(build_dashboard(two_room_spec), "Living Room")
+    temp_card = next(
+        c for c in _iter_cards(view)
+        if c.get("type") == "custom:apexcharts-card"
+        and c.get("header", {}).get("title") == "Living Room – Temperature"
+    )
+    series = temp_card["series"]
+    setpoint_forecast = next(
+        s for s in series
+        if s.get("name") == "Setpoint" and s.get("data_generator")
+    )
+    constraint_upper = next(
+        s for s in series
+        if s.get("name") == "Constraints"
+        and "constraint_upper" in (s.get("data_generator") or "")
+    )
+    constraint_lower = next(
+        s for s in series
+        if s.get("name") == "Constraints"
+        and "constraint_lower" in (s.get("data_generator") or "")
+    )
+    assert "setpoint" in setpoint_forecast["data_generator"]
+    assert "constraint_upper" in constraint_upper["data_generator"]
+    assert "constraint_lower" in constraint_lower["data_generator"]
+
+
 def test_room_view_does_not_reference_legacy_climate_suffix(two_room_spec):
     """Regression guard for the entity_id bug: the climate card must use
     ``climate.heating_assistant_living_room`` (HA's slug of the name), not
