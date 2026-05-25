@@ -994,10 +994,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #     Done after measurements are read so frost-protection logic
             #     sees the current temperature.
             now_local = datetime.now()
-            self._apply_schedule(now_local)
-            control_traj = self._compute_control_trajectory(
-                now_local, self._horizon, float(self._update_interval)
-            )
+            try:
+                self._apply_schedule(now_local)
+                control_traj = self._compute_control_trajectory(
+                    now_local, self._horizon, float(self._update_interval)
+                )
+            except Exception:
+                _LOGGER.warning(
+                    "Failed to apply schedule or compute control trajectory; "
+                    "falling back to static control for this cycle",
+                    exc_info=True,
+                )
+                control_traj = None
             self._update_window_state_machine(self.now_utc)
 
             # 2. Read outdoor temperature

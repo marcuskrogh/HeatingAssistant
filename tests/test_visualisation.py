@@ -792,6 +792,9 @@ class TestCoordinatorUpdateResilience:
         coordinator._effective_setpoint = {}
         coordinator._schedule_disabled = {}
         coordinator._schedule_enabled = {}
+        coordinator._room_comfort_offset = {}
+        coordinator._room_enabled = {}
+        coordinator._horizon = 4
         coordinator._weather_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
@@ -854,6 +857,9 @@ class TestCoordinatorUpdateResilience:
         coordinator._effective_setpoint = {}
         coordinator._schedule_disabled = {}
         coordinator._schedule_enabled = {}
+        coordinator._room_comfort_offset = {}
+        coordinator._room_enabled = {}
+        coordinator._horizon = 4
         coordinator._weather_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
@@ -910,6 +916,9 @@ class TestCoordinatorUpdateResilience:
         coordinator._effective_setpoint = {}
         coordinator._schedule_disabled = {}
         coordinator._schedule_enabled = {}
+        coordinator._room_comfort_offset = {}
+        coordinator._room_enabled = {}
+        coordinator._horizon = 4
         coordinator._weather_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
@@ -971,6 +980,8 @@ class TestCoordinatorUpdateResilience:
         coordinator._effective_setpoint = {}
         coordinator._schedule_disabled = {}
         coordinator._schedule_enabled = {}
+        coordinator._room_comfort_offset = {}
+        coordinator._room_enabled = {}
         coordinator._weather_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
@@ -1035,6 +1046,8 @@ class TestCoordinatorUpdateResilience:
         coordinator._effective_setpoint = {}
         coordinator._schedule_disabled = {}
         coordinator._schedule_enabled = {}
+        coordinator._room_comfort_offset = {}
+        coordinator._room_enabled = {}
         coordinator._weather_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
