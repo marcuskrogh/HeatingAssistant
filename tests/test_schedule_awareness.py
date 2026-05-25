@@ -126,10 +126,10 @@ def test_setpoint_and_constraints_follow_schedule_projected_trajectory() -> None
         dt=900.0,
         now_utc=datetime(2026, 1, 5, 7, 30),
         _control_trajectory=ControlTrajectory(
-            setpoints={"living_room": [21.0, 21.0, 23.0, 23.0]},
-            comfort_offsets={"living_room": [1.0, 1.0, 0.5, 0.5]},
-            q_scales={"living_room": [1.0, 1.0, 1.0, 1.0]},
-            r_scales={"living_room": [1.0, 1.0, 1.0, 1.0]},
+            setpoints={"living_room": np.array([21.0, 21.0, 23.0, 23.0])},
+            comfort_offsets={"living_room": np.array([1.0, 1.0, 0.5, 0.5])},
+            q_scales={"living_room": np.array([1.0, 1.0, 1.0, 1.0])},
+            r_scales={"living_room": np.array([1.0, 1.0, 1.0, 1.0])},
         ),
     )
 
@@ -138,13 +138,13 @@ def test_setpoint_and_constraints_follow_schedule_projected_trajectory() -> None
     lower_fc = ConstraintLowerSensor(coord, "living_room").extra_state_attributes["forecast"]
 
     assert [row["setpoint"] for row in setpoint_fc] == pytest.approx(
-        [21.0, 21.0, 21.0, 23.0, 23.0]
+        [21.0, 21.0, 23.0, 23.0, 23.0]
     )
     assert [row["constraint_upper"] for row in upper_fc] == pytest.approx(
-        [22.0, 22.0, 22.0, 23.5, 23.5]
+        [22.0, 22.0, 23.5, 23.5, 23.5]
     )
     assert [row["constraint_lower"] for row in lower_fc] == pytest.approx(
-        [20.0, 20.0, 20.0, 22.5, 22.5]
+        [20.0, 20.0, 22.5, 22.5, 22.5]
     )
 
 

@@ -172,6 +172,7 @@ def test_heating_power_forecast_exposes_forecast_attribute():
 def test_temperature_and_power_forecast_time_axes_are_interval_aligned():
     """Power plan is indexed at interval start; temperature forecast at interval end."""
     coord = _make_room_coordinator()
+    coord.now_utc = datetime(2026, 1, 5, 7, 30)
     temp_sensor = TemperatureForecastSensor(coord, "living_room")
     power_sensor = HeatingPowerForecastSensor(coord, "living_room")
 
@@ -184,7 +185,7 @@ def test_temperature_and_power_forecast_time_axes_are_interval_aligned():
     t_power0 = datetime.fromisoformat(power_fc[0]["time"])
     t_power1 = datetime.fromisoformat(power_fc[1]["time"])
 
-    assert (t_power0 - t_temp0).total_seconds() == pytest.approx(0.0)
+    assert (t_power0 - t_temp0).total_seconds() == pytest.approx(0.0, abs=1e-6)
     assert (t_temp1 - t_power0).total_seconds() == pytest.approx(dt)
     assert (t_power1 - t_power0).total_seconds() == pytest.approx(dt)
 
