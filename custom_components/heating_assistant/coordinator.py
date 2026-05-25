@@ -682,6 +682,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # event loop.
         self.open_loop_results: Dict[str, Any] = {}
 
+        # Schedule-projected per-step control parameters for the current
+        # MPC horizon.  Populated each cycle by _compute_control_trajectory
+        # and read by setpoint / constraint sensors to plot the time-varying
+        # comfort corridor on the dashboard.  None before the first cycle or
+        # when schedule computation fails.
+        self._control_trajectory: Optional["ControlTrajectory"] = None
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------
@@ -999,6 +1006,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 control_traj = self._compute_control_trajectory(
                     now_local, self._horizon, float(self._update_interval)
                 )
+                self._control_trajectory = control_traj
             except Exception:
                 _LOGGER.warning(
                     "Failed to apply schedule or compute control trajectory; "
@@ -1006,6 +1014,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     exc_info=True,
                 )
                 control_traj = None
+                self._control_trajectory = None
             self._update_window_state_machine(self.now_utc)
 
             # 2. Read outdoor temperature

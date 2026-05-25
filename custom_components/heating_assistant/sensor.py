@@ -271,11 +271,16 @@ class SetpointSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        traj = getattr(self._coordinator, "_control_trajectory", None)
+        step_sp = None
+        if traj is not None:
+            step_sp = traj.setpoints.get(self._room_name)
         return _build_horizon_forecast(
             self._coordinator,
             self._room_name,
             field="setpoint",
             value=_setpoint_value,
+            step_values=step_sp,
         )
 
 
@@ -345,11 +350,21 @@ class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):
         def _value(coord: Any, room_name: str) -> Optional[float]:
             return _constraint_bound(coord, room_name, sign)
 
+        traj = getattr(self._coordinator, "_control_trajectory", None)
+        step_bounds = None
+        if traj is not None:
+            sp_seq = traj.setpoints.get(self._room_name)
+            off_seq = traj.comfort_offsets.get(self._room_name)
+            if sp_seq is not None and off_seq is not None:
+                import numpy as np
+                step_bounds = sp_seq + sign * off_seq
+
         return _build_horizon_forecast(
             self._coordinator,
             self._room_name,
             field=field,
             value=_value,
+            step_values=step_bounds,
         )
 
 
@@ -434,6 +449,7 @@ def _build_horizon_forecast(
     room_name: str,
     field: str,
     value: Any,
+    step_values: "Optional[np.ndarray]" = None,
 ) -> Dict[str, Any]:
     """Build a per-step ``forecast`` attribute that spans the MPC horizon.
 
@@ -443,6 +459,12 @@ def _build_horizon_forecast(
     the entries so the chart renders a continuous trace — these scalars
     (setpoint, constraint bounds) are not MPC outputs, so they remain
     valid even on solver failure.
+
+    When ``step_values`` is provided (a per-step array of shape ``(N,)``
+    from the schedule-projected control trajectory) it is used instead of
+    repeating the scalar ``value`` result, so the dashboard shows a
+    time-varying comfort corridor that reflects scheduled setpoint /
+    comfort-offset changes over the horizon.
     """
     horizon = getattr(coordinator, "_horizon", None)
     dt = getattr(coordinator, "dt", None)
@@ -456,12 +478,18 @@ def _build_horizon_forecast(
     now = getattr(coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
     current = value(coordinator, room_name)
     forecast: List[Dict[str, Any]] = []
-    # Bridge at "now" plus one entry per OCP step (k = 1 … N), so the
+    # Bridge at "now" (k=0) plus one entry per OCP step (k=1…N), so the
     # line spans the same window as the temperature_forecast trace.
+    # step_values[k] corresponds to the OCP step starting at now + k*dt,
+    # matching the indexing used by _compute_control_trajectory.
+    n_steps = len(step_values) if step_values is not None else 0
     for k in range(int(horizon) + 1):
         step_time = now + timedelta(seconds=float(dt) * k)
         entry: Dict[str, Any] = {"time": step_time.isoformat()}
-        if current is not None:
+        if step_values is not None and n_steps > 0:
+            idx = min(k, n_steps - 1)
+            entry[field] = round(float(step_values[idx]), 2)
+        elif current is not None:
             entry[field] = round(current, 2)
         forecast.append(entry)
 
