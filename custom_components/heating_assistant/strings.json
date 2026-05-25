@@ -3,13 +3,13 @@
     "step": {
       "user": {
         "title": "Heating Assistant – Site Settings",
-        "description": "Configure the basic settings for Heating Assistant. Room and heat source definitions are provided in configuration.yaml or can be configured after setup.",
+        "description": "Configure the basic settings for Heating Assistant. Room and heat-source definitions are provided in configuration.yaml.",
         "data": {
           "latitude": "Latitude (degrees, positive = North)",
           "longitude": "Longitude (degrees, positive = East)",
-          "outdoor_temp_entity": "Outdoor temperature sensor (optional if weather forecast is available)",
-          "weather_entity": "Weather forecast (optional; either this or outdoor temperature sensor is needed)",
-          "update_interval": "How often to recalculate heating control (seconds, 60–3600)"
+          "outdoor_temp_entity": "Outdoor temperature sensor entity ID (leave blank to use HA default)",
+          "weather_entity": "Weather forecast entity ID (leave blank to disable forecast)",
+          "update_interval": "Control time step (seconds, 60–3600) — how often the MPC re-solves and applies actions (ZOH duration = EKF step = OCP step)"
         }
       }
     },
@@ -18,10 +18,10 @@
   "options": {
     "step": {
       "init": {
-        "title": "Heating Assistant Options",
+        "title": "Heating Assistant – Options",
         "menu_options": {
           "global_settings": "Global settings",
-          "mpc_tuning": "Controller tuning",
+          "mpc_tuning": "MPC tuning & model parameters",
           "manage_rooms": "Configure rooms",
           "save": "Save & close"
         }
@@ -29,26 +29,27 @@
       "global_settings": {
         "title": "Global Settings",
         "data": {
-          "outdoor_temp_entity": "Outdoor temperature sensor (optional if weather forecast is set)",
-          "weather_entity": "Weather forecast (optional; one of these is required)",
-          "update_interval": "Control update interval (seconds, 60–3600) — how often the system recalculates heating",
-          "sigma_w": "System model flexibility (K/√s) — higher allows faster adaptation to changing conditions",
-          "sigma_v": "Temperature sensor accuracy (K) — higher reflects less accurate sensors",
-          "sigma_b": "Sensor drift compensation (K/√s) — higher allows calibration changes over time",
-          "window_open_debounce": "Window open confirmation time (seconds) — how long a window must stay open to activate window mode",
-          "window_open_close_settle": "Window close confirmation time (seconds) — how long a window must stay closed to exit window mode",
-          "window_open_q_inflation": "Window-open uncertainty level — higher makes the system more cautious when windows are open"
+          "outdoor_temp_entity": "Outdoor temperature sensor entity ID (optional when weather forecast entity is set)",
+          "weather_entity": "Weather forecast entity ID (optional; if not set, outdoor sensor is required)",
+          "update_interval": "Control time step (seconds, 60–3600)",
+          "mpc_solver": "MPC solver (IPOPT or SLSQP) — quadratic programming backend for control optimisation",
+          "sigma_w": "SDE process-noise σ_w (K/√s) — higher values allow faster parameter adaptation",
+          "sigma_v": "Temperature measurement-noise std dev (sigma_v, K) — reflects sensor uncertainty",
+          "sigma_b": "SDE offset-drift σ_b (K/√s) — higher values allow calibration drift",
+          "window_open_debounce": "Window open debounce (seconds)",
+          "window_open_close_settle": "Window close settle time (seconds)",
+          "window_open_q_inflation": "Window-open EKF process-noise covariance multiplier"
         }
       },
       "mpc_tuning": {
-        "title": "Controller Tuning",
+        "title": "MPC Tuning & Model Parameters",
         "data": {
-          "horizon": "Prediction time horizon (steps) — higher looks further ahead (100 steps ≈ 25 hours at 15-min intervals)",
-          "tracking_weight": "Target temperature priority (0–∞) — 0 = comfort band only, higher = keep closer to setpoint",
-          "energy_weight": "Energy cost priority (0–∞) — higher values reduce heating costs but may sacrifice comfort",
-          "smoothing_weight": "Comfort smoothing (0–∞) — higher prevents rapid heating/cooling cycles",
-          "soft_constraint_weight": "Comfort band enforcement (0–∞) — higher strictly enforces staying in the comfort temperature range",
-          "terminal_weight": "End-of-window behavior (1–10000) — how much to prioritize state at the end of prediction"
+          "horizon": "MPC prediction horizon (steps) — 100 steps ≈ 25 hours at 15-min intervals",
+          "tracking_weight": "Tracking weight — weight on ‖z − setpoint‖² (Q diagonal); set to 0 to disable setpoint tracking",
+          "energy_weight": "Input regularisation weight — weight on ‖u‖² (penalises heater power use)",
+          "smoothing_weight": "Input rate-of-movement weight — weight on ‖Δu‖²; set to 0 to disable",
+          "soft_constraint_weight": "Soft output bound violation weight — direct penalty ρ for comfort-corridor violations",
+          "terminal_weight": "Terminal weight (multiplier) — cost weight applied at the prediction horizon end"
         }
       },
       "manage_rooms": {
@@ -57,7 +58,7 @@
           "add_room": "Add room",
           "edit_room": "Edit room",
           "manage_room_windows": "Configure room windows",
-          "manage_room_heaters": "Configure room heaters",
+          "manage_room_heaters": "Configure room heat sources",
           "manage_room_schedule": "Manage schedule",
           "remove_room": "Remove room",
           "finish_rooms": "Back to main menu"
@@ -66,13 +67,13 @@
       "add_room": {
         "title": "Add Room",
         "data": {
-          "name": "Room name",
-          "temp_sensors": "Temperature sensors",
-          "window_sensors": "Window/door sensors (for detecting open windows)",
+          "name": "Room name (unique identifier)",
+          "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
+          "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
           "room_size": "Approximate room size",
-          "building_age": "Approximate building construction period (affects insulation)",
-          "envelope_tightness": "Building air tightness — how much heat is lost through air leaks and wind",
-          "comfort_offset": "Comfort temperature band (±°C from setpoint)"
+          "building_age": "Approximate building age/insulation level",
+          "comfort_corridor_low": "Comfort corridor low (°C)",
+          "comfort_corridor_high": "Comfort corridor high (°C)"
         }
       },
       "edit_room": {
@@ -85,12 +86,12 @@
         "title": "Edit Room",
         "data": {
           "name": "Room name",
-          "temp_sensors": "Temperature sensors",
-          "window_sensors": "Window/door sensors (for detecting open windows)",
+          "temp_sensors": "Temperature sensors (comma-separated entity IDs)",
+          "window_sensors": "Window/door sensors (comma-separated binary_sensor entity IDs)",
           "room_size": "Approximate room size",
-          "building_age": "Approximate building construction period (affects insulation)",
-          "envelope_tightness": "Building air tightness — how much heat is lost through air leaks and wind",
-          "comfort_offset": "Comfort temperature band (±°C from setpoint)"
+          "building_age": "Approximate building age/insulation level",
+          "comfort_corridor_low": "Comfort corridor low (°C)",
+          "comfort_corridor_high": "Comfort corridor high (°C)"
         }
       },
       "manage_room_windows": {
@@ -117,8 +118,8 @@
         "title": "Add Window",
         "data": {
           "area": "Window area (m²)",
-          "orientation": "Which direction does it face? (compass direction)",
-          "tilt": "Window angle (°) — 90 = vertical (normal wall), 0 = horizontal (roof)"
+          "orientation": "Orientation (compass direction the window faces)",
+          "tilt": "Tilt from horizontal (°) — 90 = vertical wall"
         }
       },
       "remove_window": {

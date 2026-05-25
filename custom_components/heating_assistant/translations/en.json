@@ -32,9 +32,10 @@
           "outdoor_temp_entity": "Outdoor temperature sensor entity ID (optional when weather forecast entity is set)",
           "weather_entity": "Weather forecast entity ID (optional; if not set, outdoor sensor is required)",
           "update_interval": "Control time step (seconds, 60–3600)",
-          "sigma_w": "EKF process-noise std dev (sigma_w, K/√s) — higher values allow faster parameter changes",
+          "mpc_solver": "MPC solver (IPOPT or SLSQP) — quadratic programming backend for control optimisation",
+          "sigma_w": "SDE process-noise σ_w (K/√s) — higher values allow faster parameter adaptation",
           "sigma_v": "Temperature measurement-noise std dev (sigma_v, K) — reflects sensor uncertainty",
-          "sigma_b": "EKF offset-drift process-noise std dev (sigma_b, K/√s) — higher values allow calibration drift",
+          "sigma_b": "SDE offset-drift σ_b (K/√s) — higher values allow calibration drift",
           "window_open_debounce": "Window open debounce (seconds)",
           "window_open_close_settle": "Window close settle time (seconds)",
           "window_open_q_inflation": "Window-open EKF process-noise covariance multiplier"
