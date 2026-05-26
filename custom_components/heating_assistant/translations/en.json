@@ -4,81 +4,37 @@
       "user": {
         "title": "Welcome to Heating Assistant",
         "description": "Heating Assistant uses model-predictive control to keep your home comfortable while minimising energy use. It learns your home's thermal behaviour and plans ahead using outdoor temperature and weather forecasts.\n\nStart with the basics below. After setup you can add rooms, heat sources and schedules from the integration's **Configure** menu.",
-        "sections": {
-          "location": {
-            "name": "Location",
-            "description": "Used to predict solar gain through windows. Pre-filled from your Home Assistant location.",
-            "data": {
-              "latitude": "Latitude",
-              "longitude": "Longitude"
-            },
-            "data_description": {
-              "latitude": "Decimal degrees, positive north of the equator.",
-              "longitude": "Decimal degrees, positive east of the prime meridian."
-            }
-          },
-          "sensors": {
-            "name": "Outdoor information",
-            "description": "Provide a local outdoor temperature sensor (preferred) and/or a weather entity. At least one is required.",
-            "data": {
-              "outdoor_temp_entity": "Outdoor temperature sensor",
-              "weather_entity": "Weather forecast"
-            },
-            "data_description": {
-              "outdoor_temp_entity": "A local sensor measuring current outdoor temperature.",
-              "weather_entity": "Provides hourly forecasts so the controller can plan ahead."
-            }
-          },
-          "timing": {
-            "name": "Update timing",
-            "description": "How often Heating Assistant re-plans and updates your heaters.",
-            "data": {
-              "update_interval": "Control interval (seconds)"
-            },
-            "data_description": {
-              "update_interval": "Re-planning cadence in seconds. 900 s (15 min) suits most homes; lower values respond faster but use more CPU."
-            }
-          }
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "outdoor_temp_entity": "Outdoor temperature sensor",
+          "weather_entity": "Weather forecast",
+          "update_interval": "Control interval (seconds)"
+        },
+        "data_description": {
+          "latitude": "Decimal degrees, positive north of the equator. Used for solar gain prediction. Pre-filled from your Home Assistant location.",
+          "longitude": "Decimal degrees, positive east of the prime meridian. Used for solar gain prediction. Pre-filled from your Home Assistant location.",
+          "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. At least one of this or the weather entity is required.",
+          "weather_entity": "Provides hourly forecasts so the controller can plan ahead. At least one of this or the outdoor sensor is required.",
+          "update_interval": "Re-planning cadence in seconds. 900 s (15 min) suits most homes; lower values respond faster but use more CPU."
         }
       },
       "reconfigure": {
         "title": "Site settings",
         "description": "Update location, outdoor sources, and update timing. Rooms, heat sources and schedules are managed from **Configure**.",
-        "sections": {
-          "location": {
-            "name": "Location",
-            "description": "Used to predict solar gain through windows.",
-            "data": {
-              "latitude": "Latitude",
-              "longitude": "Longitude"
-            },
-            "data_description": {
-              "latitude": "Decimal degrees, positive north of the equator.",
-              "longitude": "Decimal degrees, positive east of the prime meridian."
-            }
-          },
-          "sensors": {
-            "name": "Outdoor information",
-            "description": "Provide a local outdoor temperature sensor (preferred) and/or a weather entity. At least one is required.",
-            "data": {
-              "outdoor_temp_entity": "Outdoor temperature sensor",
-              "weather_entity": "Weather forecast"
-            },
-            "data_description": {
-              "outdoor_temp_entity": "A local sensor measuring current outdoor temperature.",
-              "weather_entity": "Provides hourly forecasts so the controller can plan ahead."
-            }
-          },
-          "timing": {
-            "name": "Update timing",
-            "description": "How often Heating Assistant re-plans and updates your heaters.",
-            "data": {
-              "update_interval": "Control interval (seconds)"
-            },
-            "data_description": {
-              "update_interval": "Re-planning cadence in seconds. 900 s (15 min) suits most homes; lower values respond faster but use more CPU."
-            }
-          }
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "outdoor_temp_entity": "Outdoor temperature sensor",
+          "weather_entity": "Weather forecast",
+          "update_interval": "Control interval (seconds)"
+        },
+        "data_description": {
+          "latitude": "Decimal degrees, positive north of the equator.",
+          "longitude": "Decimal degrees, positive east of the prime meridian.",
+          "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. At least one of this or the weather entity is required.",
+          "weather_entity": "Provides hourly forecasts so the controller can plan ahead. At least one of this or the outdoor sensor is required.",
+          "update_interval": "Re-planning cadence in seconds. 900 s (15 min) suits most homes."
         }
       }
     },
@@ -109,80 +65,48 @@
       },
       "global_settings": {
         "title": "General & sensor settings",
-        "description": "Outdoor sources and how often the controller re-plans. The advanced sections below are safe to leave untouched.",
+        "description": "Outdoor sources and how often the controller re-plans. The fields lower down (model adaptation, window detection) are safe to leave at their defaults.",
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor",
           "weather_entity": "Weather forecast",
-          "update_interval": "Control interval (seconds)"
+          "update_interval": "Control interval (seconds)",
+          "sigma_w": "Model adaptation rate",
+          "sigma_v": "Sensor noise",
+          "sigma_b": "Sensor calibration drift",
+          "window_open_debounce": "Window open debounce (seconds)",
+          "window_open_close_settle": "Window close settle (seconds)",
+          "window_open_q_inflation": "Open-state uncertainty multiplier"
         },
         "data_description": {
           "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
           "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
-          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes."
-        },
-        "sections": {
-          "advanced_estimation": {
-            "name": "Advanced — model adaptation",
-            "description": "Controls how aggressively the model learns from your sensor history. Defaults work well for most homes.",
-            "data": {
-              "sigma_w": "Model adaptation rate",
-              "sigma_v": "Sensor noise",
-              "sigma_b": "Sensor calibration drift"
-            },
-            "data_description": {
-              "sigma_w": "How quickly the thermal model adapts to observed data. Higher values track changes faster but follow sensor noise more closely.",
-              "sigma_v": "Expected indoor temperature sensor noise (K). Raise this if you have a noisy sensor; lower it for a precise one.",
-              "sigma_b": "Allowed rate of sensor calibration drift. Higher values forgive slow sensor offset over time."
-            }
-          },
-          "window_detection": {
-            "name": "Advanced — window-open detection",
-            "description": "How the controller reacts when window or door sensors open and close. Only affects rooms where window sensors are configured.",
-            "data": {
-              "window_open_debounce": "Open debounce (seconds)",
-              "window_open_close_settle": "Close settle (seconds)",
-              "window_open_q_inflation": "Open-state uncertainty multiplier"
-            },
-            "data_description": {
-              "window_open_debounce": "How long a window must stay open before the controller responds. Prevents reacting to brief openings.",
-              "window_open_close_settle": "How long a window must stay closed before the controller resumes normal control.",
-              "window_open_q_inflation": "How much the controller distrusts the model while a window is open. Higher = adapts faster afterwards."
-            }
-          }
+          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes.",
+          "sigma_w": "Advanced — how quickly the thermal model adapts to observed data. Higher values track changes faster but follow sensor noise more closely. Default 0.1 works for most homes.",
+          "sigma_v": "Advanced — expected indoor temperature sensor noise (K). Raise this if you have a noisy sensor; lower it for a precise one.",
+          "sigma_b": "Advanced — allowed rate of sensor calibration drift. Higher values forgive slow sensor offset over time.",
+          "window_open_debounce": "Advanced — how long a window must stay open before the controller responds. Prevents reacting to brief openings. Only matters when window sensors are configured for a room.",
+          "window_open_close_settle": "Advanced — how long a window must stay closed before the controller resumes normal control.",
+          "window_open_q_inflation": "Advanced — how much the controller distrusts the model while a window is open. Higher = adapts faster afterwards."
         }
       },
       "mpc_tuning": {
         "title": "Control behaviour",
-        "description": "Tune how the controller balances comfort, energy use and responsiveness. Defaults work well for most homes.",
-        "sections": {
-          "comfort_vs_energy": {
-            "name": "Comfort vs energy",
-            "description": "The two main knobs you'll typically adjust.",
-            "data": {
-              "tracking_weight": "Setpoint tracking strength",
-              "energy_weight": "Energy-use penalty"
-            },
-            "data_description": {
-              "tracking_weight": "How strongly the controller chases the exact setpoint. 0 = stay inside the comfort band only. Higher values mean tighter tracking at the cost of more energy use.",
-              "energy_weight": "How strongly the controller avoids running heaters. Higher values save energy but may drift toward the edges of the comfort band."
-            }
-          },
-          "advanced_controller": {
-            "name": "Advanced — controller tuning",
-            "description": "Lower-level tuning for prediction horizon and constraint handling. Most users can leave these alone.",
-            "data": {
-              "horizon": "Prediction horizon (steps)",
-              "smoothing_weight": "Output smoothing",
-              "soft_constraint_weight": "Comfort band penalty",
-              "terminal_weight": "End-of-horizon weight"
-            },
-            "data_description": {
-              "horizon": "Number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",
-              "smoothing_weight": "Penalises rapid changes in heater output. Higher = smoother but less responsive.",
-              "soft_constraint_weight": "How hard the controller fights to stay inside your comfort band. Higher = stricter, may use more energy at the band edges.",
-              "terminal_weight": "Weight applied at the prediction horizon. Higher values discourage end-of-horizon drift."
-            }
-          }
+        "description": "Tune how the controller balances comfort, energy use and responsiveness. The top two are the everyday knobs; the rest are advanced and rarely need changing.",
+        "data": {
+          "tracking_weight": "Setpoint tracking strength",
+          "energy_weight": "Energy-use penalty",
+          "horizon": "Prediction horizon (steps)",
+          "smoothing_weight": "Output smoothing",
+          "soft_constraint_weight": "Comfort band penalty",
+          "terminal_weight": "End-of-horizon weight"
+        },
+        "data_description": {
+          "tracking_weight": "How strongly the controller chases the exact setpoint. 0 = stay inside the comfort band only. Higher values mean tighter tracking at the cost of more energy use.",
+          "energy_weight": "How strongly the controller avoids running heaters. Higher values save energy but may drift toward the edges of the comfort band.",
+          "horizon": "Advanced — number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",
+          "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
+          "soft_constraint_weight": "Advanced — how hard the controller fights to stay inside your comfort band. Higher = stricter, may use more energy at the band edges.",
+          "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift."
         }
       },
       "manage_rooms": {
@@ -200,7 +124,7 @@
       },
       "add_room": {
         "title": "Add a room",
-        "description": "Tell Heating Assistant about a new room. The advanced section is optional.",
+        "description": "Tell Heating Assistant about a new room. The fields lower down (floor type, facade colour, thermal bridges, sky coupling) are optional refinements — leave them at the defaults if unsure.",
         "data": {
           "name": "Room name",
           "temp_sensors": "Indoor temperature sensors",
@@ -208,7 +132,12 @@
           "room_size": "Room size",
           "building_age": "Building age (insulation level)",
           "envelope_tightness": "Envelope tightness",
-          "comfort_offset": "Comfort band (± °C)"
+          "comfort_offset": "Comfort band (± °C)",
+          "floor_type": "Floor type",
+          "facade_colour": "Facade colour",
+          "facade_solar_share": "Facade solar share",
+          "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
+          "sky_radiative_ua": "Sky radiative coupling (W/K)"
         },
         "data_description": {
           "name": "A unique identifier for this room (e.g. 'Living Room'). Used as the climate entity name.",
@@ -217,27 +146,12 @@
           "room_size": "Rough room volume. Determines the room's thermal mass; can be refined later from measured data.",
           "building_age": "Older buildings lose more heat. Determines the room's insulation level; refined automatically over time.",
           "envelope_tightness": "How draught-proof the envelope is. Affects how much heat is lost through wind-driven air infiltration.",
-          "comfort_offset": "Symmetric band around the setpoint that's still considered comfortable. ±2 °C is typical."
-        },
-        "sections": {
-          "advanced_envelope": {
-            "name": "Advanced — envelope & floor",
-            "description": "Fine-tune the thermal model. All optional; sensible defaults are used when left untouched.",
-            "data": {
-              "floor_type": "Floor type",
-              "facade_colour": "Facade colour",
-              "facade_solar_share": "Facade solar share",
-              "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
-              "sky_radiative_ua": "Sky radiative coupling (W/K)"
-            },
-            "data_description": {
-              "floor_type": "Underfloor heating and concrete slabs add a large slow thermal mass that the model can track separately.",
-              "facade_colour": "Affects how much solar gain the opaque walls absorb. Darker = more absorption.",
-              "facade_solar_share": "Fraction of window-derived solar gain attributed to the opaque facade (0 = ignored). Typical 0.2–0.6 when enabled.",
-              "thermal_bridge_psi_l": "Extra heat loss from window frames, balcony slabs, etc. Leave at 0 if unknown — the model can infer it from data.",
-              "sky_radiative_ua": "Long-wave radiation to the night sky (clear-night cooling). Leave at 0 if unknown."
-            }
-          }
+          "comfort_offset": "Symmetric band around the setpoint that's still considered comfortable. ±2 °C is typical.",
+          "floor_type": "Advanced — underfloor heating and concrete slabs add a large slow thermal mass that the model can track separately.",
+          "facade_colour": "Advanced — affects how much solar gain the opaque walls absorb. Darker = more absorption.",
+          "facade_solar_share": "Advanced — fraction of window-derived solar gain attributed to the opaque facade (0 = ignored). Typical 0.2–0.6 when enabled.",
+          "thermal_bridge_psi_l": "Advanced — extra heat loss from window frames, balcony slabs, etc. Leave at 0 if unknown — the model can infer it from data.",
+          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky (clear-night cooling). Leave at 0 if unknown."
         }
       },
       "edit_room": {
@@ -249,7 +163,7 @@
       },
       "room_detail": {
         "title": "Edit room: {name}",
-        "description": "Update sensors, sizing, and the comfort band for this room.",
+        "description": "Update sensors, sizing, and the comfort band for this room. Advanced envelope refinements are at the bottom.",
         "data": {
           "name": "Room name",
           "temp_sensors": "Indoor temperature sensors",
@@ -257,7 +171,12 @@
           "room_size": "Room size",
           "building_age": "Building age (insulation level)",
           "envelope_tightness": "Envelope tightness",
-          "comfort_offset": "Comfort band (± °C)"
+          "comfort_offset": "Comfort band (± °C)",
+          "floor_type": "Floor type",
+          "facade_colour": "Facade colour",
+          "facade_solar_share": "Facade solar share",
+          "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
+          "sky_radiative_ua": "Sky radiative coupling (W/K)"
         },
         "data_description": {
           "name": "A unique identifier for this room.",
@@ -266,27 +185,12 @@
           "room_size": "Rough room volume. Determines the room's thermal mass.",
           "building_age": "Older buildings lose more heat. Determines insulation level.",
           "envelope_tightness": "How draught-proof the envelope is.",
-          "comfort_offset": "Symmetric band around the setpoint that's still considered comfortable."
-        },
-        "sections": {
-          "advanced_envelope": {
-            "name": "Advanced — envelope & floor",
-            "description": "Fine-tune the thermal model. Leave at defaults if unsure.",
-            "data": {
-              "floor_type": "Floor type",
-              "facade_colour": "Facade colour",
-              "facade_solar_share": "Facade solar share",
-              "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
-              "sky_radiative_ua": "Sky radiative coupling (W/K)"
-            },
-            "data_description": {
-              "floor_type": "Underfloor heating and concrete slabs add a large slow thermal mass.",
-              "facade_colour": "Affects opaque-wall solar absorption.",
-              "facade_solar_share": "Fraction of window-derived solar gain attributed to the opaque facade.",
-              "thermal_bridge_psi_l": "Extra heat loss from window frames, balcony slabs, etc.",
-              "sky_radiative_ua": "Long-wave radiation to the night sky."
-            }
-          }
+          "comfort_offset": "Symmetric band around the setpoint that's still considered comfortable.",
+          "floor_type": "Advanced — underfloor heating and concrete slabs add a large slow thermal mass.",
+          "facade_colour": "Advanced — affects opaque-wall solar absorption.",
+          "facade_solar_share": "Advanced — fraction of window-derived solar gain attributed to the opaque facade.",
+          "thermal_bridge_psi_l": "Advanced — extra heat loss from window frames, balcony slabs, etc.",
+          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky."
         }
       },
       "manage_room_windows": {
@@ -357,37 +261,27 @@
           "name": "Display name",
           "type": "Type",
           "max_power": "Maximum thermal power (W)",
-          "heater_entity": "Control switch"
+          "heater_entity": "Control switch",
+          "efficiency": "Efficiency (electric heater)",
+          "cop_rated": "Rated COP (heat pump)",
+          "cop_temp_ref": "COP reference outdoor temp (°C)",
+          "min_power": "Minimum power (W)",
+          "max_temp_offset": "Max supply temp offset (°C)",
+          "hvac_mode": "Operating mode",
+          "emitter_time_constant": "Emitter response time (s)"
         },
         "data_description": {
           "name": "Friendly name shown in the dashboard.",
           "type": "Electric heaters convert electricity 1:1 to heat. Heat pumps lift heat from outdoors at higher efficiency (COP > 1).",
           "max_power": "Rated thermal output in watts when fully on. For heat pumps this is the heat delivered, not the electrical input.",
-          "heater_entity": "The Home Assistant switch that turns this heater on and off."
-        },
-        "sections": {
-          "performance": {
-            "name": "Performance details",
-            "description": "Better values here improve energy estimates and the controller's planning.",
-            "data": {
-              "efficiency": "Efficiency (electric heater)",
-              "cop_rated": "Rated COP (heat pump)",
-              "cop_temp_ref": "COP reference outdoor temp (°C)",
-              "min_power": "Minimum power (W)",
-              "max_temp_offset": "Max supply temp offset (°C)",
-              "hvac_mode": "Operating mode",
-              "emitter_time_constant": "Emitter response time (s)"
-            },
-            "data_description": {
-              "efficiency": "Fraction of electrical input delivered as heat (0–1). Normally 1.0 for electric heaters.",
-              "cop_rated": "Coefficient of performance at the reference outdoor temperature. Typical air-source heat pumps: 2.5–4.5.",
-              "cop_temp_ref": "Outdoor temperature at which the rated COP applies. Manufacturer datasheets typically use 7 °C.",
-              "min_power": "Lowest stable thermal output. 0 = no minimum. Helps the controller avoid short-cycling.",
-              "max_temp_offset": "Largest temperature lift this heat pump will attempt at full power (°C above outdoor).",
-              "hvac_mode": "Whether this unit can heat, cool, or do both.",
-              "emitter_time_constant": "Lag between the controller's command and heat actually reaching the room. Radiators ≈ 600 s; fan coils ≈ 60 s; resistive heaters ≈ 0 s."
-            }
-          }
+          "heater_entity": "The Home Assistant switch that turns this heater on and off.",
+          "efficiency": "Fraction of electrical input delivered as heat (0–1). Normally 1.0 for electric heaters.",
+          "cop_rated": "Coefficient of performance at the reference outdoor temperature. Typical air-source heat pumps: 2.5–4.5.",
+          "cop_temp_ref": "Outdoor temperature at which the rated COP applies. Manufacturer datasheets typically use 7 °C.",
+          "min_power": "Lowest stable thermal output. 0 = no minimum. Helps the controller avoid short-cycling.",
+          "max_temp_offset": "Largest temperature lift this heat pump will attempt at full power (°C above outdoor).",
+          "hvac_mode": "Whether this unit can heat, cool, or do both.",
+          "emitter_time_constant": "Lag between the controller's command and heat actually reaching the room. Radiators ≈ 600 s; fan coils ≈ 60 s; resistive heaters ≈ 0 s."
         }
       },
       "edit_heater": {
@@ -404,37 +298,27 @@
           "name": "Display name",
           "type": "Type",
           "max_power": "Maximum thermal power (W)",
-          "heater_entity": "Control switch"
+          "heater_entity": "Control switch",
+          "efficiency": "Efficiency (electric heater)",
+          "cop_rated": "Rated COP (heat pump)",
+          "cop_temp_ref": "COP reference outdoor temp (°C)",
+          "min_power": "Minimum power (W)",
+          "max_temp_offset": "Max supply temp offset (°C)",
+          "hvac_mode": "Operating mode",
+          "emitter_time_constant": "Emitter response time (s)"
         },
         "data_description": {
           "name": "Friendly name shown in the dashboard.",
           "type": "Electric heaters convert electricity 1:1. Heat pumps lift heat at higher efficiency.",
           "max_power": "Rated thermal output in watts when fully on.",
-          "heater_entity": "The Home Assistant switch that turns this heater on and off."
-        },
-        "sections": {
-          "performance": {
-            "name": "Performance details",
-            "description": "Better values here improve energy estimates and the controller's planning.",
-            "data": {
-              "efficiency": "Efficiency (electric heater)",
-              "cop_rated": "Rated COP (heat pump)",
-              "cop_temp_ref": "COP reference outdoor temp (°C)",
-              "min_power": "Minimum power (W)",
-              "max_temp_offset": "Max supply temp offset (°C)",
-              "hvac_mode": "Operating mode",
-              "emitter_time_constant": "Emitter response time (s)"
-            },
-            "data_description": {
-              "efficiency": "Fraction of electrical input delivered as heat (0–1).",
-              "cop_rated": "Coefficient of performance at the reference outdoor temperature.",
-              "cop_temp_ref": "Outdoor temperature at which the rated COP applies.",
-              "min_power": "Lowest stable thermal output. 0 = no minimum.",
-              "max_temp_offset": "Largest temperature lift this heat pump will attempt.",
-              "hvac_mode": "Whether this unit can heat, cool, or do both.",
-              "emitter_time_constant": "Lag between command and delivered heat."
-            }
-          }
+          "heater_entity": "The Home Assistant switch that turns this heater on and off.",
+          "efficiency": "Fraction of electrical input delivered as heat (0–1).",
+          "cop_rated": "Coefficient of performance at the reference outdoor temperature.",
+          "cop_temp_ref": "Outdoor temperature at which the rated COP applies.",
+          "min_power": "Lowest stable thermal output. 0 = no minimum.",
+          "max_temp_offset": "Largest temperature lift this heat pump will attempt.",
+          "hvac_mode": "Whether this unit can heat, cool, or do both.",
+          "emitter_time_constant": "Lag between command and delivered heat."
         }
       },
       "remove_heater": {
@@ -463,7 +347,7 @@
       },
       "add_period": {
         "title": "Add a schedule period to {name}",
-        "description": "Create a time-of-day setpoint override (e.g. warm in the evening, cool overnight).",
+        "description": "Create a time-of-day setpoint override (e.g. warm in the evening, cool overnight). The bottom three fields are optional per-period tweaks.",
         "data": {
           "name": "Label",
           "mode": "Mode",
@@ -471,7 +355,10 @@
           "end": "End time",
           "days": "Days of the week",
           "setpoint": "Setpoint override (°C)",
-          "comfort_offset": "Comfort band override (± °C)"
+          "comfort_offset": "Comfort band override (± °C)",
+          "tracking_weight": "Tracking strength multiplier",
+          "energy_weight": "Energy-use penalty multiplier",
+          "frost_protection": "Frost protection (°C)"
         },
         "data_description": {
           "name": "A short label for this period (e.g. 'morning', 'night').",
@@ -480,23 +367,10 @@
           "end": "Local time when this period ends. May cross midnight.",
           "days": "Leave empty to apply every day.",
           "setpoint": "Target temperature during this period. Leave at the room default if you don't want an override.",
-          "comfort_offset": "Comfort band width during this period. Leave at the room default if you don't want an override."
-        },
-        "sections": {
-          "advanced_period": {
-            "name": "Advanced — per-period tuning",
-            "description": "Per-period overrides for the controller's tracking and energy weights.",
-            "data": {
-              "tracking_weight": "Tracking strength multiplier",
-              "energy_weight": "Energy-use penalty multiplier",
-              "frost_protection": "Frost protection (°C)"
-            },
-            "data_description": {
-              "tracking_weight": "Multiplier on the global tracking strength during this period. 1.0 = no change.",
-              "energy_weight": "Multiplier on the global energy penalty during this period. 1.0 = no change.",
-              "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
-            }
-          }
+          "comfort_offset": "Comfort band width during this period. Leave at the room default if you don't want an override.",
+          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period. 1.0 = no change.",
+          "energy_weight": "Advanced — multiplier on the global energy penalty during this period. 1.0 = no change.",
+          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
         }
       },
       "select_edit_period": {
@@ -516,7 +390,10 @@
           "end": "End time",
           "days": "Days of the week",
           "setpoint": "Setpoint override (°C)",
-          "comfort_offset": "Comfort band override (± °C)"
+          "comfort_offset": "Comfort band override (± °C)",
+          "tracking_weight": "Tracking strength multiplier",
+          "energy_weight": "Energy-use penalty multiplier",
+          "frost_protection": "Frost protection (°C)"
         },
         "data_description": {
           "name": "A short label for this period.",
@@ -525,23 +402,10 @@
           "end": "Local time when this period ends. May cross midnight.",
           "days": "Leave empty to apply every day.",
           "setpoint": "Target temperature during this period.",
-          "comfort_offset": "Comfort band width during this period."
-        },
-        "sections": {
-          "advanced_period": {
-            "name": "Advanced — per-period tuning",
-            "description": "Per-period overrides for the controller's weights.",
-            "data": {
-              "tracking_weight": "Tracking strength multiplier",
-              "energy_weight": "Energy-use penalty multiplier",
-              "frost_protection": "Frost protection (°C)"
-            },
-            "data_description": {
-              "tracking_weight": "Multiplier on the global tracking strength during this period.",
-              "energy_weight": "Multiplier on the global energy penalty during this period.",
-              "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
-            }
-          }
+          "comfort_offset": "Comfort band width during this period.",
+          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period.",
+          "energy_weight": "Advanced — multiplier on the global energy penalty during this period.",
+          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
         }
       },
       "remove_period": {
