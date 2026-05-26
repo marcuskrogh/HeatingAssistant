@@ -859,85 +859,57 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         """Form for site / timing / sensor settings.
 
-        Note: kept as a flat schema (no ``section()`` wrappers). Mixing
-        top-level fields with sections has surfaced as fragile across the
-        Home Assistant versions we target, so we keep this critical page
-        on a plain schema and rely on field ordering + descriptions for
-        the visual structure.
+        Uses plain voluptuous validators (``vol.All(vol.Coerce, vol.Range)``)
+        for the numeric fields rather than ``NumberSelector``. This mirrors
+        the original pre-modernisation schema that was known to render
+        cleanly across the Home Assistant versions we target; the
+        ``NumberSelector`` variant failed to render this specific page
+        (likely because of the very small ``min=1e-8`` / ``step=0.0001``
+        used for ``sigma_b``). The friendly labels and helper text from
+        ``strings.json`` are unaffected by this change.
         """
         if user_input is not None:
             # Tolerate either a flat input dict (current path) or one with
-            # the legacy section keys (in case a partially-cached old form
-            # is submitted from an upgraded install).
+            # legacy section keys (in case an in-flight form is submitted
+            # from a partially-cached old version).
             flat = _flatten_sections(user_input, _GLOBAL_SECTION_KEYS)
             self._data.update(flat)
             return await self.async_step_init()
 
         current = self._data
 
-        # For single-entity optional selectors we use description.suggested_value
-        # to pre-fill the picker without setting an empty string as the default
-        # (EntitySelector rejects "" as an invalid entity ID).
+        # Pre-fill optional single-entity pickers via description.suggested_value
+        # (EntitySelector rejects "" as an invalid default).
         outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
         weather = current.get(CONF_WEATHER_ENTITY) or None
 
-        schema_dict: Dict[Any, Any] = {}
-
-        if outdoor_temp:
-            schema_dict[
-                vol.Optional(
-                    CONF_OUTDOOR_TEMP_ENTITY,
-                    description={"suggested_value": outdoor_temp},
-                )
-            ] = _entity_selector_optional("sensor")
-        else:
-            schema_dict[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional(
-                "sensor"
-            )
-
-        if weather:
-            schema_dict[
-                vol.Optional(
-                    CONF_WEATHER_ENTITY,
-                    description={"suggested_value": weather},
-                )
-            ] = _entity_selector_optional("weather")
-        else:
-            schema_dict[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional(
-                "weather"
-            )
-
-        schema_dict[
+        schema_dict: Dict[Any, Any] = {
+            vol.Optional(
+                CONF_OUTDOOR_TEMP_ENTITY,
+                description={"suggested_value": outdoor_temp},
+            ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+            vol.Optional(
+                CONF_WEATHER_ENTITY,
+                description={"suggested_value": weather},
+            ): EntitySelector(EntitySelectorConfig(domain="weather")),
             vol.Optional(
                 CONF_UPDATE_INTERVAL,
                 default=int(
                     current.get(CONF_UPDATE_INTERVAL) or DEFAULT_UPDATE_INTERVAL
                 ),
-            )
-        ] = _number_box(min_value=60, max_value=3600, step=30, unit="s")
-
-        # Advanced — model adaptation
-        schema_dict[
+            ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
             vol.Optional(
                 CONF_SIGMA_W,
                 default=float(current.get(CONF_SIGMA_W) or DEFAULT_SIGMA_W),
-            )
-        ] = _number_box(min_value=1e-6, max_value=10.0, step=0.01)
-        schema_dict[
+            ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
             vol.Optional(
                 CONF_SIGMA_V,
                 default=float(current.get(CONF_SIGMA_V) or DEFAULT_SIGMA_V),
-            )
-        ] = _number_box(min_value=1e-6, max_value=10.0, step=0.01)
-        schema_dict[
+            ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
             vol.Optional(
                 CONF_SIGMA_B,
                 default=float(current.get(CONF_SIGMA_B) or DEFAULT_SIGMA_B),
-            )
-        ] = _number_box(min_value=1e-8, max_value=1.0, step=0.0001)
-
-        # Advanced — window-open detection
-        schema_dict[
+            ): vol.All(vol.Coerce(float), vol.Range(min=1e-8, max=1.0)),
             vol.Optional(
                 CONF_WINDOW_OPEN_DEBOUNCE,
                 default=int(
@@ -945,9 +917,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     if current.get(CONF_WINDOW_OPEN_DEBOUNCE) is not None
                     else DEFAULT_WINDOW_OPEN_DEBOUNCE
                 ),
-            )
-        ] = _number_box(min_value=0, max_value=3600, step=5, unit="s")
-        schema_dict[
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
             vol.Optional(
                 CONF_WINDOW_OPEN_CLOSE_SETTLE,
                 default=int(
@@ -955,17 +925,15 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     if current.get(CONF_WINDOW_OPEN_CLOSE_SETTLE) is not None
                     else DEFAULT_WINDOW_OPEN_CLOSE_SETTLE
                 ),
-            )
-        ] = _number_box(min_value=0, max_value=3600, step=5, unit="s")
-        schema_dict[
+            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
             vol.Optional(
                 CONF_WINDOW_OPEN_Q_INFLATION,
                 default=float(
                     current.get(CONF_WINDOW_OPEN_Q_INFLATION)
                     or DEFAULT_WINDOW_OPEN_Q_INFLATION
                 ),
-            )
-        ] = _number_box(min_value=1.0, max_value=1000.0, step=1.0)
+            ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=1000.0)),
+        }
 
         return self.async_show_form(
             step_id="global_settings", data_schema=vol.Schema(schema_dict),
