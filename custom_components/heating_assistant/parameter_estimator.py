@@ -63,7 +63,9 @@ _LOGGER = logging.getLogger(__name__)
 # ── Constants ────────────────────────────────────────────────────────────────
 
 #: Minimum number of history steps before attempting estimation.
-MIN_HISTORY_STEPS = 30
+#: 60 steps ≈ 1 hour at the default 60 s sampling interval — the
+#: minimum needed to see meaningful thermal dynamics.
+MIN_HISTORY_STEPS = 60
 
 #: Log-space parameter bounds (hard limits).
 _LOG_MASS_LO = math.log(1e4)    # ~10 kJ/K
@@ -565,12 +567,8 @@ class KalmanMLEstimator:
             + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
         )
 
-        # ── Convert history to CD-EKF format (use "ym" key) ────────────────
+        # ── Convert history (carries timestamps for gap detection) ────────
         std_history = self._convert_history_std(history, use_ym=True)
-
-        # ── Build model factory for CDParameterEstimator ───────────────────
-        def _model_factory(theta: np.ndarray):
-            return self._build_parametric_system(layout, theta)
 
         # ── Build regularisation function ──────────────────────────────────
         def _regularization_fn(theta: np.ndarray) -> float:
@@ -589,60 +587,31 @@ class KalmanMLEstimator:
             pert[a:b] *= 200.0   # std ≈ 100 W in linear space
             return theta0 + pert
 
-        # ── Initial state estimate for CD-EKF (supports augmented states) ──
-        system0 = _model_factory(theta_prior)
-        if system0 is None:
-            return {
-                "success": False,
-                "estimated_params": {
-                    name: {"thermal_mass": p["thermal_mass"], "r_external": p["r_external"]}
-                    for name, p in current.items()
-                },
-                "current_params": {
-                    name: {"thermal_mass": p["thermal_mass"], "r_external": p["r_external"]}
-                    for name, p in current.items()
-                },
-                "estimated_internal_gains": {
-                    name: p["internal_gain"] for name, p in current.items()
-                },
-                "estimated_heater_scales": {
-                    s.name: float(getattr(s, "power_scale", 1.0))
-                    for s in self._sources
-                },
-                "estimated_inter_room_r": {},
-                "identifiable_connections": [],
-                "identifiable_sources": [],
-                "stage2_converged": False,
-                "n_steps": n_steps,
-                "log_likelihood": None,
-                "message": "Failed to initialize parametric model for estimation.",
-            }
-        x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
-
         # ── IPOPT multi-start optimisation with analytical gradients ──────────
-        # Route through mbc's IpoptNLPBackend — the same backend the MPC
-        # controller uses for OCP solves — so identification and control
-        # share a single IPOPT integration point.
+        # Objective: multi-step open-loop simulation MSE (see
+        # _simulation_mse_and_grad).  The EKF PED likelihood is retained
+        # for diagnostics (compute_log_likelihood / compute_loglik_slice)
+        # but is no longer used here because it diverges on unevenly-spaced
+        # data from controller restarts.
         lb = np.array([lo for lo, _ in bounds])
         ub = np.array([hi for _, hi in bounds])
 
-        # Cache the last (theta, neg_ll, grad) triple so the optimiser's
-        # separate calls to fun/jac at the same point do not trigger a
-        # second forward-sensitivity pass.
+        # Cache the last (theta, obj, grad) triple so separate fun/jac calls
+        # at the same point do not trigger a second forward-sensitivity pass.
         _cache: List[Optional[object]] = [None, None, None]  # [theta, val, grad]
 
         def _eval(theta: np.ndarray) -> None:
             if _cache[0] is None or not np.array_equal(theta, _cache[0]):
-                neg_ll_lik, g_lik = self._cd_ped_neg_ll_and_grad(
-                    theta, layout, std_history, x0, P0
+                mse, g_mse = self._simulation_mse_and_grad(
+                    theta, layout, std_history, nominal_dt=self._dt,
                 )
                 reg = _regularization_fn(theta)
                 reg_grad = self._compute_regularization_gradient(
                     theta, layout, identifiable_pairs
                 )
                 _cache[0] = theta.copy()
-                _cache[1] = neg_ll_lik + reg
-                _cache[2] = g_lik + reg_grad
+                _cache[1] = mse + reg
+                _cache[2] = g_mse + reg_grad
 
         def _fun(theta: np.ndarray) -> float:
             _eval(theta)
@@ -656,8 +625,12 @@ class KalmanMLEstimator:
             options={"print_level": 0, "max_iter": 300, "tol": 1e-6}
         )
         scipy_backend = ScipyNLPBackend(
-            method="SLSQP",
-            options={"maxiter": 300, "ftol": 1e-6},
+            # L-BFGS-B builds a quasi-Newton Hessian approximation that
+            # handles the large scale differences between parameters (e.g.
+            # log_mass gradient is O(1) while q_int gradient is O(1e-4)),
+            # giving much better convergence than pure-gradient SLSQP.
+            method="L-BFGS-B",
+            options={"maxiter": 500, "ftol": 1e-12, "gtol": 1e-6},
         )
         _active_backend = ipopt_backend
 
@@ -694,7 +667,7 @@ class KalmanMLEstimator:
                 if _active_backend is ipopt_backend:
                     _LOGGER.warning(
                         "IPOPT backend unavailable for parameter estimation (%s); "
-                        "falling back to SLSQP.",
+                        "falling back to L-BFGS-B.",
                         exc,
                     )
                     _active_backend = scipy_backend
@@ -748,7 +721,9 @@ class KalmanMLEstimator:
             estimated_r_ij[key] = round(float(math.exp(log_r_ij[k])), 6)
             identifiable_names.append(key)
 
-        # Compute reportable log-likelihood (without regularisation)
+        # Report negative normalised MSE (higher → better fit).
+        # Stored in the same "log_likelihood" field for dashboard compatibility;
+        # the value is -MSE/room/step (not a true log-likelihood).
         try:
             if not np.isfinite(best_f):
                 log_ll_val: Optional[float] = None
@@ -757,7 +732,7 @@ class KalmanMLEstimator:
                     log_mass, log_r, q_int, log_alpha, log_r_ij,
                     identifiable_pairs, identifiable_sources,
                 )
-                log_ll_val = round(float(-(best_f - reg)), 3)
+                log_ll_val = round(float(-(best_f - reg)), 6)
         except Exception:
             log_ll_val = None
 
@@ -809,6 +784,215 @@ class KalmanMLEstimator:
         }
 
     # ── Internal helpers ──────────────────────────────────────────────────
+
+    def _simulation_mse_and_grad(
+        self,
+        theta: np.ndarray,
+        layout: "_ThetaLayout",
+        std_history: List[Dict[str, Any]],
+        nominal_dt: float,
+        max_gap_factor: float = 1.5,
+        min_segment_steps: int = 20,
+        max_window_steps: int = 60,
+    ) -> Tuple[float, np.ndarray]:
+        """
+        Multi-step open-loop simulation MSE and its gradient w.r.t. ``theta``.
+
+        The history is split into contiguous segments wherever the timestamp
+        gap between consecutive records exceeds ``max_gap_factor * nominal_dt``
+        (controller restarts, HA pauses).  Each segment is further divided
+        into windows of at most ``max_window_steps`` steps; each window is
+        simulated forward from its own first measured temperature.  Short
+        windows keep the simulation horizon well-conditioned and prevent
+        the gradient for slowly-varying parameters (q_int) from being
+        swamped by the accumulated error of very long open-loop runs.
+
+        Gradient is computed via a forward-sensitivity pass propagating
+        ``sx = ∂x/∂θ`` alongside the state.  This is strictly simpler than
+        the EKF sensitivity pass because there is no Kalman update step —
+        the sensitivity resets to zero at every segment boundary rather than
+        accumulating across the full dataset.
+
+        Returns
+        -------
+        mse : float
+            Sum of squared errors normalised per room per step.  Returns
+            ``1e10`` (sentinel) on any numerical failure so the optimiser
+            treats the point as infeasible.
+        grad : (ntheta,) ndarray
+            Gradient of ``mse`` w.r.t. ``theta`` (zero on failure).
+        """
+        _SENTINEL = 1e10
+        ntheta = len(theta)
+        _zero_grad = np.zeros(ntheta)
+
+        if not np.all(np.isfinite(theta)):
+            return _SENTINEL, _zero_grad.copy()
+
+        model = self._build_parametric_system(layout, theta)
+        if model is None:
+            return _SENTINEL, _zero_grad.copy()
+
+        n = self._n
+        nx = int(model.nx)
+        n_sub = 10
+
+        _skip_analytic_grad = (model._F.shape[0] > n)
+
+        log_mass, log_r, _q_int, log_alpha, log_r_ij_vec = layout.unpack(theta)
+        C_cap = np.exp(log_mass)
+        g_ext = np.exp(-log_r)
+
+        heater_scales = np.ones(self._n_u)
+        for k_la, s_idx in enumerate(layout.identifiable_sources):
+            heater_scales[s_idx] = float(np.exp(log_alpha[k_la]))
+
+        g_ij_vec = np.exp(-log_r_ij_vec) if len(log_r_ij_vec) else np.array([])
+
+        F_n = model._F
+        G_d_mat = model._G_d
+        n_alpha = len(layout.identifiable_sources)
+
+        _p0 = model.params
+
+        # Precompute dFdtheta (constant — independent of state/input)
+        dFdtheta = np.zeros((ntheta, nx, nx))
+        if not _skip_analytic_grad:
+            for j in range(n):
+                dFdtheta[j, j, :n] = -F_n[j, :]
+            for j in range(n):
+                dFdtheta[n + j, j, j] = g_ext[j] / C_cap[j]
+            for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+                g_ij = float(g_ij_vec[k_rij])
+                t_idx = 3 * n + n_alpha + k_rij
+                dFdtheta[t_idx, pi, pi] = g_ij / C_cap[pi]
+                dFdtheta[t_idx, pj, pj] = g_ij / C_cap[pj]
+                dFdtheta[t_idx, pi, pj] = -g_ij / C_cap[pi]
+                dFdtheta[t_idx, pj, pi] = -g_ij / C_cap[pj]
+
+        # ── Segment history at timestamp gaps ────────────────────────────
+        N = len(std_history)
+        seg_starts: List[int] = [0]
+        for idx in range(N - 1):
+            t_a = std_history[idx].get("t")
+            t_b = std_history[idx + 1].get("t")
+            if t_a is not None and t_b is not None:
+                if (float(t_b) - float(t_a)) > max_gap_factor * nominal_dt:
+                    seg_starts.append(idx + 1)
+        seg_starts.append(N)
+
+        total_sse = 0.0
+        total_grad = np.zeros(ntheta)
+        n_steps_used = 0
+
+        for seg_i in range(len(seg_starts) - 1):
+            seg_begin = seg_starts[seg_i]
+            seg_end = seg_starts[seg_i + 1]
+            if (seg_end - seg_begin) < min_segment_steps:
+                continue
+
+            seg = std_history[seg_begin:seg_end]
+
+            # Split the contiguous segment into windows of at most
+            # max_window_steps.  Each window is simulated independently
+            # from its own first measurement so that the open-loop horizon
+            # never grows so long that the gradient for slow parameters
+            # (q_int, large C) is swamped by accumulated simulation error.
+            for win_start in range(0, len(seg), max_window_steps):
+                win_end = min(win_start + max_window_steps, len(seg))
+                if (win_end - win_start) < min_segment_steps:
+                    continue
+                win = seg[win_start:win_end]
+
+                # Initialise from first measurement of this window
+                ym0 = np.asarray(win[0]["ym"], dtype=float)
+                x = np.zeros(nx, dtype=float)
+                x[:min(n, len(ym0))] = ym0[:min(n, len(ym0))]
+                sx = np.zeros((ntheta, nx))  # ∂x/∂θ — reset per window
+
+                for step in range(len(win) - 1):
+                    rec_k = win[step]
+                    rec_next = win[step + 1]
+
+                    try:
+                        u_k = np.asarray(rec_k["u"], dtype=float)
+                        d_k = np.asarray(rec_k["d"], dtype=float)
+                        ym_next = np.asarray(rec_next["ym"], dtype=float)
+                    except (KeyError, TypeError, ValueError):
+                        break
+
+                    t_k = rec_k.get("t")
+                    t_next = rec_next.get("t")
+                    if t_k is not None and t_next is not None:
+                        actual_dt = float(t_next) - float(t_k)
+                        if actual_dt <= 0.0:
+                            actual_dt = nominal_dt
+                    else:
+                        actual_dt = nominal_dt
+                    h_sub = actual_dt / n_sub
+                    T_out_k = float(d_k[0])
+
+                    valid = True
+                    for _ in range(n_sub):
+                        T = x[:n]
+                        try:
+                            f_val = model.f(x, u_k, d_k, _p0, 0.0)
+                            F_full = model.dfdx(x, u_k, d_k, _p0, 0.0)
+                        except Exception:
+                            valid = False
+                            break
+
+                        dfdtheta_val = np.zeros((ntheta, nx))
+                        if not _skip_analytic_grad:
+                            for j in range(n):
+                                dfdtheta_val[j, j] = -f_val[j]
+                            for j in range(n):
+                                dfdtheta_val[n + j, j] = (
+                                    (g_ext[j] / C_cap[j]) * (T[j] - T_out_k)
+                                )
+                            for j in range(n):
+                                dfdtheta_val[2 * n + j, j] = G_d_mat[j, 1 + j]
+                            for k_la, s_idx in enumerate(layout.identifiable_sources):
+                                src = self._sources[s_idx]
+                                i_src = model._room_idx[src.room]
+                                u_s = float(u_k[s_idx]) if s_idx < len(u_k) else 0.0
+                                u_scaled_s = heater_scales[s_idx] * u_s
+                                heat_c = (
+                                    src.thermal_power(max(0.0, u_scaled_s), T_out_k)
+                                    / C_cap[i_src]
+                                )
+                                dfdtheta_val[3 * n + k_la, i_src] = heat_c
+                            for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+                                g_ij = float(g_ij_vec[k_rij])
+                                t_idx = 3 * n + n_alpha + k_rij
+                                dfdtheta_val[t_idx, pi] = (
+                                    (g_ij / C_cap[pi]) * (T[pi] - T[pj])
+                                )
+                                dfdtheta_val[t_idx, pj] = (
+                                    (g_ij / C_cap[pj]) * (T[pj] - T[pi])
+                                )
+
+                        # Euler step for state and sensitivity
+                        sx = sx + h_sub * (sx @ F_full.T + dfdtheta_val)
+                        x = x + h_sub * f_val
+
+                    if not valid or not np.all(np.isfinite(x)):
+                        break
+
+                    residual = ym_next - x[:n]  # shape (n,)
+                    total_sse += float(np.dot(residual, residual))
+                    # ∂||residual||²/∂θ_i = -2 * sx[i, :n] · residual
+                    if not _skip_analytic_grad:
+                        total_grad -= 2.0 * (sx[:, :n] @ residual)
+                    n_steps_used += 1
+
+        if n_steps_used == 0:
+            return _SENTINEL, _zero_grad.copy()
+
+        # Normalise per room per step so the objective is O(variance) and
+        # scale-invariant w.r.t. dataset length and number of rooms.
+        scale = float(n * n_steps_used)
+        return total_sse / scale, total_grad / scale
 
     def _cd_ped_neg_ll_and_grad(
         self,
@@ -1327,7 +1511,7 @@ class KalmanMLEstimator:
         n = self._n
         n_u = self._n_u
         room_idx = {name: i for i, name in enumerate(self._room_names)}
-        std: List[Dict[str, np.ndarray]] = []
+        std: List[Dict[str, Any]] = []
         meas_key = "ym" if use_ym else "y"
         for record in history:
             y = np.array(record["y"][:n], dtype=float)
@@ -1340,7 +1524,15 @@ class KalmanMLEstimator:
             for name, gain in record.get("d_solar", {}).items():
                 if name in room_idx:
                     d[1 + room_idx[name]] = float(gain)
-            std.append({meas_key: y, "u": u, "d": d})
+            # Carry the Unix timestamp so _simulation_mse_and_grad can detect
+            # gaps from controller restarts and treat them as segment boundaries.
+            t_val = record.get("timestamp")
+            std.append({
+                meas_key: y,
+                "u": u,
+                "d": d,
+                "t": float(t_val) if t_val is not None else None,
+            })
         return std
 
     def _compute_regularization(

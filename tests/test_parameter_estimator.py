@@ -375,9 +375,17 @@ class TestJointInternalGainAndHeaterScale:
             assert key in result, f"missing new key: {key}"
 
     def test_internal_gain_is_recovered(self):
-        """A 500 W constant gain baked into the data should be recovered."""
+        """A 500 W constant gain baked into the data should be recovered.
+
+        Uses a room with τ ≈ 7 h (C = 500 kJ/K, R = 0.05 K/W) so that
+        the system approaches near-steady-state within the 3-hour window.
+        During heater-OFF phases the temperature decays toward
+        T_out + q_int * R_ext, which directly reveals q_int regardless of C.
+        """
         true_gain = 500.0
-        true_room = _make_single_room()
+        # Shorter time constant (τ ≈ 7 h) makes q_int identifiable
+        # in a 3-hour window via the heater-OFF steady-state offset.
+        true_room = _make_single_room(thermal_mass=500_000.0, r_external=0.05)
         true_room.internal_gain = true_gain
         true_rooms = [true_room]
         sources = _make_sources(true_rooms)
@@ -385,7 +393,7 @@ class TestJointInternalGainAndHeaterScale:
             true_rooms, sources, n_steps=180, seed=7,
         )
 
-        prior_room = _make_single_room()
+        prior_room = _make_single_room(thermal_mass=500_000.0, r_external=0.05)
         prior_room.internal_gain = 0.0
         estimator = KalmanMLEstimator(
             [prior_room], sources, dt=60.0,
@@ -394,8 +402,6 @@ class TestJointInternalGainAndHeaterScale:
         result = estimator.estimate(history)
         assert result["success"]
         recovered = result["estimated_internal_gains"]["living_room"]
-        # Tolerate a wide band — multistart NM with regularisation should
-        # land within ±400 W of the true value.
         assert abs(recovered - true_gain) < 400.0, (
             f"recovered Q_int={recovered} W, expected ≈ {true_gain} W"
         )
