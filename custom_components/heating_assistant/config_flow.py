@@ -401,57 +401,47 @@ def _site_settings_schema(
     weather_default: Optional[str],
     update_interval_default: int,
 ) -> vol.Schema:
-    """Build the sectioned schema used by the initial setup and reconfigure flows."""
+    """Flat schema used by the initial setup and reconfigure flows.
 
-    location_schema = vol.Schema(
-        {
-            vol.Required(CONF_LATITUDE, default=latitude_default): _number_box(
-                min_value=-90.0, max_value=90.0, step=0.000001, unit="°",
-            ),
-            vol.Required(CONF_LONGITUDE, default=longitude_default): _number_box(
-                min_value=-180.0, max_value=180.0, step=0.000001, unit="°",
-            ),
-        }
-    )
+    The visual grouping comes from field ordering and ``data_description``
+    helper text rather than ``section()`` wrappers — the latter has
+    proved fragile when mixed with top-level fields on some Home
+    Assistant versions.
+    """
+    schema_dict: Dict[Any, Any] = {
+        vol.Required(CONF_LATITUDE, default=float(latitude_default)): _number_box(
+            min_value=-90.0, max_value=90.0, step=0.000001, unit="°",
+        ),
+        vol.Required(CONF_LONGITUDE, default=float(longitude_default)): _number_box(
+            min_value=-180.0, max_value=180.0, step=0.000001, unit="°",
+        ),
+    }
 
-    sensors_inner: Dict[Any, Any] = {}
     if outdoor_temp_default:
-        sensors_inner[
+        schema_dict[
             vol.Optional(
                 CONF_OUTDOOR_TEMP_ENTITY,
                 description={"suggested_value": outdoor_temp_default},
             )
         ] = _entity_selector_optional("sensor")
     else:
-        sensors_inner[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional("sensor")
+        schema_dict[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional("sensor")
 
     if weather_default:
-        sensors_inner[
+        schema_dict[
             vol.Optional(
                 CONF_WEATHER_ENTITY,
                 description={"suggested_value": weather_default},
             )
         ] = _entity_selector_optional("weather")
     else:
-        sensors_inner[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional("weather")
+        schema_dict[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional("weather")
 
-    sensors_schema = vol.Schema(sensors_inner)
+    schema_dict[
+        vol.Required(CONF_UPDATE_INTERVAL, default=int(update_interval_default))
+    ] = _number_box(min_value=60, max_value=3600, step=30, unit="s")
 
-    timing_schema = vol.Schema(
-        {
-            vol.Required(
-                CONF_UPDATE_INTERVAL, default=int(update_interval_default),
-            ): _number_box(min_value=60, max_value=3600, step=30, unit="s"),
-        }
-    )
-
-    return vol.Schema(
-        {
-            vol.Required(SECTION_LOCATION): _section(location_schema, collapsed=False),
-            vol.Required(SECTION_SENSORS): _section(sensors_schema, collapsed=False),
-            vol.Required(SECTION_TIMING): _section(timing_schema, collapsed=False),
-        }
-    )
+    return vol.Schema(schema_dict)
 
 
 def _site_settings_errors(flat: Dict[str, Any]) -> Dict[str, str]:
@@ -599,29 +589,14 @@ def _room_form_schema(
     thermal_bridge_psi_l_default: float = DEFAULT_THERMAL_BRIDGE_PSI_L,
     sky_radiative_ua_default: float = DEFAULT_SKY_RADIATIVE_UA,
 ) -> vol.Schema:
-    """Schema shared by the add-room and edit-room forms."""
+    """Flat schema shared by the add-room and edit-room forms.
+
+    Advanced envelope refinements (floor type, facade colour, etc.) live
+    after the basics and have helper text rather than being hidden behind
+    a collapsed section — kept flat for cross-version robustness.
+    """
     sensors_list = _coerce_to_list(sensors_default)
     window_sensors_list = _coerce_to_list(window_sensors_default)
-
-    advanced_schema = vol.Schema(
-        {
-            vol.Optional(CONF_FLOOR_TYPE, default=floor_type_default): _dropdown(
-                FLOOR_TYPE_OPTIONS, translation_key="floor_type",
-            ),
-            vol.Optional(CONF_FACADE_COLOUR, default=facade_colour_default): _dropdown(
-                FACADE_COLOUR_OPTIONS, translation_key="facade_colour",
-            ),
-            vol.Optional(
-                CONF_FACADE_SOLAR_SHARE, default=float(facade_solar_share_default),
-            ): _number_slider(min_value=0.0, max_value=1.0, step=0.05),
-            vol.Optional(
-                CONF_THERMAL_BRIDGE_PSI_L, default=float(thermal_bridge_psi_l_default),
-            ): _number_box(min_value=0.0, max_value=50.0, step=0.1, unit="W/K"),
-            vol.Optional(
-                CONF_SKY_RADIATIVE_UA, default=float(sky_radiative_ua_default),
-            ): _number_box(min_value=0.0, max_value=100.0, step=0.5, unit="W/K"),
-        }
-    )
 
     return vol.Schema(
         {
@@ -647,7 +622,22 @@ def _room_form_schema(
             vol.Required(
                 CONF_COMFORT_OFFSET, default=float(comfort_offset_default),
             ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
-            vol.Required(SECTION_ADV_ENVELOPE): _section(advanced_schema, collapsed=True),
+            # ── Advanced envelope refinements ──
+            vol.Optional(CONF_FLOOR_TYPE, default=floor_type_default): _dropdown(
+                FLOOR_TYPE_OPTIONS, translation_key="floor_type",
+            ),
+            vol.Optional(CONF_FACADE_COLOUR, default=facade_colour_default): _dropdown(
+                FACADE_COLOUR_OPTIONS, translation_key="facade_colour",
+            ),
+            vol.Optional(
+                CONF_FACADE_SOLAR_SHARE, default=float(facade_solar_share_default),
+            ): _number_slider(min_value=0.0, max_value=1.0, step=0.05),
+            vol.Optional(
+                CONF_THERMAL_BRIDGE_PSI_L, default=float(thermal_bridge_psi_l_default),
+            ): _number_box(min_value=0.0, max_value=50.0, step=0.1, unit="W/K"),
+            vol.Optional(
+                CONF_SKY_RADIATIVE_UA, default=float(sky_radiative_ua_default),
+            ): _number_box(min_value=0.0, max_value=100.0, step=0.5, unit="W/K"),
         }
     )
 
@@ -685,51 +675,59 @@ def _heater_form_schema(
     hvac_mode_default: str = DEFAULT_SOURCE_HVAC_MODE,
     emitter_time_constant_default: float = _DEFAULT_EMITTER_TIME_CONSTANT,
 ) -> vol.Schema:
-    """Schema for adding/editing a heat source (heater)."""
-
-    perf_inner: Dict[Any, Any] = {
-        vol.Optional(CONF_SOURCE_EFFICIENCY, default=float(efficiency_default)): _number_slider(
-            min_value=0.1, max_value=1.0, step=0.05,
+    """Flat schema for adding/editing a heat source (heater)."""
+    schema_dict: Dict[Any, Any] = {
+        vol.Required(CONF_SOURCE_NAME, default=name_default): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.TEXT)
         ),
-        vol.Optional(CONF_SOURCE_COP_RATED, default=float(cop_rated_default)): _number_slider(
-            min_value=1.0, max_value=8.0, step=0.1,
+        vol.Required(CONF_SOURCE_TYPE, default=type_default): _radio(
+            [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP],
+            translation_key="source_type",
         ),
-        vol.Optional(
-            CONF_SOURCE_COP_TEMP_REF, default=float(cop_temp_ref_default),
-        ): _number_box(min_value=-20.0, max_value=20.0, step=0.5, unit="°C"),
-        vol.Optional(CONF_SOURCE_MIN_POWER, default=float(min_power_default)): _number_box(
-            min_value=0.0, max_value=100000.0, step=10.0, unit="W",
-        ),
-        vol.Optional(
-            CONF_SOURCE_MAX_TEMP_OFFSET, default=float(max_temp_offset_default),
-        ): _number_box(min_value=0.1, max_value=20.0, step=0.1, unit="°C"),
-        vol.Optional(CONF_SOURCE_HVAC_MODE, default=hvac_mode_default): _dropdown(
-            [SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL],
-            translation_key="hvac_mode",
-        ),
-        vol.Optional(
-            CONF_SOURCE_EMITTER_TIME_CONSTANT, default=float(emitter_time_constant_default),
-        ): _number_box(min_value=0.0, max_value=600.0, step=5.0, unit="s"),
+        vol.Required(
+            CONF_SOURCE_MAX_POWER, default=float(max_power_default),
+        ): _number_box(min_value=100.0, max_value=100000.0, step=100.0, unit="W"),
     }
+    if heater_entity_default:
+        schema_dict[
+            vol.Required(
+                CONF_SOURCE_HEATER_ENTITY,
+                description={"suggested_value": heater_entity_default},
+            )
+        ] = _entity_selector_optional("switch")
+    else:
+        schema_dict[vol.Required(CONF_SOURCE_HEATER_ENTITY)] = _entity_selector_optional("switch")
 
-    return vol.Schema(
+    # ── Performance details ──
+    schema_dict.update(
         {
-            vol.Required(CONF_SOURCE_NAME, default=name_default): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT)
+            vol.Optional(
+                CONF_SOURCE_EFFICIENCY, default=float(efficiency_default),
+            ): _number_slider(min_value=0.1, max_value=1.0, step=0.05),
+            vol.Optional(
+                CONF_SOURCE_COP_RATED, default=float(cop_rated_default),
+            ): _number_slider(min_value=1.0, max_value=8.0, step=0.1),
+            vol.Optional(
+                CONF_SOURCE_COP_TEMP_REF, default=float(cop_temp_ref_default),
+            ): _number_box(min_value=-20.0, max_value=20.0, step=0.5, unit="°C"),
+            vol.Optional(
+                CONF_SOURCE_MIN_POWER, default=float(min_power_default),
+            ): _number_box(min_value=0.0, max_value=100000.0, step=10.0, unit="W"),
+            vol.Optional(
+                CONF_SOURCE_MAX_TEMP_OFFSET, default=float(max_temp_offset_default),
+            ): _number_box(min_value=0.1, max_value=20.0, step=0.1, unit="°C"),
+            vol.Optional(CONF_SOURCE_HVAC_MODE, default=hvac_mode_default): _dropdown(
+                [SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL],
+                translation_key="hvac_mode",
             ),
-            vol.Required(CONF_SOURCE_TYPE, default=type_default): _radio(
-                [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP],
-                translation_key="source_type",
-            ),
-            vol.Required(
-                CONF_SOURCE_MAX_POWER, default=float(max_power_default),
-            ): _number_box(min_value=100.0, max_value=100000.0, step=100.0, unit="W"),
-            vol.Required(
-                CONF_SOURCE_HEATER_ENTITY, default=heater_entity_default,
-            ): _entity_selector_optional("switch"),
-            vol.Required(SECTION_PERFORMANCE): _section(vol.Schema(perf_inner), collapsed=True),
+            vol.Optional(
+                CONF_SOURCE_EMITTER_TIME_CONSTANT,
+                default=float(emitter_time_constant_default),
+            ): _number_box(min_value=0.0, max_value=600.0, step=5.0, unit="s"),
         }
     )
+
+    return vol.Schema(schema_dict)
 
 
 _DAY_OPTIONS = [
@@ -759,23 +757,9 @@ def _period_form_schema(
     energy_weight_default: float = 1.0,
     frost_protection_default: float = 12.0,
 ) -> vol.Schema:
-    """Schema shared by the add-period and edit-period forms."""
+    """Flat schema shared by the add-period and edit-period forms."""
     if days_default is None:
         days_default = []
-
-    advanced_schema = vol.Schema(
-        {
-            vol.Optional(
-                CONF_SCHEDULE_TRACKING_WEIGHT, default=float(tracking_weight_default),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
-            vol.Optional(
-                CONF_SCHEDULE_ENERGY_WEIGHT, default=float(energy_weight_default),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
-            vol.Optional(
-                CONF_SCHEDULE_FROST_PROTECTION, default=float(frost_protection_default),
-            ): _number_box(min_value=0.0, max_value=20.0, step=0.5, unit="°C"),
-        }
-    )
 
     return vol.Schema(
         {
@@ -805,7 +789,16 @@ def _period_form_schema(
             vol.Optional(
                 CONF_SCHEDULE_COMFORT_OFFSET, default=float(comfort_offset_default),
             ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
-            vol.Required(SECTION_ADV_PERIOD): _section(advanced_schema, collapsed=True),
+            # ── Advanced per-period overrides ──
+            vol.Optional(
+                CONF_SCHEDULE_TRACKING_WEIGHT, default=float(tracking_weight_default),
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+            vol.Optional(
+                CONF_SCHEDULE_ENERGY_WEIGHT, default=float(energy_weight_default),
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+            vol.Optional(
+                CONF_SCHEDULE_FROST_PROTECTION, default=float(frost_protection_default),
+            ): _number_box(min_value=0.0, max_value=20.0, step=0.5, unit="°C"),
         }
     )
 
@@ -864,8 +857,18 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     async def async_step_global_settings(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Form for site / timing / sensor settings."""
+        """Form for site / timing / sensor settings.
+
+        Note: kept as a flat schema (no ``section()`` wrappers). Mixing
+        top-level fields with sections has surfaced as fragile across the
+        Home Assistant versions we target, so we keep this critical page
+        on a plain schema and rely on field ordering + descriptions for
+        the visual structure.
+        """
         if user_input is not None:
+            # Tolerate either a flat input dict (current path) or one with
+            # the legacy section keys (in case a partially-cached old form
+            # is submitted from an upgraded install).
             flat = _flatten_sections(user_input, _GLOBAL_SECTION_KEYS)
             self._data.update(flat)
             return await self.async_step_init()
@@ -878,99 +881,95 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
         weather = current.get(CONF_WEATHER_ENTITY) or None
 
-        basics_schema_inner: Dict[Any, Any] = {}
+        schema_dict: Dict[Any, Any] = {}
+
         if outdoor_temp:
-            basics_schema_inner[
+            schema_dict[
                 vol.Optional(
                     CONF_OUTDOOR_TEMP_ENTITY,
                     description={"suggested_value": outdoor_temp},
                 )
             ] = _entity_selector_optional("sensor")
         else:
-            basics_schema_inner[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional(
+            schema_dict[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional(
                 "sensor"
             )
 
         if weather:
-            basics_schema_inner[
+            schema_dict[
                 vol.Optional(
                     CONF_WEATHER_ENTITY,
                     description={"suggested_value": weather},
                 )
             ] = _entity_selector_optional("weather")
         else:
-            basics_schema_inner[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional(
+            schema_dict[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional(
                 "weather"
             )
 
-        basics_schema_inner[
+        schema_dict[
             vol.Optional(
                 CONF_UPDATE_INTERVAL,
-                default=int(current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)),
+                default=int(
+                    current.get(CONF_UPDATE_INTERVAL) or DEFAULT_UPDATE_INTERVAL
+                ),
             )
         ] = _number_box(min_value=60, max_value=3600, step=30, unit="s")
 
-        estimation_schema = vol.Schema(
-            {
-                vol.Optional(
-                    CONF_SIGMA_W,
-                    default=float(current.get(CONF_SIGMA_W, DEFAULT_SIGMA_W)),
-                ): _number_box(min_value=1e-6, max_value=10.0, step=0.01),
-                vol.Optional(
-                    CONF_SIGMA_V,
-                    default=float(current.get(CONF_SIGMA_V, DEFAULT_SIGMA_V)),
-                ): _number_box(min_value=1e-6, max_value=10.0, step=0.01),
-                vol.Optional(
-                    CONF_SIGMA_B,
-                    default=float(current.get(CONF_SIGMA_B, DEFAULT_SIGMA_B)),
-                ): _number_box(min_value=1e-8, max_value=1.0, step=0.0001),
-            }
-        )
+        # Advanced — model adaptation
+        schema_dict[
+            vol.Optional(
+                CONF_SIGMA_W,
+                default=float(current.get(CONF_SIGMA_W) or DEFAULT_SIGMA_W),
+            )
+        ] = _number_box(min_value=1e-6, max_value=10.0, step=0.01)
+        schema_dict[
+            vol.Optional(
+                CONF_SIGMA_V,
+                default=float(current.get(CONF_SIGMA_V) or DEFAULT_SIGMA_V),
+            )
+        ] = _number_box(min_value=1e-6, max_value=10.0, step=0.01)
+        schema_dict[
+            vol.Optional(
+                CONF_SIGMA_B,
+                default=float(current.get(CONF_SIGMA_B) or DEFAULT_SIGMA_B),
+            )
+        ] = _number_box(min_value=1e-8, max_value=1.0, step=0.0001)
 
-        window_schema = vol.Schema(
-            {
-                vol.Optional(
-                    CONF_WINDOW_OPEN_DEBOUNCE,
-                    default=int(
-                        current.get(
-                            CONF_WINDOW_OPEN_DEBOUNCE, DEFAULT_WINDOW_OPEN_DEBOUNCE,
-                        )
-                    ),
-                ): _number_box(min_value=0, max_value=3600, step=5, unit="s"),
-                vol.Optional(
-                    CONF_WINDOW_OPEN_CLOSE_SETTLE,
-                    default=int(
-                        current.get(
-                            CONF_WINDOW_OPEN_CLOSE_SETTLE,
-                            DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
-                        )
-                    ),
-                ): _number_box(min_value=0, max_value=3600, step=5, unit="s"),
-                vol.Optional(
-                    CONF_WINDOW_OPEN_Q_INFLATION,
-                    default=float(
-                        current.get(
-                            CONF_WINDOW_OPEN_Q_INFLATION,
-                            DEFAULT_WINDOW_OPEN_Q_INFLATION,
-                        )
-                    ),
-                ): _number_box(min_value=1.0, max_value=1000.0, step=1.0),
-            }
-        )
-
-        schema = vol.Schema(
-            {
-                **basics_schema_inner,
-                vol.Required(SECTION_ADV_ESTIMATION): _section(
-                    estimation_schema, collapsed=True,
+        # Advanced — window-open detection
+        schema_dict[
+            vol.Optional(
+                CONF_WINDOW_OPEN_DEBOUNCE,
+                default=int(
+                    current.get(CONF_WINDOW_OPEN_DEBOUNCE)
+                    if current.get(CONF_WINDOW_OPEN_DEBOUNCE) is not None
+                    else DEFAULT_WINDOW_OPEN_DEBOUNCE
                 ),
-                vol.Required(SECTION_WINDOW_DETECTION): _section(
-                    window_schema, collapsed=True,
+            )
+        ] = _number_box(min_value=0, max_value=3600, step=5, unit="s")
+        schema_dict[
+            vol.Optional(
+                CONF_WINDOW_OPEN_CLOSE_SETTLE,
+                default=int(
+                    current.get(CONF_WINDOW_OPEN_CLOSE_SETTLE)
+                    if current.get(CONF_WINDOW_OPEN_CLOSE_SETTLE) is not None
+                    else DEFAULT_WINDOW_OPEN_CLOSE_SETTLE
                 ),
-            }
-        )
+            )
+        ] = _number_box(min_value=0, max_value=3600, step=5, unit="s")
+        schema_dict[
+            vol.Optional(
+                CONF_WINDOW_OPEN_Q_INFLATION,
+                default=float(
+                    current.get(CONF_WINDOW_OPEN_Q_INFLATION)
+                    or DEFAULT_WINDOW_OPEN_Q_INFLATION
+                ),
+            )
+        ] = _number_box(min_value=1.0, max_value=1000.0, step=1.0)
 
-        return self.async_show_form(step_id="global_settings", data_schema=schema)
+        return self.async_show_form(
+            step_id="global_settings", data_schema=vol.Schema(schema_dict),
+        )
 
     # ------------------------------------------------------------------
     # MPC tuning
@@ -979,59 +978,67 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     async def async_step_mpc_tuning(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Form for MPC controller and model tuning parameters."""
+        """Form for MPC controller and model tuning parameters.
+
+        Kept flat (no sections) for the same robustness reason as
+        ``async_step_global_settings``.
+        """
         if user_input is not None:
             flat = _flatten_sections(user_input, _MPC_SECTION_KEYS)
             self._data.update(flat)
             return await self.async_step_init()
 
         current = self._data
-        comfort_schema = vol.Schema(
-            {
-                vol.Optional(
-                    CONF_TRACKING_WEIGHT,
-                    default=float(current.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT)),
-                ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
-                vol.Optional(
-                    CONF_ENERGY_WEIGHT,
-                    default=float(current.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)),
-                ): _number_slider(min_value=0.0, max_value=10.0, step=0.01),
-            }
-        )
-        advanced_schema = vol.Schema(
-            {
-                vol.Optional(
-                    CONF_HORIZON,
-                    default=int(current.get(CONF_HORIZON, DEFAULT_HORIZON)),
-                ): _number_box(min_value=1, max_value=480, step=1),
-                vol.Optional(
-                    CONF_SMOOTHING_WEIGHT,
-                    default=float(current.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)),
-                ): _number_slider(min_value=0.0, max_value=10.0, step=0.05),
-                vol.Optional(
-                    CONF_SOFT_CONSTRAINT_WEIGHT,
-                    default=float(
-                        current.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
-                    ),
-                ): _number_box(min_value=0.0, max_value=10000.0, step=1.0),
-                vol.Optional(
-                    CONF_TERMINAL_WEIGHT,
-                    default=float(current.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)),
-                ): _number_box(min_value=1.0, max_value=10000.0, step=1.0),
-            }
-        )
-        schema = vol.Schema(
-            {
-                vol.Required(SECTION_COMFORT_VS_ENERGY): _section(
-                    comfort_schema, collapsed=False,
+        schema_dict: Dict[Any, Any] = {
+            vol.Optional(
+                CONF_TRACKING_WEIGHT,
+                default=float(
+                    current.get(CONF_TRACKING_WEIGHT)
+                    if current.get(CONF_TRACKING_WEIGHT) is not None
+                    else DEFAULT_TRACKING_WEIGHT
                 ),
-                vol.Required(SECTION_ADV_CONTROLLER): _section(
-                    advanced_schema, collapsed=True,
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+            vol.Optional(
+                CONF_ENERGY_WEIGHT,
+                default=float(
+                    current.get(CONF_ENERGY_WEIGHT)
+                    if current.get(CONF_ENERGY_WEIGHT) is not None
+                    else DEFAULT_ENERGY_WEIGHT
                 ),
-            }
-        )
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.01),
+            vol.Optional(
+                CONF_HORIZON,
+                default=int(
+                    current.get(CONF_HORIZON) or DEFAULT_HORIZON
+                ),
+            ): _number_box(min_value=1, max_value=480, step=1),
+            vol.Optional(
+                CONF_SMOOTHING_WEIGHT,
+                default=float(
+                    current.get(CONF_SMOOTHING_WEIGHT)
+                    if current.get(CONF_SMOOTHING_WEIGHT) is not None
+                    else DEFAULT_SMOOTHING_WEIGHT
+                ),
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.05),
+            vol.Optional(
+                CONF_SOFT_CONSTRAINT_WEIGHT,
+                default=float(
+                    current.get(CONF_SOFT_CONSTRAINT_WEIGHT)
+                    if current.get(CONF_SOFT_CONSTRAINT_WEIGHT) is not None
+                    else DEFAULT_SOFT_CONSTRAINT_WEIGHT
+                ),
+            ): _number_box(min_value=0.0, max_value=10000.0, step=1.0),
+            vol.Optional(
+                CONF_TERMINAL_WEIGHT,
+                default=float(
+                    current.get(CONF_TERMINAL_WEIGHT) or DEFAULT_TERMINAL_WEIGHT
+                ),
+            ): _number_box(min_value=1.0, max_value=10000.0, step=1.0),
+        }
 
-        return self.async_show_form(step_id="mpc_tuning", data_schema=schema)
+        return self.async_show_form(
+            step_id="mpc_tuning", data_schema=vol.Schema(schema_dict),
+        )
 
     # ------------------------------------------------------------------
     # Save & close

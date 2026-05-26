@@ -73,65 +73,71 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
     """strings.json and en.json should both contain the modernised labels.
 
     The modernised UI moves jargon-heavy explanations from labels into
-    ``data_description`` helper text below each field, and groups advanced
-    fields into ``sections``.  These assertions lock that layout in.
+    ``data_description`` helper text below each field. All schemas are flat
+    (no ``section()`` wrappers) — sections proved fragile across Home
+    Assistant versions when mixed with top-level fields, so we keep the
+    visual grouping via field ordering + description-prefixed "Advanced — "
+    notes.
     """
     strings = json.loads(STRINGS_PATH.read_text(encoding="utf-8"))
     en = json.loads(EN_TRANSLATION_PATH.read_text(encoding="utf-8"))
     assert strings == en
 
-    # ── Global settings: top-level basics + sections for advanced parts ──
+    # ── Global settings: every field has a friendly label and helper text. ──
     global_step = strings["options"]["step"]["global_settings"]
-    global_basics = global_step["data"]
-    global_basics_desc = global_step["data_description"]
-    global_sections = global_step["sections"]
+    global_data = global_step["data"]
+    global_desc = global_step["data_description"]
+    # Step uses a flat schema — sections must NOT be present, otherwise HA
+    # would try to render a section wrapper that no longer exists in code.
+    assert "sections" not in global_step
 
-    # Basics live at the top level with friendly labels and helper text.
-    for key in ("outdoor_temp_entity", "weather_entity", "update_interval"):
-        assert key in global_basics
-        assert key in global_basics_desc
-        assert global_basics[key]  # non-empty label
-        assert global_basics_desc[key]  # non-empty description
-
-    assert "optional" in global_basics_desc["outdoor_temp_entity"].lower()
-    assert "outdoor temperature sensor" in global_basics_desc["weather_entity"].lower()
-
-    # Advanced estimation is its own collapsed section.
-    est = global_sections["advanced_estimation"]
-    assert {"name", "description", "data", "data_description"} <= set(est.keys())
-    for key in ("sigma_w", "sigma_v", "sigma_b"):
-        assert key in est["data"]
-        assert key in est["data_description"]
-        # Labels are friendly — no greek / SDE jargon.
-        assert "σ" not in est["data"][key]
-        assert not est["data"][key].startswith("SDE")
-
-    # Window detection settings are also in their own section.
-    wd = global_sections["window_detection"]
     for key in (
+        "outdoor_temp_entity",
+        "weather_entity",
+        "update_interval",
+        "sigma_w",
+        "sigma_v",
+        "sigma_b",
         "window_open_debounce",
         "window_open_close_settle",
         "window_open_q_inflation",
     ):
-        assert key in wd["data"]
-        assert key in wd["data_description"]
+        assert key in global_data
+        assert key in global_desc
+        assert global_data[key]  # non-empty label
+        assert global_desc[key]  # non-empty description
 
-    # ── MPC tuning: comfort/energy basics + advanced controller section ──
+    # Labels stay friendly — no greek / "SDE" jargon.
+    for key in ("sigma_w", "sigma_v", "sigma_b"):
+        assert "σ" not in global_data[key]
+        assert not global_data[key].startswith("SDE")
+
+    assert "optional" in global_desc["outdoor_temp_entity"].lower()
+    assert "outdoor temperature sensor" in global_desc["weather_entity"].lower()
+
+    # ── MPC tuning is also flat. ──
     mpc_step = strings["options"]["step"]["mpc_tuning"]
-    mpc_sections = mpc_step["sections"]
-    comfort = mpc_sections["comfort_vs_energy"]
-    assert "tracking_weight" in comfort["data"]
-    assert "energy_weight" in comfort["data"]
-    advanced_ctrl = mpc_sections["advanced_controller"]
-    for key in ("horizon", "smoothing_weight", "soft_constraint_weight", "terminal_weight"):
-        assert key in advanced_ctrl["data"]
+    assert "sections" not in mpc_step
+    mpc_data = mpc_step["data"]
+    for key in (
+        "tracking_weight",
+        "energy_weight",
+        "horizon",
+        "smoothing_weight",
+        "soft_constraint_weight",
+        "terminal_weight",
+    ):
+        assert key in mpc_data
+        assert key in mpc_step["data_description"]
 
-    # ── Rooms: capabilities preserved, plus advanced envelope section ──
-    add_room = strings["options"]["step"]["add_room"]["data"]
-    add_room_desc = strings["options"]["step"]["add_room"]["data_description"]
-    add_room_sections = strings["options"]["step"]["add_room"]["sections"]
-    room_detail = strings["options"]["step"]["room_detail"]["data"]
-    room_detail_sections = strings["options"]["step"]["room_detail"]["sections"]
+    # ── Rooms: capabilities preserved, advanced envelope fields at top level. ──
+    add_room = strings["options"]["step"]["add_room"]
+    add_room_data = add_room["data"]
+    add_room_desc = add_room["data_description"]
+    assert "sections" not in add_room
+    room_detail = strings["options"]["step"]["room_detail"]
+    room_detail_data = room_detail["data"]
+    assert "sections" not in room_detail
     manage_rooms_menu = strings["options"]["step"]["manage_rooms"]["menu_options"]
 
     for key in (
@@ -142,41 +148,34 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
         "envelope_tightness",
         "comfort_offset",
         "name",
-    ):
-        assert key in add_room
-        assert key in add_room_desc
-        assert key in room_detail
-    assert "setpoint" not in add_room
-    assert "setpoint" not in room_detail
-    # Comfort band replaces the legacy comfort_corridor_{low,high} keys.
-    assert "comfort_corridor_low" not in add_room
-    assert "comfort_corridor_high" not in add_room
-
-    # Floor / facade refinements live in the collapsed advanced section.
-    adv_envelope = add_room_sections["advanced_envelope"]
-    for key in (
         "floor_type",
         "facade_colour",
         "facade_solar_share",
         "thermal_bridge_psi_l",
         "sky_radiative_ua",
     ):
-        assert key in adv_envelope["data"]
-        assert key in adv_envelope["data_description"]
-        assert key in room_detail_sections["advanced_envelope"]["data"]
+        assert key in add_room_data
+        assert key in add_room_desc
+        assert key in room_detail_data
+    assert "setpoint" not in add_room_data
+    assert "setpoint" not in room_detail_data
+    # Comfort band replaces the legacy comfort_corridor_{low,high} keys.
+    assert "comfort_corridor_low" not in add_room_data
+    assert "comfort_corridor_high" not in add_room_data
 
     assert "manage_room_windows" in manage_rooms_menu
 
     # ── Schedule periods use the time picker (no HH:MM in labels). ──
-    period_data = strings["options"]["step"]["add_period"]["data"]
-    period_sections = strings["options"]["step"]["add_period"]["sections"]
+    period = strings["options"]["step"]["add_period"]
+    assert "sections" not in period
+    period_data = period["data"]
     for key in ("start", "end"):
         assert key in period_data
         # The TimeSelector renders a native time picker — no need to spell
         # the format out in the label.
         assert "HH:MM" not in period_data[key]
     for key in ("tracking_weight", "energy_weight", "frost_protection"):
-        assert key in period_sections["advanced_period"]["data"]
+        assert key in period_data
 
     # ── Selector translation keys exist for dropdowns. ──
     selector = strings["selector"]
@@ -195,10 +194,31 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
         assert "options" in selector[key]
         assert selector[key]["options"]  # non-empty
 
-    # ── Reconfigure step is present in the config flow. ──
-    assert "reconfigure" in strings["config"]["step"]
-    reconfigure_sections = strings["config"]["step"]["reconfigure"]["sections"]
-    assert {"location", "sensors", "timing"} <= set(reconfigure_sections.keys())
+    # ── Reconfigure step is present in the config flow and also flat. ──
+    reconfigure_step = strings["config"]["step"]["reconfigure"]
+    assert "sections" not in reconfigure_step
+    for key in (
+        "latitude",
+        "longitude",
+        "outdoor_temp_entity",
+        "weather_entity",
+        "update_interval",
+    ):
+        assert key in reconfigure_step["data"]
+        assert key in reconfigure_step["data_description"]
+
+    # The original user-step (initial setup) is also flat.
+    user_step = strings["config"]["step"]["user"]
+    assert "sections" not in user_step
+    for key in (
+        "latitude",
+        "longitude",
+        "outdoor_temp_entity",
+        "weather_entity",
+        "update_interval",
+    ):
+        assert key in user_step["data"]
+        assert key in user_step["data_description"]
 
 
 def test_period_time_validation_helper_accepts_hh_mm_and_rejects_invalid() -> None:
