@@ -14,12 +14,17 @@ from typing import Any, Callable, Dict, List, Optional
 from .const import (
     CONF_COMFORT_OFFSET,
     CONF_ENVELOPE_TIGHTNESS,
+    CONF_FACADE_COLOUR,
+    CONF_FACADE_SOLAR_SHARE,
+    CONF_FLOOR_TYPE,
     CONF_INFILTRATION_FRACTION,
     CONF_ROOM_NAME,
     CONF_SETPOINT,
+    CONF_SKY_RADIATIVE_UA,
     CONF_R_EXTERNAL,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_THERMAL_BRIDGE_PSI_L,
     CONF_THERMAL_MASS,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
@@ -54,6 +59,11 @@ from .const import (
     SCHEDULE_MODE_OFF,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENVELOPE_TIGHTNESS,
+    DEFAULT_FACADE_COLOUR,
+    DEFAULT_FACADE_SOLAR_SHARE,
+    DEFAULT_FLOOR_TYPE,
+    DEFAULT_SKY_RADIATIVE_UA,
+    DEFAULT_THERMAL_BRIDGE_PSI_L,
     DEFAULT_WINDOW_TILT,
     DEFAULT_EFFICIENCY,
     DEFAULT_COP_RATED,
@@ -62,6 +72,14 @@ from .const import (
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_TURN_OFF_DEADBAND,
     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
+    FACADE_COLOUR_CUSTOM,
+    FACADE_COLOUR_DARK,
+    FACADE_COLOUR_LIGHT,
+    FACADE_COLOUR_MEDIUM,
+    FLOOR_TYPE_CONCRETE,
+    FLOOR_TYPE_NONE,
+    FLOOR_TYPE_SLAB_ON_GRADE,
+    FLOOR_TYPE_UFH,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
 )
@@ -140,6 +158,75 @@ def nearest_choice(value: float, mapping: Dict[str, float], default_key: str) ->
     return min(mapping, key=lambda key: abs(mapping[key] - value))
 
 
+#: Floor-type tokens accepted from the room form (mirrors const.FLOOR_TYPE_*).
+FLOOR_TYPE_OPTIONS: List[str] = [
+    FLOOR_TYPE_NONE,
+    FLOOR_TYPE_CONCRETE,
+    FLOOR_TYPE_SLAB_ON_GRADE,
+    FLOOR_TYPE_UFH,
+]
+
+#: Facade colour tokens accepted from the room form (mirrors const.FACADE_COLOUR_*).
+FACADE_COLOUR_OPTIONS: List[str] = [
+    FACADE_COLOUR_LIGHT,
+    FACADE_COLOUR_MEDIUM,
+    FACADE_COLOUR_DARK,
+    FACADE_COLOUR_CUSTOM,
+]
+
+
+def _apply_advanced_envelope(
+    room: Dict[str, Any],
+    *,
+    floor_type: Optional[str],
+    facade_colour: Optional[str],
+    facade_solar_share: Optional[float],
+    thermal_bridge_psi_l: Optional[float],
+    sky_radiative_ua: Optional[float],
+) -> None:
+    """Write advanced envelope fields into ``room`` only when explicitly set.
+
+    Values that match the model default are stripped from the room dict — this
+    keeps the stored shape minimal so existing rooms aren't decorated with
+    extra keys unless the user actually customised something.
+    """
+    def _set_or_strip(key: str, value: Any, default: Any) -> None:
+        if value is None:
+            return
+        if value == default:
+            room.pop(key, None)
+        else:
+            room[key] = value
+
+    if floor_type is not None:
+        if floor_type == DEFAULT_FLOOR_TYPE:
+            room.pop(CONF_FLOOR_TYPE, None)
+        else:
+            room[CONF_FLOOR_TYPE] = floor_type
+
+    if facade_colour is not None:
+        if facade_colour == DEFAULT_FACADE_COLOUR:
+            room.pop(CONF_FACADE_COLOUR, None)
+        else:
+            room[CONF_FACADE_COLOUR] = facade_colour
+
+    _set_or_strip(
+        CONF_FACADE_SOLAR_SHARE,
+        None if facade_solar_share is None else float(facade_solar_share),
+        DEFAULT_FACADE_SOLAR_SHARE,
+    )
+    _set_or_strip(
+        CONF_THERMAL_BRIDGE_PSI_L,
+        None if thermal_bridge_psi_l is None else float(thermal_bridge_psi_l),
+        DEFAULT_THERMAL_BRIDGE_PSI_L,
+    )
+    _set_or_strip(
+        CONF_SKY_RADIATIVE_UA,
+        None if sky_radiative_ua is None else float(sky_radiative_ua),
+        DEFAULT_SKY_RADIATIVE_UA,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Room CRUD helper
 # ---------------------------------------------------------------------------
@@ -212,6 +299,11 @@ class RoomFlowHelper:
         infiltration_fraction: Optional[float] = None,
         comfort_offset: Optional[float] = None,
         window_sensors: Optional[List[str]] = None,
+        floor_type: Optional[str] = None,
+        facade_colour: Optional[str] = None,
+        facade_solar_share: Optional[float] = None,
+        thermal_bridge_psi_l: Optional[float] = None,
+        sky_radiative_ua: Optional[float] = None,
     ) -> Optional[str]:
         """Append a new room.  Returns an error key on duplicate, else ``None``.
 
@@ -223,6 +315,12 @@ class RoomFlowHelper:
         ``comfort_offset`` is the symmetric ±offset from the setpoint
         defining the comfort region [setpoint - offset, setpoint + offset].
         When ``None``, defaults to DEFAULT_COMFORT_OFFSET.
+
+        ``floor_type``, ``facade_colour``, ``facade_solar_share``,
+        ``thermal_bridge_psi_l`` and ``sky_radiative_ua`` are optional
+        envelope refinements; they are written into the room dict only when
+        the caller passes a non-default value, so existing rooms see no
+        change in storage shape when these aren't touched.
         """
         name = name.strip()
         if self.is_duplicate(name):
@@ -245,6 +343,14 @@ class RoomFlowHelper:
             new_room[CONF_TEMP_SENSOR] = sensors[0]
         if window_sensors is not None:
             new_room[CONF_WINDOW_SENSORS] = list(window_sensors)
+        _apply_advanced_envelope(
+            new_room,
+            floor_type=floor_type,
+            facade_colour=facade_colour,
+            facade_solar_share=facade_solar_share,
+            thermal_bridge_psi_l=thermal_bridge_psi_l,
+            sky_radiative_ua=sky_radiative_ua,
+        )
         self.rooms.append(new_room)
         return None
 
@@ -259,6 +365,11 @@ class RoomFlowHelper:
         infiltration_fraction: Optional[float] = None,
         comfort_offset: Optional[float] = None,
         window_sensors: Optional[List[str]] = None,
+        floor_type: Optional[str] = None,
+        facade_colour: Optional[str] = None,
+        facade_solar_share: Optional[float] = None,
+        thermal_bridge_psi_l: Optional[float] = None,
+        sky_radiative_ua: Optional[float] = None,
     ) -> Optional[str]:
         """Update the currently-selected room.  Returns an error key or ``None``."""
         if self.current_idx is None:
@@ -288,6 +399,14 @@ class RoomFlowHelper:
             # No explicit override on this edit → leave whatever was there
             # alone (keeps a previously customised value intact).
             pass
+        _apply_advanced_envelope(
+            room,
+            floor_type=floor_type,
+            facade_colour=facade_colour,
+            facade_solar_share=facade_solar_share,
+            thermal_bridge_psi_l=thermal_bridge_psi_l,
+            sky_radiative_ua=sky_radiative_ua,
+        )
         return None
 
     def remove_by_name(self, name: str) -> bool:

@@ -1,9 +1,26 @@
-"""Config flow for the Heating Assistant integration."""
+"""Config flow for the Heating Assistant integration.
+
+The flow is organised so the user-facing forms feel like other modern Home
+Assistant integrations:
+
+* Initial setup is a single, friendly step with grouped sections (Location,
+  Outdoor information, Update timing) and explanatory text under every field.
+* Site settings can be revisited via the **Reconfigure** entry-point without
+  diving into the options flow.
+* All numeric fields use ``NumberSelector`` (with sliders where it helps),
+  schedule times use ``TimeSelector``, and discrete choices use
+  ``SelectSelector`` with dropdown / list modes.
+* Room, heater and schedule editors group "advanced" fields into collapsed
+  sections so the basics stay visible.
+
+The persisted data shape is **unchanged** — sectioned input is flattened before
+it is handed off to the storage helpers in ``_options_flow``.
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import voluptuous as vol
 
@@ -11,6 +28,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -22,14 +40,23 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
+    TimeSelector,
+    TimeSelectorConfig,
 )
 import homeassistant.helpers.config_validation as cv
+
+try:
+    from homeassistant.data_entry_flow import section as _ha_section
+except ImportError:  # pragma: no cover — older HA fallback
+    _ha_section = None  # type: ignore[assignment]
 
 from .schedule import parse_time as _parse_time
 from ._options_flow import (
     BUILDING_AGE_TO_R_EXTERNAL,
     COMPASS_TO_DEGREES,
     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
+    FACADE_COLOUR_OPTIONS,
+    FLOOR_TYPE_OPTIONS,
     ROOM_SIZE_TO_THERMAL_MASS,
     RoomFlowHelper,
     WindowFlowHelper,
@@ -43,6 +70,9 @@ from ._options_flow import (
 from .const import (
     CONF_COMFORT_OFFSET,
     CONF_ENERGY_WEIGHT,
+    CONF_FACADE_COLOUR,
+    CONF_FACADE_SOLAR_SHARE,
+    CONF_FLOOR_TYPE,
     CONF_HORIZON,
     CONF_TRACKING_WEIGHT,
     CONF_LATITUDE,
@@ -57,11 +87,13 @@ from .const import (
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
+    CONF_SKY_RADIATIVE_UA,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
     CONF_TERMINAL_WEIGHT,
+    CONF_THERMAL_BRIDGE_PSI_L,
     CONF_WINDOW_OPEN_CLOSE_SETTLE,
     CONF_WINDOW_OPEN_DEBOUNCE,
     CONF_WINDOW_OPEN_Q_INFLATION,
@@ -104,15 +136,20 @@ from .const import (
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_ENVELOPE_TIGHTNESS,
+    DEFAULT_FACADE_COLOUR,
+    DEFAULT_FACADE_SOLAR_SHARE,
+    DEFAULT_FLOOR_TYPE,
     DEFAULT_TRACKING_WEIGHT,
     DEFAULT_HORIZON,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
+    DEFAULT_SKY_RADIATIVE_UA,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
+    DEFAULT_THERMAL_BRIDGE_PSI_L,
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
     DEFAULT_WINDOW_OPEN_DEBOUNCE,
     DEFAULT_WINDOW_OPEN_Q_INFLATION,
@@ -135,6 +172,64 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_ROOM_SETPOINT = 22.0
 
+# Section identifiers used in both schemas and strings.json. Centralised so
+# the flattening helper stays in sync with the schema builders.
+SECTION_LOCATION = "location"
+SECTION_SENSORS = "sensors"
+SECTION_TIMING = "timing"
+SECTION_ADV_ESTIMATION = "advanced_estimation"
+SECTION_WINDOW_DETECTION = "window_detection"
+SECTION_COMFORT_VS_ENERGY = "comfort_vs_energy"
+SECTION_ADV_CONTROLLER = "advanced_controller"
+SECTION_ADV_ENVELOPE = "advanced_envelope"
+SECTION_PERFORMANCE = "performance"
+SECTION_ADV_PERIOD = "advanced_period"
+
+# Default heat-pump emitter time constant exposed in the heater form. Mirrors
+# the existing UI behaviour (heat_pump → 60 s typical lag).
+_DEFAULT_EMITTER_TIME_CONSTANT = 60.0
+
+
+def _section(schema: vol.Schema, *, collapsed: bool = True) -> Any:
+    """Wrap ``schema`` in a ``data_entry_flow.section`` when supported.
+
+    On older Home Assistant versions where sections are unavailable, the
+    inner schema is returned directly — fields will appear inline. Either
+    way, ``_flatten_sections`` produces the same flat user_input shape
+    downstream, so the storage layer never sees the difference.
+    """
+    if _ha_section is None:
+        return schema
+    return _ha_section(schema, {"collapsed": collapsed})
+
+
+def _flatten_sections(
+    user_input: Optional[Dict[str, Any]],
+    section_keys: Iterable[str],
+) -> Dict[str, Any]:
+    """Lift section sub-dicts into the top-level dict.
+
+    HA's ``data_entry_flow.section`` returns the section's data nested under
+    the section key, e.g. ``{"sensors": {"outdoor_temp_entity": ...}}``.
+    Every downstream consumer in this module wants a flat dict, so this
+    helper merges them up. Top-level keys win on collision.
+    """
+    if not user_input:
+        return {}
+    result: Dict[str, Any] = {}
+    for key, value in user_input.items():
+        if key in section_keys and isinstance(value, dict):
+            for sub_key, sub_val in value.items():
+                result.setdefault(sub_key, sub_val)
+        else:
+            result.setdefault(key, value)
+    return result
+
+
+def _section_defaults(current: Dict[str, Any], keys: Iterable[str]) -> Dict[str, Any]:
+    """Return a dict suitable for ``section(..., {"default": ...})`` initial values."""
+    return {k: current[k] for k in keys if k in current}
+
 
 def _build_period_dict(
     user_input: Dict[str, Any],
@@ -145,8 +240,8 @@ def _build_period_dict(
     period: Dict[str, Any] = {
         CONF_SCHEDULE_NAME: user_input[CONF_SCHEDULE_NAME],
         CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
-        CONF_SCHEDULE_START: user_input[CONF_SCHEDULE_START],
-        CONF_SCHEDULE_END: user_input[CONF_SCHEDULE_END],
+        CONF_SCHEDULE_START: _normalise_time_string(user_input[CONF_SCHEDULE_START]),
+        CONF_SCHEDULE_END: _normalise_time_string(user_input[CONF_SCHEDULE_END]),
         CONF_SCHEDULE_FROST_PROTECTION: float(
             user_input.get(CONF_SCHEDULE_FROST_PROTECTION, 12.0)
         ),
@@ -194,13 +289,178 @@ def _coerce_to_list(value: Any) -> list:
     return []
 
 
-def _is_valid_time_string(value: str) -> bool:
+def _is_valid_time_string(value: Any) -> bool:
     """Return True when ``value`` parses as HH:MM(/:SS), False otherwise."""
+    if not isinstance(value, str):
+        return False
     try:
         _parse_time(value)
     except (TypeError, ValueError):
         return False
     return True
+
+
+def _normalise_time_string(value: str) -> str:
+    """Trim a HH:MM:SS string back to HH:MM for compact storage.
+
+    ``TimeSelector`` returns ``HH:MM:SS``; the controller expects ``HH:MM``
+    and the existing storage shape uses the shorter form. Validation
+    happens before this is ever called, so the cast is safe.
+    """
+    if isinstance(value, str) and value.count(":") == 2:
+        return ":".join(value.split(":")[:2])
+    return value
+
+
+# ---------------------------------------------------------------------------
+# Selector helpers
+# ---------------------------------------------------------------------------
+
+
+def _entity_selector_optional(domain: str) -> EntitySelector:
+    return EntitySelector(EntitySelectorConfig(domain=domain))
+
+
+def _entity_selector_multi(domain: str) -> EntitySelector:
+    return EntitySelector(EntitySelectorConfig(domain=domain, multiple=True))
+
+
+def _dropdown(options: List[str], *, translation_key: Optional[str] = None) -> SelectSelector:
+    cfg_kwargs: Dict[str, Any] = {
+        "options": options,
+        "mode": SelectSelectorMode.DROPDOWN,
+    }
+    if translation_key is not None:
+        cfg_kwargs["translation_key"] = translation_key
+    return SelectSelector(SelectSelectorConfig(**cfg_kwargs))
+
+
+def _radio(options: List[str], *, translation_key: Optional[str] = None) -> SelectSelector:
+    cfg_kwargs: Dict[str, Any] = {
+        "options": options,
+        "mode": SelectSelectorMode.LIST,
+    }
+    if translation_key is not None:
+        cfg_kwargs["translation_key"] = translation_key
+    return SelectSelector(SelectSelectorConfig(**cfg_kwargs))
+
+
+def _number_box(
+    *,
+    min_value: float,
+    max_value: float,
+    step: float = 1.0,
+    unit: Optional[str] = None,
+) -> NumberSelector:
+    kwargs: Dict[str, Any] = {
+        "min": min_value,
+        "max": max_value,
+        "step": step,
+        "mode": NumberSelectorMode.BOX,
+    }
+    if unit is not None:
+        kwargs["unit_of_measurement"] = unit
+    return NumberSelector(NumberSelectorConfig(**kwargs))
+
+
+def _number_slider(
+    *,
+    min_value: float,
+    max_value: float,
+    step: float = 0.1,
+    unit: Optional[str] = None,
+) -> NumberSelector:
+    kwargs: Dict[str, Any] = {
+        "min": min_value,
+        "max": max_value,
+        "step": step,
+        "mode": NumberSelectorMode.SLIDER,
+    }
+    if unit is not None:
+        kwargs["unit_of_measurement"] = unit
+    return NumberSelector(NumberSelectorConfig(**kwargs))
+
+
+# ---------------------------------------------------------------------------
+# Site-settings schema (initial setup + reconfigure)
+# ---------------------------------------------------------------------------
+
+
+_SITE_SECTION_KEYS: Tuple[str, ...] = (
+    SECTION_LOCATION,
+    SECTION_SENSORS,
+    SECTION_TIMING,
+)
+
+
+def _site_settings_schema(
+    *,
+    latitude_default: float,
+    longitude_default: float,
+    outdoor_temp_default: Optional[str],
+    weather_default: Optional[str],
+    update_interval_default: int,
+) -> vol.Schema:
+    """Build the sectioned schema used by the initial setup and reconfigure flows."""
+
+    location_schema = vol.Schema(
+        {
+            vol.Required(CONF_LATITUDE, default=latitude_default): _number_box(
+                min_value=-90.0, max_value=90.0, step=0.000001, unit="°",
+            ),
+            vol.Required(CONF_LONGITUDE, default=longitude_default): _number_box(
+                min_value=-180.0, max_value=180.0, step=0.000001, unit="°",
+            ),
+        }
+    )
+
+    sensors_inner: Dict[Any, Any] = {}
+    if outdoor_temp_default:
+        sensors_inner[
+            vol.Optional(
+                CONF_OUTDOOR_TEMP_ENTITY,
+                description={"suggested_value": outdoor_temp_default},
+            )
+        ] = _entity_selector_optional("sensor")
+    else:
+        sensors_inner[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional("sensor")
+
+    if weather_default:
+        sensors_inner[
+            vol.Optional(
+                CONF_WEATHER_ENTITY,
+                description={"suggested_value": weather_default},
+            )
+        ] = _entity_selector_optional("weather")
+    else:
+        sensors_inner[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional("weather")
+
+    sensors_schema = vol.Schema(sensors_inner)
+
+    timing_schema = vol.Schema(
+        {
+            vol.Required(
+                CONF_UPDATE_INTERVAL, default=int(update_interval_default),
+            ): _number_box(min_value=60, max_value=3600, step=30, unit="s"),
+        }
+    )
+
+    return vol.Schema(
+        {
+            vol.Required(SECTION_LOCATION): _section(location_schema, collapsed=False),
+            vol.Required(SECTION_SENSORS): _section(sensors_schema, collapsed=False),
+            vol.Required(SECTION_TIMING): _section(timing_schema, collapsed=False),
+        }
+    )
+
+
+def _site_settings_errors(flat: Dict[str, Any]) -> Dict[str, str]:
+    """Validate that at least one outdoor source is configured."""
+    outdoor = flat.get(CONF_OUTDOOR_TEMP_ENTITY)
+    weather = flat.get(CONF_WEATHER_ENTITY)
+    if not outdoor and not weather:
+        return {"base": "outdoor_or_weather_required"}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -219,30 +479,30 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Step 1: Basic site settings (location, outdoor sensor, time step)."""
+        """Step 1: Site basics — location, outdoor sources, update timing."""
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            self._data.update(user_input)
-            return self.async_create_entry(title=NAME, data=self._data)
+            flat = _flatten_sections(user_input, _SITE_SECTION_KEYS)
+            errors = _site_settings_errors(flat)
+            if not errors:
+                self._data.update(flat)
+                return self.async_create_entry(title=NAME, data=self._data)
+            current = flat
+        else:
+            current = {}
 
-        ha_lat = self.hass.config.latitude
-        ha_lon = self.hass.config.longitude
+        ha_lat = self.hass.config.latitude if self.hass is not None else 0.0
+        ha_lon = self.hass.config.longitude if self.hass is not None else 0.0
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_LATITUDE, default=ha_lat): vol.Coerce(float),
-                vol.Required(CONF_LONGITUDE, default=ha_lon): vol.Coerce(float),
-                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): EntitySelector(
-                    EntitySelectorConfig(domain="sensor")
-                ),
-                vol.Optional(CONF_WEATHER_ENTITY): EntitySelector(
-                    EntitySelectorConfig(domain="weather")
-                ),
-                vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
-                    vol.Coerce(int), vol.Range(min=60, max=3600)
-                ),
-            }
+        schema = _site_settings_schema(
+            latitude_default=float(current.get(CONF_LATITUDE, ha_lat)),
+            longitude_default=float(current.get(CONF_LONGITUDE, ha_lon)),
+            outdoor_temp_default=current.get(CONF_OUTDOOR_TEMP_ENTITY) or None,
+            weather_default=current.get(CONF_WEATHER_ENTITY) or None,
+            update_interval_default=int(
+                current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+            ),
         )
 
         return self.async_show_form(
@@ -250,6 +510,63 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             errors=errors,
         )
+
+    async def async_step_reconfigure(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Allow site basics to be revisited after the initial setup."""
+        entry = self._get_reconfigure_entry()
+        existing = dict(entry.data) if entry is not None else {}
+        errors: Dict[str, str] = {}
+
+        if user_input is not None:
+            flat = _flatten_sections(user_input, _SITE_SECTION_KEYS)
+            errors = _site_settings_errors(flat)
+            if not errors:
+                new_data = {**existing, **flat}
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data=new_data,
+                    reason="reconfigure_successful",
+                )
+            existing = {**existing, **flat}
+
+        ha_lat = self.hass.config.latitude if self.hass is not None else 0.0
+        ha_lon = self.hass.config.longitude if self.hass is not None else 0.0
+
+        schema = _site_settings_schema(
+            latitude_default=float(existing.get(CONF_LATITUDE, ha_lat)),
+            longitude_default=float(existing.get(CONF_LONGITUDE, ha_lon)),
+            outdoor_temp_default=existing.get(CONF_OUTDOOR_TEMP_ENTITY) or None,
+            weather_default=existing.get(CONF_WEATHER_ENTITY) or None,
+            update_interval_default=int(
+                existing.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+            ),
+        )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            errors=errors,
+        )
+
+    def _get_reconfigure_entry(self) -> Optional[config_entries.ConfigEntry]:
+        """Return the entry being reconfigured (HA 2024.x+ helper).
+
+        Falls back to ``hass.config_entries.async_get_entry(self.context["entry_id"])``
+        on older Home Assistant versions that don't expose the convenience
+        method.
+        """
+        getter = getattr(self, "_get_entry", None)
+        if callable(getter):
+            try:
+                return getter()
+            except Exception:  # pragma: no cover — defensive
+                pass
+        entry_id = (self.context or {}).get("entry_id") if hasattr(self, "context") else None
+        if entry_id and self.hass is not None:
+            return self.hass.config_entries.async_get_entry(entry_id)
+        return None
 
     @staticmethod
     @callback
@@ -260,8 +577,11 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 # ---------------------------------------------------------------------------
-# Schema builders
+# Room / window / heater / schedule schemas
 # ---------------------------------------------------------------------------
+
+
+_ROOM_SECTION_KEYS: Tuple[str, ...] = (SECTION_ADV_ENVELOPE,)
 
 
 def _room_form_schema(
@@ -273,33 +593,61 @@ def _room_form_schema(
     building_age_default: str = "1980_1999",
     envelope_tightness_default: str = DEFAULT_ENVELOPE_TIGHTNESS,
     comfort_offset_default: float = DEFAULT_COMFORT_OFFSET,
+    floor_type_default: str = DEFAULT_FLOOR_TYPE,
+    facade_colour_default: str = DEFAULT_FACADE_COLOUR,
+    facade_solar_share_default: float = DEFAULT_FACADE_SOLAR_SHARE,
+    thermal_bridge_psi_l_default: float = DEFAULT_THERMAL_BRIDGE_PSI_L,
+    sky_radiative_ua_default: float = DEFAULT_SKY_RADIATIVE_UA,
 ) -> vol.Schema:
     """Schema shared by the add-room and edit-room forms."""
-    # EntitySelector(multiple=True) requires a list as the default value.
     sensors_list = _coerce_to_list(sensors_default)
     window_sensors_list = _coerce_to_list(window_sensors_default)
 
+    advanced_schema = vol.Schema(
+        {
+            vol.Optional(CONF_FLOOR_TYPE, default=floor_type_default): _dropdown(
+                FLOOR_TYPE_OPTIONS, translation_key="floor_type",
+            ),
+            vol.Optional(CONF_FACADE_COLOUR, default=facade_colour_default): _dropdown(
+                FACADE_COLOUR_OPTIONS, translation_key="facade_colour",
+            ),
+            vol.Optional(
+                CONF_FACADE_SOLAR_SHARE, default=float(facade_solar_share_default),
+            ): _number_slider(min_value=0.0, max_value=1.0, step=0.05),
+            vol.Optional(
+                CONF_THERMAL_BRIDGE_PSI_L, default=float(thermal_bridge_psi_l_default),
+            ): _number_box(min_value=0.0, max_value=50.0, step=0.1, unit="W/K"),
+            vol.Optional(
+                CONF_SKY_RADIATIVE_UA, default=float(sky_radiative_ua_default),
+            ): _number_box(min_value=0.0, max_value=100.0, step=0.5, unit="W/K"),
+        }
+    )
+
     return vol.Schema(
         {
-            vol.Required(CONF_ROOM_NAME, default=name_default): str,
-            vol.Optional(CONF_TEMP_SENSORS, default=sensors_list): EntitySelector(
-                EntitySelectorConfig(domain="sensor", multiple=True)
+            vol.Required(CONF_ROOM_NAME, default=name_default): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
-            vol.Optional(CONF_WINDOW_SENSORS, default=window_sensors_list): EntitySelector(
-                EntitySelectorConfig(domain="binary_sensor", multiple=True)
+            vol.Optional(CONF_TEMP_SENSORS, default=sensors_list): _entity_selector_multi("sensor"),
+            vol.Optional(
+                CONF_WINDOW_SENSORS, default=window_sensors_list,
+            ): _entity_selector_multi("binary_sensor"),
+            vol.Required("room_size", default=room_size_default): _dropdown(
+                list(ROOM_SIZE_TO_THERMAL_MASS), translation_key="room_size",
             ),
-            vol.Required("room_size", default=room_size_default): vol.In(
-                list(ROOM_SIZE_TO_THERMAL_MASS)
-            ),
-            vol.Required("building_age", default=building_age_default): vol.In(
-                list(BUILDING_AGE_TO_R_EXTERNAL)
+            vol.Required("building_age", default=building_age_default): _dropdown(
+                list(BUILDING_AGE_TO_R_EXTERNAL), translation_key="building_age",
             ),
             vol.Required(
                 "envelope_tightness", default=envelope_tightness_default,
-            ): vol.In(list(ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION)),
+            ): _dropdown(
+                list(ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION),
+                translation_key="envelope_tightness",
+            ),
             vol.Required(
-                CONF_COMFORT_OFFSET, default=comfort_offset_default,
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=10.0)),
+                CONF_COMFORT_OFFSET, default=float(comfort_offset_default),
+            ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
+            vol.Required(SECTION_ADV_ENVELOPE): _section(advanced_schema, collapsed=True),
         }
     )
 
@@ -307,17 +655,20 @@ def _room_form_schema(
 def _window_form_schema() -> vol.Schema:
     return vol.Schema(
         {
-            vol.Required(CONF_WINDOW_AREA): vol.All(
-                vol.Coerce(float), vol.Range(min=0.01, max=50.0)
+            vol.Required(CONF_WINDOW_AREA): _number_box(
+                min_value=0.01, max_value=50.0, step=0.1, unit="m²",
             ),
-            vol.Required(CONF_WINDOW_ORIENTATION, default="S"): vol.In(
-                list(COMPASS_TO_DEGREES)
+            vol.Required(CONF_WINDOW_ORIENTATION, default="S"): _dropdown(
+                list(COMPASS_TO_DEGREES), translation_key="orientation",
             ),
-            vol.Optional(CONF_WINDOW_TILT, default=DEFAULT_WINDOW_TILT): vol.All(
-                vol.Coerce(float), vol.Range(min=0.0, max=90.0)
+            vol.Optional(CONF_WINDOW_TILT, default=float(DEFAULT_WINDOW_TILT)): _number_slider(
+                min_value=0.0, max_value=90.0, step=5.0, unit="°",
             ),
         }
     )
+
+
+_HEATER_SECTION_KEYS: Tuple[str, ...] = (SECTION_PERFORMANCE,)
 
 
 def _heater_form_schema(
@@ -332,42 +683,51 @@ def _heater_form_schema(
     min_power_default: float = DEFAULT_MIN_POWER,
     max_temp_offset_default: float = DEFAULT_MAX_TEMP_OFFSET,
     hvac_mode_default: str = DEFAULT_SOURCE_HVAC_MODE,
-    emitter_time_constant_default: float = 60.0,
+    emitter_time_constant_default: float = _DEFAULT_EMITTER_TIME_CONSTANT,
 ) -> vol.Schema:
     """Schema for adding/editing a heat source (heater)."""
+
+    perf_inner: Dict[Any, Any] = {
+        vol.Optional(CONF_SOURCE_EFFICIENCY, default=float(efficiency_default)): _number_slider(
+            min_value=0.1, max_value=1.0, step=0.05,
+        ),
+        vol.Optional(CONF_SOURCE_COP_RATED, default=float(cop_rated_default)): _number_slider(
+            min_value=1.0, max_value=8.0, step=0.1,
+        ),
+        vol.Optional(
+            CONF_SOURCE_COP_TEMP_REF, default=float(cop_temp_ref_default),
+        ): _number_box(min_value=-20.0, max_value=20.0, step=0.5, unit="°C"),
+        vol.Optional(CONF_SOURCE_MIN_POWER, default=float(min_power_default)): _number_box(
+            min_value=0.0, max_value=100000.0, step=10.0, unit="W",
+        ),
+        vol.Optional(
+            CONF_SOURCE_MAX_TEMP_OFFSET, default=float(max_temp_offset_default),
+        ): _number_box(min_value=0.1, max_value=20.0, step=0.1, unit="°C"),
+        vol.Optional(CONF_SOURCE_HVAC_MODE, default=hvac_mode_default): _dropdown(
+            [SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL],
+            translation_key="hvac_mode",
+        ),
+        vol.Optional(
+            CONF_SOURCE_EMITTER_TIME_CONSTANT, default=float(emitter_time_constant_default),
+        ): _number_box(min_value=0.0, max_value=600.0, step=5.0, unit="s"),
+    }
+
     return vol.Schema(
         {
-            vol.Required(CONF_SOURCE_NAME, default=name_default): str,
-            vol.Required(CONF_SOURCE_TYPE, default=type_default): vol.In(
-                [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP]
+            vol.Required(CONF_SOURCE_NAME, default=name_default): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT)
+            ),
+            vol.Required(CONF_SOURCE_TYPE, default=type_default): _radio(
+                [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP],
+                translation_key="source_type",
             ),
             vol.Required(
-                CONF_SOURCE_MAX_POWER, default=max_power_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=100.0, max=100000.0)),
-            vol.Required(CONF_SOURCE_HEATER_ENTITY, default=heater_entity_default): EntitySelector(
-                EntitySelectorConfig(domain="switch")
-            ),
-            vol.Optional(
-                CONF_SOURCE_EFFICIENCY, default=efficiency_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1.0)),
-            vol.Optional(
-                CONF_SOURCE_COP_RATED, default=cop_rated_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10.0)),
-            vol.Optional(
-                CONF_SOURCE_COP_TEMP_REF, default=cop_temp_ref_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=-20.0, max=20.0)),
-            vol.Optional(
-                CONF_SOURCE_MIN_POWER, default=min_power_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=100000.0)),
-            vol.Optional(
-                CONF_SOURCE_MAX_TEMP_OFFSET, default=max_temp_offset_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20.0)),
-            vol.Optional(
-                CONF_SOURCE_HVAC_MODE, default=hvac_mode_default
-            ): vol.In([SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL]),
-            vol.Optional(
-                CONF_SOURCE_EMITTER_TIME_CONSTANT, default=emitter_time_constant_default
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=600.0)),
+                CONF_SOURCE_MAX_POWER, default=float(max_power_default),
+            ): _number_box(min_value=100.0, max_value=100000.0, step=100.0, unit="W"),
+            vol.Required(
+                CONF_SOURCE_HEATER_ENTITY, default=heater_entity_default,
+            ): _entity_selector_optional("switch"),
+            vol.Required(SECTION_PERFORMANCE): _section(vol.Schema(perf_inner), collapsed=True),
         }
     )
 
@@ -381,6 +741,9 @@ _DAY_OPTIONS = [
     {"value": "sat", "label": "Saturday"},
     {"value": "sun", "label": "Sunday"},
 ]
+
+
+_PERIOD_SECTION_KEYS: Tuple[str, ...] = (SECTION_ADV_PERIOD,)
 
 
 def _period_form_schema(
@@ -399,22 +762,35 @@ def _period_form_schema(
     """Schema shared by the add-period and edit-period forms."""
     if days_default is None:
         days_default = []
+
+    advanced_schema = vol.Schema(
+        {
+            vol.Optional(
+                CONF_SCHEDULE_TRACKING_WEIGHT, default=float(tracking_weight_default),
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+            vol.Optional(
+                CONF_SCHEDULE_ENERGY_WEIGHT, default=float(energy_weight_default),
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+            vol.Optional(
+                CONF_SCHEDULE_FROST_PROTECTION, default=float(frost_protection_default),
+            ): _number_box(min_value=0.0, max_value=20.0, step=0.5, unit="°C"),
+        }
+    )
+
     return vol.Schema(
         {
             vol.Required(CONF_SCHEDULE_NAME, default=name_default): TextSelector(
                 TextSelectorConfig(type=TextSelectorType.TEXT)
             ),
-            vol.Required(CONF_SCHEDULE_MODE, default=mode_default): SelectSelector(
-                SelectSelectorConfig(
-                    options=[SCHEDULE_MODE_COMFORT, SCHEDULE_MODE_OFF],
-                    mode=SelectSelectorMode.LIST,
-                )
+            vol.Required(CONF_SCHEDULE_MODE, default=mode_default): _radio(
+                [SCHEDULE_MODE_COMFORT, SCHEDULE_MODE_OFF],
+                translation_key="schedule_mode",
             ),
-            vol.Required(CONF_SCHEDULE_START, default=start_default): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT)
+            vol.Required(CONF_SCHEDULE_START, default=start_default): TimeSelector(
+                TimeSelectorConfig()
             ),
-            vol.Required(CONF_SCHEDULE_END, default=end_default): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT)
+            vol.Required(CONF_SCHEDULE_END, default=end_default): TimeSelector(
+                TimeSelectorConfig()
             ),
             vol.Optional(CONF_SCHEDULE_DAYS, default=days_default): SelectSelector(
                 SelectSelectorConfig(
@@ -423,21 +799,13 @@ def _period_form_schema(
                     mode=SelectSelectorMode.LIST,
                 )
             ),
-            vol.Optional(CONF_SCHEDULE_SETPOINT, default=setpoint_default): NumberSelector(
-                NumberSelectorConfig(min=5.0, max=35.0, step=0.5, mode=NumberSelectorMode.BOX)
+            vol.Optional(CONF_SCHEDULE_SETPOINT, default=float(setpoint_default)): _number_box(
+                min_value=5.0, max_value=35.0, step=0.5, unit="°C",
             ),
-            vol.Optional(CONF_SCHEDULE_COMFORT_OFFSET, default=comfort_offset_default): NumberSelector(
-                NumberSelectorConfig(min=0.1, max=10.0, step=0.1, mode=NumberSelectorMode.BOX)
-            ),
-            vol.Optional(CONF_SCHEDULE_TRACKING_WEIGHT, default=tracking_weight_default): NumberSelector(
-                NumberSelectorConfig(min=0.0, max=10.0, step=0.1, mode=NumberSelectorMode.BOX)
-            ),
-            vol.Optional(CONF_SCHEDULE_ENERGY_WEIGHT, default=energy_weight_default): NumberSelector(
-                NumberSelectorConfig(min=0.0, max=10.0, step=0.1, mode=NumberSelectorMode.BOX)
-            ),
-            vol.Optional(CONF_SCHEDULE_FROST_PROTECTION, default=frost_protection_default): NumberSelector(
-                NumberSelectorConfig(min=0.0, max=20.0, step=0.5, mode=NumberSelectorMode.BOX)
-            ),
+            vol.Optional(
+                CONF_SCHEDULE_COMFORT_OFFSET, default=float(comfort_offset_default),
+            ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
+            vol.Required(SECTION_ADV_PERIOD): _section(advanced_schema, collapsed=True),
         }
     )
 
@@ -445,6 +813,16 @@ def _period_form_schema(
 # ---------------------------------------------------------------------------
 # Options flow
 # ---------------------------------------------------------------------------
+
+
+_GLOBAL_SECTION_KEYS: Tuple[str, ...] = (
+    SECTION_ADV_ESTIMATION,
+    SECTION_WINDOW_DETECTION,
+)
+_MPC_SECTION_KEYS: Tuple[str, ...] = (
+    SECTION_COMFORT_VS_ENERGY,
+    SECTION_ADV_CONTROLLER,
+)
 
 
 class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
@@ -488,7 +866,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         """Form for site / timing / sensor settings."""
         if user_input is not None:
-            self._data.update(user_input)
+            flat = _flatten_sections(user_input, _GLOBAL_SECTION_KEYS)
+            self._data.update(flat)
             return await self.async_step_init()
 
         current = self._data
@@ -498,54 +877,96 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         # (EntitySelector rejects "" as an invalid entity ID).
         outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
         weather = current.get(CONF_WEATHER_ENTITY) or None
-        outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
 
-        schema = vol.Schema(
-            {
+        basics_schema_inner: Dict[Any, Any] = {}
+        if outdoor_temp:
+            basics_schema_inner[
                 vol.Optional(
                     CONF_OUTDOOR_TEMP_ENTITY,
                     description={"suggested_value": outdoor_temp},
-                ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+                )
+            ] = _entity_selector_optional("sensor")
+        else:
+            basics_schema_inner[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional(
+                "sensor"
+            )
+
+        if weather:
+            basics_schema_inner[
                 vol.Optional(
                     CONF_WEATHER_ENTITY,
                     description={"suggested_value": weather},
-                ): EntitySelector(EntitySelectorConfig(domain="weather")),
-                vol.Optional(
-                    CONF_UPDATE_INTERVAL,
-                    default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-                ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
+                )
+            ] = _entity_selector_optional("weather")
+        else:
+            basics_schema_inner[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional(
+                "weather"
+            )
+
+        basics_schema_inner[
+            vol.Optional(
+                CONF_UPDATE_INTERVAL,
+                default=int(current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)),
+            )
+        ] = _number_box(min_value=60, max_value=3600, step=30, unit="s")
+
+        estimation_schema = vol.Schema(
+            {
                 vol.Optional(
                     CONF_SIGMA_W,
-                    default=current.get(CONF_SIGMA_W, DEFAULT_SIGMA_W),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
+                    default=float(current.get(CONF_SIGMA_W, DEFAULT_SIGMA_W)),
+                ): _number_box(min_value=1e-6, max_value=10.0, step=0.01),
                 vol.Optional(
                     CONF_SIGMA_V,
-                    default=current.get(CONF_SIGMA_V, DEFAULT_SIGMA_V),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
+                    default=float(current.get(CONF_SIGMA_V, DEFAULT_SIGMA_V)),
+                ): _number_box(min_value=1e-6, max_value=10.0, step=0.01),
                 vol.Optional(
                     CONF_SIGMA_B,
-                    default=current.get(CONF_SIGMA_B, DEFAULT_SIGMA_B),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1e-8, max=1.0)),
+                    default=float(current.get(CONF_SIGMA_B, DEFAULT_SIGMA_B)),
+                ): _number_box(min_value=1e-8, max_value=1.0, step=0.0001),
+            }
+        )
+
+        window_schema = vol.Schema(
+            {
                 vol.Optional(
                     CONF_WINDOW_OPEN_DEBOUNCE,
-                    default=current.get(
-                        CONF_WINDOW_OPEN_DEBOUNCE, DEFAULT_WINDOW_OPEN_DEBOUNCE,
+                    default=int(
+                        current.get(
+                            CONF_WINDOW_OPEN_DEBOUNCE, DEFAULT_WINDOW_OPEN_DEBOUNCE,
+                        )
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                ): _number_box(min_value=0, max_value=3600, step=5, unit="s"),
                 vol.Optional(
                     CONF_WINDOW_OPEN_CLOSE_SETTLE,
-                    default=current.get(
-                        CONF_WINDOW_OPEN_CLOSE_SETTLE,
-                        DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+                    default=int(
+                        current.get(
+                            CONF_WINDOW_OPEN_CLOSE_SETTLE,
+                            DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
+                        )
                     ),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                ): _number_box(min_value=0, max_value=3600, step=5, unit="s"),
                 vol.Optional(
                     CONF_WINDOW_OPEN_Q_INFLATION,
-                    default=current.get(
-                        CONF_WINDOW_OPEN_Q_INFLATION,
-                        DEFAULT_WINDOW_OPEN_Q_INFLATION,
+                    default=float(
+                        current.get(
+                            CONF_WINDOW_OPEN_Q_INFLATION,
+                            DEFAULT_WINDOW_OPEN_Q_INFLATION,
+                        )
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=1000.0)),
+                ): _number_box(min_value=1.0, max_value=1000.0, step=1.0),
+            }
+        )
+
+        schema = vol.Schema(
+            {
+                **basics_schema_inner,
+                vol.Required(SECTION_ADV_ESTIMATION): _section(
+                    estimation_schema, collapsed=True,
+                ),
+                vol.Required(SECTION_WINDOW_DETECTION): _section(
+                    window_schema, collapsed=True,
+                ),
             }
         )
 
@@ -560,38 +981,53 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         """Form for MPC controller and model tuning parameters."""
         if user_input is not None:
-            self._data.update(user_input)
+            flat = _flatten_sections(user_input, _MPC_SECTION_KEYS)
+            self._data.update(flat)
             return await self.async_step_init()
 
         current = self._data
-        schema = vol.Schema(
+        comfort_schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_TRACKING_WEIGHT,
+                    default=float(current.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT)),
+                ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+                vol.Optional(
+                    CONF_ENERGY_WEIGHT,
+                    default=float(current.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)),
+                ): _number_slider(min_value=0.0, max_value=10.0, step=0.01),
+            }
+        )
+        advanced_schema = vol.Schema(
             {
                 vol.Optional(
                     CONF_HORIZON,
-                    default=current.get(CONF_HORIZON, DEFAULT_HORIZON),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
-                vol.Optional(
-                    CONF_TRACKING_WEIGHT,
-                    default=current.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-                vol.Optional(
-                    CONF_ENERGY_WEIGHT,
-                    default=current.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                    default=int(current.get(CONF_HORIZON, DEFAULT_HORIZON)),
+                ): _number_box(min_value=1, max_value=480, step=1),
                 vol.Optional(
                     CONF_SMOOTHING_WEIGHT,
-                    default=current.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                    default=float(current.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)),
+                ): _number_slider(min_value=0.0, max_value=10.0, step=0.05),
                 vol.Optional(
                     CONF_SOFT_CONSTRAINT_WEIGHT,
-                    default=current.get(
-                        CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT
+                    default=float(
+                        current.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
                     ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+                ): _number_box(min_value=0.0, max_value=10000.0, step=1.0),
                 vol.Optional(
                     CONF_TERMINAL_WEIGHT,
-                    default=current.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT),
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=10000.0)),
+                    default=float(current.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)),
+                ): _number_box(min_value=1.0, max_value=10000.0, step=1.0),
+            }
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(SECTION_COMFORT_VS_ENERGY): _section(
+                    comfort_schema, collapsed=False,
+                ),
+                vol.Required(SECTION_ADV_CONTROLLER): _section(
+                    advanced_schema, collapsed=True,
+                ),
             }
         )
 
@@ -641,21 +1077,26 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            # EntitySelector(multiple=True) already returns a list.
-            sensors = _coerce_to_list(user_input.get(CONF_TEMP_SENSORS, []))
-            window_sensors = _coerce_to_list(user_input.get(CONF_WINDOW_SENSORS, []))
-            tightness = user_input.get("envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS)
+            flat = _flatten_sections(user_input, _ROOM_SECTION_KEYS)
+            sensors = _coerce_to_list(flat.get(CONF_TEMP_SENSORS, []))
+            window_sensors = _coerce_to_list(flat.get(CONF_WINDOW_SENSORS, []))
+            tightness = flat.get("envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS)
             err = self._rooms.add(
-                name=user_input[CONF_ROOM_NAME],
+                name=flat[CONF_ROOM_NAME],
                 sensors=sensors,
-                thermal_mass=ROOM_SIZE_TO_THERMAL_MASS[user_input["room_size"]],
-                r_external=BUILDING_AGE_TO_R_EXTERNAL[user_input["building_age"]],
+                thermal_mass=ROOM_SIZE_TO_THERMAL_MASS[flat["room_size"]],
+                r_external=BUILDING_AGE_TO_R_EXTERNAL[flat["building_age"]],
                 setpoint=DEFAULT_ROOM_SETPOINT,
                 infiltration_fraction=(
                     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
                 ),
-                comfort_offset=user_input[CONF_COMFORT_OFFSET],
+                comfort_offset=flat[CONF_COMFORT_OFFSET],
                 window_sensors=window_sensors,
+                floor_type=flat.get(CONF_FLOOR_TYPE),
+                facade_colour=flat.get(CONF_FACADE_COLOUR),
+                facade_solar_share=flat.get(CONF_FACADE_SOLAR_SHARE),
+                thermal_bridge_psi_l=flat.get(CONF_THERMAL_BRIDGE_PSI_L),
+                sky_radiative_ua=flat.get(CONF_SKY_RADIATIVE_UA),
             )
             if err is None:
                 return await self.async_step_manage_rooms()
@@ -681,7 +1122,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         names = self._rooms.names()
         schema = vol.Schema(
-            {vol.Required("room_name", default=names[0]): vol.In(names)}
+            {vol.Required("room_name", default=names[0]): _dropdown(names)}
         )
         return self.async_show_form(step_id="edit_room", data_schema=schema)
 
@@ -694,38 +1135,55 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_manage_rooms()
 
         if user_input is not None:
-            sensors = _coerce_to_list(user_input.get(CONF_TEMP_SENSORS, []))
-            window_sensors = _coerce_to_list(user_input.get(CONF_WINDOW_SENSORS, []))
-            tightness = user_input.get("envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS)
+            flat = _flatten_sections(user_input, _ROOM_SECTION_KEYS)
+            sensors = _coerce_to_list(flat.get(CONF_TEMP_SENSORS, []))
+            window_sensors = _coerce_to_list(flat.get(CONF_WINDOW_SENSORS, []))
+            tightness = flat.get("envelope_tightness", DEFAULT_ENVELOPE_TIGHTNESS)
             err = self._rooms.update_current(
-                name=user_input[CONF_ROOM_NAME],
+                name=flat[CONF_ROOM_NAME],
                 sensors=sensors,
-                thermal_mass=ROOM_SIZE_TO_THERMAL_MASS[user_input["room_size"]],
-                r_external=BUILDING_AGE_TO_R_EXTERNAL[user_input["building_age"]],
+                thermal_mass=ROOM_SIZE_TO_THERMAL_MASS[flat["room_size"]],
+                r_external=BUILDING_AGE_TO_R_EXTERNAL[flat["building_age"]],
                 setpoint=DEFAULT_ROOM_SETPOINT,
                 infiltration_fraction=(
                     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION[tightness]
                 ),
-                comfort_offset=user_input[CONF_COMFORT_OFFSET],
+                comfort_offset=flat[CONF_COMFORT_OFFSET],
                 window_sensors=window_sensors,
+                floor_type=flat.get(CONF_FLOOR_TYPE),
+                facade_colour=flat.get(CONF_FACADE_COLOUR),
+                facade_solar_share=flat.get(CONF_FACADE_SOLAR_SHARE),
+                thermal_bridge_psi_l=flat.get(CONF_THERMAL_BRIDGE_PSI_L),
+                sky_radiative_ua=flat.get(CONF_SKY_RADIATIVE_UA),
             )
             if err is None:
                 return await self.async_step_manage_rooms()
-            # Re-show the form with the values the user just entered.
             return self.async_show_form(
                 step_id="room_detail",
                 data_schema=_room_form_schema(
-                    name_default=user_input.get(CONF_ROOM_NAME, ""),
+                    name_default=flat.get(CONF_ROOM_NAME, ""),
                     sensors_default=sensors,
                     window_sensors_default=window_sensors,
-                    room_size_default=user_input.get("room_size", "medium"),
-                    building_age_default=user_input.get("building_age", "1980_1999"),
+                    room_size_default=flat.get("room_size", "medium"),
+                    building_age_default=flat.get("building_age", "1980_1999"),
                     envelope_tightness_default=tightness,
-                    comfort_offset_default=user_input.get(
+                    comfort_offset_default=flat.get(
                         CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET,
+                    ),
+                    floor_type_default=flat.get(CONF_FLOOR_TYPE, DEFAULT_FLOOR_TYPE),
+                    facade_colour_default=flat.get(CONF_FACADE_COLOUR, DEFAULT_FACADE_COLOUR),
+                    facade_solar_share_default=flat.get(
+                        CONF_FACADE_SOLAR_SHARE, DEFAULT_FACADE_SOLAR_SHARE,
+                    ),
+                    thermal_bridge_psi_l_default=flat.get(
+                        CONF_THERMAL_BRIDGE_PSI_L, DEFAULT_THERMAL_BRIDGE_PSI_L,
+                    ),
+                    sky_radiative_ua_default=flat.get(
+                        CONF_SKY_RADIATIVE_UA, DEFAULT_SKY_RADIATIVE_UA,
                     ),
                 ),
                 errors={CONF_ROOM_NAME: err},
+                description_placeholders={"name": room.get(CONF_ROOM_NAME, "")},
             )
 
         # Pre-fill with values already stored for this room.
@@ -759,8 +1217,23 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             comfort_offset_default=float(
                 room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
             ),
+            floor_type_default=room.get(CONF_FLOOR_TYPE, DEFAULT_FLOOR_TYPE),
+            facade_colour_default=room.get(CONF_FACADE_COLOUR, DEFAULT_FACADE_COLOUR),
+            facade_solar_share_default=float(
+                room.get(CONF_FACADE_SOLAR_SHARE, DEFAULT_FACADE_SOLAR_SHARE)
+            ),
+            thermal_bridge_psi_l_default=float(
+                room.get(CONF_THERMAL_BRIDGE_PSI_L, DEFAULT_THERMAL_BRIDGE_PSI_L)
+            ),
+            sky_radiative_ua_default=float(
+                room.get(CONF_SKY_RADIATIVE_UA, DEFAULT_SKY_RADIATIVE_UA)
+            ),
         )
-        return self.async_show_form(step_id="room_detail", data_schema=schema)
+        return self.async_show_form(
+            step_id="room_detail",
+            data_schema=schema,
+            description_placeholders={"name": room.get(CONF_ROOM_NAME, "")},
+        )
 
     async def async_step_remove_room(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -775,7 +1248,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         names = self._rooms.names()
         schema = vol.Schema(
-            {vol.Required("room_name", default=names[0]): vol.In(names)}
+            {vol.Required("room_name", default=names[0]): _dropdown(names)}
         )
         return self.async_show_form(step_id="remove_room", data_schema=schema)
 
@@ -793,7 +1266,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         names = self._rooms.names()
         schema = vol.Schema(
-            {vol.Required("room_name", default=names[0]): vol.In(names)}
+            {vol.Required("room_name", default=names[0]): _dropdown(names)}
         )
         return self.async_show_form(step_id="manage_room_windows", data_schema=schema)
 
@@ -804,6 +1277,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     def _current_windows(self) -> Optional[WindowFlowHelper]:
         room = self._rooms.current_room()
         return WindowFlowHelper(room) if room is not None else None
+
+    def _current_room_name(self) -> str:
+        room = self._rooms.current_room() or {}
+        return room.get(CONF_ROOM_NAME, "")
 
     async def async_step_manage_windows(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -817,7 +1294,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             menu_options.append("remove_window")
         menu_options.append("finish_windows")
         return self.async_show_menu(
-            step_id="manage_windows", menu_options=menu_options
+            step_id="manage_windows",
+            menu_options=menu_options,
+            description_placeholders={"name": self._current_room_name()},
         )
 
     async def async_step_add_window(
@@ -837,7 +1316,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_manage_windows()
 
         return self.async_show_form(
-            step_id="add_window", data_schema=_window_form_schema()
+            step_id="add_window",
+            data_schema=_window_form_schema(),
+            description_placeholders={"name": self._current_room_name()},
         )
 
     async def async_step_remove_window(
@@ -859,7 +1340,11 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         schema = vol.Schema(
             {vol.Required("window_idx", default="0"): vol.In(window_options)}
         )
-        return self.async_show_form(step_id="remove_window", data_schema=schema)
+        return self.async_show_form(
+            step_id="remove_window",
+            data_schema=schema,
+            description_placeholders={"name": self._current_room_name()},
+        )
 
     async def async_step_finish_windows(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -889,7 +1374,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         names = self._rooms.names()
         schema = vol.Schema(
-            {vol.Required("room_name", default=names[0]): vol.In(names)}
+            {vol.Required("room_name", default=names[0]): _dropdown(names)}
         )
         return self.async_show_form(step_id="manage_room_heaters", data_schema=schema)
 
@@ -905,7 +1390,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             menu_options += ["edit_heater", "remove_heater"]
         menu_options.append("finish_heaters")
         return self.async_show_menu(
-            step_id="manage_heaters", menu_options=menu_options
+            step_id="manage_heaters",
+            menu_options=menu_options,
+            description_placeholders={"name": self._current_room_name()},
         )
 
     async def async_step_add_heater(
@@ -917,23 +1404,26 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_manage_room_heaters()
 
         if user_input is not None:
+            flat = _flatten_sections(user_input, _HEATER_SECTION_KEYS)
             heaters.add(
-                name=user_input[CONF_SOURCE_NAME],
-                source_type=user_input[CONF_SOURCE_TYPE],
-                max_power=user_input[CONF_SOURCE_MAX_POWER],
-                heater_entity=user_input[CONF_SOURCE_HEATER_ENTITY],
-                efficiency=user_input.get(CONF_SOURCE_EFFICIENCY),
-                cop_rated=user_input.get(CONF_SOURCE_COP_RATED),
-                cop_temp_ref=user_input.get(CONF_SOURCE_COP_TEMP_REF),
-                min_power=user_input.get(CONF_SOURCE_MIN_POWER),
-                max_temp_offset=user_input.get(CONF_SOURCE_MAX_TEMP_OFFSET),
-                hvac_mode=user_input.get(CONF_SOURCE_HVAC_MODE),
-                emitter_time_constant=user_input.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
+                name=flat[CONF_SOURCE_NAME],
+                source_type=flat[CONF_SOURCE_TYPE],
+                max_power=flat[CONF_SOURCE_MAX_POWER],
+                heater_entity=flat[CONF_SOURCE_HEATER_ENTITY],
+                efficiency=flat.get(CONF_SOURCE_EFFICIENCY),
+                cop_rated=flat.get(CONF_SOURCE_COP_RATED),
+                cop_temp_ref=flat.get(CONF_SOURCE_COP_TEMP_REF),
+                min_power=flat.get(CONF_SOURCE_MIN_POWER),
+                max_temp_offset=flat.get(CONF_SOURCE_MAX_TEMP_OFFSET),
+                hvac_mode=flat.get(CONF_SOURCE_HVAC_MODE),
+                emitter_time_constant=flat.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
             )
             return await self.async_step_manage_heaters()
 
         return self.async_show_form(
-            step_id="add_heater", data_schema=_heater_form_schema()
+            step_id="add_heater",
+            data_schema=_heater_form_schema(),
+            description_placeholders={"name": self._current_room_name()},
         )
 
     async def async_step_edit_heater(
@@ -973,19 +1463,20 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         heater = heaters.heat_sources[idx]
 
         if user_input is not None:
+            flat = _flatten_sections(user_input, _HEATER_SECTION_KEYS)
             heaters.update(
                 idx,
-                name=user_input[CONF_SOURCE_NAME],
-                source_type=user_input[CONF_SOURCE_TYPE],
-                max_power=user_input[CONF_SOURCE_MAX_POWER],
-                heater_entity=user_input[CONF_SOURCE_HEATER_ENTITY],
-                efficiency=user_input.get(CONF_SOURCE_EFFICIENCY),
-                cop_rated=user_input.get(CONF_SOURCE_COP_RATED),
-                cop_temp_ref=user_input.get(CONF_SOURCE_COP_TEMP_REF),
-                min_power=user_input.get(CONF_SOURCE_MIN_POWER),
-                max_temp_offset=user_input.get(CONF_SOURCE_MAX_TEMP_OFFSET),
-                hvac_mode=user_input.get(CONF_SOURCE_HVAC_MODE),
-                emitter_time_constant=user_input.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
+                name=flat[CONF_SOURCE_NAME],
+                source_type=flat[CONF_SOURCE_TYPE],
+                max_power=flat[CONF_SOURCE_MAX_POWER],
+                heater_entity=flat[CONF_SOURCE_HEATER_ENTITY],
+                efficiency=flat.get(CONF_SOURCE_EFFICIENCY),
+                cop_rated=flat.get(CONF_SOURCE_COP_RATED),
+                cop_temp_ref=flat.get(CONF_SOURCE_COP_TEMP_REF),
+                min_power=flat.get(CONF_SOURCE_MIN_POWER),
+                max_temp_offset=flat.get(CONF_SOURCE_MAX_TEMP_OFFSET),
+                hvac_mode=flat.get(CONF_SOURCE_HVAC_MODE),
+                emitter_time_constant=flat.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
             )
             self._selected_heater_idx = None
             return await self.async_step_manage_heaters()
@@ -1001,9 +1492,15 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             min_power_default=float(heater.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER)),
             max_temp_offset_default=float(heater.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET)),
             hvac_mode_default=heater.get(CONF_SOURCE_HVAC_MODE, DEFAULT_SOURCE_HVAC_MODE),
-            emitter_time_constant_default=float(heater.get(CONF_SOURCE_EMITTER_TIME_CONSTANT, 60.0)),
+            emitter_time_constant_default=float(
+                heater.get(CONF_SOURCE_EMITTER_TIME_CONSTANT, _DEFAULT_EMITTER_TIME_CONSTANT)
+            ),
         )
-        return self.async_show_form(step_id="heater_detail", data_schema=schema)
+        return self.async_show_form(
+            step_id="heater_detail",
+            data_schema=schema,
+            description_placeholders={"name": heater.get(CONF_SOURCE_NAME, "")},
+        )
 
     async def async_step_remove_heater(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -1054,7 +1551,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         names = self._rooms.names()
         schema = vol.Schema(
-            {vol.Required("room_name", default=names[0]): vol.In(names)}
+            {vol.Required("room_name", default=names[0]): _dropdown(names)}
         )
         return self.async_show_form(step_id="manage_room_schedule", data_schema=schema)
 
@@ -1070,7 +1567,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             menu_options += ["select_edit_period", "remove_period"]
         menu_options.append("finish_schedule")
         return self.async_show_menu(
-            step_id="manage_schedule", menu_options=menu_options
+            step_id="manage_schedule",
+            menu_options=menu_options,
+            description_placeholders={"name": self._current_room_name()},
         )
 
     async def async_step_add_period(
@@ -1084,8 +1583,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            start_str = user_input.get(CONF_SCHEDULE_START, "")
-            end_str = user_input.get(CONF_SCHEDULE_END, "")
+            flat = _flatten_sections(user_input, _PERIOD_SECTION_KEYS)
+            start_str = flat.get(CONF_SCHEDULE_START, "")
+            end_str = flat.get(CONF_SCHEDULE_END, "")
             if not _is_valid_time_string(start_str):
                 errors[CONF_SCHEDULE_START] = "invalid_time"
             if not _is_valid_time_string(end_str):
@@ -1097,7 +1597,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 room_comfort_offset = float(
                     room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
                 )
-                period = _build_period_dict(user_input, room_setpoint, room_comfort_offset)
+                period = _build_period_dict(flat, room_setpoint, room_comfort_offset)
                 schedule.add(period)
                 return await self.async_step_manage_schedule()
 
@@ -1113,6 +1613,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 comfort_offset_default=room_comfort_offset,
             ),
             errors=errors,
+            description_placeholders={"name": self._current_room_name()},
         )
 
     async def async_step_select_edit_period(
@@ -1150,8 +1651,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            start_str = user_input.get(CONF_SCHEDULE_START, "")
-            end_str = user_input.get(CONF_SCHEDULE_END, "")
+            flat = _flatten_sections(user_input, _PERIOD_SECTION_KEYS)
+            start_str = flat.get(CONF_SCHEDULE_START, "")
+            end_str = flat.get(CONF_SCHEDULE_END, "")
             if not _is_valid_time_string(start_str):
                 errors[CONF_SCHEDULE_START] = "invalid_time"
             if not _is_valid_time_string(end_str):
@@ -1163,7 +1665,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 room_comfort_offset = float(
                     room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
                 )
-                updated = _build_period_dict(user_input, room_setpoint, room_comfort_offset)
+                updated = _build_period_dict(flat, room_setpoint, room_comfort_offset)
                 schedule.update(idx, updated)
                 self._selected_period_idx = None
                 return await self.async_step_manage_schedule()
@@ -1186,7 +1688,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             frost_protection_default=float(period.get(CONF_SCHEDULE_FROST_PROTECTION, 12.0)),
         )
         return self.async_show_form(
-            step_id="edit_period", data_schema=schema, errors=errors
+            step_id="edit_period",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"name": period.get(CONF_SCHEDULE_NAME, "")},
         )
 
     async def async_step_remove_period(
