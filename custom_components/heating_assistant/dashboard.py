@@ -1481,12 +1481,317 @@ def _settings_view(spec: DashboardSpec) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _sysid_temperature_card(room: RoomSpec) -> Dict[str, Any]:
+    """Temperature comparison chart: measured (red) vs simulated (blue) + covariance band."""
+    sysid = _eid("sensor", room.name, "sysid_simulation")
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {
+            "show": True,
+            "title": f"{room.name} – SysID: Measured vs Simulated",
+            "show_states": True,
+        },
+        "graph_span": "1d",
+        "apex_config": {
+            "chart": {"animations": {"enabled": False}},
+            "legend": {"show": True, "position": "top"},
+            "noData": {
+                "text": (
+                    "No simulation data yet.  Press **Run SysID Simulation** "
+                    "to generate the comparison."
+                ),
+                "align": "center",
+                "verticalAlign": "middle",
+                "style": {"fontSize": "13px", "color": "#9E9E9E"},
+            },
+        },
+        "yaxis": [
+            {
+                "id": "temp",
+                "apex_config": {
+                    "title": {"text": "Temperature (°C)"},
+                    "decimalsInFloat": 2,
+                    "tickAmount": 5,
+                },
+            }
+        ],
+        "series": [
+            # Covariance upper bound – rendered first so it forms the top of the band
+            {
+                "entity": sysid,
+                "name": "95 % band",
+                "yaxis_id": "temp",
+                "type": "area",
+                "color": "#1E88E5",
+                "opacity": 0.15,
+                "stroke_width": 0,
+                "curve": "smooth",
+                "data_generator": (
+                    "return (entity.attributes.simulation || []).map(p => "
+                    "[new Date(p.time).getTime(), p.cov_upper ?? null]);"
+                ),
+                "show": {"in_header": False, "in_legend": True},
+            },
+            # Covariance lower bound – same colour, card background fill creates the band
+            {
+                "entity": sysid,
+                "name": "95 % band",
+                "yaxis_id": "temp",
+                "type": "area",
+                "color": "var(--card-background-color)",
+                "opacity": 1.0,
+                "stroke_width": 0,
+                "curve": "smooth",
+                "data_generator": (
+                    "return (entity.attributes.simulation || []).map(p => "
+                    "[new Date(p.time).getTime(), p.cov_lower ?? null]);"
+                ),
+                "show": {"in_header": False, "in_legend": False},
+            },
+            # Simulated temperature – blue line
+            {
+                "entity": sysid,
+                "name": "Simulated (open-loop)",
+                "yaxis_id": "temp",
+                "color": "#1E88E5",
+                "stroke_width": 2,
+                "curve": "smooth",
+                "float_precision": 2,
+                "data_generator": (
+                    "return (entity.attributes.simulation || []).map(p => "
+                    "[new Date(p.time).getTime(), p.simulated ?? null]);"
+                ),
+                "show": {"in_header": True, "in_legend": True},
+            },
+            # Measured temperature – red line
+            {
+                "entity": sysid,
+                "name": "Measured",
+                "yaxis_id": "temp",
+                "color": "#E53935",
+                "stroke_width": 2,
+                "curve": "smooth",
+                "float_precision": 2,
+                "data_generator": (
+                    "return (entity.attributes.simulation || []).map(p => "
+                    "[new Date(p.time).getTime(), p.measured ?? null]);"
+                ),
+                "show": {"in_header": True, "in_legend": True},
+            },
+        ],
+    }
+
+
+def _sysid_param_card(room: RoomSpec) -> Dict[str, Any]:
+    """Compact table of the thermal and noise parameters used in the last simulation."""
+    sysid = _eid("sensor", room.name, "sysid_simulation")
+    return {
+        "type": "entities",
+        "title": f"{room.name} – Parameters used",
+        "state_color": False,
+        "entities": [
+            {
+                "entity": sysid,
+                "name": "Open-loop RMSE",
+                "icon": "mdi:chart-timeline-variant",
+            },
+            {
+                "entity": sysid,
+                "name": "MAE",
+                "icon": "mdi:approximately-equal",
+                "attribute": "mae",
+            },
+            {
+                "entity": sysid,
+                "name": "Thermal mass C [J/K]",
+                "icon": "mdi:weight-kilogram",
+                "attribute": "thermal_mass",
+            },
+            {
+                "entity": sysid,
+                "name": "R_external [K/W]",
+                "icon": "mdi:home-thermometer-outline",
+                "attribute": "r_external",
+            },
+            {
+                "entity": sysid,
+                "name": "σ_w (process noise)",
+                "icon": "mdi:sigma",
+                "attribute": "sigma_w",
+            },
+            {
+                "entity": sysid,
+                "name": "σ_v (measurement noise)",
+                "icon": "mdi:sigma",
+                "attribute": "sigma_v",
+            },
+            {
+                "entity": sysid,
+                "name": "Horizon [h]",
+                "icon": "mdi:clock-outline",
+                "attribute": "horizon_hours",
+            },
+        ],
+    }
+
+
+def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
+    """System Identification view.
+
+    For each room:
+      * A temperature comparison chart (measured red, simulated blue, ±2σ band)
+      * A parameter summary card (C, R_ext, σ_w, σ_v, RMSE)
+
+    A global action section lets the user trigger a new simulation and shows
+    the service call parameters so they can be tweaked from the developer
+    tools or a button card.
+    """
+    sections: List[Dict[str, Any]] = []
+
+    # ------------------------------------------------------------------
+    # Intro / run-simulation section
+    # ------------------------------------------------------------------
+    intro_md: Dict[str, Any] = {
+        "type": "markdown",
+        "content": (
+            "## System Identification\n\n"
+            "This page compares **recorded measurements** (red) against an "
+            "**open-loop simulation** (blue) of the 1R1C thermal model.  "
+            "The model is initialised at the first data-point and run forward "
+            "without Kalman corrections — errors that accumulate reveal "
+            "model-plant mismatch.\n\n"
+            "The **shaded blue band** shows the ±2σ propagated state "
+            "covariance.  A widening band means the process noise σ_w is "
+            "large relative to the thermal time-constant.\n\n"
+            "Use **Run SysID Simulation** to regenerate with the default "
+            "parameters, or call `heating_assistant.run_sysid_simulation` "
+            "from Developer Tools → Services with custom `horizon_hours`, "
+            "`sigma_w`, `sigma_v`, and per-room `thermal_mass_<room>` / "
+            "`r_external_<room>` overrides."
+        ),
+    }
+
+    run_button: Dict[str, Any] = {
+        "type": "button",
+        "name": "Run SysID Simulation (all rooms, 6 h horizon)",
+        "icon": "mdi:play-circle-outline",
+        "tap_action": {
+            "action": "call-service",
+            "service": f"{DOMAIN}.run_sysid_simulation",
+            "service_data": {"horizon_hours": 6.0},
+        },
+    }
+
+    # Per-horizon buttons for quick horizon switching
+    horizon_buttons: List[Dict[str, Any]] = [
+        {
+            "type": "button",
+            "name": f"{h}h horizon",
+            "icon": "mdi:timer-outline",
+            "tap_action": {
+                "action": "call-service",
+                "service": f"{DOMAIN}.run_sysid_simulation",
+                "service_data": {"horizon_hours": float(h)},
+            },
+        }
+        for h in (1, 3, 6, 12, 24)
+    ]
+
+    sections.append(
+        {
+            "type": "grid",
+            "cards": [
+                {"type": "heading", "heading": "System Identification", "heading_style": "title"},
+                intro_md,
+                run_button,
+                *horizon_buttons,
+            ],
+        }
+    )
+
+    # ------------------------------------------------------------------
+    # Per-room chart + parameter table
+    # ------------------------------------------------------------------
+    for room in spec.rooms:
+        sections.append(
+            {
+                "type": "grid",
+                "cards": [
+                    {
+                        "type": "heading",
+                        "heading": f"{room.name}",
+                        "heading_style": "title",
+                    },
+                    _sysid_temperature_card(room),
+                    _sysid_param_card(room),
+                    {
+                        "type": "button",
+                        "name": f"Run SysID – {room.name} only",
+                        "icon": "mdi:play-circle",
+                        "tap_action": {
+                            "action": "call-service",
+                            "service": f"{DOMAIN}.run_sysid_simulation",
+                            "service_data": {
+                                "room_name": room.name,
+                                "horizon_hours": 6.0,
+                            },
+                        },
+                    },
+                ],
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # Help section: how to tune parameters from Developer Tools
+    # ------------------------------------------------------------------
+    help_md: Dict[str, Any] = {
+        "type": "markdown",
+        "title": "Tuning parameters",
+        "content": (
+            "To run a simulation with custom parameters, go to **Developer "
+            "Tools → Services**, select `heating_assistant.run_sysid_simulation` "
+            "and supply any combination of:\n\n"
+            "| Field | Description | Default |\n"
+            "|---|---|---|\n"
+            "| `horizon_hours` | Window length [h] | 6.0 |\n"
+            "| `sigma_w` | Process noise std [°C/√step] | controller σ_w |\n"
+            "| `sigma_v` | Measurement noise std [°C] | controller σ_v |\n"
+            + "".join(
+                f"| `thermal_mass_{slugify(r.name)}` | Thermal mass for {r.name} [J/K] | model value |\n"
+                f"| `r_external_{slugify(r.name)}` | R_external for {r.name} [K/W] | model value |\n"
+                for r in spec.rooms
+            )
+            + "\nRe-run estimation with **Estimate Parameters (ML)** on the "
+            "Diagnostics page to update the model before comparing."
+        ),
+    }
+
+    sections.append(
+        {
+            "type": "grid",
+            "cards": [
+                {"type": "heading", "heading": "How to tune", "heading_style": "title"},
+                help_md,
+            ],
+        }
+    )
+
+    return {
+        "title": "System ID",
+        "path": "system-id",
+        "icon": "mdi:chart-scatter-plot",
+        "type": "sections",
+        "sections": sections,
+    }
+
+
 def build_dashboard(spec: DashboardSpec) -> Dict[str, Any]:
     """Return the full Lovelace dashboard configuration as a dict."""
     views: List[Dict[str, Any]] = [_overview_view(spec)]
     for room in spec.rooms:
         views.append(_room_view(room, spec))
     views.append(_diagnostics_view(spec))
+    views.append(_sysid_view(spec))
     views.append(_settings_view(spec))
 
     return {

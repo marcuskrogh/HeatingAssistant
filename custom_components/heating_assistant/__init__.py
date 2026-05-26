@@ -198,6 +198,7 @@ SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 SERVICE_REGENERATE_DASHBOARD = "regenerate_dashboard"
 SERVICE_COMPUTE_LOGLIK_SLICE = "compute_loglik_slice"
+SERVICE_RUN_SYSID_SIMULATION = "run_sysid_simulation"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
@@ -1285,6 +1286,132 @@ def _register_services(hass: HomeAssistant) -> None:
                     vol.Coerce(int), vol.Range(min=5, max=120)
                 ),
             }
+        ),
+    )
+
+    async def handle_run_sysid_simulation(call: ServiceCall) -> None:
+        """Run system-identification open-loop simulation with configurable params."""
+        from .sysid import run_sysid_simulation
+        from .dashboard import slugify
+
+        coordinator = _get_coordinator(hass)
+        room_name_filter: Optional[str] = call.data.get("room_name")
+        horizon_hours: float = float(call.data.get("horizon_hours", 6.0))
+        sigma_w: float = float(call.data.get("sigma_w", coordinator._sigma_w))
+        sigma_v: float = float(call.data.get("sigma_v", coordinator._sigma_v))
+
+        dt = float(UPDATE_INTERVAL)
+        horizon_steps = max(1, int(horizon_hours * 3600.0 / dt))
+
+        # Build per-room parameter overrides from service data
+        room_params: Dict[str, Dict[str, float]] = {}
+        for room_name in coordinator.model.room_names:
+            overrides: Dict[str, float] = {}
+            room_key = slugify(room_name)
+            # Accept both the exact room name and a slug form as service data keys
+            tm_key = f"thermal_mass_{room_key}"
+            re_key = f"r_external_{room_key}"
+            if tm_key in call.data:
+                overrides["thermal_mass"] = float(call.data[tm_key])
+            if re_key in call.data:
+                overrides["r_external"] = float(call.data[re_key])
+            if overrides:
+                room_params[room_name] = overrides
+
+        history = list(coordinator.history_buffer)
+
+        try:
+            result = await hass.async_add_executor_job(
+                run_sysid_simulation,
+                history,
+                coordinator.model,
+                coordinator.heat_sources,
+                coordinator.model.room_names,
+                dt,
+                horizon_steps,
+                room_params,
+                sigma_w,
+                sigma_v,
+            )
+
+            if "error" in result:
+                message = f"**Error:** {result['error']}"
+            else:
+                per_room = result.get("per_room", {})
+
+                # Tag each per-room result with the horizon so the sensor can
+                # derive horizon_hours without knowing dt.
+                for room_data in per_room.values():
+                    room_data["horizon_steps"] = result.get("horizon_steps", horizon_steps)
+
+                # Filter to requested room if specified
+                if room_name_filter:
+                    per_room = {
+                        k: v for k, v in per_room.items()
+                        if k == room_name_filter
+                    }
+
+                coordinator.sysid_results.update(per_room)
+                coordinator.async_update_listeners()
+
+                lines = [
+                    f"**Horizon:** {horizon_hours} h "
+                    f"({result.get('horizon_steps', horizon_steps)} steps)\n"
+                    f"**σ_w:** {sigma_w}  **σ_v:** {sigma_v}"
+                ]
+                for room, data in per_room.items():
+                    rmse = data.get("rmse")
+                    mae = data.get("mae")
+                    tm = data.get("thermal_mass")
+                    re = data.get("r_external")
+                    quality = (
+                        "excellent" if rmse is not None and rmse < 0.2
+                        else "acceptable" if rmse is not None and rmse < 0.5
+                        else "poor"
+                    )
+                    lines.append(
+                        f"**{room}**\n"
+                        f"  thermal\\_mass: {tm:,.0f} J/K  r\\_external: {re:.5f} K/W\n"
+                        f"  RMSE: {rmse:.3f} °C ({quality})  MAE: {mae:.3f} °C"
+                        if rmse is not None and tm is not None and re is not None
+                        else f"**{room}:** no data"
+                    )
+
+                message = "\n\n".join(lines)
+
+        except Exception as exc:
+            _LOGGER.error("SysID simulation failed: %s", exc, exc_info=True)
+            message = f"**Error:** {exc}"
+
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Heating Assistant – System Identification Simulation",
+                "message": message,
+                "notification_id": f"{DOMAIN}_sysid_simulation",
+            },
+            blocking=False,
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RUN_SYSID_SIMULATION,
+        handle_run_sysid_simulation,
+        schema=vol.Schema(
+            {
+                vol.Optional("room_name"): cv.string,
+                vol.Optional("horizon_hours", default=6.0): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.5, max=72.0)
+                ),
+                vol.Optional("sigma_w"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
+                vol.Optional("sigma_v"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
+            },
+            extra=vol.ALLOW_EXTRA,  # allow thermal_mass_<room>, r_external_<room> keys
         ),
     )
 
