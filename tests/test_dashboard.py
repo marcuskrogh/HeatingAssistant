@@ -609,9 +609,11 @@ def test_overview_quick_actions_expose_user_facing_functions(two_room_spec):
     assert f"{DOMAIN}.regenerate_dashboard" in services
 
     nav_paths = {
-        b["tap_action"]["navigation_path"]
-        for b in buttons
-        if b["tap_action"]["action"] == "navigate"
+        c["tap_action"]["navigation_path"]
+        for c in _iter_cards(overview)
+        if c.get("type") == "button"
+        and isinstance(c.get("tap_action"), dict)
+        and c["tap_action"].get("action") == "navigate"
     }
     assert "/heating-assistant/diagnostics" in nav_paths
 
