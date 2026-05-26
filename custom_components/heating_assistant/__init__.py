@@ -1297,10 +1297,14 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _get_coordinator(hass)
         room_name_filter: Optional[str] = call.data.get("room_name")
         horizon_hours: float = float(call.data.get("horizon_hours", 6.0))
-        sigma_w: float = float(call.data.get("sigma_w", coordinator._sigma_w))
-        sigma_v: float = float(call.data.get("sigma_v", coordinator._sigma_v))
+        sigma_w: float = float(call.data.get(
+            "sigma_w", getattr(coordinator, "_sigma_w", 0.1)
+        ))
+        sigma_v: float = float(call.data.get(
+            "sigma_v", getattr(coordinator, "_sigma_v", 0.5)
+        ))
 
-        dt = float(UPDATE_INTERVAL)
+        dt = coordinator.dt  # seconds; handles runtime overrides correctly
         horizon_steps = max(1, int(horizon_hours * 3600.0 / dt))
 
         # Build per-room parameter overrides from service data

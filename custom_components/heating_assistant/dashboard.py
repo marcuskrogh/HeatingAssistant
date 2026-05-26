@@ -1491,13 +1491,13 @@ def _sysid_temperature_card(room: RoomSpec) -> Dict[str, Any]:
             "title": f"{room.name} – SysID: Measured vs Simulated",
             "show_states": True,
         },
-        "graph_span": "1d",
         "apex_config": {
-            "chart": {"animations": {"enabled": False}},
+            "chart": {"animations": {"enabled": False}, "zoom": {"enabled": True}},
             "legend": {"show": True, "position": "top"},
+            "xaxis": {"type": "datetime"},
             "noData": {
                 "text": (
-                    "No simulation data yet.  Press **Run SysID Simulation** "
+                    "No simulation data yet.  Press Run SysID Simulation "
                     "to generate the comparison."
                 ),
                 "align": "center",

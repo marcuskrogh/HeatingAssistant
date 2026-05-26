@@ -99,7 +99,10 @@ def run_sysid_simulation(
         }
 
     actual_steps = min(horizon_steps, len(history) - 1)
-    window = history[:actual_steps + 1]
+    # Take the most recent records so we always start from a consistent model
+    # state and avoid stale entries that may have been recorded with a different
+    # room count (e.g. before a room was added to the configuration).
+    window = list(history)[-(actual_steps + 1):]
 
     # ------------------------------------------------------------------
     # Build a temporary model with overridden parameters
@@ -125,14 +128,33 @@ def run_sysid_simulation(
     Q_d = (sigma_w ** 2) * dt * np.eye(n)
 
     # ------------------------------------------------------------------
-    # Initialise simulation state from first history entry
+    # Find the first record in the window that has a full-length y-vector.
+    # Older entries may have been recorded with a different room count (e.g.
+    # before a room was added), so we skip them rather than hard-failing.
     # ------------------------------------------------------------------
-    y0 = window[0].get("y", [])
-    if len(y0) < n:
+    start_idx = 0
+    for start_idx, rec in enumerate(window):
+        y_check = rec.get("y", [])
+        if len(y_check) >= n:
+            break
+    else:
         return {
-            "error": "History y-vector shorter than room count.",
+            "error": (
+                f"No history record with ≥ {n} room temperatures found "
+                f"(all {len(window)} records in the window have a shorter y-vector). "
+                "This can happen if rooms were recently added to the configuration."
+            ),
             "per_room": {},
         }
+
+    window = window[start_idx:]
+    if len(window) < 2:
+        return {
+            "error": "Fewer than 2 usable records after skipping short y-vectors.",
+            "per_room": {},
+        }
+
+    y0 = window[0].get("y", [])
 
     T_sim = np.array(y0[:n], dtype=float)
     # Initial covariance: uncertainty = measurement noise on each axis
@@ -171,7 +193,11 @@ def run_sysid_simulation(
         d_outdoor = float(record.get("d_outdoor", 10.0))
         d_solar: Dict[str, float] = record.get("d_solar", {})
         timestamp = float(record.get("timestamp", 0.0))
-        y_meas = record.get("y", [None] * n)
+        y_raw = record.get("y", [])
+        # If this record has fewer entries than expected, use None for missing rooms.
+        y_meas: List[Optional[float]] = [
+            (float(y_raw[i]) if i < len(y_raw) else None) for i in range(n)
+        ]
 
         # Convert control fractions to heat inputs [W]
         heat_inputs: Dict[str, float] = {}
