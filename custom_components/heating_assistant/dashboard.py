@@ -206,6 +206,9 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "", "color": "#424242"},
+        "apex_config": {
+            "legend": {"show": False},
+        },
         "yaxis": [
             {
                 "id": "temp",
