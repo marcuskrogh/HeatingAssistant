@@ -335,14 +335,18 @@ compute_loglik_slice:
           step: 0.1
 
 run_sysid_simulation:
-  name: Run system identification simulation
+  name: Run system identification (EKF reconstruction)
   description: >
-    Run an open-loop simulation of the 1R1C thermal model over a configurable
-    history window and compare it against the recorded measurements.  The
-    simulation propagates the state covariance alongside the mean trajectory so
-    the System Identification dashboard can render a ±2σ confidence band.
-    Results are stored on the per-room ``…_sysid_simulation`` sensor entities
-    and reported as a persistent notification.
+    Reconstruct the state trajectory with a discrete-time Extended Kalman
+    Filter (EKF) over a configurable history window.  At each step the
+    one-step-ahead prediction x̂⁻(k) and its output uncertainty are recorded
+    before incorporating the actual measurement, so the System Identification
+    dashboard can overlay the EKF prediction (blue line) against the
+    measurement (red line) with a ±2σ confidence band.  Unlike a free-run
+    simulation the EKF residuals stay bounded, exposing model-plant mismatch
+    without accumulated drift.  Results are stored on the per-room
+    ``…_sysid_simulation`` sensor entities and reported as a persistent
+    notification.
   fields:
     room_name:
       name: Room name
@@ -369,9 +373,10 @@ run_sysid_simulation:
     sigma_w:
       name: Process noise σ_w
       description: >
-        Standard deviation of the process noise [°C / √step].  Controls how
-        quickly the covariance band widens.  Defaults to the controller's
-        current σ_w.
+        Continuous-time process noise intensity [K/√s]  (Q_c = σ_w² · I).
+        Controls how quickly the covariance band widens.  Matches the units
+        used by the production CD-EKF controller.  Defaults to the
+        controller's current σ_w.
       required: false
       example: 0.1
       selector:
@@ -379,7 +384,7 @@ run_sysid_simulation:
           min: 0.0
           max: 10.0
           step: 0.01
-          unit_of_measurement: "°C/√step"
+          unit_of_measurement: "K/√s"
     sigma_v:
       name: Measurement noise σ_v
       description: >

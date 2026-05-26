@@ -1482,22 +1482,22 @@ def _settings_view(spec: DashboardSpec) -> Dict[str, Any]:
 
 
 def _sysid_temperature_card(room: RoomSpec) -> Dict[str, Any]:
-    """Temperature comparison chart: measured (red) vs simulated (blue) + covariance band."""
+    """Temperature comparison chart: measured (red) vs EKF one-step prediction (blue) + ±2σ band."""
     sysid = _eid("sensor", room.name, "sysid_simulation")
     return {
         "type": "custom:apexcharts-card",
         "header": {
             "show": True,
-            "title": f"{room.name} – SysID: Measured vs Simulated",
+            "title": f"{room.name} – SysID: Measured vs EKF Prediction",
             "show_states": True,
         },
+        "graph_span": "1d",
         "apex_config": {
-            "chart": {"animations": {"enabled": False}, "zoom": {"enabled": True}},
+            "chart": {"animations": {"enabled": False}},
             "legend": {"show": True, "position": "top"},
-            "xaxis": {"type": "datetime"},
             "noData": {
                 "text": (
-                    "No simulation data yet.  Press Run SysID Simulation "
+                    "No simulation data yet.  Press **Run SysID Simulation** "
                     "to generate the comparison."
                 ),
                 "align": "center",
@@ -1548,10 +1548,10 @@ def _sysid_temperature_card(room: RoomSpec) -> Dict[str, Any]:
                 ),
                 "show": {"in_header": False, "in_legend": False},
             },
-            # Simulated temperature – blue line
+            # One-step EKF prediction – blue line
             {
                 "entity": sysid,
-                "name": "Simulated (open-loop)",
+                "name": "One-step prediction (EKF)",
                 "yaxis_id": "temp",
                 "color": "#1E88E5",
                 "stroke_width": 2,
@@ -1559,7 +1559,7 @@ def _sysid_temperature_card(room: RoomSpec) -> Dict[str, Any]:
                 "float_precision": 2,
                 "data_generator": (
                     "return (entity.attributes.simulation || []).map(p => "
-                    "[new Date(p.time).getTime(), p.simulated ?? null]);"
+                    "[new Date(p.time).getTime(), p.predicted ?? null]);"
                 ),
                 "show": {"in_header": True, "in_legend": True},
             },
@@ -1639,10 +1639,10 @@ def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
     """System Identification view.
 
     For each room:
-      * A temperature comparison chart (measured red, simulated blue, ±2σ band)
+      * A temperature comparison chart (measured red, EKF one-step prediction blue, ±2σ band)
       * A parameter summary card (C, R_ext, σ_w, σ_v, RMSE)
 
-    A global action section lets the user trigger a new simulation and shows
+    A global action section lets the user trigger a new reconstruction and shows
     the service call parameters so they can be tweaked from the developer
     tools or a button card.
     """
@@ -1655,14 +1655,17 @@ def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
         "type": "markdown",
         "content": (
             "## System Identification\n\n"
-            "This page compares **recorded measurements** (red) against an "
-            "**open-loop simulation** (blue) of the 1R1C thermal model.  "
-            "The model is initialised at the first data-point and run forward "
-            "without Kalman corrections — errors that accumulate reveal "
-            "model-plant mismatch.\n\n"
-            "The **shaded blue band** shows the ±2σ propagated state "
-            "covariance.  A widening band means the process noise σ_w is "
-            "large relative to the thermal time-constant.\n\n"
+            "This page compares **recorded measurements** (red) against the "
+            "**EKF one-step-ahead predictions** x̂⁻(k) (blue) of the 1R1C "
+            "thermal model.  At each step the filter predicts the next "
+            "temperature from the previous *filtered* state, records that "
+            "prediction, then corrects with the actual measurement.  "
+            "Residuals stay bounded — unlike a free-run simulation — so "
+            "systematic deviations pinpoint model-plant mismatch.\n\n"
+            "The **shaded blue band** shows ±2σ of the one-step output "
+            "uncertainty: √(P⁻[i,i] + σ_v²).  A wide band means the "
+            "continuous process noise σ_w [K/√s] is large relative to the "
+            "thermal time-constant.\n\n"
             "Use **Run SysID Simulation** to regenerate with the default "
             "parameters, or call `heating_assistant.run_sysid_simulation` "
             "from Developer Tools → Services with custom `horizon_hours`, "
@@ -1754,7 +1757,7 @@ def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
             "| Field | Description | Default |\n"
             "|---|---|---|\n"
             "| `horizon_hours` | Window length [h] | 6.0 |\n"
-            "| `sigma_w` | Process noise std [°C/√step] | controller σ_w |\n"
+            "| `sigma_w` | Continuous process noise intensity [K/√s] | controller σ_w |\n"
             "| `sigma_v` | Measurement noise std [°C] | controller σ_v |\n"
             + "".join(
                 f"| `thermal_mass_{slugify(r.name)}` | Thermal mass for {r.name} [J/K] | model value |\n"
