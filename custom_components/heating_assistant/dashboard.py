@@ -255,6 +255,52 @@ def _mpc_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 **_history_series_kwargs(),
                 "show": {"in_header": False, "in_legend": False},
             },
+            # History: upper constraint cap for outside-corridor shading.
+            {
+                "entity": upper,
+                "name": "Constraints",
+                "yaxis_id": "temp",
+                "type": "area",
+                "color": "#E53935",
+                "opacity": 0.16,
+                "stroke_width": 0,
+                "curve": "stepline",
+                "transform": (
+                    "const v = Number(x);"
+                    "if (!Number.isFinite(v)) return null;"
+                    "return v + 3.0;"
+                ),
+                **_history_series_kwargs(),
+                "show": {"in_legend": False, "in_header": False},
+            },
+            # History: upper comfort bound – redraws feasible corridor with
+            # card background to leave only outside regions shaded.
+            {
+                "entity": upper,
+                "name": "Constraints",
+                "yaxis_id": "temp",
+                "type": "area",
+                "color": "var(--card-background-color)",
+                "opacity": 1.0,
+                "stroke_width": 0,
+                "curve": "stepline",
+                **_history_series_kwargs(),
+                "show": {"in_legend": False, "in_header": False},
+            },
+            # History: lower comfort bound – redraws lower out-of-corridor
+            # region in red, still with no boundary line.
+            {
+                "entity": lower,
+                "name": "Constraints",
+                "yaxis_id": "temp",
+                "type": "area",
+                "color": "#E53935",
+                "opacity": 0.16,
+                "stroke_width": 0,
+                "curve": "stepline",
+                **_history_series_kwargs(),
+                "show": {"in_legend": False, "in_header": False},
+            },
             # Forecast: setpoint over the MPC horizon – hidden from legend; history entry covers it
             {
                 "entity": setpoint,
@@ -644,7 +690,7 @@ def _schedule_card(room: RoomSpec) -> Optional[Dict[str, Any]]:
 
 
 def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
-    """Top-level overview with comfort tiles and system charts."""
+    """Top-level overview with general status, room KPIs, and key actions."""
     comfort_tiles = [
         {
             "type": "tile",
@@ -664,12 +710,26 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
     weather_status = _system_eid("sensor", "weather_forecast_status")
     est_status = _system_eid("sensor", "estimated_parameters_status")
 
-    # All-rooms charts: one shared temperature chart (lines overlaid) and one
-    # shared heating-power chart (stacked area). Keeping everything on a
-    # single chart per quantity gives the user a holistic, comparable view
-    # at a glance, while the per-room subviews remain the place for detail.
-    all_rooms_temperature_chart = _overview_temperature_chart(spec)
-    all_rooms_power_chart = _overview_power_chart(spec)
+    room_snapshot_entities: List[Dict[str, Any]] = []
+    for room in spec.rooms:
+        room_snapshot_entities.extend(
+            [
+                {"type": "section", "label": room.name},
+                {"entity": _eid("sensor", room.name, "temperature_filtered"), "name": "Temperature"},
+                {"entity": _eid("sensor", room.name, "setpoint"), "name": "Setpoint"},
+                {"entity": _eid("sensor", room.name, "heating_power_measured"), "name": "Power"},
+                {"entity": _eid("sensor", room.name, "model_fit_quality"), "name": "Fit R²"},
+            ]
+        )
+    if not room_snapshot_entities:
+        room_snapshot_entities = [{"type": "section", "label": "No rooms configured"}]
+
+    room_snapshot_card: Dict[str, Any] = {
+        "type": "entities",
+        "title": "Room snapshot",
+        "state_color": True,
+        "entities": room_snapshot_entities,
+    }
 
     energy_card = {
         "type": "entities",
@@ -693,15 +753,8 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
         {
             "type": "grid",
             "cards": [
-                {"type": "heading", "heading": "Temperatures (all rooms)", "heading_style": "title"},
-                all_rooms_temperature_chart,
-            ],
-        },
-        {
-            "type": "grid",
-            "cards": [
-                {"type": "heading", "heading": "Heating power (all rooms)", "heading_style": "title"},
-                all_rooms_power_chart,
+                {"type": "heading", "heading": "Room snapshot", "heading_style": "title"},
+                room_snapshot_card,
             ],
         },
         {
@@ -730,8 +783,35 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
         {
             "type": "grid",
             "cards": [
-                {"type": "heading", "heading": "Outdoor & solar", "heading_style": "title"},
-                _system_weather_strip(spec),
+                {"type": "heading", "heading": "Quick actions", "heading_style": "title"},
+                {
+                    "type": "button",
+                    "name": "Estimate parameters",
+                    "icon": "mdi:flask-outline",
+                    "tap_action": {
+                        "action": "call-service",
+                        "service": f"{DOMAIN}.estimate_parameters_ml",
+                        "service_data": {"apply_parameters": True},
+                    },
+                },
+                {
+                    "type": "button",
+                    "name": "Regenerate dashboard",
+                    "icon": "mdi:refresh",
+                    "tap_action": {
+                        "action": "call-service",
+                        "service": f"{DOMAIN}.regenerate_dashboard",
+                    },
+                },
+                {
+                    "type": "button",
+                    "name": "Open diagnostics",
+                    "icon": "mdi:stethoscope",
+                    "tap_action": {
+                        "action": "navigate",
+                        "navigation_path": f"/{spec.url_path}/diagnostics",
+                    },
+                },
             ],
         },
     ]

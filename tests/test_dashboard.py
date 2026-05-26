@@ -219,31 +219,28 @@ def test_room_temperature_chart_shades_outside_comfort_region_without_constraint
         s for s in temp_card["series"]
         if s.get("name") == "Constraints"
     ]
-    assert len(constraints) == 3
+    assert len(constraints) == 6
 
-    upper_shade = next(
-        s for s in constraints
-        if s.get("color") == "#E53935"
-        and "constraint_upper" in (s.get("data_generator") or "")
-        and "constraint_lower" in (s.get("data_generator") or "")
-    )
-    corridor_clear = next(
-        s for s in constraints
-        if s.get("color") == "var(--card-background-color)"
-    )
-    lower_shade = next(
-        s for s in constraints
-        if s.get("color") == "#E53935"
-        and "constraint_lower" in (s.get("data_generator") or "")
-        and "constraint_upper" not in (s.get("data_generator") or "")
-    )
+    history_constraints = [s for s in constraints if not s.get("data_generator")]
+    forecast_constraints = [s for s in constraints if s.get("data_generator")]
+    assert len(history_constraints) == 3
+    assert len(forecast_constraints) == 3
 
-    assert upper_shade.get("type") == "area"
-    assert corridor_clear.get("type") == "area"
-    assert lower_shade.get("type") == "area"
-    assert upper_shade.get("stroke_width") == 0
-    assert corridor_clear.get("stroke_width") == 0
-    assert lower_shade.get("stroke_width") == 0
+    for constraint_group in (history_constraints, forecast_constraints):
+        red_constraints = [s for s in constraint_group if s.get("color") == "#E53935"]
+        clear_constraints = [s for s in constraint_group if s.get("color") == "var(--card-background-color)"]
+        assert len(red_constraints) == 2
+        assert len(clear_constraints) == 1
+        assert all(s.get("type") == "area" for s in constraint_group)
+        assert all(s.get("stroke_width") == 0 for s in constraint_group)
+
+    history_upper_shade = next(
+        s for s in history_constraints
+        if s.get("color") == "#E53935" and s.get("transform")
+    )
+    assert "return v + 3.0" in history_upper_shade["transform"]
+    assert history_upper_shade.get("extend_to") == "now"
+    assert history_upper_shade.get("group_by", {}).get("func") == "raw"
 
 
 def test_room_temperature_chart_has_no_legend(two_room_spec):
@@ -578,53 +575,47 @@ def test_forecast_series_use_readme_field_names(two_room_spec):
             assert "p.value" not in gen, gen
 
 
-def test_overview_has_two_all_rooms_charts(two_room_spec):
-    """The overview must contain one temperature chart and one power chart
-    that cover all rooms (per user feedback: keep rooms together, don't
-    fragment the overview)."""
+def test_overview_has_no_advanced_apexcharts(two_room_spec):
+    """Overview should stay general and avoid advanced charts/plots."""
     overview = next(
         v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
     )
-    apex_titles = [
-        c["header"]["title"]
+    apex_cards = [c for c in _iter_cards(overview) if c.get("type") == "custom:apexcharts-card"]
+    assert not apex_cards
+
+
+def test_overview_room_snapshot_contains_room_level_kpis(two_room_spec):
+    overview = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
+    )
+    refs = set(_iter_entity_refs(overview))
+    assert f"sensor.{DOMAIN}_living_room_temperature_filtered" in refs
+    assert f"sensor.{DOMAIN}_living_room_setpoint" in refs
+    assert f"sensor.{DOMAIN}_living_room_heating_power_measured" in refs
+    assert f"sensor.{DOMAIN}_living_room_model_fit_quality" in refs
+    assert f"sensor.{DOMAIN}_bedroom_temperature_filtered" in refs
+    assert f"sensor.{DOMAIN}_bedroom_setpoint" in refs
+    assert f"sensor.{DOMAIN}_bedroom_heating_power_measured" in refs
+    assert f"sensor.{DOMAIN}_bedroom_model_fit_quality" in refs
+
+
+def test_overview_quick_actions_expose_user_facing_functions(two_room_spec):
+    overview = next(
+        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
+    )
+    buttons = list(_iter_button_action_cards(overview))
+    services = {b["tap_action"]["service"] for b in buttons if b["tap_action"]["action"] == "call-service"}
+    assert f"{DOMAIN}.estimate_parameters_ml" in services
+    assert f"{DOMAIN}.regenerate_dashboard" in services
+
+    nav_paths = {
+        c["tap_action"]["navigation_path"]
         for c in _iter_cards(overview)
-        if c.get("type") == "custom:apexcharts-card" and c.get("header")
-    ]
-    assert any("Room Temperatures" in t for t in apex_titles)
-    assert any("Power" in t for t in apex_titles)
-
-
-def test_overview_temperature_chart_covers_every_room(two_room_spec):
-    overview = next(
-        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
-    )
-    temp_card = next(
-        c for c in _iter_cards(overview)
-        if c.get("type") == "custom:apexcharts-card"
-        and c.get("header", {}).get("title") == "Room Temperatures"
-    )
-    entities = {s["entity"] for s in temp_card["series"]}
-    assert f"sensor.{DOMAIN}_living_room_temperature_filtered" in entities
-    assert f"sensor.{DOMAIN}_bedroom_temperature_filtered" in entities
-
-
-def test_overview_power_chart_forecast_series_are_room_specific(two_room_spec):
-    overview = next(
-        v for v in build_dashboard(two_room_spec)["views"] if v["title"] == "Overview"
-    )
-    power_card = next(
-        c for c in _iter_cards(overview)
-        if c.get("type") == "custom:apexcharts-card"
-        and c.get("header", {}).get("title") == "Power – All Rooms"
-    )
-    plan_series = [
-        s for s in power_card["series"]
-        if s.get("entity", "").endswith("_heating_power_forecast")
-        and "heating_power" in s.get("data_generator", "")
-    ]
-    names = {s["name"] for s in plan_series}
-    assert "Living Room Plan" in names
-    assert "Bedroom Plan" in names
+        if c.get("type") == "button"
+        and isinstance(c.get("tap_action"), dict)
+        and c["tap_action"].get("action") == "navigate"
+    }
+    assert "/heating-assistant/diagnostics" in nav_paths
 
 
 def test_diagnostics_loglik_panel_exposes_sensor_and_button_per_room(two_room_spec):
