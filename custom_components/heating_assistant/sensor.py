@@ -94,6 +94,7 @@ async def async_setup_entry(
         entities.append(KalmanInnovationSensor(coordinator, room_name))
         entities.append(ResidualACFSensor(coordinator, room_name))
         entities.append(LoglikSliceSensor(coordinator, room_name))
+        entities.append(SysIdSimulationSensor(coordinator, room_name))
 
     # Per-source sensors
     for src in coordinator.heat_sources:
@@ -2315,4 +2316,84 @@ class WeatherForecastStatusSensor(CoordinatorEntity, SensorEntity):
             "consecutive_failures": getattr(
                 self._coordinator, "weather_consecutive_failures", 0
             ),
+        }
+
+
+# ---------------------------------------------------------------------------
+# System identification simulation sensor (per room)
+# ---------------------------------------------------------------------------
+
+
+class SysIdSimulationSensor(CoordinatorEntity, SensorEntity):
+    """
+    Sensor exposing the most recent system-identification open-loop simulation.
+
+    State value: open-loop RMSE [°C] (``None`` until the first simulation run).
+
+    Attributes:
+        ``simulation``   – list of {time (ISO-8601), measured, simulated,
+                                     cov_upper, cov_lower} for Apex Charts
+        ``thermal_mass`` – J/K used for this run
+        ``r_external``   – K/W used for this run
+        ``sigma_w``      – process noise std used for this run
+        ``sigma_v``       – measurement noise std used for this run
+        ``rmse``         – same as state value [°C]
+        ``mae``          – mean absolute error [°C]
+        ``horizon_hours``– simulated horizon in hours
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 3
+    _attr_icon = "mdi:chart-scatter-plot"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = f"Heating Assistant – {room_name} – SysID Simulation"
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_sysid_simulation"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        room_data = getattr(self._coordinator, "sysid_results", {}).get(
+            self._room_name, {}
+        )
+        return room_data.get("rmse")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        room_data = getattr(self._coordinator, "sysid_results", {}).get(
+            self._room_name, {}
+        )
+        sim_raw = room_data.get("simulation", [])
+        formatted: list = []
+        for entry in sim_raw:
+            ts = entry.get("time", 0.0)
+            dt_iso = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+            formatted.append({
+                "time": dt_iso,
+                "measured": entry.get("measured"),
+                "simulated": entry.get("simulated"),
+                "cov_upper": entry.get("cov_upper"),
+                "cov_lower": entry.get("cov_lower"),
+            })
+        dt_val = self._coordinator.dt
+        horizon_steps = room_data.get("horizon_steps", 0)
+        horizon_hours = round(horizon_steps * dt_val / 3600.0, 2) if horizon_steps else None
+        return {
+            "simulation": formatted,
+            "thermal_mass": room_data.get("thermal_mass"),
+            "r_external": room_data.get("r_external"),
+            "sigma_w": room_data.get("sigma_w"),
+            "sigma_v": room_data.get("sigma_v"),
+            "rmse": room_data.get("rmse"),
+            "mae": room_data.get("mae"),
+            "horizon_hours": horizon_hours,
         }

@@ -682,6 +682,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # event loop.
         self.open_loop_results: Dict[str, Any] = {}
 
+        # Cache populated by run_sysid_simulation service.
+        # Keyed by room_name; each value is the per-room dict returned by
+        # sysid.run_sysid_simulation (simulation, rmse, mae, params).
+        # SysIdSimulationSensor reads from here.
+        self.sysid_results: Dict[str, Any] = {}
+
         # Schedule-projected per-step control parameters for the current
         # MPC horizon.  Populated each cycle by _compute_control_trajectory
         # and read by setpoint / constraint sensors to plot the time-varying

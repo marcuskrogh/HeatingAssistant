@@ -334,6 +334,67 @@ compute_loglik_slice:
           max: 4.0
           step: 0.1
 
+run_sysid_simulation:
+  name: Run system identification simulation
+  description: >
+    Run an open-loop simulation of the 1R1C thermal model over a configurable
+    history window and compare it against the recorded measurements.  The
+    simulation propagates the state covariance alongside the mean trajectory so
+    the System Identification dashboard can render a ±2σ confidence band.
+    Results are stored on the per-room ``…_sysid_simulation`` sensor entities
+    and reported as a persistent notification.
+  fields:
+    room_name:
+      name: Room name
+      description: >
+        Optional room name.  If omitted, all rooms are simulated.
+      required: false
+      example: "living_room"
+      selector:
+        text:
+    horizon_hours:
+      name: Horizon (hours)
+      description: >
+        How many hours of history to simulate over (capped to the available
+        buffer size).  Default is 6 hours.
+      required: false
+      default: 6.0
+      example: 6.0
+      selector:
+        number:
+          min: 0.5
+          max: 72.0
+          step: 0.5
+          unit_of_measurement: "h"
+    sigma_w:
+      name: Process noise σ_w
+      description: >
+        Standard deviation of the process noise [°C / √step].  Controls how
+        quickly the covariance band widens.  Defaults to the controller's
+        current σ_w.
+      required: false
+      example: 0.1
+      selector:
+        number:
+          min: 0.0
+          max: 10.0
+          step: 0.01
+          unit_of_measurement: "°C/√step"
+    sigma_v:
+      name: Measurement noise σ_v
+      description: >
+        Standard deviation of the measurement noise [°C].  Added in quadrature
+        to the state variance to produce the total confidence-band width.
+        Defaults to the controller's current σ_v.
+      required: false
+      example: 0.5
+      selector:
+        number:
+          min: 0.0
+          max: 10.0
+          step: 0.01
+          unit_of_measurement: "°C"
+
 regenerate_dashboard:
   name: Regenerate Lovelace dashboard
   description: >
