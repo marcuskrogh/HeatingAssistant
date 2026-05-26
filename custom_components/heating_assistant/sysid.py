@@ -1,26 +1,53 @@
 """
-System identification simulation for the Heating Assistant integration.
+System identification via CD-EKF reconstruction for the Heating Assistant.
 
-Provides ``run_sysid_simulation``: an open-loop forward simulation of the
-1R1C thermal model over a recorded history window with configurable
-parameters, returning the simulated temperatures *and* the propagated
-state-covariance for dashboard visualisation.
+``run_sysid_ekf`` drives the production ``ContinuousDiscreteEKF`` from the
+``mbc`` package (the same filter the MPC controller uses) over a replay of
+the recorded history window.  The SDE model used is a ``HouseThermalSDE``
+copy built from the live (or overridden) room parameters so the sysid filter
+is bit-for-bit identical to the live controller — same implicit-Euler mean
+integration, same sensitivity-matrix covariance propagation:
 
-The covariance propagation uses the linearised (Euler-discretised) state
-matrix so the shaded confidence band on the dashboard shows how fast
-uncertainty grows as the model runs free — wider band means the model is
-sensitive to process noise at the current parameters.
+    Predict over [t_{k-1}, t_k]  (n_steps sub-steps each):
+        mean:  Newton solve  x_{j+1} − x_j − h f(x_{j+1}, u, d, p, t) = 0
+        cov:   Φ_j = (I − h · ∂f/∂x(x_{j+1}))⁻¹
+               τ_j = P_j + h · σ(x_j) σ(x_j)^T
+               P_{j+1} = Φ_j τ_j Φ_j^T
+
+Before each measurement update the predicted state x̂⁻(k) = x_pred[:n_rooms]
+and the room-temperature covariance P⁻(k)[:n,:n] are recorded so the
+dashboard can overlay:
+
+  * the one-step EKF prediction (blue line) against the measurement (red), and
+  * a ±2σ band  √(P⁻[i,i] + σ_v²)  from the predicted output variance.
+
+Update (Joseph form, built into mbc):
+    update(y_k, u_k, d_k, p, mask=valid)  →  x̂⁺(k), P⁺(k)
 """
 
 from __future__ import annotations
 
 import copy
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 _LOGGER = logging.getLogger(__name__)
+
+# Deferred imports so the module loads even if mbc / controller is absent
+# during unit tests that monkey-patch run_sysid_ekf.
+_HouseThermalSDE = None
+_ContinuousDiscreteEKF = None
+
+
+def _ensure_imports() -> None:
+    global _HouseThermalSDE, _ContinuousDiscreteEKF
+    if _HouseThermalSDE is None:
+        from .controller import HouseThermalSDE  # noqa: PLC0415
+        from mbc.estimation import ContinuousDiscreteEKF  # noqa: PLC0415
+        _HouseThermalSDE = HouseThermalSDE
+        _ContinuousDiscreteEKF = ContinuousDiscreteEKF
 
 
 # ---------------------------------------------------------------------------
@@ -28,125 +55,99 @@ _LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def run_sysid_simulation(
+def run_sysid_ekf(
     history: List[Dict[str, Any]],
-    model: Any,                          # HouseModel
-    heat_sources: List[Any],             # list of HeatSource objects
+    model: Any,                               # HouseModel (read-only; deep-copied)
+    heat_sources: List[Any],                  # HeatSource objects (read-only)
     room_names: List[str],
-    dt: float,                           # sampling interval [s]
+    dt: float,                                # sampling interval [s]
     horizon_steps: int,
-    room_params: Dict[str, Dict[str, float]],  # {room: {thermal_mass, r_external}}
-    sigma_w: float,                      # process noise std [°C / sqrt(s)]
-    sigma_v: float,                      # measurement noise std [°C]
+    room_params: Dict[str, Dict[str, float]], # {room: {thermal_mass, r_external}}
+    sigma_w: float,                           # continuous process noise intensity [K/√s]
+    sigma_v: float,                           # measurement noise std [K]
 ) -> Dict[str, Any]:
     """
-    Run an open-loop simulation over ``horizon_steps`` of the history buffer.
-
-    The model is initialised from the first measurement in the window and
-    propagated purely with the recorded control inputs and disturbances.  A
-    per-room state covariance is propagated in parallel so the caller can
-    render ±2σ confidence bands on the dashboard.
+    Reconstruct the state trajectory with the production CD-EKF and return
+    per-step one-step-ahead predictions with their output covariance.
 
     Parameters
     ----------
     history
-        Ordered history-buffer entries (oldest first), each a dict with keys
-        ``y`` (list of room temps), ``u`` (list of source fractions),
-        ``d_outdoor`` (float), ``d_solar`` (dict room→W), ``timestamp``.
+        History-buffer entries (oldest first), each a dict with keys
+        ``y`` (list[float]), ``u`` (list[float]), ``d_outdoor`` (float),
+        ``d_solar`` (dict[str,float]), ``timestamp`` (float).
     model
-        The live ``HouseModel`` instance (read-only; a copy is made).
+        Live ``HouseModel``; a deep copy is made before overriding params.
     heat_sources
-        The live heat-source objects (read-only; used for max_power).
+        Live heat-source objects.
     room_names
         Ordered room names matching the ``y`` index.
     dt
-        Sampling interval in seconds.
+        Sampling interval in seconds (= coordinator update interval).
     horizon_steps
-        Number of history steps to simulate (capped to len(history)−1).
+        Number of most-recent history steps to reconstruct.
     room_params
-        Overrideable per-room parameters.  Keys that are present override the
-        corresponding room attribute; missing keys use the live model values.
-        Supported keys per room: ``thermal_mass`` [J/K], ``r_external`` [K/W].
+        Per-room overrides applied to the copy.  Keys: ``thermal_mass``
+        [J/K], ``r_external`` [K/W].
     sigma_w
-        Process noise standard deviation [°C / step¹ᐟ²] applied to each
-        temperature state.  Controls how quickly open-loop covariance grows.
+        Continuous-time process noise intensity [K/√s]  (σ(x) = σ_w · I).
+        Matches the units used by the production CD-EKF controller.
     sigma_v
-        Measurement noise standard deviation [°C].  Added in quadrature to
-        the diagonal of the propagated state covariance to give the total
-        output variance.
+        Measurement noise std [K].  Used by ``HouseThermalSDE.Rm``.
 
     Returns
     -------
     dict with keys:
-        ``per_room``  – {room_name: {simulation, rmse, mae, thermal_mass,
-                                     r_external, sigma_w, sigma_v}}
-          ``simulation``  – list of {time, measured, simulated,
-                                     cov_upper, cov_lower}
-        ``horizon_steps`` – actual steps simulated
-        ``error``         – only present on failure
+        ``per_room``     – {room_name: {simulation, rmse, mae, thermal_mass,
+                                        r_external, sigma_w, sigma_v}}
+          ``simulation`` – list of {time (UNIX float), measured,
+                                    predicted, cov_upper, cov_lower}
+        ``horizon_steps`` – actual steps reconstructed
+        ``error``         – present only on failure
     """
+    _ensure_imports()
+
     n = len(room_names)
     if n == 0:
         return {"error": "No rooms configured.", "per_room": {}}
 
     if len(history) < 2:
         return {
-            "error": (
-                f"Insufficient history: need ≥ 2 steps, have {len(history)}."
-            ),
+            "error": f"Insufficient history: need ≥ 2 steps, have {len(history)}.",
             "per_room": {},
             "horizon_steps": 0,
         }
 
     actual_steps = min(horizon_steps, len(history) - 1)
-    # Take the most recent records so we always start from a consistent model
-    # state and avoid stale entries that may have been recorded with a different
-    # room count (e.g. before a room was added to the configuration).
     window = list(history)[-(actual_steps + 1):]
 
     # ------------------------------------------------------------------
-    # Build a temporary model with overridden parameters
+    # Build parametrised HouseModel copy
     # ------------------------------------------------------------------
     try:
         sim_model = _build_sim_model(model, room_params, room_names)
     except Exception as exc:
-        _LOGGER.error("Failed to build simulation model: %s", exc, exc_info=True)
+        _LOGGER.error("SysID: model construction failed: %s", exc, exc_info=True)
         return {"error": f"Model construction failed: {exc}", "per_room": {}}
 
     # ------------------------------------------------------------------
-    # Extract the linearised drift matrix F_c = (1/C) A for covariance
-    # propagation.  Shape (n, n).
-    # ------------------------------------------------------------------
-    C_vec, A_mat, _ = sim_model._build_matrices()
-    inv_C = 1.0 / np.maximum(C_vec, 1e-6)
-    F_c = A_mat * inv_C[:, None]           # (n, n)
-
-    # Euler-discretised state-transition matrix: F_d ≈ I + F_c·dt
-    F_d = np.eye(n) + F_c * dt            # (n, n)
-
-    # Discrete process-noise covariance: Q_d = sigma_w² · dt · I
-    Q_d = (sigma_w ** 2) * dt * np.eye(n)
-
-    # ------------------------------------------------------------------
-    # Find the first record in the window that has a full-length y-vector.
-    # Older entries may have been recorded with a different room count (e.g.
-    # before a room was added), so we skip them rather than hard-failing.
+    # Skip any leading records that pre-date a room-count change.
     # ------------------------------------------------------------------
     start_idx = 0
+    found = False
     for start_idx, rec in enumerate(window):
-        y_check = rec.get("y", [])
-        if len(y_check) >= n:
+        if len(rec.get("y", [])) >= n:
+            found = True
             break
-    else:
+    if not found:
         return {
             "error": (
-                f"No history record with ≥ {n} room temperatures found "
-                f"(all {len(window)} records in the window have a shorter y-vector). "
+                f"No history record with ≥ {n} room temperatures "
+                f"(all {len(window)} records in the window are too short). "
                 "This can happen if rooms were recently added to the configuration."
             ),
             "per_room": {},
         }
-
     window = window[start_idx:]
     if len(window) < 2:
         return {
@@ -154,128 +155,157 @@ def run_sysid_simulation(
             "per_room": {},
         }
 
-    y0 = window[0].get("y", [])
+    # ------------------------------------------------------------------
+    # Build HouseThermalSDE  (augment_offsets=False: state = [T(n), φ(m)])
+    # ------------------------------------------------------------------
+    try:
+        sde = _HouseThermalSDE(
+            sim_model,
+            heat_sources,
+            dt,
+            sigma_w=sigma_w,
+            sigma_v=sigma_v,
+            augment_offsets=False,
+        )
+    except Exception as exc:
+        _LOGGER.error("SysID: SDE construction failed: %s", exc, exc_info=True)
+        return {"error": f"SDE construction failed: {exc}", "per_room": {}}
 
-    T_sim = np.array(y0[:n], dtype=float)
-    # Initial covariance: uncertainty = measurement noise on each axis
-    P = (sigma_v ** 2) * np.eye(n)
-
-    # Heat-source max powers (needed to convert fraction u → watts)
-    source_max_power: List[float] = []
-    source_rooms: List[str] = []
-    for src in heat_sources:
-        source_max_power.append(float(getattr(src, "max_power", 0.0)))
-        source_rooms.append(getattr(src, "room", ""))
+    n_x = sde.nx                              # n_rooms + n_emitter_lags
+    room_list = sde._room_list                # authoritative room order from SDE
 
     # ------------------------------------------------------------------
-    # Forward simulation
+    # Initialise CD-EKF from first measurement
+    # ------------------------------------------------------------------
+    y0 = window[0].get("y", [])
+    x0 = np.zeros(n_x, dtype=float)
+    x0[:n] = [float(y0[i]) if i < len(y0) else 0.0 for i in range(n)]
+    P0 = (sigma_v ** 2) * np.eye(n_x)
+
+    ekf = _ContinuousDiscreteEKF(
+        sde, x0, P0, dt,
+        n_steps=10,
+        scheme="implicit-euler",
+    )
+
+    p = np.array([])    # use model-default parameters
+
+    # ------------------------------------------------------------------
+    # ZOH bookkeeping: u[k] and d[k] drive interval [t_k, t_{k+1}]
+    # ------------------------------------------------------------------
+    n_u   = len(heat_sources)
+    n_d   = sde.nd   # 1 + n_rooms
+
+    u_prev = _record_u(window[0], n_u)
+    d_prev = _record_d(window[0], room_list, n_d)
+    t_prev = float(window[0].get("timestamp", 0.0))
+
+    # ------------------------------------------------------------------
+    # Output containers — initial point (no prediction available yet)
     # ------------------------------------------------------------------
     per_room_sim: Dict[str, List[Dict[str, Any]]] = {name: [] for name in room_names}
-
-    # Record initial point
-    ts0 = float(window[0].get("timestamp", 0.0))
+    ts0 = t_prev
     for i, name in enumerate(room_names):
-        std_i = float(np.sqrt(max(0.0, P[i, i]) + sigma_v ** 2))
         per_room_sim[name].append({
-            "time": ts0,
-            "measured": float(y0[i]),
-            "simulated": float(T_sim[i]),
-            "cov_upper": float(T_sim[i] + 2.0 * std_i),
-            "cov_lower": float(T_sim[i] - 2.0 * std_i),
+            "time":      ts0,
+            "measured":  float(y0[i]) if i < len(y0) else None,
+            "predicted": float(x0[i]),
+            "cov_upper": float(x0[i] + 2.0 * sigma_v),
+            "cov_lower": float(x0[i] - 2.0 * sigma_v),
         })
 
-    # Set initial temperatures on the simulation model
-    for i, name in enumerate(room_names):
-        sim_model.rooms[name].temperature = float(T_sim[i])
-
+    # ------------------------------------------------------------------
+    # Main CD-EKF loop
+    # ------------------------------------------------------------------
     for record in window[1:]:
-        u_raw = record.get("u", [])
-        d_outdoor = float(record.get("d_outdoor", 10.0))
-        d_solar: Dict[str, float] = record.get("d_solar", {})
         timestamp = float(record.get("timestamp", 0.0))
-        y_raw = record.get("y", [])
-        # If this record has fewer entries than expected, use None for missing rooms.
+        y_raw     = record.get("y", [])
         y_meas: List[Optional[float]] = [
-            (float(y_raw[i]) if i < len(y_raw) else None) for i in range(n)
+            float(y_raw[i]) if i < len(y_raw) else None for i in range(n)
         ]
+        u_curr = _record_u(record, n_u)
+        d_curr = _record_d(record, room_list, n_d)
 
-        # Convert control fractions to heat inputs [W]
-        heat_inputs: Dict[str, float] = {}
-        for k, src_room in enumerate(source_rooms):
-            if src_room in heat_inputs:
-                heat_inputs[src_room] = 0.0
-        for k, (src_room, max_p) in enumerate(zip(source_rooms, source_max_power)):
-            frac = float(u_raw[k]) if k < len(u_raw) else 0.0
-            heat_inputs[src_room] = heat_inputs.get(src_room, 0.0) + frac * max_p
-
-        # Advance model state (updates sim_model temperatures in-place)
+        # ---- Prediction step ----------------------------------------
+        # Propagate from x̂⁺(k-1) using u_prev, d_prev (ZOH).
         try:
-            sim_model.step(
-                dt=dt,
-                heat_inputs=heat_inputs,
-                outdoor_temp=d_outdoor,
-                solar_gains=d_solar,
-            )
+            x_pred, P_pred = ekf.predict(u_prev, d_prev, p, t_prev)
         except Exception as exc:
-            _LOGGER.warning("SysID simulation step failed: %s", exc)
+            _LOGGER.warning("SysID CD-EKF predict failed at ts=%.0f: %s", timestamp, exc)
             break
 
-        T_sim = np.array(
-            [sim_model.rooms[name].temperature for name in room_names],
-            dtype=float,
-        )
+        # Room-temperature block: x_pred[:n], P_pred[:n, :n]
+        T_pred    = x_pred[:n]
+        P_pred_rr = P_pred[:n, :n]
 
-        # Propagate covariance: P_{k+1} = F_d P F_d^T + Q_d
-        P = F_d @ P @ F_d.T + Q_d
-
+        # ---- Record one-step-ahead prediction -----------------------
+        # Output variance: S_i = P⁻[i,i] + σ_v²
         for i, name in enumerate(room_names):
-            std_i = float(np.sqrt(max(0.0, P[i, i]) + sigma_v ** 2))
-            measured_i = (
-                float(y_meas[i]) if i < len(y_meas) and y_meas[i] is not None
-                else None
-            )
+            std_i = float(np.sqrt(max(0.0, P_pred_rr[i, i] + sigma_v ** 2)))
             per_room_sim[name].append({
-                "time": timestamp,
-                "measured": measured_i,
-                "simulated": float(T_sim[i]),
-                "cov_upper": float(T_sim[i] + 2.0 * std_i),
-                "cov_lower": float(T_sim[i] - 2.0 * std_i),
+                "time":      timestamp,
+                "measured":  y_meas[i],
+                "predicted": float(T_pred[i]),
+                "cov_upper": float(T_pred[i] + 2.0 * std_i),
+                "cov_lower": float(T_pred[i] - 2.0 * std_i),
             })
 
+        # ---- Update step --------------------------------------------
+        valid = np.array([m is not None for m in y_meas], dtype=bool)
+        y_k   = np.array([
+            y_meas[i] if y_meas[i] is not None else float(T_pred[i])
+            for i in range(n)
+        ], dtype=float)
+        mask  = valid if not valid.all() else None   # None = use all (faster path)
+
+        try:
+            ekf.update(y_k, u_curr, d_curr, p, mask=mask)
+        except Exception as exc:
+            _LOGGER.warning("SysID CD-EKF update failed at ts=%.0f: %s", timestamp, exc)
+            break
+
+        # Advance ZOH state
+        u_prev = u_curr
+        d_prev = d_curr
+        t_prev = timestamp
+
     # ------------------------------------------------------------------
-    # Compute RMSE / MAE per room
+    # One-step prediction RMSE / MAE per room
     # ------------------------------------------------------------------
     per_room_out: Dict[str, Any] = {}
     for i, name in enumerate(room_names):
-        sim_data = per_room_sim[name]
-        errors = [
-            e["simulated"] - e["measured"]
-            for e in sim_data
-            if e["measured"] is not None
+        entries = per_room_sim[name]
+        errors  = [
+            e["predicted"] - e["measured"]
+            for e in entries
+            if e.get("measured") is not None
         ]
         if errors:
-            err_arr = np.array(errors)
-            rmse = float(np.sqrt(np.mean(err_arr ** 2)))
-            mae = float(np.mean(np.abs(err_arr)))
+            arr  = np.array(errors, dtype=float)
+            rmse = float(np.sqrt(np.mean(arr ** 2)))
+            mae  = float(np.mean(np.abs(arr)))
         else:
-            rmse = None
-            mae = None
+            rmse = mae = None
 
         room = sim_model.rooms.get(name)
         per_room_out[name] = {
-            "simulation": sim_data,
-            "rmse": rmse,
-            "mae": mae,
+            "simulation":   entries,
+            "rmse":         rmse,
+            "mae":          mae,
             "thermal_mass": float(room.thermal_mass) if room else None,
-            "r_external": float(room.r_external) if room else None,
-            "sigma_w": sigma_w,
-            "sigma_v": sigma_v,
+            "r_external":   float(room.r_external)   if room else None,
+            "sigma_w":      sigma_w,
+            "sigma_v":      sigma_v,
         }
 
     return {
-        "per_room": per_room_out,
+        "per_room":      per_room_out,
         "horizon_steps": actual_steps,
     }
+
+
+# Alias kept for callers that import the old name.
+run_sysid_simulation = run_sysid_ekf
 
 
 # ---------------------------------------------------------------------------
@@ -283,14 +313,39 @@ def run_sysid_simulation(
 # ---------------------------------------------------------------------------
 
 
+def _record_u(record: Dict[str, Any], n_u: int) -> np.ndarray:
+    """Extract control fractions from a history record as a float64 array."""
+    u_raw = record.get("u", [])
+    return np.array(
+        [float(u_raw[k]) if k < len(u_raw) else 0.0 for k in range(n_u)],
+        dtype=float,
+    )
+
+
+def _record_d(
+    record: Dict[str, Any],
+    room_list: List[str],
+    n_d: int,
+) -> np.ndarray:
+    """Build the disturbance vector d = [T_outdoor, Q_solar_1, ..., Q_solar_n].
+
+    Layout matches ``HouseThermalSDE.nd``:  d[0] = outdoor temperature,
+    d[1+i] = solar gain for room ``room_list[i]`` [W].
+    """
+    d = np.zeros(n_d, dtype=float)
+    d[0] = float(record.get("d_outdoor", 10.0))
+    solar = record.get("d_solar", {})
+    for i, name in enumerate(room_list):
+        d[1 + i] = float(solar.get(name, 0.0))
+    return d
+
+
 def _build_sim_model(
     live_model: Any,
     room_params: Dict[str, Dict[str, float]],
     room_names: List[str],
 ) -> Any:
-    """Return a deep copy of *live_model* with room_params overridden."""
-    import copy
-
+    """Return a deep copy of *live_model* with *room_params* overrides applied."""
     sim_model = copy.deepcopy(live_model)
     for name in room_names:
         overrides = room_params.get(name, {})
@@ -304,11 +359,11 @@ def _build_sim_model(
         if "r_external" in overrides:
             room.r_external = float(overrides["r_external"])
 
-    # Rebuild cached matrices so the new parameters are reflected in F_c / F_d.
+    # Rebuild cached matrices so HouseThermalSDE picks up the new parameters.
     sim_model.rebuild_derived_parameters()
     C, A, B = sim_model._build_matrices()
-    sim_model._C = C
-    sim_model._A = A
+    sim_model._C     = C
+    sim_model._A     = A
     sim_model._B_ext = B
 
     return sim_model

@@ -2326,12 +2326,12 @@ class WeatherForecastStatusSensor(CoordinatorEntity, SensorEntity):
 
 class SysIdSimulationSensor(CoordinatorEntity, SensorEntity):
     """
-    Sensor exposing the most recent system-identification open-loop simulation.
+    Sensor exposing the most recent system-identification EKF reconstruction.
 
-    State value: open-loop RMSE [°C] (``None`` until the first simulation run).
+    State value: one-step-ahead RMSE [°C] (``None`` until the first run).
 
     Attributes:
-        ``simulation``   – list of {time (ISO-8601), measured, simulated,
+        ``simulation``   – list of {time (ISO-8601), measured, predicted,
                                      cov_upper, cov_lower} for Apex Charts
         ``thermal_mass`` – J/K used for this run
         ``r_external``   – K/W used for this run
@@ -2339,7 +2339,7 @@ class SysIdSimulationSensor(CoordinatorEntity, SensorEntity):
         ``sigma_v``       – measurement noise std used for this run
         ``rmse``         – same as state value [°C]
         ``mae``          – mean absolute error [°C]
-        ``horizon_hours``– simulated horizon in hours
+        ``horizon_hours``– reconstructed horizon in hours
     """
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -2380,7 +2380,7 @@ class SysIdSimulationSensor(CoordinatorEntity, SensorEntity):
             formatted.append({
                 "time": dt_iso,
                 "measured": entry.get("measured"),
-                "simulated": entry.get("simulated"),
+                "predicted": entry.get("predicted"),
                 "cov_upper": entry.get("cov_upper"),
                 "cov_lower": entry.get("cov_lower"),
             })
