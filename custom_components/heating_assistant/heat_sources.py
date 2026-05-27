@@ -131,6 +131,23 @@ class HeatSource(ABC):
         """Upper bound on the control input."""
         return 1.0
 
+    @property
+    def elec_per_unit_heat(self) -> float:
+        """Electrical power [W] drawn per unit of positive control input (heating).
+
+        For heat pumps the COP cancels out: P_elec = thermal / COP is independent
+        of outdoor temperature and equals the rated electrical draw at full load.
+        """
+        return 0.0
+
+    @property
+    def elec_per_unit_cool(self) -> float:
+        """Electrical power [W] drawn per unit of |negative| control input (cooling).
+
+        Zero for sources that cannot cool.
+        """
+        return 0.0
+
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(name={self.name!r}, room={self.room!r}, "
@@ -181,6 +198,10 @@ class ElectricHeater(HeatSource):
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """Thermal power = electrical power × efficiency × power_scale."""
         return self._gain * setpoint_fraction
+
+    @property
+    def elec_per_unit_heat(self) -> float:
+        return self.max_power * self.efficiency * self.power_scale
 
     def target_temperature(self, setpoint_fraction: float, internal_temp: float) -> float:
         """Target setpoint = internal_temp + fraction × max_temp_offset."""
@@ -303,6 +324,22 @@ class HeatPump(HeatSource):
     def can_cool(self) -> bool:
         """Returns True when the configured hvac_mode includes cooling."""
         return self.hvac_mode in ("cool", "heat_cool") and self.cooling_cop > 0
+
+    @property
+    def elec_per_unit_heat(self) -> float:
+        # COP cancels: P_elec = thermal(u) / COP = _q_heat_base * u / COP * COP = _q_heat_base * u
+        # Recompute from current power_scale to stay consistent after power_scale updates.
+        electric_max = self.max_power / self.cop_rated if self.cop_rated > 0 else 0.0
+        return electric_max * self.heating_efficiency * self.power_scale
+
+    @property
+    def elec_per_unit_cool(self) -> float:
+        if not self.can_cool:
+            return 0.0
+        # Q_cool = electric_max * cooling_cop * cooling_efficiency * power_scale
+        # P_elec_cool = Q_cool / cooling_cop = electric_max * cooling_efficiency * power_scale
+        electric_max = self.max_power / self.cop_rated if self.cop_rated > 0 else 0.0
+        return electric_max * self.cooling_efficiency * self.power_scale
 
     @property
     def u_min(self) -> float:

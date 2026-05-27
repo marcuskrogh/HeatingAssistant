@@ -59,6 +59,11 @@ class DashboardSpec:
     ``history_hours`` / ``forecast_hours`` set the chart window used by the
     MPC triplet on the per-room views; the total ``graph_span`` is their
     sum. The defaults mirror the recipe in ``README §13.17``.
+
+    ``has_price`` controls whether the *Power & electricity price* dual-axis
+    chart is inserted into each room's per-room view.  Set to ``True`` when a
+    price entity is configured so users can see the controller reacting to
+    spot-price variations.
     """
 
     rooms: Sequence[RoomSpec]
@@ -67,6 +72,7 @@ class DashboardSpec:
     forecast_hours: float = 3.0
     title: str = "Heating Assistant"
     url_path: str = "heating-assistant"
+    has_price: bool = False
 
     @property
     def graph_span_hours(self) -> float:
@@ -436,6 +442,95 @@ def _mpc_control_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
                 "stroke_width": 2,
                 "float_precision": 0,
                 "show": {"in_header": True},
+            },
+        ],
+    }
+
+
+def _price_and_power_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
+    """Heating power (actual + plan) vs electricity price – dual-axis chart."""
+    measured = _eid("sensor", room.name, "heating_power_measured")
+    forecast = _eid("sensor", room.name, "heating_power_forecast")
+    price_current = _system_eid("sensor", "electricity_price")
+    price_fc = _system_eid("sensor", "electricity_price_forecast")
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {
+            "show": True,
+            "title": f"{room.name} – Power & Price",
+            "show_states": True,
+        },
+        "graph_span": f"{int(spec.graph_span_hours)}h",
+        "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
+        "now": {"show": True, "label": "", "color": "#424242"},
+        "yaxis": [
+            {
+                "id": "power",
+                "apex_config": {
+                    "title": {"text": "Power (W)"},
+                    "tickAmount": 4,
+                },
+            },
+            {
+                "id": "price",
+                "opposite": True,
+                "min": 0,
+                "apex_config": {
+                    "title": {"text": "Price"},
+                    "decimalsInFloat": 4,
+                    "tickAmount": 4,
+                },
+            },
+        ],
+        "series": [
+            {
+                "entity": measured,
+                "name": "Actual",
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": "#BF360C",
+                "opacity": 0.2,
+                "stroke_width": 2,
+                "float_precision": 0,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
+            },
+            {
+                "entity": forecast,
+                "name": "Plan",
+                "data_generator": _forecast_generator("heating_power"),
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": "#E65100",
+                "opacity": 0.35,
+                "stroke_width": 2,
+                "float_precision": 0,
+                "show": {"in_header": True},
+            },
+            {
+                "entity": price_current,
+                "name": "Price",
+                "yaxis_id": "price",
+                "color": "#1565C0",
+                "stroke_width": 2,
+                "curve": "stepline",
+                "float_precision": 4,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
+            },
+            {
+                "entity": price_fc,
+                "name": "Price fc.",
+                "data_generator": _forecast_generator("price"),
+                "yaxis_id": "price",
+                "color": "#42A5F5",
+                "stroke_width": 2,
+                "stroke_dash": 4,
+                "curve": "stepline",
+                "float_precision": 4,
+                "show": {"in_legend": False, "in_header": False},
             },
         ],
     }
@@ -1111,6 +1206,24 @@ def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
                 _mpc_control_card(room, spec),
             ],
         },
+    ]
+
+    if spec.has_price:
+        sections.append(
+            {
+                "type": "grid",
+                "cards": [
+                    {
+                        "type": "heading",
+                        "heading": "Power & electricity price",
+                        "heading_style": "title",
+                    },
+                    _price_and_power_card(room, spec),
+                ],
+            }
+        )
+
+    sections += [
         {
             "type": "grid",
             "cards": [
@@ -1863,11 +1976,14 @@ def build_dashboard_from_coordinator(coordinator: Any) -> Dict[str, Any]:
     else:
         forecast_hours = 3.0
 
+    has_price = bool(getattr(coordinator, "_price_entity", None))
+
     return build_dashboard(
         DashboardSpec(
             rooms=tuple(rooms),
             sources=tuple(sources),
             forecast_hours=forecast_hours,
+            has_price=has_price,
         )
     )
 

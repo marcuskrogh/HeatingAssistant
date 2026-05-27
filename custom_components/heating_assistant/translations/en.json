@@ -69,6 +69,7 @@
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor",
           "weather_entity": "Weather forecast",
+          "price_entity": "Electricity price sensor",
           "update_interval": "Control interval (seconds)",
           "sigma_w": "Model adaptation rate",
           "sigma_v": "Sensor noise",
@@ -80,6 +81,7 @@
         "data_description": {
           "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
           "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
+          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating. Enable the price sensitivity slider in Control behaviour to activate.",
           "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes.",
           "sigma_w": "Advanced — how quickly the thermal model adapts to observed data. Higher values track changes faster but follow sensor noise more closely. Default 0.1 works for most homes.",
           "sigma_v": "Advanced — expected indoor temperature sensor noise (K). Raise this if you have a noisy sensor; lower it for a precise one.",
@@ -98,7 +100,8 @@
           "horizon": "Prediction horizon (steps)",
           "smoothing_weight": "Output smoothing",
           "soft_constraint_weight": "Comfort band penalty",
-          "terminal_weight": "End-of-horizon weight"
+          "terminal_weight": "End-of-horizon weight",
+          "energy_price_weight": "Price sensitivity"
         },
         "data_description": {
           "tracking_weight": "How strongly the controller chases the exact setpoint. 0 = stay inside the comfort band only. Higher values mean tighter tracking at the cost of more energy use.",
@@ -106,7 +109,8 @@
           "horizon": "Advanced — number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",
           "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
           "soft_constraint_weight": "Advanced — how hard the controller fights to stay inside your comfort band. Higher = stricter, may use more energy at the band edges.",
-          "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift."
+          "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift.",
+          "energy_price_weight": "How strongly the controller shifts heating toward cheaper hours. 0 = ignore prices, 1 = balanced comfort/cost trade-off. Only active when an electricity price sensor is configured above."
         }
       },
       "manage_rooms": {

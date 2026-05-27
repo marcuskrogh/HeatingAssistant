@@ -112,6 +112,11 @@ async def async_setup_entry(
     entities.append(MPCPerformanceSensor(coordinator))
     entities.append(WeatherForecastStatusSensor(coordinator))
 
+    # Price sensors — only when a price entity is configured
+    if getattr(coordinator, "_price_entity", None):
+        entities.append(ElectricityPriceSensor(coordinator))
+        entities.append(ElectricityPriceForecastSensor(coordinator))
+
     async_add_entities(entities)
 
 
@@ -1304,6 +1309,135 @@ class SolarGainForecastSensor(CoordinatorEntity, SensorEntity):
             "step_seconds": dt,
             "window_count": len(room.windows),
             "total_window_area": round(sum(w.area for w in room.windows), 2),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Electricity price sensors (system-wide) — current + forecast
+# ---------------------------------------------------------------------------
+
+
+class ElectricityPriceSensor(CoordinatorEntity, SensorEntity):
+    """Current electricity spot price from the configured price entity.
+
+    The state mirrors ``coordinator.price_forecast[0]`` (the price for the
+    current control interval), so the sensor updates every coordinator cycle
+    and stays aligned with the value the MPC actually used.  The unit of
+    measurement is read dynamically from the underlying price entity so it
+    reflects whatever currency/kWh unit Nord Pool / Tibber reports.
+    """
+
+    _attr_device_class = None
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 4
+    _attr_icon = "mdi:cash"
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Electricity Price"
+        self._attr_unique_id = f"{DOMAIN}_electricity_price"
+
+    @property
+    def native_unit_of_measurement(self) -> Optional[str]:
+        price_entity = getattr(self._coordinator, "_price_entity", None)
+        if not price_entity:
+            return None
+        state = self._coordinator.hass.states.get(price_entity)
+        if state is None:
+            return None
+        return state.attributes.get("unit_of_measurement")
+
+    @property
+    def native_value(self) -> Optional[float]:
+        forecast = self._coordinator.price_forecast
+        if not forecast:
+            return None
+        try:
+            return round(float(forecast[0]), 5)
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        forecast = self._coordinator.price_forecast or []
+        return {
+            "has_forecast": len(forecast) > 0,
+            "horizon_steps": len(forecast),
+        }
+
+
+class ElectricityPriceForecastSensor(CoordinatorEntity, SensorEntity):
+    """Electricity price forecast over the MPC prediction horizon.
+
+    The state is the current price (identical to :class:`ElectricityPriceSensor`).
+    The full timestamped forecast is exposed as a ``forecast`` attribute for
+    ``apexcharts-card`` dashboard plots.
+
+    ``device_class``/``state_class`` are ``None`` — forecasted prices are
+    predictions, not historical measurements — and ``available`` returns
+    ``True`` so the cached forecast survives transient coordinator failures.
+    """
+
+    _attr_device_class = None
+    _attr_state_class = None
+    _attr_suggested_display_precision = 4
+    _attr_icon = "mdi:lightning-bolt-circle"
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Electricity Price Forecast"
+        self._attr_unique_id = f"{DOMAIN}_electricity_price_forecast"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_unit_of_measurement(self) -> Optional[str]:
+        price_entity = getattr(self._coordinator, "_price_entity", None)
+        if not price_entity:
+            return None
+        state = self._coordinator.hass.states.get(price_entity)
+        if state is None:
+            return None
+        return state.attributes.get("unit_of_measurement")
+
+    @property
+    def native_value(self) -> Optional[float]:
+        forecast = self._coordinator.price_forecast
+        if not forecast:
+            return None
+        try:
+            return round(float(forecast[0]), 5)
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        forecast = self._coordinator.price_forecast or []
+        dt = self._coordinator.dt
+        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
+
+        # Entry at t=now bridges history to forecast; then one entry per OCP step.
+        forecast_list: List[Dict[str, Any]] = []
+        if forecast:
+            for i, price in enumerate(forecast):
+                step_time = now + timedelta(seconds=dt * i)
+                try:
+                    forecast_list.append({
+                        "time": step_time.isoformat(),
+                        "price": round(float(price), 5),
+                    })
+                except (TypeError, ValueError):
+                    pass
+
+        return {
+            "forecast": forecast_list,
+            "horizon_steps": len(forecast),
+            "step_seconds": dt,
+            "horizon_minutes": round(len(forecast) * dt / 60, 1),
         }
 
 

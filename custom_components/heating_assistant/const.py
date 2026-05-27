@@ -380,6 +380,10 @@ CONF_WINDOW_OPEN_DEBOUNCE = "window_open_debounce"            # seconds sensor m
 CONF_WINDOW_OPEN_CLOSE_SETTLE = "window_open_close_settle"    # seconds sensors must stay off before leaving open-state
 CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multiplier for EKF process noise while room is open
 
+# Electricity price (Nord Pool / Tibber / any hourly price sensor)
+CONF_PRICE_ENTITY = "price_entity"                # HA sensor entity_id exposing Nord Pool / market prices
+CONF_ENERGY_PRICE_WEIGHT = "energy_price_weight"  # α: dimensionless scale on the linear price term
+
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
 DEFAULT_R_EXTERNAL = 0.05              # K/W
@@ -416,6 +420,7 @@ DEFAULT_WINDOW_OPEN_DEBOUNCE = 60
 DEFAULT_WINDOW_OPEN_CLOSE_SETTLE = 30
 DEFAULT_WINDOW_OPEN_Q_INFLATION = 10.0
 DEFAULT_WINDOW_TILT = 90.0             # vertical
+DEFAULT_ENERGY_PRICE_WEIGHT = 0.0      # disabled until a price entity is configured
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
 
 # Comfort schedule modes

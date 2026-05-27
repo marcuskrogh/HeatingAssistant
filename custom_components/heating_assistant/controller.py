@@ -1186,11 +1186,27 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         offset_seq: Optional[np.ndarray] = None,
         q_scale_seq: Optional[np.ndarray] = None,
         r_scale_seq: Optional[np.ndarray] = None,
+        price_seq: Optional[np.ndarray] = None,
+        elec_heat: Optional[np.ndarray] = None,
+        elec_cool: Optional[np.ndarray] = None,
+        bid_mask: Optional[np.ndarray] = None,
+        price_weight: float = 0.0,
+        dt_h: float = 0.25,
     ):
-        # Fast path: no time-varying parameters and no u_ss correction.
+        has_price = (
+            price_seq is not None
+            and price_weight > 0.0
+            and elec_heat is not None
+        )
+        # Fast path: no time-varying parameters, no u_ss correction, no price.
         if (
-            u_ss is None or np.allclose(u_ss, 0.0)
-        ) and x_ref_dev_seq is None and offset_seq is None and q_scale_seq is None and r_scale_seq is None:
+            (u_ss is None or np.allclose(u_ss, 0.0))
+            and x_ref_dev_seq is None
+            and offset_seq is None
+            and q_scale_seq is None
+            and r_scale_seq is None
+            and not has_price
+        ):
             return super().solve(x0, D, x_ref, u_prev)
 
         N = self._N
@@ -1384,7 +1400,111 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             G_qp[row + i, n_U + i] = -1.0
             h_qp[row + i] = 0.0
 
-        sol = _cvxsolvers.qp(H, f, G_qp, h_qp)
+        # ── Price-aware linear cost term ──────────────────────────────────────
+        # For non-negative sources: add α·pₖ·cᵢ·Δtₕ directly to the gradient.
+        # For bidirectional sources: augment the decision vector with slack
+        # variables s⁺, s⁻ ≥ 0 satisfying u_abs = s⁺ − s⁻.
+        #
+        # Complementarity (s⁺·s⁻ = 0) is enforced by the price penalty alone:
+        # for any pₖ > 0, the linear cost α·pₖ·(c_heat·s⁺ + c_cool·s⁻) drives
+        # whichever slack is not needed to zero.  We do NOT add quadratic or
+        # linear penalties on (s⁺+s⁻) — those would be equivalent to penalising
+        # |u_abs| directly (an implicit energy cost that distorts the optimisation).
+        #
+        # Upper bounds s⁺ ≤ u_max, s⁻ ≤ |u_min| bound the QP for pₖ = 0 (no
+        # gradient on slacks) without adding any energy-like penalty.
+        # Prices are clamped to ≥ 0; negative spot prices yield zero cost, letting
+        # comfort/tracking terms drive the decision (the controller can freely use
+        # electricity without it artificially increasing the objective).
+        if has_price:
+            price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
+            n_price = len(price_arr)
+
+            bid_list: List[int] = []
+            if bid_mask is not None:
+                bid_list = [i for i in range(nu) if bid_mask[i]]
+            bid_set = set(bid_list)
+            n_bid = len(bid_list)
+
+            # Non-negative sources: direct linear term on u_dev.
+            for k in range(N):
+                p_k = float(price_arr[min(k, n_price - 1)])
+                for i in range(nu):
+                    if i not in bid_set:
+                        c_h = float(elec_heat[i]) * 1e-3  # W → kW
+                        f[k * nu + i] = f[k * nu + i] + price_weight * p_k * c_h * dt_h
+
+            if n_bid == 0:
+                sol = _cvxsolvers.qp(H, f, G_qp, h_qp)
+            else:
+                # Bidirectional sources: augment Z = [U; ε; S⁺; S⁻].
+                n_S = N * n_bid
+                n_Z_aug = n_U + n_eps + 2 * n_S
+
+                # ── Augmented Hessian (no slack quadratic term) ───────────────
+                H_aug = _zeros(n_Z_aug, n_Z_aug)
+                for i in range(n_U + n_eps):
+                    for j in range(n_U + n_eps):
+                        H_aug[i, j] = H[i, j]
+                # Slack diagonal: zero — price penalty alone enforces complementarity.
+
+                # ── Augmented gradient (price terms only, no slack linear bias) ─
+                f_aug = _zeros(n_Z_aug, 1)
+                for i in range(n_U + n_eps):
+                    f_aug[i] = f[i]
+                for k in range(N):
+                    p_k = float(price_arr[min(k, n_price - 1)])
+                    for jj, src_i in enumerate(bid_list):
+                        c_h = float(elec_heat[src_i]) * 1e-3
+                        c_c = (float(elec_cool[src_i]) if elec_cool is not None
+                               else c_h) * 1e-3
+                        sp = n_U + n_eps + k * n_bid + jj
+                        sm = n_U + n_eps + n_S + k * n_bid + jj
+                        f_aug[sp] = f_aug[sp] + price_weight * p_k * c_h * dt_h
+                        f_aug[sm] = f_aug[sm] + price_weight * p_k * c_c * dt_h
+
+                # ── Augmented inequality constraints ──────────────────────────
+                # Rows: existing (u box + ε) | s⁺ ≥ 0 | s⁻ ≥ 0 | s⁺ ≤ umax | s⁻ ≤ |umin|
+                # The upper bounds are essential when pₖ = 0 to keep the QP bounded.
+                u_min_np, u_max_np = self._model.u_bounds
+                n_ineq_aug = n_ineq + 4 * n_S
+                G_aug = _zeros(n_ineq_aug, n_Z_aug)
+                h_aug = _zeros(n_ineq_aug, 1)
+                for i in range(n_ineq):
+                    for j in range(n_U + n_eps):
+                        G_aug[i, j] = G_qp[i, j]
+                    h_aug[i] = h_qp[i]
+                # s⁺ ≥ 0 and s⁻ ≥ 0 (non-negativity)
+                for p in range(2 * n_S):
+                    G_aug[n_ineq + p, n_U + n_eps + p] = -1.0
+                # s⁺ ≤ u_max_i and s⁻ ≤ |u_min_i| (upper bounds)
+                for k in range(N):
+                    for jj, src_i in enumerate(bid_list):
+                        sp = n_U + n_eps + k * n_bid + jj
+                        sm = n_U + n_eps + n_S + k * n_bid + jj
+                        ub_row_sp = n_ineq + 2 * n_S + k * n_bid + jj
+                        ub_row_sm = n_ineq + 2 * n_S + n_S + k * n_bid + jj
+                        G_aug[ub_row_sp, sp] = 1.0
+                        h_aug[ub_row_sp] = float(u_max_np[src_i])
+                        G_aug[ub_row_sm, sm] = 1.0
+                        h_aug[ub_row_sm] = float(abs(u_min_np[src_i]))
+
+                # ── Equality: u_dev[k,i] − s⁺[k,j] + s⁻[k,j] = −u_ss[i] ────
+                n_eq = N * n_bid
+                A_eq = _zeros(n_eq, n_Z_aug)
+                b_eq = _zeros(n_eq, 1)
+                for k in range(N):
+                    for jj, src_i in enumerate(bid_list):
+                        row_eq = k * n_bid + jj
+                        A_eq[row_eq, k * nu + src_i] = 1.0
+                        A_eq[row_eq, n_U + n_eps + k * n_bid + jj] = -1.0
+                        A_eq[row_eq, n_U + n_eps + n_S + k * n_bid + jj] = 1.0
+                        b_eq[row_eq] = -(float(u_ss[src_i]) if u_ss is not None
+                                         else 0.0)
+
+                sol = _cvxsolvers.qp(H_aug, f_aug, G_aug, h_aug, A_eq, b_eq)
+        else:
+            sol = _cvxsolvers.qp(H, f, G_qp, h_qp)
 
         if sol["status"] != "optimal":
             import warnings
@@ -1443,6 +1563,12 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         offset_seq: Optional[np.ndarray] = None,
         q_scale_seq: Optional[np.ndarray] = None,
         r_scale_seq: Optional[np.ndarray] = None,
+        price_seq: Optional[np.ndarray] = None,
+        elec_heat: Optional[np.ndarray] = None,
+        elec_cool: Optional[np.ndarray] = None,
+        bid_mask: Optional[np.ndarray] = None,
+        price_weight: float = 0.0,
+        dt_h: float = 0.25,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Run one MPC step.
 
@@ -1458,6 +1584,18 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             Per-step multiplier applied to the global Q diagonal per room.
         r_scale_seq : (N, n_sources) ndarray, optional
             Per-step multiplier applied to the global R diagonal per source.
+        price_seq : (N,) ndarray, optional
+            Forecasted electricity price at each horizon step [currency/kWh].
+        elec_heat : (nu,) ndarray, optional
+            Electrical power drawn per unit of positive input [W/unit] per source.
+        elec_cool : (nu,) ndarray, optional
+            Electrical power drawn per unit of |negative input| [W/unit] per source.
+        bid_mask : (nu,) bool ndarray, optional
+            True for sources that can take negative inputs (bidirectional).
+        price_weight : float
+            Dimensionless scaling factor α for the price term.
+        dt_h : float
+            OCP time step in hours (dt / 3600).
         """
         y = np.asarray(y, dtype=float).reshape(self._model.nym)
         d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
@@ -1539,6 +1677,12 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             offset_seq=offset_seq,
             q_scale_seq=q_scale_seq,
             r_scale_seq=r_scale_seq,
+            price_seq=price_seq,
+            elec_heat=elec_heat,
+            elec_cool=elec_cool,
+            bid_mask=bid_mask,
+            price_weight=price_weight,
+            dt_h=dt_h,
         )
 
         U_dev_np = np.array(list(U_dev), dtype=float).reshape(self._N, self._model.nu)
@@ -1634,6 +1778,7 @@ class HeatingMPCController:
         solver: str = "qp",
         solver_options: Optional[Dict[str, Any]] = None,
         use_analytic_derivatives: bool = True,
+        energy_price_weight: float = 0.0,
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
@@ -1743,6 +1888,22 @@ class HeatingMPCController:
         self._tracking_weight: float = float(tracking_weight)
         self._energy_weight: float = float(energy_weight)
 
+        # ── Price-aware cost term ────────────────────────────────────────
+        self._energy_price_weight: float = float(energy_price_weight)
+        self._dt_h: float = dt / 3600.0
+        # Electrical draw per unit of u for each source (recomputed from
+        # current power_scale so estimation updates are reflected).
+        self._elec_heat: np.ndarray = np.array(
+            [src.elec_per_unit_heat for src in heat_sources], dtype=float
+        )
+        self._elec_cool: np.ndarray = np.array(
+            [src.elec_per_unit_cool for src in heat_sources], dtype=float
+        )
+        # Bidirectional mask: sources whose u_min < 0 need slack vars.
+        self._bid_mask: np.ndarray = np.array(
+            [src.u_min < 0 for src in heat_sources], dtype=bool
+        )
+
         # ── Warm-start / bookkeeping ─────────────────────────────────────
         self._u_prev: np.ndarray = np.zeros(n_u)
         self._solve_times: deque = deque(maxlen=MPC_STATS_BUFFER_SIZE)
@@ -1758,6 +1919,7 @@ class HeatingMPCController:
         self._outdoor_forecast: List[float] = []
         self._solar_forecast: List[Dict[str, float]] = []
         self._heating_schedule: List[Dict[str, float]] = []
+        self._price_forecast: List[float] = []
 
     # ── Visualisation / diagnostic properties ────────────────────────────
 
@@ -1881,6 +2043,11 @@ class HeatingMPCController:
         return self._heating_schedule
 
     @property
+    def price_forecast(self) -> List[float]:
+        """Electricity price forecast used in the last compute() [currency/kWh]."""
+        return self._price_forecast
+
+    @property
     def last_solve_time(self) -> Optional[float]:
         """Wall-clock time [s] consumed by the most recent QP solve, or None."""
         return self._solve_times[-1] if self._solve_times else None
@@ -1962,6 +2129,7 @@ class HeatingMPCController:
         cloud_cover_now: Optional[float] = None,
         disabled_sources: Optional[Set[str]] = None,
         control_trajectory: Optional[Any] = None,
+        price_forecast: Optional[List[float]] = None,
     ) -> Dict[str, float]:
         """
         Compute optimal control actions for the current time step.
@@ -1995,6 +2163,11 @@ class HeatingMPCController:
             user toggle, or window override).  Their QP outputs are zeroed
             out before the actions dict and heating schedule are built, so
             sensors report 0 W for both current and predicted inputs.
+        price_forecast : list of float, optional
+            Forecasted electricity prices aligned to the prediction horizon
+            [currency/kWh].  When provided and energy_price_weight > 0 the
+            controller penalises electrical consumption proportional to the
+            spot price at each step.
 
         Returns
         -------
@@ -2020,6 +2193,7 @@ class HeatingMPCController:
         # Store forecasts for visualisation
         self._outdoor_forecast = list(outdoor_seq)
         self._solar_forecast = [dict(s) for s in solar_seq]
+        self._price_forecast = list(price_forecast) if price_forecast is not None else []
 
         # ── Current measurement y = room temperatures ────────────────────
         room_list = self._system._room_list
@@ -2073,6 +2247,20 @@ class HeatingMPCController:
             q_scale_seq = None
             r_scale_seq = None
 
+        # ── Price forecast aligned to horizon ────────────────────────────
+        price_seq_np: Optional[np.ndarray] = None
+        if (price_forecast is not None
+                and len(price_forecast) > 0
+                and self._energy_price_weight > 0.0):
+            raw = np.asarray(price_forecast, dtype=float)
+            # Clamp to N steps, padding with last value if shorter.
+            if len(raw) >= N:
+                price_seq_np = raw[:N]
+            else:
+                price_seq_np = np.concatenate([
+                    raw, np.full(N - len(raw), raw[-1])
+                ])
+
         # ── QP solve with disturbance forecast ───────────────────────────
         _t0 = time.perf_counter()
         u_abs, U_abs, X_abs = self._mpc.step(
@@ -2082,6 +2270,12 @@ class HeatingMPCController:
             offset_seq=offset_seq,
             q_scale_seq=q_scale_seq,
             r_scale_seq=r_scale_seq,
+            price_seq=price_seq_np,
+            elec_heat=self._elec_heat,
+            elec_cool=self._elec_cool,
+            bid_mask=self._bid_mask,
+            price_weight=self._energy_price_weight,
+            dt_h=self._dt_h,
         )
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1

@@ -94,6 +94,8 @@ from .const import (
     CONF_TEMP_SENSORS,
     CONF_TERMINAL_WEIGHT,
     CONF_THERMAL_BRIDGE_PSI_L,
+    CONF_ENERGY_PRICE_WEIGHT,
+    CONF_PRICE_ENTITY,
     CONF_WINDOW_OPEN_CLOSE_SETTLE,
     CONF_WINDOW_OPEN_DEBOUNCE,
     CONF_WINDOW_OPEN_Q_INFLATION,
@@ -134,6 +136,7 @@ from .const import (
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
     DEFAULT_COMFORT_OFFSET,
+    DEFAULT_ENERGY_PRICE_WEIGHT,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_FACADE_COLOUR,
@@ -882,6 +885,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         # (EntitySelector rejects "" as an invalid default).
         outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
         weather = current.get(CONF_WEATHER_ENTITY) or None
+        price_entity = current.get(CONF_PRICE_ENTITY) or None
 
         schema_dict: Dict[Any, Any] = {
             vol.Optional(
@@ -892,6 +896,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 CONF_WEATHER_ENTITY,
                 description={"suggested_value": weather},
             ): EntitySelector(EntitySelectorConfig(domain="weather")),
+            vol.Optional(
+                CONF_PRICE_ENTITY,
+                description={"suggested_value": price_entity},
+            ): EntitySelector(EntitySelectorConfig(domain="sensor")),
             vol.Optional(
                 CONF_UPDATE_INTERVAL,
                 default=int(
@@ -1002,6 +1010,14 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     current.get(CONF_TERMINAL_WEIGHT) or DEFAULT_TERMINAL_WEIGHT
                 ),
             ): _number_box(min_value=1.0, max_value=10000.0, step=1.0),
+            vol.Optional(
+                CONF_ENERGY_PRICE_WEIGHT,
+                default=float(
+                    current.get(CONF_ENERGY_PRICE_WEIGHT)
+                    if current.get(CONF_ENERGY_PRICE_WEIGHT) is not None
+                    else DEFAULT_ENERGY_PRICE_WEIGHT
+                ),
+            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
         }
 
         return self.async_show_form(
