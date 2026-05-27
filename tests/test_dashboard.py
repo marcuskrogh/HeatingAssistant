@@ -11,10 +11,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.const import DOMAIN
 from custom_components.heating_assistant.dashboard import (
+    DASHBOARD_VARIANT_INDUSTRIAL,
     DashboardSpec,
     HeatSourceSpec,
     RoomSpec,
     build_dashboard,
+    build_dashboard_variant,
+    build_dashboard_variant_from_coordinator,
     build_dashboard_from_coordinator,
     dashboard_to_yaml,
     slugify,
@@ -700,3 +703,57 @@ def test_build_from_coordinator_scales_forecast_to_mpc_horizon():
             f"Card {card.get('header', {}).get('title')!r} has "
             f"graph_span={card['graph_span']!r}, expected {expected_span!r}"
         )
+
+
+def test_industrial_dashboard_has_overview_and_room_subviews(two_room_spec):
+    dashboard = build_dashboard_variant(two_room_spec, variant=DASHBOARD_VARIANT_INDUSTRIAL)
+    assert dashboard["title"] == "Heating Assistant – Industrial"
+    titles = [v["title"] for v in dashboard["views"]]
+    assert titles == ["Overview", "Living Room", "Bedroom"]
+    assert dashboard["views"][0].get("subview") in (None, False)
+    assert all(v.get("subview") is True for v in dashboard["views"][1:])
+
+
+def test_industrial_overview_uses_gauge_kpis(two_room_spec):
+    overview = build_dashboard_variant(
+        two_room_spec, variant=DASHBOARD_VARIANT_INDUSTRIAL
+    )["views"][0]
+    gauges = [c for c in _iter_cards(overview) if c.get("type") == "gauge"]
+    assert len(gauges) >= 3
+    names = {g.get("name") for g in gauges}
+    assert "MPC Compute Time" in names
+    assert "Total Heating Power" in names
+
+
+def test_industrial_room_view_contains_temperature_power_disturbance_plots(two_room_spec):
+    room = _room_view(
+        build_dashboard_variant(two_room_spec, variant=DASHBOARD_VARIANT_INDUSTRIAL),
+        "Living Room",
+    )
+    headers = {
+        card.get("header", {}).get("title")
+        for card in _iter_cards(room)
+        if card.get("type") == "custom:apexcharts-card"
+    }
+    assert "Living Room – Temperature Envelope" in headers
+    assert "Living Room – Heating Power" in headers
+    assert "Living Room – Disturbances" in headers
+
+
+def test_build_variant_from_coordinator_supports_industrial():
+    class FakeModel:
+        room_names = ["Office"]
+
+    class FakeCoordinator:
+        model = FakeModel()
+        heat_sources = []
+        _room_schedule = {}
+        _horizon = 6
+        dt = 900
+        _price_entity = None
+
+    dashboard = build_dashboard_variant_from_coordinator(
+        FakeCoordinator(), variant=DASHBOARD_VARIANT_INDUSTRIAL
+    )
+    assert dashboard["title"] == "Heating Assistant – Industrial"
+    assert [v["title"] for v in dashboard["views"]] == ["Overview", "Office"]

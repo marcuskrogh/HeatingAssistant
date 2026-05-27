@@ -403,13 +403,26 @@ run_sysid_simulation:
 regenerate_dashboard:
   name: Regenerate Lovelace dashboard
   description: >
-    Rebuild the per-room Heating Assistant Lovelace dashboard from the
-    current room and heat-source configuration.  The generated YAML is
+    Rebuild a Heating Assistant Lovelace dashboard from the current room and
+    heat-source configuration.  Choose ``classic`` (default) for the existing
+    dashboard or ``industrial`` for the modern process-control dashboard with
+    gauge-style KPIs and room-level process plots.  The generated YAML is
     returned in the service response and (unless ``dry_run`` is set) also
-    written to ``<config>/dashboards/heating_assistant.yaml`` so it can be
-    referenced from ``configuration.yaml`` via ``lovelace.dashboards`` or
-    pasted into a new dashboard in the UI.
+    written to ``<config>/dashboards``.
   fields:
+    variant:
+      name: Dashboard variant
+      description: >
+        Dashboard style to generate: ``classic`` (existing dashboard) or
+        ``industrial`` (new process-control dashboard).
+      required: false
+      default: "classic"
+      example: "industrial"
+      selector:
+        select:
+          options:
+            - "classic"
+            - "industrial"
     dry_run:
       name: Dry run
       description: >
@@ -426,7 +439,8 @@ regenerate_dashboard:
       description: >
         Optional plain filename (no directory components) for the generated
         YAML inside ``<config>/dashboards``.  Defaults to
-        ``heating_assistant.yaml``.
+        ``heating_assistant.yaml`` for ``classic`` and
+        ``heating_assistant_industrial.yaml`` for ``industrial``.
       required: false
       example: "heating_assistant.yaml"
       selector:

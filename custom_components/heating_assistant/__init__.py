@@ -202,6 +202,7 @@ SERVICE_RUN_SYSID_SIMULATION = "run_sysid_simulation"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
+DEFAULT_INDUSTRIAL_DASHBOARD_FILENAME = "heating_assistant_industrial.yaml"
 
 # ---------------------------------------------------------------------------
 # YAML schema
@@ -544,11 +545,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     written = await _async_auto_write_default_dashboard(hass, entry, coordinator)
     if written:
         await _async_try_register_lovelace_dashboard(hass, written)
+    written_industrial = await _async_auto_write_industrial_dashboard(
+        hass, entry, coordinator
+    )
+    if written_industrial:
+        await _async_try_register_lovelace_dashboard(
+            hass,
+            written_industrial,
+            url_path=DASHBOARD_INDUSTRIAL_URL_PATH,
+            title="Heating Assistant Industrial",
+            icon="mdi:factory",
+        )
 
     return True
 
 
 DASHBOARD_URL_PATH = "heating-assistant"
+DASHBOARD_INDUSTRIAL_URL_PATH = "heating-assistant-industrial"
 
 
 async def _async_auto_write_default_dashboard(
@@ -655,9 +668,93 @@ async def _async_auto_write_default_dashboard(
         return None
 
 
+async def _async_auto_write_industrial_dashboard(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: HeatingAssistantCoordinator,
+) -> Optional[str]:
+    """Write the industrial dashboard YAML as an additional dashboard."""
+    import os
+    from datetime import datetime, timezone
+
+    from .dashboard import (
+        DASHBOARD_VARIANT_INDUSTRIAL,
+        build_dashboard_variant_from_coordinator,
+        dashboard_to_yaml,
+    )
+
+    _DASHBOARD_FORMAT_VERSION = 1
+
+    try:
+        marker_store = Store(
+            hass,
+            version=1,
+            key=f"{DOMAIN}_industrial_dashboard_marker_{entry.entry_id}",
+        )
+        marker = await marker_store.async_load()
+        config_horizon = coordinator._horizon
+        config_dt = coordinator.dt
+        if (
+            marker
+            and marker.get("written_at")
+            and marker.get("format_version", 1) >= _DASHBOARD_FORMAT_VERSION
+            and marker.get("horizon") == config_horizon
+            and marker.get("dt") == config_dt
+        ):
+            return marker.get("path") if marker.get("path") else None
+
+        base_dir = hass.config.path("dashboards")
+        target = os.path.join(base_dir, DEFAULT_INDUSTRIAL_DASHBOARD_FILENAME)
+        if not marker and os.path.exists(target):
+            await marker_store.async_save(
+                {
+                    "written_at": datetime.now(tz=timezone.utc).isoformat(),
+                    "path": target,
+                    "format_version": _DASHBOARD_FORMAT_VERSION,
+                    "horizon": config_horizon,
+                    "dt": config_dt,
+                }
+            )
+            return target
+
+        dashboard = build_dashboard_variant_from_coordinator(
+            coordinator,
+            variant=DASHBOARD_VARIANT_INDUSTRIAL,
+        )
+        yaml_text = await hass.async_add_executor_job(dashboard_to_yaml, dashboard)
+
+        def _write() -> None:
+            os.makedirs(base_dir, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write(yaml_text)
+
+        await hass.async_add_executor_job(_write)
+
+        await marker_store.async_save(
+            {
+                "written_at": datetime.now(tz=timezone.utc).isoformat(),
+                "path": target,
+                "format_version": _DASHBOARD_FORMAT_VERSION,
+                "horizon": config_horizon,
+                "dt": config_dt,
+            }
+        )
+        return target
+    except Exception:
+        _LOGGER.debug(
+            "Heating Assistant: auto-write of industrial dashboard skipped",
+            exc_info=True,
+        )
+        return None
+
+
 async def _async_try_register_lovelace_dashboard(
     hass: HomeAssistant,
     yaml_path: str,
+    *,
+    url_path: str = DASHBOARD_URL_PATH,
+    title: str = "Heating Assistant",
+    icon: str = "mdi:home-thermometer",
 ) -> None:
     """Best-effort registration of the YAML file as a Lovelace dashboard.
 
@@ -684,21 +781,21 @@ async def _async_try_register_lovelace_dashboard(
             dashboards = lovelace_data.get("dashboards")
         if dashboards is None:
             return
-        if DASHBOARD_URL_PATH in dashboards:
+        if url_path in dashboards:
             return  # already registered (e.g. by the user)
 
         rel_filename = os.path.relpath(yaml_path, hass.config.path())
         config = {
             "mode": "yaml",
-            "icon": "mdi:home-thermometer",
-            "title": "Heating Assistant",
+            "icon": icon,
+            "title": title,
             "filename": rel_filename,
-            "url_path": DASHBOARD_URL_PATH,
+            "url_path": url_path,
             "show_in_sidebar": True,
             "require_admin": False,
         }
-        dashboards[DASHBOARD_URL_PATH] = LovelaceYAML(
-            hass, DASHBOARD_URL_PATH, config
+        dashboards[url_path] = LovelaceYAML(
+            hass, url_path, config
         )
 
         try:
@@ -709,7 +806,7 @@ async def _async_try_register_lovelace_dashboard(
                 component_name="lovelace",
                 sidebar_title=config["title"],
                 sidebar_icon=config["icon"],
-                frontend_url_path=DASHBOARD_URL_PATH,
+                frontend_url_path=url_path,
                 config={"mode": "yaml"},
                 require_admin=False,
                 update=False,
@@ -1475,18 +1572,31 @@ def _register_services(hass: HomeAssistant) -> None:
         """
         import os
 
-        from .dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
+        from .dashboard import (
+            DASHBOARD_VARIANT_CLASSIC,
+            DASHBOARD_VARIANT_INDUSTRIAL,
+            build_dashboard_variant_from_coordinator,
+            dashboard_to_yaml,
+        )
 
         coordinator = _get_coordinator(hass)
         # ``build_dashboard_from_coordinator`` is a pure read over coordinator
         # state; run it inline to avoid racing with the next update cycle.
-        dashboard = build_dashboard_from_coordinator(coordinator)
+        variant = str(call.data.get("variant") or DASHBOARD_VARIANT_CLASSIC)
+        if variant not in {DASHBOARD_VARIANT_CLASSIC, DASHBOARD_VARIANT_INDUSTRIAL}:
+            raise ValueError("variant must be 'classic' or 'industrial'")
+        dashboard = build_dashboard_variant_from_coordinator(coordinator, variant=variant)
         yaml_text: str = await hass.async_add_executor_job(
             dashboard_to_yaml, dashboard
         )
 
         dry_run = bool(call.data.get("dry_run", False))
-        filename = str(call.data.get("filename") or DEFAULT_DASHBOARD_FILENAME)
+        default_filename = (
+            DEFAULT_INDUSTRIAL_DASHBOARD_FILENAME
+            if variant == DASHBOARD_VARIANT_INDUSTRIAL
+            else DEFAULT_DASHBOARD_FILENAME
+        )
+        filename = str(call.data.get("filename") or default_filename)
         write_path: str | None = None
 
         if not dry_run:
@@ -1511,7 +1621,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 {
                     "title": "Heating Assistant dashboard regenerated",
                     "message": (
-                        f"Wrote dashboard YAML to `{write_path}`. "
+                        f"Wrote {variant} dashboard YAML to `{write_path}`. "
                         "Add a `lovelace.dashboards` entry referencing this file "
                         "or paste the contents into a new dashboard via "
                         "Settings → Dashboards."
@@ -1523,6 +1633,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         return {
             "yaml": yaml_text,
+            "variant": variant,
             "rooms": [v["title"] for v in dashboard["views"] if v.get("subview")],
             "written_to": write_path,
         }
@@ -1535,6 +1646,7 @@ def _register_services(hass: HomeAssistant) -> None:
             {
                 vol.Optional("dry_run", default=False): cv.boolean,
                 vol.Optional("filename"): cv.string,
+                vol.Optional("variant"): vol.In(["classic", "industrial"]),
             }
         ),
         supports_response=SupportsResponse.OPTIONAL,
