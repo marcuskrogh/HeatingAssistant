@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-05-25 14:14 UTC*
+*Generated: 2026-05-27 19:03 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,14 +18,14 @@ One control step consists of:
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | SLSQP    | qp             |       6.5 |         6.5 |      6.7 |   15 |
-| studio-1room           | IPOPT    | qp             |       6.4 |         6.4 |      6.5 |   15 |
-| two-bedroom-2room      | SLSQP    | qp             |       7.3 |         7.3 |      7.4 |   15 |
-| two-bedroom-2room      | IPOPT    | qp             |       7.7 |         7.4 |      9.4 |   15 |
-| full-house-5room       | SLSQP    | qp             |      16.5 |        16.4 |     18.2 |   15 |
-| full-house-5room       | IPOPT    | qp             |      16.5 |        16.4 |     17.5 |   15 |
-| full-house-5room-N16   | SLSQP    | qp             |      43.7 |        43.6 |     44.4 |   15 |
-| full-house-5room-N16   | IPOPT    | qp             |      43.0 |        43.0 |     43.5 |   15 |
+| studio-1room           | SLSQP    | qp             |       4.9 |         4.9 |      4.9 |   15 |
+| studio-1room           | IPOPT    | qp             |       4.9 |         4.9 |      5.2 |   15 |
+| two-bedroom-2room      | SLSQP    | qp             |       5.6 |         5.6 |      5.6 |   15 |
+| two-bedroom-2room      | IPOPT    | qp             |       5.6 |         5.6 |      5.7 |   15 |
+| full-house-5room       | SLSQP    | qp             |      13.0 |        12.9 |     13.9 |   15 |
+| full-house-5room       | IPOPT    | qp             |      12.9 |        12.9 |     13.0 |   15 |
+| full-house-5room-N16   | SLSQP    | qp             |      36.1 |        36.1 |     36.4 |   15 |
+| full-house-5room-N16   | IPOPT    | qp             |      35.1 |        35.1 |     35.3 |   15 |
 
 **Configurations:**
 
@@ -45,13 +45,11 @@ One estimation run consists of:
 2. Multi-start IPOPT minimisation of negative Kalman prediction-error
    decomposition log-likelihood with analytical gradients (3 restarts)
 
-History buffer: 60 steps (1-minute samples) of synthetic data.
+History buffer: 90 steps (1-minute samples) of synthetic data.
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | IPOPT    | IPOPT          |    1122.1 |      1122.1 |   1122.1 |    1 |
-| two-bedroom-2room      | IPOPT    | SLSQP          |    1544.4 |      1544.4 |   1544.4 |    1 |
-| full-house-5room       | IPOPT    | IPOPT          |    3364.7 |      3364.7 |   3364.7 |    1 |
+
 
 **Configurations:**
 
@@ -67,17 +65,14 @@ History buffer: 60 steps (1-minute samples) of synthetic data.
 
 | Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |
 |-----------------------------|------------------------|------------|-----------------|-----------------|----------|
-| MPC.compute                 | studio-1room           | SLSQP    |         6.4 |         6.5 |      1.5% (slower) |
-| MPC.compute                 | studio-1room           | IPOPT    |         6.4 |         6.4 |      0.5% (slower) |
-| MPC.compute                 | two-bedroom-2room      | SLSQP    |         7.3 |         7.3 |      0.7% (slower) |
-| MPC.compute                 | two-bedroom-2room      | IPOPT    |         7.3 |         7.4 |      0.9% (slower) |
-| MPC.compute                 | full-house-5room       | SLSQP    |        16.8 |        16.4 |     -2.6% (faster) |
-| MPC.compute                 | full-house-5room       | IPOPT    |        16.9 |        16.4 |     -2.8% (faster) |
-| MPC.compute                 | full-house-5room-N16   | SLSQP    |        43.7 |        43.6 |     -0.2% (faster) |
-| MPC.compute                 | full-house-5room-N16   | IPOPT    |        42.3 |        43.0 |      1.6% (slower) |
-| KalmanMLEstimator.estimate  | studio-1room           | IPOPT    |      1083.2 |      1122.1 |      3.6% (slower) |
-| KalmanMLEstimator.estimate  | two-bedroom-2room      | IPOPT    |      1599.0 |      1544.4 |     -3.4% (faster) |
-| KalmanMLEstimator.estimate  | full-house-5room       | IPOPT    |      3416.8 |      3364.7 |     -1.5% (faster) |
+| MPC.compute                 | studio-1room           | SLSQP    |         6.5 |         4.9 |    -24.9% (faster) |
+| MPC.compute                 | studio-1room           | IPOPT    |         6.4 |         4.9 |    -24.1% (faster) |
+| MPC.compute                 | two-bedroom-2room      | SLSQP    |         7.3 |         5.6 |    -23.8% (faster) |
+| MPC.compute                 | two-bedroom-2room      | IPOPT    |         7.4 |         5.6 |    -24.9% (faster) |
+| MPC.compute                 | full-house-5room       | SLSQP    |        16.4 |        12.9 |    -21.5% (faster) |
+| MPC.compute                 | full-house-5room       | IPOPT    |        16.4 |        12.9 |    -21.3% (faster) |
+| MPC.compute                 | full-house-5room-N16   | SLSQP    |        43.6 |        36.1 |    -17.2% (faster) |
+| MPC.compute                 | full-house-5room-N16   | IPOPT    |        43.0 |        35.1 |    -18.5% (faster) |
 
 ---
 
