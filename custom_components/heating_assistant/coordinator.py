@@ -27,6 +27,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_COMFORT_OFFSET,
     CONF_ENERGY_WEIGHT,
+    CONF_ENERGY_PRICE_WEIGHT,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_SLACK_QUAD_WEIGHT,
+    CONF_PRICE_SLACK_LIN_WEIGHT,
     CONF_ESTIMATED_PARAMS,
     CONF_PERSISTED_SETPOINTS,
     CONF_TRACKING_WEIGHT,
@@ -89,6 +93,9 @@ from .const import (
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
     DEFAULT_COMFORT_OFFSET,
+    DEFAULT_ENERGY_PRICE_WEIGHT,
+    DEFAULT_PRICE_SLACK_QUAD_WEIGHT,
+    DEFAULT_PRICE_SLACK_LIN_WEIGHT,
     DEFAULT_COOLING_COP,
     DEFAULT_COOLING_EFFICIENCY,
     DEFAULT_HEATING_EFFICIENCY,
@@ -345,6 +352,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._longitude: float = data.get(CONF_LONGITUDE, hass.config.longitude)
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
+        self._price_entity: Optional[str] = options.get(CONF_PRICE_ENTITY) or data.get(CONF_PRICE_ENTITY)
         # The update interval drives how often the coordinator ticks, the EKF
         # measurement step, and the OCP ZOH step — all three must be equal for
         # the MPC predictions to match physical reality.  Options take precedence
@@ -364,6 +372,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._tracking_weight: float = data.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT)
         self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
+        self._energy_price_weight: float = float(
+            data.get(CONF_ENERGY_PRICE_WEIGHT, DEFAULT_ENERGY_PRICE_WEIGHT)
+        )
+        self._price_slack_quad: float = float(
+            data.get(CONF_PRICE_SLACK_QUAD_WEIGHT, DEFAULT_PRICE_SLACK_QUAD_WEIGHT)
+        )
+        self._price_slack_lin: float = float(
+            data.get(CONF_PRICE_SLACK_LIN_WEIGHT, DEFAULT_PRICE_SLACK_LIN_WEIGHT)
+        )
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._soft_constraint_weight: float = data.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
@@ -471,6 +488,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+            price_slack_quad_weight=self._price_slack_quad,
+            price_slack_lin_weight=self._price_slack_lin,
         )
 
         self._init_room_state(rooms_cfg)
@@ -695,6 +715,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # when schedule computation fails.
         self._control_trajectory: Optional["ControlTrajectory"] = None
 
+        # Electricity price forecast for the current horizon [currency/kWh].
+        # None when no price entity is configured or the fetch fails.
+        self.price_forecast: Optional[List[float]] = None
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------
@@ -812,6 +836,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+            price_slack_quad_weight=self._price_slack_quad,
+            price_slack_lin_weight=self._price_slack_lin,
         )
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
@@ -961,6 +988,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+            price_slack_quad_weight=self._price_slack_quad,
+            price_slack_lin_weight=self._price_slack_lin,
         )
 
         self._estimation_timestamp = None
@@ -1027,13 +1057,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             outdoor_temp = self._read_outdoor_temp()
             self.outdoor_temp = outdoor_temp
 
-            # 2b. Read weather forecast for outdoor temperature prediction
+            # 2b. Read electricity price forecast from Nord Pool / price entity.
+            self.price_forecast = await self._async_read_price_forecast(self.now_utc)
+
+            # 2c. Read weather forecast for outdoor temperature prediction
             #     and cloud-cover (used to attenuate the clear-sky solar model)
             outdoor_forecast = await self._async_read_weather_forecast()
             cloud_cover_now = self._read_cloud_cover_now()
             cloud_forecast = await self._async_read_cloud_forecast(cloud_cover_now=cloud_cover_now)
 
-            # 2c. Read current wind speed for the Sherman–Grimsrud
+            # 2d. Read current wind speed for the Sherman–Grimsrud
             #     infiltration overlay (Phase 1 C1).  When the weather
             #     entity does not expose ``wind_speed`` this returns
             #     ``None`` and the controller's external conductance
@@ -1056,7 +1089,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 }
                 self.controller.set_room_process_noise_covariance_scales(q_scale)
 
-            # 2d. Compute the current ground temperature from the
+            # 2e. Compute the current ground temperature from the
             #     built-in sinusoidal model (Phase 1 A2).  No external
             #     data needed — only the day of year.  Pushed to the
             #     controller and held constant over the cycle, in line
@@ -1104,6 +1137,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     cloud_cover_now=cloud_cover_now,
                     disabled_sources=disabled_src_names or None,
                     control_trajectory=control_traj,
+                    price_forecast=self.price_forecast,
                 )
                 self.predictions = self.controller.predictions
                 self.linearised_predictions = self.controller.linearised_predictions
@@ -1111,6 +1145,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
                 self.filtered_temperatures = self.controller.filtered_temperatures
+                # Mirror the price forecast that was actually used so sensors can
+                # expose it (may differ from self.price_forecast if the controller
+                # truncated / padded it).
+                self.price_forecast = self.controller.price_forecast or self.price_forecast
 
                 # Capture Kalman innovation for diagnostics (may be None on first step)
                 # controller.last_innovation is populated by compute() after splitting
@@ -1286,6 +1324,85 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             return forecast_data
         self._record_weather_failure(error or "unknown error")
         return None
+
+    async def _async_read_price_forecast(
+        self, now: datetime
+    ) -> Optional[List[float]]:
+        """Read the electricity price forecast from the configured price entity.
+
+        Supports the Nord Pool custom component (HACS) and any sensor that
+        exposes hourly price lists in ``today`` and ``tomorrow`` attributes.
+        Falls back to persistence (current price repeated over the horizon)
+        when only the sensor state is available.
+
+        Returns a list of N prices [currency/kWh] aligned to horizon steps,
+        or None when no price entity is configured or the sensor is unavailable.
+        """
+        if not self._price_entity:
+            return None
+        state = self.hass.states.get(self._price_entity)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+
+        attrs = state.attributes
+
+        # ── Try attribute-based forecast (Nord Pool / Tibber style) ──────
+        today_raw = attrs.get("today") or attrs.get("prices_today") or []
+        tomorrow_raw = attrs.get("tomorrow") or attrs.get("prices_tomorrow") or []
+
+        today_prices: List[float] = []
+        tomorrow_prices: List[float] = []
+
+        for entry in today_raw:
+            if isinstance(entry, (int, float)):
+                today_prices.append(float(entry))
+            elif isinstance(entry, dict):
+                v = entry.get("value") or entry.get("price") or entry.get("total")
+                if v is not None:
+                    try:
+                        today_prices.append(float(v))
+                    except (TypeError, ValueError):
+                        pass
+
+        for entry in tomorrow_raw:
+            if isinstance(entry, (int, float)):
+                tomorrow_prices.append(float(entry))
+            elif isinstance(entry, dict):
+                v = entry.get("value") or entry.get("price") or entry.get("total")
+                if v is not None:
+                    try:
+                        tomorrow_prices.append(float(v))
+                    except (TypeError, ValueError):
+                        pass
+
+        all_prices = today_prices + tomorrow_prices
+
+        # ── Align hourly prices to horizon steps ─────────────────────────
+        if all_prices:
+            # Determine current hour index within today_prices.
+            now_local = now.astimezone()
+            current_hour = now_local.hour
+            # Offset into all_prices: today starts at hour 0.
+            offset = current_hour
+            aligned: List[float] = []
+            N = self._horizon
+            dt_s = float(self.dt)
+            steps_per_hour = max(1, round(3600.0 / dt_s))
+            for k in range(N):
+                hour_idx = offset + k // steps_per_hour
+                if hour_idx < len(all_prices):
+                    aligned.append(all_prices[hour_idx])
+                else:
+                    # Beyond forecast: repeat last known price.
+                    aligned.append(all_prices[-1])
+            return aligned
+
+        # ── Fall back to current sensor state (persistence) ───────────────
+        try:
+            current_price = float(state.state)
+        except (ValueError, TypeError):
+            return None
+        return [current_price] * self._horizon
 
     def _record_weather_success(self) -> None:
         """Mark the most recent forecast fetch as successful."""
@@ -2083,6 +2200,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+            price_slack_quad_weight=self._price_slack_quad,
+            price_slack_lin_weight=self._price_slack_lin,
         )
 
         _LOGGER.info(
