@@ -1192,8 +1192,6 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         bid_mask: Optional[np.ndarray] = None,
         price_weight: float = 0.0,
         dt_h: float = 0.25,
-        slack_quad: float = 1.0,
-        slack_lin: float = 0.0,
     ):
         has_price = (
             price_seq is not None
@@ -1403,12 +1401,23 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             h_qp[row + i] = 0.0
 
         # ── Price-aware linear cost term ──────────────────────────────────────
-        # For non-negative sources: add α·pₖ·cᵢ·Δt_h directly to the gradient.
+        # For non-negative sources: add α·pₖ·cᵢ·Δtₕ directly to the gradient.
         # For bidirectional sources: augment the decision vector with slack
-        # variables s⁺, s⁻ ≥ 0 satisfying u_abs = s⁺ − s⁻, so |u_abs| = s⁺ + s⁻
-        # at optimality (the quadratic Q_s penalty enforces complementarity).
+        # variables s⁺, s⁻ ≥ 0 satisfying u_abs = s⁺ − s⁻.
+        #
+        # Complementarity (s⁺·s⁻ = 0) is enforced by the price penalty alone:
+        # for any pₖ > 0, the linear cost α·pₖ·(c_heat·s⁺ + c_cool·s⁻) drives
+        # whichever slack is not needed to zero.  We do NOT add quadratic or
+        # linear penalties on (s⁺+s⁻) — those would be equivalent to penalising
+        # |u_abs| directly (an implicit energy cost that distorts the optimisation).
+        #
+        # Upper bounds s⁺ ≤ u_max, s⁻ ≤ |u_min| bound the QP for pₖ = 0 (no
+        # gradient on slacks) without adding any energy-like penalty.
+        # Prices are clamped to ≥ 0; negative spot prices yield zero cost, letting
+        # comfort/tracking terms drive the decision (the controller can freely use
+        # electricity without it artificially increasing the objective).
         if has_price:
-            price_arr = np.asarray(price_seq, dtype=float)
+            price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
             n_price = len(price_arr)
 
             bid_list: List[int] = []
@@ -1418,7 +1427,6 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             n_bid = len(bid_list)
 
             # Non-negative sources: direct linear term on u_dev.
-            # (Box constraints guarantee u_abs ≥ 0, so u_dev+u_ss ≥ 0.)
             for k in range(N):
                 p_k = float(price_arr[min(k, n_price - 1)])
                 for i in range(nu):
@@ -1427,29 +1435,20 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                         f[k * nu + i] = f[k * nu + i] + price_weight * p_k * c_h * dt_h
 
             if n_bid == 0:
-                # All sources non-negative: solve without augmentation.
                 sol = _cvxsolvers.qp(H, f, G_qp, h_qp)
             else:
-                # Bidirectional sources present: augment Z = [U; ε; S⁺; S⁻].
-                n_S = N * n_bid            # number of s⁺ (or s⁻) variables
+                # Bidirectional sources: augment Z = [U; ε; S⁺; S⁻].
+                n_S = N * n_bid
                 n_Z_aug = n_U + n_eps + 2 * n_S
 
-                # ── Augmented Hessian ─────────────────────────────────────────
+                # ── Augmented Hessian (no slack quadratic term) ───────────────
                 H_aug = _zeros(n_Z_aug, n_Z_aug)
                 for i in range(n_U + n_eps):
                     for j in range(n_U + n_eps):
                         H_aug[i, j] = H[i, j]
-                # Q_s · (s⁺ + s⁻)² = Q_s·s⁺² + 2·Q_s·s⁺·s⁻ + Q_s·s⁻²
-                for k in range(N):
-                    for jj, _ in enumerate(bid_list):
-                        sp = n_U + n_eps + k * n_bid + jj
-                        sm = n_U + n_eps + n_S + k * n_bid + jj
-                        H_aug[sp, sp] = H_aug[sp, sp] + slack_quad
-                        H_aug[sm, sm] = H_aug[sm, sm] + slack_quad
-                        H_aug[sp, sm] = H_aug[sp, sm] + slack_quad
-                        H_aug[sm, sp] = H_aug[sm, sp] + slack_quad
+                # Slack diagonal: zero — price penalty alone enforces complementarity.
 
-                # ── Augmented gradient ────────────────────────────────────────
+                # ── Augmented gradient (price terms only, no slack linear bias) ─
                 f_aug = _zeros(n_Z_aug, 1)
                 for i in range(n_U + n_eps):
                     f_aug[i] = f[i]
@@ -1461,26 +1460,36 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                                else c_h) * 1e-3
                         sp = n_U + n_eps + k * n_bid + jj
                         sm = n_U + n_eps + n_S + k * n_bid + jj
-                        f_aug[sp] = (f_aug[sp]
-                                     + price_weight * p_k * c_h * dt_h + slack_lin)
-                        f_aug[sm] = (f_aug[sm]
-                                     + price_weight * p_k * c_c * dt_h + slack_lin)
+                        f_aug[sp] = f_aug[sp] + price_weight * p_k * c_h * dt_h
+                        f_aug[sm] = f_aug[sm] + price_weight * p_k * c_c * dt_h
 
                 # ── Augmented inequality constraints ──────────────────────────
-                # Existing rows (u box + ε bounds) + non-negativity for s⁺, s⁻.
-                n_ineq_aug = n_ineq + 2 * n_S
+                # Rows: existing (u box + ε) | s⁺ ≥ 0 | s⁻ ≥ 0 | s⁺ ≤ umax | s⁻ ≤ |umin|
+                # The upper bounds are essential when pₖ = 0 to keep the QP bounded.
+                u_min_np, u_max_np = self._model.u_bounds
+                n_ineq_aug = n_ineq + 4 * n_S
                 G_aug = _zeros(n_ineq_aug, n_Z_aug)
                 h_aug = _zeros(n_ineq_aug, 1)
                 for i in range(n_ineq):
                     for j in range(n_U + n_eps):
                         G_aug[i, j] = G_qp[i, j]
                     h_aug[i] = h_qp[i]
+                # s⁺ ≥ 0 and s⁻ ≥ 0 (non-negativity)
                 for p in range(2 * n_S):
                     G_aug[n_ineq + p, n_U + n_eps + p] = -1.0
-                    # h_aug[n_ineq + p] = 0 (already)
+                # s⁺ ≤ u_max_i and s⁻ ≤ |u_min_i| (upper bounds)
+                for k in range(N):
+                    for jj, src_i in enumerate(bid_list):
+                        sp = n_U + n_eps + k * n_bid + jj
+                        sm = n_U + n_eps + n_S + k * n_bid + jj
+                        ub_row_sp = n_ineq + 2 * n_S + k * n_bid + jj
+                        ub_row_sm = n_ineq + 2 * n_S + n_S + k * n_bid + jj
+                        G_aug[ub_row_sp, sp] = 1.0
+                        h_aug[ub_row_sp] = float(u_max_np[src_i])
+                        G_aug[ub_row_sm, sm] = 1.0
+                        h_aug[ub_row_sm] = float(abs(u_min_np[src_i]))
 
-                # ── Equality constraints: u_dev[k,i] − s⁺[k,j] + s⁻[k,j] = −u_ss[i]
-                # In absolute coords: u_abs = s⁺ − s⁻; in dev coords: u_dev + u_ss = s⁺ − s⁻.
+                # ── Equality: u_dev[k,i] − s⁺[k,j] + s⁻[k,j] = −u_ss[i] ────
                 n_eq = N * n_bid
                 A_eq = _zeros(n_eq, n_Z_aug)
                 b_eq = _zeros(n_eq, 1)
@@ -1560,8 +1569,6 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         bid_mask: Optional[np.ndarray] = None,
         price_weight: float = 0.0,
         dt_h: float = 0.25,
-        slack_quad: float = 1.0,
-        slack_lin: float = 0.0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Run one MPC step.
 
@@ -1589,10 +1596,6 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             Dimensionless scaling factor α for the price term.
         dt_h : float
             OCP time step in hours (dt / 3600).
-        slack_quad : float
-            Quadratic penalty Q_s on slack sum ‖s⁺ + s⁻‖² (enforces complementarity).
-        slack_lin : float
-            Linear penalty q_s on slack sum s⁺ + s⁻ (optional additional push).
         """
         y = np.asarray(y, dtype=float).reshape(self._model.nym)
         d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
@@ -1680,8 +1683,6 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             bid_mask=bid_mask,
             price_weight=price_weight,
             dt_h=dt_h,
-            slack_quad=slack_quad,
-            slack_lin=slack_lin,
         )
 
         U_dev_np = np.array(list(U_dev), dtype=float).reshape(self._N, self._model.nu)
@@ -1778,8 +1779,6 @@ class HeatingMPCController:
         solver_options: Optional[Dict[str, Any]] = None,
         use_analytic_derivatives: bool = True,
         energy_price_weight: float = 0.0,
-        price_slack_quad_weight: float = 1.0,
-        price_slack_lin_weight: float = 0.0,
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
@@ -1891,8 +1890,6 @@ class HeatingMPCController:
 
         # ── Price-aware cost term ────────────────────────────────────────
         self._energy_price_weight: float = float(energy_price_weight)
-        self._price_slack_quad: float = float(price_slack_quad_weight)
-        self._price_slack_lin: float = float(price_slack_lin_weight)
         self._dt_h: float = dt / 3600.0
         # Electrical draw per unit of u for each source (recomputed from
         # current power_scale so estimation updates are reflected).
@@ -2279,8 +2276,6 @@ class HeatingMPCController:
             bid_mask=self._bid_mask,
             price_weight=self._energy_price_weight,
             dt_h=self._dt_h,
-            slack_quad=self._price_slack_quad,
-            slack_lin=self._price_slack_lin,
         )
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1

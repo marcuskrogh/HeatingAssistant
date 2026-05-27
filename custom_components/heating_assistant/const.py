@@ -383,8 +383,6 @@ CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multi
 # Electricity price (Nord Pool / Tibber / any hourly price sensor)
 CONF_PRICE_ENTITY = "price_entity"                # HA sensor entity_id exposing Nord Pool / market prices
 CONF_ENERGY_PRICE_WEIGHT = "energy_price_weight"  # α: dimensionless scale on the linear price term
-CONF_PRICE_SLACK_QUAD_WEIGHT = "price_slack_quad_weight"  # Q_s: quadratic penalty on slack sum (enforces complementarity)
-CONF_PRICE_SLACK_LIN_WEIGHT = "price_slack_lin_weight"    # q_s: linear penalty on slack sum (optional additional push)
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -423,8 +421,6 @@ DEFAULT_WINDOW_OPEN_CLOSE_SETTLE = 30
 DEFAULT_WINDOW_OPEN_Q_INFLATION = 10.0
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 DEFAULT_ENERGY_PRICE_WEIGHT = 0.0      # disabled until a price entity is configured
-DEFAULT_PRICE_SLACK_QUAD_WEIGHT = 1.0  # Q_s: any positive value enforces complementarity
-DEFAULT_PRICE_SLACK_LIN_WEIGHT = 0.0   # q_s: optional; Q_s alone is sufficient
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
 
 # Comfort schedule modes

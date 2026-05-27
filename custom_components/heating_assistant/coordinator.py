@@ -29,8 +29,6 @@ from .const import (
     CONF_ENERGY_WEIGHT,
     CONF_ENERGY_PRICE_WEIGHT,
     CONF_PRICE_ENTITY,
-    CONF_PRICE_SLACK_QUAD_WEIGHT,
-    CONF_PRICE_SLACK_LIN_WEIGHT,
     CONF_ESTIMATED_PARAMS,
     CONF_PERSISTED_SETPOINTS,
     CONF_TRACKING_WEIGHT,
@@ -94,8 +92,6 @@ from .const import (
     CONF_WINDOW_TILT,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENERGY_PRICE_WEIGHT,
-    DEFAULT_PRICE_SLACK_QUAD_WEIGHT,
-    DEFAULT_PRICE_SLACK_LIN_WEIGHT,
     DEFAULT_COOLING_COP,
     DEFAULT_COOLING_EFFICIENCY,
     DEFAULT_HEATING_EFFICIENCY,
@@ -375,12 +371,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._energy_price_weight: float = float(
             data.get(CONF_ENERGY_PRICE_WEIGHT, DEFAULT_ENERGY_PRICE_WEIGHT)
         )
-        self._price_slack_quad: float = float(
-            data.get(CONF_PRICE_SLACK_QUAD_WEIGHT, DEFAULT_PRICE_SLACK_QUAD_WEIGHT)
-        )
-        self._price_slack_lin: float = float(
-            data.get(CONF_PRICE_SLACK_LIN_WEIGHT, DEFAULT_PRICE_SLACK_LIN_WEIGHT)
-        )
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._soft_constraint_weight: float = data.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
@@ -489,8 +479,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            price_slack_quad_weight=self._price_slack_quad,
-            price_slack_lin_weight=self._price_slack_lin,
         )
 
         self._init_room_state(rooms_cfg)
@@ -837,8 +825,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            price_slack_quad_weight=self._price_slack_quad,
-            price_slack_lin_weight=self._price_slack_lin,
         )
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
@@ -989,8 +975,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            price_slack_quad_weight=self._price_slack_quad,
-            price_slack_lin_weight=self._price_slack_lin,
         )
 
         self._estimation_timestamp = None
@@ -2201,8 +2185,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            price_slack_quad_weight=self._price_slack_quad,
-            price_slack_lin_weight=self._price_slack_lin,
         )
 
         _LOGGER.info(
