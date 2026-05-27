@@ -51,6 +51,9 @@ def _make_coordinator() -> SimpleNamespace:
     coordinator.model = SimpleNamespace(room_names=["living_room", "bedroom"])
     coordinator.heat_sources = []
     coordinator._room_schedule = {}
+    coordinator._horizon = 6
+    coordinator.dt = 60
+    coordinator._price_entity = None
     return coordinator
 
 
