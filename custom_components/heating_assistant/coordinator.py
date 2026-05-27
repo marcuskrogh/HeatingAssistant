@@ -29,6 +29,8 @@ from .const import (
     CONF_ENERGY_WEIGHT,
     CONF_ENERGY_PRICE_WEIGHT,
     CONF_PRICE_ENTITY,
+    CONF_PRICE_NET_TARIFF,
+    CONF_PRICE_SPOT_SURCHARGE,
     CONF_ESTIMATED_PARAMS,
     CONF_PERSISTED_SETPOINTS,
     CONF_TRACKING_WEIGHT,
@@ -92,6 +94,8 @@ from .const import (
     CONF_WINDOW_TILT,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENERGY_PRICE_WEIGHT,
+    DEFAULT_PRICE_NET_TARIFF,
+    DEFAULT_PRICE_SPOT_SURCHARGE,
     DEFAULT_COOLING_COP,
     DEFAULT_COOLING_EFFICIENCY,
     DEFAULT_HEATING_EFFICIENCY,
@@ -349,6 +353,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
         self._price_entity: Optional[str] = options.get(CONF_PRICE_ENTITY) or data.get(CONF_PRICE_ENTITY)
+        self._price_net_tariff: float = float(
+            options.get(CONF_PRICE_NET_TARIFF, data.get(CONF_PRICE_NET_TARIFF, DEFAULT_PRICE_NET_TARIFF))
+        )
+        self._price_spot_surcharge: float = float(
+            options.get(CONF_PRICE_SPOT_SURCHARGE, data.get(CONF_PRICE_SPOT_SURCHARGE, DEFAULT_PRICE_SPOT_SURCHARGE))
+        )
         # The update interval drives how often the coordinator ticks, the EKF
         # measurement step, and the OCP ZOH step — all three must be equal for
         # the MPC predictions to match physical reality.  Options take precedence
@@ -1362,6 +1372,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         all_prices = today_prices + tomorrow_prices
 
         # ── Align hourly prices to horizon steps ─────────────────────────
+        adder = self._price_net_tariff + self._price_spot_surcharge
         if all_prices:
             # Determine current hour index within today_prices.
             now_local = now.astimezone()
@@ -1374,11 +1385,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             steps_per_hour = max(1, round(3600.0 / dt_s))
             for k in range(N):
                 hour_idx = offset + k // steps_per_hour
-                if hour_idx < len(all_prices):
-                    aligned.append(all_prices[hour_idx])
-                else:
-                    # Beyond forecast: repeat last known price.
-                    aligned.append(all_prices[-1])
+                raw = all_prices[hour_idx] if hour_idx < len(all_prices) else all_prices[-1]
+                aligned.append(max(0.0, raw + adder))
             return aligned
 
         # ── Fall back to current sensor state (persistence) ───────────────
@@ -1386,7 +1394,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             current_price = float(state.state)
         except (ValueError, TypeError):
             return None
-        return [current_price] * self._horizon
+        return [max(0.0, current_price + adder)] * self._horizon
 
     def _record_weather_success(self) -> None:
         """Mark the most recent forecast fetch as successful."""
