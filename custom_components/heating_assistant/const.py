@@ -383,6 +383,8 @@ CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multi
 # Electricity price (Nord Pool / Tibber / any hourly price sensor)
 CONF_PRICE_ENTITY = "price_entity"                # HA sensor entity_id exposing Nord Pool / market prices
 CONF_ENERGY_PRICE_WEIGHT = "energy_price_weight"  # α: dimensionless scale on the linear price term
+CONF_PRICE_NET_TARIFF = "price_net_tariff"        # fixed net/grid tariff added to raw spot price (same unit/kWh)
+CONF_PRICE_SPOT_SURCHARGE = "price_spot_surcharge"  # fixed spot price surcharge/tax added on top (same unit/kWh)
 
 # Defaults
 DEFAULT_THERMAL_MASS = 5_000_000.0     # J/K (~typical room)
@@ -420,7 +422,9 @@ DEFAULT_WINDOW_OPEN_DEBOUNCE = 60
 DEFAULT_WINDOW_OPEN_CLOSE_SETTLE = 30
 DEFAULT_WINDOW_OPEN_Q_INFLATION = 10.0
 DEFAULT_WINDOW_TILT = 90.0             # vertical
-DEFAULT_ENERGY_PRICE_WEIGHT = 0.0      # disabled until a price entity is configured
+DEFAULT_ENERGY_PRICE_WEIGHT = 1.0      # active out of the box when a price entity is configured
+DEFAULT_PRICE_NET_TARIFF = 0.0         # no tariff adder by default
+DEFAULT_PRICE_SPOT_SURCHARGE = 0.0     # no surcharge adder by default
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
 
 # Comfort schedule modes

@@ -1202,26 +1202,15 @@ def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
         {
             "type": "grid",
             "cards": [
-                {"type": "heading", "heading": "MPC control input", "heading_style": "title"},
-                _mpc_control_card(room, spec),
+                {
+                    "type": "heading",
+                    "heading": "Power & electricity price" if spec.has_price else "MPC control input",
+                    "heading_style": "title",
+                },
+                _price_and_power_card(room, spec) if spec.has_price else _mpc_control_card(room, spec),
             ],
         },
     ]
-
-    if spec.has_price:
-        sections.append(
-            {
-                "type": "grid",
-                "cards": [
-                    {
-                        "type": "heading",
-                        "heading": "Power & electricity price",
-                        "heading_style": "title",
-                    },
-                    _price_and_power_card(room, spec),
-                ],
-            }
-        )
 
     sections += [
         {

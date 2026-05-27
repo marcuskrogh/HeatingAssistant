@@ -96,6 +96,8 @@ from .const import (
     CONF_THERMAL_BRIDGE_PSI_L,
     CONF_ENERGY_PRICE_WEIGHT,
     CONF_PRICE_ENTITY,
+    CONF_PRICE_NET_TARIFF,
+    CONF_PRICE_SPOT_SURCHARGE,
     CONF_WINDOW_OPEN_CLOSE_SETTLE,
     CONF_WINDOW_OPEN_DEBOUNCE,
     CONF_WINDOW_OPEN_Q_INFLATION,
@@ -137,6 +139,8 @@ from .const import (
     SCHEDULE_MODE_OFF,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_ENERGY_PRICE_WEIGHT,
+    DEFAULT_PRICE_NET_TARIFF,
+    DEFAULT_PRICE_SPOT_SURCHARGE,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_FACADE_COLOUR,
@@ -901,6 +905,22 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 description={"suggested_value": price_entity},
             ): EntitySelector(EntitySelectorConfig(domain="sensor")),
             vol.Optional(
+                CONF_PRICE_NET_TARIFF,
+                default=float(
+                    current.get(CONF_PRICE_NET_TARIFF)
+                    if current.get(CONF_PRICE_NET_TARIFF) is not None
+                    else DEFAULT_PRICE_NET_TARIFF
+                ),
+            ): _number_box(min_value=0.0, max_value=10.0, step=0.001),
+            vol.Optional(
+                CONF_PRICE_SPOT_SURCHARGE,
+                default=float(
+                    current.get(CONF_PRICE_SPOT_SURCHARGE)
+                    if current.get(CONF_PRICE_SPOT_SURCHARGE) is not None
+                    else DEFAULT_PRICE_SPOT_SURCHARGE
+                ),
+            ): _number_box(min_value=0.0, max_value=10.0, step=0.001),
+            vol.Optional(
                 CONF_UPDATE_INTERVAL,
                 default=int(
                     current.get(CONF_UPDATE_INTERVAL) or DEFAULT_UPDATE_INTERVAL
@@ -1017,7 +1037,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     if current.get(CONF_ENERGY_PRICE_WEIGHT) is not None
                     else DEFAULT_ENERGY_PRICE_WEIGHT
                 ),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+            ): _number_box(min_value=0.0, max_value=10000.0, step=0.1),
         }
 
         return self.async_show_form(

@@ -70,6 +70,8 @@
           "outdoor_temp_entity": "Outdoor temperature sensor",
           "weather_entity": "Weather forecast",
           "price_entity": "Electricity price sensor",
+          "price_net_tariff": "Net tariff (per kWh)",
+          "price_spot_surcharge": "Spot price surcharge (per kWh)",
           "update_interval": "Control interval (seconds)",
           "sigma_w": "Model adaptation rate",
           "sigma_v": "Sensor noise",
@@ -82,6 +84,8 @@
           "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
           "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
           "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating. Enable the price sensitivity slider in Control behaviour to activate.",
+          "price_net_tariff": "Fixed grid / network tariff to add to the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.20 DKK/kWh). Ensures the effective price seen by the controller is never below your actual cost of electricity.",
+          "price_spot_surcharge": "Fixed spot price surcharge or electricity tax to add on top of the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.90 DKK/kWh for Danish elafgift). Together with the net tariff this floors the effective price at a realistic consumer value.",
           "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes.",
           "sigma_w": "Advanced — how quickly the thermal model adapts to observed data. Higher values track changes faster but follow sensor noise more closely. Default 0.1 works for most homes.",
           "sigma_v": "Advanced — expected indoor temperature sensor noise (K). Raise this if you have a noisy sensor; lower it for a precise one.",
@@ -110,7 +114,7 @@
           "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
           "soft_constraint_weight": "Advanced — how hard the controller fights to stay inside your comfort band. Higher = stricter, may use more energy at the band edges.",
           "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift.",
-          "energy_price_weight": "How strongly the controller shifts heating toward cheaper hours. 0 = ignore prices, 1 = balanced comfort/cost trade-off. Only active when an electricity price sensor is configured above."
+          "energy_price_weight": "Scales how strongly the electricity price enters the MPC cost relative to the other cost terms. The right value depends on your price unit and other weights: start at the default (1.0) and increase if the controller is not shifting heating noticeably toward cheap hours, or decrease if comfort is being compromised. Only active when an electricity price sensor is configured."
         }
       },
       "manage_rooms": {
