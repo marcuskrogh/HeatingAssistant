@@ -1037,7 +1037,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     if current.get(CONF_ENERGY_PRICE_WEIGHT) is not None
                     else DEFAULT_ENERGY_PRICE_WEIGHT
                 ),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
+            ): _number_box(min_value=0.0, max_value=10000.0, step=0.1),
         }
 
         return self.async_show_form(

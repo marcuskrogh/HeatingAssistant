@@ -114,7 +114,7 @@
           "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
           "soft_constraint_weight": "Advanced — how hard the controller fights to stay inside your comfort band. Higher = stricter, may use more energy at the band edges.",
           "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift.",
-          "energy_price_weight": "How strongly the controller shifts heating toward cheaper hours. 0 = ignore prices, 1 = balanced comfort/cost trade-off. Only active when an electricity price sensor is configured above."
+          "energy_price_weight": "Scales how strongly the electricity price enters the MPC cost relative to the other cost terms. The right value depends on your price unit and other weights: start at the default (1.0) and increase if the controller is not shifting heating noticeably toward cheap hours, or decrease if comfort is being compromised. Only active when an electricity price sensor is configured."
         }
       },
       "manage_rooms": {

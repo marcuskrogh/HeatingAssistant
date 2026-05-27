@@ -422,7 +422,7 @@ DEFAULT_WINDOW_OPEN_DEBOUNCE = 60
 DEFAULT_WINDOW_OPEN_CLOSE_SETTLE = 30
 DEFAULT_WINDOW_OPEN_Q_INFLATION = 10.0
 DEFAULT_WINDOW_TILT = 90.0             # vertical
-DEFAULT_ENERGY_PRICE_WEIGHT = 0.0      # disabled until a price entity is configured
+DEFAULT_ENERGY_PRICE_WEIGHT = 1.0      # active out of the box when a price entity is configured
 DEFAULT_PRICE_NET_TARIFF = 0.0         # no tariff adder by default
 DEFAULT_PRICE_SPOT_SURCHARGE = 0.0     # no surcharge adder by default
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
