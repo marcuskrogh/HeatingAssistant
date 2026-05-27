@@ -32,6 +32,9 @@ from .const import DOMAIN
 # Public dataclasses
 # ---------------------------------------------------------------------------
 
+DASHBOARD_VARIANT_CLASSIC = "classic"
+DASHBOARD_VARIANT_INDUSTRIAL = "industrial"
+
 
 @dataclass(frozen=True)
 class HeatSourceSpec:
@@ -1260,6 +1263,363 @@ def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
     }
 
 
+def _industrial_overview_view(spec: DashboardSpec) -> Dict[str, Any]:
+    """Industrial-process style overview with gauge KPIs and room navigation."""
+    kpi_cards: List[Dict[str, Any]] = [
+        {
+            "type": "gauge",
+            "name": "MPC Compute Time",
+            "entity": _system_eid("sensor", "mpc_performance"),
+            "needle": True,
+            "min": 0,
+            "max": 60,
+            "severity": {"green": 0, "yellow": 20, "red": 40},
+        },
+        {
+            "type": "gauge",
+            "name": "Total Heating Power",
+            "entity": _system_eid("sensor", "system_summary"),
+            "needle": True,
+            "min": 0,
+            "max": 15000,
+            "severity": {"green": 0, "yellow": 6000, "red": 10000},
+        },
+        {
+            "type": "gauge",
+            "name": "Outdoor Temperature",
+            "entity": _system_eid("sensor", "outdoor_temperature_measured"),
+            "needle": True,
+            "min": -30,
+            "max": 35,
+            "severity": {"green": 5, "yellow": -5, "red": -15},
+        },
+    ]
+    if spec.rooms:
+        kpi_cards.append(
+            {
+                "type": "gauge",
+                "name": f"{spec.rooms[0].name} Fit (R²)",
+                "entity": _eid("sensor", spec.rooms[0].name, "model_fit_quality"),
+                "needle": True,
+                "min": 0,
+                "max": 1,
+                "severity": {"green": 0.85, "yellow": 0.6, "red": 0.0},
+            }
+        )
+
+    room_tiles: List[Dict[str, Any]] = [
+        {
+            "type": "tile",
+            "entity": _climate_eid(room.name),
+            "name": room.name,
+            "icon": room.icon or "mdi:radiator",
+            "state_content": ["state", "current_temperature"],
+            "tap_action": {
+                "action": "navigate",
+                "navigation_path": f"/{spec.url_path}/{slugify(room.name)}",
+            },
+        }
+        for room in spec.rooms
+    ]
+
+    return {
+        "title": "Overview",
+        "path": "overview",
+        "icon": "mdi:factory",
+        "type": "sections",
+        "sections": [
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Process KPIs", "heading_style": "title"},
+                    *kpi_cards,
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Room Units", "heading_style": "title"},
+                    *(
+                        room_tiles
+                        if room_tiles
+                        else [{"type": "markdown", "content": "_No rooms configured._"}]
+                    ),
+                ],
+            },
+        ],
+    }
+
+
+def _industrial_temperature_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {"show": True, "title": f"{room.name} – Temperature Envelope", "show_states": True},
+        "graph_span": f"{int(spec.graph_span_hours)}h",
+        "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
+        "now": {"show": True, "label": "", "color": "#6c7a89"},
+        "apex_config": {
+            "chart": {"toolbar": {"show": False}},
+            "grid": {"borderColor": "#2a3441"},
+            "legend": {"show": True, "position": "top"},
+            "stroke": {"lineCap": "round"},
+        },
+        "yaxis": [{"id": "temp", "apex_config": {"title": {"text": "°C"}, "tickAmount": 5}}],
+        "series": [
+            {
+                "entity": _eid("sensor", room.name, "temperature_filtered"),
+                "name": "Filtered",
+                "yaxis_id": "temp",
+                "color": "#58a6ff",
+                "stroke_width": 2,
+                "curve": "smooth",
+                "float_precision": 2,
+                **_history_series_kwargs(),
+            },
+            {
+                "entity": _eid("sensor", room.name, "temperature_forecast"),
+                "name": "Forecast",
+                "data_generator": _forecast_generator("temperature"),
+                "yaxis_id": "temp",
+                "color": "#2f81f7",
+                "stroke_width": 2,
+                "stroke_dash": 4,
+                "curve": "smooth",
+                "float_precision": 2,
+            },
+            {
+                "entity": _eid("sensor", room.name, "setpoint"),
+                "name": "Setpoint",
+                "yaxis_id": "temp",
+                "color": "#f0883e",
+                "stroke_width": 1,
+                "curve": "stepline",
+                "float_precision": 1,
+                **_history_series_kwargs(),
+            },
+            {
+                "entity": _eid("sensor", room.name, "setpoint"),
+                "name": "Setpoint",
+                "data_generator": _forecast_generator("setpoint"),
+                "yaxis_id": "temp",
+                "color": "#f0883e",
+                "stroke_width": 1,
+                "stroke_dash": 4,
+                "curve": "stepline",
+                "float_precision": 1,
+                "show": {"in_legend": False, "in_header": False},
+            },
+            {
+                "entity": _eid("sensor", room.name, "constraint_upper"),
+                "name": "Upper corridor",
+                "data_generator": _forecast_generator("constraint_upper"),
+                "yaxis_id": "temp",
+                "color": "#8b949e",
+                "stroke_width": 1,
+                "stroke_dash": 2,
+                "curve": "stepline",
+                "show": {"in_header": False},
+            },
+            {
+                "entity": _eid("sensor", room.name, "constraint_lower"),
+                "name": "Lower corridor",
+                "data_generator": _forecast_generator("constraint_lower"),
+                "yaxis_id": "temp",
+                "color": "#8b949e",
+                "stroke_width": 1,
+                "stroke_dash": 2,
+                "curve": "stepline",
+                "show": {"in_header": False},
+            },
+        ],
+    }
+
+
+def _industrial_power_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {"show": True, "title": f"{room.name} – Heating Power", "show_states": True},
+        "graph_span": f"{int(spec.graph_span_hours)}h",
+        "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
+        "now": {"show": True, "label": "", "color": "#6c7a89"},
+        "apex_config": {
+            "chart": {"toolbar": {"show": False}},
+            "grid": {"borderColor": "#2a3441"},
+            "legend": {"show": True, "position": "top"},
+        },
+        "yaxis": [{"id": "power", "apex_config": {"title": {"text": "W"}, "tickAmount": 5}}],
+        "series": [
+            {
+                "entity": _eid("sensor", room.name, "heating_power_measured"),
+                "name": "Measured",
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": "#f85149",
+                "opacity": 0.25,
+                "stroke_width": 2,
+                **_history_series_kwargs(),
+            },
+            {
+                "entity": _eid("sensor", room.name, "heating_power_forecast"),
+                "name": "Plan",
+                "data_generator": _forecast_generator("heating_power"),
+                "yaxis_id": "power",
+                "type": "area",
+                "curve": "stepline",
+                "color": "#ff7b72",
+                "opacity": 0.35,
+                "stroke_width": 2,
+            },
+        ],
+    }
+
+
+def _industrial_disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {"show": True, "title": f"{room.name} – Disturbances", "show_states": True},
+        "graph_span": f"{int(spec.graph_span_hours)}h",
+        "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
+        "now": {"show": True, "label": "", "color": "#6c7a89"},
+        "apex_config": {
+            "chart": {"toolbar": {"show": False}},
+            "grid": {"borderColor": "#2a3441"},
+            "legend": {"show": True, "position": "top"},
+        },
+        "yaxis": [
+            {"id": "temp", "apex_config": {"title": {"text": "Outdoor °C"}}},
+            {"id": "power", "opposite": True, "min": 0, "apex_config": {"title": {"text": "Solar W"}}},
+        ],
+        "series": [
+            {
+                "entity": _system_eid("sensor", "outdoor_temperature_measured"),
+                "name": "Outdoor",
+                "yaxis_id": "temp",
+                "color": "#79c0ff",
+                "stroke_width": 2,
+                "curve": "smooth",
+                "float_precision": 1,
+                **_history_series_kwargs(),
+            },
+            {
+                "entity": _system_eid("sensor", "outdoor_temperature_forecast"),
+                "name": "Outdoor",
+                "data_generator": _forecast_generator("outdoor_temp"),
+                "yaxis_id": "temp",
+                "color": "#a5d6ff",
+                "stroke_width": 2,
+                "stroke_dash": 4,
+                "curve": "smooth",
+                "float_precision": 1,
+                "show": {"in_legend": False, "in_header": False},
+            },
+            {
+                "entity": _eid("sensor", room.name, "solar_gain_measured"),
+                "name": "Solar",
+                "yaxis_id": "power",
+                "type": "area",
+                "color": "#e3b341",
+                "opacity": 0.2,
+                "stroke_width": 1,
+                **_history_series_kwargs(),
+            },
+            {
+                "entity": _eid("sensor", room.name, "solar_gain_forecast"),
+                "name": "Solar",
+                "data_generator": _forecast_generator("solar_gain"),
+                "yaxis_id": "power",
+                "type": "area",
+                "color": "#f2cc60",
+                "opacity": 0.35,
+                "stroke_width": 1,
+                "show": {"in_legend": False, "in_header": False},
+            },
+        ],
+    }
+
+
+def _industrial_room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
+    kpi_cards = [
+        {
+            "type": "gauge",
+            "entity": _eid("sensor", room.name, "temperature_filtered"),
+            "name": "Room Temperature",
+            "needle": True,
+            "min": 10,
+            "max": 30,
+            "severity": {"green": 18, "yellow": 16, "red": 14},
+        },
+        {
+            "type": "gauge",
+            "entity": _eid("sensor", room.name, "heating_power_measured"),
+            "name": "Delivered Power",
+            "needle": True,
+            "min": 0,
+            "max": 6000,
+            "severity": {"green": 0, "yellow": 2500, "red": 4500},
+        },
+        {
+            "type": "gauge",
+            "entity": _eid("sensor", room.name, "model_fit_quality"),
+            "name": "Model Fit R²",
+            "needle": True,
+            "min": 0,
+            "max": 1,
+            "severity": {"green": 0.85, "yellow": 0.6, "red": 0.0},
+        },
+    ]
+
+    return {
+        "title": room.name,
+        "path": slugify(room.name),
+        "icon": room.icon or "mdi:radiator",
+        "subview": True,
+        "type": "sections",
+        "sections": [
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Unit KPIs", "heading_style": "title"},
+                    {"type": "thermostat", "entity": _climate_eid(room.name), "name": room.name},
+                    *kpi_cards,
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Temperature", "heading_style": "title"},
+                    _industrial_temperature_card(room, spec),
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Heating Power", "heading_style": "title"},
+                    _industrial_power_card(room, spec),
+                ],
+            },
+            {
+                "type": "grid",
+                "cards": [
+                    {"type": "heading", "heading": "Disturbances", "heading_style": "title"},
+                    _industrial_disturbance_card(room, spec),
+                ],
+            },
+        ],
+    }
+
+
+def build_industrial_dashboard(spec: DashboardSpec) -> Dict[str, Any]:
+    """Return an industrial-style dashboard with overview + room subviews."""
+    views: List[Dict[str, Any]] = [_industrial_overview_view(spec)]
+    for room in spec.rooms:
+        views.append(_industrial_room_view(room, spec))
+    return {
+        "title": f"{spec.title} – Industrial",
+        "views": views,
+    }
+
+
 def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
     """Diagnostics view – estimation workflow + per-room fit matrix.
 
@@ -1905,6 +2265,16 @@ def build_dashboard(spec: DashboardSpec) -> Dict[str, Any]:
     }
 
 
+def build_dashboard_variant(
+    spec: DashboardSpec,
+    variant: str = DASHBOARD_VARIANT_CLASSIC,
+) -> Dict[str, Any]:
+    """Build a named dashboard variant."""
+    if variant == DASHBOARD_VARIANT_INDUSTRIAL:
+        return build_industrial_dashboard(spec)
+    return build_dashboard(spec)
+
+
 def dashboard_to_yaml(dashboard: Dict[str, Any]) -> str:
     """Serialise a dashboard dict to a Lovelace-ready YAML string.
 
@@ -1967,13 +2337,61 @@ def build_dashboard_from_coordinator(coordinator: Any) -> Dict[str, Any]:
 
     has_price = bool(getattr(coordinator, "_price_entity", None))
 
-    return build_dashboard(
+    return build_dashboard_variant(
         DashboardSpec(
             rooms=tuple(rooms),
             sources=tuple(sources),
             forecast_hours=forecast_hours,
             has_price=has_price,
         )
+    )
+
+
+def build_dashboard_variant_from_coordinator(
+    coordinator: Any,
+    variant: str = DASHBOARD_VARIANT_CLASSIC,
+) -> Dict[str, Any]:
+    """Build a dashboard variant from a live coordinator."""
+    rooms: List[RoomSpec] = []
+    schedule_map = getattr(coordinator, "_room_schedule", {}) or {}
+    for name in coordinator.model.room_names:
+        schedule = schedule_map.get(name)
+        has_schedule = bool(schedule) and not getattr(schedule, "is_empty", False)
+        rooms.append(RoomSpec(name=name, has_schedule=has_schedule))
+
+    sources: List[HeatSourceSpec] = []
+    for src in getattr(coordinator, "heat_sources", []) or []:
+        kind = type(src).__name__
+        if kind == "HeatPump":
+            kind_str = "heat_pump"
+        elif kind == "ElectricHeater":
+            kind_str = "electric_heater"
+        else:
+            kind_str = "electric_heater"
+        sources.append(HeatSourceSpec(
+            name=src.name,
+            room=src.room,
+            kind=kind_str,
+            entity_id=getattr(src, "heater_entity", None),
+        ))
+
+    horizon = getattr(coordinator, "_horizon", None)
+    dt = getattr(coordinator, "dt", None) or getattr(coordinator, "_update_interval", None)
+    if horizon is not None and dt is not None:
+        forecast_hours = horizon * float(dt) / 3600.0
+    else:
+        forecast_hours = 3.0
+
+    has_price = bool(getattr(coordinator, "_price_entity", None))
+
+    return build_dashboard_variant(
+        DashboardSpec(
+            rooms=tuple(rooms),
+            sources=tuple(sources),
+            forecast_hours=forecast_hours,
+            has_price=has_price,
+        ),
+        variant=variant,
     )
 
 

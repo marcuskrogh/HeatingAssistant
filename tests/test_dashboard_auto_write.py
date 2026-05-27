@@ -51,6 +51,9 @@ def _make_coordinator() -> SimpleNamespace:
     coordinator.model = SimpleNamespace(room_names=["living_room", "bedroom"])
     coordinator.heat_sources = []
     coordinator._room_schedule = {}
+    coordinator._horizon = 6
+    coordinator.dt = 60
+    coordinator._price_entity = None
     return coordinator
 
 
@@ -159,3 +162,17 @@ async def test_auto_write_returns_path_used_for_lovelace_registration(tmp_path):
     path = await init_mod._async_auto_write_default_dashboard(hass, _entry(), coordinator)
     assert path is not None
     assert path.endswith(init_mod.DEFAULT_DASHBOARD_FILENAME)
+
+
+@pytest.mark.asyncio
+async def test_auto_write_also_supports_industrial_dashboard(tmp_path):
+    hass = _make_hass(tmp_path)
+    coordinator = _make_coordinator()
+    path = await init_mod._async_auto_write_industrial_dashboard(
+        hass, _entry(), coordinator
+    )
+    assert path is not None
+    target = tmp_path / "dashboards" / init_mod.DEFAULT_INDUSTRIAL_DASHBOARD_FILENAME
+    assert target.exists()
+    content = target.read_text(encoding="utf-8")
+    assert "Heating Assistant – Industrial" in content
