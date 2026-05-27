@@ -1455,8 +1455,9 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                 for k in range(N):
                     p_k = float(price_arr[min(k, n_price - 1)])
                     for jj, src_i in enumerate(bid_list):
-                        c_h = float(elec_heat[src_i])
-                        c_c = float(elec_cool[src_i]) if elec_cool is not None else c_h
+                        c_h = float(elec_heat[src_i]) * 1e-3
+                        c_c = (float(elec_cool[src_i]) if elec_cool is not None
+                               else float(elec_heat[src_i])) * 1e-3
                         sp = n_U + n_eps + k * n_bid + jj
                         sm = n_U + n_eps + n_S + k * n_bid + jj
                         f_aug[sp] = f_aug[sp] + price_weight * p_k * c_h * dt_h
