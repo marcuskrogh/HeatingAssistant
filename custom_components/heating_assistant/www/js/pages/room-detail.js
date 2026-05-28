@@ -87,10 +87,13 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 
   loadChartsData(room, state, connection, tempChart, powerChart, disturbChart);
 
-  const countdownInterval = setInterval(() => countdown.tick(state), 1000);
+  let latestState = state;
+  const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
 
   return {
     update(newState) {
+      latestState = newState;
+
       const tv = entityValue(newState, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
       const pv = entityValue(newState, room.entities['heating_power_measured']);
       const fv = entityValue(newState, room.entities['model_fit_quality']);
