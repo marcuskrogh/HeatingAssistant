@@ -1,0 +1,41 @@
+export class HaConnection {
+  constructor(hass) {
+    this._hass = hass;
+  }
+
+  async getStates() {
+    const states = this._hass.states;
+    return { ...states };
+  }
+
+  async getHistory(entityIds, hoursBack = 6) {
+    const now = new Date();
+    const start = new Date(now.getTime() - hoursBack * 3600 * 1000);
+    try {
+      const result = await this._hass.callWS({
+        type: 'history/history_during_period',
+        start_time: start.toISOString(),
+        end_time: now.toISOString(),
+        entity_ids: entityIds,
+        minimal_response: true,
+        significant_changes_only: false,
+      });
+      return result;
+    } catch (e) {
+      console.warn('History fetch failed:', e);
+      return {};
+    }
+  }
+
+  async subscribe(callback) {
+    const unsub = await this._hass.connection.subscribeEvents(
+      callback,
+      'state_changed'
+    );
+    return () => unsub();
+  }
+
+  getEntityState(entityId) {
+    return this._hass.states[entityId] || null;
+  }
+}

@@ -557,6 +557,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             icon="mdi:factory",
         )
 
+    # Register custom JS/CSS industrial panel
+    try:
+        import pathlib
+
+        from homeassistant.components.http import StaticPathConfig
+
+        www_path = pathlib.Path(__file__).parent / "www"
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig("/ha-industrial-panel", str(www_path), cache_headers=False)]
+        )
+
+        from homeassistant.components.frontend import async_register_built_in_panel
+
+        async_register_built_in_panel(
+            hass,
+            component_name="custom",
+            sidebar_title="HA Industrial",
+            sidebar_icon="mdi:factory",
+            frontend_url_path="ha-industrial",
+            config={
+                "_panel_custom": {
+                    "name": "ha-industrial-panel",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js",
+                    "embed_iframe": False,
+                }
+            },
+            require_admin=False,
+        )
+    except Exception:
+        _LOGGER.debug(
+            "Heating Assistant: custom industrial panel registration skipped",
+            exc_info=True,
+        )
+
     return True
 
 
