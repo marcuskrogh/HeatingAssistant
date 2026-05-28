@@ -992,6 +992,18 @@ def _register_services(hass: HomeAssistant) -> None:
         result = await coordinator.async_estimate_parameters_ml(
             apply_params=apply_params,
         )
+
+        # Update sysid_results so that the dashboard sensor entities reflect
+        # the newly identified parameters immediately (without requiring a
+        # separate sysid simulation run).
+        if result.get("success") and apply_params:
+            for room_name, params in result.get("estimated_params", {}).items():
+                existing = coordinator.sysid_results.get(room_name, {})
+                existing["thermal_mass"] = params.get("thermal_mass")
+                existing["r_external"] = params.get("r_external")
+                coordinator.sysid_results[room_name] = existing
+            coordinator.async_update_listeners()
+
         hass.bus.async_fire(
             f"{DOMAIN}_ml_estimation_result",
             {
@@ -1107,8 +1119,16 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _get_coordinator(hass)
         room_name_filter = call.data.get("room_name")
         segment_length = int(call.data.get("segment_length", 30))
+        horizon_hours: Optional[float] = call.data.get("horizon_hours")
 
         history = list(coordinator.history_buffer)
+
+        # Filter history to requested time horizon (timestamp-based).
+        if horizon_hours is not None and history:
+            last_ts = float(history[-1].get("timestamp", 0.0))
+            cutoff_ts = last_ts - float(horizon_hours) * 3600.0
+            history = [h for h in history if float(h.get("timestamp", 0.0)) >= cutoff_ts]
+
         system = coordinator.controller._system
         room_names = coordinator.model.room_names
         n_rooms = len(room_names)
@@ -1418,6 +1438,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("segment_length", default=30): vol.All(
                     vol.Coerce(int), vol.Range(min=5, max=120)
                 ),
+                vol.Optional("horizon_hours"): vol.Coerce(float),
             }
         ),
     )

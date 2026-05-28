@@ -278,6 +278,7 @@ export function renderTuning(container, rooms, state, connection, hass) {
       await hass.callService('heating_assistant', 'run_open_loop_simulation', {
         room_name: currentRoom,
         segment_length: 30,
+        horizon_hours: parseFloat(horizonInput.value),
       });
       setSimStatus('Complete.', '');
     } catch (err) {
