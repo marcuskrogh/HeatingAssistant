@@ -1,6 +1,10 @@
 import { TimeSeriesChart, makeDataset, historyToDataPoints, forecastToDataPoints, loadChartJs } from '../components/time-series-chart.js';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js';
-import { formatTemperature, formatPower, formatNumber, entityValue, entityAttr, roomEntity, systemEntity } from '../utils.js';
+import { createCountdown } from '../components/countdown.js';
+import {
+  formatTemperature, formatPower, formatNumber,
+  entityValue, entityAttr, systemEntity, modelFitLabel,
+} from '../utils.js';
 
 export function renderRoomDetail(container, roomSlug, rooms, state, connection) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -29,15 +33,24 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
   const tempVal = entityValue(state, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
   const powerVal = entityValue(state, room.entities['heating_power_measured']);
   const fitVal = entityValue(state, room.entities['model_fit_quality']);
-  const errorVal = entityValue(state, room.entities['prediction_error']);
+  const fitInfo = modelFitLabel(fitVal);
+  const setpointVal = entityValue(state, room.entities['setpoint']);
 
   const kpis = [
     createKpiCard({ value: formatTemperature(tempVal), label: 'Temperature', unit: '' }),
+    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '—', label: 'Setpoint', unit: '' }),
     createKpiCard({ value: formatPower(powerVal), label: 'Power', unit: '' }),
-    createKpiCard({ value: fitVal !== null ? formatNumber(fitVal, 3) : '—', label: 'Fit (R²)', unit: '' }),
-    createKpiCard({ value: errorVal !== null ? formatNumber(errorVal, 2) + '°C' : '—', label: 'Error', unit: '' }),
+    createKpiCard({
+      value: `<span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>`,
+      label: 'Model Fit',
+      unit: '',
+      html: true,
+    }),
   ];
   kpis.forEach((k) => kpiGrid.appendChild(k));
+
+  const countdown = createCountdown(state, true);
+  kpiGrid.appendChild(countdown.element);
 
   const chartsContainer = document.createElement('div');
   chartsContainer.className = 'grid-charts';
@@ -53,14 +66,13 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
   const tempChart = new TimeSeriesChart(tempChartEl, {
     title: 'TEMPERATURE',
     yLabel: '°C',
-    height: 220,
+    height: 240,
   });
 
   const powerChart = new TimeSeriesChart(powerChartEl, {
     title: 'HEATING POWER',
     yLabel: 'W',
-    yMin: 0,
-    height: 180,
+    height: 200,
   });
 
   const disturbChart = new TimeSeriesChart(disturbChartEl, {
@@ -68,51 +80,66 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
     yLabel: '°C',
     y2: true,
     y2Label: 'W',
-    height: 180,
+    height: 200,
   });
 
   loadChartsData(room, state, connection, tempChart, powerChart, disturbChart);
+
+  const countdownInterval = setInterval(() => countdown.tick(state), 1000);
 
   return {
     update(newState) {
       const tv = entityValue(newState, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
       const pv = entityValue(newState, room.entities['heating_power_measured']);
       const fv = entityValue(newState, room.entities['model_fit_quality']);
-      const ev = entityValue(newState, room.entities['prediction_error']);
+      const fi = modelFitLabel(fv);
+      const sp = entityValue(newState, room.entities['setpoint']);
 
       updateKpiCard(kpis[0], { value: formatTemperature(tv) });
-      updateKpiCard(kpis[1], { value: formatPower(pv) });
-      updateKpiCard(kpis[2], { value: fv !== null ? formatNumber(fv, 3) : '—' });
-      updateKpiCard(kpis[3], { value: ev !== null ? formatNumber(ev, 2) + '°C' : '—' });
+      updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '—' });
+      updateKpiCard(kpis[2], { value: formatPower(pv) });
+      updateKpiCard(kpis[3], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
 
       updateChartsFromState(room, newState, tempChart, powerChart, disturbChart);
+    },
+    destroy() {
+      clearInterval(countdownInterval);
+      tempChart.destroy();
+      powerChart.destroy();
+      disturbChart.destroy();
     },
   };
 }
 
 async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart) {
-  const historyEntities = [
-    room.entities['temperature_filtered'] || room.entities['temperature_measured'],
-    room.entities['heating_power_measured'],
-    room.entities['solar_gain_measured'],
-  ].filter(Boolean);
-
+  const tempFilteredEntity = room.entities['temperature_filtered'];
+  const tempMeasuredEntity = room.entities['temperature_measured'];
+  const powerMeasuredEntity = room.entities['heating_power_measured'];
+  const solarMeasuredEntity = room.entities['solar_gain_measured'];
   const outdoorEntity = systemEntity('outdoor_temperature_measured');
-  historyEntities.push(outdoorEntity);
+
+  const historyEntities = [
+    tempFilteredEntity,
+    tempMeasuredEntity,
+    powerMeasuredEntity,
+    solarMeasuredEntity,
+    outdoorEntity,
+  ].filter(Boolean);
 
   const history = await connection.getHistory(historyEntities, 6);
 
-  const tempHistoryEntity = room.entities['temperature_filtered'] || room.entities['temperature_measured'];
-  const tempHistory = historyToDataPoints(history[tempHistoryEntity]);
-  const powerHistory = historyToDataPoints(history[room.entities['heating_power_measured']]);
-  const solarHistory = historyToDataPoints(history[room.entities['solar_gain_measured']]);
+  const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
+  const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
+  const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
+  const solarHistory = historyToDataPoints(history[solarMeasuredEntity]);
   const outdoorHistory = historyToDataPoints(history[outdoorEntity]);
 
   const forecastEntity = state[room.entities['temperature_forecast']];
   const forecastData = forecastEntity?.attributes?.forecast || [];
 
-  const tempForecast = forecastToDataPoints(forecastData, 'temperature');
-  const setpointData = forecastToDataPoints(forecastData, 'setpoint');
+  const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
+  const tempForecastLinearised = forecastToDataPoints(forecastData, 'temperature_linearised');
+  const setpointForecast = forecastToDataPoints(forecastData, 'setpoint');
   const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
   const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
   const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temperature');
@@ -120,43 +147,123 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const upperBound = entityValue(state, room.entities['constraint_upper']);
   const lowerBound = entityValue(state, room.entities['constraint_lower']);
 
-  const tempDatasets = [
-    makeDataset('Filtered', tempHistory, '#4fc3f7', { borderWidth: 2 }),
-    makeDataset('Forecast', tempForecast, '#4fc3f7', { dashed: true, borderWidth: 1.5 }),
-    makeDataset('Setpoint', setpointData, '#e57373', { dashed: true, borderWidth: 1, pointRadius: 0 }),
+  buildTemperatureChart(tempChart, filteredHistory, measuredHistory, tempForecastNonlinear, tempForecastLinearised, setpointForecast, upperBound, lowerBound);
+  buildPowerChart(powerChart, powerHistory, powerForecast, state, room);
+  buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
+}
+
+function buildTemperatureChart(chart, filteredHistory, measuredHistory, forecastNonlinear, forecastLinearised, setpointData, upperBound, lowerBound) {
+  const now = Date.now();
+  const past = now - 7 * 3600 * 1000;
+  const future = now + 4 * 3600 * 1000;
+
+  const datasets = [
+    makeDataset('Filtered', filteredHistory, '#4fc3f7', { borderWidth: 2 }),
+    makeDataset('Measured', measuredHistory, '#e57373', {
+      borderWidth: 0, pointRadius: 3, pointHoverRadius: 5,
+      pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
+      showLine: false,
+    }),
+    makeDataset('Forecast', forecastNonlinear, '#4fc3f7', { dashed: true, borderWidth: 2 }),
   ];
 
+  if (forecastLinearised.length > 0) {
+    datasets.push(
+      makeDataset('Linearised', forecastLinearised, '#ab47bc', { dashed: true, borderWidth: 1.5 })
+    );
+  }
+
+  if (setpointData.length > 0) {
+    datasets.push(
+      makeDataset('Setpoint', setpointData, '#e57373', { dashed: true, borderWidth: 1, pointRadius: 0 })
+    );
+  }
+
   if (upperBound !== null && lowerBound !== null) {
-    const now = Date.now();
-    const future = now + 4 * 3600 * 1000;
-    const past = now - 7 * 3600 * 1000;
     const boundTimes = [past, now, future];
-    tempDatasets.push(
-      makeDataset('Upper', boundTimes.map((t) => ({ x: t, y: upperBound })), 'rgba(229,115,115,0.3)', {
-        fill: '+1', borderWidth: 0, pointRadius: 0,
-        backgroundColor: 'rgba(229,115,115,0.06)',
+    const yMax = upperBound + 5;
+    const yMin = lowerBound - 5;
+
+    datasets.push(
+      makeDataset('Above Comfort', boundTimes.map((t) => ({ x: t, y: yMax })), 'transparent', {
+        fill: { target: { value: upperBound }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
+        borderWidth: 0, pointRadius: 0, showLine: true,
       }),
-      makeDataset('Lower', boundTimes.map((t) => ({ x: t, y: lowerBound })), 'rgba(229,115,115,0.3)', {
-        borderWidth: 0, pointRadius: 0,
+      makeDataset('Upper Bound', boundTimes.map((t) => ({ x: t, y: upperBound })), 'rgba(229,115,115,0.4)', {
+        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
+      }),
+      makeDataset('Lower Bound', boundTimes.map((t) => ({ x: t, y: lowerBound })), 'rgba(229,115,115,0.4)', {
+        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
+      }),
+      makeDataset('Below Comfort', boundTimes.map((t) => ({ x: t, y: yMin })), 'transparent', {
+        fill: { target: { value: lowerBound }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
+        borderWidth: 0, pointRadius: 0, showLine: true,
       })
     );
   }
 
-  await tempChart.render(tempDatasets);
+  chart.render(datasets);
+}
 
-  const powerDatasets = [
-    makeDataset('Measured', powerHistory, '#ffb74d', { borderWidth: 2, fill: true, backgroundColor: 'rgba(255,183,77,0.1)' }),
-    makeDataset('Planned', powerForecast, '#ffb74d', { dashed: true, borderWidth: 1.5 }),
+function buildPowerChart(chart, powerHistory, powerForecast, state, room) {
+  const maxPowerAttr = entityAttr(state, room.entities['heating_power_forecast'], 'max_power');
+  const maxPower = maxPowerAttr ? parseFloat(maxPowerAttr) : null;
+
+  const now = Date.now();
+  const past = now - 7 * 3600 * 1000;
+  const future = now + 4 * 3600 * 1000;
+
+  const datasets = [
+    makeDataset('Measured', powerHistory, '#ffb74d', {
+      borderWidth: 2, stepped: 'before',
+      fill: true, backgroundColor: 'rgba(255,183,77,0.08)',
+    }),
+    makeDataset('Planned', powerForecast, '#ffb74d', {
+      dashed: true, borderWidth: 2, stepped: 'before',
+    }),
   ];
-  await powerChart.render(powerDatasets);
 
-  const disturbDatasets = [
+  if (maxPower !== null) {
+    const boundTimes = [past, now, future];
+    const yMax = maxPower * 1.3;
+    const minPower = -maxPower;
+    const yMin = minPower * 1.3;
+
+    datasets.push(
+      makeDataset('Max Power', boundTimes.map((t) => ({ x: t, y: maxPower })), 'rgba(229,115,115,0.4)', {
+        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
+      }),
+      makeDataset('Above Max', boundTimes.map((t) => ({ x: t, y: yMax })), 'transparent', {
+        fill: { target: { value: maxPower }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
+        borderWidth: 0, pointRadius: 0, showLine: true,
+      }),
+      makeDataset('Min Power', boundTimes.map((t) => ({ x: t, y: minPower })), 'rgba(229,115,115,0.4)', {
+        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
+      }),
+      makeDataset('Below Min', boundTimes.map((t) => ({ x: t, y: yMin })), 'transparent', {
+        fill: { target: { value: minPower }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
+        borderWidth: 0, pointRadius: 0, showLine: true,
+      })
+    );
+  }
+
+  chart.render(datasets);
+}
+
+function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHistory, solarForecast) {
+  const datasets = [
     makeDataset('Outdoor Temp', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
     makeDataset('Outdoor Forecast', outdoorForecast, '#90a4ae', { dashed: true, borderWidth: 1.5 }),
-    makeDataset('Solar Gain', solarHistory, '#ffd54f', { borderWidth: 2, yAxisID: 'y2', fill: true, backgroundColor: 'rgba(255,213,79,0.1)' }),
-    makeDataset('Solar Forecast', solarForecast, '#ffd54f', { dashed: true, borderWidth: 1.5, yAxisID: 'y2' }),
+    makeDataset('Solar Gain', solarHistory, '#ffd54f', {
+      borderWidth: 2, yAxisID: 'y2',
+      fill: true, backgroundColor: 'rgba(255,213,79,0.08)',
+    }),
+    makeDataset('Solar Forecast', solarForecast, '#ffd54f', {
+      dashed: true, borderWidth: 1.5, yAxisID: 'y2',
+    }),
   ];
-  await disturbChart.render(disturbDatasets);
+
+  chart.render(datasets);
 }
 
 function updateChartsFromState(room, state, tempChart, powerChart, disturbChart) {
@@ -165,25 +272,31 @@ function updateChartsFromState(room, state, tempChart, powerChart, disturbChart)
 
   const forecastData = forecastEntity.attributes.forecast;
   const tempForecast = forecastToDataPoints(forecastData, 'temperature');
+  const tempLinearised = forecastToDataPoints(forecastData, 'temperature_linearised');
   const setpointData = forecastToDataPoints(forecastData, 'setpoint');
   const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
   const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
   const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temperature');
 
-  if (tempChart._chart && tempChart._chart.data.datasets.length >= 3) {
-    tempChart._chart.data.datasets[1].data = tempForecast;
-    tempChart._chart.data.datasets[2].data = setpointData;
+  if (tempChart._chart) {
+    const ds = tempChart._chart.data.datasets;
+    if (ds[2]) ds[2].data = tempForecast;
+    if (ds[3] && tempLinearised.length > 0) ds[3].data = tempLinearised;
+    const setpointIdx = ds.findIndex((d) => d.label === 'Setpoint');
+    if (setpointIdx >= 0) ds[setpointIdx].data = setpointData;
     tempChart._chart.update('none');
   }
 
-  if (powerChart._chart && powerChart._chart.data.datasets.length >= 2) {
-    powerChart._chart.data.datasets[1].data = powerForecast;
+  if (powerChart._chart) {
+    const ds = powerChart._chart.data.datasets;
+    if (ds[1]) ds[1].data = powerForecast;
     powerChart._chart.update('none');
   }
 
-  if (disturbChart._chart && disturbChart._chart.data.datasets.length >= 4) {
-    disturbChart._chart.data.datasets[1].data = outdoorForecast;
-    disturbChart._chart.data.datasets[3].data = solarForecast;
+  if (disturbChart._chart) {
+    const ds = disturbChart._chart.data.datasets;
+    if (ds[1]) ds[1].data = outdoorForecast;
+    if (ds[3]) ds[3].data = solarForecast;
     disturbChart._chart.update('none');
   }
 }

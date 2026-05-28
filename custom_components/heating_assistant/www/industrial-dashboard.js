@@ -76,7 +76,7 @@ class HaIndustrialPanel extends HTMLElement {
       <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css">
       <div class="shell">
         <header class="header">
-          <h1 class="header__title">HEATING ASSISTANT INDUSTRIAL</h1>
+          <h1 class="header__title">HEATING ASSISTANT</h1>
           <div class="header__status">
             <span class="status-dot status-dot--live"></span>
             <span class="status-label">LIVE</span>
