@@ -15,7 +15,7 @@ export function createCountdown(state, small = false) {
     tick(currentState) {
       const dt = getDtSeconds(currentState);
       const rem = computeRemaining(currentState, dt);
-      renderCountdownContent(container, rem, dt, small);
+      updateCountdownDOM(container, rem, dt, small);
     },
   };
 }
@@ -38,14 +38,20 @@ function computeRemaining(state, dtS) {
 }
 
 function renderCountdownContent(container, remaining, dtS, small) {
-  const progress = 1 - remaining / dtS;
+  const progress = Math.min(1, Math.max(0, 1 - remaining / dtS));
   const circumference = 2 * Math.PI * 34;
   const dashOffset = circumference * (1 - progress);
 
   if (small) {
     container.innerHTML = `
+      <svg class="countdown__ring countdown__ring--small" viewBox="0 0 80 80">
+        <circle class="countdown__ring-track" cx="40" cy="40" r="34" />
+        <circle class="countdown__ring-fill" cx="40" cy="40" r="34"
+          stroke-dasharray="${circumference}"
+          stroke-dashoffset="${dashOffset}" />
+      </svg>
       <span class="countdown__value">${formatCountdown(remaining)}</span>
-      <span class="countdown__interval">Δt = ${Math.round(dtS)}s</span>
+      <span class="countdown__interval">\u0394t = ${Math.round(dtS)}s</span>
       <span class="countdown__label">NEXT CONTROL</span>
     `;
   } else {
@@ -53,11 +59,27 @@ function renderCountdownContent(container, remaining, dtS, small) {
       <svg class="countdown__ring" viewBox="0 0 80 80">
         <circle class="countdown__ring-track" cx="40" cy="40" r="34" />
         <circle class="countdown__ring-fill" cx="40" cy="40" r="34"
-          style="stroke-dasharray: ${circumference}; stroke-dashoffset: ${dashOffset};" />
+          stroke-dasharray="${circumference}"
+          stroke-dashoffset="${dashOffset}" />
       </svg>
       <span class="countdown__value">${formatCountdown(remaining)}</span>
-      <span class="countdown__interval">Δt = ${Math.round(dtS)}s</span>
+      <span class="countdown__interval">\u0394t = ${Math.round(dtS)}s</span>
       <span class="countdown__label">NEXT CONTROL</span>
     `;
   }
+}
+
+function updateCountdownDOM(container, remaining, dtS, small) {
+  const progress = Math.min(1, Math.max(0, 1 - remaining / dtS));
+  const circumference = 2 * Math.PI * 34;
+  const dashOffset = circumference * (1 - progress);
+
+  const ring = container.querySelector('.countdown__ring-fill');
+  if (ring) {
+    ring.setAttribute('stroke-dasharray', circumference);
+    ring.setAttribute('stroke-dashoffset', dashOffset);
+  }
+
+  const valueEl = container.querySelector('.countdown__value');
+  if (valueEl) valueEl.textContent = formatCountdown(remaining);
 }

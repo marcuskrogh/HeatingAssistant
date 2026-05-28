@@ -88,7 +88,7 @@ export class TimeSeriesChart {
     this._canvas = null;
   }
 
-  async render(datasets) {
+  async render(datasets, dynamicLimits) {
     await loadChartJs();
 
     this._container.innerHTML = `
@@ -103,7 +103,7 @@ export class TimeSeriesChart {
     this._canvas = this._container.querySelector('canvas');
     const ctx = this._canvas.getContext('2d');
 
-    const options = this._buildOptions();
+    const options = this._buildOptions(dynamicLimits);
     this._chart = new window.Chart(ctx, {
       type: 'line',
       data: { datasets },
@@ -125,7 +125,7 @@ export class TimeSeriesChart {
     }
   }
 
-  _buildOptions() {
+  _buildOptions(dynamicLimits) {
     const opts = JSON.parse(JSON.stringify(CHART_DEFAULTS));
 
     if (this._config.yLabel) {
@@ -156,6 +156,13 @@ export class TimeSeriesChart {
 
     if (this._config.yMin !== undefined) opts.scales.y.min = this._config.yMin;
     if (this._config.yMax !== undefined) opts.scales.y.max = this._config.yMax;
+
+    if (dynamicLimits) {
+      if (dynamicLimits.yMin !== undefined) opts.scales.y.min = dynamicLimits.yMin;
+      if (dynamicLimits.yMax !== undefined) opts.scales.y.max = dynamicLimits.yMax;
+      if (dynamicLimits.y2Min !== undefined && opts.scales.y2) opts.scales.y2.min = dynamicLimits.y2Min;
+      if (dynamicLimits.y2Max !== undefined && opts.scales.y2) opts.scales.y2.max = dynamicLimits.y2Max;
+    }
 
     return opts;
   }
