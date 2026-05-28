@@ -76,7 +76,7 @@ class HaIndustrialPanel extends HTMLElement {
       <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css">
       <div class="shell">
         <header class="header">
-          <button class="menu-button" id="menu-toggle" aria-label="Open sidebar">
+          <button class="menu-button" id="menu-toggle" aria-label="Toggle sidebar">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
               <path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
             </svg>
