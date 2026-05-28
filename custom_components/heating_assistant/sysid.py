@@ -118,8 +118,39 @@ def run_sysid_ekf(
             "horizon_steps": 0,
         }
 
-    actual_steps = min(horizon_steps, len(history) - 1)
-    window = list(history)[-(actual_steps + 1):]
+    # Select window by actual timestamps rather than step count.
+    # The history buffer may contain gaps (standby, restarts) so step-count
+    # selection can span far more wall-clock time than intended.
+    last_ts = float(history[-1].get("timestamp", 0.0))
+    cutoff_ts = last_ts - horizon_steps * dt
+    window = [h for h in history if float(h.get("timestamp", 0.0)) >= cutoff_ts]
+    if len(window) < 2:
+        window = list(history)[-(min(horizon_steps, len(history) - 1) + 1):]
+
+    # Filter out entries with large gaps (> 3× dt) from their predecessor.
+    # Such gaps break the fixed-dt EKF assumption and produce nonsense.
+    max_gap = 3.0 * dt
+    filtered = [window[0]]
+    for i in range(1, len(window)):
+        t_cur = float(window[i].get("timestamp", 0.0))
+        t_prv = float(window[i - 1].get("timestamp", 0.0))
+        if 0 < (t_cur - t_prv) <= max_gap:
+            filtered.append(window[i])
+        else:
+            # Restart contiguous segment from this point
+            filtered = [window[i]]
+    window = filtered
+    if len(window) < 2:
+        return {
+            "error": (
+                f"No contiguous data segment found within the requested "
+                f"horizon ({horizon_steps * dt / 3600:.1f} h). "
+                f"History has gaps exceeding {max_gap / 60:.0f} min."
+            ),
+            "per_room": {},
+            "horizon_steps": 0,
+        }
+    actual_steps = len(window) - 1
 
     # ------------------------------------------------------------------
     # Build parametrised HouseModel copy
