@@ -34,7 +34,9 @@ function computeRemaining(state, dtS) {
   if (!lastUpdated) return dtS;
 
   const elapsed = (Date.now() - lastUpdated.getTime()) / 1000;
-  return Math.max(0, dtS - elapsed);
+  if (elapsed < 0) return dtS;
+  const remaining = dtS - (elapsed % dtS);
+  return remaining;
 }
 
 function renderCountdownContent(container, remaining, dtS, small) {

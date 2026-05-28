@@ -38,10 +38,12 @@ export function renderOverview(container, rooms, state, connection) {
   roomSection.appendChild(roomGrid);
   container.appendChild(roomSection);
 
-  const countdownInterval = setInterval(() => countdown.tick(state), 1000);
+  let latestState = state;
+  const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
 
   return {
     update(newState) {
+      latestState = newState;
       gauges.forEach((g) => g.updater(newState));
       tiles.forEach((t) => updateRoomTile(t.element, t.room, newState));
       updateCountdown(countdown, newState);
