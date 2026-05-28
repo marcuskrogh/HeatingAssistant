@@ -181,19 +181,37 @@ function computeTotalSolar(state, rooms) {
 }
 
 function computeDailyEnergy(state) {
-  let total = 0;
+  // Sum the cumulative kWh from all energy_total sensors (already the correct integral).
+  let cumulative = 0;
+  let anyValid = false;
   for (const entityId of Object.keys(state)) {
     if (entityId.startsWith('sensor.heating_assistant_') && entityId.endsWith('_energy_total')) {
       const entity = state[entityId];
-      if (entity && entity.attributes && entity.attributes.current_power != null) {
-        const power = parseFloat(entity.attributes.current_power);
-        if (!isNaN(power)) total += Math.abs(power);
+      if (entity) {
+        const v = parseFloat(entity.state);
+        if (!isNaN(v)) {
+          cumulative += v;
+          anyValid = true;
+        }
       }
     }
   }
-  const hoursToday = new Date().getHours() + new Date().getMinutes() / 60;
-  const avgPower = total;
-  return (avgPower * hoursToday) / 1000;
+  if (!anyValid) return 0;
+
+  // Subtract the cumulative total recorded at the start of today so the gauge
+  // reflects energy used since midnight rather than since the sensor was created.
+  const today = new Date().toDateString();
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem('ha_daily_energy_baseline') || 'null');
+  } catch (_) { /* ignore parse errors */ }
+
+  if (!stored || stored.date !== today) {
+    localStorage.setItem('ha_daily_energy_baseline', JSON.stringify({ date: today, value: cumulative }));
+    return 0;
+  }
+
+  return Math.max(0, cumulative - stored.value);
 }
 
 function computeOverallFit(state, rooms) {
