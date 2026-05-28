@@ -34,12 +34,14 @@ class HaIndustrialPanel extends HTMLElement {
       { discoverRooms },
       { renderOverview },
       { renderRoomDetail },
+      { renderTuning },
     ] = await Promise.all([
       import(`${BASE_PATH}/js/ha-connection.js`),
       import(`${BASE_PATH}/js/router.js`),
       import(`${BASE_PATH}/js/discovery.js`),
       import(`${BASE_PATH}/js/pages/overview.js`),
       import(`${BASE_PATH}/js/pages/room-detail.js`),
+      import(`${BASE_PATH}/js/pages/tuning.js`),
     ]);
 
     this._connection = new HaConnection(this._hass);
@@ -51,6 +53,7 @@ class HaIndustrialPanel extends HTMLElement {
     this._router = new Router(contentEl, {
       overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection),
       room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection),
+      tuning: () => renderTuning(contentEl, this._rooms, this._state, this._connection, this._hass),
     });
 
     this._unsubscribe = await this._connection.subscribe((event) => {
@@ -58,6 +61,7 @@ class HaIndustrialPanel extends HTMLElement {
     });
 
     this._router.start();
+    this._updateActiveNav();
   }
 
   _onStateChanged(event) {
@@ -76,12 +80,18 @@ class HaIndustrialPanel extends HTMLElement {
       <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css">
       <div class="shell">
         <header class="header">
-          <button class="menu-button" id="menu-toggle" aria-label="Toggle sidebar">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-            </svg>
-          </button>
-          <h1 class="header__title">HEATING ASSISTANT</h1>
+          <div class="header__left">
+            <button class="menu-button" id="menu-toggle" aria-label="Toggle sidebar">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+              </svg>
+            </button>
+            <h1 class="header__title">HEATING ASSISTANT</h1>
+            <nav class="header__nav">
+              <a class="header__nav-link" href="#overview">OVERVIEW</a>
+              <a class="header__nav-link" href="#tuning">TUNING</a>
+            </nav>
+          </div>
           <div class="header__status">
             <span class="status-dot status-dot--live"></span>
             <span class="status-label">LIVE</span>
@@ -95,6 +105,17 @@ class HaIndustrialPanel extends HTMLElement {
 
     this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
       window.dispatchEvent(new Event('hass-toggle-menu'));
+    });
+
+    window.addEventListener('hashchange', () => this._updateActiveNav());
+  }
+
+  _updateActiveNav() {
+    const hash = window.location.hash.slice(1).split('/')[0] || 'overview';
+    const links = this.shadowRoot.querySelectorAll('.header__nav-link');
+    links.forEach((link) => {
+      const linkRoute = link.getAttribute('href').slice(1);
+      link.classList.toggle('header__nav-link--active', linkRoute === hash);
     });
   }
 

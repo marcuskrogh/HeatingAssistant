@@ -34,8 +34,9 @@ export class Router {
     const route = parts[0];
     const param = parts.slice(1).join('/');
 
-    if (route === 'room' && param && this._routes.room) {
-      this._currentPage = this._routes.room(param);
+    const handler = this._routes[route];
+    if (handler) {
+      this._currentPage = handler(param);
     } else if (this._routes.overview) {
       this._currentPage = this._routes.overview();
     }
