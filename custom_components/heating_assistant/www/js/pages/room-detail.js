@@ -351,8 +351,21 @@ function updateChartsFromState(room, state, tempChart, powerChart, disturbChart)
   if (powerChart._chart) {
     const ds = powerChart._chart.data.datasets;
     if (ds[1]) ds[1].data = powerForecast;
+
+    const priceIdx = ds.findIndex((d) => d.label === 'Price');
     const priceForecastIdx = ds.findIndex((d) => d.label === 'Price Forecast');
     if (priceForecastIdx >= 0) ds[priceForecastIdx].data = priceForecast;
+
+    const combinedPrice = [
+      ...(priceIdx >= 0 ? ds[priceIdx].data : []),
+      ...(priceForecastIdx >= 0 ? priceForecast : []),
+    ];
+    const { yMin: priceMin, yMax: priceMax } = computeYLimits([combinedPrice], [0]);
+    if (powerChart._chart.options?.scales?.y2) {
+      powerChart._chart.options.scales.y2.min = priceMin;
+      powerChart._chart.options.scales.y2.max = priceMax;
+    }
+
     powerChart._chart.update('none');
   }
 
