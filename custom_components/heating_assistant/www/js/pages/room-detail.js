@@ -70,8 +70,10 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
   });
 
   const powerChart = new TimeSeriesChart(powerChartEl, {
-    title: 'HEATING POWER',
+    title: 'HEATING POWER & PRICE',
     yLabel: 'W',
+    y2: true,
+    y2Label: 'Price',
     height: 200,
   });
 
@@ -118,6 +120,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const powerMeasuredEntity = room.entities['heating_power_measured'];
   const solarMeasuredEntity = room.entities['solar_gain_measured'];
   const outdoorEntity = systemEntity('outdoor_temperature_measured');
+  const priceEntity = systemEntity('electricity_price');
 
   const historyEntities = [
     tempFilteredEntity,
@@ -126,6 +129,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     powerMeasuredEntity,
     solarMeasuredEntity,
     outdoorEntity,
+    priceEntity,
   ].filter(Boolean);
 
   const history = await connection.getHistory(historyEntities, 6);
@@ -136,22 +140,27 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
   const solarHistory = historyToDataPoints(history[solarMeasuredEntity]);
   const outdoorHistory = historyToDataPoints(history[outdoorEntity]);
+  const priceHistory = historyToDataPoints(history[priceEntity]);
 
   const forecastEntity = state[room.entities['temperature_forecast']];
   const forecastData = forecastEntity?.attributes?.forecast || [];
 
+  const priceForecastEntity = state[systemEntity('electricity_price_forecast')];
+  const priceForecastData = priceForecastEntity?.attributes?.forecast || [];
+  const priceForecast = forecastToDataPoints(priceForecastData, 'price');
+
   const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
-  const tempForecastLinearised = forecastToDataPoints(forecastData, 'temperature_linearised');
+  const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
   const setpointForecast = forecastToDataPoints(forecastData, 'setpoint');
   const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
   const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
-  const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temperature');
+  const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temp');
 
   const upperBound = entityValue(state, room.entities['constraint_upper']);
   const lowerBound = entityValue(state, room.entities['constraint_lower']);
 
   buildTemperatureChart(tempChart, filteredHistory, measuredHistory, setpointHistory, tempForecastNonlinear, tempForecastLinearised, setpointForecast, upperBound, lowerBound);
-  buildPowerChart(powerChart, powerHistory, powerForecast, state, room);
+  buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, state, room);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
 }
 
@@ -238,14 +247,17 @@ function buildTemperatureChart(chart, filteredHistory, measuredHistory, setpoint
   chart.render(datasets, { yMin, yMax });
 }
 
-function buildPowerChart(chart, powerHistory, powerForecast, state, room) {
+function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, state, room) {
   const maxPowerAttr = entityAttr(state, room.entities['heating_power_forecast'], 'max_power');
   const maxPower = maxPowerAttr ? parseFloat(maxPowerAttr) : null;
   const minPower = maxPower !== null ? -maxPower : null;
 
-  const allData = [powerHistory, powerForecast];
+  const allPower = [powerHistory, powerForecast];
   const boundsArr = [maxPower, minPower, 0];
-  const { yMin, yMax } = computeYLimits(allData, boundsArr);
+  const { yMin, yMax } = computeYLimits(allPower, boundsArr);
+
+  const allPrice = [...priceHistory, ...priceForecast];
+  const { yMin: priceMin, yMax: priceMax } = computeYLimits([allPrice], [0]);
 
   const datasets = [
     makeDataset('Measured', powerHistory, '#ffb74d', {
@@ -254,6 +266,12 @@ function buildPowerChart(chart, powerHistory, powerForecast, state, room) {
     }),
     makeDataset('Planned', powerForecast, '#ffb74d', {
       dashed: true, borderWidth: 2, stepped: 'before',
+    }),
+    makeDataset('Price', priceHistory, '#81c784', {
+      borderWidth: 2, yAxisID: 'y2',
+    }),
+    makeDataset('Price Forecast', priceForecast, '#81c784', {
+      dashed: true, borderWidth: 1.5, yAxisID: 'y2',
     }),
   ];
 
@@ -277,7 +295,7 @@ function buildPowerChart(chart, powerHistory, powerForecast, state, room) {
     );
   }
 
-  chart.render(datasets, { yMin, yMax });
+  chart.render(datasets, { yMin, yMax, y2Min: priceMin, y2Max: priceMax });
 }
 
 function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHistory, solarForecast) {
@@ -308,11 +326,15 @@ function updateChartsFromState(room, state, tempChart, powerChart, disturbChart)
 
   const forecastData = forecastEntity.attributes.forecast;
   const tempForecast = forecastToDataPoints(forecastData, 'temperature');
-  const tempLinearised = forecastToDataPoints(forecastData, 'temperature_linearised');
+  const tempLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
   const setpointData = forecastToDataPoints(forecastData, 'setpoint');
   const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
   const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
-  const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temperature');
+  const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temp');
+
+  const priceForecastEntity = state[systemEntity('electricity_price_forecast')];
+  const priceForecastData = priceForecastEntity?.attributes?.forecast || [];
+  const priceForecast = forecastToDataPoints(priceForecastData, 'price');
 
   if (tempChart._chart) {
     const ds = tempChart._chart.data.datasets;
@@ -329,6 +351,21 @@ function updateChartsFromState(room, state, tempChart, powerChart, disturbChart)
   if (powerChart._chart) {
     const ds = powerChart._chart.data.datasets;
     if (ds[1]) ds[1].data = powerForecast;
+
+    const priceIdx = ds.findIndex((d) => d.label === 'Price');
+    const priceForecastIdx = ds.findIndex((d) => d.label === 'Price Forecast');
+    if (priceForecastIdx >= 0) ds[priceForecastIdx].data = priceForecast;
+
+    const combinedPrice = [
+      ...(priceIdx >= 0 ? ds[priceIdx].data : []),
+      ...(priceForecastIdx >= 0 ? priceForecast : []),
+    ];
+    const { yMin: priceMin, yMax: priceMax } = computeYLimits([combinedPrice], [0]);
+    if (powerChart._chart.options?.scales?.y2) {
+      powerChart._chart.options.scales.y2.min = priceMin;
+      powerChart._chart.options.scales.y2.max = priceMax;
+    }
+
     powerChart._chart.update('none');
   }
 
