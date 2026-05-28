@@ -46,13 +46,14 @@
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   padding: 16px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-card);
 }
 
 .header__title {
+  flex: 1;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -63,6 +64,30 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Hamburger menu button — lets users open the HA sidebar on mobile */
+.menu-button {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.menu-button:hover,
+.menu-button:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  outline: none;
 }
 
 .status-dot {
