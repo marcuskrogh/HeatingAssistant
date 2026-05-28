@@ -107,6 +107,14 @@ class HaIndustrialPanel extends HTMLElement {
       window.dispatchEvent(new Event('hass-toggle-menu'));
     });
 
+    this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const target = link.getAttribute('href');
+        window.location.hash = target;
+      });
+    });
+
     window.addEventListener('hashchange', () => this._updateActiveNav());
   }
 

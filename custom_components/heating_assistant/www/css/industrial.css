@@ -676,6 +676,13 @@
   margin-bottom: 16px;
 }
 
+.tuning-section__desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+}
+
 .tuning-params-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
