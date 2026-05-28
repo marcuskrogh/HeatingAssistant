@@ -15,6 +15,7 @@ const CHART_DEFAULTS = {
         padding: 12,
         usePointStyle: true,
         pointStyle: 'line',
+        filter: (item) => !item.text.startsWith('Above') && !item.text.startsWith('Below'),
       },
     },
     tooltip: {
@@ -28,6 +29,7 @@ const CHART_DEFAULTS = {
       padding: 10,
       displayColors: true,
       boxPadding: 4,
+      filter: (item) => !item.dataset.label?.startsWith('Above') && !item.dataset.label?.startsWith('Below'),
     },
   },
   scales: {
@@ -178,27 +180,40 @@ function nowLinePlugin() {
       ctx.moveTo(x, chart.chartArea.top);
       ctx.lineTo(x, chart.chartArea.bottom);
       ctx.stroke();
+
+      ctx.fillStyle = 'rgba(108, 122, 137, 0.8)';
+      ctx.font = '9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText('NOW', x, chart.chartArea.top - 4);
+
       ctx.restore();
     },
   };
 }
 
 export function makeDataset(label, data, color, options = {}) {
-  return {
+  const ds = {
     label,
     data,
     borderColor: color,
-    backgroundColor: options.fill ? color.replace(')', ', 0.1)').replace('rgb(', 'rgba(') : 'transparent',
+    backgroundColor: options.backgroundColor || 'transparent',
     borderWidth: options.borderWidth || 1.5,
     pointRadius: options.pointRadius ?? 0,
-    pointHoverRadius: 3,
-    tension: 0.2,
+    pointHoverRadius: options.pointHoverRadius ?? 3,
+    tension: options.stepped ? 0 : 0.2,
     fill: options.fill || false,
-    borderDash: options.dashed ? [5, 5] : [],
+    borderDash: options.dashed ? [5, 5] : (options.borderDash || []),
     yAxisID: options.yAxisID || 'y',
-    segment: options.segment,
-    ...options,
+    order: options.order,
   };
+
+  if (options.stepped) ds.stepped = options.stepped;
+  if (options.showLine === false) ds.showLine = false;
+  if (options.pointBackgroundColor) ds.pointBackgroundColor = options.pointBackgroundColor;
+  if (options.pointBorderColor) ds.pointBorderColor = options.pointBorderColor;
+  if (options.segment) ds.segment = options.segment;
+
+  return ds;
 }
 
 export function historyToDataPoints(historyArray) {
@@ -217,10 +232,12 @@ export function forecastToDataPoints(forecastArray, field) {
   if (!forecastArray || !Array.isArray(forecastArray)) return [];
   return forecastArray
     .map((entry) => {
-      const val = parseFloat(entry[field]);
-      if (isNaN(val)) return null;
+      const val = entry[field];
+      if (val === undefined || val === null) return null;
+      const num = parseFloat(val);
+      if (isNaN(num)) return null;
       const time = new Date(entry.time);
-      return { x: time.getTime(), y: val };
+      return { x: time.getTime(), y: num };
     })
     .filter(Boolean);
 }

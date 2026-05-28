@@ -1,22 +1,31 @@
 import { createGauge, updateGauge } from '../components/gauge.js';
 import { createRoomTile, updateRoomTile } from '../components/room-tile.js';
-import { formatDuration, formatPower, formatTemperature, formatNumber, entityValue, entityAttr, systemEntity } from '../utils.js';
+import { createCountdown, updateCountdown } from '../components/countdown.js';
+import {
+  formatPercent, formatEnergy, formatTemperature, formatPower,
+  formatNumber, entityValue, entityAttr, systemEntity, modelFitLabel,
+  MAX_SOLVE_TIME_S,
+} from '../utils.js';
 
 export function renderOverview(container, rooms, state, connection) {
   container.innerHTML = '';
 
   const kpiSection = document.createElement('div');
-  kpiSection.innerHTML = '<div class="section-header">PROCESS KPIs</div>';
+  kpiSection.innerHTML = '<div class="section-header">SYSTEM STATUS</div>';
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'grid-kpi';
 
   const gauges = buildGauges(state, rooms);
   gauges.forEach((g) => kpiGrid.appendChild(g.element));
+
+  const countdown = createCountdown(state, false);
+  kpiGrid.appendChild(countdown.element);
+
   kpiSection.appendChild(kpiGrid);
   container.appendChild(kpiSection);
 
   const roomSection = document.createElement('div');
-  roomSection.innerHTML = '<div class="section-header">ROOM UNITS</div>';
+  roomSection.innerHTML = '<div class="section-header">ROOMS</div>';
   const roomGrid = document.createElement('div');
   roomGrid.className = 'grid-rooms';
 
@@ -29,33 +38,32 @@ export function renderOverview(container, rooms, state, connection) {
   roomSection.appendChild(roomGrid);
   container.appendChild(roomSection);
 
+  const countdownInterval = setInterval(() => countdown.tick(state), 1000);
+
   return {
     update(newState) {
       gauges.forEach((g) => g.updater(newState));
       tiles.forEach((t) => updateRoomTile(t.element, t.room, newState));
+      updateCountdown(countdown, newState);
+    },
+    _countdownInterval: countdownInterval,
+    destroy() {
+      clearInterval(countdownInterval);
     },
   };
 }
 
 function buildGauges(state, rooms) {
-  const mpcValue = entityValue(state, systemEntity('mpc_performance'));
+  const mpcSolveTime = entityValue(state, systemEntity('mpc_performance'));
+  const mpcPercent = mpcSolveTime !== null ? Math.min(100, (mpcSolveTime / MAX_SOLVE_TIME_S) * 100) : 0;
+
   const mpcGauge = createGauge({
-    value: mpcValue !== null ? mpcValue * 1000 : 0,
+    value: mpcPercent,
     min: 0,
     max: 100,
-    label: 'MPC COMPUTE',
-    format: (v) => formatDuration(v / 1000),
-    severity: { good: 0, warning: 20, alarm: 50, inverse: true },
-  });
-
-  const powerValue = entityValue(state, systemEntity('system_summary'));
-  const powerGauge = createGauge({
-    value: powerValue ?? 0,
-    min: 0,
-    max: 15000,
-    label: 'TOTAL POWER',
-    format: formatPower,
-    severity: { good: 0, warning: 6000, alarm: 10000, inverse: true },
+    label: 'MPC LOAD',
+    format: (v) => formatPercent(v),
+    severity: { good: 0, warning: 50, alarm: 80, inverse: true },
   });
 
   const outdoorValue = entityValue(state, systemEntity('outdoor_temperature_measured'));
@@ -68,24 +76,34 @@ function buildGauges(state, rooms) {
     severity: { good: 5, warning: -5, alarm: -15 },
   });
 
-  let avgFit = 0;
-  let fitCount = 0;
-  rooms.forEach((room) => {
-    const fitEntity = room.entities['model_fit_quality'];
-    if (fitEntity) {
-      const v = entityValue(state, fitEntity);
-      if (v !== null) { avgFit += v; fitCount++; }
-    }
+  const totalSolar = computeTotalSolar(state, rooms);
+  const solarGauge = createGauge({
+    value: totalSolar,
+    min: 0,
+    max: 5000,
+    label: 'SOLAR GAIN',
+    format: formatPower,
+    severity: { good: 1000, warning: 200, alarm: 0 },
   });
-  if (fitCount > 0) avgFit /= fitCount;
 
+  const fitEval = computeOverallFit(state, rooms);
   const fitGauge = createGauge({
-    value: avgFit,
+    value: fitEval.value,
     min: 0,
     max: 1,
-    label: 'MODEL FIT (R²)',
-    format: (v) => formatNumber(v, 3),
-    severity: { good: 0.85, warning: 0.6, alarm: 0 },
+    label: 'MODEL FIT',
+    format: () => fitEval.label,
+    severity: { good: 0.8, warning: 0.5, alarm: 0 },
+  });
+
+  const dailyEnergy = computeDailyEnergy(state);
+  const energyGauge = createGauge({
+    value: dailyEnergy,
+    min: 0,
+    max: 100,
+    label: 'DAILY ENERGY',
+    format: () => formatEnergy(dailyEnergy),
+    severity: { good: 0, warning: 50, alarm: 80, inverse: true },
   });
 
   return [
@@ -93,22 +111,11 @@ function buildGauges(state, rooms) {
       element: mpcGauge,
       updater: (s) => {
         const v = entityValue(s, systemEntity('mpc_performance'));
+        const pct = v !== null ? Math.min(100, (v / MAX_SOLVE_TIME_S) * 100) : 0;
         updateGauge(mpcGauge, {
-          value: v !== null ? v * 1000 : 0,
-          min: 0, max: 100,
-          format: (v) => formatDuration(v / 1000),
-          severity: { good: 0, warning: 20, alarm: 50, inverse: true },
-        });
-      },
-    },
-    {
-      element: powerGauge,
-      updater: (s) => {
-        const v = entityValue(s, systemEntity('system_summary'));
-        updateGauge(powerGauge, {
-          value: v ?? 0, min: 0, max: 15000,
-          format: formatPower,
-          severity: { good: 0, warning: 6000, alarm: 10000, inverse: true },
+          value: pct, min: 0, max: 100,
+          format: (v) => formatPercent(v),
+          severity: { good: 0, warning: 50, alarm: 80, inverse: true },
         });
       },
     },
@@ -124,23 +131,87 @@ function buildGauges(state, rooms) {
       },
     },
     {
+      element: solarGauge,
+      updater: (s) => {
+        const total = computeTotalSolar(s, rooms);
+        updateGauge(solarGauge, {
+          value: total, min: 0, max: 5000,
+          format: formatPower,
+          severity: { good: 1000, warning: 200, alarm: 0 },
+        });
+      },
+    },
+    {
+      element: energyGauge,
+      updater: (s) => {
+        const energy = computeDailyEnergy(s);
+        updateGauge(energyGauge, {
+          value: energy, min: 0, max: 100,
+          format: () => formatEnergy(energy),
+          severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+        });
+      },
+    },
+    {
       element: fitGauge,
       updater: (s) => {
-        let avg = 0, cnt = 0;
-        rooms.forEach((room) => {
-          const fitEntity = room.entities['model_fit_quality'];
-          if (fitEntity) {
-            const v = entityValue(s, fitEntity);
-            if (v !== null) { avg += v; cnt++; }
-          }
-        });
-        if (cnt > 0) avg /= cnt;
+        const fit = computeOverallFit(s, rooms);
         updateGauge(fitGauge, {
-          value: avg, min: 0, max: 1,
-          format: (v) => formatNumber(v, 3),
-          severity: { good: 0.85, warning: 0.6, alarm: 0 },
+          value: fit.value, min: 0, max: 1,
+          format: () => fit.label,
+          severity: { good: 0.8, warning: 0.5, alarm: 0 },
         });
       },
     },
   ];
+}
+
+function computeTotalSolar(state, rooms) {
+  let total = 0;
+  for (const room of rooms) {
+    const entity = room.entities['solar_gain_measured'];
+    if (entity) {
+      const v = entityValue(state, entity);
+      if (v !== null) total += v;
+    }
+  }
+  return total;
+}
+
+function computeDailyEnergy(state) {
+  let total = 0;
+  for (const entityId of Object.keys(state)) {
+    if (entityId.startsWith('sensor.heating_assistant_') && entityId.endsWith('_energy_total')) {
+      const entity = state[entityId];
+      if (entity && entity.attributes && entity.attributes.current_power != null) {
+        const power = parseFloat(entity.attributes.current_power);
+        if (!isNaN(power)) total += Math.abs(power);
+      }
+    }
+  }
+  const hoursToday = new Date().getHours() + new Date().getMinutes() / 60;
+  const avgPower = total;
+  return (avgPower * hoursToday) / 1000;
+}
+
+function computeOverallFit(state, rooms) {
+  let sum = 0;
+  let count = 0;
+  let worstR2 = 1;
+
+  for (const room of rooms) {
+    const entity = room.entities['model_fit_quality'];
+    if (entity) {
+      const v = entityValue(state, entity);
+      if (v !== null) {
+        sum += v;
+        count++;
+        if (v < worstR2) worstR2 = v;
+      }
+    }
+  }
+
+  const avg = count > 0 ? sum / count : 0;
+  const fit = modelFitLabel(worstR2);
+  return { value: avg, label: fit.label };
 }

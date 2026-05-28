@@ -13,6 +13,7 @@ export class Router {
 
   destroy() {
     window.removeEventListener('hashchange', this._onHashChange);
+    this._destroyCurrentPage();
   }
 
   update(state) {
@@ -26,6 +27,8 @@ export class Router {
   }
 
   _navigate() {
+    this._destroyCurrentPage();
+
     const hash = window.location.hash.slice(1) || 'overview';
     const parts = hash.split('/');
     const route = parts[0];
@@ -36,5 +39,12 @@ export class Router {
     } else if (this._routes.overview) {
       this._currentPage = this._routes.overview();
     }
+  }
+
+  _destroyCurrentPage() {
+    if (this._currentPage && this._currentPage.destroy) {
+      this._currentPage.destroy();
+    }
+    this._currentPage = null;
   }
 }

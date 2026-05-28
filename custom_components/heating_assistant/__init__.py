@@ -542,22 +542,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    written = await _async_auto_write_default_dashboard(hass, entry, coordinator)
-    if written:
-        await _async_try_register_lovelace_dashboard(hass, written)
-    written_industrial = await _async_auto_write_industrial_dashboard(
-        hass, entry, coordinator
-    )
-    if written_industrial:
-        await _async_try_register_lovelace_dashboard(
-            hass,
-            written_industrial,
-            url_path=DASHBOARD_INDUSTRIAL_URL_PATH,
-            title="Heating Assistant Industrial",
-            icon="mdi:factory",
-        )
+    # NOTE: Native Lovelace dashboards are kept in code but disabled.
+    # The custom JS/CSS panel below is the primary dashboard.
+    # written = await _async_auto_write_default_dashboard(hass, entry, coordinator)
+    # if written:
+    #     await _async_try_register_lovelace_dashboard(hass, written)
+    # written_industrial = await _async_auto_write_industrial_dashboard(
+    #     hass, entry, coordinator
+    # )
+    # if written_industrial:
+    #     await _async_try_register_lovelace_dashboard(
+    #         hass,
+    #         written_industrial,
+    #         url_path=DASHBOARD_INDUSTRIAL_URL_PATH,
+    #         title="Heating Assistant Industrial",
+    #         icon="mdi:factory",
+    #     )
 
-    # Register custom JS/CSS industrial panel
+    # Register custom JS/CSS panel
     try:
         import pathlib
 
@@ -573,8 +575,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_register_built_in_panel(
             hass,
             component_name="custom",
-            sidebar_title="HA Industrial",
-            sidebar_icon="mdi:factory",
+            sidebar_title="Heating Assistant",
+            sidebar_icon="mdi:radiator",
             frontend_url_path="ha-industrial",
             config={
                 "_panel_custom": {
@@ -587,7 +589,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     except Exception:
         _LOGGER.debug(
-            "Heating Assistant: custom industrial panel registration skipped",
+            "Heating Assistant: custom panel registration skipped",
             exc_info=True,
         )
 
