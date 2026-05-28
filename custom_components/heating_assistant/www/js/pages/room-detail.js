@@ -138,9 +138,9 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
   const setpointHistory = historyToDataPoints(history[setpointEntity]);
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
-  const solarHistory = historyToDataPoints(history[solarMeasuredEntity]);
-  const outdoorHistory = historyToDataPoints(history[outdoorEntity]);
-  const priceHistory = historyToDataPoints(history[priceEntity]);
+  const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
+  const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
+  const priceHistory = appendCurrentValue(historyToDataPoints(history[priceEntity]), state, priceEntity);
 
   const forecastEntity = state[room.entities['temperature_forecast']];
   const forecastData = forecastEntity?.attributes?.forecast || [];
@@ -162,6 +162,14 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   buildTemperatureChart(tempChart, filteredHistory, measuredHistory, setpointHistory, tempForecastNonlinear, tempForecastLinearised, setpointForecast, upperBound, lowerBound);
   buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, state, room);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
+}
+
+function appendCurrentValue(dataPoints, state, entityId) {
+  const val = entityValue(state, entityId);
+  if (val !== null) {
+    dataPoints.push({ x: Date.now(), y: val });
+  }
+  return dataPoints;
 }
 
 function computeYLimits(allDataPoints, bounds, marginFraction = 0.05) {
