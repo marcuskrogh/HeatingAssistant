@@ -17,7 +17,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 
   const nav = document.createElement('button');
   nav.className = 'nav-back';
-  nav.innerHTML = '<span class="nav-back__arrow">←</span> OVERVIEW';
+  nav.innerHTML = '<span class="nav-back__arrow">\u2190</span> OVERVIEW';
   nav.addEventListener('click', () => { window.location.hash = '#overview'; });
   container.appendChild(nav);
 
@@ -38,7 +38,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 
   const kpis = [
     createKpiCard({ value: formatTemperature(tempVal), label: 'Temperature', unit: '' }),
-    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '—', label: 'Setpoint', unit: '' }),
+    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint', unit: '' }),
     createKpiCard({ value: formatPower(powerVal), label: 'Power', unit: '' }),
     createKpiCard({
       value: `<span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>`,
@@ -65,7 +65,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 
   const tempChart = new TimeSeriesChart(tempChartEl, {
     title: 'TEMPERATURE',
-    yLabel: '°C',
+    yLabel: '\u00b0C',
     height: 240,
   });
 
@@ -77,7 +77,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 
   const disturbChart = new TimeSeriesChart(disturbChartEl, {
     title: 'DISTURBANCES',
-    yLabel: '°C',
+    yLabel: '\u00b0C',
     y2: true,
     y2Label: 'W',
     height: 200,
@@ -96,7 +96,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
       const sp = entityValue(newState, room.entities['setpoint']);
 
       updateKpiCard(kpis[0], { value: formatTemperature(tv) });
-      updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '—' });
+      updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
       updateKpiCard(kpis[2], { value: formatPower(pv) });
       updateKpiCard(kpis[3], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
 
@@ -114,6 +114,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart) {
   const tempFilteredEntity = room.entities['temperature_filtered'];
   const tempMeasuredEntity = room.entities['temperature_measured'];
+  const setpointEntity = room.entities['setpoint'];
   const powerMeasuredEntity = room.entities['heating_power_measured'];
   const solarMeasuredEntity = room.entities['solar_gain_measured'];
   const outdoorEntity = systemEntity('outdoor_temperature_measured');
@@ -121,6 +122,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const historyEntities = [
     tempFilteredEntity,
     tempMeasuredEntity,
+    setpointEntity,
     powerMeasuredEntity,
     solarMeasuredEntity,
     outdoorEntity,
@@ -130,6 +132,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
 
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
   const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
+  const setpointHistory = historyToDataPoints(history[setpointEntity]);
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
   const solarHistory = historyToDataPoints(history[solarMeasuredEntity]);
   const outdoorHistory = historyToDataPoints(history[outdoorEntity]);
@@ -147,15 +150,53 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const upperBound = entityValue(state, room.entities['constraint_upper']);
   const lowerBound = entityValue(state, room.entities['constraint_lower']);
 
-  buildTemperatureChart(tempChart, filteredHistory, measuredHistory, tempForecastNonlinear, tempForecastLinearised, setpointForecast, upperBound, lowerBound);
+  buildTemperatureChart(tempChart, filteredHistory, measuredHistory, setpointHistory, tempForecastNonlinear, tempForecastLinearised, setpointForecast, upperBound, lowerBound);
   buildPowerChart(powerChart, powerHistory, powerForecast, state, room);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
 }
 
-function buildTemperatureChart(chart, filteredHistory, measuredHistory, forecastNonlinear, forecastLinearised, setpointData, upperBound, lowerBound) {
+function computeYLimits(allDataPoints, bounds, marginFraction = 0.05) {
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+
+  for (const points of allDataPoints) {
+    for (const p of points) {
+      if (p && p.y != null) {
+        if (p.y < minVal) minVal = p.y;
+        if (p.y > maxVal) maxVal = p.y;
+      }
+    }
+  }
+
+  for (const b of bounds) {
+    if (b != null) {
+      if (b < minVal) minVal = b;
+      if (b > maxVal) maxVal = b;
+    }
+  }
+
+  if (!isFinite(minVal) || !isFinite(maxVal)) return { yMin: undefined, yMax: undefined };
+
+  const range = maxVal - minVal || 1;
+  const margin = range * marginFraction;
+  return {
+    yMin: minVal - margin,
+    yMax: maxVal + margin,
+  };
+}
+
+function buildTemperatureChart(chart, filteredHistory, measuredHistory, setpointHistory, forecastNonlinear, forecastLinearised, setpointForecast, upperBound, lowerBound) {
   const now = Date.now();
   const past = now - 7 * 3600 * 1000;
-  const future = now + 4 * 3600 * 1000;
+  const lastForecastTime = forecastNonlinear.length > 0
+    ? forecastNonlinear[forecastNonlinear.length - 1].x
+    : now + 3 * 3600 * 1000;
+
+  const allData = [filteredHistory, measuredHistory, setpointHistory, forecastNonlinear, forecastLinearised, setpointForecast];
+  const boundsArr = [upperBound, lowerBound];
+  const { yMin, yMax } = computeYLimits(allData, boundsArr);
+
+  const combinedSetpoint = [...setpointHistory, ...setpointForecast];
 
   const datasets = [
     makeDataset('Filtered', filteredHistory, '#4fc3f7', { borderWidth: 2 }),
@@ -173,45 +214,38 @@ function buildTemperatureChart(chart, filteredHistory, measuredHistory, forecast
     );
   }
 
-  if (setpointData.length > 0) {
+  if (combinedSetpoint.length > 0) {
     datasets.push(
-      makeDataset('Setpoint', setpointData, '#e57373', { dashed: true, borderWidth: 1, pointRadius: 0 })
+      makeDataset('Setpoint', combinedSetpoint, '#e57373', { dashed: true, borderWidth: 1, pointRadius: 0 })
     );
   }
 
   if (upperBound !== null && lowerBound !== null) {
-    const boundTimes = [past, now, future];
-    const yMax = upperBound + 5;
-    const yMin = lowerBound - 5;
+    const boundTimes = [past, now, lastForecastTime];
 
     datasets.push(
-      makeDataset('Above Comfort', boundTimes.map((t) => ({ x: t, y: yMax })), 'transparent', {
+      makeDataset('Above Comfort', boundTimes.map((t) => ({ x: t, y: yMax + 10 })), 'transparent', {
         fill: { target: { value: upperBound }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
         borderWidth: 0, pointRadius: 0, showLine: true,
       }),
-      makeDataset('Upper Bound', boundTimes.map((t) => ({ x: t, y: upperBound })), 'rgba(229,115,115,0.4)', {
-        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
-      }),
-      makeDataset('Lower Bound', boundTimes.map((t) => ({ x: t, y: lowerBound })), 'rgba(229,115,115,0.4)', {
-        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
-      }),
-      makeDataset('Below Comfort', boundTimes.map((t) => ({ x: t, y: yMin })), 'transparent', {
+      makeDataset('Below Comfort', boundTimes.map((t) => ({ x: t, y: yMin - 10 })), 'transparent', {
         fill: { target: { value: lowerBound }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
         borderWidth: 0, pointRadius: 0, showLine: true,
       })
     );
   }
 
-  chart.render(datasets);
+  chart.render(datasets, { yMin, yMax });
 }
 
 function buildPowerChart(chart, powerHistory, powerForecast, state, room) {
   const maxPowerAttr = entityAttr(state, room.entities['heating_power_forecast'], 'max_power');
   const maxPower = maxPowerAttr ? parseFloat(maxPowerAttr) : null;
+  const minPower = maxPower !== null ? -maxPower : null;
 
-  const now = Date.now();
-  const past = now - 7 * 3600 * 1000;
-  const future = now + 4 * 3600 * 1000;
+  const allData = [powerHistory, powerForecast];
+  const boundsArr = [maxPower, minPower, 0];
+  const { yMin, yMax } = computeYLimits(allData, boundsArr);
 
   const datasets = [
     makeDataset('Measured', powerHistory, '#ffb74d', {
@@ -224,33 +258,35 @@ function buildPowerChart(chart, powerHistory, powerForecast, state, room) {
   ];
 
   if (maxPower !== null) {
-    const boundTimes = [past, now, future];
-    const yMax = maxPower * 1.3;
-    const minPower = -maxPower;
-    const yMin = minPower * 1.3;
+    const now = Date.now();
+    const past = now - 7 * 3600 * 1000;
+    const lastTime = powerForecast.length > 0
+      ? powerForecast[powerForecast.length - 1].x
+      : now + 3 * 3600 * 1000;
+    const boundTimes = [past, now, lastTime];
 
     datasets.push(
-      makeDataset('Max Power', boundTimes.map((t) => ({ x: t, y: maxPower })), 'rgba(229,115,115,0.4)', {
-        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
-      }),
-      makeDataset('Above Max', boundTimes.map((t) => ({ x: t, y: yMax })), 'transparent', {
+      makeDataset('Above Max', boundTimes.map((t) => ({ x: t, y: yMax + 1000 })), 'transparent', {
         fill: { target: { value: maxPower }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
         borderWidth: 0, pointRadius: 0, showLine: true,
       }),
-      makeDataset('Min Power', boundTimes.map((t) => ({ x: t, y: minPower })), 'rgba(229,115,115,0.4)', {
-        borderWidth: 1, borderDash: [3, 3], pointRadius: 0, fill: false,
-      }),
-      makeDataset('Below Min', boundTimes.map((t) => ({ x: t, y: yMin })), 'transparent', {
+      makeDataset('Below Min', boundTimes.map((t) => ({ x: t, y: yMin - 1000 })), 'transparent', {
         fill: { target: { value: minPower }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
         borderWidth: 0, pointRadius: 0, showLine: true,
       })
     );
   }
 
-  chart.render(datasets);
+  chart.render(datasets, { yMin, yMax });
 }
 
 function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHistory, solarForecast) {
+  const allOutdoor = [...outdoorHistory, ...outdoorForecast];
+  const allSolar = [...solarHistory, ...solarForecast];
+
+  const { yMin: outdoorMin, yMax: outdoorMax } = computeYLimits([allOutdoor], []);
+  const { yMin: solarMin, yMax: solarMax } = computeYLimits([allSolar], [0]);
+
   const datasets = [
     makeDataset('Outdoor Temp', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
     makeDataset('Outdoor Forecast', outdoorForecast, '#90a4ae', { dashed: true, borderWidth: 1.5 }),
@@ -263,7 +299,7 @@ function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHist
     }),
   ];
 
-  chart.render(datasets);
+  chart.render(datasets, { yMin: outdoorMin, yMax: outdoorMax, y2Min: solarMin, y2Max: solarMax });
 }
 
 function updateChartsFromState(room, state, tempChart, powerChart, disturbChart) {
@@ -283,7 +319,10 @@ function updateChartsFromState(room, state, tempChart, powerChart, disturbChart)
     if (ds[2]) ds[2].data = tempForecast;
     if (ds[3] && tempLinearised.length > 0) ds[3].data = tempLinearised;
     const setpointIdx = ds.findIndex((d) => d.label === 'Setpoint');
-    if (setpointIdx >= 0) ds[setpointIdx].data = setpointData;
+    if (setpointIdx >= 0) {
+      const existingHistory = ds[setpointIdx].data.filter((p) => p.x <= Date.now());
+      ds[setpointIdx].data = [...existingHistory, ...setpointData];
+    }
     tempChart._chart.update('none');
   }
 
