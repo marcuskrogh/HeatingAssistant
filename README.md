@@ -13,7 +13,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
    - 2.1 [File layout](#21-file-layout)
    - 2.2 [Data flow](#22-data-flow)
 3. [Physics and Mathematical Models](#3-physics-and-mathematical-models)
-   - 3.1 [Lumped RC thermal model](#31-lumped-rc-thermal-model)
+   - 3.1 [Lumped RC thermal model (1R1C)](#31-lumped-rc-thermal-model-1r1c)
    - 3.2 [State-space matrix form](#32-state-space-matrix-form)
    - 3.3 [Numerical integration](#33-numerical-integration)
    - 3.4 [Solar heat gain model](#34-solar-heat-gain-model)
@@ -134,9 +134,9 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | **Air-source heat pump support** | Temperature-dependent COP based on Carnot scaling.  The pump shuts off automatically below a configurable outdoor temperature floor to prevent defrost damage.  Offset-based setpoint control (`max_temp_offset`) lets the heat pump modulate output via the gap between its internal sensor and the target temperature. |
 | **Multiple heat sources per room** | Any number of heaters and/or heat pumps can be assigned to the same room; the controller optimises them jointly. |
 | **Turn-off deadband** | Two-threshold Schmitt-trigger hysteresis around the setpoint (width = 2 × `turn_off_deadband`).  Passive cooling engages only when `room_temp > setpoint + deadband`, and disengages only when `room_temp < setpoint − deadband`.  Between the thresholds the current mode is held, preventing rapid toggling. |
-| **Receding-horizon NMPC** | Each control cycle the controller solves a nonlinear program (NLP) over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error, energy use, and input rate-of-change (Δu smoothing).  Inputs are applied via zero-order hold. |
+| **Receding-horizon MPC** | Each control cycle the controller linearizes the nonlinear SDE around the current operating point and solves a convex QP over the prediction horizon to find the continuous input sequence that minimises a cost of temperature tracking error, energy use, and input rate-of-change (Δu smoothing).  Inputs are applied via zero-order hold. |
 | **CD-EKF state estimation** | A continuous-discrete Extended Kalman Filter (CD-EKF) integrates the nonlinear thermal SDE and linearised Riccati ODE between measurements, providing the minimum-variance state estimate for the nonlinear house thermal model. |
-| **Generic MBC framework** | The controller is built on the `mbc` (model-based control) package, providing `ContinuousDiscreteModel`, `ContinuousDiscreteEKF`, and `CDTrackingOptimalControlProblem` components that can be reused for any continuous-discrete nonlinear system. |
+| **Generic MBC framework** | The controller is built on the `mbc` (model-based control) package, providing `ContinuousDiscreteModel`, `ContinuousDiscreteEKF`, and `CDLinearizedMPCController` components that can be reused for any continuous-discrete nonlinear system. |
 | **HA climate entities** | One `climate.*` entity per room exposes setpoint, current temperature, HVAC mode and action in the standard HA interface.  Heat-pump-equipped rooms additionally advertise `heat_cool` mode and report `cooling` as the HVAC action while the integration drives the heat pump in dry / fan-only mode. |
 | **Cooling-aware visualisation** | Cooling capacity is derived from a separate `cooling_cop` (EER) so the advanced visualisation no longer treats the rated *heating* output as the cooling capability.  Per-room Heating Power, Heating Plan, and Energy Balance sensors expose signed power (positive = heating, negative = cooling) so a single ApexCharts series shows both modes. |
 | **HA sensor entities** | Predicted temperature and active heating power sensors per room, with model metadata exposed as state attributes. |
@@ -160,6 +160,7 @@ custom_components/heating_assistant/
 ├── manifest.json          Integration metadata: name, version, requirements, iot_class
 ├── translations/
 │   └── en.json            English strings for the UI setup wizard
+├── strings.json           Default strings (fallback for translations)
 │
 ├── const.py               All shared string keys and numeric defaults
 │
@@ -171,14 +172,16 @@ custom_components/heating_assistant/
 │
 ├── config_flow.py         UI wizard (HeatingAssistantConfigFlow)
 │                          • Step "user": latitude, longitude, outdoor sensor, update_interval, horizon
-│                          • Options flow: outdoor sensor, update_interval, horizon (post-install edit)
+│                          • Options flow: reconfigure site settings post-install
+│
+├── _options_flow.py       Options flow helpers (room/source/schedule editors)
 │
 ├── coordinator.py         HeatingAssistantCoordinator (DataUpdateCoordinator)
 │                          • Builds HouseModel and heat sources from config
 │                          • _async_update_data() called every UPDATE_INTERVAL seconds
 │                          • Reads sensor states → runs MPC → writes heater actions
 │
-├── thermal_model.py       Physics: lumped RC model
+├── thermal_model.py       Physics: lumped 1R1C model
 │                          • RoomConnection, Window, Room  (dataclasses)
 │                          • HouseModel: step(), predict(), state-space matrices
 │                          • compute_heat_flows(): per-room heat loss breakdown
@@ -198,11 +201,14 @@ custom_components/heating_assistant/
 │                          •   Analytic Jacobians dfdx, dhmdx for EKF efficiency
 │                          • HeatingMPCController: application facade (coordinator API)
 │                          •   → uses ContinuousDiscreteEKF from mbc.estimation
-│                          •   → uses CDTrackingOptimalControlProblem from mbc.control
+│                          •   → uses CDLinearizedMPCController from mbc.control
+│
+├── integrator.py          Numerical integration (implicit Euler)
+│                          • Shared integration helper for thermal model stepping
 │
 ├── parameter_estimator.py ML thermal parameter estimation
 │                          • KalmanMLEstimator: maximum-likelihood thermal parameter fitting
-│                          • Uses Nelder–Mead optimisation over Kalman PED log-likelihood
+│                          • CD-EKF prediction-error decomposition log-likelihood
 │                          • estimate(): returns {room: {thermal_mass, r_external}}
 │
 ├── model_diagnostics.py   Analysis tools for tuning and validation
@@ -211,10 +217,31 @@ custom_components/heating_assistant/
 │                          • Open-loop multi-step simulation
 │                          • Controller performance report
 │
+├── sysid.py               System identification via EKF
+│                          • EKF reconstruction over history window
+│                          • One-step-ahead predictions with confidence bands
+│
+├── weather.py             Weather forecast integration
+│                          • Reads outdoor temperature from HA sensor
+│                          • Fetches forecasts via weather.get_forecasts service
+│                          • Cloud cover mapping from weather conditions
+│
+├── schedule.py            Comfort schedules (time-of-day setback)
+│                          • RoomSchedule: named periods with start/end/days/mode
+│                          • active_period(), effective_setpoint(), is_enabled()
+│
+├── ground_temp.py         Ground temperature model (sinusoidal annual cycle)
+│
+├── yaml_merge.py          YAML configuration merge utilities
+│
+├── dashboard.py           Lovelace dashboard generator
+│                          • Classic dashboard: overview + per-room subviews + diagnostics
+│                          • Industrial dashboard: process-control style UI
+│
 ├── diagnostics.py         HA diagnostics platform
 │                          • async_get_config_entry_diagnostics(): full system state dump
 │
-├── services.yaml          Service definitions (simulate, estimate, analyze, validate, …)
+├── services.yaml          Service definitions (12 services)
 │
 ├── climate.py             HA climate platform
 │                          • RoomClimateEntity per room
@@ -224,28 +251,34 @@ custom_components/heating_assistant/
 │
 ├── button.py              HA button platform
 │                          • EstimateParametersButton: triggers ML parameter estimation
-│                            with one press; applies results and posts a notification
+│                          • ResetParametersButton: reverts to configured defaults
 │
-└── sensor.py              HA sensor platform
-                           • PredictedTemperatureSensor per room         [°C]
-                           • HeatingPowerSensor per room                 [W]
-                           • SolarGainSensor per room                    [W]
-                           • TemperatureForecastSensor per room          [°C]
-                           • HeatLossSensor per room                     [W]
-                           • EnergyBalanceSensor per room                [W]
-                           • HeatingPlanSensor per room                  [W]
-                           • SolarForecastSensor per room                [W]
-                           • PredictionErrorSensor per room              [°C]
-                           • ModelFitQualitySensor per room              [–]
-                           • ParameterConfidenceSensor per room          [–]
-                           • OpenLoopRMSESensor per room                 [°C]
-                           • KalmanInnovationSensor per room             [°C]
-                           • ResidualACFSensor per room                  [–]
-                           • ControlActionSensor per heat source         [%]
-                           • HeatPumpCOPSensor per heat pump             [–]
-                           • OutdoorTemperatureSensor system-wide        [°C]
-                           • OutdoorForecastSensor system-wide           [°C]
-                           • SystemEfficiencySensor system-wide          [W]
+├── sensor.py              HA sensor platform (100+ entities)
+│                          • PredictedTemperatureSensor per room         [°C]
+│                          • HeatingPowerSensor per room                 [W]
+│                          • SolarGainSensor per room                    [W]
+│                          • TemperatureForecastSensor per room          [°C]
+│                          • HeatLossSensor per room                     [W]
+│                          • EnergyBalanceSensor per room                [W]
+│                          • HeatingPlanSensor per room                  [W]
+│                          • SolarForecastSensor per room                [W]
+│                          • PredictionErrorSensor per room              [°C]
+│                          • ModelFitQualitySensor per room              [–]
+│                          • ParameterConfidenceSensor per room          [–]
+│                          • OpenLoopRMSESensor per room                 [°C]
+│                          • KalmanInnovationSensor per room             [°C]
+│                          • ResidualACFSensor per room                  [–]
+│                          • ControlActionSensor per heat source         [%]
+│                          • HeatPumpCOPSensor per heat pump             [–]
+│                          • OutdoorTemperatureSensor system-wide        [°C]
+│                          • OutdoorForecastSensor system-wide           [°C]
+│                          • SystemEfficiencySensor system-wide          [W]
+│                          • MPCPerformanceSensor system-wide            [–]
+│
+└── www/                   Frontend assets (industrial dashboard)
+    ├── js/                Custom web components (gauges, KPI cards, charts)
+    ├── css/industrial.css Industrial dashboard styling
+    └── vendor/            Bundled Chart.js library
 ```
 
 ### 2.2 Data flow
@@ -261,7 +294,7 @@ custom_components/heating_assistant/
 │   …                     │                                                │
 │                          ▼                                               │
 │        ┌─────────────────────────────┐                                   │
-│        │  HeatingAssistantCoordinator │  (every 60 s)                    │
+│        │  HeatingAssistantCoordinator │  (every 900 s / 15 min)          │
 │        │                             │                                   │
 │        │  1. Read sensor states      │                                   │
 │        │  2. Update HouseModel temps │                                   │
@@ -287,15 +320,16 @@ Inside HeatingMPCController.compute():
 
   ┌─ ContinuousDiscreteEKF.step(y, u, d, p, t)  →  x̂ (state estimate)
   │    predict: integrate dx/dt = f(x,u,d,p,t) and dP/dt = FP + PFᵀ + σσᵀ
-  │             over [tₖ₋₁, tₖ] using Euler sub-steps
+  │             over [tₖ₋₁, tₖ] using implicit-Euler sub-steps
   │    update:  K = P⁻ Hᵀ (H P⁻ Hᵀ + Rₘ)⁻¹
   │             x̂ = x̂⁻ + K (y − hm(x̂⁻)),  P = (I − K H) P⁻
   │
-  ├─ CDTrackingOptimalControlProblem.solve(x̂, D)
-  │    NLP:  min  Σ ‖z[k] − z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S
+  ├─ CDLinearizedMPCController.solve(x̂, D)
+  │    Linearize → ZOH-discretize → batch convex QP:
+  │          min  Σ ‖z[k] − z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S
   │               + ρ_z (soft constraint violation penalty)
   │          s.t.  0 ≤ u ≤ 1  (hard input box)
-  │    solve via configurable NLP backend (IPOPT default; deterministic fallback to SLSQP)
+  │    solve via CVXOPT
   │
   └─ apply u*[0] to heat sources (receding horizon)
 ```
@@ -304,113 +338,46 @@ Inside HeatingMPCController.compute():
 
 ## 3. Physics and Mathematical Models
 
-### 3.1 2R2C + slab thermal model
+### 3.1 Lumped RC thermal model (1R1C)
 
-Each room is treated as a **three-node** lumped-parameter network (Phase 1 A1 + A2):
+Each room is treated as a **single-node** lumped-parameter thermal circuit:
 
-- a fast **air** node $T_{a,i}$ (small capacitance $C_{a,i}$) holds the air + light furniture,
-- a slow **envelope** node $T_{w,i}$ (large capacitance $C_{w,i}$) holds the heavy mass in the walls / ceiling, and
-- a **slab** node $T_{s,i}$ (very large capacitance $C_{s,i}$) holds the floor mass.
-
-The air and wall nodes are coupled by an internal-film resistance $R_{aw,i}$; the envelope conducts to the outdoor via $R_{we,i}$.  The air and slab nodes are coupled by a separate internal-film resistance $R_{sa,i}$; the slab conducts to a built-in ground-temperature driver $T_g(t)$ via $R_{sg,i}$.  Heat input from heaters lands on the **air** node by default, **except for UFH-equipped rooms (`floor_type = "ufh"`) where it lands on the slab** — the locked Phase 1 B1 routing change.  Solar gain through windows always lands on the air node (a Phase 1 C4 refinement may split it later).  The air node also exchanges directly with the outdoor via the **infiltration** path (Phase 1 C1 — Sherman–Grimsrud / LBL model).  Inter-room couplings route through the **wall** nodes only — partitions are mass, so they couple envelope-to-envelope; each room's slab sits on its own ground patch (locked design call in roadmap §17.2 A1 + A2).
+- One thermal node $T_i$ per room representing the combined air + interior mass temperature.
+- One thermal resistance $R_{i,\text{ext}}$ coupling the room to the outdoor air.
+- Optional inter-room thermal resistances $R_{ij}$ coupling adjacent rooms.
 
 The continuous-time energy balance per room is:
 
-$$C_{a,i} \cdot \frac{dT_{a,i}}{dt} = Q_{\text{heater},i}^\text{air} + Q_{\text{solar},i} + Q_{\text{int},i} + \frac{T_{w,i} - T_{a,i}}{R_{aw,i}} + \frac{T_{s,i} - T_{a,i}}{R_{sa,i}} + UA_{\text{inf},i}(v_w, \Delta T_i) \cdot (T_{\text{outdoor}} - T_{a,i})$$
-
-$$C_{w,i} \cdot \frac{dT_{w,i}}{dt} = \frac{T_{a,i} - T_{w,i}}{R_{aw,i}} + \frac{T_{\text{outdoor}} - T_{w,i}}{R_{we,i}} + \sum_{j \in \text{adj}(i)} \frac{T_{w,j} - T_{w,i}}{R_{ij}}$$
-
-$$C_{s,i} \cdot \frac{dT_{s,i}}{dt} = Q_{\text{heater},i}^\text{slab} + \frac{T_{a,i} - T_{s,i}}{R_{sa,i}} + \frac{T_g(t) - T_{s,i}}{R_{sg,i}}$$
-
-where $Q_{\text{heater},i}^\text{air}$ and $Q_{\text{heater},i}^\text{slab}$ partition each room's heat-source output: all sources go to the air block unless the room is UFH (`floor_type = "ufh"`), in which case they go to the slab block.
-
-The wind-driven infiltration conductance follows the LBL model:
-
-$$UA_{\text{inf},i}(v_w, \Delta T_i) = \rho c_p \cdot L_i \cdot \sqrt{C_s \, |\Delta T_i| + C_w \, v_w^2}$$
-
-The ground-temperature driver $T_g(t)$ is a built-in sinusoidal annual cycle (no external data dependency):
-
-$$T_g(t) = \bar T_g + A_g \cdot \cos\!\left(2\pi \frac{d_\text{year}(t) - d_\text{peak}}{365}\right)$$
-
-with $\bar T_g = 10$ °C, $A_g = 4$ K and $d_\text{peak} = 220$ as defaults (temperate residential climate, ~30 cm slab depth).
-
-**Calibration.**  The user's bundled $C_i$ (`thermal_mass`) and $R_{i,\text{ext}}$ (`r_external`) are typology-friendly inputs that get split inside `HouseModel`:
-
-- $C_{a,i} = f_{c,i} \cdot C_i$, $\quad C_{s,i} = f_{s,i} \cdot C_i$, $\quad C_{w,i} = (1 - f_{c,i} - f_{s,i}) \cdot C_i$
-- $R_{\text{cond,total},i} = R_{i,\text{ext}} / (1 - f_{\text{inf},i})$
-- $R_{aw,i} = f_{r,i} \cdot R_{\text{cond,total},i}$, $\quad R_{we,i} = (1 - f_{r,i}) \cdot R_{\text{cond,total},i}$
-- $R_{sa,i}$, $R_{sg,i}$ defaulted by `floor_type` from `const.FLOOR_TYPE_DEFAULTS` (or set explicitly)
-- $L_i$ derived so that $UA_{\text{inf},i}$ at the typical reference conditions equals $f_{\text{inf},i} / R_{i,\text{ext}}$
-
-This calibration guarantees that **at the typical reference conditions** ($v_w = 3$ m/s, $|\Delta T| = 20$ K, ground temperature near its annual mean) the steady-state air-to-outdoor heat flux through the wall path equals $(T_a - T_\text{out}) / R_{i,\text{ext}}$, with the slab contributing a separate (small for non-slab rooms, larger for slab/UFH rooms) loss to ground.
+$$C_i \cdot \frac{dT_i}{dt} = Q_{\text{heater},i} + Q_{\text{solar},i} + \frac{T_{\text{outdoor}} - T_i}{R_{i,\text{ext}}} + \sum_{j \in \text{adj}(i)} \frac{T_j - T_i}{R_{ij}}$$
 
 **Symbol table**
 
 | Symbol | Unit | Meaning |
 |--------|------|---------|
-| $C_i$ | J/K | Bundled thermal mass (user input).  Split: $C_i = C_{a,i} + C_{w,i} + C_{s,i}$. |
-| $C_{a,i}$, $C_{w,i}$, $C_{s,i}$ | J/K | Air-, envelope-, and slab-node capacitances. |
-| $T_{a,i}$, $T_{w,i}$, $T_{s,i}$ | °C | Air, envelope, and slab temperatures (state variables). |
+| $C_i$ | J/K | Thermal mass of room $i$ (user input `thermal_mass`).  Represents combined air, furniture, interior walls, and a fraction of external wall mass. |
+| $T_i$ | °C | Room temperature (state variable). |
 | $T_{\text{outdoor}}$ | °C | Outdoor air temperature. |
-| $T_g(t)$ | °C | Ground temperature from the built-in sinusoidal annual model. |
-| $v_w$ | m/s | Outdoor wind speed (read from the configured HA `weather.*` entity). |
-| $\Delta T_i$ | K | $T_{a,i} - T_{\text{outdoor}}$ at the start of each integration sub-step. |
-| $R_{aw,i}$ | K/W | Internal film resistance between air and envelope. |
-| $R_{we,i}$ | K/W | Wall conduction resistance from envelope to outdoor. |
-| $R_{sa,i}$ | K/W | Internal film resistance between air and slab. |
-| $R_{sg,i}$ | K/W | Slab-to-ground conduction resistance. |
-| $R_{i,\text{ext}}$ | K/W | Bundled typical-conditions total resistance (user input). |
-| $R_{ij}$ | K/W | Inter-room (wall-to-wall) thermal resistance. |
-| $f_{c,i}$ | – | `c_air_fraction` ∈ [0, 1] — share of $C_i$ on the air node.  Default 0.05. |
-| $f_{s,i}$ | – | `c_slab_fraction` ∈ [0, 1] — share of $C_i$ on the slab node.  Defaulted by `floor_type`. |
-| $f_{r,i}$ | – | `r_aw_fraction` ∈ [0, 1] — share of the conductive path on $R_{aw,i}$.  Default 0.05. |
-| $f_{\text{inf},i}$ | – | `infiltration_fraction` ∈ [0, 0.95] — share of $1/R_{i,\text{ext}}$ from wind-driven exchange. |
-| $L_i$ | m² | Effective leakage area; derived from $f_{\text{inf},i}$, $R_{i,\text{ext}}$ and the typical-conditions calibration. |
-| $\rho c_p$ | J/(m³·K) | Volumetric heat capacity of air, ≈ 1200. |
-| $C_s$, $C_w$ | (m/s)²/K, – | Sherman–Grimsrud stack and wind coefficients (single-storey residential defaults: $1.45 \times 10^{-4}$ and $3.19 \times 10^{-4}$). |
-| $Q_{\text{heater},i}^\text{air}$, $Q_{\text{heater},i}^\text{slab}$ | W | Heat-source output partitioned by `floor_type` (UFH rooms route to slab, others to air). |
-| $Q_{\text{solar},i}$, $Q_{\text{int},i}$ | W | Solar gain through windows and identified internal gain — both on the air node.  A fraction $\alpha_{f,i} \cdot \sigma_{f,i}$ of $Q_{\text{solar},i}$ is *also* routed to the wall node (opaque-facade sol-air contribution; §3.4). |
-| $UA_{\text{sky},i}$ | W/K | Long-wave radiative conductance from the envelope to the night sky (`sky_radiative_ua`).  Acts in parallel with $1/R_{we,i}$ and pulls the wall toward the effective sky temperature $T_{\text{outdoor}} - \Delta T_\text{sky}$.  Default 0. |
-| $\Delta T_\text{sky}$ | K | Sky-temperature depression below outdoor air (`DEFAULT_DELTA_T_SKY`).  Constant 6 K for the Phase 1 implementation; Phase 5 promotes it to a cloud-cover-driven term. |
-| $\alpha_{f,i}$ | – | Opaque-facade short-wave absorptance (`facade_absorptance`).  Resolved from a typology preset via `facade_colour` (`light` = 0.30, `medium` = 0.55, `dark` = 0.85). |
-| $\sigma_{f,i}$ | – | Share of the room's window-derived solar gain that lands on the opaque facade (`facade_solar_share`) ∈ [0, 1].  Default 0. |
-| $\psi L_i$ | W/K | Aggregated linear-thermal-bridge correction (`thermal_bridge_psi_l`).  Adds directly to the wall→outdoor conductance.  Default 0; identified from data with a strong prior centred on zero. |
+| $R_{i,\text{ext}}$ | K/W | Thermal resistance from room to outdoor (user input `r_external`).  Bundles all paths: walls, roof, ground, infiltration. |
+| $R_{ij}$ | K/W | Inter-room thermal resistance between rooms $i$ and $j$ (user input `r_value` on connections). |
+| $Q_{\text{heater},i}$ | W | Total thermal power input from all heat sources assigned to room $i$. |
+| $Q_{\text{solar},i}$ | W | Solar heat gain through all windows in room $i$. |
 
-**Floor typology.**  `floor_type` selects sensible defaults for $f_{s,i}$, $R_{sa,i}$, $R_{sg,i}$ and the heat-source routing:
-
-| `floor_type` | $f_{s,i}$ | $R_{sa,i}$ [K/W] | $R_{sg,i}$ [K/W] | Heat routing |
-|---|---|---|---|---|
-| `none` (default) | 0.01 | $10^6$ (decoupled) | $10^6$ (decoupled) | air |
-| `slab_on_grade` | 0.50 | 0.006 | 0.05 | air |
-| `concrete` | 0.40 | 0.006 | 0.20 | air |
-| `ufh` | 0.50 | 0.006 | 0.05 | **slab** |
-
-The wind-driven term is held constant *within* each implicit-Euler sub-step (linearly-implicit treatment) and refreshed *between* sub-steps, so the predict step stays a single linear solve per sub-step despite $UA_{\text{inf},i}$ depending on $T_{a,i}$ via $|\Delta T_i|$.
-
-**Why three nodes per room.**  A 1R1C lumped model cannot reproduce both the ~5-minute air response to heater input *and* the multi-hour settling tail of the envelope.  A 2R2C network adds the slow envelope mode but treats slab and walls as a single bucket — fine for radiator-heated rooms, but UFH systems have a characteristic 4–8 h slab-to-air lag that the wall-block dynamics cannot capture.  The third (slab) node makes that lag explicit and lets the MPC anticipate it.  See [roadmap §17.2 A1 + A2](#172-phase-1--modelling-fidelity-the-new-default-plant-model) for the design rationale.
+The model captures the dominant thermal dynamics for residential MPC: single-room time constants typically span 2–20 hours, which aligns well with 15-minute control intervals and 90-minute prediction horizons.
 
 ### 3.2 State-space matrix form
 
-For a house with *n* rooms, the 2R2C + slab network assembles into a compact matrix form once at startup.  The physical state vector is $\mathbf{x} = [T_{a,1}, \ldots, T_{a,n}, \; T_{w,1}, \ldots, T_{w,n}, \; T_{s,1}, \ldots, T_{s,n}]$ of length $3n$:
+For a house with *n* rooms, the 1R1C network assembles into a compact matrix form once at startup.  The physical state vector is $\mathbf{x} = [T_1, \ldots, T_n]$ of length $n$:
 
-$$\mathbf{C} \cdot \frac{d\mathbf{x}}{dt} = \mathbf{A} \cdot \mathbf{x} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{B}_{\text{ground}} \cdot T_g(t) + \mathbf{Q}(t)$$
+$$\mathbf{C} \cdot \frac{d\mathbf{x}}{dt} = \mathbf{A} \cdot \mathbf{x} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{Q}(t)$$
 
 where:
 
-- $\mathbf{C}$ is a $3n$-vector of capacitances: $[C_{a,1}, \ldots, C_{a,n}, \; C_{w,1}, \ldots, C_{w,n}, \; C_{s,1}, \ldots, C_{s,n}]$.
-- $\mathbf{A}$ is a $3n \times 3n$ block matrix with the following block structure (rows are air, wall, slab respectively):
+- $\mathbf{C}$ is an $n$-vector of capacitances: $[C_1, \ldots, C_n]$.
+- $\mathbf{A}$ is an $n \times n$ matrix.  The diagonal elements are $A_{ii} = -(1/R_{i,\text{ext}} + \sum_j 1/R_{ij})$ (sum of all conductances leaving room $i$).  Off-diagonal elements are $A_{ij} = +1/R_{ij}$ for connected rooms.
+- $\mathbf{B}_{\text{ext}}$ is an $n$-vector with $1/R_{i,\text{ext}}$ for each room — the outdoor temperature drives each room through its external resistance.
+- $\mathbf{Q}(t)$ is the $n$-vector of disturbances: solar gain + heater output for each room.
 
-  $$\mathbf{A} = \begin{bmatrix} -\!\tfrac{1}{R_{aw}}\!-\!\tfrac{1}{R_{sa}} & +\tfrac{1}{R_{aw}} & +\tfrac{1}{R_{sa}} \\[2pt] +\tfrac{1}{R_{aw}} & -\!\tfrac{1}{R_{aw}}\!-\!\tfrac{1}{R_{we}}\!-\!\!\sum_j\!\tfrac{1}{R_{ij}} & 0 \\[2pt] +\tfrac{1}{R_{sa}} & 0 & -\!\tfrac{1}{R_{sa}}\!-\!\tfrac{1}{R_{sg}} \end{bmatrix}$$
-
-  Inter-room couplings appear only in the wall–wall block (off-diagonal $+1/R_{ij}$ for connected rooms).  The slab–slab block has no inter-room coupling — each slab sits on its own ground patch.
-
-- $\mathbf{B}_{\text{ext}}$ is a $3n$-vector with zero on the air and slab blocks and $1/R_{we,i}$ on the wall block.  The outdoor air drives the wall conductively; the air sees outdoor only via the Sherman–Grimsrud overlay; the slab sees the ground, not the outdoor.
-- $\mathbf{B}_{\text{ground}}$ is a $3n$-vector with $1/R_{sg,i}$ on the slab block and zero elsewhere.  The ground-temperature driver $T_g(t)$ couples into the slab only.
-- $\mathbf{Q}(t)$ is the $3n$-vector of disturbances: solar + internal gain on the air block; heater output on the air block for non-UFH rooms and on the slab block for UFH rooms (`floor_type = "ufh"`); the wall block stays zero.
-
-The Sherman–Grimsrud wind overlay is added at runtime as a per-room delta on the air-block diagonal of $\mathbf{A}$ and a matching $+\delta_i$ on the air-block of $\mathbf{B}_{\text{ext}}$.
-
-This block-structured representation makes each `step()` call a single $3n \times 3n$ linear solve — fast even for large houses, and exploits the implicit-Euler L-stability described in §3.3.
+This representation makes each `step()` call a single $n \times n$ linear solve — fast even for large houses, and exploits the implicit-Euler L-stability described in §3.3.
 
 ### 3.3 Continuous-discrete integration
 
@@ -428,7 +395,7 @@ $$R(\mathbf{x}_{k+1}) = \mathbf{x}_{k+1} - \mathbf{x}_k - h\,\mathbf{f}(\mathbf{
 
 with Jacobian $\mathbf{I} - h\,\partial \mathbf{f}/\partial \mathbf{x}$.  For the residential thermal model the drift is affine in the state (heat-pump COP varies with the *disturbance* $T_{\text{out}}$, not with the state itself), so the residual is linear in $\mathbf{x}_{k+1}$ and Newton converges in a single iteration — i.e. one $n \times n$ linear solve per sub-step.
 
-**Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  This matters once later phases of the roadmap (§17) introduce 2R2C + slab dynamics with eigenvalue spreads of $10^3$–$10^4$; under explicit Euler the same step size would be conditionally stable at best and divergent at worst on the fast mode, forcing impractically small sub-steps.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.
+**Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.  This prepares the integration for future multi-node models (2R2C, slab) where eigenvalue spreads of $10^3$–$10^4$ would make explicit Euler conditionally stable at best.
 
 The CD-EKF propagates both the mean state and the error covariance matrix using the same scheme.  In the implementation, the EKF reuses `mbc`'s native `scheme="implicit-euler"` mode (Newton iteration on the mean ODE; covariance propagated by the one-step sensitivity matrix $\Phi = (I - h\,A_{n+1})^{-1}$).  The `HouseModel.step()` / `HouseModel.predict()` methods, the controller's visualisation prediction loop, and the open-loop diagnostic simulator all share a single integration helper (`custom_components/heating_assistant/integrator.py`) so the integration scheme is uniform across the codebase.
 
@@ -508,38 +475,13 @@ $$Q_{\text{solar}} = \text{SHGC} \cdot \text{area} \cdot I_{\text{window}} \quad
 
 The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear double glazing).  This constant is defined in `solar_model.py` as `DEFAULT_SHGC` and can be changed at the module level if your windows have a different specification.
 
-#### Step 7 — Sol-air split onto the opaque facade (Phase 1 C4)
+#### Cloud cover correction
 
-The window-derived $Q_\text{solar}$ above is the *glazed* fraction; opaque facade absorptance (dark cladding, sun-warmed brickwork) is captured pragmatically by routing a configurable share of the *same* solar gain onto the wall node as well:
-
-$$Q_{\text{solar},i}^\text{air}  = Q_{\text{solar},i}$$
-
-$$Q_{\text{solar},i}^\text{wall} = \alpha_{f,i} \cdot \sigma_{f,i} \cdot Q_{\text{solar},i}$$
-
-where $\alpha_{f,i}$ is the opaque-facade short-wave absorptance (typology preset: `light` 0.30, `medium` 0.55, `dark` 0.85; or set explicitly via `facade_absorptance`) and $\sigma_{f,i}$ is `facade_solar_share` ∈ [0, 1].  Both default to **off** ($\sigma_{f,i} = 0$) so existing installs see no behaviour change.
-
-A full per-surface sol-air geometry model (independent orientation, area, $h_e$ per facade) is the Phase 5 / 6 follow-up.  In the meantime this share-based routing captures the dominant effect — south-facing-facade midday wall warming — with a single per-room knob.
-
-#### Step 8 — Long-wave radiation to sky (Phase 1 C3)
-
-A clear night sky behaves as a $\sim$ 6 K cooler radiator than the ambient air.  An additional radiative conductance $UA_{\text{sky},i}$ (`sky_radiative_ua`) is added in parallel with the wall→outdoor conductance, with the wall sinking toward the *effective sky temperature* $T_\text{outdoor} - \Delta T_\text{sky}$:
-
-$$\dot{T}_{w,i}\big|_\text{sky} = -\frac{UA_{\text{sky},i}}{C_{w,i}} \cdot \big(T_{w,i} - (T_\text{outdoor} - \Delta T_\text{sky})\big)$$
-
-This is implemented as a conductance bump on the wall block plus a constant cooling-drift bias $-UA_{\text{sky},i} \cdot \Delta T_\text{sky} / C_{w,i}$.  $\Delta T_\text{sky}$ is currently the constant `DEFAULT_DELTA_T_SKY = 6` K; Phase 5 replaces it with a cloud-cover-driven term.
+When a `weather_entity` is configured, cloud cover is extracted from the weather forecast (as an explicit field or mapped from the weather condition string, e.g. `sunny` → 0.0, `cloudy` → 0.85).  The solar gain is scaled by `(1 − cloud_fraction)` to account for reduced irradiance under overcast skies.
 
 ### 3.5 Heat source models
 
-**Heat-source routing (Phase 1 B1).**  Each heat source's thermal output lands on one of two state-vector blocks depending on its room's `floor_type`:
-
-| `floor_type` | Heat lands on | Typical emitters |
-|---|---|---|
-| `none`, `slab_on_grade`, `concrete` | **Air node** ($T_a$) | Wall-mounted radiators, fan coils, air-source heat-pump internal unit, electric panel heaters |
-| `ufh` | **Slab node** ($T_s$) | Underfloor heating loops, slab-embedded electric mats |
-
-For UFH-routed sources, the heat-source model below still computes the same thermal output $Q_\text{thermal}(\phi, T_\text{out})$; only its destination state changes.  The characteristic 4–8 h slab→air lag of underfloor heating then emerges naturally from the slab dynamics: the slab heats first via $Q_\text{heater}^\text{slab}$, then transfers to the air via $R_{sa}$.
-
-**Pragmatic emitter filter (Phase 1 B2).**  Each heat source carries an `emitter_time_constant` $\tau_\text{em} \ge 0$ that captures the dominant valve / metal-mass / water-loop lag without requiring supply-temperature telemetry.  When $\tau_\text{em} > 0$ the source's *commanded* fraction $u_j(t)$ is passed through a first-order filter to produce an *effective* fraction $\phi_j(t)$:
+**Emitter filter.**  Each heat source carries an `emitter_time_constant` $\tau_\text{em} \ge 0$ that captures the dominant valve / metal-mass / water-loop lag without requiring supply-temperature telemetry.  When $\tau_\text{em} > 0$ the source's *commanded* fraction $u_j(t)$ is passed through a first-order filter to produce an *effective* fraction $\phi_j(t)$:
 
 $$\frac{d\phi_j}{dt} = \frac{u_j - \phi_j}{\tau_{\text{em},j}}$$
 
@@ -557,9 +499,7 @@ Adding the filter introduces one state variable per filtered source.  The EKF an
 | `heat_pump`       | 60 s | Indoor unit + refrigerant loop have ~1 minute of internal thermal mass. |
 | Hydronic radiator | 600 s (user-configured) | Water loop + metal mass; set explicitly via the per-source `emitter_time_constant` field. |
 
-When $\tau_\text{em} = 0$ the filter is bypassed — $u_j$ flows directly to `thermal_power`, recovering the pre-B2 behaviour for that source.
-
-The full water-loop / metal emitter model (with $T_\text{supply}(t)$ telemetry from the heat-source side) is the Phase 6 follow-up.  Until then this pragmatic filter captures the dominant first-order lag at near-zero implementation cost.
+When $\tau_\text{em} = 0$ the filter is bypassed — $u_j$ flows directly to `thermal_power`, recovering the pre-filter behaviour for that source.
 
 #### Electric heater
 
@@ -658,28 +598,27 @@ The controller (`controller.py`) implements a **nonlinear model predictive contr
 | Component | Class (from `mbc`) | Role |
 |-----------|-------|------|
 | **System model** | `ContinuousDiscreteModel` (ABC) | Defines the continuous-discrete SDE: `dx = f(x,u,d,p,t)dt + σdw`, `ym = hm(x,...)`. |
-| **State estimator** | `ContinuousDiscreteEKF` | CD-EKF: integrates the nonlinear drift and linearised Riccati ODE between measurement steps using Euler sub-stepping. |
-| **Optimal control** | `CDTrackingOptimalControlProblem` | NLP formulation of the receding-horizon tracking problem.  Propagates the predicted trajectory via Euler integration and solves via a configurable NLP backend (IPOPT by default; deterministic fallback to SLSQP when unavailable). |
-| **MPC policy** | `CDNMPCController` | Orchestrates estimate → optimise → apply at each step. |
+| **State estimator** | `ContinuousDiscreteEKF` | CD-EKF: integrates the nonlinear drift and linearised Riccati ODE between measurement steps using implicit-Euler sub-stepping. |
+| **Optimal control** | `CDLinearizedMPCController` | Linearizes the nonlinear SDE around the current operating point, discretizes via ZOH, and solves the resulting batch convex QP via CVXOPT. |
 
 The house-heating application provides two classes in `controller.py`:
 
 | Class | Role |
 |-------|------|
 | `HouseThermalSDE` | Concrete `ContinuousDiscreteModel` wrapping `HouseModel` and `HeatSource` objects.  The nonlinearity arises from the heat-pump COP varying with outdoor temperature through `G_u(T_out)`. |
-| `HeatingMPCController` | Application facade.  Builds `HouseThermalSDE`, `ContinuousDiscreteEKF`, and `CDTrackingOptimalControlProblem`; adds solar/outdoor forecasting; applies source set-points; exposes visualisation properties for the coordinator. |
+| `HeatingMPCController` | Application facade.  Builds `HouseThermalSDE`, `ContinuousDiscreteEKF`, and `CDLinearizedMPCController`; adds solar/outdoor forecasting; applies source set-points; exposes visualisation properties for the coordinator. |
 
 At each control step the `HeatingMPCController`:
 
 1. Reads room temperatures from HA sensors (measurement vector **y**).
 2. Builds an *N*-step disturbance forecast **D** (outdoor temperature + solar gains).
 3. Runs the CD-EKF to obtain the state estimate **x̂**.
-4. Solves the NLP to find the optimal continuous input sequence **U***.
+4. Solves the QP to find the optimal continuous input sequence **U***.
 5. Applies only the **first step** u*[0] of the optimal sequence (receding horizon).
 
 ### 4.2 State estimation — Continuous-Discrete EKF
 
-The state estimator is a **Continuous-Discrete Extended Kalman Filter (CD-EKF)** from the `mbc` package (`mbc.estimation.ContinuousDiscreteEKF`).  Between consecutive measurement times $t_{k-1}$ and $t_k$ the filter integrates the continuous-time mean and covariance using Euler sub-steps:
+The state estimator is a **Continuous-Discrete Extended Kalman Filter (CD-EKF)** from the `mbc` package (`mbc.estimation.ContinuousDiscreteEKF`).  Between consecutive measurement times $t_{k-1}$ and $t_k$ the filter integrates the continuous-time mean and covariance using implicit-Euler sub-steps:
 
 **Prediction (continuous-time integration over $[t_{k-1}, t_k]$):**
 
@@ -708,7 +647,7 @@ $$\mathbf{P}[k] = \bigl(\mathbf{I} - \mathbf{K}[k]\,\mathbf{H}\bigr)\,\mathbf{P}
 
 For the house thermal system with full-state observation ($\mathbf{h}_m = \mathbf{I}$, one temperature sensor per room), the Kalman gain converges quickly to a value that weights measurements heavily relative to the model prediction.  The filter provides robustness against temporary sensor noise and gradual model drift.
 
-### 4.3 Optimal control problem — nonlinear tracking NLP
+### 4.3 Optimal control problem — batch QP
 
 The cost function over the prediction horizon *N* is:
 
@@ -728,7 +667,7 @@ where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u
 | $\rho_z$ | Soft constraint penalty weight (default: $10^4$) |
 | $\mathbf{u}[k]$ | Input vector (continuous fractions $\in [0, 1]$) |
 
-The predicted state trajectory is propagated using Euler sub-stepping of the nonlinear drift $\mathbf{f}(\mathbf{x}, \mathbf{u}, \mathbf{d}, \mathbf{p}, t)$ over each sampling interval.  The NLP is solved via a configurable backend (default **IPOPT** with analytical derivatives when supported; deterministic fallback to **SLSQP** from `scipy.optimize` when IPOPT is unavailable) with box constraints $0 \le \mathbf{u}[k] \le 1$.
+The predicted state trajectory is propagated by linearizing the nonlinear SDE around the current operating point (x̂, u_prev, d_now) using the analytic Jacobians, then discretizing the local linear model via ZOH.  The resulting convex QP is solved via **CVXOPT** with box constraints $0 \le \mathbf{u}[k] \le 1$.
 
 The **terminal cost** $\mathbf{P}$ is the key mechanism for achieving setpoint tracking.  Without a large terminal weight the optimizer has weak incentive to drive the state to the reference by the end of the horizon — it can minimise total cost by spreading the error across all stages without converging.  Setting $\mathbf{P} = \lambda \mathbf{Q}$ with $\lambda \gg 1$ (default $\lambda = 100$) is equivalent to approximating the infinite-horizon cost and forces the optimal trajectory to converge to the setpoint well within the horizon.
 
@@ -740,7 +679,7 @@ The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from on
 
 ### 4.4 Disturbance forecasts
 
-The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{N \times n_d}$ before solving the NLP:
+The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{N \times n_d}$ before solving the QP:
 
 | Disturbance | Forecast method |
 |-------------|----------------|
@@ -764,11 +703,11 @@ compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
 │   ├─ predict: integrate dx/dt = f(x,u,d,p,t) and dP/dt = FP+PFᵀ+σσᵀ
 │   └─ update:  K = P⁻Hᵀ(HP⁻Hᵀ+Rm)⁻¹,  x̂ = x̂⁻ + K(y − hm(x̂⁻))
 │
-├─ CDTrackingOptimalControlProblem.solve(x̂, D)
-│   ├─ propagate: x[k+1] = x[k] + h·f(x[k],u[k],d[k],p,t)  (Euler sub-steps)
-│   ├─ NLP: weak setpoint pull + input costs + soft comfort-corridor penalties
-│   │      min Σ ε‖z[k]-z_ref‖² + ‖u[k]‖²_R + ‖Δu[k]‖²_S + ρ_z·corridor_violation
-│   └─ solve via configurable NLP backend (default IPOPT; fallback SLSQP)  s.t.  0 ≤ u ≤ 1
+├─ CDLinearizedMPCController.solve(x̂, D)
+│   ├─ linearize: ∂f/∂x, ∂f/∂u evaluated at (x̂, u_prev, d_now)
+│   ├─ discretize: ZOH → local linear model (A_d, B_d)
+│   ├─ QP: min Σ ‖z[k]-z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S + ρ_z·corridor_violation
+│   └─ solve via CVXOPT  s.t.  0 ≤ u ≤ 1
 │
 └─ Apply u*[0] to heat sources (receding horizon)
    Return {source_name: fraction}
@@ -889,10 +828,10 @@ If a `heater_entity` is not specified for a source, the controller still runs an
 The `HeatingAssistantCoordinator` inherits from `DataUpdateCoordinator` with:
 
 ```python
-update_interval = timedelta(seconds=UPDATE_INTERVAL)   # UPDATE_INTERVAL = 60 s
+update_interval = timedelta(seconds=UPDATE_INTERVAL)   # UPDATE_INTERVAL = 900 s (15 min)
 ```
 
-Every 60 seconds:
+Every 900 seconds (15 minutes):
 1. All room temperature sensors are polled from the HA state machine.
 2. The outdoor temperature sensor is polled.
 3. The MPC controller runs (`HeatingMPCController.compute()`).
@@ -944,22 +883,33 @@ No cloud connectivity is required.  The integration is classified as `iot_class:
            ├── manifest.json
            ├── const.py
            ├── config_flow.py
+           ├── _options_flow.py
            ├── coordinator.py
            ├── thermal_model.py
            ├── solar_model.py
            ├── heat_sources.py
            ├── controller.py
-           ├── optimal_control.py
-           ├── state_estimator.py
+           ├── integrator.py
            ├── parameter_estimator.py
            ├── model_diagnostics.py
+           ├── sysid.py
+           ├── weather.py
+           ├── schedule.py
+           ├── ground_temp.py
+           ├── yaml_merge.py
+           ├── dashboard.py
            ├── climate.py
            ├── sensor.py
            ├── button.py
            ├── diagnostics.py
            ├── services.yaml
-           └── translations/
-               └── en.json
+           ├── strings.json
+           ├── translations/
+           │   └── en.json
+           └── www/
+               ├── js/
+               ├── css/
+               └── vendor/
    ```
 
 4. **Restart Home Assistant** (Settings → System → Restart, or `ha core restart` via CLI).
@@ -1007,7 +957,7 @@ Before you begin, confirm the following are in place:
    | **Outdoor temperature sensor entity ID** | The entity ID of your outdoor sensor, e.g. `sensor.openweathermap_temperature`.  Leave blank to use the 5 °C fallback (not recommended for real use). |
    | **Weather entity ID** | The entity ID of a HA weather entity, e.g. `weather.forecast_home`.  Leave blank to use the persistence forecast (current outdoor temperature assumed constant).  Recommended for improved prediction accuracy. |
    | **Control time step (update_interval)** | Leave at `900` (15 minutes) unless you have a specific reason to change it. This is both the OCP ZOH duration and the EKF/coordinator update period. |
-   | **MPC prediction horizon** | Leave at `6` (90-minute lookahead at update_interval = 900 s).  Increase to `8`–`12` for buildings with high thermal mass. |
+   | **MPC prediction horizon** | Leave at `100` (25-hour lookahead at update_interval = 900 s).  Decrease to `6`–`12` for faster solve times if computational resources are limited. |
 
 5. Click **Submit**.
 
@@ -1166,7 +1116,7 @@ Setpoint range: 5 °C (frost protection) to 30 °C, adjustable in 0.5 °C steps.
 
 ### 8.10 Step 9 – Confirm heater control is active
 
-After the first full coordinator update cycle (up to 60 seconds after startup):
+After the first full coordinator update cycle (up to 900 seconds / 15 minutes after startup):
 
 1. Check `sensor.heating_assistant_<room_name>_heating_power_measured`.  If the room is below setpoint it should show a positive value (W).
 2. Verify the linked heater entity has changed state — e.g. a `switch.*` heater should be `on` if the controller decided to heat.
@@ -1210,7 +1160,7 @@ After installation, navigate to **Settings → Devices & Services → + Add Inte
 | **Outdoor temperature sensor entity ID** | *(empty)* | The entity ID of a HA temperature sensor that measures outdoor air temperature (e.g. `sensor.openweathermap_temperature`, `sensor.netatmo_outdoor_temperature`).  If left blank the controller uses a fallback of 5 °C — configure this for accurate operation. |
 | **Weather entity ID** | *(empty)* | The entity ID of a HA weather entity (e.g. `weather.forecast_home` from the Met.no integration).  When configured, the controller uses the weather forecast to predict outdoor temperature changes over the MPC horizon instead of assuming the current temperature stays constant.  This significantly improves prediction accuracy during temperature transitions (e.g. overnight cooling, morning warm-up). |
 | **Control time step (update_interval)** | 900 | Interval in seconds at which the MPC controller re-solves and applies actions; serves as the OCP ZOH duration, the EKF measurement step, and the coordinator update period.  Range: 60–3600.  Default 900 s = 15 minutes. |
-| **MPC prediction horizon** | 6 | Number of update_interval steps to look ahead.  At update_interval=900 s, horizon=6 means 90 minutes of prediction. Range: 1–24. |
+| **MPC prediction horizon** | 100 | Number of update_interval steps to look ahead.  At update_interval=900 s, horizon=100 means ~25 hours of prediction. Range: 1–200. |
 
 After saving, the integration entry is created.  The room topology and heat-source configuration still need to be added to `configuration.yaml`.
 
@@ -1246,12 +1196,12 @@ heating_assistant:
 | `latitude` | float | No | HA / wizard setting | Site latitude [°].  Overrides the wizard value. |
 | `longitude` | float | No | HA / wizard setting | Site longitude [°].  Overrides the wizard value. |
 | `update_interval` | int | No | `900` | Control time step [s]: sets the OCP ZOH duration, the EKF measurement step, and how often the coordinator re-solves.  Range 60–3600. |
-| `horizon` | int | No | `6` | MPC prediction horizon [steps].  Range 1–24. |
+| `horizon` | int | No | `100` | MPC prediction horizon [steps].  Range 1–200. |
 | `energy_weight` | float | No | `0.01` | Weight on the input cost ‖**u**‖² in the MPC objective.  Higher values make the controller more conservative about running heaters, reducing overshoot at the expense of slightly slower heating.  Typical range: `0.001`–`0.5`.  See [Section 14.5](#145-mpc-regulator-tuning). |
 | `smoothing_weight` | float | No | `0.1` | Weight on the input rate-of-change cost ‖Δ**u**‖² in the MPC objective.  Higher values strongly penalise rapid changes in heater output between consecutive time steps, dampening oscillations and reducing actuator wear.  Set to `0.0` to disable.  Typical range: `0.0`–`2.0`.  See [Section 14.5](#145-mpc-regulator-tuning). |
-| `constraint_offset` | float | No | `2.0` | Symmetric soft output constraint band [°C] around the setpoint: the controller keeps predicted room temperatures within `[setpoint − δ, setpoint + δ]`.  Violations are penalised but not forbidden.  Decrease for tighter tracking; increase if the NLP solver reports infeasibility. |
+| `constraint_offset` | float | No | `2.0` | Symmetric soft output constraint band [°C] around the setpoint: the controller keeps predicted room temperatures within `[setpoint − δ, setpoint + δ]`.  Violations are penalised but not forbidden.  Decrease for tighter tracking; increase if the solver reports infeasibility. |
 | `terminal_weight` | float | No | `100.0` | Terminal cost multiplier λ: **P** = λ × **Q**.  A large value forces the predicted trajectory to converge to the setpoint by the end of the horizon, dramatically improving steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint; decrease toward 10–20 if you prefer softer convergence with more energy-aware shaping over the horizon.  Must be ≥ 1. |
-| `mpc_solver` | string | No | `ipopt` | NLP solver backend for MPC (`ipopt` or `SLSQP`). The default path enables IPOPT, and when IPOPT is unavailable the controller falls back deterministically to `SLSQP`. |
+| `mpc_solver` | string | No | `cvxopt` | QP solver backend for the linearized MPC.  The default uses CVXOPT for the batch convex QP. |
 | `mpc_analytic_derivatives` | bool | No | `true` | Enables analytical-derivative plumbing when supported by the installed `mbc` backend. Unsupported hooks automatically fall back to numerical derivatives. |
 | `sigma_w` | float | No | `0.1` | EKF process-noise standard deviation [K/√s]. Increase when the thermal model is too “stiff” and does not adapt quickly enough to disturbances. UI/YAML range: `1e-6`–`10.0`. |
 | `sigma_v` | float | No | `0.5` | EKF measurement-noise standard deviation [K]. Increase when room sensors are noisy/spiky; decrease when sensors are stable and you want tighter measurement tracking. UI/YAML range: `1e-6`–`10.0`. |
@@ -2288,7 +2238,7 @@ In addition to the basic sensors (predicted temperature, heating power, solar ga
 | **Kalman Innovation** | ✓ | Innovation series with consistency flag for filter tuning |
 | **Residual ACF** | ✓ | Lag-0…20 autocorrelation of residuals + 95 % confidence band + Ljung-Box Q |
 
-All sensors update every coordinator cycle (default 60 seconds) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
+All sensors update every coordinator cycle (default 900 seconds / 15 minutes) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
 
 The diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) are documented in detail — including ready-to-paste ApexCharts cards — in [`MODEL_FIT_GUIDE.md`](MODEL_FIT_GUIDE.md).  All forecast and diagnostic attributes emit ISO-8601 timestamp strings; use `new Date(e.time).getTime()` (not `e.time * 1000`) in your `data_generator` expressions.
 
@@ -2445,7 +2395,7 @@ This service uses **maximum likelihood estimation (MLE)** to identify thermal mo
 - **Heater power-scale** correction factors for each heat source (to account for miscalibration or efficiency degradation)
 - **Inter-room thermal resistance** `r_value` [K/W] for connections with sufficient temperature-difference variation
 
-The estimator uses a **continuous-discrete Extended Kalman Filter (CD-EKF)** prediction-error decomposition (PED) to evaluate the Gaussian log-likelihood of each candidate parameter set.  The CD-EKF handles the nonlinear heat-pump COP dynamics directly in continuous time, integrating the state and covariance between discrete measurements using forward Euler with sub-stepping.  A multi-start Nelder–Mead optimizer searches the parameter space, with automatic **identifiability gating** to exclude parameters that the data cannot constrain (e.g., heater scales when heating fraction is constant, inter-room resistances when adjacent rooms track each other closely).
+The estimator uses a **continuous-discrete Extended Kalman Filter (CD-EKF)** prediction-error decomposition (PED) to evaluate the Gaussian log-likelihood of each candidate parameter set.  The CD-EKF handles the nonlinear heat-pump COP dynamics directly in continuous time, integrating the state and covariance between discrete measurements using implicit-Euler sub-stepping.  A multi-start optimizer searches the parameter space, with automatic **identifiability gating** to exclude parameters that the data cannot constrain (e.g., heater scales when heating fraction is constant, inter-room resistances when adjacent rooms track each other closely).
 
 **When to use:**
 
@@ -2562,7 +2512,7 @@ Evaluates model quality by running a free-run (open-loop) multi-step simulation 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `room_name` | string | — | Optional room name.  If omitted, all rooms are simulated. |
-| `segment_length` | int | `30` | Number of history steps per segment (each step ≈ 60 s).  Default 30 = 30-minute free-run window. |
+| `segment_length` | int | `30` | Number of history steps per segment (each step = one coordinator cycle, i.e. `update_interval` seconds).  Default 30 steps. |
 
 **Rule of thumb:** open-loop RMSE < 0.2 °C over 30 steps is excellent; > 0.5 °C suggests the model should be re-estimated.
 
@@ -3285,7 +3235,7 @@ cards:
           in_header: true
 ```
 
-> **Adapting for other rooms:** Duplicate this vertical-stack card for each room subview and replace every occurrence of `living_room` with the room's entity suffix (e.g. `bedroom`, `kitchen`).  The example uses `graph_span: 9h` with `offset: '-6h'`, giving 6 h of recorder history before *Now*.  The MPC forecast appears after *Now*: with the default settings (`dt: 900`, `horizon: 6`) the prediction spans **90 minutes**.  To size the window exactly to your horizon, use **history = 2 × horizon** and **total span = 3 × horizon** — for the defaults that gives `graph_span: 4h30m` with `offset: '-3h'`; for `horizon: 12` use `graph_span: 9h` with `offset: '-6h'`.
+> **Adapting for other rooms:** Duplicate this vertical-stack card for each room subview and replace every occurrence of `living_room` with the room's entity suffix (e.g. `bedroom`, `kitchen`).  The example uses `graph_span: 9h` with `offset: '-6h'`, giving 6 h of recorder history before *Now*.  The MPC forecast appears after *Now*: with the default settings (`dt: 900`, `horizon: 100`) the prediction spans **25 hours**.  For shorter horizons (e.g. `horizon: 6`), the prediction spans 90 minutes — size the window as **history = 2 × horizon** and **total span = 3 × horizon**.
 
 ---
 
@@ -3546,7 +3496,7 @@ The MPC controller solves a quadratic program at each update cycle.  Its behavio
 
 | Parameter | Config key | Default | Effect |
 |-----------|-----------|---------|--------|
-| **Prediction horizon** | `horizon` | `6` steps | How many time steps ahead the controller plans.  Longer horizons give the controller more room to "see" the thermal inertia of the building and act proactively. |
+| **Prediction horizon** | `horizon` | `100` steps | How many time steps ahead the controller plans.  Longer horizons give the controller more room to "see" the thermal inertia of the building and act proactively. |
 | **Terminal weight** | `terminal_weight` | `100` | Multiplier λ on the terminal tracking cost **P** = λ**Q**.  A large value (≥ 50) forces the predicted trajectory to reach the setpoint by the end of the horizon, which is the primary mechanism for steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint. |
 | **Energy weight** | `energy_weight` | `0.01` | Weight on ‖**u**‖² — penalises running heaters.  Increase to make the controller more conservative (less aggressive heating). |
 | **Smoothing weight** | `smoothing_weight` | `0.1` | Weight on ‖Δ**u**‖² — penalises changing the heater output from one step to the next.  Increase to dampen oscillations and reduce actuator wear. |
@@ -3662,7 +3612,7 @@ The **MPC Performance** sensor (`sensor.heating_assistant_mpc_performance`) expo
 | `terminal_weight` | Terminal cost multiplier λ currently in effect |
 | `recent_solve_times_s` | List of the last 50 solve times [s] for sparkline charts |
 
-**Typical solve times** at the default settings (`horizon = 6`, `update_interval = 900 s`, `n_int_steps = 10`) are 0.05–0.3 s depending on the number of rooms and CPU speed.  If `max_solve_time_s` approaches the `update_interval` (e.g. 900 s), consider reducing `horizon` or `n_int_steps`.
+**Typical solve times** at the default settings (`horizon = 100`, `update_interval = 900 s`, `n_int_steps = 10`) are 0.05–0.3 s depending on the number of rooms and CPU speed.  If `max_solve_time_s` approaches the `update_interval` (e.g. 900 s), consider reducing `horizon` or `n_int_steps`.
 
 **Example ApexCharts card for MPC performance:**
 
@@ -3723,19 +3673,46 @@ entities:
 HeatingAssistant/
 ├── custom_components/
 │   └── heating_assistant/     ← HA integration (described above)
+│       └── www/               ← Frontend assets (industrial dashboard)
 ├── tests/
 │   ├── __init__.py
-│   ├── test_thermal_model.py     ← 11 tests: construction, step, predict, inter-room flow
-│   ├── test_solar_model.py       ← 13 tests: angles, DNI, incidence, window gain
-│   ├── test_heat_sources.py      ← 31 tests: electric, heat pump, COP curve, cooling, deadband
-│   ├── test_controller.py        ← 44 tests: HouseThermalSDE, CD-EKF, CDTrackingOCP, HeatingMPCController
-│   ├── test_climate.py           ←  9 tests: HVAC mode/action, heat pump cooling
-│   ├── test_coordinator_apply_actions.py ← 31 tests: climate/switch/number dispatch, deadband, cooling
-│   ├── test_model_diagnostics.py ← 25 tests: fit metrics, residuals, parameter validation, performance
-│   ├── test_parameter_estimator.py ← 21 tests: Nelder-Mead, KalmanMLEstimator, joint identification
-│   ├── test_visualisation.py     ← 47 tests: heat flows, time constant, predictions, forecast sensors
-│   └── test_performance.py       ←  6 benchmarks: MPC and parameter-estimation run-times (3 slow)
-├── BENCHMARKS.md              ← Latest performance benchmark results (auto-generated)
+│   ├── conftest.py              ← Shared pytest fixtures
+│   ├── test_thermal_model.py    ← Physics model validation
+│   ├── test_solar_model.py      ← Solar irradiance pipeline
+│   ├── test_heat_sources.py     ← Electric heater, heat pump, COP curve, cooling
+│   ├── test_controller.py       ← HouseThermalSDE, CD-EKF, MPC solver
+│   ├── test_climate.py          ← HVAC mode/action, heat pump cooling
+│   ├── test_coordinator_apply_actions.py ← Heater dispatch logic
+│   ├── test_model_diagnostics.py ← Fit metrics, residuals, parameter validation
+│   ├── test_parameter_estimator.py ← ML identification
+│   ├── test_estimation_button.py ← Button entity triggers
+│   ├── test_persist_estimated_params.py ← Parameter persistence across restarts
+│   ├── test_visualisation.py    ← Heat flows, time constant, predictions
+│   ├── test_visualisation_sensors.py ← Forecast sensor entities
+│   ├── test_prediction_sensors.py ← Prediction sensor generation
+│   ├── test_sensor_metadata.py  ← Entity metadata validation
+│   ├── test_schedule.py         ← Comfort schedule logic
+│   ├── test_schedule_awareness.py ← MPC schedule-awareness
+│   ├── test_weather_module.py   ← Forecast handling
+│   ├── test_weather_status.py   ← Weather entity status
+│   ├── test_window_override.py  ← Window-open state machine
+│   ├── test_dashboard.py        ← Lovelace generation
+│   ├── test_dashboard_auto_write.py ← Auto-write dashboard on setup
+│   ├── test_integrator.py       ← Implicit Euler integration
+│   ├── test_infiltration.py     ← Infiltration model
+│   ├── test_2r2c.py             ← Future 2R2C envelope model
+│   ├── test_slab_ufh.py         ← Future slab/UFH model
+│   ├── test_emitter_filter.py   ← Emitter time constant filter
+│   ├── test_config_ui_options.py ← Config flow UI tests
+│   ├── test_options_flow_helpers.py ← Options flow helper tests
+│   ├── test_init_reload.py      ← Integration reload tests
+│   ├── test_init_setup_entry.py ← Setup entry tests
+│   ├── test_init_yaml_merge.py  ← YAML merge tests
+│   ├── test_finishing_pass.py   ← Final validation pass
+│   ├── test_performance.py      ← Benchmarks: MPC and estimation run-times
+│   └── plot_model_fit.py        ← Plotting utility for model fit visualisation
+├── benchmarks/                ← Performance benchmark scripts
+├── BENCHMARKS.md              ← Latest performance benchmark results
 ├── .gitignore
 └── README.md
 ```
@@ -3755,23 +3732,14 @@ Run the full test suite (skipping slow benchmarks):
 python -m pytest tests/ -v -m "not slow"
 ```
 
-Expected output: **235 tests pass** (3 slow parameter-estimation benchmarks deselected; 238 total including them).
+Expected output: all tests pass (slow parameter-estimation benchmarks deselected with `-m "not slow"`).
 
 Run a single test module:
 
 ```bash
 python -m pytest tests/test_thermal_model.py -v
-python -m pytest tests/test_solar_model.py -v
-python -m pytest tests/test_heat_sources.py -v
 python -m pytest tests/test_controller.py -v
-python -m pytest tests/test_climate.py -v
-python -m pytest tests/test_coordinator_apply_actions.py -v
-python -m pytest tests/test_model_diagnostics.py -v
-python -m pytest tests/test_parameter_estimator.py -v
-python -m pytest tests/test_visualisation.py -v
-python -m pytest tests/test_climate.py -v
-python -m pytest tests/test_parameter_estimator.py -v
-python -m pytest tests/test_model_diagnostics.py -v
+python -m pytest tests/test_heat_sources.py -v
 ```
 
 ### 15.3 Performance benchmarks
@@ -3783,7 +3751,7 @@ Run-time benchmarks for the active control step and parameter estimation routine
 python -m pytest tests/test_performance.py -v -s
 ```
 
-The three parameter-estimation benchmarks (Nelder-Mead + Kalman filter) are marked `@pytest.mark.slow` because they take 14–500 seconds each.  They are excluded from the normal test run by `-m "not slow"`.
+The three parameter-estimation benchmarks are marked `@pytest.mark.slow` because they take 14–500 seconds each.  They are excluded from the normal test run by `-m "not slow"`.
 
 Latest results are in [`BENCHMARKS.md`](BENCHMARKS.md).
 
@@ -3910,12 +3878,12 @@ This is the surface we build on.  Every later phase is described as a
 |-------|-------|
 | **Plant model** | One thermal node per room ($1R1C$ per room) with inter-room conductances $1/R_{ij}$ and outdoor conductance $1/R_{i,\text{ext}}$; clear-sky solar gain through each window; Carnot-corrected heat-pump COP |
 | **Disturbances** | Outdoor temperature (HA weather forecast, interpolated to horizon); solar irradiance from latitude/longitude clear-sky pipeline |
-| **State estimator** | Continuous-discrete EKF; explicit Euler sub-stepped covariance propagation; per-room scalar measurement update |
-| **Optimal-control problem** | Receding-horizon NLP over continuous $u\in[0,1]$ minimising tracking + energy + Δu smoothing + soft-constraint slack; zero-order hold; horizon $N$ steps × $\Delta t$ (default 8 × 15 min) |
-| **Solver** | IPOPT primary, SLSQP deterministic fallback; warm-start from previous solution; analytic Jacobians for `f` and `h` |
+| **State estimator** | Continuous-discrete EKF; implicit-Euler sub-stepped covariance propagation; per-room scalar measurement update |
+| **Optimal-control problem** | Receding-horizon linearized MPC over continuous $u\in[0,1]$ minimising tracking + energy + Δu smoothing + soft-constraint slack; zero-order hold; horizon $N$ steps × $\Delta t$ (default 6 × 15 min) |
+| **Solver** | CVXOPT (batch convex QP after linearization); analytic Jacobians for `f` and `h` |
 | **System ID** | Offline maximum-likelihood (CD-EKF prediction-error decomposition) over the rolling history buffer; identifies $C_i$, $R_{i,\text{ext}}$, internal gain, heater scale, inter-room R |
 | **Constraints** | Box on $u$; soft slack on temperature corridors; Schmitt-trigger hysteresis on cooling mode |
-| **Cycle time** | ~5 s for a 5-room / 8-step horizon on a small NUC |
+| **Cycle time** | ~5 s for a 5-room / 6-step horizon on a small NUC |
 
 The remainder of §17 lifts each of these rows in turn.
 
