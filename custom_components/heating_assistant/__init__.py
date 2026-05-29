@@ -626,7 +626,7 @@ async def _async_auto_write_default_dashboard(
     # Bump this when the generated entity-id formula or card structure changes
     # in a way that makes old files incorrect.  Existing installs will have
     # their dashboard file overwritten once on the next HA restart.
-    _DASHBOARD_FORMAT_VERSION = 4
+    _DASHBOARD_FORMAT_VERSION = 5
 
     try:
         marker_store = Store(
