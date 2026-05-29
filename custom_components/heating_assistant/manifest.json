@@ -7,8 +7,9 @@
   "requirements": [
     "numpy>=1.21.0",
     "scipy>=1.9.0",
+    "osqp>=1.0",
     "highspy",
-    "mbc @ https://github.com/marcuskrogh/mbc/archive/d2da10b73b4025c32f11e3b1823fa58e31c9b38a.zip"
+    "mbc @ git+https://github.com/marcuskrogh/mbc.git@b270890a0407caa41be56e95265c182f30ff989d"
   ],
   "dependencies": [],
   "codeowners": ["@marcuskrogh"],
