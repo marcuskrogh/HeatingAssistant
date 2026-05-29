@@ -90,6 +90,7 @@ export function renderTuning(container, rooms, state, connection, hass) {
     <div class="tuning-actions" style="margin-top:20px">
       <button class="btn btn--primary" id="btn-sysid">EKF Reconstruction</button>
       <button class="btn btn--secondary" id="btn-open-loop">Open-Loop Simulation</button>
+      <button class="btn btn--ghost" id="btn-reset-defaults" title="Reset all parameters to their default values">Reset to Defaults</button>
       <span class="tuning-actions__status" id="sim-status"></span>
     </div>
   `;
@@ -154,6 +155,7 @@ export function renderTuning(container, rooms, state, connection, hass) {
   const horizonInput = container.querySelector('#param-horizon');
   const btnSysid = container.querySelector('#btn-sysid');
   const btnOpenLoop = container.querySelector('#btn-open-loop');
+  const btnResetDefaults = container.querySelector('#btn-reset-defaults');
   const btnEstimateMl = container.querySelector('#btn-estimate-ml');
   const identStatusEl = container.querySelector('#ident-status');
   const simStatusEl = container.querySelector('#sim-status');
@@ -286,6 +288,15 @@ export function renderTuning(container, rooms, state, connection, hass) {
     }
     btnSysid.disabled = false;
     btnOpenLoop.disabled = false;
+  });
+
+  btnResetDefaults.addEventListener('click', () => {
+    sigmaWInput.value = DEFAULTS.sigma_w;
+    sigmaVInput.value = DEFAULTS.sigma_v;
+    thermalMassInput.value = DEFAULTS.thermal_mass;
+    rExternalInput.value = DEFAULTS.r_external;
+    horizonInput.value = DEFAULTS.horizon_hours;
+    setSimStatus('Parameters reset to defaults.', '');
   });
 
   populateParamsFromState(currentRoom, state);

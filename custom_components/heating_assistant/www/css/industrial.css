@@ -655,6 +655,17 @@
   color: var(--bg-primary);
 }
 
+.btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted, var(--text-secondary));
+}
+
+.btn--ghost:hover:not(:disabled) {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
 /* Tuning Page */
 .tuning-controls__row {
   display: flex;
