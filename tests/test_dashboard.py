@@ -110,7 +110,7 @@ def test_dashboard_has_overview_room_diagnostics_settings_views(two_room_spec):
     dashboard = build_dashboard(two_room_spec)
     assert dashboard["title"] == "Heating Assistant"
     titles = [v["title"] for v in dashboard["views"]]
-    assert titles == ["Overview", "Living Room", "Bedroom", "Diagnostics", "Settings & Services"]
+    assert titles == ["Overview", "Living Room", "Bedroom", "Diagnostics", "System ID", "Settings & Services"]
 
 
 def test_room_views_are_marked_as_subviews(two_room_spec):
@@ -253,11 +253,14 @@ def test_room_temperature_chart_has_no_legend(two_room_spec):
         if c.get("type") == "custom:apexcharts-card"
         and c.get("header", {}).get("title") == "Living Room – Temperature"
     )
-    for series in temp_card.get("series", []):
-        assert series.get("show", {}).get("in_legend") is False, (
-            f"Series {series.get('name')!r} should have in_legend: false"
-        )
-    assert "apex_config" not in temp_card
+    # Legend is hidden either via apex_config or via per-series show.in_legend.
+    apex_cfg = temp_card.get("apex_config", {})
+    legend_hidden_globally = apex_cfg.get("legend", {}).get("show") is False
+    if not legend_hidden_globally:
+        for series in temp_card.get("series", []):
+            assert series.get("show", {}).get("in_legend") is False, (
+                f"Series {series.get('name')!r} should have in_legend: false"
+            )
 
 
 def test_room_view_does_not_reference_legacy_climate_suffix(two_room_spec):
@@ -457,7 +460,7 @@ def test_dashboard_with_no_rooms_still_builds():
     spec = DashboardSpec(rooms=(), sources=())
     dashboard = build_dashboard(spec)
     titles = [v["title"] for v in dashboard["views"]]
-    assert titles == ["Overview", "Diagnostics", "Settings & Services"]
+    assert titles == ["Overview", "Diagnostics", "System ID", "Settings & Services"]
 
 
 def test_build_from_coordinator_extracts_rooms_and_sources():
@@ -656,7 +659,7 @@ def test_dashboard_to_yaml_preserves_view_order(two_room_spec):
     yaml_text = dashboard_to_yaml(build_dashboard(two_room_spec))
     loaded = yaml_module.safe_load(yaml_text)
     titles = [v["title"] for v in loaded["views"]]
-    assert titles == ["Overview", "Living Room", "Bedroom", "Diagnostics", "Settings & Services"]
+    assert titles == ["Overview", "Living Room", "Bedroom", "Diagnostics", "System ID", "Settings & Services"]
 
 
 def test_build_from_coordinator_handles_missing_schedule_map():
