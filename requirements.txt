@@ -6,6 +6,4 @@
 #
 numpy
 scipy
-osqp>=1.0
 highspy
-mbc @ git+https://github.com/marcuskrogh/mbc.git@b270890a0407caa41be56e95265c182f30ff989d

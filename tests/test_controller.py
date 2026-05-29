@@ -17,9 +17,9 @@ from custom_components.heating_assistant.thermal_model import (
     Window,
 )
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
-from mbc.models import ContinuousDiscreteModel
-from mbc.estimation import ContinuousDiscreteEKF
-from mbc.control import CDTrackingOptimalControlProblem, CDLinearizedMPCController
+from custom_components.heating_assistant.mbc.models import ContinuousDiscreteModel
+from custom_components.heating_assistant.mbc.estimation import ContinuousDiscreteEKF
+from custom_components.heating_assistant.mbc.control import CDTrackingOptimalControlProblem, CDLinearizedMPCController
 from custom_components.heating_assistant.controller import (
     HouseThermalSDE,
     HeatingMPCController,
