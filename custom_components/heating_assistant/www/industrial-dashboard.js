@@ -1,4 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
+const PANEL_VERSION = '2';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -36,12 +37,12 @@ class HaIndustrialPanel extends HTMLElement {
       { renderRoomDetail },
       { renderTuning },
     ] = await Promise.all([
-      import(`${BASE_PATH}/js/ha-connection.js`),
-      import(`${BASE_PATH}/js/router.js`),
-      import(`${BASE_PATH}/js/discovery.js`),
-      import(`${BASE_PATH}/js/pages/overview.js`),
-      import(`${BASE_PATH}/js/pages/room-detail.js`),
-      import(`${BASE_PATH}/js/pages/tuning.js`),
+      import(`${BASE_PATH}/js/ha-connection.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/router.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/discovery.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/pages/overview.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/pages/room-detail.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/pages/tuning.js?v=${PANEL_VERSION}`),
     ]);
 
     this._connection = new HaConnection(this._hass);
@@ -77,7 +78,7 @@ class HaIndustrialPanel extends HTMLElement {
 
   _renderShell() {
     this.shadowRoot.innerHTML = `
-      <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css">
+      <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css?v=${PANEL_VERSION}">
       <div class="shell">
         <header class="header">
           <div class="header__left">
@@ -104,8 +105,7 @@ class HaIndustrialPanel extends HTMLElement {
     `;
 
     this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
-      window.history.pushState(null, '', '/lovelace');
-      window.dispatchEvent(new CustomEvent('location-changed'));
+      window.dispatchEvent(new Event('hass-toggle-menu'));
     });
 
     this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
