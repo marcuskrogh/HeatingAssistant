@@ -685,8 +685,8 @@ def test_build_from_coordinator_scales_forecast_to_mpc_horizon():
         dt = 600.0          # 600 s each → 4 h forecast window
 
     dashboard = build_dashboard_from_coordinator(FakeCoordinator())
-    # Expected: history_hours=6 (default) + forecast_hours=4 → graph_span "10h"
-    expected_span = "10h"
+    # Expected: history_hours=12 (default) + forecast_hours=4 → graph_span "16h"
+    expected_span = "16h"
     for card in _iter_cards(dashboard):
         if card.get("type") != "custom:apexcharts-card" or "graph_span" not in card:
             continue
