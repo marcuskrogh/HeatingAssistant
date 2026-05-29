@@ -1,10 +1,10 @@
-"""Coordinator-level tests for the solar-forecast clearness integration.
+"""Coordinator-level tests for the solar-forecast (GHI) integration.
 
 Builds a bare coordinator via ``object.__new__`` (same pattern as
-``test_coordinator_apply_actions.py``) and exercises ``_read_clearness`` and
+``test_coordinator_apply_actions.py``) and exercises ``_read_ghi`` and
 ``_room_solar_gain`` directly, covering the graceful-fallback paths that keep
 the analytical model in charge when the forecast entity is missing / stale /
-unparseable.
+unparseable / lacks a peak power.
 """
 
 from __future__ import annotations
@@ -17,19 +17,26 @@ import pytest
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from custom_components.heating_assistant.thermal_model import HouseModel, Room, Window
-from custom_components.heating_assistant.solar_model import clear_sky_plane_poa
 
 
 LAT, LON = 55.0, 12.0
 NOW = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
 
 
-def _make_coordinator(solar_entity, entity_states, *, rooms=None):
+def _make_coordinator(
+    solar_entity,
+    entity_states,
+    *,
+    rooms=None,
+    peak_power=None,
+    plane_tilt=None,
+    plane_azimuth=None,
+):
     coord = object.__new__(HeatingAssistantCoordinator)
     coord._solar_forecast_entity = solar_entity
-    coord._pv_plane_tilt = None
-    coord._pv_plane_azimuth = None
-    coord._pv_peak_power = None
+    coord._pv_plane_tilt = plane_tilt
+    coord._pv_plane_azimuth = plane_azimuth
+    coord._pv_peak_power = peak_power
     coord._latitude = LAT
     coord._longitude = LON
     coord._horizon = 4
@@ -67,86 +74,101 @@ def _make_coordinator(solar_entity, entity_states, *, rooms=None):
     return coord
 
 
-def _watts_attr(factor=0.5):
-    """Forecast.Solar-style watts dict tracking the generic clear-sky plane."""
-    watts = {}
-    for h in range(0, 5):
-        ts = NOW + timedelta(hours=h)
-        poa = clear_sky_plane_poa(ts, LAT, LON, 30.0, 180.0)
-        watts[ts.isoformat()] = factor * poa
-    return {"watts": watts}
+def _ghi_forecast_attrs(ghi=500.0):
+    """Generic GHI forecast attribute series (W/m²) over the next hours."""
+    fc = [
+        {"datetime": (NOW + timedelta(hours=h)).isoformat(), "ghi": ghi}
+        for h in range(0, 6)
+    ]
+    return {"forecast": fc, "unit_of_measurement": "W/m²"}
 
 
-class TestReadClearness:
+class TestReadGhi:
     def test_no_entity_returns_none(self):
         coord = _make_coordinator(None, {})
-        now_idx, fc = coord._read_clearness(NOW)
-        assert now_idx is None and fc is None
+        now_v, fc = coord._read_ghi(NOW)
+        assert now_v is None and fc is None
 
     def test_unavailable_entity_records_failure(self):
         coord = _make_coordinator(
             "sensor.pv", {"sensor.pv": {"state": "unavailable", "attributes": {}}},
         )
-        now_idx, fc = coord._read_clearness(NOW)
-        assert now_idx is None and fc is None
+        now_v, fc = coord._read_ghi(NOW)
+        assert now_v is None and fc is None
         assert coord.solar_fc_consecutive_failures == 1
 
     def test_stale_entity_falls_back(self):
         coord = _make_coordinator(
-            "sensor.pv",
-            {"sensor.pv": {
-                "state": "1500",
-                "attributes": _watts_attr(),
+            "sensor.ghi",
+            {"sensor.ghi": {
+                "state": "500",
+                "attributes": _ghi_forecast_attrs(),
                 "last_updated": NOW - timedelta(hours=6),
             }},
         )
-        now_idx, fc = coord._read_clearness(NOW)
-        assert now_idx is None and fc is None
+        now_v, fc = coord._read_ghi(NOW)
+        assert now_v is None and fc is None
         assert coord.solar_fc_last_error == "forecast stale"
 
-    def test_unparsable_falls_back(self):
+    def test_power_without_peak_falls_back(self):
+        # A PV-power sensor with no configured peak power can't be scaled to
+        # absolute irradiance → fall back to the analytical model.
+        attrs = {"watts": {(NOW + timedelta(hours=h)).isoformat(): 3000 for h in range(5)}}
         coord = _make_coordinator(
-            "sensor.pv", {"sensor.pv": {"state": "1500", "attributes": {"foo": "bar"}}},
+            "sensor.pv", {"sensor.pv": {"state": "3000", "attributes": attrs}},
         )
-        now_idx, fc = coord._read_clearness(NOW)
-        assert now_idx is None and fc is None
-        assert coord.solar_fc_consecutive_failures == 1
+        now_v, fc = coord._read_ghi(NOW)
+        assert now_v is None and fc is None
+        assert "peak" in (coord.solar_fc_last_error or "")
 
-    def test_valid_forecast_solar_drives_clearness(self):
+    def test_irradiance_sensor_drives_ghi(self):
         coord = _make_coordinator(
-            "sensor.pv",
-            {"sensor.pv": {"state": "1500", "attributes": _watts_attr(0.5)}},
+            "sensor.ghi",
+            {"sensor.ghi": {"state": "500", "attributes": _ghi_forecast_attrs(500.0)}},
         )
-        now_idx, fc = coord._read_clearness(NOW)
+        now_v, fc = coord._read_ghi(NOW)
         assert fc is not None
-        assert coord._solar_provider == "forecast_solar"
         assert coord.solar_fc_consecutive_failures == 0
-        # Auto-calibrated against the generic plane → defined steps near 1.0.
         defined = [v for v in fc if v is not None]
         assert defined
         for v in defined:
-            assert 0.9 <= v <= 1.1
+            assert v == pytest.approx(500.0, rel=1e-6)
+
+    def test_power_with_peak_drives_ghi(self):
+        # Forecast.Solar-style watts; with peak power + plane geometry the
+        # watts deconvolve to a positive GHI series.
+        watts = {(NOW + timedelta(hours=h)).isoformat(): 2500 for h in range(5)}
+        coord = _make_coordinator(
+            "sensor.pv",
+            {"sensor.pv": {"state": "2500", "attributes": {"watts": watts}}},
+            peak_power=5000.0, plane_tilt=35.0, plane_azimuth=180.0,
+        )
+        now_v, fc = coord._read_ghi(NOW)
+        assert fc is not None
+        assert coord._solar_provider == "forecast_solar"
+        defined = [v for v in fc if v is not None]
+        assert defined and all(v > 0.0 for v in defined)
 
 
 class TestRoomSolarGain:
-    def test_windowed_room_clearness_modulates(self):
-        coord = _make_coordinator("sensor.pv", {})
-        clear = coord._room_solar_gain("lr", NOW, None, None)
-        dim = coord._room_solar_gain("lr", NOW, None, 0.5)
-        assert clear > 0.0
-        assert dim == pytest.approx(0.5 * clear, rel=1e-9)
+    def test_windowed_room_ghi_overrides_cloud(self):
+        coord = _make_coordinator("sensor.ghi", {})
+        with_cloud = coord._room_solar_gain("lr", NOW, 1.0, 500.0)
+        no_cloud = coord._room_solar_gain("lr", NOW, None, 500.0)
+        assert no_cloud > 0.0
+        assert with_cloud == pytest.approx(no_cloud, rel=1e-12)
 
     def test_windowless_room_uses_exposure(self):
         rooms = [
             Room(name="lr", thermal_mass=5e6, r_external=0.05, temperature=20.0,
                  solar_exposure_aperture=3.0, solar_facing=180.0),
         ]
-        coord = _make_coordinator("sensor.pv", {}, rooms=rooms)
-        gain = coord._room_solar_gain("lr", NOW, None, None)
+        coord = _make_coordinator("sensor.ghi", {}, rooms=rooms)
+        gain = coord._room_solar_gain("lr", NOW, None, 600.0)
         assert gain > 0.0
 
     def test_missing_entity_gain_matches_cloud_baseline(self):
-        # With no clearness, the gain equals the plain cloud-cover path.
+        # With no GHI, the gain equals the plain cloud-cover path.
         coord = _make_coordinator(None, {})
         from custom_components.heating_assistant.solar_model import room_solar_gains
         baseline = room_solar_gains(

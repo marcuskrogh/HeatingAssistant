@@ -950,11 +950,13 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 CONF_WEATHER_ENTITY,
                 description={"suggested_value": weather},
             ): EntitySelector(EntitySelectorConfig(domain="weather")),
-            # Optional PV solar-forecast sensor (Forecast.Solar / Solcast /
-            # Open-Meteo Solar / any sensor with a power-forecast series).  When
-            # set, a data-driven clearness index replaces the cloud-cover
-            # attenuation in the solar model.  The plane tilt/azimuth/peak-power
-            # below are optional refinements; blank ⇒ auto-calibrated.
+            # Optional solar-forecast sensor: a GHI / W·m⁻² sensor (used
+            # directly) or a PV-power forecast (Forecast.Solar / Solcast /
+            # Open-Meteo Solar).  When set, the forecast supplies the solar
+            # model's GHI intensity (decomposed + transposed by geometry),
+            # replacing the cloud-cover attenuation; the clear-sky model is the
+            # automatic fallback.  For PV-power sensors set the peak power below
+            # (required) and the plane tilt/azimuth (improves de-projection).
             vol.Optional(
                 CONF_SOLAR_FORECAST_ENTITY,
                 description={"suggested_value": solar_forecast},

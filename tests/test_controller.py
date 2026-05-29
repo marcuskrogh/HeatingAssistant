@@ -1572,9 +1572,9 @@ class TestSetpointLinearisation:
         assert ctrl._mpc.x_ref[0] == pytest.approx(21.0)
 
 
-class TestSolarClearnessThreading:
-    """The controller's per-room solar gain honours clearness precedence and
-    the windowless exposure fallback (Part A/B of the solar-forecast work)."""
+class TestSolarGhiThreading:
+    """The controller's per-room solar gain honours forecast-GHI precedence and
+    the windowless exposure fallback (the solar-forecast work)."""
 
     def _windowed_controller(self):
         living = Room(
@@ -1592,34 +1592,34 @@ class TestSolarClearnessThreading:
         sources = [ElectricHeater("lr", "living_room", max_power=2000.0)]
         return HeatingMPCController(model, sources, horizon=3, dt=900.0)
 
-    def test_room_gain_clearness_overrides_cloud(self):
+    def test_room_gain_ghi_overrides_cloud(self):
         ctrl = self._windowed_controller()
         now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
-        clear = ctrl._room_gain("living_room", now, cloud_cover=None, clearness=None)
-        # clearness=0.5 halves the windowed gain regardless of heavy cloud
-        modulated = ctrl._room_gain("living_room", now, cloud_cover=1.0, clearness=0.5)
-        assert clear > 0.0
-        assert modulated == pytest.approx(0.5 * clear, rel=1e-9)
+        # With GHI provided, cloud cover is ignored entirely.
+        with_cloud = ctrl._room_gain("living_room", now, cloud_cover=1.0, ghi=500.0)
+        no_cloud = ctrl._room_gain("living_room", now, cloud_cover=None, ghi=500.0)
+        assert no_cloud > 0.0
+        assert with_cloud == pytest.approx(no_cloud, rel=1e-12)
 
     def test_windowless_room_uses_exposure(self):
         ctrl = self._windowed_controller()
         now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
-        gain = ctrl._room_gain("bedroom", now, cloud_cover=None, clearness=None)
+        gain = ctrl._room_gain("bedroom", now, cloud_cover=None, ghi=600.0)
         assert gain > 0.0  # exposure preset gives non-zero gain without windows
 
     def test_forecast_solar_per_step_fallback(self):
         ctrl = self._windowed_controller()
         now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
-        # Step 0 uses clearness 0.5; later steps have None → fall back to cloud.
+        # Step 0 uses forecast GHI; later steps have None → fall back to cloud.
         schedules = ctrl._forecast_solar(
             now,
             cloud_forecast=[1.0, 1.0, 1.0, 1.0],
             cloud_cover_now=1.0,
-            clearness_forecast=[0.5, None, None, None],
-            clearness_now=0.5,
+            ghi_forecast=[500.0, None, None, None],
+            ghi_now=500.0,
         )
-        # k=0 clearness path (×0.5) vs k=1 cloud path (×0.25) → different gains.
+        # k=0 GHI path vs k=1 heavy-cloud clear-sky path → different gains.
         g0 = schedules[0]["living_room"]
         g1 = schedules[1]["living_room"]
-        assert g0 > 0.0 and g1 > 0.0
+        assert g0 > 0.0 and g1 >= 0.0
         assert abs(g0 - g1) > 1e-9

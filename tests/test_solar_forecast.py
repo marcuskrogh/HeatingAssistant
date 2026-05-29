@@ -1,18 +1,22 @@
-"""Unit tests for the solar-forecast clearness-index module."""
+"""Unit tests for the solar-forecast GHI-derivation module."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import math
 import pytest
 
 from custom_components.heating_assistant import solar_forecast as sf
-from custom_components.heating_assistant.solar_model import clear_sky_plane_poa
+from custom_components.heating_assistant.solar_model import (
+    ghi_to_dni_dhi,
+    solar_angles,
+    transpose_to_surface,
+)
 
 
-# A clear summer midday at a mid-latitude site, so the modelled clear-sky POA
-# is comfortably above the night floor for the timestamps used below.
+# A clear summer midday at a mid-latitude site.
 LAT, LON = 55.0, 12.0
 NOON = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
 PLANE_TILT, PLANE_AZ = 35.0, 180.0
@@ -22,68 +26,54 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
+def _poa_on_plane(ghi: float, dt: datetime, tilt: float, az: float) -> float:
+    """Model the POA a plane would see for a given GHI (for round-trip tests)."""
+    alt, sun_az = solar_angles(dt, LAT, LON)
+    n = dt.timetuple().tm_yday
+    dni, dhi = ghi_to_dni_dhi(ghi, alt, n)
+    return transpose_to_surface(dni, dhi, alt, sun_az, tilt, az)
+
+
 # ---------------------------------------------------------------------------
-# Parsers
+# Parsers + kind detection
 # ---------------------------------------------------------------------------
 
 
 class TestParsers:
     def test_forecast_solar_watts_dict(self):
-        attrs = {
-            "watts": {
-                _iso(NOON): 3000,
-                _iso(NOON + timedelta(hours=1)): 3200,
-            }
-        }
+        attrs = {"watts": {_iso(NOON): 3000, _iso(NOON + timedelta(hours=1)): 3200}}
         series, provider = sf.parse_pv_power_forecast(SimpleNamespace(attributes=attrs))
         assert provider == "forecast_solar"
-        assert len(series) == 2
-        # sorted ascending by epoch; values preserved as W
-        assert series[0][1] == 3000.0
-        assert series[1][1] == 3200.0
-        assert series[0][0] < series[1][0]
+        assert series[0][1] == 3000.0 and series[1][1] == 3200.0
 
     def test_solcast_list_kw_to_w(self):
-        attrs = {
-            "detailedForecast": [
-                {"period_start": _iso(NOON), "pv_estimate": 3.0},
-                {"period_start": _iso(NOON + timedelta(minutes=30)), "pv_estimate": 2.5},
-            ]
-        }
+        attrs = {"detailedForecast": [{"period_start": _iso(NOON), "pv_estimate": 3.0}]}
         series, provider = sf.parse_pv_power_forecast(SimpleNamespace(attributes=attrs))
         assert provider == "solcast"
-        # kW → W
-        assert series[0][1] == 3000.0
-        assert series[1][1] == 2500.0
+        assert series[0][1] == 3000.0  # kW → W
 
-    def test_generic_list_power(self):
-        attrs = {
-            "forecast": [
-                {"datetime": _iso(NOON), "power": 1500},
-                {"datetime": _iso(NOON + timedelta(hours=1)), "power": 1700},
-            ]
-        }
+    def test_generic_ghi_series(self):
+        attrs = {"forecast": [{"datetime": _iso(NOON), "ghi": 540}]}
         series, provider = sf.parse_pv_power_forecast(SimpleNamespace(attributes=attrs))
         assert provider == "generic"
-        assert series[0][1] == 1500.0
-
-    def test_generic_kw_unit_hint(self):
-        attrs = {
-            "power_forecast": [{"period_start": _iso(NOON), "pv_estimate": 2.0}],
-            "power_forecast_unit": "kW",
-        }
-        series, provider = sf.parse_pv_power_forecast(SimpleNamespace(attributes=attrs))
-        assert provider == "generic"
-        assert series[0][1] == 2000.0
+        assert series[0][1] == 540.0
 
     def test_no_forecast_returns_none(self):
         series, provider = sf.parse_pv_power_forecast(SimpleNamespace(attributes={}))
-        assert series is None
-        assert provider == "none"
+        assert series is None and provider == "none"
+
+    def test_detect_irradiance_unit(self):
+        s = SimpleNamespace(attributes={"unit_of_measurement": "W/m²"})
+        assert sf.detect_value_kind(s) == "irradiance"
+
+    def test_detect_power_default(self):
+        s = SimpleNamespace(attributes={"unit_of_measurement": "W"})
+        assert sf.detect_value_kind(s) == "power"
+        assert sf.detect_value_kind(SimpleNamespace(attributes={})) == "power"
 
 
 # ---------------------------------------------------------------------------
-# read_pv_power_now
+# read_value_now
 # ---------------------------------------------------------------------------
 
 
@@ -103,121 +93,119 @@ class _FakeHass:
         return _FakeHass._States(self._state)
 
 
-def test_read_pv_power_now_from_state():
+def test_read_value_now_from_state():
     state = SimpleNamespace(state="2500", attributes={})
-    val = sf.read_pv_power_now(_FakeHass(state), "sensor.pv", now=NOON)
-    assert val == 2500.0
+    assert sf.read_value_now(_FakeHass(state), "sensor.pv", now=NOON) == 2500.0
 
 
-def test_read_pv_power_now_none_when_unconfigured():
-    assert sf.read_pv_power_now(_FakeHass(None), None) is None
+def test_read_value_now_none_when_unconfigured():
+    assert sf.read_value_now(_FakeHass(None), None) is None
 
 
 # ---------------------------------------------------------------------------
-# compute_clearness_series
+# POA → GHI inversion
 # ---------------------------------------------------------------------------
 
 
-class TestClearnessSeries:
-    def _daytime_series(self, factor, tilt=PLANE_TILT, az=PLANE_AZ):
-        """PV series == factor * modelled clear-sky POA for the given plane."""
+class TestPoaToGhi:
+    def test_round_trip_recovers_ghi(self):
+        target = 600.0
+        poa = _poa_on_plane(target, NOON, PLANE_TILT, PLANE_AZ)
+        recovered = sf.poa_to_ghi(poa, NOON, LAT, LON, PLANE_TILT, PLANE_AZ)
+        assert recovered == pytest.approx(target, rel=0.02)
+
+    def test_zero_at_night(self):
+        midnight = datetime(2024, 12, 21, 0, 0, tzinfo=timezone.utc)
+        assert sf.poa_to_ghi(100.0, midnight, 60.0, 12.0, 35.0, 180.0) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# compute_ghi_series
+# ---------------------------------------------------------------------------
+
+
+class TestGhiSeries:
+    def _power_series(self, target_ghi, peak):
+        """PV-power series that corresponds to ``target_ghi`` on the panel plane."""
         out = []
         for h in range(0, 6):
-            ts = (NOON + timedelta(hours=h)).timestamp()
-            poa = clear_sky_plane_poa(
-                datetime.fromtimestamp(ts, tz=timezone.utc), LAT, LON, tilt, az
-            )
-            out.append((ts, factor * poa))
+            ts = NOON + timedelta(hours=h)
+            poa = _poa_on_plane(target_ghi, ts, PLANE_TILT, PLANE_AZ)
+            out.append((ts.timestamp(), peak * poa / 1000.0))  # P = peak·POA/1000
         return out
 
-    def test_physical_path_recovers_factor(self):
-        # With geometry + peak power, index = power / (peak * POA / 1000).
-        peak = 5000.0
-        series = []
-        for h in range(0, 6):
-            ts = (NOON + timedelta(hours=h)).timestamp()
-            poa = clear_sky_plane_poa(
-                datetime.fromtimestamp(ts, tz=timezone.utc), LAT, LON, PLANE_TILT, PLANE_AZ
-            )
-            series.append((ts, 0.8 * peak * poa / 1000.0))
-        result, now_idx = sf.compute_clearness_series(
-            series, horizon=5, dt=3600.0, latitude=LAT, longitude=LON, now=NOON,
-            plane_tilt=PLANE_TILT, plane_azimuth=PLANE_AZ, pv_peak_power=peak,
+    def test_irradiance_passthrough(self):
+        series = [
+            ((NOON + timedelta(hours=h)).timestamp(), 500.0) for h in range(6)
+        ]
+        result, ghi_now = sf.compute_ghi_series(
+            series, 500.0, "irradiance", horizon=5, dt=3600.0,
+            latitude=LAT, longitude=LON, now=NOON,
         )
-        defined = [r for r in result if r is not None]
-        assert defined, "expected some daytime steps"
-        for r in defined:
-            assert r == pytest.approx(0.8, abs=1e-6)
-
-    def test_autocalibrated_path_peaks_near_one(self):
-        # No geometry / no peak → percentile auto-calibration against the
-        # generic (tilt 30, az 180) reference plane.  A series proportional to
-        # that same plane's clear-sky shape normalises to ~1 across the horizon.
-        series = self._daytime_series(0.5, tilt=30.0, az=180.0)
-        result, _ = sf.compute_clearness_series(
-            series, horizon=5, dt=3600.0, latitude=LAT, longitude=LON, now=NOON,
-        )
-        defined = [r for r in result if r is not None]
+        defined = [v for v in result if v is not None]
         assert defined
-        for r in defined:
-            assert r == pytest.approx(1.0, abs=1e-6)
+        for v in defined:
+            assert v == pytest.approx(500.0, rel=1e-9)
+        assert ghi_now == pytest.approx(500.0)
 
-    def test_clamped_to_max(self):
-        # A spike well above the clear-sky reference is clamped to CLEARNESS_MAX.
+    def test_power_with_peak_and_plane_recovers_ghi(self):
         peak = 5000.0
-        ts = NOON.timestamp()
-        poa = clear_sky_plane_poa(NOON, LAT, LON, PLANE_TILT, PLANE_AZ)
-        series = [(ts, 10.0 * peak * poa / 1000.0)]  # 10x over-irradiance
-        result, now_idx = sf.compute_clearness_series(
-            series, horizon=1, dt=3600.0, latitude=LAT, longitude=LON, now=NOON,
-            plane_tilt=PLANE_TILT, plane_azimuth=PLANE_AZ, pv_peak_power=peak,
-            pv_power_now=10.0 * peak * poa / 1000.0,
+        target = 600.0
+        series = self._power_series(target, peak)
+        result, ghi_now = sf.compute_ghi_series(
+            series, None, "power", horizon=5, dt=3600.0,
+            latitude=LAT, longitude=LON, now=NOON,
+            plane_tilt=PLANE_TILT, plane_azimuth=PLANE_AZ, peak_power=peak,
         )
-        assert now_idx == pytest.approx(sf.CLEARNESS_MAX)
+        defined = [v for v in result if v is not None]
+        assert defined
+        for v in defined:
+            assert v == pytest.approx(target, rel=0.03)
 
-    def test_night_steps_are_none(self):
-        # Midwinter midnight at a high latitude → sun well below horizon.
-        midnight = datetime(2024, 12, 21, 0, 0, tzinfo=timezone.utc)
-        ts = midnight.timestamp()
-        series = [(ts, 0.0)]
-        result, now_idx = sf.compute_clearness_series(
-            series, horizon=3, dt=3600.0, latitude=60.0, longitude=12.0, now=midnight,
+    def test_power_without_peak_returns_none(self):
+        series = [(NOON.timestamp(), 3000.0)]
+        result, ghi_now = sf.compute_ghi_series(
+            series, 3000.0, "power", horizon=3, dt=3600.0,
+            latitude=LAT, longitude=LON, now=NOON,
         )
-        # No daytime reference anywhere → undefined everywhere.
-        assert all(r is None for r in (result or []))
+        assert result is None and ghi_now is None
 
-    def test_empty_input_returns_none(self):
-        result, now_idx = sf.compute_clearness_series(
-            [], horizon=3, dt=3600.0, latitude=LAT, longitude=LON, now=NOON,
+    def test_empty_returns_none(self):
+        result, ghi_now = sf.compute_ghi_series(
+            [], None, "irradiance", horizon=3, dt=3600.0,
+            latitude=LAT, longitude=LON, now=NOON,
         )
-        assert result is None and now_idx is None
+        assert result is None and ghi_now is None
+
+    def test_steps_outside_coverage_are_none(self):
+        # One forecast point only at NOON; later horizon steps are uncovered.
+        series = [(NOON.timestamp(), 500.0)]
+        result, _ = sf.compute_ghi_series(
+            series, None, "irradiance", horizon=5, dt=3600.0,
+            latitude=LAT, longitude=LON, now=NOON,
+        )
+        # Steps are at NOON+1h..NOON+5h, all past the single NOON point → None.
+        assert all(v is None for v in result)
 
 
 # ---------------------------------------------------------------------------
-# select_clearness_for_step
+# select_ghi_for_step
 # ---------------------------------------------------------------------------
 
 
-class TestSelectClearness:
+class TestSelectGhi:
     def test_in_range(self):
-        assert sf.select_clearness_for_step([0.5, 0.6, 0.7], 1) == 0.6
+        assert sf.select_ghi_for_step([100.0, 200.0, 300.0], 1) == 200.0
 
     def test_none_entry_falls_back(self):
-        assert sf.select_clearness_for_step([0.5, None, 0.7], 1, fallback=0.3) == 0.3
+        assert sf.select_ghi_for_step([100.0, None, 300.0], 1, fallback=50.0) == 50.0
 
-    def test_persistence_past_end(self):
-        assert sf.select_clearness_for_step([0.5, 0.9], 5) == 0.9
-
-    def test_persistence_skips_trailing_none(self):
-        assert sf.select_clearness_for_step([0.5, 0.9, None], 5) == 0.9
+    def test_past_end_falls_back_not_persisted(self):
+        # GHI must NOT persist past coverage (would leak daytime into night).
+        assert sf.select_ghi_for_step([100.0, 200.0], 5, fallback=None) is None
 
     def test_empty_returns_fallback(self):
-        assert sf.select_clearness_for_step(None, 0, fallback=0.42) == 0.42
-
-
-# ---------------------------------------------------------------------------
-# Staleness
-# ---------------------------------------------------------------------------
+        assert sf.select_ghi_for_step(None, 0, fallback=42.0) == 42.0
 
 
 def test_is_stale():

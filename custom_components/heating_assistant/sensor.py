@@ -2465,8 +2465,8 @@ class SolarForecastStatusSensor(CoordinatorEntity, SensorEntity):
 
     Attributes expose which solar source is active (data-driven forecast vs
     the analytical clear-sky model), the matched provider schema, the current
-    clearness index and its horizon series (kept here, off the history buffer),
-    and the usual error / timestamp diagnostics.
+    GHI and its horizon series [W/m²] (kept here, off the history buffer), and
+    the usual error / timestamp diagnostics.
     """
 
     _attr_icon = "mdi:solar-power-variant"
@@ -2500,9 +2500,9 @@ class SolarForecastStatusSensor(CoordinatorEntity, SensorEntity):
             ),
             "active_source": getattr(self._coordinator, "solar_source", "analytical"),
             "provider": getattr(self._coordinator, "_solar_provider", "none"),
-            "clearness_now": getattr(self._coordinator, "clearness_now", None),
-            "clearness_forecast": list(
-                getattr(self._coordinator, "clearness_forecast", []) or []
+            "ghi_now": getattr(self._coordinator, "ghi_now", None),
+            "ghi_forecast": list(
+                getattr(self._coordinator, "ghi_forecast", []) or []
             ),
             "last_error": getattr(self._coordinator, "solar_fc_last_error", None),
             "last_error_at": last_err_at.isoformat() if last_err_at else None,

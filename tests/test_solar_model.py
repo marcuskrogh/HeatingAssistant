@@ -19,6 +19,9 @@ from custom_components.heating_assistant.solar_model import (
     room_solar_gains,
     room_solar_gains_from_exposure,
     cloud_attenuation_factor,
+    erbs_diffuse_fraction,
+    extraterrestrial_normal_irradiance,
+    ghi_to_dni_dhi,
 )
 from custom_components.heating_assistant.thermal_model import Window
 
@@ -205,20 +208,65 @@ class TestClearSkyPlanePOA:
         assert toward > away
 
 
-class TestClearnessPrecedence:
-    def test_clearness_overrides_cloud(self):
-        win = Window(area=2.0, orientation=180.0, tilt=90.0)
-        clear = window_solar_gain(win, NOON, LATITUDE, LONGITUDE)
-        # clearness=0.5 halves the clear-sky gain regardless of cloud_cover
-        half = window_solar_gain(
-            win, NOON, LATITUDE, LONGITUDE, cloud_cover=1.0, clearness=0.5
-        )
-        assert half == pytest.approx(0.5 * clear, rel=1e-9)
+class TestErbsDecomposition:
+    def test_zero_at_night(self):
+        assert ghi_to_dni_dhi(0.0, -0.1, 172) == (0.0, 0.0)
+        assert ghi_to_dni_dhi(500.0, -0.1, 172) == (0.0, 0.0)
 
-    def test_clearness_none_keeps_cloud_path(self):
+    def test_components_sum_to_ghi_horizontal(self):
+        alt = math.radians(50.0)
+        ghi = 600.0
+        dni, dhi = ghi_to_dni_dhi(ghi, alt, 172)
+        # GHI = DNI·sin(alt) + DHI  (energy balance on the horizontal)
+        assert dni * math.sin(alt) + dhi == pytest.approx(ghi, rel=1e-6)
+
+    def test_overcast_is_mostly_diffuse(self):
+        alt = math.radians(40.0)
+        n = 172
+        ghi_extra = extraterrestrial_normal_irradiance(n) * math.sin(alt)
+        low_ghi = 0.15 * ghi_extra          # very cloudy → low clearness
+        dni, dhi = ghi_to_dni_dhi(low_ghi, alt, n)
+        assert dhi > 0.8 * low_ghi          # Erbs: nearly all diffuse
+
+    def test_clear_has_strong_beam(self):
+        alt = math.radians(40.0)
+        n = 172
+        ghi_extra = extraterrestrial_normal_irradiance(n) * math.sin(alt)
+        high_ghi = 0.75 * ghi_extra         # clear → high clearness
+        dni, dhi = ghi_to_dni_dhi(high_ghi, alt, n)
+        assert dhi < 0.4 * high_ghi          # mostly beam
+
+
+class TestGhiPrecedence:
+    def test_ghi_overrides_cloud(self):
+        win = Window(area=2.0, orientation=180.0, tilt=90.0)
+        # With GHI provided, cloud_cover is ignored entirely.
+        with_cloud = window_solar_gain(
+            win, NOON, LATITUDE, LONGITUDE, cloud_cover=1.0, ghi=400.0
+        )
+        without_cloud = window_solar_gain(
+            win, NOON, LATITUDE, LONGITUDE, ghi=400.0
+        )
+        assert with_cloud == pytest.approx(without_cloud, rel=1e-12)
+
+    def test_zero_ghi_zero_gain(self):
+        win = Window(area=2.0, orientation=180.0, tilt=90.0)
+        assert window_solar_gain(win, NOON, LATITUDE, LONGITUDE, ghi=0.0) == 0.0
+
+    def test_gain_monotonic_in_ghi(self):
+        # Horizontal surface: POA ≡ GHI (DNI·sinα + DHI), so gain is exactly
+        # proportional to GHI — convention-independent and strictly monotonic.
+        win = Window(area=2.0, orientation=180.0, tilt=0.0)
+        low = window_solar_gain(win, NOON, LATITUDE, LONGITUDE, ghi=200.0)
+        high = window_solar_gain(win, NOON, LATITUDE, LONGITUDE, ghi=800.0)
+        assert 0.0 < low < high
+        # 4× the GHI → 4× the gain on a horizontal surface.
+        assert high == pytest.approx(4.0 * low, rel=1e-9)
+
+    def test_ghi_none_keeps_cloud_path(self):
         win = Window(area=2.0, orientation=180.0, tilt=90.0)
         with_cloud = window_solar_gain(
-            win, NOON, LATITUDE, LONGITUDE, cloud_cover=1.0, clearness=None
+            win, NOON, LATITUDE, LONGITUDE, cloud_cover=1.0, ghi=None
         )
         clear = window_solar_gain(win, NOON, LATITUDE, LONGITUDE)
         assert with_cloud == pytest.approx(0.25 * clear, rel=1e-9)
@@ -234,9 +282,12 @@ class TestExposureGain:
         assert g1 > 0.0
         assert g3 == pytest.approx(3.0 * g1, rel=1e-9)
 
-    def test_clearness_modulates_exposure(self):
-        full = room_solar_gains_from_exposure(3.0, 180.0, NOON, LATITUDE, LONGITUDE)
-        dim = room_solar_gains_from_exposure(
-            3.0, 180.0, NOON, LATITUDE, LONGITUDE, clearness=0.4
+    def test_ghi_drives_exposure(self):
+        zero = room_solar_gains_from_exposure(
+            3.0, 180.0, NOON, LATITUDE, LONGITUDE, ghi=0.0
         )
-        assert dim == pytest.approx(0.4 * full, rel=1e-9)
+        lit = room_solar_gains_from_exposure(
+            3.0, 180.0, NOON, LATITUDE, LONGITUDE, ghi=600.0
+        )
+        assert zero == 0.0
+        assert lit > 0.0

@@ -495,7 +495,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Solar-forecast fetch health + state (consumed by the diagnostic
         # SolarForecastStatusSensor).  ``_solar_provider`` records which schema
         # the last successful parse matched; ``solar_source`` records whether
-        # the clearness index or the analytical model drove the most recent
+        # the forecast GHI or the analytical model drove the most recent
         # cycle's solar gains.
         self.solar_fc_last_error: Optional[str] = None
         self.solar_fc_last_error_at: Optional[datetime] = None
@@ -503,8 +503,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.solar_fc_consecutive_failures: int = 0
         self._solar_provider: str = "none"
         self.solar_source: str = "analytical"
-        self.clearness_now: Optional[float] = None
-        self.clearness_forecast: List[Optional[float]] = []
+        self.ghi_now: Optional[float] = None
+        self.ghi_forecast: List[Optional[float]] = []
 
         # Restore persisted estimated parameters so that identified values
         # survive a full Home Assistant restart (not just an in-memory reload).
@@ -1123,12 +1123,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             cloud_cover_now = self._read_cloud_cover_now()
             cloud_forecast = await self._async_read_cloud_forecast(cloud_cover_now=cloud_cover_now)
 
-            # 2c'. Read the optional solar-power forecast and derive a
-            #      data-driven clearness index.  When no entity is configured
-            #      (or it is unavailable / stale / unparseable) both values are
-            #      ``None`` and the solar model falls back to the cloud-cover
-            #      attenuation above — i.e. today's behaviour, unchanged.
-            clearness_now, clearness_forecast = self._read_clearness(self.now_utc)
+            # 2c'. Read the optional solar forecast and derive a GHI series.
+            #      When no entity is configured (or it is unavailable / stale /
+            #      unparseable / lacks the peak power needed to scale PV power to
+            #      irradiance) both values are ``None`` and the solar model falls
+            #      back to the cloud-cover attenuation above — today's behaviour.
+            ghi_now, ghi_forecast = self._read_ghi(self.now_utc)
 
             # 2d. Read current wind speed for the Sherman–Grimsrud
             #     infiltration overlay (Phase 1 C1).  When the weather
@@ -1167,21 +1167,21 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if hasattr(self.controller, "set_ground_temp"):
                 self.controller.set_ground_temp(ground_temp_now)
 
-            # 3. Compute current solar gains for visualization.  The clearness
-            #    index (when available) takes precedence over cloud cover; a
-            #    room with no enumerated windows falls back to its single
-            #    solar-exposure aperture.
+            # 3. Compute current solar gains for visualization.  The forecast
+            #    GHI (when available) drives the intensity and takes precedence
+            #    over cloud cover; a room with no enumerated windows falls back
+            #    to its single solar-exposure aperture.
             now = self.now_utc
             self.cloud_cover = cloud_cover_now
-            self.clearness_now = clearness_now
-            self.clearness_forecast = list(clearness_forecast or [])
+            self.ghi_now = ghi_now
+            self.ghi_forecast = list(ghi_forecast or [])
             self.solar_source = (
-                "forecast" if clearness_forecast or clearness_now is not None
+                "forecast" if ghi_forecast or ghi_now is not None
                 else "analytical"
             )
             self.solar_gains = {
                 name: self._room_solar_gain(
-                    name, now, cloud_cover_now, clearness_now
+                    name, now, cloud_cover_now, ghi_now
                 )
                 for name in self.model.room_names
             }
@@ -1204,8 +1204,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     outdoor_forecast=outdoor_forecast,
                     cloud_forecast=cloud_forecast,
                     cloud_cover_now=cloud_cover_now,
-                    clearness_forecast=clearness_forecast,
-                    clearness_now=clearness_now,
+                    ghi_forecast=ghi_forecast,
+                    ghi_now=ghi_now,
                     disabled_sources=disabled_src_names or None,
                     control_trajectory=control_traj,
                     price_forecast=self.price_forecast,
@@ -1310,10 +1310,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "d_outdoor": outdoor_temp,
                 "d_solar": dict(self.solar_gains),
                 "cloud_cover": cloud_cover_now,
-                # Scalar only — the full horizon-length clearness array is kept
-                # off the bounded history buffer (it lives on the diagnostic
+                # Scalar only — the full horizon-length GHI array is kept off
+                # the bounded history buffer (it lives on the diagnostic
                 # SolarForecastStatusSensor instead) to limit recorder growth.
-                "clearness_now": clearness_now,
+                "ghi_now": ghi_now,
                 "solar_source": self.solar_source,
                 "timestamp": now.timestamp(),
                 # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
@@ -1536,15 +1536,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 reason,
             )
 
-    def _read_clearness(
+    def _read_ghi(
         self, now: datetime,
     ) -> Tuple[Optional[float], Optional[List[Optional[float]]]]:
-        """Read the solar-forecast entity and derive a clearness index.
+        """Read the solar-forecast entity and derive a GHI series [W/m²].
 
-        Returns ``(clearness_now, clearness_forecast)``.  Both are ``None``
-        when no entity is configured, it is unavailable / stale, or its payload
-        cannot be parsed — in which case the solar model falls back to the
-        cloud-cover attenuation (today's behaviour).
+        Returns ``(ghi_now, ghi_forecast)``.  Both are ``None`` when no entity
+        is configured, it is unavailable / stale / unparseable, or no absolute
+        GHI can be derived (a PV-power sensor with no configured peak power) —
+        in which case the solar model falls back to the cloud-cover attenuation
+        (today's behaviour).
         """
         self._solar_provider = "none"
         if not self._solar_forecast_entity:
@@ -1559,16 +1560,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             return None, None
 
         series, provider = _solar_fc.parse_pv_power_forecast(state)
-        if not series:
+        kind = _solar_fc.detect_value_kind(state)
+        value_now = _solar_fc.read_value_now(
+            self.hass, self._solar_forecast_entity, now=now,
+        )
+        if not series and value_now is None:
             self._record_solar_fc_failure("no parsable forecast series")
             return None, None
 
         self._solar_provider = provider
-        pv_power_now = _solar_fc.read_pv_power_now(
-            self.hass, self._solar_forecast_entity, now=now,
-        )
-        forecast, clearness_now = _solar_fc.compute_clearness_series(
+        forecast, ghi_now = _solar_fc.compute_ghi_series(
             series,
+            value_now,
+            kind,
             self._horizon,
             float(self.dt),
             self._latitude,
@@ -1576,22 +1580,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             now,
             plane_tilt=self._pv_plane_tilt,
             plane_azimuth=self._pv_plane_azimuth,
-            pv_power_now=pv_power_now,
-            pv_peak_power=self._pv_peak_power,
+            peak_power=self._pv_peak_power,
         )
-        if forecast is None and clearness_now is None:
-            self._record_solar_fc_failure("clearness undefined")
+        if forecast is None and ghi_now is None:
+            # Most commonly: a PV-power sensor without a configured peak power,
+            # so the watts can't be scaled to absolute irradiance.
+            self._record_solar_fc_failure("GHI underivable (set PV peak power)")
             return None, None
 
         self._record_solar_fc_success()
-        return clearness_now, forecast
+        return ghi_now, forecast
 
     def _room_solar_gain(
         self,
         name: str,
         now: datetime,
         cloud_cover: Optional[float],
-        clearness: Optional[float],
+        ghi: Optional[float],
     ) -> float:
         """Per-room solar gain [W]: windows when present, else exposure preset.
 
@@ -1602,12 +1607,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if room.windows:
             return room_solar_gains(
                 room.windows, now, self._latitude, self._longitude,
-                cloud_cover=cloud_cover, clearness=clearness,
+                cloud_cover=cloud_cover, ghi=ghi,
             )
         return room_solar_gains_from_exposure(
             room.solar_exposure_aperture, room.solar_facing,
             now, self._latitude, self._longitude,
-            cloud_cover=cloud_cover, clearness=clearness,
+            cloud_cover=cloud_cover, ghi=ghi,
         )
 
     # Backwards-compatible aliases for any caller / test that imported the

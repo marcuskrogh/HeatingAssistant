@@ -393,13 +393,14 @@ CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
 CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = OCP step = EKF step (seconds)
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
-# Solar-forecast integration (Forecast.Solar / Solcast / Open-Meteo Solar / any
-# sensor exposing a PV-power-forecast series).  When configured, a data-driven
-# clearness index derived from the forecast replaces the coarse cloud-cover
-# attenuation in the solar model; the analytical model remains the automatic
-# fallback.  Plane tilt/azimuth are optional (improve the clear-sky reference);
-# peak power further sharpens the absolute anchoring.  All optional — blank ⇒
-# the index auto-calibrates against the forecast's own clear-sky envelope.
+# Solar-forecast integration (a GHI / W·m⁻² sensor, or a PV-power forecast from
+# Forecast.Solar / Solcast / Open-Meteo Solar).  When configured, the forecast
+# supplies the solar model's *intensity* as a GHI series — decomposed into
+# beam/diffuse (Erbs) and transposed onto each window by geometry — replacing
+# the cloud-cover attenuation; the analytical clear-sky model remains the
+# automatic fallback.  For PV-power sensors, ``pv_peak_power`` is required to
+# scale watts to absolute irradiance and the plane tilt/azimuth improve the
+# de-projection; GHI sensors need neither.
 CONF_SOLAR_FORECAST_ENTITY = "solar_forecast_entity"  # HA sensor entity_id with a PV power forecast
 CONF_PV_PLANE_TILT = "pv_plane_tilt"        # degrees from horizontal (0–90), optional
 CONF_PV_PLANE_AZIMUTH = "pv_plane_azimuth"  # degrees clockwise from North (0–360), optional
