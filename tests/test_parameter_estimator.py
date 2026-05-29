@@ -460,6 +460,50 @@ class TestJointInternalGainAndHeaterScale:
 # ---------------------------------------------------------------------------
 
 
+class TestObjectiveScaling:
+    """The identification objective must accumulate (sum) over steps so that
+    data confidence grows with the number of observations.
+
+    Regression test: the objective used to be *averaged* over steps, which
+    made its curvature independent of the dataset length.  The fixed O(1)
+    Gaussian prior then always out-voted the data and the estimates stayed
+    pinned to the (possibly wrong) configured prior — the user-visible symptom
+    being a poorly-fit open-loop with the wrong gains.
+    """
+
+    def test_objective_grows_with_dataset_length(self):
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0, regularization=0.0)
+
+        # A model whose parameters differ from the data-generating ones, so
+        # the open-loop residuals are non-trivial.
+        true_rooms = [_make_single_room(thermal_mass=3_000_000.0, r_external=0.08)]
+        hist_short = _generate_history(true_rooms, sources, n_steps=120, seed=1)
+        hist_long = _generate_history(true_rooms, sources, n_steps=240, seed=1)
+
+        layout = _ThetaLayout(n_rooms=1, identifiable_sources=[],
+                              identifiable_pairs=[])
+        theta = np.concatenate([
+            estimator._log_mass_prior,
+            estimator._log_r_prior,
+            estimator._q_int_prior,
+        ])
+
+        sh_short = estimator._convert_history_std(hist_short, use_ym=True)
+        sh_long = estimator._convert_history_std(hist_long, use_ym=True)
+
+        obj_short, _ = estimator._simulation_mse_and_grad(
+            theta, layout, sh_short, nominal_dt=60.0, max_window_steps=10_000,
+        )
+        obj_long, _ = estimator._simulation_mse_and_grad(
+            theta, layout, sh_long, nominal_dt=60.0, max_window_steps=10_000,
+        )
+        # Twice the data ⇒ roughly twice the accumulated misfit (a *mean*
+        # would leave the two values about equal).
+        assert obj_long > 1.5 * obj_short
+
+
 class TestAnalyticalGradient:
     """
     Verify that _cd_ped_neg_ll_and_grad returns a gradient that matches

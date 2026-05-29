@@ -939,6 +939,61 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                 val[b_start: b_start + n], dtype=float,
             )
 
+    def initial_state_from_measurement(
+        self,
+        y: np.ndarray,
+        u: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Build a full state vector that is consistent with a measurement.
+
+        This is the single source of truth for initialising an open-loop
+        (free-run) simulation or filter from a recorded data point so that
+        the model **starts at the same state the data is in**:
+
+        * room-temperature block ``T`` ← measured temperatures ``y`` so that
+          ``hm(x0) == y`` exactly (the offset block ``b`` is zeroed, so the
+          predicted output equals the measured temperature with no initial
+          innovation);
+        * emitter-lag block ``φ`` ← warm-started to the commanded fraction
+          ``u`` of each filtered source (the steady state of the first-order
+          emitter filter ``dφ/dt = (u − φ)/τ``).  Cold-starting ``φ`` at zero
+          would make the simulation under-deliver heat for ~one emitter time
+          constant and inject a spurious start-of-window transient/bias;
+        * offset block ``b`` ← zero (random-walk bias states are not part of
+          the physical open-loop prediction).
+
+        Parameters
+        ----------
+        y : array-like
+            Measured room temperatures (length ≥ ``n_rooms``; extra entries
+            ignored).
+        u : array-like, optional
+            Commanded control fractions for each source.  When omitted the
+            emitter-lag states start at zero (cold).
+
+        Returns
+        -------
+        np.ndarray
+            State vector of length ``self.nx``.
+        """
+        n = self._n_rooms
+        m = self._n_filtered
+        x = np.zeros(self._nx, dtype=float)
+
+        y_arr = np.asarray(y, dtype=float).ravel()
+        n_copy = min(n, y_arr.size)
+        x[:n_copy] = y_arr[:n_copy]
+
+        if m > 0 and u is not None:
+            u_arr = np.asarray(u, dtype=float).ravel()
+            for k, src_idx in enumerate(self._filtered_source_indices):
+                if src_idx < u_arr.size:
+                    x[n + k] = float(u_arr[src_idx])
+
+        # Offset block (if augmented) intentionally left at zero so that
+        # hm(x0) == y exactly.
+        return x
+
     @property
     def x_ref(self) -> np.ndarray:
         """Room setpoints as an ``(nz,) = (n_rooms,)`` ndarray.

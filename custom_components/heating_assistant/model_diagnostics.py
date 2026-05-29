@@ -743,14 +743,34 @@ def compute_open_loop_predictions(
             "segment_length": segment_length,
         }
 
+    # Prefer the system's own disturbance builder so the open-loop diagnostic
+    # uses *exactly* the same heat balance as the live MPC/EKF.  Crucially this
+    # folds ``Room.internal_gain`` into the disturbance channel — omitting it
+    # (as the old local builder did) produced a systematic open-loop bias
+    # equal to the steady-state temperature contribution of the internal gain,
+    # because the estimator identifies and applies that gain but the diagnostic
+    # was ignoring it.
+    _has_disturbance_vector = hasattr(system, "disturbance_vector")
+    _rooms = getattr(getattr(system, "_model", None), "rooms", {}) or {}
+
     def _make_d(record: Dict[str, Any]) -> np.ndarray:
+        outdoor = float(record.get("d_outdoor", 0.0))
+        d_solar = record.get("d_solar", {}) or {}
+        if _has_disturbance_vector:
+            return np.asarray(
+                system.disturbance_vector(outdoor, d_solar), dtype=float
+            )
+        # Fallback: replicate the disturbance layout, including the
+        # per-room internal heat gain folded into the solar slot.
         p = system.nd
         d = np.zeros(p)
-        d[0] = float(record.get("d_outdoor", 0.0))
-        d_solar = record.get("d_solar", {})
-        for name, gain in d_solar.items():
-            if name in system._room_idx:
-                d[1 + system._room_idx[name]] = float(gain)
+        d[0] = outdoor
+        for name, idx in system._room_idx.items():
+            gain = float(d_solar.get(name, 0.0))
+            room_obj = _rooms.get(name)
+            if room_obj is not None:
+                gain += float(getattr(room_obj, "internal_gain", 0.0))
+            d[1 + idx] = gain
         return d
 
     per_room_preds: Dict[str, List[float]] = {name: [] for name in room_names}
@@ -766,9 +786,6 @@ def compute_open_loop_predictions(
             continue
 
         nx = int(getattr(system, "nx", n))
-        x = np.zeros(nx, dtype=float)
-        x[:n] = np.array(y0[:n], dtype=float)
-        d_prev = _make_d(seg[0])
 
         # u_prev holds the control applied during [t_{k-1}, t_k].
         # u_k (stored at step k) is the action applied from t_k onward,
@@ -778,6 +795,22 @@ def compute_open_loop_predictions(
         for k, v in enumerate(seg[0].get("u", [])):
             if k < n_u:
                 u_prev[k] = float(v)
+
+        # Robust initial state: start the open-loop free-run at the *same*
+        # state the data is in.  ``initial_state_from_measurement`` sets the
+        # room temperatures from the measurement (so hm(x0) == y0 with the
+        # offset block zeroed) and warm-starts the emitter-lag states to the
+        # commanded fraction, avoiding a spurious cold-emitter transient at
+        # the start of every segment.  Fall back to the legacy room-only
+        # initialisation for system objects that don't provide the helper.
+        init_fn = getattr(system, "initial_state_from_measurement", None)
+        if callable(init_fn):
+            x = np.asarray(init_fn(np.asarray(y0[:n], dtype=float), u_prev),
+                           dtype=float)
+        else:
+            x = np.zeros(nx, dtype=float)
+            x[:n] = np.array(y0[:n], dtype=float)
+        d_prev = _make_d(seg[0])
 
         valid_segment = True
         for record in seg[1:]:
