@@ -41,10 +41,7 @@ from .const import (
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
-    CONF_SOLAR_FORECAST_ENTITY,
-    CONF_PV_PLANE_TILT,
-    CONF_PV_PLANE_AZIMUTH,
-    CONF_PV_PEAK_POWER,
+    CONF_SOLAR_RADIATION_ENTITY,
     CONF_SOLAR_EXPOSURE,
     CONF_SOLAR_FACING,
     DEFAULT_SOLAR_EXPOSURE,
@@ -351,10 +348,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     _RUNTIME_RECONFIG_KEYS: Set[str] = {
         CONF_OUTDOOR_TEMP_ENTITY,
         CONF_WEATHER_ENTITY,
-        CONF_SOLAR_FORECAST_ENTITY,
-        CONF_PV_PLANE_TILT,
-        CONF_PV_PLANE_AZIMUTH,
-        CONF_PV_PEAK_POWER,
+        CONF_SOLAR_RADIATION_ENTITY,
         CONF_LATITUDE,
         CONF_LONGITUDE,
         CONF_TRACKING_WEIGHT,
@@ -383,16 +377,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._longitude: float = data.get(CONF_LONGITUDE, hass.config.longitude)
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
-        self._solar_forecast_entity: Optional[str] = options.get(CONF_SOLAR_FORECAST_ENTITY) or data.get(CONF_SOLAR_FORECAST_ENTITY)
-        self._pv_plane_tilt: Optional[float] = _coerce_opt_float(
-            options.get(CONF_PV_PLANE_TILT, data.get(CONF_PV_PLANE_TILT))
-        )
-        self._pv_plane_azimuth: Optional[float] = _coerce_opt_float(
-            options.get(CONF_PV_PLANE_AZIMUTH, data.get(CONF_PV_PLANE_AZIMUTH))
-        )
-        self._pv_peak_power: Optional[float] = _coerce_opt_float(
-            options.get(CONF_PV_PEAK_POWER, data.get(CONF_PV_PEAK_POWER))
-        )
+        self._solar_radiation_entity: Optional[str] = options.get(CONF_SOLAR_RADIATION_ENTITY) or data.get(CONF_SOLAR_RADIATION_ENTITY)
         self._price_entity: Optional[str] = options.get(CONF_PRICE_ENTITY) or data.get(CONF_PRICE_ENTITY)
         self._price_net_tariff: float = float(
             options.get(CONF_PRICE_NET_TARIFF, data.get(CONF_PRICE_NET_TARIFF, DEFAULT_PRICE_NET_TARIFF))
@@ -493,7 +478,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._weather_warn_thresholds: tuple = (1, 2, 5, 10, 50, 100, 500, 1000)
 
         # Solar-forecast fetch health + state (consumed by the diagnostic
-        # SolarForecastStatusSensor).  ``_solar_provider`` records which schema
+        # SolarRadiationStatusSensor).  ``_solar_provider`` records which schema
         # the last successful parse matched; ``solar_source`` records whether
         # the forecast GHI or the analytical model drove the most recent
         # cycle's solar gains.
@@ -935,14 +920,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._outdoor_entity = str(pending.get(CONF_OUTDOOR_TEMP_ENTITY, ""))
         if CONF_WEATHER_ENTITY in pending:
             self._weather_entity = str(pending.get(CONF_WEATHER_ENTITY, ""))
-        if CONF_SOLAR_FORECAST_ENTITY in pending:
-            self._solar_forecast_entity = str(pending.get(CONF_SOLAR_FORECAST_ENTITY, "")) or None
-        if CONF_PV_PLANE_TILT in pending:
-            self._pv_plane_tilt = _coerce_opt_float(pending.get(CONF_PV_PLANE_TILT))
-        if CONF_PV_PLANE_AZIMUTH in pending:
-            self._pv_plane_azimuth = _coerce_opt_float(pending.get(CONF_PV_PLANE_AZIMUTH))
-        if CONF_PV_PEAK_POWER in pending:
-            self._pv_peak_power = _coerce_opt_float(pending.get(CONF_PV_PEAK_POWER))
+        if CONF_SOLAR_RADIATION_ENTITY in pending:
+            self._solar_radiation_entity = str(pending.get(CONF_SOLAR_RADIATION_ENTITY, "")) or None
         if CONF_LATITUDE in pending:
             self._latitude = float(pending.get(CONF_LATITUDE, self._latitude))
         if CONF_LONGITUDE in pending:
@@ -1312,7 +1291,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "cloud_cover": cloud_cover_now,
                 # Scalar only — the full horizon-length GHI array is kept off
                 # the bounded history buffer (it lives on the diagnostic
-                # SolarForecastStatusSensor instead) to limit recorder growth.
+                # SolarRadiationStatusSensor instead) to limit recorder growth.
                 "ghi_now": ghi_now,
                 "solar_source": self.solar_source,
                 "timestamp": now.timestamp(),
@@ -1515,7 +1494,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if self.solar_fc_consecutive_failures > 0:
             _LOGGER.info(
                 "Solar forecast recovered for %s after %d consecutive failures",
-                self._solar_forecast_entity,
+                self._solar_radiation_entity,
                 self.solar_fc_consecutive_failures,
             )
         self.solar_fc_last_error = None
@@ -1531,7 +1510,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if self.solar_fc_consecutive_failures in self._weather_warn_thresholds:
             _LOGGER.warning(
                 "Solar forecast unavailable for %s (failure #%d): %s",
-                self._solar_forecast_entity,
+                self._solar_radiation_entity,
                 self.solar_fc_consecutive_failures,
                 reason,
             )
@@ -1539,19 +1518,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     def _read_ghi(
         self, now: datetime,
     ) -> Tuple[Optional[float], Optional[List[Optional[float]]]]:
-        """Read the solar-forecast entity and derive a GHI series [W/m²].
+        """Read the solar-radiation entity and derive a GHI series [W/m²].
 
         Returns ``(ghi_now, ghi_forecast)``.  Both are ``None`` when no entity
-        is configured, it is unavailable / stale / unparseable, or no absolute
-        GHI can be derived (a PV-power sensor with no configured peak power) —
-        in which case the solar model falls back to the cloud-cover attenuation
-        (today's behaviour).
+        is configured, it is unavailable / stale, or it carries no usable
+        irradiance — in which case the solar model falls back to the analytical
+        clear-sky model (today's behaviour).
         """
         self._solar_provider = "none"
-        if not self._solar_forecast_entity:
+        if not self._solar_radiation_entity:
             return None, None
 
-        state = self.hass.states.get(self._solar_forecast_entity)
+        state = self.hass.states.get(self._solar_radiation_entity)
         if state is None or getattr(state, "state", None) in _solar_fc._UNAVAILABLE_STATES:
             self._record_solar_fc_failure("entity unavailable")
             return None, None
@@ -1559,33 +1537,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._record_solar_fc_failure("forecast stale")
             return None, None
 
-        series, provider = _solar_fc.parse_pv_power_forecast(state)
-        kind = _solar_fc.detect_value_kind(state)
-        value_now = _solar_fc.read_value_now(
-            self.hass, self._solar_forecast_entity, now=now,
+        series = _solar_fc.parse_irradiance_forecast(state)
+        value_now = _solar_fc.read_irradiance_now(
+            self.hass, self._solar_radiation_entity, now=now,
         )
         if not series and value_now is None:
-            self._record_solar_fc_failure("no parsable forecast series")
+            self._record_solar_fc_failure("no irradiance data")
             return None, None
 
-        self._solar_provider = provider
+        self._solar_provider = "irradiance"
         forecast, ghi_now = _solar_fc.compute_ghi_series(
-            series,
-            value_now,
-            kind,
-            self._horizon,
-            float(self.dt),
-            self._latitude,
-            self._longitude,
-            now,
-            plane_tilt=self._pv_plane_tilt,
-            plane_azimuth=self._pv_plane_azimuth,
-            peak_power=self._pv_peak_power,
+            series, value_now, self._horizon, float(self.dt), now,
         )
         if forecast is None and ghi_now is None:
-            # Most commonly: a PV-power sensor without a configured peak power,
-            # so the watts can't be scaled to absolute irradiance.
-            self._record_solar_fc_failure("GHI underivable (set PV peak power)")
+            self._record_solar_fc_failure("no usable irradiance")
             return None, None
 
         self._record_solar_fc_success()

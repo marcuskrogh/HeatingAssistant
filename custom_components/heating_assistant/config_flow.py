@@ -105,10 +105,7 @@ from .const import (
     CONF_THERMAL_MASS,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
-    CONF_SOLAR_FORECAST_ENTITY,
-    CONF_PV_PLANE_TILT,
-    CONF_PV_PLANE_AZIMUTH,
-    CONF_PV_PEAK_POWER,
+    CONF_SOLAR_RADIATION_ENTITY,
     CONF_SOLAR_EXPOSURE,
     CONF_SOLAR_FACING,
     DEFAULT_SOLAR_EXPOSURE,
@@ -938,7 +935,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         # (EntitySelector rejects "" as an invalid default).
         outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
         weather = current.get(CONF_WEATHER_ENTITY) or None
-        solar_forecast = current.get(CONF_SOLAR_FORECAST_ENTITY) or None
+        solar_radiation = current.get(CONF_SOLAR_RADIATION_ENTITY) or None
         price_entity = current.get(CONF_PRICE_ENTITY) or None
 
         schema_dict: Dict[Any, Any] = {
@@ -950,29 +947,16 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 CONF_WEATHER_ENTITY,
                 description={"suggested_value": weather},
             ): EntitySelector(EntitySelectorConfig(domain="weather")),
-            # Optional solar-forecast sensor: a GHI / W·m⁻² sensor (used
-            # directly) or a PV-power forecast (Forecast.Solar / Solcast /
-            # Open-Meteo Solar).  When set, the forecast supplies the solar
-            # model's GHI intensity (decomposed + transposed by geometry),
-            # replacing the cloud-cover attenuation; the clear-sky model is the
-            # automatic fallback.  For PV-power sensors set the peak power below
-            # (required) and the plane tilt/azimuth (improves de-projection).
+            # Optional solar-radiation (irradiance) sensor reporting the sun's
+            # GHI in W/m² (e.g. Open-Meteo shortwave_radiation, a pyranometer),
+            # ideally with an hourly forecast in its attributes.  When set, the
+            # forecast supplies the solar model's intensity (decomposed +
+            # transposed by geometry), replacing the modelled clear-sky
+            # irradiance; the clear-sky model is the automatic fallback.
             vol.Optional(
-                CONF_SOLAR_FORECAST_ENTITY,
-                description={"suggested_value": solar_forecast},
+                CONF_SOLAR_RADIATION_ENTITY,
+                description={"suggested_value": solar_radiation},
             ): EntitySelector(EntitySelectorConfig(domain="sensor")),
-            vol.Optional(
-                CONF_PV_PLANE_TILT,
-                description={"suggested_value": current.get(CONF_PV_PLANE_TILT)},
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=90.0)),
-            vol.Optional(
-                CONF_PV_PLANE_AZIMUTH,
-                description={"suggested_value": current.get(CONF_PV_PLANE_AZIMUTH)},
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=360.0)),
-            vol.Optional(
-                CONF_PV_PEAK_POWER,
-                description={"suggested_value": current.get(CONF_PV_PEAK_POWER)},
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(
                 CONF_PRICE_ENTITY,
                 description={"suggested_value": price_entity},
