@@ -57,7 +57,8 @@ def _make_model(rooms):
     model._A = None
     model._B_ext = None
     model._B_ground = None
-    model._build_matrices = lambda: ("C", "A", "B_ext", "B_ground")
+    model._build_matrices = lambda: ("C", "A", "B_ext")
+    model.rebuild_derived_parameters = lambda: None
     return model
 
 
@@ -90,13 +91,16 @@ class _FakeCoordinator:
         self._entry = SimpleNamespace(entry_id="test-entry-1", data=dict(entry_data))
         self._horizon = 6
         self._update_interval = 900
+        self._tracking_weight = 0.0
         self._energy_weight = 0.01
         self._smoothing_weight = 0.1
         self._constraint_offset = 2.0
+        self._soft_constraint_weight = 10.0
         self._terminal_weight = 100.0
         self._sigma_w = 0.25
         self._sigma_v = 0.75
         self._sigma_b = 0.01
+        self._energy_price_weight = 1.0
         self._mpc_solver = "SLSQP"
         self._mpc_analytic_derivatives = True
         self._latitude = 0.0
@@ -269,7 +273,6 @@ def test_restore_estimated_parameters_applies_to_model():
     assert coordinator.model._C == "C"
     assert coordinator.model._A == "A"
     assert coordinator.model._B_ext == "B_ext"
-    assert coordinator.model._B_ground == "B_ground"
     assert coordinator._estimation_timestamp == "2025-01-01T00:00:00+00:00"
     assert coordinator._estimation_log_likelihood == pytest.approx(-55.0)
 

@@ -43,7 +43,7 @@ HeatingMPCController
       1. Runs the CD-EKF to fuse the current temperature measurement.
       2. Linearises the SDE model around (x̂, u_prev, d_now) using analytic
          Jacobians and ZOH-discretises the result.
-      3. Solves a convex QP (via cvxopt) in deviation coordinates.
+      3. Solves a convex QP (via OSQP/HiGHS) in deviation coordinates.
       4. Applies the first optimal action to all heat sources.
 
     Public API:
@@ -89,22 +89,17 @@ def _select_cloud_for_step(
 from .const import MPC_STATS_BUFFER_SIZE
 
 # ── Import model-based control components from mbc ────────────────────────────
-from cvxopt import matrix as _cvxmat, solvers as _cvxsolvers
+from scipy.linalg import block_diag as _scipy_block_diag
 from mbc.models import ContinuousDiscreteModel
 from mbc.estimation import ContinuousDiscreteEKF
 from mbc.control import (
     CDLinearizedMPCController,
     linearize_cd_model,
     discretize_cd_linearization,
+    QPProblem,
+    make_qp_backend,
 )
-from mbc.control.ocp import (
-    OptimalControlProblem,
-    _block_diag,
-    _block_diag_terminal,
-    _tile_column,
-    _build_D_diff,
-)
-from mbc._utils import _eye, _zeros, _np_to_cvx
+from mbc.control.ocp import OptimalControlProblem
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -1170,12 +1165,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
 # ── Helper ───────────────────────────────────────────────────────────────────
 
-def _diag_cvx(n: int, v: float) -> _cvxmat:
-    """Return an n×n diagonal cvxopt matrix with v on the diagonal."""
-    m = _cvxmat(0.0, (n, n))
-    for i in range(n):
-        m[i, i] = v
-    return m
+def _diag_np(n: int, v: float) -> np.ndarray:
+    """Return an n×n diagonal numpy matrix with v on the diagonal."""
+    return np.eye(n) * v
 
 
 # ── Innovation-capturing EKF wrapper ────────────────────────────────────────
@@ -1269,45 +1261,42 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         nx = self._model.nx
         nu = self._model.nu
         nd = self._model.nd
-        Cz = _np_to_cvx(self._model.Cz)
-        nz = Cz.size[0]
+        Cz = np.asarray(self._model.Cz, dtype=float)
+        nz = Cz.shape[0]
 
-        if isinstance(x0, np.ndarray):
-            x0 = _np_to_cvx(x0.reshape(-1, 1))
-        if isinstance(x_ref, np.ndarray):
-            x_ref = _np_to_cvx(x_ref.reshape(-1, 1))
+        # Coerce inputs to numpy 1D
+        x0 = np.asarray(x0, dtype=float).reshape(-1)
+        x_ref = np.asarray(x_ref, dtype=float).reshape(-1)
+        D = np.asarray(D, dtype=float).reshape(-1) if D is not None else np.zeros(N * nd)
+        if u_prev is not None:
+            u_prev = np.asarray(u_prev, dtype=float).reshape(-1)
 
-        Ad = _np_to_cvx(self._model.Ad)
-        Bd = _np_to_cvx(self._model.Bd)
-        Ed = _np_to_cvx(self._model.Ed)
+        Ad = np.asarray(self._model.Ad, dtype=float)
+        Bd = np.asarray(self._model.Bd, dtype=float)
+        Ed = np.asarray(self._model.Ed, dtype=float)
 
         # State-prediction matrices  X = Ψ x₀ + Γ U + Λ D
-        Ad_pow = [_eye(nx)]
+        Ad_pow = [np.eye(nx)]
         for _ in range(N):
-            Ad_pow.append(Ad * Ad_pow[-1])
+            Ad_pow.append(Ad @ Ad_pow[-1])
 
-        Psi    = _zeros(N * nx, nx)
-        Gamma  = _zeros(N * nx, N * nu)
-        Lambda = _zeros(N * nx, N * nd)
+        Psi = np.zeros((N * nx, nx))
+        Gamma = np.zeros((N * nx, N * nu))
+        Lambda = np.zeros((N * nx, N * nd))
 
         for k in range(N):
-            for i in range(nx):
-                for j in range(nx):
-                    Psi[k * nx + i, j] = Ad_pow[k + 1][i, j]
-            for j_step in range(k + 1):
-                Ak_j = Ad_pow[k - j_step]
-                AB = Ak_j * Bd
-                AE = Ak_j * Ed
-                for i in range(nx):
-                    for jj in range(nu):
-                        Gamma[k * nx + i, j_step * nu + jj] = AB[i, jj]
-                    for jj in range(nd):
-                        Lambda[k * nx + i, j_step * nd + jj] = AE[i, jj]
+            Psi[k * nx:(k + 1) * nx, :] = Ad_pow[k + 1]
+            for j in range(k + 1):
+                Ak = Ad_pow[k - j]
+                Gamma[k * nx:(k + 1) * nx, j * nu:(j + 1) * nu] = Ak @ Bd
+                Lambda[k * nx:(k + 1) * nx, j * nd:(j + 1) * nd] = Ak @ Ed
 
-        Cz_bar = _block_diag(Cz, N)
-        CG = Cz_bar * Gamma
-        CP = Cz_bar * Psi
-        CL = Cz_bar * Lambda
+        Cz_bar = np.kron(np.eye(N), Cz)
+        CG = Cz_bar @ Gamma    # (N·nz) × (N·nu)
+        CP = Cz_bar @ Psi      # (N·nz) × nx
+        CL = Cz_bar @ Lambda   # (N·nz) × (N·nd)
+
+        z_ref_np = Cz @ x_ref  # (nz,) baseline output reference
 
         # ── Time-varying cost matrices ────────────────────────────────────
         # Build Q_bar, R_bar, z_ref_bar, z_min_tiled, z_max_tiled for the QP.
@@ -1324,7 +1313,7 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         if has_varying:
             # Q_bar: block-diagonal with per-step, per-output Q weights.
             # Terminal step uses P = terminal_weight × Q_base per element.
-            Q_bar = _zeros(N * nz, N * nz)
+            Q_bar = np.zeros((N * nz, N * nz))
             for k in range(N):
                 base_diag = self._P if k == N - 1 else self._Q
                 for i in range(nz):
@@ -1334,7 +1323,7 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                     Q_bar[k * nz + i, k * nz + i] = val
 
             # R_bar: block-diagonal with per-step, per-source R weights.
-            R_bar = _zeros(N * nu, N * nu)
+            R_bar = np.zeros((N * nu, N * nu))
             for k in range(N):
                 for i in range(nu):
                     val = self._R[i, i]
@@ -1344,24 +1333,19 @@ class _AbsoluteInputOCP(OptimalControlProblem):
 
             # z_ref_bar: stacked per-step reference in deviation coordinates.
             if x_ref_dev_seq is not None:
-                z_ref_bar = _cvxmat(
-                    np.asarray(x_ref_dev_seq, dtype=float).reshape(-1).tolist(),
-                    (N * nz, 1),
-                )
+                z_ref_bar = np.asarray(x_ref_dev_seq, dtype=float).reshape(-1)
             else:
-                z_ref = Cz * x_ref
-                z_ref_bar = _tile_column(z_ref, N)
+                z_ref_bar = np.tile(z_ref_np, N)
         else:
-            Q_bar = _block_diag_terminal(self._Q, self._P, N)
-            R_bar = _block_diag(self._R, N)
-            z_ref = Cz * x_ref
-            z_ref_bar = _tile_column(z_ref, N)
+            Q_bar = _scipy_block_diag(*([self._Q] * (N - 1) + [self._P])) if N > 1 else self._P.copy()
+            R_bar = _scipy_block_diag(*([self._R] * N))
+            z_ref_bar = np.tile(z_ref_np, N)
 
-        Z_free   = CP * x0 + CL * D
-        e_free   = Z_free - z_ref_bar
+        Z_free = CP @ x0 + CL @ D
+        e_free = Z_free - z_ref_bar
 
-        H_uu = CG.T * Q_bar * CG + R_bar
-        f_u  = CG.T * Q_bar * e_free
+        H_uu = CG.T @ Q_bar @ CG + R_bar
+        f_u = CG.T @ Q_bar @ e_free
 
         # Linear correction: penalise ‖u_dev + u_ss‖²_R instead of ‖u_dev‖²_R.
         # Each nu-block of the gradient gets R[i,i] * r_scale[k] * u_ss[i].
@@ -1371,90 +1355,69 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                     r_val = self._R[i, i]
                     if r_scale_seq is not None:
                         r_val *= float(r_scale_seq[k, i])
-                    f_u[k * nu + i] = f_u[k * nu + i] + r_val * u_ss[i]
+                    f_u[k * nu + i] += r_val * u_ss[i]
 
         if self._S is not None:
             if u_prev is None:
-                u_prev = _zeros(nu, 1)
-            d0_shift = _zeros(N * nu, 1)
+                u_prev = np.zeros(nu)
+            d0_shift = np.zeros(N * nu)
             d0_shift[:nu] = -u_prev
-            H_uu += self._D_diff.T * self._S_bar * self._D_diff
-            f_u  += self._D_diff.T * self._S_bar * d0_shift
+            H_uu = H_uu + self._D_diff.T @ self._S_bar @ self._D_diff
+            f_u = f_u + self._D_diff.T @ self._S_bar @ d0_shift
 
         # Full QP decision variable Z = [U; ε]
-        n_U   = N * nu
+        n_U = N * nu
         n_eps = N * nz
-        n_Z   = n_U + n_eps
+        n_Z = n_U + n_eps
 
-        H = _zeros(n_Z, n_Z)
-        for i in range(n_U):
-            for j in range(n_U):
-                H[i, j] = H_uu[i, j]
-        for i in range(n_eps):
-            H[n_U + i, n_U + i] = self._rho
+        H = np.zeros((n_Z, n_Z))
+        H[:n_U, :n_U] = H_uu
+        np.fill_diagonal(H[n_U:, n_U:], self._rho)
+        H = 0.5 * (H + H.T)
 
-        f = _zeros(n_Z, 1)
-        for i in range(n_U):
-            f[i] = f_u[i]
+        f = np.zeros(n_Z)
+        f[:n_U] = f_u
 
-        # Input box constraints (unchanged)
+        # Input box bounds
         u_min_np, u_max_np = self._model.u_bounds
-        u_min_tiled = _tile_column(_np_to_cvx(u_min_np.reshape(-1, 1)), N)
-        u_max_tiled = _tile_column(_np_to_cvx(u_max_np.reshape(-1, 1)), N)
+        u_min_tiled = np.tile(u_min_np.reshape(-1), N)
+        u_max_tiled = np.tile(u_max_np.reshape(-1), N)
 
-        # Soft output constraints: time-varying corridor centred on z_ref[k]
-        # with half-width offset[k] per room.  Falls back to static scalar
-        # self._y_offset when no offset_seq is provided.
+        # Soft output corridor bounds: time-varying when offset_seq/x_ref_dev_seq given.
         if has_varying:
-            z_min_data: List[float] = []
-            z_max_data: List[float] = []
+            z_min_parts: List[np.ndarray] = []
+            z_max_parts: List[np.ndarray] = []
             for k in range(N):
-                if x_ref_dev_seq is not None:
-                    z_ref_k = np.asarray(x_ref_dev_seq[k], dtype=float)
-                else:
-                    z_ref_k = np.array(list(Cz * x_ref), dtype=float).flatten()
-                if offset_seq is not None:
-                    off_k = np.asarray(offset_seq[k], dtype=float)
-                else:
-                    off_k = np.full(nz, self._y_offset, dtype=float)
-                z_min_data.extend((z_ref_k - off_k).tolist())
-                z_max_data.extend((z_ref_k + off_k).tolist())
-            z_min_tiled = _cvxmat(z_min_data, (N * nz, 1))
-            z_max_tiled = _cvxmat(z_max_data, (N * nz, 1))
+                z_ref_k = (
+                    np.asarray(x_ref_dev_seq[k], dtype=float)
+                    if x_ref_dev_seq is not None
+                    else z_ref_np
+                )
+                off_k = (
+                    np.asarray(offset_seq[k], dtype=float)
+                    if offset_seq is not None
+                    else np.full(nz, self._y_offset, dtype=float)
+                )
+                z_min_parts.append(z_ref_k - off_k)
+                z_max_parts.append(z_ref_k + off_k)
+            z_min_tiled = np.concatenate(z_min_parts)
+            z_max_tiled = np.concatenate(z_max_parts)
         else:
-            z_min = z_ref - _cvxmat(self._y_offset, (nz, 1))
-            z_max = z_ref + _cvxmat(self._y_offset, (nz, 1))
-            z_min_tiled = _tile_column(z_min, N)
-            z_max_tiled = _tile_column(z_max, N)
+            z_min_tiled = np.tile(z_ref_np - self._y_offset, N)
+            z_max_tiled = np.tile(z_ref_np + self._y_offset, N)
 
-        n_ineq = 2 * n_U + 2 * n_eps + n_eps
-        G_qp = _zeros(n_ineq, n_Z)
-        h_qp = _zeros(n_ineq, 1)
+        # Soft output inequality constraints  G_out Z ≤ h_out:
+        # -CG U - ε ≤ -z_min + Z_free  and  CG U - ε ≤ z_max - Z_free
+        neg_I_eps = -np.eye(n_eps)
+        G_out = np.hstack([
+            np.vstack([-CG, CG]),
+            np.vstack([neg_I_eps, neg_I_eps]),
+        ])
+        h_out = np.concatenate([-z_min_tiled + Z_free, z_max_tiled - Z_free])
 
-        row = 0
-        for i in range(n_U):
-            G_qp[row + i, i] = -1.0
-            h_qp[row + i] = -u_min_tiled[i]
-        row += n_U
-        for i in range(n_U):
-            G_qp[row + i, i] = 1.0
-            h_qp[row + i] = u_max_tiled[i]
-        row += n_U
-        for i in range(n_eps):
-            for j in range(n_U):
-                G_qp[row + i, j] = -CG[i, j]
-            G_qp[row + i, n_U + i] = -1.0
-            h_qp[row + i] = -z_min_tiled[i] + Z_free[i]
-        row += n_eps
-        for i in range(n_eps):
-            for j in range(n_U):
-                G_qp[row + i, j] = CG[i, j]
-            G_qp[row + i, n_U + i] = -1.0
-            h_qp[row + i] = z_max_tiled[i] - Z_free[i]
-        row += n_eps
-        for i in range(n_eps):
-            G_qp[row + i, n_U + i] = -1.0
-            h_qp[row + i] = 0.0
+        # Box bounds: U ∈ [u_min, u_max], ε ≥ 0
+        lb = np.concatenate([u_min_tiled, np.zeros(n_eps)])
+        ub = np.concatenate([u_max_tiled, np.full(n_eps, np.inf)])
 
         # ── Price-aware linear cost term ──────────────────────────────────────
         # For non-negative sources: add α·pₖ·cᵢ·Δtₕ directly to the gradient.
@@ -1488,26 +1451,24 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                 for i in range(nu):
                     if i not in bid_set:
                         c_h = float(elec_heat[i])
-                        f[k * nu + i] = f[k * nu + i] + price_weight * p_k * c_h * dt_h
+                        f[k * nu + i] += price_weight * p_k * c_h * dt_h
 
             if n_bid == 0:
-                sol = _cvxsolvers.qp(H, f, G_qp, h_qp)
+                result = self._backend.solve(
+                    QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
+                )
             else:
                 # Bidirectional sources: augment Z = [U; ε; S⁺; S⁻].
                 n_S = N * n_bid
                 n_Z_aug = n_U + n_eps + 2 * n_S
 
-                # ── Augmented Hessian (no slack quadratic term) ───────────────
-                H_aug = _zeros(n_Z_aug, n_Z_aug)
-                for i in range(n_U + n_eps):
-                    for j in range(n_U + n_eps):
-                        H_aug[i, j] = H[i, j]
-                # Slack diagonal: zero — price penalty alone enforces complementarity.
+                # Augmented Hessian (no slack quadratic term — price alone drives complementarity)
+                H_aug = np.zeros((n_Z_aug, n_Z_aug))
+                H_aug[:n_Z, :n_Z] = H
 
-                # ── Augmented gradient (price terms only, no slack linear bias) ─
-                f_aug = _zeros(n_Z_aug, 1)
-                for i in range(n_U + n_eps):
-                    f_aug[i] = f[i]
+                # Augmented gradient
+                f_aug = np.zeros(n_Z_aug)
+                f_aug[:n_Z] = f
                 for k in range(N):
                     p_k = float(price_arr[min(k, n_price - 1)])
                     for jj, src_i in enumerate(bid_list):
@@ -1516,65 +1477,57 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                                else float(elec_heat[src_i])) * 1e-3
                         sp = n_U + n_eps + k * n_bid + jj
                         sm = n_U + n_eps + n_S + k * n_bid + jj
-                        f_aug[sp] = f_aug[sp] + price_weight * p_k * c_h * dt_h
-                        f_aug[sm] = f_aug[sm] + price_weight * p_k * c_c * dt_h
+                        f_aug[sp] += price_weight * p_k * c_h * dt_h
+                        f_aug[sm] += price_weight * p_k * c_c * dt_h
 
-                # ── Augmented inequality constraints ──────────────────────────
-                # Rows: existing (u box + ε) | s⁺ ≥ 0 | s⁻ ≥ 0 | s⁺ ≤ umax | s⁻ ≤ |umin|
-                # The upper bounds are essential when pₖ = 0 to keep the QP bounded.
-                u_min_np, u_max_np = self._model.u_bounds
-                n_ineq_aug = n_ineq + 4 * n_S
-                G_aug = _zeros(n_ineq_aug, n_Z_aug)
-                h_aug = _zeros(n_ineq_aug, 1)
-                for i in range(n_ineq):
-                    for j in range(n_U + n_eps):
-                        G_aug[i, j] = G_qp[i, j]
-                    h_aug[i] = h_qp[i]
-                # s⁺ ≥ 0 and s⁻ ≥ 0 (non-negativity)
-                for p in range(2 * n_S):
-                    G_aug[n_ineq + p, n_U + n_eps + p] = -1.0
-                # s⁺ ≤ u_max_i and s⁻ ≤ |u_min_i| (upper bounds)
+                # Augmented soft-output inequality (G_out extended to wider Z)
+                G_aug = np.zeros((2 * n_eps, n_Z_aug))
+                G_aug[:, :n_Z] = G_out
+
+                # Bounds: U, ε from before; s⁺/s⁻ ∈ [0, u_max/|u_min|]
+                s_plus_ub = np.zeros(n_S)
+                s_minus_ub = np.zeros(n_S)
                 for k in range(N):
                     for jj, src_i in enumerate(bid_list):
-                        sp = n_U + n_eps + k * n_bid + jj
-                        sm = n_U + n_eps + n_S + k * n_bid + jj
-                        ub_row_sp = n_ineq + 2 * n_S + k * n_bid + jj
-                        ub_row_sm = n_ineq + 2 * n_S + n_S + k * n_bid + jj
-                        G_aug[ub_row_sp, sp] = 1.0
-                        h_aug[ub_row_sp] = float(u_max_np[src_i])
-                        G_aug[ub_row_sm, sm] = 1.0
-                        h_aug[ub_row_sm] = float(abs(u_min_np[src_i]))
+                        s_plus_ub[k * n_bid + jj] = float(u_max_np[src_i])
+                        s_minus_ub[k * n_bid + jj] = float(abs(u_min_np[src_i]))
+                lb_aug = np.concatenate([lb, np.zeros(2 * n_S)])
+                ub_aug = np.concatenate([ub, s_plus_ub, s_minus_ub])
 
-                # ── Equality: u_dev[k,i] − s⁺[k,j] + s⁻[k,j] = −u_ss[i] ────
+                # Equality: u_dev[k,i] − s⁺[k,j] + s⁻[k,j] = −u_ss[i]
                 n_eq = N * n_bid
-                A_eq = _zeros(n_eq, n_Z_aug)
-                b_eq = _zeros(n_eq, 1)
+                A_eq = np.zeros((n_eq, n_Z_aug))
+                b_eq = np.zeros(n_eq)
                 for k in range(N):
                     for jj, src_i in enumerate(bid_list):
                         row_eq = k * n_bid + jj
                         A_eq[row_eq, k * nu + src_i] = 1.0
                         A_eq[row_eq, n_U + n_eps + k * n_bid + jj] = -1.0
                         A_eq[row_eq, n_U + n_eps + n_S + k * n_bid + jj] = 1.0
-                        b_eq[row_eq] = -(float(u_ss[src_i]) if u_ss is not None
-                                         else 0.0)
+                        b_eq[row_eq] = -(float(u_ss[src_i]) if u_ss is not None else 0.0)
 
-                sol = _cvxsolvers.qp(H_aug, f_aug, G_aug, h_aug, A_eq, b_eq)
+                result = self._backend.solve(
+                    QPProblem(P=H_aug, q=f_aug, lb=lb_aug, ub=ub_aug,
+                              G=G_aug, h=h_out, A=A_eq, b=b_eq)
+                )
         else:
-            sol = _cvxsolvers.qp(H, f, G_qp, h_qp)
+            result = self._backend.solve(
+                QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
+            )
 
-        if sol["status"] != "optimal":
+        if not result.success:
             import warnings
             warnings.warn(
                 f"_AbsoluteInputOCP.solve: QP solver returned status "
-                f"'{sol['status']}'; returning zero inputs as fallback.",
+                f"'{result.status}'; returning zero inputs as fallback.",
                 RuntimeWarning,
                 stacklevel=2,
             )
-            U_flat = _zeros(n_U, 1)
+            U_flat = np.zeros(n_U)
         else:
-            U_flat = sol["x"][:n_U]
+            U_flat = np.asarray(result.x[:n_U], dtype=float)
 
-        X_flat = Psi * x0 + Gamma * U_flat + Lambda * D
+        X_flat = Psi @ x0 + Gamma @ U_flat + Lambda @ D
         return U_flat, X_flat
 
 
@@ -1702,7 +1655,7 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             D_dev_np = np.zeros((self._N, self._model.nd), dtype=float)
 
         self._last_D_dev = D_dev_np.copy()
-        D_dev = _cvxmat(D_dev_np.reshape(-1).tolist(), (self._N * self._model.nd, 1))
+        D_dev = D_dev_np.reshape(-1)
 
         # Non-zero initial condition: the full tracking error from the setpoint.
         # Combined with x_ref_dev = 0, the QP drives x_hat toward x_ss over
@@ -1710,7 +1663,7 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         # absolute action to deviation coordinates for the S-penalty.
         x0_dev = (x_hat - x_ss).astype(float)
         u_prev_dev_np = self._u_prev - u_ss
-        u_prev_dev = _cvxmat(u_prev_dev_np.tolist(), (self._model.nu, 1))
+        u_prev_dev = u_prev_dev_np
 
         # Convert absolute time-varying setpoints to deviation coordinates so
         # the QP sees them relative to the linearisation point x_ss.
@@ -1741,8 +1694,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             dt_h=dt_h,
         )
 
-        U_dev_np = np.array(list(U_dev), dtype=float).reshape(self._N, self._model.nu)
-        X_dev_np = np.array(list(X_dev), dtype=float).reshape(self._N, self._model.nx)
+        U_dev_np = np.asarray(U_dev, dtype=float).reshape(self._N, self._model.nu)
+        X_dev_np = np.asarray(X_dev, dtype=float).reshape(self._N, self._model.nx)
 
         U_abs = U_dev_np + u_ss.reshape(1, -1)
         X_abs = X_dev_np + x_ss.reshape(1, -1)
@@ -1775,7 +1728,7 @@ class HeatingMPCController:
     The control loop at each step:
       1. CDLinearizedMPCController.step(): runs EKF predict+update, linearises
          the model around the current operating point, ZOH-discretises, and
-         solves a convex QP via cvxopt.
+         solves a convex QP via OSQP/HiGHS.
       2. Apply the first optimal action to all heat sources.
 
     Cost structure (QP):
@@ -1896,11 +1849,11 @@ class HeatingMPCController:
             n_steps=n_int_steps, scheme="implicit-euler",
         )
 
-        # ── OCP cost matrices (cvxopt format) ───────────────────────────
-        Q_cv = _diag_cvx(n_z, float(tracking_weight))
-        R_cv = _diag_cvx(n_u, float(energy_weight))
-        P_cv = _diag_cvx(n_z, float(terminal_weight) * float(tracking_weight))
-        S_cv = _diag_cvx(n_u, float(smoothing_weight)) if smoothing_weight > 0.0 else None
+        # ── OCP cost matrices ────────────────────────────────────────────
+        Q_cv = _diag_np(n_z, float(tracking_weight))
+        R_cv = _diag_np(n_u, float(energy_weight))
+        P_cv = _diag_np(n_z, float(terminal_weight) * float(tracking_weight))
+        S_cv = _diag_np(n_u, float(smoothing_weight)) if smoothing_weight > 0.0 else None
 
         # Soft-constraint penalty: direct weight on comfort-corridor violations
         rho = float(soft_constraint_weight)

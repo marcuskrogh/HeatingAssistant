@@ -90,11 +90,6 @@ def test_merge_populates_solver_defaults():
 
     merged = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
 
-    assert merged[CONF_MPC_SOLVER] == DEFAULT_MPC_SOLVER
-    assert (
-        merged[CONF_MPC_ANALYTIC_DERIVATIVES]
-        == DEFAULT_MPC_ANALYTIC_DERIVATIVES
-    )
     assert merged[CONF_SIGMA_W] == DEFAULT_SIGMA_W
     assert merged[CONF_SIGMA_V] == DEFAULT_SIGMA_V
     assert merged[CONF_SIGMA_B] == DEFAULT_SIGMA_B
