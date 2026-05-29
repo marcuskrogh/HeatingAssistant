@@ -796,6 +796,8 @@ class TestCoordinatorUpdateResilience:
         coordinator._room_enabled = {}
         coordinator._horizon = 4
         coordinator._weather_entity = None
+        coordinator._price_entity = None
+        coordinator._solar_radiation_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
@@ -861,6 +863,8 @@ class TestCoordinatorUpdateResilience:
         coordinator._room_enabled = {}
         coordinator._horizon = 4
         coordinator._weather_entity = None
+        coordinator._price_entity = None
+        coordinator._solar_radiation_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
@@ -920,6 +924,8 @@ class TestCoordinatorUpdateResilience:
         coordinator._room_enabled = {}
         coordinator._horizon = 4
         coordinator._weather_entity = None
+        coordinator._price_entity = None
+        coordinator._solar_radiation_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
@@ -983,6 +989,8 @@ class TestCoordinatorUpdateResilience:
         coordinator._room_comfort_offset = {}
         coordinator._room_enabled = {}
         coordinator._weather_entity = None
+        coordinator._price_entity = None
+        coordinator._solar_radiation_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
@@ -1049,6 +1057,8 @@ class TestCoordinatorUpdateResilience:
         coordinator._room_comfort_offset = {}
         coordinator._room_enabled = {}
         coordinator._weather_entity = None
+        coordinator._price_entity = None
+        coordinator._solar_radiation_entity = None
         coordinator._read_cloud_cover_now = MagicMock(return_value=None)
         coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
         coordinator._history_buffer = deque(maxlen=10)
