@@ -45,7 +45,7 @@ def _ensure_imports() -> None:
     global _HouseThermalSDE, _ContinuousDiscreteEKF
     if _HouseThermalSDE is None:
         from .controller import HouseThermalSDE  # noqa: PLC0415
-        from mbc.estimation import ContinuousDiscreteEKF  # noqa: PLC0415
+        from .mbc.estimation import ContinuousDiscreteEKF  # noqa: PLC0415
         _HouseThermalSDE = HouseThermalSDE
         _ContinuousDiscreteEKF = ContinuousDiscreteEKF
 
