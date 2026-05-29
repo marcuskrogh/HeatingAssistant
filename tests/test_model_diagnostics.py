@@ -463,6 +463,92 @@ def test_generate_model_fit_report_no_predictions():
 # Tests: compute_open_loop_predictions (attribute name regression test)
 # ---------------------------------------------------------------------------
 
+def test_open_loop_simulation_includes_internal_gain():
+    """The open-loop diagnostic must fold ``Room.internal_gain`` into the
+    heat balance, exactly like the live MPC/EKF.
+
+    Regression test: the diagnostic used to build its own disturbance vector
+    that ignored ``internal_gain``, so any room with an identified internal
+    gain showed a systematic open-loop bias equal to that gain's steady-state
+    temperature contribution.  Here we generate the "truth" from a model that
+    *includes* a large internal gain and then run the open-loop simulation on
+    a system wrapping the same model — the prediction must reproduce the data
+    with negligible bias.
+    """
+    from custom_components.heating_assistant.controller import HouseThermalSDE
+    from custom_components.heating_assistant.thermal_model import HouseModel, Room
+    from custom_components.heating_assistant.heat_sources import ElectricHeater
+    from custom_components.heating_assistant.model_diagnostics import (
+        compute_open_loop_predictions,
+    )
+
+    dt = 60.0
+    room = Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0,
+                internal_gain=600.0)
+    model = HouseModel([room])
+    heater = ElectricHeater("h", "studio", 3000.0)
+
+    # Generate truth from the same model (internal_gain applied via step()).
+    temps = {"studio": 20.0}
+    history = []
+    for i in range(120):
+        history.append({
+            "y": [temps["studio"]], "u": [0.3], "d_outdoor": 5.0,
+            "d_solar": {"studio": 0.0}, "timestamp": 1000.0 + dt * i,
+        })
+        temps = model.step(dt, {"studio": heater.thermal_power(0.3, 5.0)},
+                           5.0, {"studio": 0.0})
+
+    system = HouseThermalSDE(model, [heater], dt)
+    result = compute_open_loop_predictions(
+        history, system, ["studio"], 1, dt, segment_length=30,
+    )
+    sim = result["per_room"]["studio"]["simulation"]
+    bias = float(np.mean([s["predicted"] - s["measured"] for s in sim]))
+    # Model matches truth (incl. internal gain) → essentially perfect fit
+    # (residual is only sub-step integrator / 3-decimal rounding noise).
+    # Before the fix the diagnostic ignored internal_gain and the bias was
+    # ~0.135 °C here, so this bound is comfortably below the regression.
+    assert abs(bias) < 1e-3, f"open-loop bias {bias} — internal_gain ignored?"
+    assert result["per_room"]["studio"]["rmse"] < 5e-3
+
+
+def test_open_loop_warm_starts_emitter_state():
+    """Open-loop segments must start at the same state the data is in,
+    including the emitter-lag state warm-started from the command.
+
+    ``HouseThermalSDE.initial_state_from_measurement`` is the single source
+    of truth: room temps come from the measurement (so ``hm(x0) == y0``) and
+    the emitter-lag block is warm-started to the commanded fraction instead
+    of cold-starting at zero.
+    """
+    from custom_components.heating_assistant.controller import HouseThermalSDE
+    from custom_components.heating_assistant.thermal_model import HouseModel, Room
+    from custom_components.heating_assistant.heat_sources import ElectricHeater
+
+    room = Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0)
+    model = HouseModel([room])
+    # Emitter time constant > 0 → one filter (φ) state appended.
+    heater = ElectricHeater("h", "studio", 3000.0, emitter_time_constant=600.0)
+    system = HouseThermalSDE(model, [heater], 60.0)
+
+    n = system._n_rooms
+    assert system._n_filtered == 1  # one emitter-lag state
+
+    y0 = np.array([19.5])
+    u0 = np.array([0.7])
+    x0 = system.initial_state_from_measurement(y0, u0)
+
+    # Room temperature initialised from the measurement; output matches it.
+    np.testing.assert_allclose(x0[:n], y0)
+    np.testing.assert_allclose(
+        system.hm(x0, u0, system.disturbance_vector(5.0, {}), np.array([]), 0.0),
+        y0,
+    )
+    # Emitter-lag state warm-started to the command (not cold at zero).
+    assert x0[n] == pytest.approx(0.7)
+
+
 def test_compute_open_loop_predictions_uses_correct_attribute_names():
     """compute_open_loop_predictions must use system.nd / system.nu (not n_d / n_u).
 

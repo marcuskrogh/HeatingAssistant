@@ -258,6 +258,7 @@ class KalmanMLEstimator:
         Q_var: float = 0.01,
         R_var: float = 0.25,
         regularization: float = 1.0,
+        max_window_steps: int = 120,
     ) -> None:
         self._rooms = rooms
         self._sources = sources
@@ -265,6 +266,15 @@ class KalmanMLEstimator:
         self._Q_var = Q_var
         self._R_var = R_var
         self._regularization = regularization
+        # Length [steps] of each open-loop simulation window in the
+        # identification objective.  Buildings have thermal time constants
+        # of many hours, so the window must be long enough for the open-loop
+        # trajectory to diverge meaningfully on a wrong R_ext / Q_int —
+        # otherwise those slow parameters are unconstrained and collapse onto
+        # the (possibly poor) prior.  The window is still bounded so a single
+        # bad data stretch can't dominate the gradient.  Default 120 steps
+        # (= 2 h at the 60 s sampling interval).
+        self._max_window_steps = int(max(20, max_window_steps))
 
         self._room_names: List[str] = [r.name for r in rooms]
         self._n = len(rooms)
@@ -604,6 +614,7 @@ class KalmanMLEstimator:
             if _cache[0] is None or not np.array_equal(theta, _cache[0]):
                 mse, g_mse = self._simulation_mse_and_grad(
                     theta, layout, std_history, nominal_dt=self._dt,
+                    max_window_steps=self._max_window_steps,
                 )
                 reg = _regularization_fn(theta)
                 reg_grad = self._compute_regularization_gradient(
@@ -639,13 +650,31 @@ class KalmanMLEstimator:
         best_f = float("inf")
         best_converged = False
 
-        for restart in range(_N_RESTARTS):
-            if restart == 0:
-                theta_start = theta_prior.copy()
-            else:
-                theta_start = _perturb(theta_prior, rng, restart)
-                theta_start = np.clip(theta_start, lb, ub)
+        # ── Build the set of starting points ───────────────────────────────
+        # Always include the configured prior.  Add a physics-informed start
+        # derived from a coarse least-squares fit of the per-room 1R1C energy
+        # balance: this makes the search robust to a poor configured prior
+        # (the common case before the first good estimate) and gives the
+        # optimiser a basin close to the data-consistent C / R_ext / Q_int.
+        # The remaining starts are small random perturbations of the prior.
+        # Multi-start keeps the lowest-objective result, so extra candidates
+        # can only help.
+        start_points: List[Tuple[str, np.ndarray]] = [("prior", theta_prior.copy())]
+        phys_theta = self._physics_informed_theta(
+            std_history, layout, theta_prior, lb, ub,
+        )
+        if phys_theta is not None:
+            start_points.append(("physics", phys_theta))
+            start_points.append(
+                ("physics+jitter", np.clip(_perturb(phys_theta, rng, 1), lb, ub))
+            )
+        for restart in range(1, _N_RESTARTS):
+            start_points.append(
+                (f"perturb{restart}",
+                 np.clip(_perturb(theta_prior, rng, restart), lb, ub))
+            )
 
+        for restart, (_start_label, theta_start) in enumerate(start_points):
             _cache[0] = None  # invalidate cache for new starting point
 
             try:
@@ -785,6 +814,129 @@ class KalmanMLEstimator:
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
+    def _physics_informed_theta(
+        self,
+        std_history: List[Dict[str, np.ndarray]],
+        layout: "_ThetaLayout",
+        theta_prior: np.ndarray,
+        lb: np.ndarray,
+        ub: np.ndarray,
+        nominal_dt: Optional[float] = None,
+    ) -> Optional[np.ndarray]:
+        """Coarse, data-driven starting point for the multi-start optimiser.
+
+        Performs an independent ordinary-least-squares fit of the lumped
+        1R1C energy balance for each room
+
+            C_i (dT_i/dt) = g_ext_i (T_out − T_i) + Q_i + q_int_i
+
+        where ``Q_i`` is the known heat injection (heaters at the prior
+        power-scale + solar) for room *i*.  Treating the inter-room coupling
+        as part of the residual, each room yields a linear system in the
+        unknowns ``[C_i, g_ext_i, q_int_i]`` solved by least squares over all
+        consecutive sample pairs with a near-nominal time step.
+
+        Only rooms with a well-conditioned fit and physically sensible
+        (positive, in-bounds) ``C`` and ``g_ext`` adopt the data-driven
+        values; every other room — and the heater-scale / inter-room-R
+        blocks — keeps its prior.  Returns ``None`` when no room could be
+        fit, so the caller simply falls back to the prior start.
+
+        The result is a *starting point* only; the full nonlinear multi-step
+        objective still refines it, so the coarseness of this fit (no
+        inter-room term, explicit-Euler derivative) is acceptable.
+        """
+        n = self._n
+        if len(std_history) < MIN_HISTORY_STEPS:
+            return None
+        dt_nom = float(nominal_dt) if nominal_dt else float(self._dt)
+
+        # Per-room accumulators for the design matrix rows.
+        rows: List[List[List[float]]] = [[] for _ in range(n)]
+        targets: List[List[float]] = [[] for _ in range(n)]
+
+        # Map each source to its room index and a thermal-power callable.
+        src_room = [self._room_names.index(s.room) if s.room in self._room_names
+                    else -1 for s in self._sources]
+
+        for k in range(len(std_history) - 1):
+            rec = std_history[k]
+            rec_next = std_history[k + 1]
+            try:
+                T_k = np.asarray(rec["ym"], dtype=float)
+                T_next = np.asarray(rec_next["ym"], dtype=float)
+                u_k = np.asarray(rec["u"], dtype=float)
+                d_k = np.asarray(rec["d"], dtype=float)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if T_k.size < n or T_next.size < n:
+                continue
+
+            t_k = rec.get("t")
+            t_next = rec_next.get("t")
+            if t_k is not None and t_next is not None:
+                dt = float(t_next) - float(t_k)
+                # Skip pairs straddling a gap (controller restart / pause).
+                if not (0.5 * dt_nom <= dt <= 1.5 * dt_nom):
+                    continue
+            else:
+                dt = dt_nom
+
+            T_out = float(d_k[0]) if d_k.size > 0 else 0.0
+
+            # Known heat injection per room: heaters (prior scale) + solar.
+            Q = np.zeros(n)
+            for j, src in enumerate(self._sources):
+                i = src_room[j]
+                if i < 0:
+                    continue
+                u_s = float(u_k[j]) if j < u_k.size else 0.0
+                try:
+                    Q[i] += float(src.thermal_power(max(0.0, u_s), T_out))
+                except Exception:
+                    pass
+            for i in range(n):
+                if 1 + i < d_k.size:
+                    Q[i] += float(d_k[1 + i])  # solar gain slot
+
+            for i in range(n):
+                dTdt = (float(T_next[i]) - float(T_k[i])) / dt
+                # C·dTdt − g·(T_out − T) − q_int = Q   →  unknown [C, g, q_int]
+                rows[i].append([dTdt, -(T_out - float(T_k[i])), -1.0])
+                targets[i].append(float(Q[i]))
+
+        theta = theta_prior.copy()
+        any_fit = False
+        for i in range(n):
+            A = np.asarray(rows[i], dtype=float)
+            b = np.asarray(targets[i], dtype=float)
+            if A.shape[0] < max(MIN_HISTORY_STEPS // 2, 10):
+                continue
+            # Require the regressors to actually vary, else the fit is
+            # ill-posed (e.g. constant temperature / no excitation).
+            if np.all(np.std(A, axis=0) < 1e-9):
+                continue
+            try:
+                sol, _res, rank, _sv = np.linalg.lstsq(A, b, rcond=None)
+            except np.linalg.LinAlgError:
+                continue
+            if rank < 3 or not np.all(np.isfinite(sol)):
+                continue
+            C_i, g_i, q_i = float(sol[0]), float(sol[1]), float(sol[2])
+            if not (C_i > 0.0 and g_i > 0.0):
+                continue  # unphysical — keep the prior for this room
+            log_mass = float(np.clip(math.log(C_i), _LOG_MASS_LO, _LOG_MASS_HI))
+            log_r = float(np.clip(math.log(1.0 / g_i), _LOG_R_LO, _LOG_R_HI))
+            q_int = float(np.clip(q_i, _Q_INT_LO, _Q_INT_HI))
+            theta[i] = log_mass
+            theta[n + i] = log_r
+            theta[2 * n + i] = q_int
+            any_fit = True
+
+        if not any_fit:
+            return None
+        return np.clip(theta, lb, ub)
+
     def _simulation_mse_and_grad(
         self,
         theta: np.ndarray,
@@ -904,10 +1056,19 @@ class KalmanMLEstimator:
                     continue
                 win = seg[win_start:win_end]
 
-                # Initialise from first measurement of this window
+                # Initialise from first measurement of this window, starting
+                # the free-run at the *same* state the data is in: room temps
+                # from the measurement and emitter-lag states warm-started to
+                # the commanded fraction (steady state of the lag filter).
+                # This mirrors the open-loop diagnostic and the live EKF, so
+                # the parameters we identify reflect the trajectory the user
+                # actually sees.  The warm-start carries no θ-dependence, so
+                # the per-window sensitivity correctly resets to zero.
                 ym0 = np.asarray(win[0]["ym"], dtype=float)
-                x = np.zeros(nx, dtype=float)
-                x[:min(n, len(ym0))] = ym0[:min(n, len(ym0))]
+                u0 = np.asarray(win[0].get("u", []), dtype=float)
+                x = np.asarray(
+                    model.initial_state_from_measurement(ym0, u0), dtype=float
+                )
                 sx = np.zeros((ntheta, nx))  # ∂x/∂θ — reset per window
 
                 for step in range(len(win) - 1):
@@ -976,8 +1137,13 @@ class KalmanMLEstimator:
                         sx = sx + h_sub * (sx @ F_full.T + dfdtheta_val)
                         x = x + h_sub * f_val
 
-                    if not valid or not np.all(np.isfinite(x)):
-                        break
+                    if (not valid or not np.all(np.isfinite(x))
+                            or not np.all(np.isfinite(sx))):
+                        # Overflow/divergence at an extreme trial point (e.g.
+                        # during a line search).  Mark the whole evaluation
+                        # infeasible so the optimiser backs off rather than
+                        # ingesting a non-finite gradient.
+                        return _SENTINEL, _zero_grad.copy()
 
                     residual = ym_next - x[:n]  # shape (n,)
                     total_sse += float(np.dot(residual, residual))
@@ -989,10 +1155,26 @@ class KalmanMLEstimator:
         if n_steps_used == 0:
             return _SENTINEL, _zero_grad.copy()
 
-        # Normalise per room per step so the objective is O(variance) and
-        # scale-invariant w.r.t. dataset length and number of rooms.
-        scale = float(n * n_steps_used)
-        return total_sse / scale, total_grad / scale
+        # Noise-weighted *sum* of squared residuals (a proper Gaussian
+        # data-misfit term), divided only by the number of rooms.
+        #
+        # We deliberately do NOT average over the number of steps.  Averaging
+        # made the objective's curvature independent of the dataset length,
+        # so the data could never out-vote the O(1) Gaussian prior no matter
+        # how many observations were collected — the estimates stayed pinned
+        # to the configured prior (manifesting as a poorly-fit open-loop with
+        # the wrong gains).  Summing over steps and weighting by the
+        # measurement variance ``R_var`` puts the data term on the same
+        # footing as the prior in :meth:`_compute_regularization`, so the
+        # data correctly dominates once enough informative samples exist
+        # while the prior still stabilises directions the data cannot
+        # constrain.
+        scale = float(n * self._R_var)
+        mse = total_sse / scale
+        grad = total_grad / scale
+        if not (np.isfinite(mse) and np.all(np.isfinite(grad))):
+            return _SENTINEL, _zero_grad.copy()
+        return mse, grad
 
     def _cd_ped_neg_ll_and_grad(
         self,
