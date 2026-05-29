@@ -96,10 +96,7 @@ from .const import (
     CONF_THERMAL_BRIDGE_PSI_L,
     CONF_TRACKING_WEIGHT,
     CONF_WEATHER_ENTITY,
-    CONF_SOLAR_FORECAST_ENTITY,
-    CONF_PV_PLANE_TILT,
-    CONF_PV_PLANE_AZIMUTH,
-    CONF_PV_PEAK_POWER,
+    CONF_SOLAR_RADIATION_ENTITY,
     CONF_SOLAR_EXPOSURE,
     CONF_SOLAR_FACING,
     DEFAULT_SOLAR_EXPOSURE,
@@ -357,16 +354,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_HEAT_SOURCES, default=[]): [_SOURCE_SCHEMA],
                 vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): str,
                 vol.Optional(CONF_WEATHER_ENTITY): str,
-                vol.Optional(CONF_SOLAR_FORECAST_ENTITY): str,
-                vol.Optional(CONF_PV_PLANE_TILT): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=90.0),
-                ),
-                vol.Optional(CONF_PV_PLANE_AZIMUTH): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=360.0),
-                ),
-                vol.Optional(CONF_PV_PEAK_POWER): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0),
-                ),
+                vol.Optional(CONF_SOLAR_RADIATION_ENTITY): str,
                 vol.Optional(CONF_LATITUDE): vol.Coerce(float),
                 vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(

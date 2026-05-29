@@ -111,7 +111,7 @@ async def async_setup_entry(
     entities.append(EstimatedParametersStatusSensor(coordinator))
     entities.append(MPCPerformanceSensor(coordinator))
     entities.append(WeatherForecastStatusSensor(coordinator))
-    entities.append(SolarForecastStatusSensor(coordinator))
+    entities.append(SolarRadiationStatusSensor(coordinator))
 
     # Price sensors — only when a price entity is configured
     if getattr(coordinator, "_price_entity", None):
@@ -2454,29 +2454,29 @@ class WeatherForecastStatusSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class SolarForecastStatusSensor(CoordinatorEntity, SensorEntity):
-    """Diagnostic sensor reporting the health of the solar-forecast read.
+class SolarRadiationStatusSensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor reporting the health of the solar-radiation forecast.
 
     The state is one of:
 
     * ``"ok"``        — the most recent read succeeded and drives the gains
     * ``"failing"``   — at least one consecutive read has failed
-    * ``"disabled"``  — no solar-forecast entity is configured
+    * ``"disabled"``  — no solar-radiation entity is configured
 
-    Attributes expose which solar source is active (data-driven forecast vs
-    the analytical clear-sky model), the matched provider schema, the current
-    GHI and its horizon series [W/m²] (kept here, off the history buffer), and
-    the usual error / timestamp diagnostics.
+    Attributes expose which solar source is active (the irradiance forecast vs
+    the analytical clear-sky model), the current GHI and its horizon series
+    [W/m²] (kept here, off the history buffer), and the usual error / timestamp
+    diagnostics.
     """
 
-    _attr_icon = "mdi:solar-power-variant"
+    _attr_icon = "mdi:weather-sunny"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
         super().__init__(coordinator)
         self._coordinator = coordinator
-        self._attr_name = "Heating Assistant – Solar Forecast Status"
-        self._attr_unique_id = f"{DOMAIN}_solar_forecast_status"
+        self._attr_name = "Heating Assistant – Solar Radiation Forecast Status"
+        self._attr_unique_id = f"{DOMAIN}_solar_radiation_status"
 
     @property
     def available(self) -> bool:
@@ -2484,7 +2484,7 @@ class SolarForecastStatusSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        if not getattr(self._coordinator, "_solar_forecast_entity", None):
+        if not getattr(self._coordinator, "_solar_radiation_entity", None):
             return "disabled"
         if getattr(self._coordinator, "solar_fc_consecutive_failures", 0) > 0:
             return "failing"
@@ -2495,11 +2495,10 @@ class SolarForecastStatusSensor(CoordinatorEntity, SensorEntity):
         last_err_at = getattr(self._coordinator, "solar_fc_last_error_at", None)
         last_ok_at = getattr(self._coordinator, "solar_fc_last_success_at", None)
         return {
-            "solar_forecast_entity": getattr(
-                self._coordinator, "_solar_forecast_entity", None
+            "solar_radiation_entity": getattr(
+                self._coordinator, "_solar_radiation_entity", None
             ),
             "active_source": getattr(self._coordinator, "solar_source", "analytical"),
-            "provider": getattr(self._coordinator, "_solar_provider", "none"),
             "ghi_now": getattr(self._coordinator, "ghi_now", None),
             "ghi_forecast": list(
                 getattr(self._coordinator, "ghi_forecast", []) or []

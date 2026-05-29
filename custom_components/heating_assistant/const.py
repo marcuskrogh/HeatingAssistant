@@ -393,18 +393,15 @@ CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
 CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = OCP step = EKF step (seconds)
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
-# Solar-forecast integration (a GHI / W·m⁻² sensor, or a PV-power forecast from
-# Forecast.Solar / Solcast / Open-Meteo Solar).  When configured, the forecast
-# supplies the solar model's *intensity* as a GHI series — decomposed into
-# beam/diffuse (Erbs) and transposed onto each window by geometry — replacing
-# the cloud-cover attenuation; the analytical clear-sky model remains the
-# automatic fallback.  For PV-power sensors, ``pv_peak_power`` is required to
-# scale watts to absolute irradiance and the plane tilt/azimuth improve the
-# de-projection; GHI sensors need neither.
-CONF_SOLAR_FORECAST_ENTITY = "solar_forecast_entity"  # HA sensor entity_id with a PV power forecast
-CONF_PV_PLANE_TILT = "pv_plane_tilt"        # degrees from horizontal (0–90), optional
-CONF_PV_PLANE_AZIMUTH = "pv_plane_azimuth"  # degrees clockwise from North (0–360), optional
-CONF_PV_PEAK_POWER = "pv_peak_power"        # Wp rated array power, optional
+# Solar-radiation (irradiance) forecast.  A sensor reporting the sun's Global
+# Horizontal Irradiance (GHI) in W/m² — e.g. the Open-Meteo
+# ``shortwave_radiation`` variable, a pyranometer, or any irradiance sensor,
+# ideally with an hourly forecast in its attributes.  When configured, the
+# forecast supplies the solar model's *intensity* — decomposed into beam/diffuse
+# (Erbs) and transposed onto each window by geometry — replacing the modelled
+# clear-sky irradiance; the analytical clear-sky model remains the automatic
+# fallback.  This is the sun's radiation, NOT solar-panel / PV production.
+CONF_SOLAR_RADIATION_ENTITY = "solar_radiation_entity"  # HA sensor entity_id, W/m² GHI
 CONF_TRACKING_WEIGHT = "tracking_weight"          # scalar weight on ‖z − z_ref‖² (setpoint tracking cost Q diagonal)
 CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (input regularisation cost R diagonal)
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (input rate-of-movement cost S diagonal)

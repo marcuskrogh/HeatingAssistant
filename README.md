@@ -129,7 +129,7 @@ Heating Assistant replaces simple on/off or PID thermostats with a physics-based
 | Feature | Detail |
 |---------|--------|
 | **Room-by-room thermal model** | Each room is an independent RC thermal node.  Heat flows between adjacent rooms and to the outdoors through configurable thermal resistances. |
-| **Solar heat gain disturbances** | Every window is modelled individually: area, compass orientation, and tilt angle feed a solar irradiance pipeline to produce a time-varying heat gain in Watts.  The irradiance *intensity* can optionally be driven by a Home Assistant **solar-forecast sensor** (Forecast.Solar, Solcast, a GHI sensor, …) — decomposed and transposed onto each window by the geometry model — with the analytical clear-sky model as the automatic fallback.  See §3.4 Step 9. |
+| **Solar heat gain disturbances** | Every window is modelled individually: area, compass orientation, and tilt angle feed a solar irradiance pipeline to produce a time-varying heat gain in Watts.  The irradiance *intensity* can optionally be driven by a Home Assistant **solar-radiation forecast** (a GHI / W·m⁻² sensor such as Open-Meteo's `shortwave_radiation`) — decomposed and transposed onto each window by the geometry model — with the analytical clear-sky model as the automatic fallback.  This uses the sun's radiation, not solar-panel production.  See §3.4 Step 9. |
 | **Electric heater support** | Resistive heaters and infrared panels modelled as `Q_thermal = P_electrical × η`.  Efficiency is configurable. |
 | **Air-source heat pump support** | Temperature-dependent COP based on Carnot scaling.  The pump shuts off automatically below a configurable outdoor temperature floor to prevent defrost damage.  Offset-based setpoint control (`max_temp_offset`) lets the heat pump modulate output via the gap between its internal sensor and the target temperature. |
 | **Multiple heat sources per room** | Any number of heaters and/or heat pumps can be assigned to the same room; the controller optimises them jointly. |
@@ -528,37 +528,31 @@ $$\dot{T}_{w,i}\big|_\text{sky} = -\frac{UA_{\text{sky},i}}{C_{w,i}} \cdot \big(
 
 This is implemented as a conductance bump on the wall block plus a constant cooling-drift bias $-UA_{\text{sky},i} \cdot \Delta T_\text{sky} / C_{w,i}$.  $\Delta T_\text{sky}$ is currently the constant `DEFAULT_DELTA_T_SKY = 6` K; Phase 5 replaces it with a cloud-cover-driven term.
 
-#### Step 9 — Optional: drive the intensity from a solar-forecast sensor
+#### Step 9 — Optional: drive the intensity from a solar-radiation forecast
+
+> **This is about the sun's radiation, not solar panels.**  The input here is a forecast of **solar irradiance** in W/m² — the energy arriving from the sun — *not* PV / solar-panel production.  No panel geometry, peak power, or inverter data is involved.
 
 The pipeline above is factored into three layers so the **intensity** can be swapped for a measured forecast while the geometry stays put:
 
 1. **Geometry** — sun position, incidence angle per surface, sky-view factor, and the extra-terrestrial reference $G_{on}$.  Pure almanac/trigonometry; shared by both intensity sources.
 2. **Intensity** *(swappable)* — the irradiance for the current sky:
    * **Fallback** — the clear-sky model (Steps 2–5) attenuated by the Kasten–Czeplak cloud factor.  This is what runs with no forecast configured.
-   * **Forecast** — a Global Horizontal Irradiance (GHI) value from a solar-forecast sensor.
+   * **Forecast** — a measured/forecast **Global Horizontal Irradiance (GHI)** in W/m² from a solar-radiation sensor.
 3. **Window coupling** — decompose the intensity into beam (DNI) + diffuse (DHI) and transpose onto each window (Step 6), then apply SHGC·area.
 
-When a forecast GHI is available it is decomposed into beam/diffuse using the **Erbs correlation** (`erbs_diffuse_fraction`), which derives the diffuse fraction from the clearness index $K_t = \text{GHI} / (G_{on}\sin\alpha)$ — geometry plus the forecast only, **no clear-sky transmittance assumption**.  The beam then follows the cosine of the incidence angle and the diffuse the sky-view factor, exactly as in Step 6.  This means the forecast supplies the *magnitude* (including real cloud, haze, and the cloud-driven shift toward diffuse light) while the model supplies only the *geometry* that redistributes it onto your specific windows.
+When a forecast GHI is available it is decomposed into beam/diffuse using the **Erbs correlation** (`erbs_diffuse_fraction`), which derives the diffuse fraction from the clearness index $K_t = \text{GHI} / (G_{on}\sin\alpha)$ — geometry plus the forecast only, **no clear-sky transmittance assumption**.  The beam then follows the cosine of the incidence angle and the diffuse the sky-view factor, exactly as in Step 6.  So the forecast supplies the *magnitude* of the sun's radiation (including real cloud, haze, and the cloud-driven shift toward diffuse light) while the model supplies only the *geometry* that redistributes it onto your specific windows.
 
-Configure it with the optional `solar_forecast_entity` (plus, for PV-power sensors, `pv_peak_power` and ideally `pv_plane_tilt` / `pv_plane_azimuth`).  The forecast drives every window/room; a room with no enumerated windows uses its `solar_exposure` preset instead.  The fallback is automatic and total: if the entity is missing, unavailable, stale, unparseable, or (for a PV-power sensor) lacks the peak power needed to scale watts to absolute irradiance, the cycle silently reverts to the clear-sky + cloud model — so configuring a forecast can only help, never break, the solar estimate.  The diagnostic `sensor.heating_assistant_solar_forecast_status` reports which source is active, the matched provider, the current GHI, and the horizon GHI series.
+Configure it with the optional `solar_radiation_entity` — a sensor whose value is solar irradiance in W/m², ideally exposing an hourly forecast series in its attributes (a `forecast`/`shortwave_radiation`/`ghi`/`irradiance` list of `{datetime, value}` or a `{timestamp: value}` map).  The current state is used for the present step; forecast entries cover the horizon, and any step beyond the forecast's coverage falls back to the clear-sky model.  The forecast drives every window/room; a room with no enumerated windows uses its `solar_exposure` preset instead.  The fallback is automatic and total: if the entity is missing, unavailable, stale, or carries no usable irradiance, the cycle silently reverts to the clear-sky + cloud model — so configuring a forecast can only help, never break, the solar estimate.  The diagnostic `sensor.heating_assistant_solar_radiation_forecast_status` reports whether the forecast or the analytical model is active, the current GHI, and the horizon GHI series.
 
-**How a sensor's value becomes GHI:**
+##### Where to get a solar-radiation forecast in Home Assistant
 
-| Sensor reports | How it is used |
-|---|---|
-| **GHI / shortwave radiation** [W/m²] (`unit_of_measurement` contains `W/m²`) | Used directly — the purest path, no inversion. |
-| **PV power** [W] for a configured plane *(Forecast.Solar, Solcast, …)* | Converted to a plane-of-array irradiance `1000·P/pv_peak_power`, then de-projected to GHI via the panel geometry (`pv_plane_tilt` / `pv_plane_azimuth`) and the Erbs split (`poa_to_ghi`).  Requires `pv_peak_power`; if the plane is omitted the panel is treated as a horizontal GHI proxy. |
+Most Home Assistant "solar forecast" integrations (Forecast.Solar, Solcast, Open-Meteo **Solar** Forecast) predict **PV-panel production** and are **not** what this needs — they answer "how many watts will my panels make", not "how much sun is hitting the ground".  Look instead for a source of **solar irradiance / shortwave radiation in W/m²**:
 
-##### Recommended Home Assistant solar-forecast integrations
+1. **[Open-Meteo](https://open-meteo.com/en/docs) `shortwave_radiation` (recommended, free, no API key).**  The Open-Meteo forecast API exposes `shortwave_radiation` (GHI), plus `direct_radiation` / `diffuse_radiation`, in W/m².  Expose it as a Home Assistant sensor — e.g. via a [RESTful sensor](https://www.home-assistant.io/integrations/rest/) hitting the forecast API, putting the hourly series in an attribute — and point `solar_radiation_entity` at it.  This is the cleanest fit: a true GHI forecast over the full horizon.
+2. **A physical pyranometer / solar-radiation sensor** (e.g. many weather stations report W/m²).  Gives an accurate *current* GHI; without a forecast attribute only the present step uses it and later steps fall back to the clear-sky model, so it mainly sharpens "now".
+3. **[OpenWeatherMap Solar Irradiance API](https://openweathermap.org/api/solar-energy-prediction)** or similar paid irradiance APIs, surfaced as a W/m² sensor.
 
-In rough order of how cleanly they feed this model:
-
-1. **An irradiance / GHI source (best).**  If you can expose **Global Horizontal Irradiance** in W/m² as a sensor — e.g. the **Open-Meteo** weather integration's `shortwave_radiation`, a local **pyranometer**, or any integration publishing GHI — point `solar_forecast_entity` at it.  No peak power or plane geometry needed; the value is used directly.
-2. **[Forecast.Solar](https://www.home-assistant.io/integrations/forecast_solar/)** (official core integration, free).  Exposes a per-timestep `watts` forecast for your configured plane.  Set `pv_peak_power` to your array's rated Wp and `pv_plane_tilt` / `pv_plane_azimuth` to match the panels.  Good default choice for most users with PV.
-3. **[Solcast PV Forecast](https://github.com/BJReplay/ha-solcast-solar)** (HACS; free tier with an API key).  Higher-quality satellite-calibrated forecasts via its `detailedForecast` (kW, auto-converted).  Same `pv_peak_power` + plane setup as Forecast.Solar.
-4. **Open-Meteo Solar Forecast** and similar PV-power custom integrations — supported through the generic parser; configure peak power + plane as above.
-
-Tips: give the integration the **same plane geometry** you enter here so the de-projection is accurate; set `pv_peak_power` to the array's rated DC power (it absorbs system losses into the absolute scale).  If you have **no PV system at all**, prefer option 1 (a GHI sensor) — it needs neither peak power nor plane and is the most direct fit.
+**Met.no and other standard weather integrations do *not* expose solar irradiance.**  The Met.no integration provides **cloud coverage** (which the analytical model already consumes via the `weather_entity` for its Kasten–Czeplak attenuation — Step 4) and a *current* **UV index**, but no broadband GHI and no radiation *forecast*.  UV index is a narrow-band proxy that varies independently of total shortwave radiation, so it isn't used as an irradiance source.  If all you have is Met.no, you already get its benefit through the cloud-cover path; to genuinely replace the modelled radiation with a forecast, add an irradiance source such as Open-Meteo's `shortwave_radiation`.
 
 ### 3.5 Heat source models
 
