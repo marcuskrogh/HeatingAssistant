@@ -85,6 +85,31 @@ def _coerce_condition(value: Any) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 
+def parse_ts(value: Any) -> Optional[float]:
+    """Parse an ISO-8601 string or :class:`datetime` to a UTC epoch [seconds].
+
+    Accepts a trailing ``Z`` and naive datetimes (assumed UTC).  Returns
+    ``None`` when the value is missing or unparsable.  Shared by the weather
+    and solar-forecast parsers so timestamp handling stays consistent.
+    """
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            if value.endswith("Z"):
+                value = value[:-1] + "+00:00"
+            fc_time = datetime.fromisoformat(value)
+        elif isinstance(value, datetime):
+            fc_time = value
+        else:
+            return None
+        if fc_time.tzinfo is None:
+            fc_time = fc_time.replace(tzinfo=timezone.utc)
+        return fc_time.timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
 def interpolate_forecast(entries: List[Tuple[float, float]], target_ts: float) -> float:
     """Linearly interpolate a sorted (ts, value) series at ``target_ts``.
 
@@ -175,20 +200,10 @@ def parse_forecast_field(
             value = fallback_coerce(entry.get(fallback_field))
         if value is None:
             continue
-        try:
-            if isinstance(dt_str, str):
-                if dt_str.endswith("Z"):
-                    dt_str = dt_str[:-1] + "+00:00"
-                fc_time = datetime.fromisoformat(dt_str)
-            elif isinstance(dt_str, datetime):
-                fc_time = dt_str
-            else:
-                continue
-            if fc_time.tzinfo is None:
-                fc_time = fc_time.replace(tzinfo=timezone.utc)
-            entries.append((fc_time.timestamp(), float(value)))
-        except (ValueError, TypeError):
+        ts = parse_ts(dt_str)
+        if ts is None:
             continue
+        entries.append((ts, float(value)))
 
     # Anchor at the current observation so the interpolated series starts
     # from the measured value and ramps smoothly into the forecast rather

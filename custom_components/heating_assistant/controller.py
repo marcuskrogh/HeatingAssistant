@@ -67,7 +67,8 @@ import numpy as np
 
 from .thermal_model import HouseModel
 from .heat_sources import HeatSource
-from .solar_model import room_solar_gains
+from .solar_model import room_solar_gains, room_solar_gains_from_exposure
+from .solar_forecast import select_ghi_for_step
 
 
 def _select_cloud_for_step(
@@ -2182,6 +2183,8 @@ class HeatingMPCController:
         outdoor_forecast: Optional[List[float]] = None,
         cloud_forecast: Optional[List[float]] = None,
         cloud_cover_now: Optional[float] = None,
+        ghi_forecast: Optional[List[Optional[float]]] = None,
+        ghi_now: Optional[float] = None,
         disabled_sources: Optional[Set[str]] = None,
         control_trajectory: Optional[Any] = None,
         price_forecast: Optional[List[float]] = None,
@@ -2213,6 +2216,14 @@ class HeatingMPCController:
         cloud_cover_now : float, optional
             Current cloud-cover fraction in [0, 1].  Used for the k=0 entry
             of the solar schedule when solar_gains was not pre-computed.
+        ghi_forecast : list of float, optional
+            Forecast Global Horizontal Irradiance [W/m²] per horizon step (from
+            a solar-forecast sensor).  When present for a step it drives the
+            intensity (decomposed geometrically) and takes precedence over the
+            cloud-cover attenuation; ``None`` entries fall back per-step.
+        ghi_now : float, optional
+            Current GHI [W/m²].  Used for the k=0 entry / current gains when
+            ``solar_gains`` was not pre-computed.
         disabled_sources : set of str, optional
             Names of heat sources whose rooms are currently off (schedule off,
             user toggle, or window override).  Their QP outputs are zeroed
@@ -2233,7 +2244,9 @@ class HeatingMPCController:
         if now is None:
             now = datetime.now(tz=timezone.utc)
         if solar_gains is None:
-            solar_gains = self._current_solar(now, cloud_cover=cloud_cover_now)
+            solar_gains = self._current_solar(
+                now, cloud_cover=cloud_cover_now, ghi=ghi_now
+            )
 
         N = self._horizon
         p = np.array([], dtype=float)  # no estimated parameters
@@ -2243,7 +2256,13 @@ class HeatingMPCController:
             outdoor_seq = list(outdoor_forecast[:N])
         else:
             outdoor_seq = self._forecast_outdoor(outdoor_temp)
-        solar_seq = self._forecast_solar(now, cloud_forecast=cloud_forecast, cloud_cover_now=cloud_cover_now)
+        solar_seq = self._forecast_solar(
+            now,
+            cloud_forecast=cloud_forecast,
+            cloud_cover_now=cloud_cover_now,
+            ghi_forecast=ghi_forecast,
+            ghi_now=ghi_now,
+        )
 
         # Store forecasts for visualisation
         self._outdoor_forecast = list(outdoor_seq)
@@ -2415,11 +2434,47 @@ class HeatingMPCController:
         """Persistence forecast: outdoor temperature constant over horizon."""
         return [current] * self._horizon
 
+    def _room_gain(
+        self,
+        name: str,
+        t: datetime,
+        cloud_cover: Optional[float],
+        ghi: Optional[float],
+    ) -> float:
+        """Solar gain [W] for one room, driven by forecast GHI (preferred) or cloud.
+
+        Uses the detailed per-window geometry when the room has any windows
+        (primary, higher-fidelity path).  Falls back to the room's single
+        solar-exposure aperture when no windows are configured, so a room can
+        opt out of per-window entry without losing solar gain entirely.
+        """
+        room = self._system._model.rooms[name]
+        if room.windows:
+            return room_solar_gains(
+                room.windows,
+                t,
+                self._latitude,
+                self._longitude,
+                cloud_cover=cloud_cover,
+                ghi=ghi,
+            )
+        return room_solar_gains_from_exposure(
+            room.solar_exposure_aperture,
+            room.solar_facing,
+            t,
+            self._latitude,
+            self._longitude,
+            cloud_cover=cloud_cover,
+            ghi=ghi,
+        )
+
     def _forecast_solar(
         self,
         now: datetime,
         cloud_forecast: Optional[List[float]] = None,
         cloud_cover_now: Optional[float] = None,
+        ghi_forecast: Optional[List[Optional[float]]] = None,
+        ghi_now: Optional[float] = None,
     ) -> List[Dict[str, float]]:
         """Solar gain forecast using the geometric solar model.
 
@@ -2430,28 +2485,19 @@ class HeatingMPCController:
         * k = 1 ... N-1 supply the OCP horizon steps 1 ... N-1.
         * k = N is one step beyond the OCP horizon for visualisation.
 
-        When cloud_forecast is provided (one fraction per horizon step),
-        the clear-sky irradiance is attenuated per the Kasten-Czeplak factor.
-        Step k uses cloud_forecast[k] for k < len(cloud_forecast); steps
-        beyond the supplied forecast hold the last value (persistence).
-
-        When cloud_forecast is None but cloud_cover_now is provided, every
-        step uses cloud_cover_now (persistence fallback) so the solar
-        forecast reflects the currently-observed cloudiness rather than
-        assuming a clear sky.
+        Intensity per step follows a precedence: forecast GHI [W/m²] (decomposed
+        geometrically) when available, else the clear-sky model attenuated by the
+        Kasten-Czeplak cloud factor, else clear sky.  GHI steps outside the
+        forecast's coverage fall back to the cloud/clear path; cloud cover beyond
+        its forecast holds the last value (persistence).
         """
         schedules = []
         for k in range(self._horizon + 1):  # N+1 entries: k = 0 ... N
             t = now + timedelta(seconds=self._dt * k)
+            g = select_ghi_for_step(ghi_forecast, k, fallback=ghi_now)
             cc = _select_cloud_for_step(cloud_forecast, k, fallback=cloud_cover_now)
             schedules.append({
-                name: room_solar_gains(
-                    self._system._model.rooms[name].windows,
-                    t,
-                    self._latitude,
-                    self._longitude,
-                    cloud_cover=cc,
-                )
+                name: self._room_gain(name, t, cc, g)
                 for name in self._system._room_list
             })
         return schedules
@@ -2460,16 +2506,11 @@ class HeatingMPCController:
         self,
         now: datetime,
         cloud_cover: Optional[float] = None,
+        ghi: Optional[float] = None,
     ) -> Dict[str, float]:
         """Current-step solar gains for all rooms."""
         return {
-            name: room_solar_gains(
-                self._system._model.rooms[name].windows,
-                now,
-                self._latitude,
-                self._longitude,
-                cloud_cover=cloud_cover,
-            )
+            name: self._room_gain(name, now, cloud_cover, ghi)
             for name in self._system._room_list
         }
 

@@ -41,6 +41,15 @@ from .const import (
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_PV_PLANE_TILT,
+    CONF_PV_PLANE_AZIMUTH,
+    CONF_PV_PEAK_POWER,
+    CONF_SOLAR_EXPOSURE,
+    CONF_SOLAR_FACING,
+    DEFAULT_SOLAR_EXPOSURE,
+    DEFAULT_SOLAR_FACING,
+    SOLAR_EXPOSURE_TO_APERTURE,
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
@@ -142,7 +151,8 @@ from .heat_sources import ElectricHeater, HeatPump, HeatSource
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import HeatingMPCController
 from .ground_temp import ground_temperature
-from .solar_model import room_solar_gains
+from .solar_model import room_solar_gains, room_solar_gains_from_exposure
+from . import solar_forecast as _solar_fc
 from .schedule import (
     EffectiveControlParams,
     EffectiveSetpoint,
@@ -179,6 +189,16 @@ def _coerce_interval_seconds(value: Any) -> float:
     return float(value)
 
 
+
+
+def _coerce_opt_float(value: Any) -> Optional[float]:
+    """Return ``float(value)`` or ``None`` for missing/blank/unparsable input."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
@@ -246,6 +266,13 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                 thermal_bridge_psi_l=rc.get(
                     CONF_THERMAL_BRIDGE_PSI_L, DEFAULT_THERMAL_BRIDGE_PSI_L,
                 ),
+                # Optional per-room solar-exposure preset — the no-geometry
+                # fallback used when the room has no enumerated windows.
+                solar_exposure_aperture=SOLAR_EXPOSURE_TO_APERTURE.get(
+                    rc.get(CONF_SOLAR_EXPOSURE, DEFAULT_SOLAR_EXPOSURE),
+                    SOLAR_EXPOSURE_TO_APERTURE[DEFAULT_SOLAR_EXPOSURE],
+                ),
+                solar_facing=rc.get(CONF_SOLAR_FACING, DEFAULT_SOLAR_FACING),
             )
         )
     return HouseModel(rooms)
@@ -324,6 +351,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     _RUNTIME_RECONFIG_KEYS: Set[str] = {
         CONF_OUTDOOR_TEMP_ENTITY,
         CONF_WEATHER_ENTITY,
+        CONF_SOLAR_FORECAST_ENTITY,
+        CONF_PV_PLANE_TILT,
+        CONF_PV_PLANE_AZIMUTH,
+        CONF_PV_PEAK_POWER,
         CONF_LATITUDE,
         CONF_LONGITUDE,
         CONF_TRACKING_WEIGHT,
@@ -352,6 +383,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._longitude: float = data.get(CONF_LONGITUDE, hass.config.longitude)
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
+        self._solar_forecast_entity: Optional[str] = options.get(CONF_SOLAR_FORECAST_ENTITY) or data.get(CONF_SOLAR_FORECAST_ENTITY)
+        self._pv_plane_tilt: Optional[float] = _coerce_opt_float(
+            options.get(CONF_PV_PLANE_TILT, data.get(CONF_PV_PLANE_TILT))
+        )
+        self._pv_plane_azimuth: Optional[float] = _coerce_opt_float(
+            options.get(CONF_PV_PLANE_AZIMUTH, data.get(CONF_PV_PLANE_AZIMUTH))
+        )
+        self._pv_peak_power: Optional[float] = _coerce_opt_float(
+            options.get(CONF_PV_PEAK_POWER, data.get(CONF_PV_PEAK_POWER))
+        )
         self._price_entity: Optional[str] = options.get(CONF_PRICE_ENTITY) or data.get(CONF_PRICE_ENTITY)
         self._price_net_tariff: float = float(
             options.get(CONF_PRICE_NET_TARIFF, data.get(CONF_PRICE_NET_TARIFF, DEFAULT_PRICE_NET_TARIFF))
@@ -450,6 +491,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # flood the log.  We re-warn whenever the failure count crosses a
         # boundary (1, 2, 5, 10, 50, 100, …).
         self._weather_warn_thresholds: tuple = (1, 2, 5, 10, 50, 100, 500, 1000)
+
+        # Solar-forecast fetch health + state (consumed by the diagnostic
+        # SolarForecastStatusSensor).  ``_solar_provider`` records which schema
+        # the last successful parse matched; ``solar_source`` records whether
+        # the forecast GHI or the analytical model drove the most recent
+        # cycle's solar gains.
+        self.solar_fc_last_error: Optional[str] = None
+        self.solar_fc_last_error_at: Optional[datetime] = None
+        self.solar_fc_last_success_at: Optional[datetime] = None
+        self.solar_fc_consecutive_failures: int = 0
+        self._solar_provider: str = "none"
+        self.solar_source: str = "analytical"
+        self.ghi_now: Optional[float] = None
+        self.ghi_forecast: List[Optional[float]] = []
 
         # Restore persisted estimated parameters so that identified values
         # survive a full Home Assistant restart (not just an in-memory reload).
@@ -880,6 +935,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._outdoor_entity = str(pending.get(CONF_OUTDOOR_TEMP_ENTITY, ""))
         if CONF_WEATHER_ENTITY in pending:
             self._weather_entity = str(pending.get(CONF_WEATHER_ENTITY, ""))
+        if CONF_SOLAR_FORECAST_ENTITY in pending:
+            self._solar_forecast_entity = str(pending.get(CONF_SOLAR_FORECAST_ENTITY, "")) or None
+        if CONF_PV_PLANE_TILT in pending:
+            self._pv_plane_tilt = _coerce_opt_float(pending.get(CONF_PV_PLANE_TILT))
+        if CONF_PV_PLANE_AZIMUTH in pending:
+            self._pv_plane_azimuth = _coerce_opt_float(pending.get(CONF_PV_PLANE_AZIMUTH))
+        if CONF_PV_PEAK_POWER in pending:
+            self._pv_peak_power = _coerce_opt_float(pending.get(CONF_PV_PEAK_POWER))
         if CONF_LATITUDE in pending:
             self._latitude = float(pending.get(CONF_LATITUDE, self._latitude))
         if CONF_LONGITUDE in pending:
@@ -1060,6 +1123,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             cloud_cover_now = self._read_cloud_cover_now()
             cloud_forecast = await self._async_read_cloud_forecast(cloud_cover_now=cloud_cover_now)
 
+            # 2c'. Read the optional solar forecast and derive a GHI series.
+            #      When no entity is configured (or it is unavailable / stale /
+            #      unparseable / lacks the peak power needed to scale PV power to
+            #      irradiance) both values are ``None`` and the solar model falls
+            #      back to the cloud-cover attenuation above — today's behaviour.
+            ghi_now, ghi_forecast = self._read_ghi(self.now_utc)
+
             # 2d. Read current wind speed for the Sherman–Grimsrud
             #     infiltration overlay (Phase 1 C1).  When the weather
             #     entity does not expose ``wind_speed`` this returns
@@ -1097,16 +1167,21 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if hasattr(self.controller, "set_ground_temp"):
                 self.controller.set_ground_temp(ground_temp_now)
 
-            # 3. Compute current solar gains for visualization
+            # 3. Compute current solar gains for visualization.  The forecast
+            #    GHI (when available) drives the intensity and takes precedence
+            #    over cloud cover; a room with no enumerated windows falls back
+            #    to its single solar-exposure aperture.
             now = self.now_utc
             self.cloud_cover = cloud_cover_now
+            self.ghi_now = ghi_now
+            self.ghi_forecast = list(ghi_forecast or [])
+            self.solar_source = (
+                "forecast" if ghi_forecast or ghi_now is not None
+                else "analytical"
+            )
             self.solar_gains = {
-                name: room_solar_gains(
-                    self.model.rooms[name].windows,
-                    now,
-                    self._latitude,
-                    self._longitude,
-                    cloud_cover=cloud_cover_now,
+                name: self._room_solar_gain(
+                    name, now, cloud_cover_now, ghi_now
                 )
                 for name in self.model.room_names
             }
@@ -1129,6 +1204,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     outdoor_forecast=outdoor_forecast,
                     cloud_forecast=cloud_forecast,
                     cloud_cover_now=cloud_cover_now,
+                    ghi_forecast=ghi_forecast,
+                    ghi_now=ghi_now,
                     disabled_sources=disabled_src_names or None,
                     control_trajectory=control_traj,
                     price_forecast=self.price_forecast,
@@ -1233,6 +1310,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "d_outdoor": outdoor_temp,
                 "d_solar": dict(self.solar_gains),
                 "cloud_cover": cloud_cover_now,
+                # Scalar only — the full horizon-length GHI array is kept off
+                # the bounded history buffer (it lives on the diagnostic
+                # SolarForecastStatusSensor instead) to limit recorder growth.
+                "ghi_now": ghi_now,
+                "solar_source": self.solar_source,
                 "timestamp": now.timestamp(),
                 # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
                 "kalman_innovation": kalman_innovation,
@@ -1427,6 +1509,111 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     def _read_wind_speed_now(self) -> Optional[float]:
         return _weather.read_wind_speed_now(self.hass, self._weather_entity)
+
+    def _record_solar_fc_success(self) -> None:
+        """Mark the most recent solar-forecast read as successful."""
+        if self.solar_fc_consecutive_failures > 0:
+            _LOGGER.info(
+                "Solar forecast recovered for %s after %d consecutive failures",
+                self._solar_forecast_entity,
+                self.solar_fc_consecutive_failures,
+            )
+        self.solar_fc_last_error = None
+        self.solar_fc_last_error_at = None
+        self.solar_fc_last_success_at = self.now_utc
+        self.solar_fc_consecutive_failures = 0
+
+    def _record_solar_fc_failure(self, reason: str) -> None:
+        """Record a solar-forecast read failure and log on threshold crossings."""
+        self.solar_fc_consecutive_failures += 1
+        self.solar_fc_last_error = reason
+        self.solar_fc_last_error_at = self.now_utc
+        if self.solar_fc_consecutive_failures in self._weather_warn_thresholds:
+            _LOGGER.warning(
+                "Solar forecast unavailable for %s (failure #%d): %s",
+                self._solar_forecast_entity,
+                self.solar_fc_consecutive_failures,
+                reason,
+            )
+
+    def _read_ghi(
+        self, now: datetime,
+    ) -> Tuple[Optional[float], Optional[List[Optional[float]]]]:
+        """Read the solar-forecast entity and derive a GHI series [W/m²].
+
+        Returns ``(ghi_now, ghi_forecast)``.  Both are ``None`` when no entity
+        is configured, it is unavailable / stale / unparseable, or no absolute
+        GHI can be derived (a PV-power sensor with no configured peak power) —
+        in which case the solar model falls back to the cloud-cover attenuation
+        (today's behaviour).
+        """
+        self._solar_provider = "none"
+        if not self._solar_forecast_entity:
+            return None, None
+
+        state = self.hass.states.get(self._solar_forecast_entity)
+        if state is None or getattr(state, "state", None) in _solar_fc._UNAVAILABLE_STATES:
+            self._record_solar_fc_failure("entity unavailable")
+            return None, None
+        if _solar_fc.is_stale(state, now):
+            self._record_solar_fc_failure("forecast stale")
+            return None, None
+
+        series, provider = _solar_fc.parse_pv_power_forecast(state)
+        kind = _solar_fc.detect_value_kind(state)
+        value_now = _solar_fc.read_value_now(
+            self.hass, self._solar_forecast_entity, now=now,
+        )
+        if not series and value_now is None:
+            self._record_solar_fc_failure("no parsable forecast series")
+            return None, None
+
+        self._solar_provider = provider
+        forecast, ghi_now = _solar_fc.compute_ghi_series(
+            series,
+            value_now,
+            kind,
+            self._horizon,
+            float(self.dt),
+            self._latitude,
+            self._longitude,
+            now,
+            plane_tilt=self._pv_plane_tilt,
+            plane_azimuth=self._pv_plane_azimuth,
+            peak_power=self._pv_peak_power,
+        )
+        if forecast is None and ghi_now is None:
+            # Most commonly: a PV-power sensor without a configured peak power,
+            # so the watts can't be scaled to absolute irradiance.
+            self._record_solar_fc_failure("GHI underivable (set PV peak power)")
+            return None, None
+
+        self._record_solar_fc_success()
+        return ghi_now, forecast
+
+    def _room_solar_gain(
+        self,
+        name: str,
+        now: datetime,
+        cloud_cover: Optional[float],
+        ghi: Optional[float],
+    ) -> float:
+        """Per-room solar gain [W]: windows when present, else exposure preset.
+
+        Mirrors the controller's per-room selection so the coordinator's
+        current-step ``solar_gains`` snapshot matches the forecast path.
+        """
+        room = self.model.rooms[name]
+        if room.windows:
+            return room_solar_gains(
+                room.windows, now, self._latitude, self._longitude,
+                cloud_cover=cloud_cover, ghi=ghi,
+            )
+        return room_solar_gains_from_exposure(
+            room.solar_exposure_aperture, room.solar_facing,
+            now, self._latitude, self._longitude,
+            cloud_cover=cloud_cover, ghi=ghi,
+        )
 
     # Backwards-compatible aliases for any caller / test that imported the
     # static helpers from the coordinator before the U3 weather extraction.

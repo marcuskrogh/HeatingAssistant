@@ -105,6 +105,18 @@ from .const import (
     CONF_THERMAL_MASS,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_PV_PLANE_TILT,
+    CONF_PV_PLANE_AZIMUTH,
+    CONF_PV_PEAK_POWER,
+    CONF_SOLAR_EXPOSURE,
+    CONF_SOLAR_FACING,
+    DEFAULT_SOLAR_EXPOSURE,
+    DEFAULT_SOLAR_FACING,
+    SOLAR_EXPOSURE_NONE,
+    SOLAR_EXPOSURE_LOW,
+    SOLAR_EXPOSURE_MEDIUM,
+    SOLAR_EXPOSURE_HIGH,
     CONF_WINDOWS,
     CONF_WINDOW_AREA,
     CONF_WINDOW_ORIENTATION,
@@ -340,6 +352,22 @@ def _dropdown(options: List[str], *, translation_key: Optional[str] = None) -> S
     if translation_key is not None:
         cfg_kwargs["translation_key"] = translation_key
     return SelectSelector(SelectSelectorConfig(**cfg_kwargs))
+
+
+def _degrees_to_compass(degrees: float) -> str:
+    """Return the compass label whose degrees are nearest to ``degrees``.
+
+    Inverse of ``COMPASS_TO_DEGREES`` (handling the 0/360 wrap) so a stored
+    ``solar_facing`` in degrees pre-fills the compass dropdown correctly.
+    """
+    best_label = "S"
+    best_diff = 360.0
+    for label, deg in COMPASS_TO_DEGREES.items():
+        diff = abs((float(degrees) - float(deg) + 180.0) % 360.0 - 180.0)
+        if diff < best_diff:
+            best_diff = diff
+            best_label = label
+    return best_label
 
 
 def _radio(options: List[str], *, translation_key: Optional[str] = None) -> SelectSelector:
@@ -595,6 +623,8 @@ def _room_form_schema(
     facade_solar_share_default: float = DEFAULT_FACADE_SOLAR_SHARE,
     thermal_bridge_psi_l_default: float = DEFAULT_THERMAL_BRIDGE_PSI_L,
     sky_radiative_ua_default: float = DEFAULT_SKY_RADIATIVE_UA,
+    solar_exposure_default: str = DEFAULT_SOLAR_EXPOSURE,
+    solar_facing_default: str = "S",
 ) -> vol.Schema:
     """Flat schema shared by the add-room and edit-room forms.
 
@@ -645,6 +675,25 @@ def _room_form_schema(
             vol.Optional(
                 CONF_SKY_RADIATIVE_UA, default=float(sky_radiative_ua_default),
             ): _number_box(min_value=0.0, max_value=100.0, step=0.5, unit="W/K"),
+            # Solar-exposure preset — the lightweight alternative to adding
+            # individual windows.  Used only when the room has no windows;
+            # otherwise the detailed window geometry takes precedence.
+            vol.Optional(
+                CONF_SOLAR_EXPOSURE, default=solar_exposure_default,
+            ): _dropdown(
+                [
+                    SOLAR_EXPOSURE_NONE,
+                    SOLAR_EXPOSURE_LOW,
+                    SOLAR_EXPOSURE_MEDIUM,
+                    SOLAR_EXPOSURE_HIGH,
+                ],
+                translation_key="solar_exposure",
+            ),
+            vol.Optional(
+                CONF_SOLAR_FACING, default=solar_facing_default,
+            ): _dropdown(
+                list(COMPASS_TO_DEGREES), translation_key="orientation",
+            ),
         }
     )
 
@@ -889,6 +938,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         # (EntitySelector rejects "" as an invalid default).
         outdoor_temp = current.get(CONF_OUTDOOR_TEMP_ENTITY) or None
         weather = current.get(CONF_WEATHER_ENTITY) or None
+        solar_forecast = current.get(CONF_SOLAR_FORECAST_ENTITY) or None
         price_entity = current.get(CONF_PRICE_ENTITY) or None
 
         schema_dict: Dict[Any, Any] = {
@@ -900,6 +950,29 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 CONF_WEATHER_ENTITY,
                 description={"suggested_value": weather},
             ): EntitySelector(EntitySelectorConfig(domain="weather")),
+            # Optional solar-forecast sensor: a GHI / W·m⁻² sensor (used
+            # directly) or a PV-power forecast (Forecast.Solar / Solcast /
+            # Open-Meteo Solar).  When set, the forecast supplies the solar
+            # model's GHI intensity (decomposed + transposed by geometry),
+            # replacing the cloud-cover attenuation; the clear-sky model is the
+            # automatic fallback.  For PV-power sensors set the peak power below
+            # (required) and the plane tilt/azimuth (improves de-projection).
+            vol.Optional(
+                CONF_SOLAR_FORECAST_ENTITY,
+                description={"suggested_value": solar_forecast},
+            ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+            vol.Optional(
+                CONF_PV_PLANE_TILT,
+                description={"suggested_value": current.get(CONF_PV_PLANE_TILT)},
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=90.0)),
+            vol.Optional(
+                CONF_PV_PLANE_AZIMUTH,
+                description={"suggested_value": current.get(CONF_PV_PLANE_AZIMUTH)},
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=360.0)),
+            vol.Optional(
+                CONF_PV_PEAK_POWER,
+                description={"suggested_value": current.get(CONF_PV_PEAK_POWER)},
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
             vol.Optional(
                 CONF_PRICE_ENTITY,
                 description={"suggested_value": price_entity},
@@ -1108,6 +1181,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 facade_solar_share=flat.get(CONF_FACADE_SOLAR_SHARE),
                 thermal_bridge_psi_l=flat.get(CONF_THERMAL_BRIDGE_PSI_L),
                 sky_radiative_ua=flat.get(CONF_SKY_RADIATIVE_UA),
+                solar_exposure=flat.get(CONF_SOLAR_EXPOSURE),
+                solar_facing=COMPASS_TO_DEGREES.get(
+                    flat.get(CONF_SOLAR_FACING), DEFAULT_SOLAR_FACING,
+                ),
             )
             if err is None:
                 return await self.async_step_manage_rooms()
@@ -1166,6 +1243,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 facade_solar_share=flat.get(CONF_FACADE_SOLAR_SHARE),
                 thermal_bridge_psi_l=flat.get(CONF_THERMAL_BRIDGE_PSI_L),
                 sky_radiative_ua=flat.get(CONF_SKY_RADIATIVE_UA),
+                solar_exposure=flat.get(CONF_SOLAR_EXPOSURE),
+                solar_facing=COMPASS_TO_DEGREES.get(
+                    flat.get(CONF_SOLAR_FACING), DEFAULT_SOLAR_FACING,
+                ),
             )
             if err is None:
                 return await self.async_step_manage_rooms()
@@ -1192,6 +1273,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     sky_radiative_ua_default=flat.get(
                         CONF_SKY_RADIATIVE_UA, DEFAULT_SKY_RADIATIVE_UA,
                     ),
+                    solar_exposure_default=flat.get(
+                        CONF_SOLAR_EXPOSURE, DEFAULT_SOLAR_EXPOSURE,
+                    ),
+                    solar_facing_default=flat.get(CONF_SOLAR_FACING, "S"),
                 ),
                 errors={CONF_ROOM_NAME: err},
                 description_placeholders={"name": room.get(CONF_ROOM_NAME, "")},
@@ -1238,6 +1323,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             ),
             sky_radiative_ua_default=float(
                 room.get(CONF_SKY_RADIATIVE_UA, DEFAULT_SKY_RADIATIVE_UA)
+            ),
+            solar_exposure_default=room.get(CONF_SOLAR_EXPOSURE, DEFAULT_SOLAR_EXPOSURE),
+            solar_facing_default=_degrees_to_compass(
+                room.get(CONF_SOLAR_FACING, DEFAULT_SOLAR_FACING)
             ),
         )
         return self.async_show_form(

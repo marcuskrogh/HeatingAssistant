@@ -69,6 +69,10 @@
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor",
           "weather_entity": "Weather forecast",
+          "solar_forecast_entity": "Solar PV forecast sensor",
+          "pv_plane_tilt": "PV panel tilt (°)",
+          "pv_plane_azimuth": "PV panel azimuth (°)",
+          "pv_peak_power": "PV peak power (Wp)",
           "price_entity": "Electricity price sensor",
           "price_net_tariff": "Net tariff (per kWh)",
           "price_spot_surcharge": "Spot price surcharge (per kWh)",
@@ -83,6 +87,10 @@
         "data_description": {
           "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
           "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
+          "solar_forecast_entity": "Optional. A solar-forecast sensor: either a GHI / shortwave-radiation sensor in W/m² (used directly — best), or a PV power forecast (Forecast.Solar, Solcast, Open-Meteo Solar). Its irradiance drives the solar model's intensity, decomposed and transposed onto your windows by geometry; the analytical clear-sky model stays as the automatic fallback.",
+          "pv_plane_tilt": "Optional (PV-power sensors only). Tilt of your PV panels from horizontal (0 = flat, 90 = vertical). Used to de-project panel power to horizontal irradiance. If omitted, the panel is treated as a horizontal proxy.",
+          "pv_plane_azimuth": "Optional (PV-power sensors only). Compass direction your PV panels face in degrees (0 = North, 90 = East, 180 = South, 270 = West).",
+          "pv_peak_power": "Required for PV-power sensors. Rated peak power of the PV array in watts (Wp); used to scale the power forecast to absolute irradiance (1000·P/peak). Not needed for GHI / W/m² sensors. Without it, a PV-power forecast can't be used and the model falls back to the clear-sky estimate.",
           "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating. Enable the price sensitivity slider in Control behaviour to activate.",
           "price_net_tariff": "Fixed grid / network tariff to add to the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.20 DKK/kWh). Ensures the effective price seen by the controller is never below your actual cost of electricity.",
           "price_spot_surcharge": "Fixed spot price surcharge or electricity tax to add on top of the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.90 DKK/kWh for Danish elafgift). Together with the net tariff this floors the effective price at a realistic consumer value.",
@@ -145,7 +153,9 @@
           "facade_colour": "Facade colour",
           "facade_solar_share": "Facade solar share",
           "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
-          "sky_radiative_ua": "Sky radiative coupling (W/K)"
+          "sky_radiative_ua": "Sky radiative coupling (W/K)",
+          "solar_exposure": "Solar exposure",
+          "solar_facing": "Sun-facing direction"
         },
         "data_description": {
           "name": "A unique identifier for this room (e.g. 'Living Room'). Used as the climate entity name.",
@@ -159,7 +169,9 @@
           "facade_colour": "Advanced — affects how much solar gain the opaque walls absorb. Darker = more absorption.",
           "facade_solar_share": "Advanced — fraction of window-derived solar gain attributed to the opaque facade (0 = ignored). Typical 0.2–0.6 when enabled.",
           "thermal_bridge_psi_l": "Advanced — extra heat loss from window frames, balcony slabs, etc. Leave at 0 if unknown — the model can infer it from data.",
-          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky (clear-night cooling). Leave at 0 if unknown."
+          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky (clear-night cooling). Leave at 0 if unknown.",
+          "solar_exposure": "Quick alternative to listing individual windows: how much direct sun this room gets. Used only when no windows are added below; adding windows overrides it.",
+          "solar_facing": "The direction the room's main glazing faces. Only used with the solar-exposure preset above."
         }
       },
       "edit_room": {
@@ -184,7 +196,9 @@
           "facade_colour": "Facade colour",
           "facade_solar_share": "Facade solar share",
           "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
-          "sky_radiative_ua": "Sky radiative coupling (W/K)"
+          "sky_radiative_ua": "Sky radiative coupling (W/K)",
+          "solar_exposure": "Solar exposure",
+          "solar_facing": "Sun-facing direction"
         },
         "data_description": {
           "name": "A unique identifier for this room.",
@@ -198,7 +212,9 @@
           "facade_colour": "Advanced — affects opaque-wall solar absorption.",
           "facade_solar_share": "Advanced — fraction of window-derived solar gain attributed to the opaque facade.",
           "thermal_bridge_psi_l": "Advanced — extra heat loss from window frames, balcony slabs, etc.",
-          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky."
+          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky.",
+          "solar_exposure": "Quick alternative to listing windows: how much direct sun this room gets. Used only when no windows are added; adding windows overrides it.",
+          "solar_facing": "The direction the room's main glazing faces. Only used with the solar-exposure preset."
         }
       },
       "manage_room_windows": {
@@ -464,6 +480,14 @@
         "SW": "Southwest",
         "W": "West",
         "NW": "Northwest"
+      }
+    },
+    "solar_exposure": {
+      "options": {
+        "none": "None (no direct sun / use windows below)",
+        "low": "Low (small or shaded glazing)",
+        "medium": "Medium (typical room)",
+        "high": "High (large sun-facing glazing)"
       }
     },
     "source_type": {

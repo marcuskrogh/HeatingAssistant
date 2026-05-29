@@ -31,6 +31,7 @@ from .const import (
     DEFAULT_FACADE_SOLAR_SHARE,
     DEFAULT_INFILTRATION_FRACTION,
     DEFAULT_SKY_RADIATIVE_UA,
+    DEFAULT_SOLAR_FACING,
     DEFAULT_THERMAL_BRIDGE_PSI_L,
     MAX_INFILTRATION_FRACTION,
     SHERMAN_GRIMSRUD_DT_TYPICAL,
@@ -111,6 +112,8 @@ class Room:
         facade_absorptance: float = DEFAULT_FACADE_ABSORPTANCE,
         facade_solar_share: float = DEFAULT_FACADE_SOLAR_SHARE,
         thermal_bridge_psi_l: float = DEFAULT_THERMAL_BRIDGE_PSI_L,
+        solar_exposure_aperture: float = 0.0,
+        solar_facing: float = DEFAULT_SOLAR_FACING,
         temperature: Optional[float] = None,
         # Legacy 2R2C parameters — accepted but ignored so existing call
         # sites (coordinator, parameter_estimator) continue to work
@@ -146,6 +149,12 @@ class Room:
 
         # Phase 1 C5 — linear thermal-bridge correction.
         self.thermal_bridge_psi_l: float = max(0.0, float(thermal_bridge_psi_l))
+
+        # Optional per-room solar-exposure preset (no-geometry fallback for
+        # solar gain when no windows are enumerated).  ``aperture`` is the
+        # effective collecting area [m²·SHGC]; 0 disables it.
+        self.solar_exposure_aperture: float = max(0.0, float(solar_exposure_aperture))
+        self.solar_facing: float = float(solar_facing)
 
         # Single temperature node — initialise from ``temperature`` kwarg,
         # or fall back to ``air_temperature`` (legacy), then default 20 °C.
