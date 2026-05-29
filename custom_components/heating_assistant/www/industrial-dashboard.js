@@ -104,7 +104,8 @@ class HaIndustrialPanel extends HTMLElement {
     `;
 
     this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
-      window.dispatchEvent(new Event('hass-toggle-menu'));
+      window.history.pushState(null, '', '/lovelace');
+      window.dispatchEvent(new CustomEvent('location-changed'));
     });
 
     this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
