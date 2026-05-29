@@ -14,6 +14,7 @@ from custom_components.heating_assistant.thermal_model import (
     HouseModel,
     Room,
     RoomConnection,
+    Window,
 )
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
 from mbc.models import ContinuousDiscreteModel
@@ -1569,3 +1570,56 @@ class TestSetpointLinearisation:
         now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
         ctrl.compute(outdoor_temp=-5.0, now=now)
         assert ctrl._mpc.x_ref[0] == pytest.approx(21.0)
+
+
+class TestSolarClearnessThreading:
+    """The controller's per-room solar gain honours clearness precedence and
+    the windowless exposure fallback (Part A/B of the solar-forecast work)."""
+
+    def _windowed_controller(self):
+        living = Room(
+            name="living_room", thermal_mass=5_000_000.0, r_external=0.05,
+            temperature=18.0, setpoint=21.0,
+            windows=[Window(area=2.0, orientation=180.0, tilt=90.0)],
+        )
+        # No windows, but a solar-exposure aperture facing south.
+        bedroom = Room(
+            name="bedroom", thermal_mass=3_000_000.0, r_external=0.08,
+            temperature=17.0, setpoint=20.0,
+            solar_exposure_aperture=3.0, solar_facing=180.0,
+        )
+        model = HouseModel([living, bedroom])
+        sources = [ElectricHeater("lr", "living_room", max_power=2000.0)]
+        return HeatingMPCController(model, sources, horizon=3, dt=900.0)
+
+    def test_room_gain_clearness_overrides_cloud(self):
+        ctrl = self._windowed_controller()
+        now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
+        clear = ctrl._room_gain("living_room", now, cloud_cover=None, clearness=None)
+        # clearness=0.5 halves the windowed gain regardless of heavy cloud
+        modulated = ctrl._room_gain("living_room", now, cloud_cover=1.0, clearness=0.5)
+        assert clear > 0.0
+        assert modulated == pytest.approx(0.5 * clear, rel=1e-9)
+
+    def test_windowless_room_uses_exposure(self):
+        ctrl = self._windowed_controller()
+        now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
+        gain = ctrl._room_gain("bedroom", now, cloud_cover=None, clearness=None)
+        assert gain > 0.0  # exposure preset gives non-zero gain without windows
+
+    def test_forecast_solar_per_step_fallback(self):
+        ctrl = self._windowed_controller()
+        now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
+        # Step 0 uses clearness 0.5; later steps have None → fall back to cloud.
+        schedules = ctrl._forecast_solar(
+            now,
+            cloud_forecast=[1.0, 1.0, 1.0, 1.0],
+            cloud_cover_now=1.0,
+            clearness_forecast=[0.5, None, None, None],
+            clearness_now=0.5,
+        )
+        # k=0 clearness path (×0.5) vs k=1 cloud path (×0.25) → different gains.
+        g0 = schedules[0]["living_room"]
+        g1 = schedules[1]["living_room"]
+        assert g0 > 0.0 and g1 > 0.0
+        assert abs(g0 - g1) > 1e-9

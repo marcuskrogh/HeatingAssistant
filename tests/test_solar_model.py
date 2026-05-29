@@ -13,9 +13,11 @@ from custom_components.heating_assistant.solar_model import (
     solar_angles,
     clear_sky_dni,
     clear_sky_dhi,
+    clear_sky_plane_poa,
     angle_of_incidence,
     window_solar_gain,
     room_solar_gains,
+    room_solar_gains_from_exposure,
     cloud_attenuation_factor,
 )
 from custom_components.heating_assistant.thermal_model import Window
@@ -179,3 +181,62 @@ class TestCloudAttenuation:
         clear = room_solar_gains(windows, dt, LATITUDE, LONGITUDE)
         overcast = room_solar_gains(windows, dt, LATITUDE, LONGITUDE, cloud_cover=1.0)
         assert overcast == pytest.approx(0.25 * clear, rel=1e-9)
+
+
+# Midday in summer, sun well above the horizon for the tests below.
+NOON = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
+
+
+class TestClearSkyPlanePOA:
+    def test_zero_at_night(self):
+        midnight = datetime(2024, 12, 21, 0, 0, tzinfo=timezone.utc)
+        assert clear_sky_plane_poa(midnight, 60.0, 12.0, 90.0, 180.0) == 0.0
+
+    def test_positive_south_facing_midday(self):
+        poa = clear_sky_plane_poa(NOON, LATITUDE, LONGITUDE, 90.0, 180.0)
+        assert poa > 0.0
+
+    def test_sun_facing_beats_away_facing(self):
+        # Convention-agnostic: a vertical plane oriented toward the modelled
+        # solar azimuth collects more than one facing directly away from it.
+        _alt, az = solar_angles(NOON, LATITUDE, LONGITUDE)
+        toward = clear_sky_plane_poa(NOON, LATITUDE, LONGITUDE, 90.0, az)
+        away = clear_sky_plane_poa(NOON, LATITUDE, LONGITUDE, 90.0, (az + 180.0) % 360.0)
+        assert toward > away
+
+
+class TestClearnessPrecedence:
+    def test_clearness_overrides_cloud(self):
+        win = Window(area=2.0, orientation=180.0, tilt=90.0)
+        clear = window_solar_gain(win, NOON, LATITUDE, LONGITUDE)
+        # clearness=0.5 halves the clear-sky gain regardless of cloud_cover
+        half = window_solar_gain(
+            win, NOON, LATITUDE, LONGITUDE, cloud_cover=1.0, clearness=0.5
+        )
+        assert half == pytest.approx(0.5 * clear, rel=1e-9)
+
+    def test_clearness_none_keeps_cloud_path(self):
+        win = Window(area=2.0, orientation=180.0, tilt=90.0)
+        with_cloud = window_solar_gain(
+            win, NOON, LATITUDE, LONGITUDE, cloud_cover=1.0, clearness=None
+        )
+        clear = window_solar_gain(win, NOON, LATITUDE, LONGITUDE)
+        assert with_cloud == pytest.approx(0.25 * clear, rel=1e-9)
+
+
+class TestExposureGain:
+    def test_zero_aperture_is_zero(self):
+        assert room_solar_gains_from_exposure(0.0, 180.0, NOON, LATITUDE, LONGITUDE) == 0.0
+
+    def test_scales_with_aperture(self):
+        g1 = room_solar_gains_from_exposure(1.0, 180.0, NOON, LATITUDE, LONGITUDE)
+        g3 = room_solar_gains_from_exposure(3.0, 180.0, NOON, LATITUDE, LONGITUDE)
+        assert g1 > 0.0
+        assert g3 == pytest.approx(3.0 * g1, rel=1e-9)
+
+    def test_clearness_modulates_exposure(self):
+        full = room_solar_gains_from_exposure(3.0, 180.0, NOON, LATITUDE, LONGITUDE)
+        dim = room_solar_gains_from_exposure(
+            3.0, 180.0, NOON, LATITUDE, LONGITUDE, clearness=0.4
+        )
+        assert dim == pytest.approx(0.4 * full, rel=1e-9)

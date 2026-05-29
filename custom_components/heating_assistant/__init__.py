@@ -96,6 +96,15 @@ from .const import (
     CONF_THERMAL_BRIDGE_PSI_L,
     CONF_TRACKING_WEIGHT,
     CONF_WEATHER_ENTITY,
+    CONF_SOLAR_FORECAST_ENTITY,
+    CONF_PV_PLANE_TILT,
+    CONF_PV_PLANE_AZIMUTH,
+    CONF_PV_PEAK_POWER,
+    CONF_SOLAR_EXPOSURE,
+    CONF_SOLAR_FACING,
+    DEFAULT_SOLAR_EXPOSURE,
+    DEFAULT_SOLAR_FACING,
+    SOLAR_EXPOSURE_TO_APERTURE,
     CONF_R_EXTERNAL,
     CONF_R_VALUE,
     CONF_ROOM_NAME,
@@ -286,6 +295,12 @@ _ROOM_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_THERMAL_BRIDGE_PSI_L, default=DEFAULT_THERMAL_BRIDGE_PSI_L,
         ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
+        vol.Optional(CONF_SOLAR_EXPOSURE, default=DEFAULT_SOLAR_EXPOSURE): vol.In(
+            list(SOLAR_EXPOSURE_TO_APERTURE),
+        ),
+        vol.Optional(CONF_SOLAR_FACING, default=DEFAULT_SOLAR_FACING): vol.All(
+            vol.Coerce(float), vol.Range(min=0.0, max=360.0),
+        ),
         vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
         vol.Optional(CONF_COMFORT_OFFSET, default=DEFAULT_COMFORT_OFFSET): vol.Coerce(float),
         vol.Optional(CONF_TEMP_SENSOR): str,
@@ -342,6 +357,16 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_HEAT_SOURCES, default=[]): [_SOURCE_SCHEMA],
                 vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): str,
                 vol.Optional(CONF_WEATHER_ENTITY): str,
+                vol.Optional(CONF_SOLAR_FORECAST_ENTITY): str,
+                vol.Optional(CONF_PV_PLANE_TILT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=90.0),
+                ),
+                vol.Optional(CONF_PV_PLANE_AZIMUTH): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=360.0),
+                ),
+                vol.Optional(CONF_PV_PEAK_POWER): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0),
+                ),
                 vol.Optional(CONF_LATITUDE): vol.Coerce(float),
                 vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(

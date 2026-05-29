@@ -170,6 +170,56 @@ def clear_sky_dhi(altitude: float, dni: float) -> float:
     return 0.1 * ghi
 
 
+def clear_sky_plane_poa(
+    dt: datetime,
+    latitude: float,
+    longitude: float,
+    surface_tilt: float,
+    surface_azimuth: float,
+) -> float:
+    """
+    Clear-sky plane-of-array (POA) irradiance on a tilted surface [W/m²].
+
+    Composes the same direct-beam + isotropic-diffuse model used by
+    :func:`window_solar_gain` (minus the SHGC and area factors), returning
+    the incident irradiance for a surface of arbitrary tilt and orientation.
+
+    Used as the modelled clear-sky *reference* for two purposes:
+
+    * deriving a data-driven clearness index from a PV-power forecast
+      (forecast power ÷ this reference — see ``solar_forecast.py``), and
+    * the optional per-room solar-exposure preset
+      (:func:`room_solar_gains_from_exposure`).
+
+    Parameters
+    ----------
+    dt : datetime          current datetime (UTC or aware).
+    latitude : float       site latitude [degrees].
+    longitude : float      site longitude [degrees].
+    surface_tilt : float   tilt from horizontal [degrees] (90 = vertical).
+    surface_azimuth : float surface azimuth clockwise from North [degrees].
+
+    Returns
+    -------
+    float : clear-sky POA irradiance [W/m²]; ``0.0`` at night.
+    """
+    altitude, azimuth_deg = solar_angles(dt, latitude, longitude)
+    if altitude <= 0.0:
+        return 0.0
+
+    n = _day_of_year(dt)
+    dni = clear_sky_dni(altitude, n)
+    dhi = clear_sky_dhi(altitude, dni)
+
+    theta = angle_of_incidence(altitude, azimuth_deg, surface_tilt, surface_azimuth)
+    direct = max(0.0, dni * math.cos(theta))
+
+    tilt_r = math.radians(surface_tilt)
+    diffuse = dhi * (1.0 + math.cos(tilt_r)) / 2.0
+
+    return direct + diffuse
+
+
 # ---------------------------------------------------------------------------
 # Incidence angle on tilted surface
 # ---------------------------------------------------------------------------
@@ -239,6 +289,7 @@ def window_solar_gain(
     longitude: float,
     shgc: float = DEFAULT_SHGC,
     cloud_cover: float | None = None,
+    clearness: float | None = None,
 ) -> float:
     """
     Compute the solar heat gain through a single window [W].
@@ -256,10 +307,22 @@ def window_solar_gain(
     shgc : float
         Solar heat gain coefficient (0–1).
     cloud_cover : float, optional
-        Cloud-cover fraction in [0, 1].  When provided, the clear-sky
-        irradiance is multiplied by the Kasten–Czeplak attenuation factor
-        (see :func:`cloud_attenuation_factor`).  ``None`` (default) means
-        clear sky.
+        Cloud-cover fraction in [0, 1].  When provided (and ``clearness`` is
+        not), the clear-sky irradiance is multiplied by the Kasten–Czeplak
+        attenuation factor (see :func:`cloud_attenuation_factor`).  ``None``
+        (default) means clear sky.
+    clearness : float, optional
+        Data-driven sky clearness / transmittance factor (≈ ``[0, 1.1]``)
+        derived from a PV-power forecast (see ``solar_forecast.py``).  When
+        provided it **takes precedence** over ``cloud_cover`` and multiplies
+        the clear-sky irradiance directly.  This is the only difference from
+        the legacy cloud path: the per-window geometry below is identical.
+
+        Note: the clearness index is derived from a *single* PV plane and is
+        applied uniformly to all windows regardless of their orientation —
+        a first-order sky-transmittance approximation (directional cloud is
+        not resolved), of the same simplification class as the single
+        Kasten–Czeplak cloud factor it replaces.
 
     Returns
     -------
@@ -282,7 +345,9 @@ def window_solar_gain(
     diffuse = dhi * (1.0 + math.cos(tilt_r)) / 2.0
 
     irradiance = direct + diffuse  # W/m²
-    if cloud_cover is not None:
+    if clearness is not None:
+        irradiance *= max(0.0, clearness)
+    elif cloud_cover is not None:
         irradiance *= cloud_attenuation_factor(cloud_cover)
     return shgc * window.area * irradiance
 
@@ -294,14 +359,54 @@ def room_solar_gains(
     longitude: float,
     shgc: float = DEFAULT_SHGC,
     cloud_cover: float | None = None,
+    clearness: float | None = None,
 ) -> float:
     """
     Total solar heat gain for a room [W] as the sum over all its windows.
 
-    When ``cloud_cover`` is provided (fraction in [0, 1]), the clear-sky
-    irradiance is attenuated by :func:`cloud_attenuation_factor`.
+    When ``clearness`` is provided it modulates the clear-sky irradiance and
+    takes precedence over ``cloud_cover``; otherwise, when ``cloud_cover`` is
+    provided (fraction in [0, 1]), the clear-sky irradiance is attenuated by
+    :func:`cloud_attenuation_factor`.
     """
     return sum(
-        window_solar_gain(w, dt, latitude, longitude, shgc, cloud_cover)
+        window_solar_gain(w, dt, latitude, longitude, shgc, cloud_cover, clearness)
         for w in windows
     )
+
+
+def room_solar_gains_from_exposure(
+    aperture: float,
+    facing: float,
+    dt: datetime,
+    latitude: float,
+    longitude: float,
+    cloud_cover: float | None = None,
+    clearness: float | None = None,
+    tilt: float = 90.0,
+) -> float:
+    """
+    Solar heat gain [W] for a room described by a single effective aperture.
+
+    The lightweight, no-geometry alternative to enumerating individual
+    windows: a room is summarised by one ``aperture`` [m²·SHGC effective]
+    facing one direction, driven by the same clear-sky POA model and the
+    same ``clearness`` / ``cloud_cover`` modulation as :func:`room_solar_gains`.
+    Returns ``0.0`` when ``aperture <= 0`` (e.g. the "none" exposure preset).
+
+    Parameters
+    ----------
+    aperture : float       effective aperture [m²·SHGC]; the magnitude that
+                           maps incident POA irradiance to room heat gain.
+    facing : float         dominant sun-facing azimuth clockwise from North
+                           [degrees] (0=N, 90=E, 180=S, 270=W).
+    tilt : float           surface tilt [degrees]; vertical (90) by default.
+    """
+    if aperture <= 0.0:
+        return 0.0
+    irradiance = clear_sky_plane_poa(dt, latitude, longitude, tilt, facing)
+    if clearness is not None:
+        irradiance *= max(0.0, clearness)
+    elif cloud_cover is not None:
+        irradiance *= cloud_attenuation_factor(cloud_cover)
+    return aperture * irradiance

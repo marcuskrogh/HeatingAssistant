@@ -59,6 +59,15 @@ CONF_WINDOW_AREA = "area"              # m²
 CONF_WINDOW_ORIENTATION = "orientation"  # degrees from North (0=N, 90=E, 180=S, 270=W)
 CONF_WINDOW_TILT = "tilt"             # degrees from horizontal (90 = vertical)
 
+# Per-room solar-exposure preset — the lightweight, no-geometry alternative to
+# enumerating individual windows.  When a room has no ``windows`` configured but
+# a non-"none" exposure level, its solar gain is computed from a single
+# effective aperture facing one direction (see SOLAR_EXPOSURE_TO_APERTURE).
+# Detailed per-window geometry remains the primary, higher-fidelity input and
+# takes precedence whenever any window is configured.
+CONF_SOLAR_EXPOSURE = "solar_exposure"  # "none" | "low" | "medium" | "high"
+CONF_SOLAR_FACING = "solar_facing"      # degrees clockwise from North (default South=180)
+
 # Heat source configuration keys
 CONF_SOURCE_NAME = "name"
 CONF_SOURCE_TYPE = "type"              # "electric_heater" | "heat_pump"
@@ -327,6 +336,24 @@ DEFAULT_FACADE_ABSORPTANCE = FACADE_COLOUR_TO_ABSORPTANCE[DEFAULT_FACADE_COLOUR]
 #: small fraction of the window-derived solar gain to the wall node).
 DEFAULT_FACADE_SOLAR_SHARE = 0.0
 
+#: Per-room solar-exposure preset → effective aperture ``A_eff`` [m²·SHGC].
+#: The single scalar that maps incident clear-sky POA irradiance [W/m²] to a
+#: room's solar heat gain [W] when individual windows are not enumerated.
+#: Levels are deliberately coarse; defaults assume clear double glazing
+#: (SHGC≈0.6) over roughly 1.5 / 5 / 10 m² of glazing.
+SOLAR_EXPOSURE_NONE = "none"
+SOLAR_EXPOSURE_LOW = "low"
+SOLAR_EXPOSURE_MEDIUM = "medium"
+SOLAR_EXPOSURE_HIGH = "high"
+SOLAR_EXPOSURE_TO_APERTURE: dict = {
+    SOLAR_EXPOSURE_NONE: 0.0,
+    SOLAR_EXPOSURE_LOW: 1.0,     # ~1.5 m² glazing × SHGC 0.6
+    SOLAR_EXPOSURE_MEDIUM: 3.0,  # ~5 m² glazing × SHGC 0.6
+    SOLAR_EXPOSURE_HIGH: 6.0,    # ~10 m² glazing × SHGC 0.6
+}
+DEFAULT_SOLAR_EXPOSURE = SOLAR_EXPOSURE_NONE
+DEFAULT_SOLAR_FACING = 180.0  # South
+
 # Phase 1 C5 — linear thermal-bridge correction.
 #
 # Linear thermal bridges (window frames, balcony slabs, corner
@@ -366,6 +393,17 @@ CONF_HORIZON = "horizon"               # MPC prediction horizon (steps)
 CONF_UPDATE_INTERVAL = "update_interval"  # wall-clock period between coordinator updates = OCP step = EKF step (seconds)
 CONF_OUTDOOR_TEMP_ENTITY = "outdoor_temp_entity"  # HA sensor entity_id
 CONF_WEATHER_ENTITY = "weather_entity"             # HA weather entity_id for forecast
+# Solar-forecast integration (Forecast.Solar / Solcast / Open-Meteo Solar / any
+# sensor exposing a PV-power-forecast series).  When configured, a data-driven
+# clearness index derived from the forecast replaces the coarse cloud-cover
+# attenuation in the solar model; the analytical model remains the automatic
+# fallback.  Plane tilt/azimuth are optional (improve the clear-sky reference);
+# peak power further sharpens the absolute anchoring.  All optional — blank ⇒
+# the index auto-calibrates against the forecast's own clear-sky envelope.
+CONF_SOLAR_FORECAST_ENTITY = "solar_forecast_entity"  # HA sensor entity_id with a PV power forecast
+CONF_PV_PLANE_TILT = "pv_plane_tilt"        # degrees from horizontal (0–90), optional
+CONF_PV_PLANE_AZIMUTH = "pv_plane_azimuth"  # degrees clockwise from North (0–360), optional
+CONF_PV_PEAK_POWER = "pv_peak_power"        # Wp rated array power, optional
 CONF_TRACKING_WEIGHT = "tracking_weight"          # scalar weight on ‖z − z_ref‖² (setpoint tracking cost Q diagonal)
 CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (input regularisation cost R diagonal)
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (input rate-of-movement cost S diagonal)

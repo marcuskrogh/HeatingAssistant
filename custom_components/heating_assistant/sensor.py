@@ -111,6 +111,7 @@ async def async_setup_entry(
     entities.append(EstimatedParametersStatusSensor(coordinator))
     entities.append(MPCPerformanceSensor(coordinator))
     entities.append(WeatherForecastStatusSensor(coordinator))
+    entities.append(SolarForecastStatusSensor(coordinator))
 
     # Price sensors — only when a price entity is configured
     if getattr(coordinator, "_price_entity", None):
@@ -2449,6 +2450,65 @@ class WeatherForecastStatusSensor(CoordinatorEntity, SensorEntity):
             "last_success_at": last_ok_at.isoformat() if last_ok_at else None,
             "consecutive_failures": getattr(
                 self._coordinator, "weather_consecutive_failures", 0
+            ),
+        }
+
+
+class SolarForecastStatusSensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor reporting the health of the solar-forecast read.
+
+    The state is one of:
+
+    * ``"ok"``        — the most recent read succeeded and drives the gains
+    * ``"failing"``   — at least one consecutive read has failed
+    * ``"disabled"``  — no solar-forecast entity is configured
+
+    Attributes expose which solar source is active (data-driven forecast vs
+    the analytical clear-sky model), the matched provider schema, the current
+    clearness index and its horizon series (kept here, off the history buffer),
+    and the usual error / timestamp diagnostics.
+    """
+
+    _attr_icon = "mdi:solar-power-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Solar Forecast Status"
+        self._attr_unique_id = f"{DOMAIN}_solar_forecast_status"
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> str:
+        if not getattr(self._coordinator, "_solar_forecast_entity", None):
+            return "disabled"
+        if getattr(self._coordinator, "solar_fc_consecutive_failures", 0) > 0:
+            return "failing"
+        return "ok"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        last_err_at = getattr(self._coordinator, "solar_fc_last_error_at", None)
+        last_ok_at = getattr(self._coordinator, "solar_fc_last_success_at", None)
+        return {
+            "solar_forecast_entity": getattr(
+                self._coordinator, "_solar_forecast_entity", None
+            ),
+            "active_source": getattr(self._coordinator, "solar_source", "analytical"),
+            "provider": getattr(self._coordinator, "_solar_provider", "none"),
+            "clearness_now": getattr(self._coordinator, "clearness_now", None),
+            "clearness_forecast": list(
+                getattr(self._coordinator, "clearness_forecast", []) or []
+            ),
+            "last_error": getattr(self._coordinator, "solar_fc_last_error", None),
+            "last_error_at": last_err_at.isoformat() if last_err_at else None,
+            "last_success_at": last_ok_at.isoformat() if last_ok_at else None,
+            "consecutive_failures": getattr(
+                self._coordinator, "solar_fc_consecutive_failures", 0
             ),
         }
 

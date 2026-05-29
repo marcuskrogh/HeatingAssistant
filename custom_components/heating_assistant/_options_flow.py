@@ -21,6 +21,10 @@ from .const import (
     CONF_ROOM_NAME,
     CONF_SETPOINT,
     CONF_SKY_RADIATIVE_UA,
+    CONF_SOLAR_EXPOSURE,
+    CONF_SOLAR_FACING,
+    DEFAULT_SOLAR_EXPOSURE,
+    DEFAULT_SOLAR_FACING,
     CONF_R_EXTERNAL,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
@@ -183,6 +187,8 @@ def _apply_advanced_envelope(
     facade_solar_share: Optional[float],
     thermal_bridge_psi_l: Optional[float],
     sky_radiative_ua: Optional[float],
+    solar_exposure: Optional[str] = None,
+    solar_facing: Optional[float] = None,
 ) -> None:
     """Write advanced envelope fields into ``room`` only when explicitly set.
 
@@ -224,6 +230,16 @@ def _apply_advanced_envelope(
         CONF_SKY_RADIATIVE_UA,
         None if sky_radiative_ua is None else float(sky_radiative_ua),
         DEFAULT_SKY_RADIATIVE_UA,
+    )
+    _set_or_strip(
+        CONF_SOLAR_EXPOSURE,
+        solar_exposure,
+        DEFAULT_SOLAR_EXPOSURE,
+    )
+    _set_or_strip(
+        CONF_SOLAR_FACING,
+        None if solar_facing is None else float(solar_facing),
+        DEFAULT_SOLAR_FACING,
     )
 
 
@@ -304,6 +320,8 @@ class RoomFlowHelper:
         facade_solar_share: Optional[float] = None,
         thermal_bridge_psi_l: Optional[float] = None,
         sky_radiative_ua: Optional[float] = None,
+        solar_exposure: Optional[str] = None,
+        solar_facing: Optional[float] = None,
     ) -> Optional[str]:
         """Append a new room.  Returns an error key on duplicate, else ``None``.
 
@@ -350,6 +368,8 @@ class RoomFlowHelper:
             facade_solar_share=facade_solar_share,
             thermal_bridge_psi_l=thermal_bridge_psi_l,
             sky_radiative_ua=sky_radiative_ua,
+            solar_exposure=solar_exposure,
+            solar_facing=solar_facing,
         )
         self.rooms.append(new_room)
         return None
@@ -370,6 +390,8 @@ class RoomFlowHelper:
         facade_solar_share: Optional[float] = None,
         thermal_bridge_psi_l: Optional[float] = None,
         sky_radiative_ua: Optional[float] = None,
+        solar_exposure: Optional[str] = None,
+        solar_facing: Optional[float] = None,
     ) -> Optional[str]:
         """Update the currently-selected room.  Returns an error key or ``None``."""
         if self.current_idx is None:
@@ -406,6 +428,8 @@ class RoomFlowHelper:
             facade_solar_share=facade_solar_share,
             thermal_bridge_psi_l=thermal_bridge_psi_l,
             sky_radiative_ua=sky_radiative_ua,
+            solar_exposure=solar_exposure,
+            solar_facing=solar_facing,
         )
         return None
 
