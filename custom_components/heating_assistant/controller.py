@@ -90,16 +90,16 @@ from .const import MPC_STATS_BUFFER_SIZE
 
 # ── Import model-based control components from mbc ────────────────────────────
 from scipy.linalg import block_diag as _scipy_block_diag
-from mbc.models import ContinuousDiscreteModel
-from mbc.estimation import ContinuousDiscreteEKF
-from mbc.control import (
+from .mbc.models import ContinuousDiscreteModel
+from .mbc.estimation import ContinuousDiscreteEKF
+from .mbc.control import (
     CDLinearizedMPCController,
     linearize_cd_model,
     discretize_cd_linearization,
     QPProblem,
     make_qp_backend,
 )
-from mbc.control.ocp import OptimalControlProblem
+from .mbc.control.ocp import OptimalControlProblem
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,

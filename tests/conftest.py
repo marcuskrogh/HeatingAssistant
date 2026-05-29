@@ -28,68 +28,6 @@ def _stub_module(name: str) -> types.ModuleType:
 
 # ── Build all needed HA stubs ─────────────────────────────────────────────
 
-_MBC_PACKAGES = [
-    "mbc",
-    "mbc._utils",
-    "mbc.models",
-    "mbc.estimation",
-    "mbc.control",
-    "mbc.control.ocp",
-    "mbc.identification",
-]
-
-# Use the real mbc library when it is installed (allows tests that exercise
-# HeatingMPCController / EKF / OCP to run against real code).  Fall back to
-# lightweight stubs only when the package is not available (e.g. a minimal CI
-# environment that only needs to test HA-independent submodules).
-try:
-    import mbc  # noqa: F401
-    import mbc.models  # noqa: F401
-    import mbc.estimation  # noqa: F401
-    import mbc.control  # noqa: F401
-    import mbc.identification  # noqa: F401
-    _mbc_available = True
-except ImportError:
-    _mbc_available = False
-
-if not _mbc_available:
-    for _pkg in _MBC_PACKAGES:
-        _stub_module(_pkg)
-
-    _mbc_models = sys.modules["mbc.models"]
-    _mbc_models.ContinuousDiscreteModel = object  # type: ignore[attr-defined]
-
-    _mbc_estimation = sys.modules["mbc.estimation"]
-    _mbc_estimation.ContinuousDiscreteEKF = object  # type: ignore[attr-defined]
-    _mbc_estimation.KalmanFilter = object  # type: ignore[attr-defined]
-
-    _mbc_control = sys.modules["mbc.control"]
-    _mbc_control.CDTrackingOptimalControlProblem = object  # type: ignore[attr-defined]
-    _mbc_control.OptimalControlProblem = object  # type: ignore[attr-defined]
-    _mbc_control.CDNMPCController = object  # type: ignore[attr-defined]
-    _mbc_control.CDLinearizedMPCController = object  # type: ignore[attr-defined]
-    _mbc_control.NLPScalingPolicy = object  # type: ignore[attr-defined]
-    _mbc_control.linearize_cd_model = lambda *a, **kw: None  # type: ignore[attr-defined]
-    _mbc_control.discretize_cd_linearization = lambda *a, **kw: None  # type: ignore[attr-defined]
-
-    _mbc_control_ocp = sys.modules["mbc.control.ocp"]
-    _mbc_control_ocp.OptimalControlProblem = object  # type: ignore[attr-defined]
-    _mbc_control_ocp._block_diag = lambda *a, **kw: None  # type: ignore[attr-defined]
-    _mbc_control_ocp._block_diag_terminal = lambda *a, **kw: None  # type: ignore[attr-defined]
-    _mbc_control_ocp._tile_column = lambda *a, **kw: None  # type: ignore[attr-defined]
-    _mbc_control_ocp._build_D_diff = lambda *a, **kw: None  # type: ignore[attr-defined]
-
-    _mbc_utils = sys.modules["mbc._utils"]
-    _mbc_utils._eye = lambda n: None  # type: ignore[attr-defined]
-    _mbc_utils._zeros = lambda m, n: None  # type: ignore[attr-defined]
-    _mbc_utils._np_to_cvx = lambda x: None  # type: ignore[attr-defined]
-
-    _mbc_id = sys.modules["mbc.identification"]
-    _mbc_id.CDParameterEstimator = object  # type: ignore[attr-defined]
-    _mbc_id.cd_ped_neg_log_likelihood = lambda *a, **kw: 0.0  # type: ignore[attr-defined]
-    _mbc_id.nelder_mead = lambda *a, **kw: None  # type: ignore[attr-defined]
-
-
 _HA_PACKAGES = [
     "voluptuous",
     "homeassistant",
@@ -415,3 +353,22 @@ _vol.In = lambda v: None  # type: ignore[attr-defined]
 _vol.REMOVE_EXTRA = "REMOVE_EXTRA"  # type: ignore[attr-defined]
 _vol.ALLOW_EXTRA = "ALLOW_EXTRA"  # type: ignore[attr-defined]
 _vol.PREVENT_EXTRA = "PREVENT_EXTRA"  # type: ignore[attr-defined]
+
+# ── Register vendored mbc under top-level "mbc.*" namespace ───────────────
+# The mbc library is vendored at custom_components/heating_assistant/mbc/.
+# Register it in sys.modules so any code referencing the top-level "mbc"
+# namespace (e.g. in tests) resolves to the vendored copy.
+
+import custom_components.heating_assistant.mbc as _vendored_mbc  # noqa: E402
+import custom_components.heating_assistant.mbc.models as _vendored_mbc_models  # noqa: E402
+import custom_components.heating_assistant.mbc.estimation as _vendored_mbc_estimation  # noqa: E402
+import custom_components.heating_assistant.mbc.control as _vendored_mbc_control  # noqa: E402
+import custom_components.heating_assistant.mbc.control.ocp as _vendored_mbc_control_ocp  # noqa: E402
+import custom_components.heating_assistant.mbc.identification as _vendored_mbc_identification  # noqa: E402
+
+sys.modules.setdefault("mbc", _vendored_mbc)
+sys.modules.setdefault("mbc.models", _vendored_mbc_models)
+sys.modules.setdefault("mbc.estimation", _vendored_mbc_estimation)
+sys.modules.setdefault("mbc.control", _vendored_mbc_control)
+sys.modules.setdefault("mbc.control.ocp", _vendored_mbc_control_ocp)
+sys.modules.setdefault("mbc.identification", _vendored_mbc_identification)
