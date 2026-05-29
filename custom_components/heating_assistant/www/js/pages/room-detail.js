@@ -135,7 +135,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     priceEntity,
   ].filter(Boolean);
 
-  const history = await connection.getHistory(historyEntities, 6);
+  const history = await connection.getHistory(historyEntities, 12);
 
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
   const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
@@ -207,7 +207,7 @@ function computeYLimits(allDataPoints, bounds, marginFraction = 0.05) {
 
 function buildTemperatureChart(chart, filteredHistory, measuredHistory, setpointHistory, forecastNonlinear, forecastLinearised, setpointForecast, upperBound, lowerBound) {
   const now = Date.now();
-  const past = now - 7 * 3600 * 1000;
+  const past = now - 13 * 3600 * 1000;
   const lastForecastTime = forecastNonlinear.length > 0
     ? forecastNonlinear[forecastNonlinear.length - 1].x
     : now + 3 * 3600 * 1000;
@@ -288,7 +288,7 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
 
   if (maxPower !== null) {
     const now = Date.now();
-    const past = now - 7 * 3600 * 1000;
+    const past = now - 13 * 3600 * 1000;
     const lastTime = powerForecast.length > 0
       ? powerForecast[powerForecast.length - 1].x
       : now + 3 * 3600 * 1000;

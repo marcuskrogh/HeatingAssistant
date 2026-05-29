@@ -71,7 +71,7 @@ class DashboardSpec:
 
     rooms: Sequence[RoomSpec]
     sources: Sequence[HeatSourceSpec]
-    history_hours: float = 6.0
+    history_hours: float = 12.0
     forecast_hours: float = 3.0
     title: str = "Heating Assistant"
     url_path: str = "heating-assistant"
