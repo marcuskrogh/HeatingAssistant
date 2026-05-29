@@ -8,7 +8,7 @@ export class HaConnection {
     return { ...states };
   }
 
-  async getHistory(entityIds, hoursBack = 6) {
+  async getHistory(entityIds, hoursBack = 12) {
     const now = new Date();
     const start = new Date(now.getTime() - hoursBack * 3600 * 1000);
     try {
