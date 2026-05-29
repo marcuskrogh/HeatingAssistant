@@ -7,4 +7,3 @@
 numpy
 scipy
 highspy
-mbc @ https://github.com/marcuskrogh/mbc/archive/d2da10b73b4025c32f11e3b1823fa58e31c9b38a.zip
