@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '3';
+const PANEL_VERSION = '4';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -105,8 +105,11 @@ class HaIndustrialPanel extends HTMLElement {
     `;
 
     this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
-      window.history.pushState(null, '', '/lovelace');
-      window.dispatchEvent(new CustomEvent('location-changed'));
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.replace('/lovelace');
+      }
     });
 
     this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
