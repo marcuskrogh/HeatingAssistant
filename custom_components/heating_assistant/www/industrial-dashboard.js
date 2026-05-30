@@ -105,7 +105,11 @@ class HaIndustrialPanel extends HTMLElement {
     `;
 
     this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
-      window.history.back();
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.replace('/lovelace');
+      }
     });
 
     this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
