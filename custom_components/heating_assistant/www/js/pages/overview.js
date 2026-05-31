@@ -57,7 +57,7 @@ export function renderOverview(container, rooms, state, connection) {
 
 function buildGauges(state, rooms) {
   const mpcSolveTime = entityValue(state, systemEntity('mpc_performance'));
-  const mpcPercent = mpcSolveTime !== null ? Math.min(100, (mpcSolveTime / MAX_SOLVE_TIME_S) * 100) : 0;
+  const mpcPercent = mpcSolveTime !== null ? (mpcSolveTime / MAX_SOLVE_TIME_S) * 100 : 0;
 
   const mpcGauge = createGauge({
     value: mpcPercent,
@@ -113,7 +113,7 @@ function buildGauges(state, rooms) {
       element: mpcGauge,
       updater: (s) => {
         const v = entityValue(s, systemEntity('mpc_performance'));
-        const pct = v !== null ? Math.min(100, (v / MAX_SOLVE_TIME_S) * 100) : 0;
+        const pct = v !== null ? (v / MAX_SOLVE_TIME_S) * 100 : 0;
         updateGauge(mpcGauge, {
           value: pct, min: 0, max: 100,
           format: (v) => formatPercent(v),
