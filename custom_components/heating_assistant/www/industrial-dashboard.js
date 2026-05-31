@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '5';
+const PANEL_VERSION = '6';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -16,9 +16,19 @@ class HaIndustrialPanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._menuButton) {
+      this._menuButton.hass = hass;
+    }
     if (!this._initialized && hass) {
       this._initialized = true;
       this._boot();
+    }
+  }
+
+  set narrow(narrow) {
+    this._narrow = narrow;
+    if (this._menuButton) {
+      this._menuButton.narrow = narrow;
     }
   }
 
@@ -80,43 +90,25 @@ class HaIndustrialPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css?v=${PANEL_VERSION}">
       <div class="shell">
-        <header class="header">
-          <div class="header__left">
-            <button class="menu-button" id="menu-toggle" aria-label="Toggle sidebar">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-              </svg>
-            </button>
-            <h1 class="header__title">HEATING ASSISTANT</h1>
-            <nav class="header__nav">
-              <a class="header__nav-link" href="#overview">OVERVIEW</a>
-              <a class="header__nav-link" href="#tuning">TUNING</a>
-            </nav>
-          </div>
-          <div class="header__status">
+        <div id="top-bar"></div>
+        <nav class="panel-nav" id="panel-nav">
+          <a class="panel-nav__link" href="#overview">OVERVIEW</a>
+          <a class="panel-nav__link" href="#tuning">TUNING</a>
+          <span class="panel-nav__fill"></span>
+          <span class="panel-nav__status">
             <span class="status-dot status-dot--live"></span>
             <span class="status-label">LIVE</span>
-          </div>
-        </header>
+          </span>
+        </nav>
         <main id="content" class="content">
           <div class="loading">INITIALIZING...</div>
         </main>
       </div>
     `;
 
-    this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
-      // Always exit the panel directly in a single click.
-      // Internal panel navigation (e.g. ← OVERVIEW on room pages) handles
-      // its own back-navigation, so this button must not step through
-      // the internal hash history — it should unconditionally leave.
-      //
-      // Using HA's client-side routing mechanism keeps the companion app
-      // and web browser in sync without a full page reload.
-      history.replaceState(null, '', '/lovelace');
-      window.dispatchEvent(new Event('location-changed'));
-    });
+    this._buildTopBar();
 
-    this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
+    this.shadowRoot.querySelectorAll('.panel-nav__link').forEach((link) => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
         const target = link.getAttribute('href');
@@ -127,12 +119,31 @@ class HaIndustrialPanel extends HTMLElement {
     window.addEventListener('hashchange', () => this._updateActiveNav());
   }
 
+  _buildTopBar() {
+    const container = this.shadowRoot.getElementById('top-bar');
+
+    const toolbar = document.createElement('app-toolbar');
+
+    const menuBtn = document.createElement('ha-menu-button');
+    menuBtn.hass = this._hass;
+    menuBtn.narrow = this._narrow ?? window.innerWidth < 870;
+    this._menuButton = menuBtn;
+
+    const title = document.createElement('div');
+    title.setAttribute('main-title', '');
+    title.textContent = 'Heating Assistant';
+
+    toolbar.appendChild(menuBtn);
+    toolbar.appendChild(title);
+    container.appendChild(toolbar);
+  }
+
   _updateActiveNav() {
     const hash = window.location.hash.slice(1).split('/')[0] || 'overview';
-    const links = this.shadowRoot.querySelectorAll('.header__nav-link');
+    const links = this.shadowRoot.querySelectorAll('.panel-nav__link');
     links.forEach((link) => {
       const linkRoute = link.getAttribute('href').slice(1);
-      link.classList.toggle('header__nav-link--active', linkRoute === hash);
+      link.classList.toggle('panel-nav__link--active', linkRoute === hash);
     });
   }
 
