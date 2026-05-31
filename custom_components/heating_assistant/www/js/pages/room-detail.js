@@ -381,13 +381,15 @@ function buildTemperatureChart(
   }
 
   // Shade outside the comfort corridor without drawing visible boundary lines.
-  // 'end' fills from the upper bound to the top of the chart (infeasible above).
-  // 'start' fills from the lower bound to the bottom of the chart (infeasible below).
+  // In Chart.js 4, fill.above/below refer to whether the DATASET is above/below
+  // the TARGET — not the direction of the fill area. The upper constraint is
+  // always below 'end' (chart top), so 'below' color applies; the lower
+  // constraint is always above 'start' (chart bottom), so 'above' color applies.
   if (combinedUpper.length > 0) {
     datasets.push(
       makeDataset('Constraint Upper', combinedUpper, 'transparent', {
         borderWidth: 0, pointRadius: 0, stepped: 'before',
-        fill: { target: 'end', above: 'rgba(229,115,115,0.12)', below: 'transparent' },
+        fill: { target: 'end', above: 'transparent', below: 'rgba(229,115,115,0.12)' },
       })
     );
   }
@@ -395,7 +397,7 @@ function buildTemperatureChart(
     datasets.push(
       makeDataset('Constraint Lower', combinedLower, 'transparent', {
         borderWidth: 0, pointRadius: 0, stepped: 'before',
-        fill: { target: 'start', above: 'transparent', below: 'rgba(229,115,115,0.12)' },
+        fill: { target: 'start', above: 'rgba(229,115,115,0.12)', below: 'transparent' },
       })
     );
   }
