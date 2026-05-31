@@ -240,6 +240,8 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const tempFilteredEntity = room.entities['temperature_filtered'];
   const tempMeasuredEntity = room.entities['temperature_measured'];
   const setpointEntity = room.entities['setpoint'];
+  const constraintUpperEntity = room.entities['constraint_upper'];
+  const constraintLowerEntity = room.entities['constraint_lower'];
   const powerMeasuredEntity = room.entities['heating_power_measured'];
   const solarMeasuredEntity = room.entities['solar_gain_measured'];
   const outdoorEntity = systemEntity('outdoor_temperature_measured');
@@ -249,6 +251,8 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     tempFilteredEntity,
     tempMeasuredEntity,
     setpointEntity,
+    constraintUpperEntity,
+    constraintLowerEntity,
     powerMeasuredEntity,
     solarMeasuredEntity,
     outdoorEntity,
@@ -260,6 +264,8 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
   const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
   const setpointHistory = historyToDataPoints(history[setpointEntity]);
+  const constraintUpperHistory = historyToDataPoints(history[constraintUpperEntity]);
+  const constraintLowerHistory = historyToDataPoints(history[constraintLowerEntity]);
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
   const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
@@ -275,14 +281,20 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
   const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
   const setpointForecast = forecastToDataPoints(forecastData, 'setpoint');
+  const constraintUpperForecast = forecastToDataPoints(forecastData, 'constraint_upper');
+  const constraintLowerForecast = forecastToDataPoints(forecastData, 'constraint_lower');
   const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
   const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
   const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temp');
 
-  const upperBound = entityValue(state, room.entities['constraint_upper']);
-  const lowerBound = entityValue(state, room.entities['constraint_lower']);
-
-  buildTemperatureChart(tempChart, filteredHistory, measuredHistory, setpointHistory, tempForecastNonlinear, tempForecastLinearised, setpointForecast, upperBound, lowerBound);
+  buildTemperatureChart(
+    tempChart,
+    filteredHistory, measuredHistory,
+    setpointHistory, setpointForecast,
+    tempForecastNonlinear, tempForecastLinearised,
+    constraintUpperHistory, constraintUpperForecast,
+    constraintLowerHistory, constraintLowerForecast,
+  );
   buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, state, room);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
 }
@@ -325,18 +337,24 @@ function computeYLimits(allDataPoints, bounds, marginFraction = 0.05) {
   };
 }
 
-function buildTemperatureChart(chart, filteredHistory, measuredHistory, setpointHistory, forecastNonlinear, forecastLinearised, setpointForecast, upperBound, lowerBound) {
-  const now = Date.now();
-  const past = now - 13 * 3600 * 1000;
-  const lastForecastTime = forecastNonlinear.length > 0
-    ? forecastNonlinear[forecastNonlinear.length - 1].x
-    : now + 3 * 3600 * 1000;
-
-  const allData = [filteredHistory, measuredHistory, setpointHistory, forecastNonlinear, forecastLinearised, setpointForecast];
-  const boundsArr = [upperBound, lowerBound];
-  const { yMin, yMax } = computeYLimits(allData, boundsArr);
-
+function buildTemperatureChart(
+  chart,
+  filteredHistory, measuredHistory,
+  setpointHistory, setpointForecast,
+  forecastNonlinear, forecastLinearised,
+  constraintUpperHistory, constraintUpperForecast,
+  constraintLowerHistory, constraintLowerForecast,
+) {
   const combinedSetpoint = [...setpointHistory, ...setpointForecast];
+  const combinedUpper = [...constraintUpperHistory, ...constraintUpperForecast];
+  const combinedLower = [...constraintLowerHistory, ...constraintLowerForecast];
+
+  const allData = [
+    filteredHistory, measuredHistory,
+    combinedSetpoint, forecastNonlinear, forecastLinearised,
+    combinedUpper, combinedLower,
+  ];
+  const { yMin, yMax } = computeYLimits(allData, []);
 
   const datasets = [
     makeDataset('Filtered', filteredHistory, '#4fc3f7', { borderWidth: 2 }),
@@ -356,21 +374,26 @@ function buildTemperatureChart(chart, filteredHistory, measuredHistory, setpoint
 
   if (combinedSetpoint.length > 0) {
     datasets.push(
-      makeDataset('Setpoint', combinedSetpoint, '#e57373', { dashed: true, borderWidth: 1, pointRadius: 0 })
+      makeDataset('Setpoint', combinedSetpoint, '#e57373', {
+        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before',
+      })
     );
   }
 
-  if (upperBound !== null && lowerBound !== null) {
-    const boundTimes = [past, now, lastForecastTime];
-
+  // Draw schedule-aware comfort corridor as time-varying dashed lines.
+  // Upper fills toward Lower (index +1) to shade the comfort zone.
+  if (combinedUpper.length > 0 && combinedLower.length > 0) {
+    const upperIdx = datasets.length;
     datasets.push(
-      makeDataset('Above Comfort', boundTimes.map((t) => ({ x: t, y: yMax + 10 })), 'transparent', {
-        fill: { target: { value: upperBound }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
-        borderWidth: 0, pointRadius: 0, showLine: true,
-      }),
-      makeDataset('Below Comfort', boundTimes.map((t) => ({ x: t, y: yMin - 10 })), 'transparent', {
-        fill: { target: { value: lowerBound }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
-        borderWidth: 0, pointRadius: 0, showLine: true,
+      makeDataset('Constraint Upper', combinedUpper, 'rgba(229,115,115,0.5)', {
+        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before',
+        fill: upperIdx + 1,
+        backgroundColor: 'rgba(229,115,115,0.07)',
+      })
+    );
+    datasets.push(
+      makeDataset('Constraint Lower', combinedLower, 'rgba(229,115,115,0.5)', {
+        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before',
       })
     );
   }
@@ -469,13 +492,26 @@ function updateChartsFromState(room, state, tempChart, powerChart, disturbChart)
 
   if (tempChart._chart) {
     const ds = tempChart._chart.data.datasets;
+    const now = Date.now();
+
     if (ds[2]) ds[2].data = tempForecast;
     if (ds[3] && tempLinearised.length > 0) ds[3].data = tempLinearised;
-    const setpointIdx = ds.findIndex((d) => d.label === 'Setpoint');
-    if (setpointIdx >= 0) {
-      const existingHistory = ds[setpointIdx].data.filter((p) => p.x <= Date.now());
-      ds[setpointIdx].data = [...existingHistory, ...setpointData];
+
+    const constraintUpperForecast = forecastToDataPoints(forecastData, 'constraint_upper');
+    const constraintLowerForecast = forecastToDataPoints(forecastData, 'constraint_lower');
+
+    for (const [label, newForecast] of [
+      ['Setpoint', setpointData],
+      ['Constraint Upper', constraintUpperForecast],
+      ['Constraint Lower', constraintLowerForecast],
+    ]) {
+      const idx = ds.findIndex((d) => d.label === label);
+      if (idx >= 0) {
+        const existingHistory = ds[idx].data.filter((p) => p.x <= now);
+        ds[idx].data = [...existingHistory, ...newForecast];
+      }
     }
+
     tempChart._chart.update('none');
   }
 
