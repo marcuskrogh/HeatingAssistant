@@ -669,7 +669,10 @@ class HeatPumpCOPSensor(CoordinatorEntity, SensorEntity):
         )
         if src is None or not isinstance(src, HeatPump):
             return None
-        return round(src.cop(self._coordinator.outdoor_temp), 2)
+        outdoor_temp = self._coordinator.outdoor_temp
+        if outdoor_temp is None:
+            return None
+        return round(src.cop(outdoor_temp), 2)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -709,8 +712,9 @@ class OutdoorTemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_outdoor_temperature_measured"
 
     @property
-    def native_value(self) -> float:
-        return round(self._coordinator.outdoor_temp, 2)
+    def native_value(self) -> Optional[float]:
+        t = self._coordinator.outdoor_temp
+        return None if t is None else round(t, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -753,19 +757,21 @@ class OutdoorTemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         return True
 
     @property
-    def native_value(self) -> float:
-        return round(self._coordinator.outdoor_temp, 2)
+    def native_value(self) -> Optional[float]:
+        t = self._coordinator.outdoor_temp
+        return None if t is None else round(t, 2)
 
     @property
     def extra_state_attributes(self) -> dict:
         outdoor_forecast = self._coordinator.outdoor_forecast
         dt = self._coordinator.dt
         now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
+        _ot = self._coordinator.outdoor_temp
 
         # Entry at t=now: bridge between history and prediction
         forecast: List[Dict[str, Any]] = [{
             "time": now.isoformat(),
-            "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
+            "outdoor_temp": None if _ot is None else round(_ot, 2),
         }]
         for i, temp in enumerate(outdoor_forecast):
             step_time = now + timedelta(seconds=dt * (i + 1))
@@ -885,7 +891,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             "temperature": now_temp,
             "heating_power": round(current_heating, 1),
             "solar_gain": round(current_solar, 1),
-            "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
+            "outdoor_temp": None if self._coordinator.outdoor_temp is None else round(self._coordinator.outdoor_temp, 2),
             "setpoint": now_sp,
             "constraint_upper": round(now_sp + comfort_offset, 2),
             "constraint_lower": round(now_sp - comfort_offset, 2),
@@ -1128,9 +1134,10 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
 
         # Effective system COP (thermal output / electrical input)
         electrical_input = 0.0
+        _outdoor_temp = self._coordinator.outdoor_temp
         for src in sources:
             if isinstance(src, HeatPump):
-                cop = src.cop(self._coordinator.outdoor_temp)
+                cop = src.cop(_outdoor_temp) if _outdoor_temp is not None else 0.0
                 if cop > 0:
                     electrical_input += src.current_power / cop
                 # If COP is 0, heat pump is off, no electrical input

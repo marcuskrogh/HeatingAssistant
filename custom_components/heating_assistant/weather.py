@@ -284,13 +284,14 @@ def read_outdoor_temp(
     hass: Any,
     outdoor_entity: Optional[str],
     weather_entity: Optional[str],
-    fallback: float = 5.0,
-) -> float:
-    """Return the current outdoor temperature [°C].
+) -> Optional[float]:
+    """Return the current outdoor temperature [°C], or None if unavailable.
 
     Tries the dedicated ``outdoor_entity`` first; if it's missing or
     unavailable, falls back to the ``temperature`` attribute on the weather
-    entity.  Returns ``fallback`` when neither is usable.
+    entity.  Returns ``None`` when neither source has a valid reading so the
+    coordinator can skip MPC execution instead of seeding the EKF with a
+    fabricated fallback value.
     """
     if outdoor_entity:
         state = hass.states.get(outdoor_entity)
@@ -310,7 +311,7 @@ def read_outdoor_temp(
                 except (ValueError, TypeError):
                     pass
 
-    return fallback
+    return None
 
 
 def read_wind_speed_now(hass: Any, weather_entity: Optional[str]) -> Optional[float]:

@@ -16,12 +16,13 @@ import dataclasses
 import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -163,6 +164,12 @@ from .schedule import (
 from . import weather as _weather
 
 _LOGGER = logging.getLogger(__name__)
+
+# Number of consecutive coordinator cycles with no valid outdoor temperature
+# before an UpdateFailed is raised (only applies when no prior reading was ever
+# obtained — i.e., the entity was never reachable since startup).
+# With the default 15-minute update interval this gives ~45 minutes of grace.
+_OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
 
 
 @dataclasses.dataclass
@@ -703,7 +710,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Current cloud-cover fraction in [0, 1], or None when unavailable;
         # used to attenuate the clear-sky solar model.
         self.cloud_cover: Optional[float] = None
-        self.outdoor_temp: float = 5.0
+        self.outdoor_temp: Optional[float] = None
+        # Last valid outdoor temperature reading.  When outdoor_temp is
+        # transiently None (entity unavailable mid-run) this value is used as a
+        # constant persistence forecast so MPC keeps running.  Reset to None
+        # only on a full coordinator re-initialisation; never cleared mid-run.
+        self._last_valid_outdoor_temp: Optional[float] = None
+        # Counter for consecutive startup cycles where outdoor_temp is None
+        # AND no prior valid reading exists.  Triggers UpdateFailed after
+        # _OUTDOOR_TEMP_MAX_STARTUP_FAILURES cycles.  Reset to 0 on first
+        # valid reading and never incremented again while persistence is used.
+        self._outdoor_temp_startup_failures: int = 0
         # Latest outdoor wind speed [m/s] from the weather entity.  Used
         # by the Sherman–Grimsrud infiltration overlay (Phase 1 C1).
         # ``None`` until the first coordinator cycle / when the weather
@@ -1200,7 +1217,55 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
             # 2. Read outdoor temperature
             outdoor_temp = self._read_outdoor_temp()
-            self.outdoor_temp = outdoor_temp
+            self.outdoor_temp = outdoor_temp  # sensor reports None = "unknown"
+
+            if outdoor_temp is not None:
+                # Fresh valid reading — update persistence cache and reset counter.
+                self._last_valid_outdoor_temp = outdoor_temp
+                self._outdoor_temp_startup_failures = 0
+            elif self._last_valid_outdoor_temp is not None:
+                # Transient failure mid-run: persist the last valid reading so
+                # MPC continues without interruption.  The sensor entity will
+                # report "unknown" while self.outdoor_temp is None.
+                _LOGGER.debug(
+                    "Outdoor temperature entity unavailable; "
+                    "persisting last known value %.1f °C for MPC",
+                    self._last_valid_outdoor_temp,
+                )
+                outdoor_temp = self._last_valid_outdoor_temp
+            else:
+                # No valid reading has ever been obtained — still starting up
+                # or entity is misconfigured / permanently unavailable.
+                self._outdoor_temp_startup_failures += 1
+                if self._outdoor_temp_startup_failures >= _OUTDOOR_TEMP_MAX_STARTUP_FAILURES:
+                    raise UpdateFailed(
+                        "Outdoor temperature is unavailable: neither "
+                        f"outdoor_temp_entity {self._outdoor_entity!r} nor "
+                        f"weather_entity {self._weather_entity!r} has produced "
+                        f"a valid reading after "
+                        f"{self._outdoor_temp_startup_failures} coordinator cycles. "
+                        "Check that the configured entities exist and are "
+                        "reporting a numeric state."
+                    )
+                _LOGGER.debug(
+                    "Outdoor temperature unavailable — startup cycle %d/%d; "
+                    "skipping MPC until entity becomes ready",
+                    self._outdoor_temp_startup_failures,
+                    _OUTDOOR_TEMP_MAX_STARTUP_FAILURES,
+                )
+                if not self.actions:
+                    self.actions = {src.name: 0.0 for src in self.heat_sources}
+                return {
+                    "temperatures": dict(self.model.temperatures),
+                    "outdoor_temp": None,
+                    "actions": dict(self.actions),
+                    "solar_gains": {},
+                    "predictions": [],
+                    "heat_flows": {},
+                    "outdoor_forecast": [],
+                    "solar_forecast": [],
+                    "heating_schedule": [],
+                }
 
             # 2b. Read electricity price forecast from Nord Pool / price entity.
             self.price_forecast = await self._async_read_price_forecast(self.now_utc)
@@ -1446,7 +1511,126 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _read_outdoor_temp(self) -> float:
+    def setup_startup_listeners(self) -> Optional[Callable]:
+        """Watch the specific entities this integration needs, not all of HA.
+
+        Triggers a coordinator refresh as soon as each of the outdoor-temp
+        sensor, weather entity, or room-temperature sensors transitions from
+        ``unknown``/``unavailable`` to a valid state, without waiting for
+        ``EVENT_HOMEASSISTANT_STARTED`` which blocks on all integrations
+        (including unrelated slow ones).
+
+        Returns a cancel callable suitable for ``entry.async_on_unload``,
+        or ``None`` when there are no entities to watch.
+        """
+        _UNAVAILABLE = {"unknown", "unavailable"}
+
+        entity_ids: List[str] = []
+        if self._outdoor_entity:
+            entity_ids.append(self._outdoor_entity)
+        if self._weather_entity:
+            entity_ids.append(self._weather_entity)
+        for sensors in self._temp_sensors.values():
+            for sid in sensors:
+                if sid not in entity_ids:
+                    entity_ids.append(sid)
+
+        if not entity_ids:
+            return None
+
+        @callback
+        def _on_entity_ready(event) -> None:
+            new_state = event.data.get("new_state")
+            if new_state is None or new_state.state in _UNAVAILABLE:
+                return
+            old_state = event.data.get("old_state")
+            # Only trigger on transitions from unavailable/unknown → valid.
+            if old_state is not None and old_state.state not in _UNAVAILABLE:
+                return
+            _LOGGER.debug(
+                "Startup: entity %s became available — requesting coordinator refresh",
+                event.data.get("entity_id"),
+            )
+            self.hass.async_create_task(self.async_request_refresh())
+
+        return async_track_state_change_event(self.hass, entity_ids, _on_entity_ready)
+
+    def setup_window_listeners(self) -> Optional[Callable]:
+        """Set up window-sensor listeners for immediate debounce/settle timing.
+
+        The coordinator's periodic cycle updates the window state machine, but
+        the configured ``window_open_debounce`` and ``window_open_close_settle``
+        timings should be honoured independently of the update interval.  This
+        method:
+
+        1. Subscribes to state-change events on every window sensor so the
+           state machine records the transition timestamp immediately.
+        2. Schedules a one-shot ``async_call_later`` refresh at exactly the
+           debounce (window opens) or settle (window closes) deadline so the
+           heater command takes effect within seconds, not at the next cycle.
+
+        Returns a cancel callable suitable for ``entry.async_on_unload``,
+        or ``None`` when no window sensors are configured.
+        """
+        all_sensor_ids: List[str] = []
+        for sensors in self._window_sensors.values():
+            for sid in sensors:
+                if sid not in all_sensor_ids:
+                    all_sensor_ids.append(sid)
+
+        if not all_sensor_ids:
+            return None
+
+        # Cancel handles for pending delayed refreshes, keyed by sensor entity_id.
+        _pending: Dict[str, Callable] = {}
+
+        @callback
+        def _on_window_changed(event) -> None:
+            new_state = event.data.get("new_state")
+            old_state = event.data.get("old_state")
+            if new_state is None:
+                return
+
+            new_open = str(new_state.state).lower() == "on"
+            old_open = old_state is not None and str(old_state.state).lower() == "on"
+            if new_open == old_open:
+                return  # No actual open/close transition
+
+            # Immediate refresh so the state machine stamps the transition now.
+            self.hass.async_create_task(self.async_request_refresh())
+
+            # Cancel any previously scheduled delayed refresh for this sensor.
+            sensor_id = event.data.get("entity_id", "")
+            if sensor_id in _pending:
+                _pending.pop(sensor_id)()
+
+            # Schedule a refresh at the debounce / settle deadline so the
+            # state machine can advance right when the timer expires.
+            delay = (
+                self._window_open_debounce if new_open
+                else self._window_open_close_settle
+            )
+
+            @callback
+            def _delayed_refresh(_now=None) -> None:
+                _pending.pop(sensor_id, None)
+                self.hass.async_create_task(self.async_request_refresh())
+
+            _pending[sensor_id] = async_call_later(self.hass, delay, _delayed_refresh)
+
+        cancel_listener = async_track_state_change_event(
+            self.hass, all_sensor_ids, _on_window_changed
+        )
+
+        def _cleanup() -> None:
+            cancel_listener()
+            for cancel_cb in list(_pending.values()):
+                cancel_cb()
+            _pending.clear()
+
+        return _cleanup
+
+    def _read_outdoor_temp(self) -> Optional[float]:
         return _weather.read_outdoor_temp(
             self.hass, self._outdoor_entity, self._weather_entity
         )

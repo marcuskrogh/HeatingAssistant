@@ -65,7 +65,7 @@ from typing import Any, Dict, Optional
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, SERVICE_RELOAD
+from homeassistant.const import SERVICE_RELOAD
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
@@ -557,20 +557,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # On cold HA starts, weather entities and temperature sensors may not yet
-    # have a valid state when the first coordinator refresh runs above.
-    # Schedule a second refresh once HA has finished loading all integrations
-    # so the correct outdoor temperature and sensor values are used from the
-    # very first active MPC cycle instead of hitting the 5 °C fallback.
-    async def _startup_refresh(event=None) -> None:
-        await coordinator.async_request_refresh()
+    # Watch only the entities this integration needs (outdoor sensor, weather,
+    # room temperature sensors) rather than waiting for EVENT_HOMEASSISTANT_STARTED
+    # which blocks on all integrations — including unrelated slow ones.
+    # Each listener fires a coordinator refresh as soon as its entity transitions
+    # from unknown/unavailable to a valid state.
+    cancel_startup = coordinator.setup_startup_listeners()
+    if cancel_startup is not None:
+        entry.async_on_unload(cancel_startup)
 
-    if hass.is_running:
-        hass.async_create_task(_startup_refresh())
-    else:
-        entry.async_on_unload(
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _startup_refresh)
-        )
+    # Schedule immediate + deadline-aligned refreshes for window open/close
+    # events so debounce and settle timings are honoured independently of the
+    # coordinator's update interval.
+    cancel_window = coordinator.setup_window_listeners()
+    if cancel_window is not None:
+        entry.async_on_unload(cancel_window)
 
     # NOTE: Native Lovelace dashboards are kept in code but disabled.
     # The custom JS/CSS panel below is the primary dashboard.
