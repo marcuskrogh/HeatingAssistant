@@ -812,6 +812,19 @@ def compute_open_loop_predictions(
             x[:n] = np.array(y0[:n], dtype=float)
         d_prev = _make_d(seg[0])
 
+        # Anchor point: record the t=0 initial state so the chart shows the
+        # simulation starting exactly at the measurement.  predicted == measured
+        # here by construction; the error at t=0 is always zero.
+        ts0 = float(seg[0].get("timestamp", 0.0))
+        for room_idx, room_name in enumerate(room_names):
+            if room_idx < len(y0):
+                init_val = round(float(y0[room_idx]), 3)
+                simulation[room_name].append({
+                    "time": ts0,
+                    "measured": init_val,
+                    "predicted": init_val,
+                })
+
         valid_segment = True
         for record in seg[1:]:
             d = _make_d(record)
