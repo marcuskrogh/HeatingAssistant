@@ -380,20 +380,22 @@ function buildTemperatureChart(
     );
   }
 
-  // Draw schedule-aware comfort corridor as time-varying dashed lines.
-  // Upper fills toward Lower (index +1) to shade the comfort zone.
-  if (combinedUpper.length > 0 && combinedLower.length > 0) {
-    const upperIdx = datasets.length;
+  // Shade outside the comfort corridor without drawing visible boundary lines.
+  // 'end' fills from the upper bound to the top of the chart (infeasible above).
+  // 'start' fills from the lower bound to the bottom of the chart (infeasible below).
+  if (combinedUpper.length > 0) {
     datasets.push(
-      makeDataset('Constraint Upper', combinedUpper, 'rgba(229,115,115,0.5)', {
-        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before',
-        fill: upperIdx + 1,
-        backgroundColor: 'rgba(229,115,115,0.07)',
+      makeDataset('Constraint Upper', combinedUpper, 'transparent', {
+        borderWidth: 0, pointRadius: 0, stepped: 'before',
+        fill: { target: 'end', above: 'rgba(229,115,115,0.12)', below: 'transparent' },
       })
     );
+  }
+  if (combinedLower.length > 0) {
     datasets.push(
-      makeDataset('Constraint Lower', combinedLower, 'rgba(229,115,115,0.5)', {
-        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before',
+      makeDataset('Constraint Lower', combinedLower, 'transparent', {
+        borderWidth: 0, pointRadius: 0, stepped: 'before',
+        fill: { target: 'start', above: 'transparent', below: 'rgba(229,115,115,0.12)' },
       })
     );
   }
