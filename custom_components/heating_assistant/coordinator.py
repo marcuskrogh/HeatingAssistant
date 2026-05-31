@@ -165,6 +165,12 @@ from . import weather as _weather
 
 _LOGGER = logging.getLogger(__name__)
 
+# Number of consecutive coordinator cycles with no valid outdoor temperature
+# before an UpdateFailed is raised (only applies when no prior reading was ever
+# obtained — i.e., the entity was never reachable since startup).
+# With the default 15-minute update interval this gives ~45 minutes of grace.
+_OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
+
 
 @dataclasses.dataclass
 class ControlTrajectory:
@@ -705,6 +711,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # used to attenuate the clear-sky solar model.
         self.cloud_cover: Optional[float] = None
         self.outdoor_temp: Optional[float] = None
+        # Last valid outdoor temperature reading.  When outdoor_temp is
+        # transiently None (entity unavailable mid-run) this value is used as a
+        # constant persistence forecast so MPC keeps running.  Reset to None
+        # only on a full coordinator re-initialisation; never cleared mid-run.
+        self._last_valid_outdoor_temp: Optional[float] = None
+        # Counter for consecutive startup cycles where outdoor_temp is None
+        # AND no prior valid reading exists.  Triggers UpdateFailed after
+        # _OUTDOOR_TEMP_MAX_STARTUP_FAILURES cycles.  Reset to 0 on first
+        # valid reading and never incremented again while persistence is used.
+        self._outdoor_temp_startup_failures: int = 0
         # Latest outdoor wind speed [m/s] from the weather entity.  Used
         # by the Sherman–Grimsrud infiltration overlay (Phase 1 C1).
         # ``None`` until the first coordinator cycle / when the weather
@@ -1201,16 +1217,41 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
             # 2. Read outdoor temperature
             outdoor_temp = self._read_outdoor_temp()
-            self.outdoor_temp = outdoor_temp
+            self.outdoor_temp = outdoor_temp  # sensor reports None = "unknown"
 
-            # Guard: when no outdoor temperature is available (entity not yet
-            # ready during startup) skip MPC and heater dispatch entirely.
-            # The entity-specific startup listeners will trigger a refresh as
-            # soon as the outdoor sensor / weather entity reports a valid value.
-            if outdoor_temp is None:
+            if outdoor_temp is not None:
+                # Fresh valid reading — update persistence cache and reset counter.
+                self._last_valid_outdoor_temp = outdoor_temp
+                self._outdoor_temp_startup_failures = 0
+            elif self._last_valid_outdoor_temp is not None:
+                # Transient failure mid-run: persist the last valid reading so
+                # MPC continues without interruption.  The sensor entity will
+                # report "unknown" while self.outdoor_temp is None.
                 _LOGGER.debug(
-                    "Outdoor temperature unavailable; skipping MPC — "
-                    "startup listeners will refresh when the entity becomes ready"
+                    "Outdoor temperature entity unavailable; "
+                    "persisting last known value %.1f °C for MPC",
+                    self._last_valid_outdoor_temp,
+                )
+                outdoor_temp = self._last_valid_outdoor_temp
+            else:
+                # No valid reading has ever been obtained — still starting up
+                # or entity is misconfigured / permanently unavailable.
+                self._outdoor_temp_startup_failures += 1
+                if self._outdoor_temp_startup_failures >= _OUTDOOR_TEMP_MAX_STARTUP_FAILURES:
+                    raise UpdateFailed(
+                        "Outdoor temperature is unavailable: neither "
+                        f"outdoor_temp_entity {self._outdoor_entity!r} nor "
+                        f"weather_entity {self._weather_entity!r} has produced "
+                        f"a valid reading after "
+                        f"{self._outdoor_temp_startup_failures} coordinator cycles. "
+                        "Check that the configured entities exist and are "
+                        "reporting a numeric state."
+                    )
+                _LOGGER.debug(
+                    "Outdoor temperature unavailable — startup cycle %d/%d; "
+                    "skipping MPC until entity becomes ready",
+                    self._outdoor_temp_startup_failures,
+                    _OUTDOOR_TEMP_MAX_STARTUP_FAILURES,
                 )
                 if not self.actions:
                     self.actions = {src.name: 0.0 for src in self.heat_sources}
