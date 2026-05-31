@@ -205,6 +205,8 @@ SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 SERVICE_REGENERATE_DASHBOARD = "regenerate_dashboard"
 SERVICE_COMPUTE_LOGLIK_SLICE = "compute_loglik_slice"
 SERVICE_RUN_SYSID_SIMULATION = "run_sysid_simulation"
+SERVICE_APPLY_MANUAL_PARAMETERS = "apply_manual_parameters"
+SERVICE_RESET_ESTIMATED_PARAMETERS = "reset_estimated_parameters"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
@@ -1630,6 +1632,45 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("enabled"): cv.boolean,
             }
         ),
+    )
+
+    async def handle_apply_manual_parameters(call: ServiceCall) -> None:
+        """Apply manually tuned thermal parameters for a single room."""
+        coordinator = _get_coordinator(hass)
+        room_name: str = call.data["room_name"]
+        thermal_mass: float = call.data["thermal_mass"]
+        r_external: float = call.data["r_external"]
+        coordinator.apply_manual_parameters(room_name, thermal_mass, r_external)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_APPLY_MANUAL_PARAMETERS,
+        handle_apply_manual_parameters,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("thermal_mass"): vol.All(
+                    vol.Coerce(float), vol.Range(min=1000.0)
+                ),
+                vol.Required("r_external"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0001)
+                ),
+            }
+        ),
+    )
+
+    async def handle_reset_estimated_parameters(call: ServiceCall) -> None:
+        """Reset the active model back to configured (YAML) default parameters."""
+        coordinator = _get_coordinator(hass)
+        coordinator.reset_estimated_parameters()
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESET_ESTIMATED_PARAMETERS,
+        handle_reset_estimated_parameters,
+        schema=vol.Schema({}),
     )
 
     async def handle_regenerate_dashboard(call: ServiceCall) -> ServiceResponse:

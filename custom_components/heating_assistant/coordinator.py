@@ -1033,6 +1033,85 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._estimation_log_likelihood = None
         _LOGGER.info("Estimated parameters reset to configured defaults")
 
+    def apply_manual_parameters(
+        self,
+        room_name: str,
+        thermal_mass: float,
+        r_external: float,
+    ) -> None:
+        """Apply manually tuned parameters for a single room.
+
+        Updates the live model and rebuilds the MPC controller immediately.
+        The change is persisted to ``entry.data`` so it survives a restart.
+        Other rooms retain whatever parameters they currently have.
+        """
+        if room_name not in self.model.rooms:
+            raise ValueError(f"Room '{room_name}' not found in model")
+
+        room = self.model.rooms[room_name]
+        room.thermal_mass = float(thermal_mass)
+        room.r_external = float(r_external)
+
+        self.model.rebuild_derived_parameters()
+        (
+            self.model._C,
+            self.model._A,
+            self.model._B_ext,
+        ) = self.model._build_matrices()
+
+        self.controller = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=self._horizon,
+            dt=self.dt,
+            measurement_dt=self.dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+            tracking_weight=self._tracking_weight,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            soft_constraint_weight=self._soft_constraint_weight,
+            terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+        )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        existing_snap = {}
+        try:
+            existing_snap = self.estimated_params_snapshot or {}
+        except Exception:
+            pass
+
+        snapshot: Dict[str, Any] = {
+            **existing_snap,
+            "rooms": {
+                name: {
+                    "thermal_mass": r.thermal_mass,
+                    "r_external": r.r_external,
+                    "internal_gain": float(getattr(r, "internal_gain", 0.0)),
+                }
+                for name, r in self.model.rooms.items()
+            },
+            "estimated_at": now_iso,
+        }
+        self._estimation_timestamp = now_iso
+
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
+            )
+        _LOGGER.info(
+            "Applied manual parameters for room '%s': thermal_mass=%.0f J/K, r_external=%.5f K/W",
+            room_name,
+            thermal_mass,
+            r_external,
+        )
+
     async def _async_update_data(self) -> Dict[str, Any]:
         """
         Called by HA periodically.  Reads sensors, runs the controller,
