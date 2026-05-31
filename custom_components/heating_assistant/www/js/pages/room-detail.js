@@ -147,49 +147,84 @@ function _showSetpointEditor(kpiCard, currentValue, onConfirm, onCancel) {
   if (!valueEl) return;
 
   const savedHtml = valueEl.innerHTML;
+  const STEP = 0.5;
+  const MIN = 5;
+  const MAX = 30;
+
+  // Snap incoming value to the nearest 0.5 °C so the stepper is never
+  // in an invalid state regardless of what the sensor reported.
+  let selected = Math.round((currentValue ?? 22) / STEP) * STEP;
+  selected = Math.max(MIN, Math.min(MAX, selected));
 
   function restore() {
     valueEl.innerHTML = savedHtml;
   }
 
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.min = '5';
-  input.max = '30';
-  input.step = '0.5';
-  input.value = typeof currentValue === 'number' ? currentValue.toFixed(1) : currentValue;
-  input.style.cssText = 'width:68px;background:var(--bg);border:1px solid var(--accent);color:var(--text-primary);font-family:var(--font-mono);font-size:16px;text-align:center;border-radius:4px;padding:2px 4px;';
+  // ── Stepper row: [−]  22.0°  [+] ─────────────────────────────────
+  const stepperRow = document.createElement('div');
+  stepperRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
 
-  const confirmBtn = document.createElement('button');
-  confirmBtn.textContent = '✓';
-  confirmBtn.className = 'btn btn--primary';
-  confirmBtn.style.cssText = 'padding:2px 8px;font-size:13px;min-width:0;margin:0 2px;';
+  const downBtn = document.createElement('button');
+  downBtn.className = 'btn btn--ghost';
+  downBtn.textContent = '−';
+  downBtn.style.cssText = 'padding:1px 10px;font-size:17px;min-width:0;line-height:1.4;';
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.textContent = '✗';
-  cancelBtn.className = 'btn btn--ghost';
-  cancelBtn.style.cssText = 'padding:2px 8px;font-size:13px;min-width:0;margin:0 2px;';
+  const valueDisplay = document.createElement('span');
+  valueDisplay.style.cssText = 'font-family:var(--font-mono);font-size:18px;color:var(--text-primary);min-width:52px;text-align:center;display:inline-block;';
 
+  const upBtn = document.createElement('button');
+  upBtn.className = 'btn btn--ghost';
+  upBtn.textContent = '+';
+  upBtn.style.cssText = 'padding:1px 10px;font-size:17px;min-width:0;line-height:1.4;';
+
+  stepperRow.appendChild(downBtn);
+  stepperRow.appendChild(valueDisplay);
+  stepperRow.appendChild(upBtn);
+
+  // ── Confirm / Cancel row ──────────────────────────────────────────
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex;justify-content:center;gap:4px;margin-top:6px;';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn btn--primary';
+  confirmBtn.textContent = '✓';
+  confirmBtn.style.cssText = 'padding:2px 10px;font-size:13px;min-width:0;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn--ghost';
+  cancelBtn.textContent = '✗';
+  cancelBtn.style.cssText = 'padding:2px 10px;font-size:13px;min-width:0;';
+
   btnRow.appendChild(confirmBtn);
   btnRow.appendChild(cancelBtn);
 
   valueEl.innerHTML = '';
-  valueEl.appendChild(input);
+  valueEl.appendChild(stepperRow);
   valueEl.appendChild(btnRow);
-  input.focus();
-  input.select();
+
+  function refresh() {
+    valueDisplay.textContent = selected.toFixed(1) + '°';
+    downBtn.disabled = selected <= MIN;
+    upBtn.disabled = selected >= MAX;
+  }
+  refresh();
+
+  downBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selected = Math.max(MIN, selected - STEP);
+    refresh();
+  });
+
+  upBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selected = Math.min(MAX, selected + STEP);
+    refresh();
+  });
 
   confirmBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    const val = parseFloat(input.value);
     restore();
-    if (!isNaN(val) && val >= 5 && val <= 30) {
-      onConfirm(val);
-    } else {
-      onCancel();
-    }
+    onConfirm(selected);
   });
 
   cancelBtn.addEventListener('click', (e) => {
@@ -197,13 +232,6 @@ function _showSetpointEditor(kpiCard, currentValue, onConfirm, onCancel) {
     restore();
     onCancel();
   });
-
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') confirmBtn.click();
-    else if (e.key === 'Escape') cancelBtn.click();
-  });
-
-  input.addEventListener('click', (e) => e.stopPropagation());
 }
 
 async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart) {
