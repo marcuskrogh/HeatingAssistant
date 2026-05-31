@@ -223,7 +223,9 @@ function _showSetpointEditor(kpiCard, currentValue, onConfirm, onCancel) {
 
   confirmBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    restore();
+    // Optimistic update: show the new value immediately so the KPI reflects
+    // the change before the HA state event arrives on the next cycle.
+    valueEl.textContent = selected.toFixed(1) + '°C';
     onConfirm(selected);
   });
 

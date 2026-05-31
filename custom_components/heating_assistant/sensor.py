@@ -854,6 +854,11 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         heating_schedule = self._coordinator.heating_schedule
         linearised_predictions = self._coordinator.linearised_predictions
 
+        # Use per-step setpoints from the schedule trajectory so the forecast
+        # setpoint line reflects scheduled changes over the horizon.
+        traj = getattr(self._coordinator, "_control_trajectory", None)
+        step_sp = traj.setpoints.get(self._room_name) if traj is not None else None
+
         # Current heating power for this room (actual, not planned)
         current_heating = sum(
             getattr(s, "current_power", 0.0)
@@ -891,9 +896,14 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             # Include this step in the forecast even if temperature is missing,
             # to keep time stamps correct (i always represents the actual step number)
             step_time = now + timedelta(seconds=dt * (i + 1))
+            step_setpoint = (
+                round(float(step_sp[i]), 2)
+                if step_sp is not None and i < len(step_sp)
+                else round(float(room.setpoint), 2)
+            )
             entry: Dict[str, Any] = {
                 "time": step_time.isoformat(),
-                "setpoint": room.setpoint,
+                "setpoint": step_setpoint,
             }
             if temp is not None:
                 temp_rounded = round(temp, 2)
