@@ -1453,8 +1453,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 ]
 
             self._history_buffer.append({
+                # Store the raw sensor measurements as y so the open-loop
+                # simulation and EKF diagnostics start from what the sensor
+                # actually read, not from any model-internal estimate.  For
+                # rooms without a sensor configured the model temperature is
+                # used as a fallback, but those rooms have no meaningful
+                # simulation target anyway.
                 "y": [
-                    self.model.rooms[name].temperature
+                    self.measured_temperatures.get(
+                        name, self.model.rooms[name].temperature
+                    )
                     for name in self.model.room_names
                 ],
                 # y_pred: prediction made at k-1 FOR step k — aligned with y.
@@ -1556,67 +1564,141 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         return async_track_state_change_event(self.hass, entity_ids, _on_entity_ready)
 
     def setup_window_listeners(self) -> Optional[Callable]:
-        """Set up window-sensor listeners for immediate debounce/settle timing.
+        """Set up window-sensor listeners for event-driven debounce/settle timing.
 
-        The coordinator's periodic cycle updates the window state machine, but
-        the configured ``window_open_debounce`` and ``window_open_close_settle``
-        timings should be honoured independently of the update interval.  This
-        method:
+        The state machine is advanced DIRECTLY from the event callbacks rather
+        than relying on coordinator refreshes to check elapsed time:
 
-        1. Subscribes to state-change events on every window sensor so the
-           state machine records the transition timestamp immediately.
-        2. Schedules a one-shot ``async_call_later`` refresh at exactly the
-           debounce (window opens) or settle (window closes) deadline so the
-           heater command takes effect within seconds, not at the next cycle.
+        * Sensor opens  → ``closed → pending_open`` immediately; after
+          ``window_open_debounce`` seconds, verify still open, advance to
+          ``open``, then fire ONE coordinator refresh (heater-off command).
+        * Sensor closes (all room sensors closed) + state is ``open`` →
+          ``open → pending_closed`` immediately; after
+          ``window_open_close_settle`` seconds, verify still closed, advance
+          to ``closed``, then fire ONE coordinator refresh (heater-on command).
+        * Sensor closes while ``pending_open`` (closed before debounce) →
+          revert to ``closed`` immediately, fire ONE coordinator refresh.
+
+        Pending timers are keyed by room name so a second sensor event in
+        the same room correctly cancels the previous in-flight timer.
 
         Returns a cancel callable suitable for ``entry.async_on_unload``,
         or ``None`` when no window sensors are configured.
         """
-        all_sensor_ids: List[str] = []
-        for sensors in self._window_sensors.values():
-            for sid in sensors:
-                if sid not in all_sensor_ids:
-                    all_sensor_ids.append(sid)
-
+        # Build sensor_id → room_name reverse lookup.
+        sensor_to_room: Dict[str, str] = {
+            sid: room_name
+            for room_name, sensors in self._window_sensors.items()
+            for sid in sensors
+        }
+        all_sensor_ids = list(sensor_to_room)
         if not all_sensor_ids:
             return None
 
-        # Cancel handles for pending delayed refreshes, keyed by sensor entity_id.
+        # Pending timer cancel-handles keyed by room_name (one timer per room).
         _pending: Dict[str, Callable] = {}
 
         @callback
         def _on_window_changed(event) -> None:
-            new_state = event.data.get("new_state")
-            old_state = event.data.get("old_state")
-            if new_state is None:
+            sensor_id = event.data.get("entity_id", "")
+            room_name = sensor_to_room.get(sensor_id)
+            if room_name is None:
                 return
 
-            new_open = str(new_state.state).lower() == "on"
-            old_open = old_state is not None and str(old_state.state).lower() == "on"
-            if new_open == old_open:
-                return  # No actual open/close transition
+            new_state_obj = event.data.get("new_state")
+            old_state_obj = event.data.get("old_state")
+            if new_state_obj is None:
+                return
 
-            # Immediate refresh so the state machine stamps the transition now.
-            self.hass.async_create_task(self.async_request_refresh())
-
-            # Cancel any previously scheduled delayed refresh for this sensor.
-            sensor_id = event.data.get("entity_id", "")
-            if sensor_id in _pending:
-                _pending.pop(sensor_id)()
-
-            # Schedule a refresh at the debounce / settle deadline so the
-            # state machine can advance right when the timer expires.
-            delay = (
-                self._window_open_debounce if new_open
-                else self._window_open_close_settle
+            new_open = str(new_state_obj.state).lower() == "on"
+            old_open = (
+                old_state_obj is not None
+                and str(old_state_obj.state).lower() == "on"
             )
+            if new_open == old_open:
+                return
 
-            @callback
-            def _delayed_refresh(_now=None) -> None:
-                _pending.pop(sensor_id, None)
-                self.hass.async_create_task(self.async_request_refresh())
+            now_utc = datetime.now(tz=timezone.utc)
 
-            _pending[sensor_id] = async_call_later(self.hass, delay, _delayed_refresh)
+            # Cancel any in-flight timer for this room before issuing a new one.
+            if room_name in _pending:
+                _pending.pop(room_name)()
+
+            current = self._window_state.get(room_name, "closed")
+
+            if new_open:
+                # ── Window just opened ─────────────────────────────────────
+                if current == "closed":
+                    self._set_window_state(room_name, "pending_open", now_utc)
+                    _LOGGER.debug(
+                        "Window sensor %s opened for %s — pending_open (debounce %.0fs)",
+                        sensor_id, room_name, self._window_open_debounce,
+                    )
+
+                @callback
+                def _advance_open(_now=None, _rn=room_name) -> None:
+                    _pending.pop(_rn, None)
+                    _now_inner = datetime.now(tz=timezone.utc)
+                    sensors = self._window_sensors.get(_rn, [])
+                    any_open = any(self._read_binary_sensor_on(s) for s in sensors)
+                    if any_open and self._window_state.get(_rn) == "pending_open":
+                        self._set_window_state(_rn, "open", _now_inner)
+                        _LOGGER.debug(
+                            "Window debounce elapsed for %s — heater override active",
+                            _rn,
+                        )
+                    self.hass.async_create_task(self.async_request_refresh())
+
+                _pending[room_name] = async_call_later(
+                    self.hass, self._window_open_debounce, _advance_open
+                )
+
+            else:
+                # ── Window just closed ─────────────────────────────────────
+                sensors = self._window_sensors.get(room_name, [])
+                any_still_open = any(
+                    self._read_binary_sensor_on(s) for s in sensors
+                )
+
+                if current == "pending_open":
+                    # Closed before debounce elapsed — revert to closed.
+                    self._set_window_state(room_name, "closed", now_utc)
+                    _LOGGER.debug(
+                        "Window sensor %s closed before debounce for %s — reverted",
+                        sensor_id, room_name,
+                    )
+                    self.hass.async_create_task(self.async_request_refresh())
+
+                elif current == "open" and not any_still_open:
+                    # All sensors closed while open — enter settle period.
+                    self._set_window_state(room_name, "pending_closed", now_utc)
+                    _LOGGER.debug(
+                        "Window sensor %s closed for %s — pending_closed (settle %.0fs)",
+                        sensor_id, room_name, self._window_open_close_settle,
+                    )
+
+                    @callback
+                    def _advance_closed(_now=None, _rn=room_name) -> None:
+                        _pending.pop(_rn, None)
+                        _now_inner = datetime.now(tz=timezone.utc)
+                        sensors2 = self._window_sensors.get(_rn, [])
+                        any_open2 = any(
+                            self._read_binary_sensor_on(s) for s in sensors2
+                        )
+                        if (
+                            not any_open2
+                            and self._window_state.get(_rn) == "pending_closed"
+                        ):
+                            self._set_window_state(_rn, "closed", _now_inner)
+                            _LOGGER.debug(
+                                "Window settle elapsed for %s — heater override cleared",
+                                _rn,
+                            )
+                        self.hass.async_create_task(self.async_request_refresh())
+
+                    _pending[room_name] = async_call_later(
+                        self.hass, self._window_open_close_settle, _advance_closed
+                    )
 
         cancel_listener = async_track_state_change_event(
             self.hass, all_sensor_ids, _on_window_changed
