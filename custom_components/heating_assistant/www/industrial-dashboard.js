@@ -53,7 +53,7 @@ class HaIndustrialPanel extends HTMLElement {
     const contentEl = this.shadowRoot.getElementById('content');
     this._router = new Router(contentEl, {
       overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection),
-      room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection),
+      room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
       tuning: () => renderTuning(contentEl, this._rooms, this._state, this._connection, this._hass),
     });
 

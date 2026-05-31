@@ -6,7 +6,7 @@ import {
   entityValue, entityAttr, systemEntity, modelFitLabel,
 } from '../utils.js';
 
-export function renderRoomDetail(container, roomSlug, rooms, state, connection) {
+export function renderRoomDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
   if (!room) {
     container.innerHTML = `<div class="loading">Room not found: ${roomSlug}</div>`;
@@ -38,7 +38,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 
   const kpis = [
     createKpiCard({ value: formatTemperature(tempVal), label: 'Temperature', unit: '' }),
-    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint', unit: '' }),
+    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint \u270e', unit: '' }),
     createKpiCard({ value: formatPower(powerVal), label: 'Power', unit: '' }),
     createKpiCard({
       value: `<span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>`,
@@ -48,6 +48,30 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
     }),
   ];
   kpis.forEach((k) => kpiGrid.appendChild(k));
+
+  // Make setpoint KPI clickable for inline editing.
+  let setpointEditing = false;
+  const setpointKpi = kpis[1];
+  setpointKpi.classList.add('card--clickable');
+  setpointKpi.title = 'Click to change setpoint';
+  const climateEntityId = `climate.heating_assistant_${roomSlug}`;
+
+  setpointKpi.addEventListener('click', () => {
+    if (setpointEditing) return;
+    const currentSp = entityValue(latestState, room.entities['setpoint']) ?? 22;
+    setpointEditing = true;
+    _showSetpointEditor(setpointKpi, currentSp, async (newSp) => {
+      try {
+        await hass.callService('climate', 'set_temperature', {
+          entity_id: climateEntityId,
+          temperature: newSp,
+        });
+      } catch (err) {
+        // Service call failed; the display will self-correct on next state update.
+      }
+      setpointEditing = false;
+    }, () => { setpointEditing = false; });
+  });
 
   const countdown = createCountdown(state, true);
   kpiGrid.appendChild(countdown.element);
@@ -101,7 +125,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
       const sp = entityValue(newState, room.entities['setpoint']);
 
       updateKpiCard(kpis[0], { value: formatTemperature(tv) });
-      updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
+      if (!setpointEditing) {
+        updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
+      }
       updateKpiCard(kpis[2], { value: formatPower(pv) });
       updateKpiCard(kpis[3], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
 
@@ -114,6 +140,70 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
       disturbChart.destroy();
     },
   };
+}
+
+function _showSetpointEditor(kpiCard, currentValue, onConfirm, onCancel) {
+  const valueEl = kpiCard.querySelector('.kpi__value');
+  if (!valueEl) return;
+
+  const savedHtml = valueEl.innerHTML;
+
+  function restore() {
+    valueEl.innerHTML = savedHtml;
+  }
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '5';
+  input.max = '30';
+  input.step = '0.5';
+  input.value = typeof currentValue === 'number' ? currentValue.toFixed(1) : currentValue;
+  input.style.cssText = 'width:68px;background:var(--bg);border:1px solid var(--accent);color:var(--text-primary);font-family:var(--font-mono);font-size:16px;text-align:center;border-radius:4px;padding:2px 4px;';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.textContent = '✓';
+  confirmBtn.className = 'btn btn--primary';
+  confirmBtn.style.cssText = 'padding:2px 8px;font-size:13px;min-width:0;margin:0 2px;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = '✗';
+  cancelBtn.className = 'btn btn--ghost';
+  cancelBtn.style.cssText = 'padding:2px 8px;font-size:13px;min-width:0;margin:0 2px;';
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;justify-content:center;gap:4px;margin-top:6px;';
+  btnRow.appendChild(confirmBtn);
+  btnRow.appendChild(cancelBtn);
+
+  valueEl.innerHTML = '';
+  valueEl.appendChild(input);
+  valueEl.appendChild(btnRow);
+  input.focus();
+  input.select();
+
+  confirmBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const val = parseFloat(input.value);
+    restore();
+    if (!isNaN(val) && val >= 5 && val <= 30) {
+      onConfirm(val);
+    } else {
+      onCancel();
+    }
+  });
+
+  cancelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    restore();
+    onCancel();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmBtn.click();
+    else if (e.key === 'Escape') cancelBtn.click();
+  });
+
+  input.addEventListener('click', (e) => e.stopPropagation());
 }
 
 async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart) {

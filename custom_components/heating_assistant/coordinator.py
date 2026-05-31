@@ -729,6 +729,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # when the MPC solver fails so sensor entities report ``unknown``.
         self.filtered_temperatures: Dict[str, float] = {}
 
+        # Rooms that have received at least one valid temperature measurement
+        # since the coordinator started.  Rooms absent from this set have
+        # never had a sensor reading (e.g. HA entity still "unknown" during
+        # startup) and must not influence the EKF initial state or actuate
+        # heat until a real measurement arrives.
+        self._rooms_ever_measured: set = set()
+
         # Rolling observation history for ML parameter estimation.
         # Each entry is a dict: {y, u, d_outdoor, d_solar, timestamp}.
         self._history_buffer: deque = deque(maxlen=HISTORY_BUFFER_SIZE)
@@ -1008,6 +1015,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         sources_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_HEAT_SOURCES, [])
         self.model = build_house_model(rooms_cfg)
         self.heat_sources = build_heat_sources(sources_cfg)
+
+        # Restore user-controlled setpoints so that "Reset to Defaults"
+        # only affects estimated thermal parameters (thermal_mass,
+        # r_external) and not the user's chosen comfort setpoints.
+        for _room_name, _sp in self._base_setpoint.items():
+            if _room_name in self.model.rooms:
+                self.model.rooms[_room_name].setpoint = _sp
         self._rebuild_sources_by_room()
 
         self.controller = HeatingMPCController(
@@ -1147,6 +1161,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     self.model.rooms[room_name].temperature = averaged
                     self.measured_temperatures[room_name] = averaged
 
+            # Update the set of rooms that have ever had a valid reading.
+            self._rooms_ever_measured.update(self.measured_temperatures.keys())
+
+            # Rooms with sensors configured but no reading yet (typically
+            # during HA startup before entities leave "unknown" state) must
+            # not drive heating or seed the EKF with the 20 °C model default.
+            rooms_not_ready: set = {
+                name for name in self._temp_sensors
+                if name not in self._rooms_ever_measured
+            }
+            if rooms_not_ready:
+                _LOGGER.debug(
+                    "Waiting for first valid temperature reading for: %s",
+                    ", ".join(sorted(rooms_not_ready)),
+                )
+
             # 1b. Apply comfort schedules: resolve the active period for each
             #     room and update the live setpoint / enabled flag accordingly.
             #     Done after measurements are read so frost-protection logic
@@ -1247,12 +1277,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 4. Run MPC controller
             # Collect heat sources whose rooms are currently off so the
             # controller can zero them out in both the first-step action and
-            # the full predicted heating schedule before returning.
+            # the full predicted heating schedule before returning.  Also
+            # disable sources for rooms that have never had a valid sensor
+            # reading so we never actuate based on the 20 °C model default.
             disabled_src_names = {
                 src.name
                 for src in self.heat_sources
                 if not self.is_room_enabled(src.room)
                 or self.is_window_override_active(src.room)
+                or src.room in rooms_not_ready
             }
             try:
                 self.actions = self.controller.compute(
@@ -1273,7 +1306,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.outdoor_forecast = self.controller.outdoor_forecast
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
-                self.filtered_temperatures = self.controller.filtered_temperatures
+                self.filtered_temperatures = dict(self.controller.filtered_temperatures)
+                # Rooms that have never had a valid reading expose "unknown"
+                # so the dashboard falls back to the raw sensor value.
+                for _r in rooms_not_ready:
+                    self.filtered_temperatures.pop(_r, None)
                 # Mirror the price forecast that was actually used so sensors can
                 # expose it (may differ from self.price_forecast if the controller
                 # truncated / padded it).
