@@ -105,7 +105,8 @@
           "energy_weight": "Energy-use penalty",
           "horizon": "Prediction horizon (steps)",
           "smoothing_weight": "Output smoothing",
-          "soft_constraint_weight": "Comfort band penalty",
+          "soft_constraint_weight": "Comfort band quadratic penalty",
+          "soft_constraint_linear_weight": "Comfort band linear penalty",
           "terminal_weight": "End-of-horizon weight",
           "energy_price_weight": "Price sensitivity"
         },
@@ -114,7 +115,8 @@
           "energy_weight": "How strongly the controller avoids running heaters. Higher values save energy but may drift toward the edges of the comfort band.",
           "horizon": "Advanced — number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",
           "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
-          "soft_constraint_weight": "Advanced — how hard the controller fights to stay inside your comfort band. Higher = stricter, may use more energy at the band edges.",
+          "soft_constraint_weight": "Advanced — quadratic penalty ρ on comfort-band violations (ρ·ε²). Higher = stronger restoring force proportional to how far outside the band the temperature is.",
+          "soft_constraint_linear_weight": "Advanced — linear penalty ρ_lin on comfort-band violations (ρ_lin·ε). Applies a constant restoring force as soon as the temperature leaves the band, regardless of the magnitude of the violation. Combine with the quadratic penalty or use alone. 0 = disabled.",
           "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift.",
           "energy_price_weight": "Scales how strongly the electricity price enters the MPC cost. Comfort is always respected first — the price term shifts heating timing within the comfort zone toward cheaper hours. Start at 1 (default). Raise to 5–20 for a stronger response; lower if comfort is being sacrificed. 0 disables price awareness. Only active when an electricity price sensor is configured."
         }

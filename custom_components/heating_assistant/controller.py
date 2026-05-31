@@ -1377,6 +1377,8 @@ class _AbsoluteInputOCP(OptimalControlProblem):
 
         f = np.zeros(n_Z)
         f[:n_U] = f_u
+        if self._rho_lin > 0.0:
+            f[n_U:] = self._rho_lin
 
         # Input box bounds
         u_min_np, u_max_np = self._model.u_bounds
@@ -1558,6 +1560,7 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             P=ocp._P,
             S=ocp._S,
             rho=ocp._rho,
+            rho_lin=ocp._rho_lin,
             y_offset=ocp._y_offset,
         )
 
@@ -1756,7 +1759,8 @@ class HeatingMPCController:
     tracking_weight   : weight on ||z - z_ref||^2_Q (setpoint tracking; 0 disables tracking)
     energy_weight     : weight on ||u||^2_R (input regularisation)
     smoothing_weight  : weight on ||Delta u||^2_S (input rate-of-movement; 0 disables)
-    soft_constraint_weight : direct penalty rho for soft output bound violations.
+    soft_constraint_weight : quadratic penalty rho on soft output bound violations (rho·ε²).
+    soft_constraint_linear_weight : linear penalty rho_lin on soft output bound violations (rho_lin·ε); 0 disables.
     sigma_w           : process-noise std dev for the SDE / EKF [K/sqrt(s)].
     sigma_v           : measurement-noise std dev [K].
     sigma_b           : offset-state process-noise std dev [K/sqrt(s)].
@@ -1779,6 +1783,7 @@ class HeatingMPCController:
         energy_weight: float = 0.01,
         smoothing_weight: float = 0.1,
         soft_constraint_weight: float = 10.0,
+        soft_constraint_linear_weight: float = 0.0,
         terminal_weight: float = 100.0,
         sigma_w: float = 0.1,
         sigma_v: float = 0.5,
@@ -1855,8 +1860,9 @@ class HeatingMPCController:
         P_cv = _diag_np(n_z, float(terminal_weight) * float(tracking_weight))
         S_cv = _diag_np(n_u, float(smoothing_weight)) if smoothing_weight > 0.0 else None
 
-        # Soft-constraint penalty: direct weight on comfort-corridor violations
+        # Soft-constraint penalties on comfort-corridor violations
         rho = float(soft_constraint_weight)
+        rho_lin = float(soft_constraint_linear_weight)
 
         # Comfort corridor half-width: use maximum comfort_offset across all rooms
         y_offset = max(
@@ -1888,6 +1894,7 @@ class HeatingMPCController:
             P=P_cv,
             S=S_cv,
             rho=rho,
+            rho_lin=rho_lin,
             y_offset=y_offset,
         )
 
