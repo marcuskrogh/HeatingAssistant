@@ -105,11 +105,15 @@ class HaIndustrialPanel extends HTMLElement {
     `;
 
     this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
-      if (window.history.length > 1) {
-        window.history.back();
-      } else {
-        window.location.replace('/lovelace');
-      }
+      // Always exit the panel directly in a single click.
+      // Internal panel navigation (e.g. ← OVERVIEW on room pages) handles
+      // its own back-navigation, so this button must not step through
+      // the internal hash history — it should unconditionally leave.
+      //
+      // Using HA's client-side routing mechanism keeps the companion app
+      // and web browser in sync without a full page reload.
+      history.replaceState(null, '', '/lovelace');
+      window.dispatchEvent(new Event('location-changed'));
     });
 
     this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
