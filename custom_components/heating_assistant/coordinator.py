@@ -51,6 +51,7 @@ from .const import (
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
+    CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -116,6 +117,7 @@ from .const import (
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -362,6 +364,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_ENERGY_WEIGHT,
         CONF_SMOOTHING_WEIGHT,
         CONF_SOFT_CONSTRAINT_WEIGHT,
+        CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
         CONF_TERMINAL_WEIGHT,
         CONF_SIGMA_W,
         CONF_SIGMA_V,
@@ -416,6 +419,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._soft_constraint_weight: float = data.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
+        self._soft_constraint_linear_weight: float = data.get(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
         self._sigma_w: float = float(
             options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
@@ -531,6 +535,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -894,6 +899,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -958,6 +964,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if CONF_SOFT_CONSTRAINT_WEIGHT in pending:
             self._soft_constraint_weight = float(
                 pending.get(CONF_SOFT_CONSTRAINT_WEIGHT, self._soft_constraint_weight)
+            )
+            rebuild_controller = True
+        if CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT in pending:
+            self._soft_constraint_linear_weight = float(
+                pending.get(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, self._soft_constraint_linear_weight)
             )
             rebuild_controller = True
         if CONF_ENERGY_WEIGHT in pending:
@@ -1053,6 +1064,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -1102,6 +1114,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -2722,6 +2735,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,

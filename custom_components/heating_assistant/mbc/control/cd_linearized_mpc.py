@@ -248,6 +248,7 @@ class CDLinearizedMPCController:
         P: Any | None = None,
         S: Any | None = None,
         rho: float = 1e4,
+        rho_lin: float = 0.0,
         y_offset: float = 2.0,
     ) -> None:
         self._model = model
@@ -279,6 +280,7 @@ class CDLinearizedMPCController:
             P=P,
             S=S,
             rho=rho,
+            rho_lin=rho_lin,
             y_offset=y_offset,
         )
 

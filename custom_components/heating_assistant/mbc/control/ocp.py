@@ -199,6 +199,7 @@ class OptimalControlProblem:
         P: Any | None = None,
         S: Any | None = None,
         rho: float = 1e4,
+        rho_lin: float = 0.0,
         y_offset: float = 2.0,
         solver: str | QPSolverBackend = "highs",
         solver_options: dict[str, Any] | None = None,
@@ -216,6 +217,7 @@ class OptimalControlProblem:
         self._P = _any_to_np2d(P) if P is not None else self._Q.copy()
         self._S = _any_to_np2d(S) if S is not None else None
         self._rho = rho
+        self._rho_lin = rho_lin
         self._y_offset = y_offset
         self._backend = make_qp_backend(solver, solver_options=solver_options)
         self._formulation = formulation
@@ -444,6 +446,8 @@ class OptimalControlProblem:
 
         f = np.zeros(n_Z)
         f[:n_U] = f_u
+        if self._rho_lin > 0.0:
+            f[n_U:] = self._rho_lin
 
         u_min, u_max = self._model.u_bounds
         u_min_t = np.tile(_any_to_np1d(u_min).reshape(-1), N)
@@ -504,6 +508,8 @@ class OptimalControlProblem:
             x_blocks + [H_uu, self._rho * sp.eye(n_eps)],
             format="csc",
         )
+        if self._rho_lin > 0.0:
+            f[oE:oE + n_eps] = self._rho_lin
 
         # ── Dynamics equality constraints  A_eq Z = b_eq (banded) ───────
         rows: list[int] = []

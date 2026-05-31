@@ -90,6 +90,7 @@ from .const import (
     CONF_SKY_RADIATIVE_UA,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
+    CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
     CONF_TERMINAL_WEIGHT,
@@ -164,6 +165,7 @@ from .const import (
     DEFAULT_SKY_RADIATIVE_UA,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_THERMAL_BRIDGE_PSI_L,
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
@@ -1080,13 +1082,21 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     if current.get(CONF_SOFT_CONSTRAINT_WEIGHT) is not None
                     else DEFAULT_SOFT_CONSTRAINT_WEIGHT
                 ),
-            ): _number_box(min_value=0.0, max_value=10000.0, step=1.0),
+            ): _number_box(min_value=0.0, max_value=1000000.0, step=1.0),
+            vol.Optional(
+                CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
+                default=float(
+                    current.get(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT)
+                    if current.get(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT) is not None
+                    else DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT
+                ),
+            ): _number_box(min_value=0.0, max_value=1000000.0, step=1.0),
             vol.Optional(
                 CONF_TERMINAL_WEIGHT,
                 default=float(
                     current.get(CONF_TERMINAL_WEIGHT) or DEFAULT_TERMINAL_WEIGHT
                 ),
-            ): _number_box(min_value=1.0, max_value=10000.0, step=1.0),
+            ): _number_box(min_value=1.0, max_value=1000000.0, step=1.0),
             vol.Optional(
                 CONF_ENERGY_PRICE_WEIGHT,
                 default=float(
@@ -1094,7 +1104,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     if current.get(CONF_ENERGY_PRICE_WEIGHT) is not None
                     else DEFAULT_ENERGY_PRICE_WEIGHT
                 ),
-            ): _number_box(min_value=0.0, max_value=10000.0, step=0.1),
+            ): _number_box(min_value=0.0, max_value=1000000.0, step=0.1),
         }
 
         return self.async_show_form(

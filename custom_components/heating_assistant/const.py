@@ -405,7 +405,8 @@ CONF_SOLAR_RADIATION_ENTITY = "solar_radiation_entity"  # HA sensor entity_id, W
 CONF_TRACKING_WEIGHT = "tracking_weight"          # scalar weight on ‖z − z_ref‖² (setpoint tracking cost Q diagonal)
 CONF_ENERGY_WEIGHT = "energy_weight"              # scalar weight on ‖u‖² (input regularisation cost R diagonal)
 CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖² (input rate-of-movement cost S diagonal)
-CONF_SOFT_CONSTRAINT_WEIGHT = "soft_constraint_weight"  # direct penalty ρ for soft output bound violations
+CONF_SOFT_CONSTRAINT_WEIGHT = "soft_constraint_weight"          # quadratic penalty ρ on soft output bound violations (ρ·ε²)
+CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT = "soft_constraint_linear_weight"  # linear penalty ρ_lin on soft output bound violations (ρ_lin·ε)
 CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
 CONF_MPC_SOLVER = "mpc_solver"                    # kept for backwards compat; QP backend always used
 CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # kept for backwards compat; always True
@@ -447,7 +448,8 @@ DEFAULT_HEATING_EFFICIENCY = 1.0       # fraction of max heating capacity used (
 DEFAULT_COMFORT_OFFSET = 2.0           # °C symmetric comfort region offset from setpoint (per-room)
 DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (input regularisation)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-movement damping)
-DEFAULT_SOFT_CONSTRAINT_WEIGHT = 10.0  # direct soft output-bound violation penalty ρ (was energy_weight × 1000 = 10)
+DEFAULT_SOFT_CONSTRAINT_WEIGHT = 10.0         # quadratic soft output-bound violation penalty ρ (ρ·ε²)
+DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT = 0.0   # linear soft output-bound violation penalty ρ_lin (ρ_lin·ε); 0 = disabled
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_MPC_SOLVER = "qp"              # QP backend; legacy "ipopt"/"slsqp" values accepted but ignored
 DEFAULT_MPC_ANALYTIC_DERIVATIVES = True  # always True; kept for backwards compat
