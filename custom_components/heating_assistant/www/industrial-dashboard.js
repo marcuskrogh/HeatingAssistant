@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '6';
+const PANEL_VERSION = '7';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {

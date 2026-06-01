@@ -42,22 +42,30 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* HA native top bar container — elevation shadow separates it from panel content */
+#top-bar {
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.14),
+              0 1px 5px rgba(0, 0, 0, 0.12),
+              0 3px 1px rgba(0, 0, 0, 0.2);
+}
+
 /* Panel navigation — the secondary tab bar below the HA top bar */
 .panel-nav {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 16px;
-  height: 48px;
-  border-bottom: 1px solid var(--divider-color, var(--border));
-  background: var(--card-background-color, var(--bg-card));
+  padding: 0 24px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
 }
 
 .panel-nav__link {
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--secondary-text-color, var(--text-secondary));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
   text-decoration: none;
   padding: 6px 12px;
   border-radius: var(--radius-sm);
@@ -66,8 +74,8 @@
 
 .panel-nav__link:hover,
 .panel-nav__link--active {
-  color: var(--primary-color, var(--accent));
-  background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.1);
+  color: var(--accent);
+  background: var(--accent-dim);
 }
 
 .panel-nav__fill {
