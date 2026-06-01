@@ -525,6 +525,27 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
         room_name: room.slug,
         periods,
       });
+
+      // Optimistically patch the shared state object (= this._state in the main component)
+      // so that any intermediate state_changed events from other entities don't call
+      // initLocalPeriods() with stale config-entity attributes and wipe the saved periods.
+      // The real state_changed for the config entity will overwrite this when it arrives.
+      if (state[CONFIG_ENTITY]) {
+        const existingAttrs = state[CONFIG_ENTITY].attributes || {};
+        const existingSchedules = existingAttrs.room_schedules || {};
+        const existingEnabled = existingSchedules[room.slug]?.enabled ?? true;
+        state[CONFIG_ENTITY] = {
+          ...state[CONFIG_ENTITY],
+          attributes: {
+            ...existingAttrs,
+            room_schedules: {
+              ...existingSchedules,
+              [room.slug]: { enabled: existingEnabled, periods },
+            },
+          },
+        };
+      }
+
       dirty = false;
       saveStatus.textContent = 'Saved.';
       saveStatus.className = 'tuning-actions__status tuning-actions__status--success';
