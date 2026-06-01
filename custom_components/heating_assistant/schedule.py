@@ -95,20 +95,29 @@ def parse_time(value: str | time) -> time:
 
 
 def _parse_days(value: Optional[Sequence[str]]) -> frozenset[int]:
-    """Convert a list of weekday short names into a set of weekday indices.
+    """Convert a list of weekday short names or indices into a set of weekday indices.
 
     ``None`` or empty means "every day".
+    Accepts both string names ("mon", "tue") and integer indices (0=Mon, 6=Sun).
     """
     if not value:
         return frozenset(range(7))
     days: set[int] = set()
     for raw in value:
-        key = str(raw).strip().lower()[:3]
-        if key not in WEEKDAY_NAMES:
-            raise ValueError(
-                f"Unknown weekday {raw!r}; expected one of {WEEKDAY_NAMES}"
-            )
-        days.add(WEEKDAY_NAMES.index(key))
+        if isinstance(raw, int):
+            if 0 <= raw <= 6:
+                days.add(raw)
+            else:
+                raise ValueError(
+                    f"Weekday index {raw} out of range; expected 0-6"
+                )
+        else:
+            key = str(raw).strip().lower()[:3]
+            if key not in WEEKDAY_NAMES:
+                raise ValueError(
+                    f"Unknown weekday {raw!r}; expected one of {WEEKDAY_NAMES}"
+                )
+            days.add(WEEKDAY_NAMES.index(key))
     return frozenset(days)
 
 

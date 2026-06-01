@@ -720,8 +720,10 @@ update_room_schedule:
       description: >
         List of schedule period objects. Each period must include name, mode
         ("comfort" or "off"), start (HH:MM), and end (HH:MM). Optional fields
-        are days (list of weekday integers 0-6), setpoint (float), and
-        frost_protection (float, default 12.0).
+        are days (list of weekday integers 0-6 or names), setpoint (float),
+        frost_protection (float, default 12.0), comfort_offset (float, band
+        half-width override), tracking_weight (float, setpoint tracking
+        multiplier), and energy_weight (float, energy penalty multiplier).
       required: true
       example:
         - name: "Morning"
@@ -729,6 +731,8 @@ update_room_schedule:
           start: "06:00"
           end: "08:30"
           setpoint: 21.0
+          comfort_offset: 1.5
+          days: [0, 1, 2, 3, 4]
         - name: "Night"
           mode: "off"
           start: "22:00"

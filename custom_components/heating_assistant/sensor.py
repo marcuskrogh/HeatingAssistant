@@ -2664,6 +2664,9 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
                             "setpoint": p.setpoint,
                             "frost_protection": p.frost_protection,
                             "days": sorted(p.days),
+                            "comfort_offset": p.comfort_offset,
+                            "tracking_weight": p.tracking_weight,
+                            "energy_weight": p.energy_weight,
                         }
                         for p in room_schedule.periods
                     ],
@@ -2677,7 +2680,14 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
         except Exception:
             pass
 
+        room_setpoints = {}
+        room_comfort_offsets = {}
+        for rn in c.model.room_names:
+            room_setpoints[slugify(rn)] = c.model.rooms[rn].setpoint
+            room_comfort_offsets[slugify(rn)] = c._room_comfort_offset.get(rn, 2.0)
+
         return {
+            "comfort_offset": next(iter(c._room_comfort_offset.values()), 2.0),
             "tracking_weight": c._tracking_weight,
             "energy_weight": c._energy_weight,
             "energy_price_weight": c._energy_price_weight,
@@ -2693,5 +2703,7 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
             "window_open_close_settle": c._window_open_close_settle,
             "window_open_q_inflation": c._window_open_q_inflation,
             "room_schedules": schedules,
+            "room_setpoints": room_setpoints,
+            "room_comfort_offsets": room_comfort_offsets,
             "parameter_history": param_history,
         }

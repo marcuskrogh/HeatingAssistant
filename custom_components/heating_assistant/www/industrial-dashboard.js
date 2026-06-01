@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '9';
+const PANEL_VERSION = '10';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -47,6 +47,7 @@ class HaIndustrialPanel extends HTMLElement {
       { renderRoomDetail },
       { renderSystemIdentification },
       { renderControllerTuning },
+      { renderSchedules },
     ] = await Promise.all([
       import(`${BASE_PATH}/js/ha-connection.js?v=${PANEL_VERSION}`),
       import(`${BASE_PATH}/js/router.js?v=${PANEL_VERSION}`),
@@ -55,6 +56,7 @@ class HaIndustrialPanel extends HTMLElement {
       import(`${BASE_PATH}/js/pages/room-detail.js?v=${PANEL_VERSION}`),
       import(`${BASE_PATH}/js/pages/system-identification.js?v=${PANEL_VERSION}`),
       import(`${BASE_PATH}/js/pages/tuning-controller.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/pages/schedules.js?v=${PANEL_VERSION}`),
     ]);
 
     this._connection = new HaConnection(this._hass);
@@ -68,6 +70,7 @@ class HaIndustrialPanel extends HTMLElement {
       room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
       identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
       tuning: (slug) => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+      schedules: (slug) => renderSchedules(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
     });
 
     this._unsubscribe = await this._connection.subscribe((event) => {
@@ -108,6 +111,7 @@ class HaIndustrialPanel extends HTMLElement {
           </div>
           <a class="panel-nav__link" href="#overview">OVERVIEW</a>
           <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
+          <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
           <a class="panel-nav__link" href="#tuning">TUNING</a>
           <span class="panel-nav__fill"></span>
           <span class="panel-nav__status">

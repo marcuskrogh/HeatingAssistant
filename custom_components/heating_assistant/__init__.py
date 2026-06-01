@@ -1861,6 +1861,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_update_room_schedule(call: ServiceCall) -> None:
         """Update the schedule for a single room and persist to config entry."""
+        from .dashboard import slugify as _slugify
+
         coordinator = _get_coordinator(hass)
         room_name: str = call.data["room_name"]
         periods: list = call.data["periods"]
@@ -1873,9 +1875,12 @@ def _register_services(hass: HomeAssistant) -> None:
         rooms_list = list(entry.data.get(CONF_ROOMS) or [])
         found = False
         for idx, room_cfg in enumerate(rooms_list):
-            if room_cfg.get(CONF_ROOM_NAME) == room_name:
+            cfg_name = room_cfg.get(CONF_ROOM_NAME, "")
+            if cfg_name == room_name or _slugify(cfg_name) == room_name:
                 rooms_list[idx] = {**room_cfg, CONF_SCHEDULE: periods}
                 found = True
+                # Use the actual room name for coordinator reload
+                room_name = cfg_name
                 break
 
         if not found:
@@ -1905,9 +1910,12 @@ def _register_services(hass: HomeAssistant) -> None:
                             vol.Required("mode"): vol.In(["comfort", "off"]),
                             vol.Required("start"): cv.string,
                             vol.Required("end"): cv.string,
-                            vol.Optional("days"): [vol.Coerce(int)],
+                            vol.Optional("days"): [vol.Any(vol.Coerce(int), cv.string)],
                             vol.Optional("setpoint"): vol.Coerce(float),
                             vol.Optional("frost_protection", default=12.0): vol.Coerce(float),
+                            vol.Optional("comfort_offset"): vol.Coerce(float),
+                            vol.Optional("tracking_weight"): vol.Coerce(float),
+                            vol.Optional("energy_weight"): vol.Coerce(float),
                         }
                     )
                 ],
