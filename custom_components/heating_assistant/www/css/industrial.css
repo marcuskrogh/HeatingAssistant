@@ -57,8 +57,47 @@
   align-items: center;
   gap: 4px;
   padding: 0 24px;
+  min-height: 48px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
+}
+
+.panel-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Mobile hamburger toggle — hidden on desktop */
+.panel-nav__toggle {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  transition: border-color var(--transition), color var(--transition);
+}
+
+.panel-nav__toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.panel-nav__toggle-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.panel-nav__toggle-label {
+  font-size: 11px;
 }
 
 .panel-nav__brand {
@@ -401,11 +440,7 @@
   color: var(--chart-temp);
 }
 
-.room-tile__setpoint {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-dim);
-}
+/* .room-tile__setpoint replaced by .room-tile__setpoint-box */
 
 .room-tile__power {
   font-family: var(--font-mono);
@@ -511,8 +546,54 @@
     grid-template-columns: 1fr;
   }
 
+  /* Mobile navigation */
   .panel-nav {
-    padding: 0 8px;
+    flex-wrap: wrap;
+    padding: 0 12px;
+    gap: 0;
+  }
+
+  .panel-nav__brand {
+    flex: 1;
+    padding-right: 12px;
+  }
+
+  .panel-nav__name {
+    font-size: 12px;
+  }
+
+  .panel-nav__toggle {
+    display: flex;
+    margin: 6px 0;
+  }
+
+  .panel-nav__fill {
+    display: none;
+  }
+
+  .panel-nav__status {
+    margin: 6px 0 6px 8px;
+  }
+
+  .panel-nav__links {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 4px 0 8px;
+    gap: 2px;
+    border-top: 1px solid var(--border);
+    order: 10;
+  }
+
+  .panel-nav__links--open {
+    display: flex;
+  }
+
+  .panel-nav__link {
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
   }
 }
 
@@ -1081,4 +1162,187 @@
   font-size: 12px;
   padding: 6px 10px;
   cursor: pointer;
+}
+
+/* ── Setpoint KPI card (room-detail page, first KPI) ── */
+.kpi--setpoint {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(0, 212, 170, 0.06) 100%);
+  position: relative;
+  padding-bottom: 28px;
+}
+
+.kpi--setpoint:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.kpi--setpoint .kpi__label {
+  color: var(--accent);
+}
+
+.kpi--setpoint__hint {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.kpi--setpoint:hover .kpi--setpoint__hint {
+  opacity: 1;
+}
+
+/* ── Room tile — setpoint box ── */
+.room-tile__setpoint-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  user-select: none;
+}
+
+.room-tile__setpoint-box:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.room-tile__setpoint-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.room-tile__setpoint-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--chart-setpoint);
+}
+
+.room-tile__setpoint-edit {
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+.room-tile__setpoint-box:hover .room-tile__setpoint-edit {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* ── Room tile — inline setpoint editor ── */
+.room-tile__sp-editor {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.room-tile__sp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+
+.room-tile__sp-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.room-tile__sp-ok {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.room-tile__sp-cancel {
+  border-color: var(--alarm);
+  color: var(--alarm);
+}
+
+.room-tile__sp-val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 38px;
+  text-align: center;
+}
+
+/* ── Room tile — schedule summaries ── */
+.room-tile__schedules {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.room-tile__sched-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.room-tile__sched-name {
+  color: var(--text-secondary);
+  font-weight: 500;
+  min-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.room-tile__sched-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.room-tile__sched-sp {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.room-tile__sched-off {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--alarm);
+  letter-spacing: 0.04em;
+}
+
+.room-tile__sched-more {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 600;
 }

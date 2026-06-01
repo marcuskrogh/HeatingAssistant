@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '10';
+const PANEL_VERSION = '11';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -66,7 +66,7 @@ class HaIndustrialPanel extends HTMLElement {
 
     const contentEl = this.shadowRoot.getElementById('content');
     this._router = new Router(contentEl, {
-      overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection),
+      overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection, this._hass),
       room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
       identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
       tuning: (slug) => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
@@ -109,10 +109,16 @@ class HaIndustrialPanel extends HTMLElement {
             </svg>
             <span class="panel-nav__name">HEATING ASSISTANT</span>
           </div>
-          <a class="panel-nav__link" href="#overview">OVERVIEW</a>
-          <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
-          <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
-          <a class="panel-nav__link" href="#tuning">TUNING</a>
+          <button class="panel-nav__toggle" id="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+            <span class="panel-nav__toggle-icon">&#9776;</span>
+            <span class="panel-nav__toggle-label">PAGES</span>
+          </button>
+          <div class="panel-nav__links" id="nav-links">
+            <a class="panel-nav__link" href="#overview">OVERVIEW</a>
+            <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
+            <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
+            <a class="panel-nav__link" href="#tuning">TUNING</a>
+          </div>
           <span class="panel-nav__fill"></span>
           <span class="panel-nav__status">
             <span class="status-dot status-dot--live"></span>
@@ -127,11 +133,26 @@ class HaIndustrialPanel extends HTMLElement {
 
     this._buildTopBar();
 
+    const navToggle = this.shadowRoot.getElementById('nav-toggle');
+    const navLinks = this.shadowRoot.getElementById('nav-links');
+
+    if (navToggle && navLinks) {
+      navToggle.addEventListener('click', () => {
+        const isOpen = navLinks.classList.toggle('panel-nav__links--open');
+        navToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      });
+    }
+
     this.shadowRoot.querySelectorAll('.panel-nav__link').forEach((link) => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
         const target = link.getAttribute('href');
         window.location.hash = target;
+        // Close mobile dropdown after navigation
+        if (navLinks) {
+          navLinks.classList.remove('panel-nav__links--open');
+          if (navToggle) navToggle.setAttribute('aria-expanded', 'false');
+        }
       });
     });
 

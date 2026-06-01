@@ -56,15 +56,17 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
   const grid = document.createElement('div');
   grid.className = 'tuning-params-grid tuning-params-grid--wide';
 
+  const activeConfig = state[CONFIG_ENTITY]?.attributes || {};
   const inputs = {};
   for (const def of PARAM_DEFS) {
+    const val = activeConfig[def.key] ?? DEFAULTS[def.key];
     const group = document.createElement('div');
     group.className = 'form-group';
     group.innerHTML = `
       <label class="form-label" for="ctrl-${def.key}">${def.label}</label>
       <input class="form-input" type="number" id="ctrl-${def.key}"
         step="${def.step}" min="${def.min}" max="${def.max}"
-        value="${DEFAULTS[def.key]}">
+        value="${val}">
       <span class="form-hint">${def.unit ? def.unit + ' \u2014 ' : ''}${def.hint}</span>
     `;
     grid.appendChild(group);
