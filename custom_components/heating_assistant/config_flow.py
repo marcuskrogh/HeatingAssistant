@@ -61,7 +61,6 @@ from ._options_flow import (
     RoomFlowHelper,
     WindowFlowHelper,
     HeaterFlowHelper,
-    ScheduleFlowHelper,
     degrees_to_compass as _degrees_to_compass,
     nearest_choice as _nearest_choice,
     window_display as _window_display,
@@ -197,7 +196,6 @@ SECTION_SENSORS = "sensors"
 SECTION_TIMING = "timing"
 SECTION_ADV_ENVELOPE = "advanced_envelope"
 SECTION_PERFORMANCE = "performance"
-SECTION_ADV_PERIOD = "advanced_period"
 
 # Default heat-pump emitter time constant exposed in the heater form. Mirrors
 # the existing UI behaviour (heat_pump → 60 s typical lag).
@@ -243,49 +241,6 @@ def _flatten_sections(
 def _section_defaults(current: Dict[str, Any], keys: Iterable[str]) -> Dict[str, Any]:
     """Return a dict suitable for ``section(..., {"default": ...})`` initial values."""
     return {k: current[k] for k in keys if k in current}
-
-
-def _build_period_dict(
-    user_input: Dict[str, Any],
-    room_setpoint: float,
-    room_comfort_offset: float,
-) -> Dict[str, Any]:
-    """Build a period dict from form input, omitting optional fields that match defaults."""
-    period: Dict[str, Any] = {
-        CONF_SCHEDULE_NAME: user_input[CONF_SCHEDULE_NAME],
-        CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
-        CONF_SCHEDULE_START: _normalise_time_string(user_input[CONF_SCHEDULE_START]),
-        CONF_SCHEDULE_END: _normalise_time_string(user_input[CONF_SCHEDULE_END]),
-        CONF_SCHEDULE_FROST_PROTECTION: float(
-            user_input.get(CONF_SCHEDULE_FROST_PROTECTION, 12.0)
-        ),
-    }
-    # Optional days — omit if empty (all days)
-    days = user_input.get(CONF_SCHEDULE_DAYS) or []
-    if days:
-        period[CONF_SCHEDULE_DAYS] = list(days)
-
-    # Optional setpoint — omit if equal to room setpoint
-    setpoint = user_input.get(CONF_SCHEDULE_SETPOINT)
-    if setpoint is not None and float(setpoint) != room_setpoint:
-        period[CONF_SCHEDULE_SETPOINT] = float(setpoint)
-
-    # Optional comfort_offset — omit if equal to room comfort_offset
-    comfort_offset = user_input.get(CONF_SCHEDULE_COMFORT_OFFSET)
-    if comfort_offset is not None and float(comfort_offset) != room_comfort_offset:
-        period[CONF_SCHEDULE_COMFORT_OFFSET] = float(comfort_offset)
-
-    # Optional tracking_weight — omit if equal to 1.0
-    tracking_weight = user_input.get(CONF_SCHEDULE_TRACKING_WEIGHT)
-    if tracking_weight is not None and float(tracking_weight) != 1.0:
-        period[CONF_SCHEDULE_TRACKING_WEIGHT] = float(tracking_weight)
-
-    # Optional energy_weight — omit if equal to 1.0
-    energy_weight = user_input.get(CONF_SCHEDULE_ENERGY_WEIGHT)
-    if energy_weight is not None and float(energy_weight) != 1.0:
-        period[CONF_SCHEDULE_ENERGY_WEIGHT] = float(energy_weight)
-
-    return period
 
 
 def _coerce_to_list(value: Any) -> list:
@@ -792,67 +747,6 @@ _DAY_OPTIONS = [
 ]
 
 
-_PERIOD_SECTION_KEYS: Tuple[str, ...] = (SECTION_ADV_PERIOD,)
-
-
-def _period_form_schema(
-    *,
-    name_default: str = "period_1",
-    mode_default: str = SCHEDULE_MODE_COMFORT,
-    start_default: str = "06:00",
-    end_default: str = "22:00",
-    days_default: Optional[List[str]] = None,
-    setpoint_default: float = 22.0,
-    comfort_offset_default: float = DEFAULT_COMFORT_OFFSET,
-    tracking_weight_default: float = 1.0,
-    energy_weight_default: float = 1.0,
-    frost_protection_default: float = 12.0,
-) -> vol.Schema:
-    """Flat schema shared by the add-period and edit-period forms."""
-    if days_default is None:
-        days_default = []
-
-    return vol.Schema(
-        {
-            vol.Required(CONF_SCHEDULE_NAME, default=name_default): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT)
-            ),
-            vol.Required(CONF_SCHEDULE_MODE, default=mode_default): _radio(
-                [SCHEDULE_MODE_COMFORT, SCHEDULE_MODE_OFF],
-                translation_key="schedule_mode",
-            ),
-            vol.Required(CONF_SCHEDULE_START, default=start_default): TimeSelector(
-                TimeSelectorConfig()
-            ),
-            vol.Required(CONF_SCHEDULE_END, default=end_default): TimeSelector(
-                TimeSelectorConfig()
-            ),
-            vol.Optional(CONF_SCHEDULE_DAYS, default=days_default): SelectSelector(
-                SelectSelectorConfig(
-                    options=_DAY_OPTIONS,
-                    multiple=True,
-                    mode=SelectSelectorMode.LIST,
-                )
-            ),
-            vol.Optional(CONF_SCHEDULE_SETPOINT, default=float(setpoint_default)): _number_box(
-                min_value=5.0, max_value=35.0, step=0.5, unit="°C",
-            ),
-            vol.Optional(
-                CONF_SCHEDULE_COMFORT_OFFSET, default=float(comfort_offset_default),
-            ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
-            # ── Advanced per-period overrides ──
-            vol.Optional(
-                CONF_SCHEDULE_TRACKING_WEIGHT, default=float(tracking_weight_default),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
-            vol.Optional(
-                CONF_SCHEDULE_ENERGY_WEIGHT, default=float(energy_weight_default),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
-            vol.Optional(
-                CONF_SCHEDULE_FROST_PROTECTION, default=float(frost_protection_default),
-            ): _number_box(min_value=0.0, max_value=20.0, step=0.5, unit="°C"),
-        }
-    )
-
 
 # ---------------------------------------------------------------------------
 # Options flow
@@ -870,7 +764,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self._rooms: RoomFlowHelper = RoomFlowHelper()
         self._initialized: bool = False
         self._selected_heater_idx: Optional[int] = None
-        self._selected_period_idx: Optional[int] = None
 
     # ------------------------------------------------------------------
     # Main menu
@@ -1005,7 +898,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 "edit_room",
                 "manage_room_windows",
                 "manage_room_heaters",
-                "manage_room_schedule",
                 "remove_room",
             ]
         menu_options.append("finish_rooms")
@@ -1492,191 +1384,3 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         """Return to the rooms menu from the heaters sub-flow."""
         return await self.async_step_manage_rooms()
 
-    # ------------------------------------------------------------------
-    # Schedule management
-    # ------------------------------------------------------------------
-
-    def _current_schedule(self) -> Optional[ScheduleFlowHelper]:
-        room = self._rooms.current_room()
-        return ScheduleFlowHelper(room) if room is not None else None
-
-    async def async_step_manage_room_schedule(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Select room before entering the schedule sub-flow."""
-        if not self._rooms:
-            return await self.async_step_manage_rooms()
-
-        if user_input is not None:
-            if self._rooms.select(user_input["room_name"]):
-                return await self.async_step_manage_schedule()
-            return await self.async_step_manage_rooms()
-
-        names = self._rooms.names()
-        schema = vol.Schema(
-            {vol.Required("room_name", default=names[0]): _dropdown(names)}
-        )
-        return self.async_show_form(step_id="manage_room_schedule", data_schema=schema)
-
-    async def async_step_manage_schedule(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Schedule management menu for the currently-selected room."""
-        schedule = self._current_schedule()
-        if schedule is None:
-            return await self.async_step_manage_room_schedule()
-        menu_options: List[str] = ["add_period"]
-        if schedule:
-            menu_options += ["select_edit_period", "remove_period"]
-        menu_options.append("finish_schedule")
-        return self.async_show_menu(
-            step_id="manage_schedule",
-            menu_options=menu_options,
-            description_placeholders={"name": self._current_room_name()},
-        )
-
-    async def async_step_add_period(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Form to add a schedule period to the current room."""
-        schedule = self._current_schedule()
-        if schedule is None:
-            return await self.async_step_manage_room_schedule()
-
-        errors: Dict[str, str] = {}
-
-        if user_input is not None:
-            flat = _flatten_sections(user_input, _PERIOD_SECTION_KEYS)
-            start_str = flat.get(CONF_SCHEDULE_START, "")
-            end_str = flat.get(CONF_SCHEDULE_END, "")
-            if not _is_valid_time_string(start_str):
-                errors[CONF_SCHEDULE_START] = "invalid_time"
-            if not _is_valid_time_string(end_str):
-                errors[CONF_SCHEDULE_END] = "invalid_time"
-
-            if not errors:
-                room = self._rooms.current_room() or {}
-                room_setpoint = float(room.get(CONF_SETPOINT, DEFAULT_ROOM_SETPOINT))
-                room_comfort_offset = float(
-                    room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
-                )
-                period = _build_period_dict(flat, room_setpoint, room_comfort_offset)
-                schedule.add(period)
-                return await self.async_step_manage_schedule()
-
-        room = self._rooms.current_room() or {}
-        room_setpoint = float(room.get(CONF_SETPOINT, DEFAULT_ROOM_SETPOINT))
-        room_comfort_offset = float(room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET))
-        next_idx = len(schedule) + 1
-        return self.async_show_form(
-            step_id="add_period",
-            data_schema=_period_form_schema(
-                name_default=f"period_{next_idx}",
-                setpoint_default=room_setpoint,
-                comfort_offset_default=room_comfort_offset,
-            ),
-            errors=errors,
-            description_placeholders={"name": self._current_room_name()},
-        )
-
-    async def async_step_select_edit_period(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Select which period to edit."""
-        schedule = self._current_schedule()
-        if schedule is None or not schedule:
-            return await self.async_step_manage_schedule()
-
-        if user_input is not None:
-            self._selected_period_idx = int(user_input["period_idx"])
-            return await self.async_step_edit_period()
-
-        period_options = schedule.display_options()
-        schema = vol.Schema(
-            {vol.Required("period_idx", default="0"): vol.In(period_options)}
-        )
-        return self.async_show_form(step_id="select_edit_period", data_schema=schema)
-
-    async def async_step_edit_period(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Edit a schedule period."""
-        schedule = self._current_schedule()
-        if schedule is None:
-            return await self.async_step_manage_room_schedule()
-
-        idx = self._selected_period_idx
-        if idx is None or not (0 <= idx < len(schedule.periods)):
-            self._selected_period_idx = None
-            return await self.async_step_select_edit_period()
-
-        period = schedule.periods[idx]
-        errors: Dict[str, str] = {}
-
-        if user_input is not None:
-            flat = _flatten_sections(user_input, _PERIOD_SECTION_KEYS)
-            start_str = flat.get(CONF_SCHEDULE_START, "")
-            end_str = flat.get(CONF_SCHEDULE_END, "")
-            if not _is_valid_time_string(start_str):
-                errors[CONF_SCHEDULE_START] = "invalid_time"
-            if not _is_valid_time_string(end_str):
-                errors[CONF_SCHEDULE_END] = "invalid_time"
-
-            if not errors:
-                room = self._rooms.current_room() or {}
-                room_setpoint = float(room.get(CONF_SETPOINT, DEFAULT_ROOM_SETPOINT))
-                room_comfort_offset = float(
-                    room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
-                )
-                updated = _build_period_dict(flat, room_setpoint, room_comfort_offset)
-                schedule.update(idx, updated)
-                self._selected_period_idx = None
-                return await self.async_step_manage_schedule()
-
-        room = self._rooms.current_room() or {}
-        room_setpoint = float(room.get(CONF_SETPOINT, DEFAULT_ROOM_SETPOINT))
-        room_comfort_offset = float(room.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET))
-        schema = _period_form_schema(
-            name_default=period.get(CONF_SCHEDULE_NAME, ""),
-            mode_default=period.get(CONF_SCHEDULE_MODE, SCHEDULE_MODE_COMFORT),
-            start_default=period.get(CONF_SCHEDULE_START, "06:00"),
-            end_default=period.get(CONF_SCHEDULE_END, "22:00"),
-            days_default=list(period.get(CONF_SCHEDULE_DAYS) or []),
-            setpoint_default=float(period.get(CONF_SCHEDULE_SETPOINT, room_setpoint)),
-            comfort_offset_default=float(
-                period.get(CONF_SCHEDULE_COMFORT_OFFSET, room_comfort_offset)
-            ),
-            tracking_weight_default=float(period.get(CONF_SCHEDULE_TRACKING_WEIGHT, 1.0)),
-            energy_weight_default=float(period.get(CONF_SCHEDULE_ENERGY_WEIGHT, 1.0)),
-            frost_protection_default=float(period.get(CONF_SCHEDULE_FROST_PROTECTION, 12.0)),
-        )
-        return self.async_show_form(
-            step_id="edit_period",
-            data_schema=schema,
-            errors=errors,
-            description_placeholders={"name": period.get(CONF_SCHEDULE_NAME, "")},
-        )
-
-    async def async_step_remove_period(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Select and remove a schedule period from the current room."""
-        schedule = self._current_schedule()
-        if schedule is None or not schedule:
-            return await self.async_step_manage_schedule()
-
-        if user_input is not None:
-            schedule.remove(int(user_input["period_idx"]))
-            return await self.async_step_manage_schedule()
-
-        period_options = schedule.display_options()
-        schema = vol.Schema(
-            {vol.Required("period_idx", default="0"): vol.In(period_options)}
-        )
-        return self.async_show_form(step_id="remove_period", data_schema=schema)
-
-    async def async_step_finish_schedule(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Return to the rooms menu from the schedule sub-flow."""
-        return await self.async_step_manage_rooms()

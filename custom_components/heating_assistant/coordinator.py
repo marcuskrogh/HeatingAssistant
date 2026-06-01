@@ -1090,13 +1090,63 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Apply manually tuned parameters for a single room.
 
-        Updates the live model and rebuilds the MPC controller immediately.
-        The change is persisted to ``entry.data`` so it survives a restart.
-        Other rooms retain whatever parameters they currently have.
+        Delegates to ``store_identified_parameters`` so that all parameter
+        applications go through the history mechanism.
+        """
+        self.store_identified_parameters(
+            room_name, thermal_mass, r_external, source="manual"
+        )
+
+    def store_identified_parameters(
+        self,
+        room_name: str,
+        thermal_mass: float,
+        r_external: float,
+        source: str = "manual",
+        rmse: Optional[float] = None,
+    ) -> None:
+        """Store and apply identified parameters with history tracking.
+
+        1. Get current active params as a history entry.
+        2. Push current active to history list (prepend).
+        3. Cap history at 10 entries.
+        4. Set new params as active.
+        5. Apply to the model (update room thermal_mass and r_external).
+        6. Persist via ``async_update_entry``.
+        7. Rebuild MPC controller.
         """
         if room_name not in self.model.rooms:
             raise ValueError(f"Room '{room_name}' not found in model")
 
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # --- Read existing persisted structure ---
+        existing_snap = {}
+        try:
+            existing_snap = self.estimated_params_snapshot or {}
+        except Exception:
+            pass
+
+        # Migrate old format (flat snapshot) to new format with active/history
+        if "active" not in existing_snap:
+            # Old format: { "rooms": {...}, "estimated_at": ... }
+            old_active = {
+                "rooms": existing_snap.get("rooms", {}),
+                "estimated_at": existing_snap.get("estimated_at", now_iso),
+                "source": "manual",
+            }
+            history: list = []
+        else:
+            old_active = dict(existing_snap["active"])
+            history = list(existing_snap.get("history", []))
+
+        # Push current active to history (prepend)
+        if old_active.get("rooms"):
+            history.insert(0, old_active)
+            # Cap history at 10 entries
+            history = history[:10]
+
+        # --- Apply to in-memory model ---
         room = self.model.rooms[room_name]
         room.thermal_mass = float(thermal_mass)
         room.r_external = float(r_external)
@@ -1108,6 +1158,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self.model._B_ext,
         ) = self.model._build_matrices()
 
+        # Rebuild MPC controller
         self.controller = HeatingMPCController(
             model=self.model,
             heat_sources=self.heat_sources,
@@ -1128,15 +1179,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_price_weight=self._energy_price_weight,
         )
 
-        now_iso = datetime.now(timezone.utc).isoformat()
-        existing_snap = {}
-        try:
-            existing_snap = self.estimated_params_snapshot or {}
-        except Exception:
-            pass
-
-        snapshot: Dict[str, Any] = {
-            **existing_snap,
+        # --- Build new active snapshot ---
+        new_active: Dict[str, Any] = {
             "rooms": {
                 name: {
                     "thermal_mass": r.thermal_mass,
@@ -1146,8 +1190,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 for name, r in self.model.rooms.items()
             },
             "estimated_at": now_iso,
+            "source": source,
         }
+        if rmse is not None:
+            new_active["rmse"] = rmse
+
         self._estimation_timestamp = now_iso
+
+        # --- Persist with new structure ---
+        snapshot: Dict[str, Any] = {
+            "active": new_active,
+            "history": history,
+        }
 
         real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
         if real_entry is not None:
@@ -1156,11 +1210,133 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
             )
         _LOGGER.info(
-            "Applied manual parameters for room '%s': thermal_mass=%.0f J/K, r_external=%.5f K/W",
+            "Stored identified parameters for room '%s': thermal_mass=%.0f J/K, "
+            "r_external=%.5f K/W (source=%s)",
             room_name,
             thermal_mass,
             r_external,
+            source,
         )
+
+    def revert_parameters(self, room_name: str, history_index: int) -> None:
+        """Revert to a previous parameter set from history.
+
+        1. Get the history entry at the given index.
+        2. Make it the new active.
+        3. Push the current active to history.
+        4. Apply to model + rebuild MPC.
+        """
+        if room_name not in self.model.rooms:
+            raise ValueError(f"Room '{room_name}' not found in model")
+
+        existing_snap = {}
+        try:
+            existing_snap = self.estimated_params_snapshot or {}
+        except Exception:
+            pass
+
+        # Migrate old format if needed
+        if "active" not in existing_snap:
+            raise ValueError("No parameter history available (old format)")
+
+        current_active = dict(existing_snap["active"])
+        history = list(existing_snap.get("history", []))
+
+        if history_index < 0 or history_index >= len(history):
+            raise ValueError(
+                f"history_index {history_index} out of range "
+                f"(0..{len(history) - 1})"
+            )
+
+        # Pop the target entry from history
+        target_entry = history.pop(history_index)
+
+        # Push current active to history (prepend)
+        history.insert(0, current_active)
+        # Cap history at 10 entries
+        history = history[:10]
+
+        # Apply target parameters to in-memory model
+        target_rooms = target_entry.get("rooms", {})
+        if room_name in target_rooms:
+            params = target_rooms[room_name]
+            room = self.model.rooms[room_name]
+            room.thermal_mass = float(params["thermal_mass"])
+            room.r_external = float(params["r_external"])
+        else:
+            raise ValueError(
+                f"Room '{room_name}' not found in history entry"
+            )
+
+        self.model.rebuild_derived_parameters()
+        (
+            self.model._C,
+            self.model._A,
+            self.model._B_ext,
+        ) = self.model._build_matrices()
+
+        # Rebuild MPC controller
+        self.controller = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=self._horizon,
+            dt=self.dt,
+            measurement_dt=self.dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+            tracking_weight=self._tracking_weight,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
+            terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+        )
+
+        # Build the new active reflecting actual model state
+        now_iso = datetime.now(timezone.utc).isoformat()
+        new_active: Dict[str, Any] = {
+            "rooms": {
+                name: {
+                    "thermal_mass": r.thermal_mass,
+                    "r_external": r.r_external,
+                    "internal_gain": float(getattr(r, "internal_gain", 0.0)),
+                }
+                for name, r in self.model.rooms.items()
+            },
+            "estimated_at": now_iso,
+            "source": target_entry.get("source", "reverted"),
+        }
+        self._estimation_timestamp = now_iso
+
+        # Persist
+        snapshot: Dict[str, Any] = {
+            "active": new_active,
+            "history": history,
+        }
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
+            )
+        _LOGGER.info(
+            "Reverted parameters for room '%s' to history index %d",
+            room_name,
+            history_index,
+        )
+
+    def reload_room_schedule(self, room_name: str, periods_raw: list) -> None:
+        """Rebuild a single room's schedule from raw period definitions.
+
+        Called by the ``update_room_schedule`` service after the config entry
+        has been persisted with the new periods list.
+        """
+        new_schedule = build_schedule(periods_raw)
+        self._room_schedule[room_name] = new_schedule
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """

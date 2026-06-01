@@ -151,18 +151,17 @@ estimate_parameters_ml:
     log-likelihood.  The estimation uses the rolling observation history that
     HeatingAssistant accumulates automatically during normal operation (at least
     30 steps, ~30 minutes, of data are required).  The result is reported as a
-    persistent notification.  By default the estimated parameters are applied
-    immediately to the live model so future MPC runs benefit from them;
-    set apply_parameters to false for a dry run that only reports the estimates.
+    persistent notification.  By default the estimated parameters are NOT applied
+    to the live model; set apply_parameters to true to apply them immediately.
   fields:
     apply_parameters:
       name: Apply parameters
       description: >
-        When true (default) the estimated values are applied to the running
-        model.  When false the service only reports the estimates without
+        When true the estimated values are applied to the running model.
+        When false (default) the service only reports the estimates without
         changing anything (dry run).
       required: false
-      default: true
+      default: false
       selector:
         boolean:
 
@@ -612,3 +611,126 @@ update_estimation_params:
           min: 1
           max: 1000
           step: 1
+
+store_identified_parameters:
+  name: Store identified parameters
+  description: >
+    Store and apply identified thermal parameters for a single room with full
+    history tracking. The current active parameters are pushed to the history
+    list (capped at 10 entries) and the new parameters become active. The live
+    model and MPC controller are rebuilt immediately.
+  fields:
+    room_name:
+      name: Room name
+      description: Name of the room (must match a configured room name).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    thermal_mass:
+      name: Thermal mass
+      description: Thermal mass of the room [J/K]. Must be at least 1000.
+      required: true
+      example: 5000000
+      selector:
+        number:
+          min: 1000
+          max: 100000000
+          step: 1000
+          unit_of_measurement: "J/K"
+    r_external:
+      name: External thermal resistance
+      description: Thermal resistance to outdoor [K/W]. Must be at least 0.0001.
+      required: true
+      example: 0.04
+      selector:
+        number:
+          min: 0.0001
+          max: 10.0
+          step: 0.0001
+          unit_of_measurement: "K/W"
+    source:
+      name: Source
+      description: >
+        Origin of the parameter estimate: "ml" for machine-learning
+        identification or "manual" for user-entered values.
+      required: false
+      default: "manual"
+      selector:
+        select:
+          options:
+            - "ml"
+            - "manual"
+    rmse:
+      name: RMSE
+      description: >
+        Optional root-mean-square error from the identification run.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 0.001
+          unit_of_measurement: "K"
+
+revert_parameters:
+  name: Revert parameters
+  description: >
+    Revert thermal parameters for a room to a previous entry from the
+    parameter history. The current active parameters are pushed to history
+    and the selected history entry becomes the new active set. The live model
+    and MPC controller are rebuilt immediately.
+  fields:
+    room_name:
+      name: Room name
+      description: Name of the room (must match a configured room name).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    history_index:
+      name: History index
+      description: >
+        Zero-based index into the parameter history list (0 = most recent
+        previous entry, up to 9).
+      required: true
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 9
+          step: 1
+
+update_room_schedule:
+  name: Update room schedule
+  description: >
+    Replace the comfort schedule for a single room. The new periods list is
+    persisted to the config entry and the coordinator's in-memory schedule is
+    rebuilt immediately.
+  fields:
+    room_name:
+      name: Room name
+      description: Name of the room (must match a configured room name).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    periods:
+      name: Schedule periods
+      description: >
+        List of schedule period objects. Each period must include name, mode
+        ("comfort" or "off"), start (HH:MM), and end (HH:MM). Optional fields
+        are days (list of weekday integers 0-6), setpoint (float), and
+        frost_protection (float, default 12.0).
+      required: true
+      example:
+        - name: "Morning"
+          mode: "comfort"
+          start: "06:00"
+          end: "08:30"
+          setpoint: 21.0
+        - name: "Night"
+          mode: "off"
+          start: "22:00"
+          end: "06:00"
+          frost_protection: 12.0
