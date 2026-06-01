@@ -1,4 +1,4 @@
-import { TimeSeriesChart, makeDataset, loadChartJs } from '../components/time-series-chart.js';
+import { TimeSeriesChart, makeDataset, loadChartJs, createSparkline, historyToDataPoints } from '../components/time-series-chart.js';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js';
 import { entityValue, formatNumber, systemEntity } from '../utils.js';
 
@@ -29,6 +29,7 @@ export function renderSystemIdentification(container, rooms, state, connection, 
 
 function renderIdentificationIndex(container, rooms, state, connection) {
   container.innerHTML = '';
+  const sparklines = [];
 
   const header = document.createElement('div');
   header.className = 'section-header';
@@ -48,21 +49,20 @@ function renderIdentificationIndex(container, rooms, state, connection) {
     grid.innerHTML = '';
     for (const room of rooms) {
       const tile = document.createElement('div');
-      tile.className = 'card identification-tile';
-      tile.style.cursor = 'pointer';
+      tile.className = 'card card--clickable identification-tile';
 
       const fitEntity = st[`sensor.heating_assistant_${room.slug}_model_fit_quality`];
       const fitVal = fitEntity ? parseFloat(fitEntity.state) : null;
       const fitInfo = modelFitBadge(fitVal);
 
-      const sysidEntity = st[`sensor.heating_assistant_${room.slug}_sysid_simulation`];
-      const lastIdent = sysidEntity?.attributes?.thermal_mass != null ? 'Identified' : 'Not yet run';
-
       tile.innerHTML = `
-        <div class="identification-tile__name">${room.name}</div>
-        <div class="identification-tile__row">
+        <span class="room-tile__name">${room.name}</span>
+        <div class="identification-tile__kpi-row">
           <span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>
-          <span class="identification-tile__status">${lastIdent}</span>
+          <span class="identification-tile__rmse" data-room="${room.slug}">\u2014</span>
+        </div>
+        <div class="identification-tile__sparkline">
+          <canvas data-sparkline="${room.slug}"></canvas>
         </div>
       `;
       tile.addEventListener('click', () => {
@@ -72,13 +72,77 @@ function renderIdentificationIndex(container, rooms, state, connection) {
     }
   }
 
+  function computeRMSE(filtered, measured) {
+    let sumSq = 0, count = 0;
+    for (const m of measured) {
+      let best = null, bestDist = Infinity;
+      for (const f of filtered) {
+        const dist = Math.abs(f.x - m.x);
+        if (dist < bestDist) { bestDist = dist; best = f; }
+      }
+      if (best && bestDist < 120000) {
+        sumSq += (best.y - m.y) ** 2;
+        count++;
+      }
+    }
+    return count > 0 ? Math.sqrt(sumSq / count) : null;
+  }
+
+  async function loadSparklines() {
+    const entityIds = [];
+    for (const room of rooms) {
+      entityIds.push(`sensor.heating_assistant_${room.slug}_temperature_filtered`);
+      entityIds.push(`sensor.heating_assistant_${room.slug}_temperature_measured`);
+    }
+    const history = await connection.getHistory(entityIds, 6);
+
+    for (const room of rooms) {
+      const filteredHist = history[`sensor.heating_assistant_${room.slug}_temperature_filtered`] || [];
+      const measuredHist = history[`sensor.heating_assistant_${room.slug}_temperature_measured`] || [];
+      const filteredPts = historyToDataPoints(filteredHist);
+      const measuredPts = historyToDataPoints(measuredHist);
+
+      const rmse = computeRMSE(filteredPts, measuredPts);
+      const rmseEl = grid.querySelector(`[data-room="${room.slug}"]`);
+      if (rmseEl) {
+        rmseEl.textContent = rmse != null ? `RMSE ${rmse.toFixed(3)} \u00b0C` : '\u2014';
+      }
+
+      const canvas = grid.querySelector(`[data-sparkline="${room.slug}"]`);
+      if (canvas && filteredPts.length > 0) {
+        const datasets = [
+          { data: filteredPts, borderColor: 'var(--chart-temp)', borderWidth: 1.5, spanGaps: true },
+          { data: measuredPts, borderColor: 'var(--chart-temp-measured)', borderWidth: 1, borderDash: [2, 2], spanGaps: true },
+        ];
+        const chart = await createSparkline(canvas, datasets);
+        sparklines.push(chart);
+      }
+    }
+  }
+
   buildTiles(state);
+  loadSparklines();
 
   return {
     update(newState) {
-      buildTiles(newState);
+      for (const room of rooms) {
+        const fitEntity = newState[`sensor.heating_assistant_${room.slug}_model_fit_quality`];
+        const fitVal = fitEntity ? parseFloat(fitEntity.state) : null;
+        const fitInfo = modelFitBadge(fitVal);
+        const badge = grid.querySelector(`.identification-tile [data-room="${room.slug}"]`);
+        if (badge) {
+          const badgeEl = badge.previousElementSibling;
+          if (badgeEl) {
+            badgeEl.className = `fit-badge ${fitInfo.class}`;
+            badgeEl.textContent = fitInfo.label;
+          }
+        }
+      }
     },
-    destroy() {},
+    destroy() {
+      for (const chart of sparklines) chart.destroy();
+      sparklines.length = 0;
+    },
   };
 }
 
