@@ -719,3 +719,43 @@
 .tuning-chart {
   margin-bottom: 24px;
 }
+
+/* Controller tuning — wider grid for parameter inputs */
+.tuning-params-grid--wide {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+/* Status feedback */
+.tuning-actions__status--success {
+  color: var(--good);
+}
+
+/* Identification page — room tiles */
+.identification-tile {
+  padding: 20px;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.identification-tile:hover {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.identification-tile__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.identification-tile__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.identification-tile__status {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}

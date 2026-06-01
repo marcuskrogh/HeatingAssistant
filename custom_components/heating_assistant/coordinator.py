@@ -1015,6 +1015,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if rebuild_controller:
             self._build_controller()
 
+    def apply_tuning_updates(self, updates: Dict[str, Any]) -> None:
+        """Apply tuning parameter changes immediately (called from services)."""
+        for key, value in updates.items():
+            self._pending_runtime_reconfiguration[key] = value
+        self._apply_pending_runtime_reconfiguration()
+
     def sources_for_room(self, room_name: str) -> List[HeatSource]:
         """Return the cached list of heat sources for ``room_name`` (empty if
         none), without copying.  Sensors should not mutate the returned list.

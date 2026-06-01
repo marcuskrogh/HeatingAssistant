@@ -78,6 +78,7 @@ from .const import (
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
     CONF_ENERGY_WEIGHT,
+    CONF_ENERGY_PRICE_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
     CONF_LATITUDE,
@@ -93,6 +94,7 @@ from .const import (
     CONF_R_SG,
     CONF_SKY_RADIATIVE_UA,
     CONF_SOFT_CONSTRAINT_WEIGHT,
+    CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     CONF_THERMAL_BRIDGE_PSI_L,
     CONF_TRACKING_WEIGHT,
     CONF_WEATHER_ENTITY,
@@ -154,6 +156,7 @@ from .const import (
     DEFAULT_COP_TEMP_REF,
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
+    DEFAULT_ENERGY_PRICE_WEIGHT,
     DEFAULT_FROST_PROTECTION,
     DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_HORIZON,
@@ -1650,6 +1653,75 @@ def _register_services(hass: HomeAssistant) -> None:
         ),
     )
 
+    # ------------------------------------------------------------------
+    # Runtime configuration services (called from the Heating Assistant UI)
+    # ------------------------------------------------------------------
+
+    _CONTROLLER_TUNING_KEYS = {
+        CONF_TRACKING_WEIGHT, CONF_ENERGY_WEIGHT, CONF_ENERGY_PRICE_WEIGHT,
+        CONF_SMOOTHING_WEIGHT, CONF_SOFT_CONSTRAINT_WEIGHT,
+        CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, CONF_TERMINAL_WEIGHT,
+        CONF_HORIZON, CONF_UPDATE_INTERVAL, CONF_COMFORT_OFFSET,
+    }
+
+    _ESTIMATION_PARAM_KEYS = {
+        CONF_SIGMA_W, CONF_SIGMA_V, CONF_SIGMA_B,
+        CONF_WINDOW_OPEN_DEBOUNCE, CONF_WINDOW_OPEN_CLOSE_SETTLE,
+        CONF_WINDOW_OPEN_Q_INFLATION,
+    }
+
+    async def handle_update_controller_tuning(call: ServiceCall) -> None:
+        """Update MPC controller tuning parameters from the dashboard."""
+        coordinator = _get_coordinator(hass)
+        updates = {k: v for k, v in call.data.items() if k in _CONTROLLER_TUNING_KEYS}
+        if not updates:
+            return
+        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
+        if entry:
+            new_data = {**dict(entry.data), **updates}
+            hass.config_entries.async_update_entry(entry, data=new_data)
+        coordinator.apply_tuning_updates(updates)
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_controller_tuning",
+        handle_update_controller_tuning,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_TRACKING_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
+                vol.Optional(CONF_ENERGY_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
+                vol.Optional(CONF_ENERGY_PRICE_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10000.0)
+                ),
+                vol.Optional(CONF_SMOOTHING_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
+                vol.Optional(CONF_SOFT_CONSTRAINT_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10000.0)
+                ),
+                vol.Optional(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1000000.0)
+                ),
+                vol.Optional(CONF_TERMINAL_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=1.0, max=10000.0)
+                ),
+                vol.Optional(CONF_HORIZON): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=480)
+                ),
+                vol.Optional(CONF_UPDATE_INTERVAL): vol.All(
+                    vol.Coerce(int), vol.Range(min=60, max=3600)
+                ),
+                vol.Optional(CONF_COMFORT_OFFSET): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.1, max=5.0)
+                ),
+            }
+        ),
+    )
+
     async def handle_apply_manual_parameters(call: ServiceCall) -> None:
         """Apply manually tuned thermal parameters for a single room."""
         coordinator = _get_coordinator(hass)
@@ -1671,6 +1743,46 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
                 vol.Required("r_external"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0001)
+                ),
+            }
+        ),
+    )
+
+    async def handle_update_estimation_params(call: ServiceCall) -> None:
+        """Update state estimation parameters from the dashboard."""
+        coordinator = _get_coordinator(hass)
+        updates = {k: v for k, v in call.data.items() if k in _ESTIMATION_PARAM_KEYS}
+        if not updates:
+            return
+        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
+        if entry:
+            new_data = {**dict(entry.data), **updates}
+            hass.config_entries.async_update_entry(entry, data=new_data)
+        coordinator.apply_tuning_updates(updates)
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_estimation_params",
+        handle_update_estimation_params,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_SIGMA_W): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                ),
+                vol.Optional(CONF_SIGMA_V): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                ),
+                vol.Optional(CONF_SIGMA_B): vol.All(
+                    vol.Coerce(float), vol.Range(min=1e-8, max=1.0)
+                ),
+                vol.Optional(CONF_WINDOW_OPEN_DEBOUNCE): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=3600)
+                ),
+                vol.Optional(CONF_WINDOW_OPEN_CLOSE_SETTLE): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=3600)
+                ),
+                vol.Optional(CONF_WINDOW_OPEN_Q_INFLATION): vol.All(
+                    vol.Coerce(float), vol.Range(min=1.0, max=1000.0)
                 ),
             }
         ),
