@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '7';
+const PANEL_VERSION = '8';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -92,6 +92,17 @@ class HaIndustrialPanel extends HTMLElement {
       <div class="shell">
         <div id="top-bar"></div>
         <nav class="panel-nav" id="panel-nav">
+          <div class="panel-nav__brand">
+            <svg class="panel-nav__logo" viewBox="0 0 28 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M7 1.5C7 1.5 5.5 3.5 7 5C8.5 6.5 7 8.5 7 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M14 1C14 1 12.5 3 14 4.5C15.5 6 14 8 14 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M21 1.5C21 1.5 19.5 3.5 21 5C22.5 6.5 21 8.5 21 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <rect x="2" y="10" width="24" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="9" y1="10" x2="9" y2="22" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="16" y1="10" x2="16" y2="22" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <span class="panel-nav__name">HEATING ASSISTANT</span>
+          </div>
           <a class="panel-nav__link" href="#overview">OVERVIEW</a>
           <a class="panel-nav__link" href="#tuning">TUNING</a>
           <span class="panel-nav__fill"></span>
@@ -129,12 +140,7 @@ class HaIndustrialPanel extends HTMLElement {
     menuBtn.narrow = this._narrow ?? window.innerWidth < 870;
     this._menuButton = menuBtn;
 
-    const title = document.createElement('div');
-    title.setAttribute('main-title', '');
-    title.textContent = 'Heating Assistant';
-
     toolbar.appendChild(menuBtn);
-    toolbar.appendChild(title);
     container.appendChild(toolbar);
   }
 

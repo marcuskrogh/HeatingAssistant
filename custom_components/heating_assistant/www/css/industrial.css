@@ -61,6 +61,30 @@
   border-bottom: 1px solid var(--border);
 }
 
+.panel-nav__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 20px;
+  border-right: 1px solid var(--border);
+  margin-right: 4px;
+}
+
+.panel-nav__logo {
+  width: 24px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.panel-nav__name {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .panel-nav__link {
   font-size: 11px;
   font-weight: 600;
