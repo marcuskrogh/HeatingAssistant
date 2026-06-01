@@ -91,7 +91,6 @@
           "edit_room": "Edit a room",
           "manage_room_windows": "Configure room windows",
           "manage_room_heaters": "Configure heat sources",
-          "manage_room_schedule": "Manage schedule",
           "remove_room": "Remove a room",
           "finish_rooms": "Back to main menu"
         }
@@ -312,89 +311,9 @@
       },
       "manage_room_schedule": {
         "title": "Schedule: pick a room",
-        "description": "Choose which room's schedule to manage.",
+        "description": "Schedule management has moved to the dashboard. Use the Tuning page to configure room schedules.",
         "data": {
           "room_name": "Room"
-        }
-      },
-      "manage_schedule": {
-        "title": "Schedule for {name}",
-        "description": "Periods define time-of-day comfort and setback. Outside any active period the room uses its default setpoint.",
-        "menu_options": {
-          "add_period": "Add a period",
-          "select_edit_period": "Edit a period",
-          "remove_period": "Remove a period",
-          "finish_schedule": "Done"
-        }
-      },
-      "add_period": {
-        "title": "Add a schedule period to {name}",
-        "description": "Create a time-of-day setpoint override (e.g. warm in the evening, cool overnight). The bottom three fields are optional per-period tweaks.",
-        "data": {
-          "name": "Label",
-          "mode": "Mode",
-          "start": "Start time",
-          "end": "End time",
-          "days": "Days of the week",
-          "setpoint": "Setpoint override (°C)",
-          "comfort_offset": "Comfort band override (± °C)",
-          "tracking_weight": "Tracking strength multiplier",
-          "energy_weight": "Energy-use penalty multiplier",
-          "frost_protection": "Frost protection (°C)"
-        },
-        "data_description": {
-          "name": "A short label for this period (e.g. 'morning', 'night').",
-          "mode": "Comfort = follow the setpoint. Off = disable heating (with frost protection).",
-          "start": "Local time when this period begins.",
-          "end": "Local time when this period ends. May cross midnight.",
-          "days": "Leave empty to apply every day.",
-          "setpoint": "Target temperature during this period. Leave at the room default if you don't want an override.",
-          "comfort_offset": "Comfort band width during this period. Leave at the room default if you don't want an override.",
-          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period. 1.0 = no change.",
-          "energy_weight": "Advanced — multiplier on the global energy penalty during this period. 1.0 = no change.",
-          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
-        }
-      },
-      "select_edit_period": {
-        "title": "Edit a schedule period",
-        "description": "Pick which period to edit.",
-        "data": {
-          "period_idx": "Period"
-        }
-      },
-      "edit_period": {
-        "title": "Edit period: {name}",
-        "description": "Update this period's timing and overrides.",
-        "data": {
-          "name": "Label",
-          "mode": "Mode",
-          "start": "Start time",
-          "end": "End time",
-          "days": "Days of the week",
-          "setpoint": "Setpoint override (°C)",
-          "comfort_offset": "Comfort band override (± °C)",
-          "tracking_weight": "Tracking strength multiplier",
-          "energy_weight": "Energy-use penalty multiplier",
-          "frost_protection": "Frost protection (°C)"
-        },
-        "data_description": {
-          "name": "A short label for this period.",
-          "mode": "Comfort = follow the setpoint. Off = disable heating (with frost protection).",
-          "start": "Local time when this period begins.",
-          "end": "Local time when this period ends. May cross midnight.",
-          "days": "Leave empty to apply every day.",
-          "setpoint": "Target temperature during this period.",
-          "comfort_offset": "Comfort band width during this period.",
-          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period.",
-          "energy_weight": "Advanced — multiplier on the global energy penalty during this period.",
-          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
-        }
-      },
-      "remove_period": {
-        "title": "Remove a schedule period",
-        "description": "Pick which period to delete.",
-        "data": {
-          "period_idx": "Period"
         }
       }
     },

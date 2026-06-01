@@ -58,8 +58,14 @@ function renderIdentificationIndex(container, rooms, state, connection) {
       tile.innerHTML = `
         <span class="room-tile__name">${room.name}</span>
         <div class="identification-tile__kpi-row">
-          <span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>
-          <span class="identification-tile__rmse" data-room="${room.slug}">\u2014</span>
+          <div class="identification-tile__kpi-box ${fitInfo.class}">
+            <span class="identification-tile__kpi-label">FIT</span>
+            <span class="identification-tile__kpi-value">${fitInfo.label}</span>
+          </div>
+          <div class="identification-tile__kpi-box">
+            <span class="identification-tile__kpi-label">RMSE</span>
+            <span class="identification-tile__kpi-value" data-room="${room.slug}">\u2014</span>
+          </div>
         </div>
         <div class="identification-tile__sparkline">
           <canvas data-sparkline="${room.slug}"></canvas>
@@ -105,14 +111,14 @@ function renderIdentificationIndex(container, rooms, state, connection) {
       const rmse = computeRMSE(filteredPts, measuredPts);
       const rmseEl = grid.querySelector(`[data-room="${room.slug}"]`);
       if (rmseEl) {
-        rmseEl.textContent = rmse != null ? `RMSE ${rmse.toFixed(3)} \u00b0C` : '\u2014';
+        rmseEl.textContent = rmse != null ? `${rmse.toFixed(3)} \u00b0C` : '\u2014';
       }
 
       const canvas = grid.querySelector(`[data-sparkline="${room.slug}"]`);
       if (canvas && filteredPts.length > 0) {
         const datasets = [
-          { data: filteredPts, borderColor: 'var(--chart-temp)', borderWidth: 1.5, spanGaps: true },
-          { data: measuredPts, borderColor: 'var(--chart-temp-measured)', borderWidth: 1, borderDash: [2, 2], spanGaps: true },
+          { data: filteredPts, borderColor: '#4fc3f7', borderWidth: 1.5, spanGaps: true },
+          { data: measuredPts, borderColor: '#e57373', borderWidth: 0, pointRadius: 1.5, pointBackgroundColor: '#e57373', showLine: false, spanGaps: true },
         ];
         const chart = await createSparkline(canvas, datasets);
         sparklines.push(chart);
@@ -129,12 +135,13 @@ function renderIdentificationIndex(container, rooms, state, connection) {
         const fitEntity = newState[`sensor.heating_assistant_${room.slug}_model_fit_quality`];
         const fitVal = fitEntity ? parseFloat(fitEntity.state) : null;
         const fitInfo = modelFitBadge(fitVal);
-        const badge = grid.querySelector(`.identification-tile [data-room="${room.slug}"]`);
-        if (badge) {
-          const badgeEl = badge.previousElementSibling;
-          if (badgeEl) {
-            badgeEl.className = `fit-badge ${fitInfo.class}`;
-            badgeEl.textContent = fitInfo.label;
+        const tile = grid.querySelector(`[data-room="${room.slug}"]`);
+        if (tile) {
+          const kpiBox = tile.closest('.identification-tile__kpi-row')?.querySelector('.identification-tile__kpi-box');
+          if (kpiBox) {
+            kpiBox.className = `identification-tile__kpi-box ${fitInfo.class}`;
+            const valEl = kpiBox.querySelector('.identification-tile__kpi-value');
+            if (valEl) valEl.textContent = fitInfo.label;
           }
         }
       }
@@ -221,9 +228,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   identSection.className = 'card tuning-section';
   identSection.innerHTML = `
     <div class="tuning-section__title">Parameter Identification</div>
-    <p class="tuning-section__desc">Run maximum-likelihood estimation to identify thermal model parameters from historical data. Results are applied immediately.</p>
+    <p class="tuning-section__desc">Run maximum-likelihood estimation to identify thermal model parameters from historical data. Results are shown for review — click "Apply Identified Model" to commit them to the active model.</p>
     <div class="tuning-actions">
       <button class="btn btn--accent" id="btn-estimate-ml">Run Identification</button>
+      <button class="btn btn--primary" id="btn-apply-identified" disabled>Apply Identified Model</button>
       <span class="tuning-actions__status" id="ident-status"></span>
     </div>
     <div class="tuning-section__title" style="margin-top:20px">Active Model Parameters</div>
@@ -331,6 +339,78 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     height: 260,
   });
 
+  // --- Section: Parameter History ---
+  const historySection = document.createElement('div');
+  historySection.className = 'card tuning-section';
+  historySection.innerHTML = `
+    <div class="tuning-section__title">Applied Model History</div>
+    <p class="tuning-section__desc" style="margin-bottom:12px">Up to 10 most recent parameter sets that have been applied to this room. Use "Revert" to restore a previous set.</p>
+    <div id="param-history-list"></div>
+  `;
+  container.appendChild(historySection);
+
+  const historyListEl = historySection.querySelector('#param-history-list');
+
+  function renderParamHistory(st) {
+    historyListEl.innerHTML = '';
+    const config = st[CONFIG_ENTITY]?.attributes || {};
+    const history = config.parameter_history?.[roomSlug] || [];
+    if (history.length === 0) {
+      historyListEl.innerHTML = '<span class="tuning-section__desc">No history available.</span>';
+      return;
+    }
+    const table = document.createElement('table');
+    table.className = 'param-history-table';
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Date</th>
+          <th>Source</th>
+          <th>Thermal Mass</th>
+          <th>R External</th>
+          <th>RMSE</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody');
+    for (let i = 0; i < history.length; i++) {
+      const entry = history[i];
+      const date = entry.estimated_at ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '\u2014';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${i + 1}</td>
+        <td>${date}</td>
+        <td>${(entry.source || 'manual').toUpperCase()}</td>
+        <td>${entry.thermal_mass != null ? formatMass(entry.thermal_mass) : '\u2014'}</td>
+        <td>${entry.r_external != null ? formatNumber(entry.r_external, 4) : '\u2014'}</td>
+        <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' \u00b0C' : '\u2014'}</td>
+        <td><button class="btn btn--ghost btn--sm" data-revert="${i}">Revert</button></td>
+      `;
+      tbody.appendChild(tr);
+    }
+    historyListEl.appendChild(table);
+
+    table.querySelectorAll('[data-revert]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.revert, 10);
+        btn.disabled = true;
+        btn.textContent = '\u2026';
+        try {
+          await hass.callService('heating_assistant', 'revert_parameters', {
+            room_name: roomSlug,
+            history_index: idx,
+          });
+          btn.textContent = '\u2713';
+        } catch (err) {
+          btn.textContent = 'ERR';
+        }
+      });
+    });
+  }
+
   // --- Wire up interactions ---
   const estimSigmaW = container.querySelector('#estim-sigma-w');
   const estimSigmaV = container.querySelector('#estim-sigma-v');
@@ -351,6 +431,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const btnApplyParams = container.querySelector('#btn-apply-params');
   const btnResetDefaults = container.querySelector('#btn-reset-defaults');
   const btnEstimateMl = container.querySelector('#btn-estimate-ml');
+  const btnApplyIdentified = container.querySelector('#btn-apply-identified');
   const identStatusEl = container.querySelector('#ident-status');
   const simStatusEl = container.querySelector('#sim-status');
 
@@ -406,8 +487,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     const attrs = entity?.attributes || {};
     updateKpiCard(kpiC, { value: attrs.thermal_mass != null ? formatMass(attrs.thermal_mass) : '\u2014' });
     updateKpiCard(kpiR, { value: attrs.r_external != null ? formatNumber(attrs.r_external, 4) + ' K/W' : '\u2014' });
-    updateKpiCard(kpiSigW, { value: attrs.sigma_w != null ? formatNumber(attrs.sigma_w, 3) + ' K/\u221as' : '\u2014' });
-    updateKpiCard(kpiSigV, { value: attrs.sigma_v != null ? formatNumber(attrs.sigma_v, 3) + ' \u00b0C' : '\u2014' });
   }
 
   function renderEkfResults(slug, st) {
@@ -457,14 +536,34 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     setStatus(identStatusEl, 'Running identification\u2026', 'running');
     btnEstimateMl.disabled = true;
     try {
-      await hass.callService('heating_assistant', 'estimate_parameters_ml', {
-        apply_parameters: true,
-      });
-      setStatus(identStatusEl, 'Complete \u2014 parameters applied.', '');
+      await hass.callService('heating_assistant', 'estimate_parameters_ml', {});
+      setStatus(identStatusEl, 'Complete \u2014 review results below, then click Apply to use them.', '');
+      btnApplyIdentified.disabled = false;
     } catch (err) {
       setStatus(identStatusEl, 'Error: ' + (err.message || err), 'error');
     }
     btnEstimateMl.disabled = false;
+  });
+
+  // Apply identified model — stores ML result into history + makes active
+  btnApplyIdentified.addEventListener('click', async () => {
+    setStatus(identStatusEl, 'Applying identified model\u2026', 'running');
+    btnApplyIdentified.disabled = true;
+    try {
+      const entity = latestState[filteredEntityId(roomSlug)];
+      const attrs = entity?.attributes || {};
+      const cVal = parseFloat(thermalMassInput.value) || attrs.thermal_mass;
+      const rVal = parseFloat(rExternalInput.value) || attrs.r_external;
+      await hass.callService('heating_assistant', 'store_identified_parameters', {
+        room_name: roomSlug,
+        thermal_mass: cVal,
+        r_external: rVal,
+        source: 'ml',
+      });
+      setStatus(identStatusEl, 'Identified model applied and stored in history.', 'success');
+    } catch (err) {
+      setStatus(identStatusEl, 'Error: ' + (err.message || err), 'error');
+    }
   });
 
   // EKF reconstruction
@@ -513,12 +612,13 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     setStatus(simStatusEl, 'Applying parameters to model\u2026', 'running');
     btnApplyParams.disabled = true;
     try {
-      await hass.callService('heating_assistant', 'apply_manual_parameters', {
+      await hass.callService('heating_assistant', 'store_identified_parameters', {
         room_name: roomSlug,
         thermal_mass: parseFloat(thermalMassInput.value),
         r_external: parseFloat(rExternalInput.value),
+        source: 'manual',
       });
-      setStatus(simStatusEl, 'Parameters applied to active model.', 'success');
+      setStatus(simStatusEl, 'Parameters applied and stored in history.', 'success');
     } catch (err) {
       setStatus(simStatusEl, 'Error: ' + (err.message || err), 'error');
     }
@@ -545,11 +645,13 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   populateEstimFromState(state);
   populateParamsFromState(roomSlug, state);
   renderAll(roomSlug, state);
+  renderParamHistory(state);
 
   return {
     update(newState) {
       latestState = newState;
       renderAll(roomSlug, newState);
+      renderParamHistory(newState);
     },
     destroy() {
       ekfChart.destroy();

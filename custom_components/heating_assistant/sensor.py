@@ -54,6 +54,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HeatingAssistantCoordinator
+from .dashboard import slugify
 from .heat_sources import HeatPump
 
 _LOGGER = logging.getLogger(__name__)
@@ -2652,7 +2653,7 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
         schedules = {}
         for room_name, room_schedule in c._room_schedule.items():
             if room_schedule and not room_schedule.is_empty:
-                schedules[room_name] = {
+                schedules[slugify(room_name)] = {
                     "enabled": c._schedule_enabled.get(room_name, True),
                     "periods": [
                         {
@@ -2667,6 +2668,15 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
                         for p in room_schedule.periods
                     ],
                 }
+        # Extract parameter history from the persisted snapshot.
+        param_history: list = []
+        try:
+            snap = c.estimated_params_snapshot
+            if snap and isinstance(snap, dict) and "history" in snap:
+                param_history = snap["history"]
+        except Exception:
+            pass
+
         return {
             "tracking_weight": c._tracking_weight,
             "energy_weight": c._energy_weight,
@@ -2683,4 +2693,5 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
             "window_open_close_settle": c._window_open_close_settle,
             "window_open_q_inflation": c._window_open_q_inflation,
             "room_schedules": schedules,
+            "parameter_history": param_history,
         }

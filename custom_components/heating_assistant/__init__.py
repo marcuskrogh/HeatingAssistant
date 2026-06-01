@@ -1022,7 +1022,7 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_estimate_ml(call: ServiceCall) -> None:
         """Run ML parameter estimation using the Kalman filter log-likelihood."""
         coordinator = _get_coordinator(hass)
-        apply_params: bool = call.data.get("apply_parameters", True)
+        apply_params: bool = call.data.get("apply_parameters", False)
         result = await coordinator.async_estimate_parameters_ml(
             apply_params=apply_params,
         )
@@ -1030,7 +1030,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Update sysid_results so that the dashboard sensor entities reflect
         # the newly identified parameters immediately (without requiring a
         # separate sysid simulation run).
-        if result.get("success") and apply_params:
+        if result.get("success"):
             for room_name, params in result.get("estimated_params", {}).items():
                 existing = coordinator.sysid_results.get(room_name, {})
                 existing["thermal_mass"] = params.get("thermal_mass")
@@ -1141,7 +1141,7 @@ def _register_services(hass: HomeAssistant) -> None:
         handle_estimate_ml,
         schema=vol.Schema(
             {
-                vol.Optional("apply_parameters", default=True): cv.boolean,
+                vol.Optional("apply_parameters", default=False): cv.boolean,
             }
         ),
     )
@@ -1799,6 +1799,120 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_RESET_ESTIMATED_PARAMETERS,
         handle_reset_estimated_parameters,
         schema=vol.Schema({}),
+    )
+
+    # ------------------------------------------------------------------
+    # Parameter history services
+    # ------------------------------------------------------------------
+
+    async def handle_store_identified_parameters(call: ServiceCall) -> None:
+        """Store identified parameters with history tracking."""
+        coordinator = _get_coordinator(hass)
+        room_name: str = call.data["room_name"]
+        thermal_mass: float = call.data["thermal_mass"]
+        r_external: float = call.data["r_external"]
+        source: str = call.data.get("source", "manual")
+        rmse: Optional[float] = call.data.get("rmse")
+        coordinator.store_identified_parameters(
+            room_name, thermal_mass, r_external, source=source, rmse=rmse
+        )
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "store_identified_parameters",
+        handle_store_identified_parameters,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("thermal_mass"): vol.All(
+                    vol.Coerce(float), vol.Range(min=1000.0)
+                ),
+                vol.Required("r_external"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0001)
+                ),
+                vol.Optional("source", default="manual"): vol.In(["ml", "manual"]),
+                vol.Optional("rmse"): vol.Coerce(float),
+            }
+        ),
+    )
+
+    async def handle_revert_parameters(call: ServiceCall) -> None:
+        """Revert parameters to a previous history entry."""
+        coordinator = _get_coordinator(hass)
+        room_name: str = call.data["room_name"]
+        history_index: int = call.data["history_index"]
+        coordinator.revert_parameters(room_name, history_index)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "revert_parameters",
+        handle_revert_parameters,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("history_index"): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=9)
+                ),
+            }
+        ),
+    )
+
+    async def handle_update_room_schedule(call: ServiceCall) -> None:
+        """Update the schedule for a single room and persist to config entry."""
+        coordinator = _get_coordinator(hass)
+        room_name: str = call.data["room_name"]
+        periods: list = call.data["periods"]
+
+        # Find and update the room in the config entry
+        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
+        if entry is None:
+            raise ValueError("Config entry not found")
+
+        rooms_list = list(entry.data.get(CONF_ROOMS) or [])
+        found = False
+        for idx, room_cfg in enumerate(rooms_list):
+            if room_cfg.get(CONF_ROOM_NAME) == room_name:
+                rooms_list[idx] = {**room_cfg, CONF_SCHEDULE: periods}
+                found = True
+                break
+
+        if not found:
+            raise ValueError(f"Room '{room_name}' not found in configuration")
+
+        # Persist updated rooms list
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**dict(entry.data), CONF_ROOMS: rooms_list},
+        )
+
+        # Rebuild schedule in coordinator
+        coordinator.reload_room_schedule(room_name, periods)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_room_schedule",
+        handle_update_room_schedule,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("periods"): [
+                    vol.Schema(
+                        {
+                            vol.Required("name"): cv.string,
+                            vol.Required("mode"): vol.In(["comfort", "off"]),
+                            vol.Required("start"): cv.string,
+                            vol.Required("end"): cv.string,
+                            vol.Optional("days"): [vol.Coerce(int)],
+                            vol.Optional("setpoint"): vol.Coerce(float),
+                            vol.Optional("frost_protection", default=12.0): vol.Coerce(float),
+                        }
+                    )
+                ],
+            }
+        ),
     )
 
     async def handle_regenerate_dashboard(call: ServiceCall) -> ServiceResponse:
