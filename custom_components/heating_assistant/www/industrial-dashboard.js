@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '3';
+const PANEL_VERSION = '8';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -16,9 +16,19 @@ class HaIndustrialPanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._menuButton) {
+      this._menuButton.hass = hass;
+    }
     if (!this._initialized && hass) {
       this._initialized = true;
       this._boot();
+    }
+  }
+
+  set narrow(narrow) {
+    this._narrow = narrow;
+    if (this._menuButton) {
+      this._menuButton.narrow = narrow;
     }
   }
 
@@ -55,7 +65,7 @@ class HaIndustrialPanel extends HTMLElement {
     const contentEl = this.shadowRoot.getElementById('content');
     this._router = new Router(contentEl, {
       overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection),
-      room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection),
+      room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
       identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
       tuning: () => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass),
     });
@@ -83,36 +93,37 @@ class HaIndustrialPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css?v=${PANEL_VERSION}">
       <div class="shell">
-        <header class="header">
-          <div class="header__left">
-            <button class="menu-button" id="menu-toggle" aria-label="Toggle sidebar">
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
-              </svg>
-            </button>
-            <h1 class="header__title">HEATING ASSISTANT</h1>
-            <nav class="header__nav">
-              <a class="header__nav-link" href="#overview">OVERVIEW</a>
-              <a class="header__nav-link" href="#identification">IDENTIFICATION</a>
-              <a class="header__nav-link" href="#tuning">TUNING</a>
-            </nav>
+        <div id="top-bar"></div>
+        <nav class="panel-nav" id="panel-nav">
+          <div class="panel-nav__brand">
+            <svg class="panel-nav__logo" viewBox="0 0 28 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M7 1.5C7 1.5 5.5 3.5 7 5C8.5 6.5 7 8.5 7 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M14 1C14 1 12.5 3 14 4.5C15.5 6 14 8 14 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M21 1.5C21 1.5 19.5 3.5 21 5C22.5 6.5 21 8.5 21 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <rect x="2" y="10" width="24" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="9" y1="10" x2="9" y2="22" stroke="currentColor" stroke-width="1.5"/>
+              <line x1="16" y1="10" x2="16" y2="22" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <span class="panel-nav__name">HEATING ASSISTANT</span>
           </div>
-          <div class="header__status">
+          <a class="panel-nav__link" href="#overview">OVERVIEW</a>
+          <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
+          <a class="panel-nav__link" href="#tuning">TUNING</a>
+          <span class="panel-nav__fill"></span>
+          <span class="panel-nav__status">
             <span class="status-dot status-dot--live"></span>
             <span class="status-label">LIVE</span>
-          </div>
-        </header>
+          </span>
+        </nav>
         <main id="content" class="content">
           <div class="loading">INITIALIZING...</div>
         </main>
       </div>
     `;
 
-    this.shadowRoot.getElementById('menu-toggle').addEventListener('click', () => {
-      window.dispatchEvent(new Event('hass-toggle-menu'));
-    });
+    this._buildTopBar();
 
-    this.shadowRoot.querySelectorAll('.header__nav-link').forEach((link) => {
+    this.shadowRoot.querySelectorAll('.panel-nav__link').forEach((link) => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
         const target = link.getAttribute('href');
@@ -123,12 +134,26 @@ class HaIndustrialPanel extends HTMLElement {
     window.addEventListener('hashchange', () => this._updateActiveNav());
   }
 
+  _buildTopBar() {
+    const container = this.shadowRoot.getElementById('top-bar');
+
+    const toolbar = document.createElement('app-toolbar');
+
+    const menuBtn = document.createElement('ha-menu-button');
+    menuBtn.hass = this._hass;
+    menuBtn.narrow = this._narrow ?? window.innerWidth < 870;
+    this._menuButton = menuBtn;
+
+    toolbar.appendChild(menuBtn);
+    container.appendChild(toolbar);
+  }
+
   _updateActiveNav() {
     const hash = window.location.hash.slice(1).split('/')[0] || 'overview';
-    const links = this.shadowRoot.querySelectorAll('.header__nav-link');
+    const links = this.shadowRoot.querySelectorAll('.panel-nav__link');
     links.forEach((link) => {
       const linkRoute = link.getAttribute('href').slice(1);
-      link.classList.toggle('header__nav-link--active', linkRoute === hash);
+      link.classList.toggle('panel-nav__link--active', linkRoute === hash);
     });
   }
 

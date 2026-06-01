@@ -6,7 +6,7 @@ import {
   entityValue, entityAttr, systemEntity, modelFitLabel,
 } from '../utils.js';
 
-export function renderRoomDetail(container, roomSlug, rooms, state, connection) {
+export function renderRoomDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
   if (!room) {
     container.innerHTML = `<div class="loading">Room not found: ${roomSlug}</div>`;
@@ -38,7 +38,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
 
   const kpis = [
     createKpiCard({ value: formatTemperature(tempVal), label: 'Temperature', unit: '' }),
-    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint', unit: '' }),
+    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint \u270e', unit: '' }),
     createKpiCard({ value: formatPower(powerVal), label: 'Power', unit: '' }),
     createKpiCard({
       value: `<span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>`,
@@ -48,6 +48,30 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
     }),
   ];
   kpis.forEach((k) => kpiGrid.appendChild(k));
+
+  // Make setpoint KPI clickable for inline editing.
+  let setpointEditing = false;
+  const setpointKpi = kpis[1];
+  setpointKpi.classList.add('card--clickable');
+  setpointKpi.title = 'Click to change setpoint';
+  const climateEntityId = `climate.heating_assistant_${roomSlug}`;
+
+  setpointKpi.addEventListener('click', () => {
+    if (setpointEditing) return;
+    const currentSp = entityValue(latestState, room.entities['setpoint']) ?? 22;
+    setpointEditing = true;
+    _showSetpointEditor(setpointKpi, currentSp, async (newSp) => {
+      try {
+        await hass.callService('climate', 'set_temperature', {
+          entity_id: climateEntityId,
+          temperature: newSp,
+        });
+      } catch (err) {
+        // Service call failed; the display will self-correct on next state update.
+      }
+      setpointEditing = false;
+    }, () => { setpointEditing = false; });
+  });
 
   const countdown = createCountdown(state, true);
   kpiGrid.appendChild(countdown.element);
@@ -101,7 +125,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
       const sp = entityValue(newState, room.entities['setpoint']);
 
       updateKpiCard(kpis[0], { value: formatTemperature(tv) });
-      updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
+      if (!setpointEditing) {
+        updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
+      }
       updateKpiCard(kpis[2], { value: formatPower(pv) });
       updateKpiCard(kpis[3], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
 
@@ -116,10 +142,106 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection) 
   };
 }
 
+function _showSetpointEditor(kpiCard, currentValue, onConfirm, onCancel) {
+  const valueEl = kpiCard.querySelector('.kpi__value');
+  if (!valueEl) return;
+
+  const savedHtml = valueEl.innerHTML;
+  const STEP = 0.5;
+  const MIN = 5;
+  const MAX = 30;
+
+  // Snap incoming value to the nearest 0.5 °C so the stepper is never
+  // in an invalid state regardless of what the sensor reported.
+  let selected = Math.round((currentValue ?? 22) / STEP) * STEP;
+  selected = Math.max(MIN, Math.min(MAX, selected));
+
+  function restore() {
+    valueEl.innerHTML = savedHtml;
+  }
+
+  // ── Stepper row: [−]  22.0°  [+] ─────────────────────────────────
+  const stepperRow = document.createElement('div');
+  stepperRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
+
+  const downBtn = document.createElement('button');
+  downBtn.className = 'btn btn--ghost';
+  downBtn.textContent = '−';
+  downBtn.style.cssText = 'padding:1px 10px;font-size:17px;min-width:0;line-height:1.4;';
+
+  const valueDisplay = document.createElement('span');
+  valueDisplay.style.cssText = 'font-family:var(--font-mono);font-size:18px;color:var(--text-primary);min-width:52px;text-align:center;display:inline-block;';
+
+  const upBtn = document.createElement('button');
+  upBtn.className = 'btn btn--ghost';
+  upBtn.textContent = '+';
+  upBtn.style.cssText = 'padding:1px 10px;font-size:17px;min-width:0;line-height:1.4;';
+
+  stepperRow.appendChild(downBtn);
+  stepperRow.appendChild(valueDisplay);
+  stepperRow.appendChild(upBtn);
+
+  // ── Confirm / Cancel row ──────────────────────────────────────────
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;justify-content:center;gap:4px;margin-top:6px;';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn btn--primary';
+  confirmBtn.textContent = '✓';
+  confirmBtn.style.cssText = 'padding:2px 10px;font-size:13px;min-width:0;';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn--ghost';
+  cancelBtn.textContent = '✗';
+  cancelBtn.style.cssText = 'padding:2px 10px;font-size:13px;min-width:0;';
+
+  btnRow.appendChild(confirmBtn);
+  btnRow.appendChild(cancelBtn);
+
+  valueEl.innerHTML = '';
+  valueEl.appendChild(stepperRow);
+  valueEl.appendChild(btnRow);
+
+  function refresh() {
+    valueDisplay.textContent = selected.toFixed(1) + '°';
+    downBtn.disabled = selected <= MIN;
+    upBtn.disabled = selected >= MAX;
+  }
+  refresh();
+
+  downBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selected = Math.max(MIN, selected - STEP);
+    refresh();
+  });
+
+  upBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selected = Math.min(MAX, selected + STEP);
+    refresh();
+  });
+
+  confirmBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Optimistic update: show the new value immediately so the KPI reflects
+    // the change before the HA state event arrives on the next cycle.
+    valueEl.textContent = selected.toFixed(1) + '°C';
+    onConfirm(selected);
+  });
+
+  cancelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    restore();
+    onCancel();
+  });
+}
+
 async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart) {
   const tempFilteredEntity = room.entities['temperature_filtered'];
   const tempMeasuredEntity = room.entities['temperature_measured'];
   const setpointEntity = room.entities['setpoint'];
+  const constraintUpperEntity = room.entities['constraint_upper'];
+  const constraintLowerEntity = room.entities['constraint_lower'];
   const powerMeasuredEntity = room.entities['heating_power_measured'];
   const solarMeasuredEntity = room.entities['solar_gain_measured'];
   const outdoorEntity = systemEntity('outdoor_temperature_measured');
@@ -129,6 +251,8 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     tempFilteredEntity,
     tempMeasuredEntity,
     setpointEntity,
+    constraintUpperEntity,
+    constraintLowerEntity,
     powerMeasuredEntity,
     solarMeasuredEntity,
     outdoorEntity,
@@ -140,6 +264,8 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
   const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
   const setpointHistory = historyToDataPoints(history[setpointEntity]);
+  const constraintUpperHistory = historyToDataPoints(history[constraintUpperEntity]);
+  const constraintLowerHistory = historyToDataPoints(history[constraintLowerEntity]);
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
   const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
@@ -155,14 +281,20 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
   const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
   const setpointForecast = forecastToDataPoints(forecastData, 'setpoint');
+  const constraintUpperForecast = forecastToDataPoints(forecastData, 'constraint_upper');
+  const constraintLowerForecast = forecastToDataPoints(forecastData, 'constraint_lower');
   const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
   const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
   const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temp');
 
-  const upperBound = entityValue(state, room.entities['constraint_upper']);
-  const lowerBound = entityValue(state, room.entities['constraint_lower']);
-
-  buildTemperatureChart(tempChart, filteredHistory, measuredHistory, setpointHistory, tempForecastNonlinear, tempForecastLinearised, setpointForecast, upperBound, lowerBound);
+  buildTemperatureChart(
+    tempChart,
+    filteredHistory, measuredHistory,
+    setpointHistory, setpointForecast,
+    tempForecastNonlinear, tempForecastLinearised,
+    constraintUpperHistory, constraintUpperForecast,
+    constraintLowerHistory, constraintLowerForecast,
+  );
   buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, state, room);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
 }
@@ -205,18 +337,24 @@ function computeYLimits(allDataPoints, bounds, marginFraction = 0.05) {
   };
 }
 
-function buildTemperatureChart(chart, filteredHistory, measuredHistory, setpointHistory, forecastNonlinear, forecastLinearised, setpointForecast, upperBound, lowerBound) {
-  const now = Date.now();
-  const past = now - 13 * 3600 * 1000;
-  const lastForecastTime = forecastNonlinear.length > 0
-    ? forecastNonlinear[forecastNonlinear.length - 1].x
-    : now + 3 * 3600 * 1000;
-
-  const allData = [filteredHistory, measuredHistory, setpointHistory, forecastNonlinear, forecastLinearised, setpointForecast];
-  const boundsArr = [upperBound, lowerBound];
-  const { yMin, yMax } = computeYLimits(allData, boundsArr);
-
+function buildTemperatureChart(
+  chart,
+  filteredHistory, measuredHistory,
+  setpointHistory, setpointForecast,
+  forecastNonlinear, forecastLinearised,
+  constraintUpperHistory, constraintUpperForecast,
+  constraintLowerHistory, constraintLowerForecast,
+) {
   const combinedSetpoint = [...setpointHistory, ...setpointForecast];
+  const combinedUpper = [...constraintUpperHistory, ...constraintUpperForecast];
+  const combinedLower = [...constraintLowerHistory, ...constraintLowerForecast];
+
+  const allData = [
+    filteredHistory, measuredHistory,
+    combinedSetpoint, forecastNonlinear, forecastLinearised,
+    combinedUpper, combinedLower,
+  ];
+  const { yMin, yMax } = computeYLimits(allData, []);
 
   const datasets = [
     makeDataset('Filtered', filteredHistory, '#4fc3f7', { borderWidth: 2 }),
@@ -236,21 +374,30 @@ function buildTemperatureChart(chart, filteredHistory, measuredHistory, setpoint
 
   if (combinedSetpoint.length > 0) {
     datasets.push(
-      makeDataset('Setpoint', combinedSetpoint, '#e57373', { dashed: true, borderWidth: 1, pointRadius: 0 })
+      makeDataset('Setpoint', combinedSetpoint, '#e57373', {
+        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before',
+      })
     );
   }
 
-  if (upperBound !== null && lowerBound !== null) {
-    const boundTimes = [past, now, lastForecastTime];
-
+  // Shade outside the comfort corridor without drawing visible boundary lines.
+  // In Chart.js 4, fill.above/below refer to whether the DATASET is above/below
+  // the TARGET — not the direction of the fill area. The upper constraint is
+  // always below 'end' (chart top), so 'below' color applies; the lower
+  // constraint is always above 'start' (chart bottom), so 'above' color applies.
+  if (combinedUpper.length > 0) {
     datasets.push(
-      makeDataset('Above Comfort', boundTimes.map((t) => ({ x: t, y: yMax + 10 })), 'transparent', {
-        fill: { target: { value: upperBound }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
-        borderWidth: 0, pointRadius: 0, showLine: true,
-      }),
-      makeDataset('Below Comfort', boundTimes.map((t) => ({ x: t, y: yMin - 10 })), 'transparent', {
-        fill: { target: { value: lowerBound }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
-        borderWidth: 0, pointRadius: 0, showLine: true,
+      makeDataset('Constraint Upper', combinedUpper, 'transparent', {
+        borderWidth: 0, pointRadius: 0, stepped: 'before',
+        fill: { target: 'end', above: 'transparent', below: 'rgba(229,115,115,0.12)' },
+      })
+    );
+  }
+  if (combinedLower.length > 0) {
+    datasets.push(
+      makeDataset('Constraint Lower', combinedLower, 'transparent', {
+        borderWidth: 0, pointRadius: 0, stepped: 'before',
+        fill: { target: 'start', above: 'rgba(229,115,115,0.12)', below: 'transparent' },
       })
     );
   }
@@ -349,13 +496,26 @@ function updateChartsFromState(room, state, tempChart, powerChart, disturbChart)
 
   if (tempChart._chart) {
     const ds = tempChart._chart.data.datasets;
+    const now = Date.now();
+
     if (ds[2]) ds[2].data = tempForecast;
     if (ds[3] && tempLinearised.length > 0) ds[3].data = tempLinearised;
-    const setpointIdx = ds.findIndex((d) => d.label === 'Setpoint');
-    if (setpointIdx >= 0) {
-      const existingHistory = ds[setpointIdx].data.filter((p) => p.x <= Date.now());
-      ds[setpointIdx].data = [...existingHistory, ...setpointData];
+
+    const constraintUpperForecast = forecastToDataPoints(forecastData, 'constraint_upper');
+    const constraintLowerForecast = forecastToDataPoints(forecastData, 'constraint_lower');
+
+    for (const [label, newForecast] of [
+      ['Setpoint', setpointData],
+      ['Constraint Upper', constraintUpperForecast],
+      ['Constraint Lower', constraintLowerForecast],
+    ]) {
+      const idx = ds.findIndex((d) => d.label === label);
+      if (idx >= 0) {
+        const existingHistory = ds[idx].data.filter((p) => p.x <= now);
+        ds[idx].data = [...existingHistory, ...newForecast];
+      }
     }
+
     tempChart._chart.update('none');
   }
 

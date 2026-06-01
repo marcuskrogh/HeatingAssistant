@@ -16,12 +16,13 @@ import dataclasses
 import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -50,6 +51,7 @@ from .const import (
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
+    CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -115,6 +117,7 @@ from .const import (
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -163,6 +166,12 @@ from .schedule import (
 from . import weather as _weather
 
 _LOGGER = logging.getLogger(__name__)
+
+# Number of consecutive coordinator cycles with no valid outdoor temperature
+# before an UpdateFailed is raised (only applies when no prior reading was ever
+# obtained — i.e., the entity was never reachable since startup).
+# With the default 15-minute update interval this gives ~45 minutes of grace.
+_OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
 
 
 @dataclasses.dataclass
@@ -355,6 +364,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_ENERGY_WEIGHT,
         CONF_SMOOTHING_WEIGHT,
         CONF_SOFT_CONSTRAINT_WEIGHT,
+        CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
         CONF_TERMINAL_WEIGHT,
         CONF_SIGMA_W,
         CONF_SIGMA_V,
@@ -409,6 +419,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
         self._soft_constraint_weight: float = data.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
+        self._soft_constraint_linear_weight: float = data.get(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT)
         self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
         self._sigma_w: float = float(
             options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
@@ -524,6 +535,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -703,7 +715,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Current cloud-cover fraction in [0, 1], or None when unavailable;
         # used to attenuate the clear-sky solar model.
         self.cloud_cover: Optional[float] = None
-        self.outdoor_temp: float = 5.0
+        self.outdoor_temp: Optional[float] = None
+        # Last valid outdoor temperature reading.  When outdoor_temp is
+        # transiently None (entity unavailable mid-run) this value is used as a
+        # constant persistence forecast so MPC keeps running.  Reset to None
+        # only on a full coordinator re-initialisation; never cleared mid-run.
+        self._last_valid_outdoor_temp: Optional[float] = None
+        # Counter for consecutive startup cycles where outdoor_temp is None
+        # AND no prior valid reading exists.  Triggers UpdateFailed after
+        # _OUTDOOR_TEMP_MAX_STARTUP_FAILURES cycles.  Reset to 0 on first
+        # valid reading and never incremented again while persistence is used.
+        self._outdoor_temp_startup_failures: int = 0
         # Latest outdoor wind speed [m/s] from the weather entity.  Used
         # by the Sherman–Grimsrud infiltration overlay (Phase 1 C1).
         # ``None`` until the first coordinator cycle / when the weather
@@ -728,6 +750,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Per-room Kalman-filtered state x̂⁺ after each compute(); cleared
         # when the MPC solver fails so sensor entities report ``unknown``.
         self.filtered_temperatures: Dict[str, float] = {}
+
+        # Rooms that have received at least one valid temperature measurement
+        # since the coordinator started.  Rooms absent from this set have
+        # never had a sensor reading (e.g. HA entity still "unknown" during
+        # startup) and must not influence the EKF initial state or actuate
+        # heat until a real measurement arrives.
+        self._rooms_ever_measured: set = set()
 
         # Rolling observation history for ML parameter estimation.
         # Each entry is a dict: {y, u, d_outdoor, d_solar, timestamp}.
@@ -870,6 +899,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -934,6 +964,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if CONF_SOFT_CONSTRAINT_WEIGHT in pending:
             self._soft_constraint_weight = float(
                 pending.get(CONF_SOFT_CONSTRAINT_WEIGHT, self._soft_constraint_weight)
+            )
+            rebuild_controller = True
+        if CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT in pending:
+            self._soft_constraint_linear_weight = float(
+                pending.get(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, self._soft_constraint_linear_weight)
             )
             rebuild_controller = True
         if CONF_ENERGY_WEIGHT in pending:
@@ -1014,6 +1049,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         sources_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_HEAT_SOURCES, [])
         self.model = build_house_model(rooms_cfg)
         self.heat_sources = build_heat_sources(sources_cfg)
+
+        # Restore user-controlled setpoints so that "Reset to Defaults"
+        # only affects estimated thermal parameters (thermal_mass,
+        # r_external) and not the user's chosen comfort setpoints.
+        for _room_name, _sp in self._base_setpoint.items():
+            if _room_name in self.model.rooms:
+                self.model.rooms[_room_name].setpoint = _sp
         self._rebuild_sources_by_room()
 
         self.controller = HeatingMPCController(
@@ -1028,6 +1070,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,
@@ -1038,6 +1081,86 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._estimation_timestamp = None
         self._estimation_log_likelihood = None
         _LOGGER.info("Estimated parameters reset to configured defaults")
+
+    def apply_manual_parameters(
+        self,
+        room_name: str,
+        thermal_mass: float,
+        r_external: float,
+    ) -> None:
+        """Apply manually tuned parameters for a single room.
+
+        Updates the live model and rebuilds the MPC controller immediately.
+        The change is persisted to ``entry.data`` so it survives a restart.
+        Other rooms retain whatever parameters they currently have.
+        """
+        if room_name not in self.model.rooms:
+            raise ValueError(f"Room '{room_name}' not found in model")
+
+        room = self.model.rooms[room_name]
+        room.thermal_mass = float(thermal_mass)
+        room.r_external = float(r_external)
+
+        self.model.rebuild_derived_parameters()
+        (
+            self.model._C,
+            self.model._A,
+            self.model._B_ext,
+        ) = self.model._build_matrices()
+
+        self.controller = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=self._horizon,
+            dt=self.dt,
+            measurement_dt=self.dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+            tracking_weight=self._tracking_weight,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
+            terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+        )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        existing_snap = {}
+        try:
+            existing_snap = self.estimated_params_snapshot or {}
+        except Exception:
+            pass
+
+        snapshot: Dict[str, Any] = {
+            **existing_snap,
+            "rooms": {
+                name: {
+                    "thermal_mass": r.thermal_mass,
+                    "r_external": r.r_external,
+                    "internal_gain": float(getattr(r, "internal_gain", 0.0)),
+                }
+                for name, r in self.model.rooms.items()
+            },
+            "estimated_at": now_iso,
+        }
+        self._estimation_timestamp = now_iso
+
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
+            )
+        _LOGGER.info(
+            "Applied manual parameters for room '%s': thermal_mass=%.0f J/K, r_external=%.5f K/W",
+            room_name,
+            thermal_mass,
+            r_external,
+        )
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """
@@ -1074,6 +1197,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     self.model.rooms[room_name].temperature = averaged
                     self.measured_temperatures[room_name] = averaged
 
+            # Update the set of rooms that have ever had a valid reading.
+            self._rooms_ever_measured.update(self.measured_temperatures.keys())
+
+            # Rooms with sensors configured but no reading yet (typically
+            # during HA startup before entities leave "unknown" state) must
+            # not drive heating or seed the EKF with the 20 °C model default.
+            rooms_not_ready: set = {
+                name for name in self._temp_sensors
+                if name not in self._rooms_ever_measured
+            }
+            if rooms_not_ready:
+                _LOGGER.debug(
+                    "Waiting for first valid temperature reading for: %s",
+                    ", ".join(sorted(rooms_not_ready)),
+                )
+
             # 1b. Apply comfort schedules: resolve the active period for each
             #     room and update the live setpoint / enabled flag accordingly.
             #     Done after measurements are read so frost-protection logic
@@ -1097,7 +1236,55 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
             # 2. Read outdoor temperature
             outdoor_temp = self._read_outdoor_temp()
-            self.outdoor_temp = outdoor_temp
+            self.outdoor_temp = outdoor_temp  # sensor reports None = "unknown"
+
+            if outdoor_temp is not None:
+                # Fresh valid reading — update persistence cache and reset counter.
+                self._last_valid_outdoor_temp = outdoor_temp
+                self._outdoor_temp_startup_failures = 0
+            elif self._last_valid_outdoor_temp is not None:
+                # Transient failure mid-run: persist the last valid reading so
+                # MPC continues without interruption.  The sensor entity will
+                # report "unknown" while self.outdoor_temp is None.
+                _LOGGER.debug(
+                    "Outdoor temperature entity unavailable; "
+                    "persisting last known value %.1f °C for MPC",
+                    self._last_valid_outdoor_temp,
+                )
+                outdoor_temp = self._last_valid_outdoor_temp
+            else:
+                # No valid reading has ever been obtained — still starting up
+                # or entity is misconfigured / permanently unavailable.
+                self._outdoor_temp_startup_failures += 1
+                if self._outdoor_temp_startup_failures >= _OUTDOOR_TEMP_MAX_STARTUP_FAILURES:
+                    raise UpdateFailed(
+                        "Outdoor temperature is unavailable: neither "
+                        f"outdoor_temp_entity {self._outdoor_entity!r} nor "
+                        f"weather_entity {self._weather_entity!r} has produced "
+                        f"a valid reading after "
+                        f"{self._outdoor_temp_startup_failures} coordinator cycles. "
+                        "Check that the configured entities exist and are "
+                        "reporting a numeric state."
+                    )
+                _LOGGER.debug(
+                    "Outdoor temperature unavailable — startup cycle %d/%d; "
+                    "skipping MPC until entity becomes ready",
+                    self._outdoor_temp_startup_failures,
+                    _OUTDOOR_TEMP_MAX_STARTUP_FAILURES,
+                )
+                if not self.actions:
+                    self.actions = {src.name: 0.0 for src in self.heat_sources}
+                return {
+                    "temperatures": dict(self.model.temperatures),
+                    "outdoor_temp": None,
+                    "actions": dict(self.actions),
+                    "solar_gains": {},
+                    "predictions": [],
+                    "heat_flows": {},
+                    "outdoor_forecast": [],
+                    "solar_forecast": [],
+                    "heating_schedule": [],
+                }
 
             # 2b. Read electricity price forecast from Nord Pool / price entity.
             self.price_forecast = await self._async_read_price_forecast(self.now_utc)
@@ -1174,12 +1361,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 4. Run MPC controller
             # Collect heat sources whose rooms are currently off so the
             # controller can zero them out in both the first-step action and
-            # the full predicted heating schedule before returning.
+            # the full predicted heating schedule before returning.  Also
+            # disable sources for rooms that have never had a valid sensor
+            # reading so we never actuate based on the 20 °C model default.
             disabled_src_names = {
                 src.name
                 for src in self.heat_sources
                 if not self.is_room_enabled(src.room)
                 or self.is_window_override_active(src.room)
+                or src.room in rooms_not_ready
             }
             try:
                 self.actions = self.controller.compute(
@@ -1200,7 +1390,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.outdoor_forecast = self.controller.outdoor_forecast
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
-                self.filtered_temperatures = self.controller.filtered_temperatures
+                self.filtered_temperatures = dict(self.controller.filtered_temperatures)
+                # Rooms that have never had a valid reading expose "unknown"
+                # so the dashboard falls back to the raw sensor value.
+                for _r in rooms_not_ready:
+                    self.filtered_temperatures.pop(_r, None)
                 # Mirror the price forecast that was actually used so sensors can
                 # expose it (may differ from self.price_forecast if the controller
                 # truncated / padded it).
@@ -1278,8 +1472,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 ]
 
             self._history_buffer.append({
+                # Store the raw sensor measurements as y so the open-loop
+                # simulation and EKF diagnostics start from what the sensor
+                # actually read, not from any model-internal estimate.  For
+                # rooms without a sensor configured the model temperature is
+                # used as a fallback, but those rooms have no meaningful
+                # simulation target anyway.
                 "y": [
-                    self.model.rooms[name].temperature
+                    self.measured_temperatures.get(
+                        name, self.model.rooms[name].temperature
+                    )
                     for name in self.model.room_names
                 ],
                 # y_pred: prediction made at k-1 FOR step k — aligned with y.
@@ -1336,7 +1538,200 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _read_outdoor_temp(self) -> float:
+    def setup_startup_listeners(self) -> Optional[Callable]:
+        """Watch the specific entities this integration needs, not all of HA.
+
+        Triggers a coordinator refresh as soon as each of the outdoor-temp
+        sensor, weather entity, or room-temperature sensors transitions from
+        ``unknown``/``unavailable`` to a valid state, without waiting for
+        ``EVENT_HOMEASSISTANT_STARTED`` which blocks on all integrations
+        (including unrelated slow ones).
+
+        Returns a cancel callable suitable for ``entry.async_on_unload``,
+        or ``None`` when there are no entities to watch.
+        """
+        _UNAVAILABLE = {"unknown", "unavailable"}
+
+        entity_ids: List[str] = []
+        if self._outdoor_entity:
+            entity_ids.append(self._outdoor_entity)
+        if self._weather_entity:
+            entity_ids.append(self._weather_entity)
+        for sensors in self._temp_sensors.values():
+            for sid in sensors:
+                if sid not in entity_ids:
+                    entity_ids.append(sid)
+
+        if not entity_ids:
+            return None
+
+        @callback
+        def _on_entity_ready(event) -> None:
+            new_state = event.data.get("new_state")
+            if new_state is None or new_state.state in _UNAVAILABLE:
+                return
+            old_state = event.data.get("old_state")
+            # Only trigger on transitions from unavailable/unknown → valid.
+            if old_state is not None and old_state.state not in _UNAVAILABLE:
+                return
+            _LOGGER.debug(
+                "Startup: entity %s became available — requesting coordinator refresh",
+                event.data.get("entity_id"),
+            )
+            self.hass.async_create_task(self.async_request_refresh())
+
+        return async_track_state_change_event(self.hass, entity_ids, _on_entity_ready)
+
+    def setup_window_listeners(self) -> Optional[Callable]:
+        """Set up window-sensor listeners for event-driven debounce/settle timing.
+
+        The state machine is advanced DIRECTLY from the event callbacks rather
+        than relying on coordinator refreshes to check elapsed time:
+
+        * Sensor opens  → ``closed → pending_open`` immediately; after
+          ``window_open_debounce`` seconds, verify still open, advance to
+          ``open``, then fire ONE coordinator refresh (heater-off command).
+        * Sensor closes (all room sensors closed) + state is ``open`` →
+          ``open → pending_closed`` immediately; after
+          ``window_open_close_settle`` seconds, verify still closed, advance
+          to ``closed``, then fire ONE coordinator refresh (heater-on command).
+        * Sensor closes while ``pending_open`` (closed before debounce) →
+          revert to ``closed`` immediately, fire ONE coordinator refresh.
+
+        Pending timers are keyed by room name so a second sensor event in
+        the same room correctly cancels the previous in-flight timer.
+
+        Returns a cancel callable suitable for ``entry.async_on_unload``,
+        or ``None`` when no window sensors are configured.
+        """
+        # Build sensor_id → room_name reverse lookup.
+        sensor_to_room: Dict[str, str] = {
+            sid: room_name
+            for room_name, sensors in self._window_sensors.items()
+            for sid in sensors
+        }
+        all_sensor_ids = list(sensor_to_room)
+        if not all_sensor_ids:
+            return None
+
+        # Pending timer cancel-handles keyed by room_name (one timer per room).
+        _pending: Dict[str, Callable] = {}
+
+        @callback
+        def _on_window_changed(event) -> None:
+            sensor_id = event.data.get("entity_id", "")
+            room_name = sensor_to_room.get(sensor_id)
+            if room_name is None:
+                return
+
+            new_state_obj = event.data.get("new_state")
+            old_state_obj = event.data.get("old_state")
+            if new_state_obj is None:
+                return
+
+            new_open = str(new_state_obj.state).lower() == "on"
+            old_open = (
+                old_state_obj is not None
+                and str(old_state_obj.state).lower() == "on"
+            )
+            if new_open == old_open:
+                return
+
+            now_utc = datetime.now(tz=timezone.utc)
+
+            # Cancel any in-flight timer for this room before issuing a new one.
+            if room_name in _pending:
+                _pending.pop(room_name)()
+
+            current = self._window_state.get(room_name, "closed")
+
+            if new_open:
+                # ── Window just opened ─────────────────────────────────────
+                if current == "closed":
+                    self._set_window_state(room_name, "pending_open", now_utc)
+                    _LOGGER.debug(
+                        "Window sensor %s opened for %s — pending_open (debounce %.0fs)",
+                        sensor_id, room_name, self._window_open_debounce,
+                    )
+
+                @callback
+                def _advance_open(_now=None, _rn=room_name) -> None:
+                    _pending.pop(_rn, None)
+                    _now_inner = datetime.now(tz=timezone.utc)
+                    sensors = self._window_sensors.get(_rn, [])
+                    any_open = any(self._read_binary_sensor_on(s) for s in sensors)
+                    if any_open and self._window_state.get(_rn) == "pending_open":
+                        self._set_window_state(_rn, "open", _now_inner)
+                        _LOGGER.debug(
+                            "Window debounce elapsed for %s — heater override active",
+                            _rn,
+                        )
+                    self.hass.async_create_task(self.async_request_refresh())
+
+                _pending[room_name] = async_call_later(
+                    self.hass, self._window_open_debounce, _advance_open
+                )
+
+            else:
+                # ── Window just closed ─────────────────────────────────────
+                sensors = self._window_sensors.get(room_name, [])
+                any_still_open = any(
+                    self._read_binary_sensor_on(s) for s in sensors
+                )
+
+                if current == "pending_open":
+                    # Closed before debounce elapsed — revert to closed.
+                    self._set_window_state(room_name, "closed", now_utc)
+                    _LOGGER.debug(
+                        "Window sensor %s closed before debounce for %s — reverted",
+                        sensor_id, room_name,
+                    )
+                    self.hass.async_create_task(self.async_request_refresh())
+
+                elif current == "open" and not any_still_open:
+                    # All sensors closed while open — enter settle period.
+                    self._set_window_state(room_name, "pending_closed", now_utc)
+                    _LOGGER.debug(
+                        "Window sensor %s closed for %s — pending_closed (settle %.0fs)",
+                        sensor_id, room_name, self._window_open_close_settle,
+                    )
+
+                    @callback
+                    def _advance_closed(_now=None, _rn=room_name) -> None:
+                        _pending.pop(_rn, None)
+                        _now_inner = datetime.now(tz=timezone.utc)
+                        sensors2 = self._window_sensors.get(_rn, [])
+                        any_open2 = any(
+                            self._read_binary_sensor_on(s) for s in sensors2
+                        )
+                        if (
+                            not any_open2
+                            and self._window_state.get(_rn) == "pending_closed"
+                        ):
+                            self._set_window_state(_rn, "closed", _now_inner)
+                            _LOGGER.debug(
+                                "Window settle elapsed for %s — heater override cleared",
+                                _rn,
+                            )
+                        self.hass.async_create_task(self.async_request_refresh())
+
+                    _pending[room_name] = async_call_later(
+                        self.hass, self._window_open_close_settle, _advance_closed
+                    )
+
+        cancel_listener = async_track_state_change_event(
+            self.hass, all_sensor_ids, _on_window_changed
+        )
+
+        def _cleanup() -> None:
+            cancel_listener()
+            for cancel_cb in list(_pending.values()):
+                cancel_cb()
+            _pending.clear()
+
+        return _cleanup
+
+    def _read_outdoor_temp(self) -> Optional[float]:
         return _weather.read_outdoor_temp(
             self.hass, self._outdoor_entity, self._weather_entity
         )
@@ -2346,6 +2741,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
             soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
             terminal_weight=self._terminal_weight,
             sigma_w=self._sigma_w,
             sigma_v=self._sigma_v,

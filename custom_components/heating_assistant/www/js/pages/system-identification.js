@@ -162,37 +162,34 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       <button class="btn btn--accent" id="btn-estimate-ml">Run Identification</button>
       <span class="tuning-actions__status" id="ident-status"></span>
     </div>
-    <div class="tuning-section__title" style="margin-top:20px">Identified Parameters</div>
+    <div class="tuning-section__title" style="margin-top:20px">Active Model Parameters</div>
+    <p class="tuning-section__desc" style="margin-bottom:8px">Currently applied parameters in the active thermal model.</p>
     <div class="grid-kpi" id="ident-kpis"></div>
   `;
   container.appendChild(identSection);
 
   const identKpiGrid = identSection.querySelector('#ident-kpis');
-  const kpiC = createKpiCard({ value: '\u2014', label: 'Thermal Mass', unit: '' });
-  const kpiR = createKpiCard({ value: '\u2014', label: 'R External', unit: '' });
-  const kpiSigW = createKpiCard({ value: '\u2014', label: '\u03c3_w', unit: '' });
-  const kpiSigV = createKpiCard({ value: '\u2014', label: '\u03c3_v', unit: '' });
+  const kpiC = createKpiCard({ value: '—', label: 'Thermal Mass', unit: '' });
+  const kpiR = createKpiCard({ value: '—', label: 'R External', unit: '' });
   identKpiGrid.appendChild(kpiC);
   identKpiGrid.appendChild(kpiR);
-  identKpiGrid.appendChild(kpiSigW);
-  identKpiGrid.appendChild(kpiSigV);
 
   // --- Section: Model Validation ---
   const validSection = document.createElement('div');
   validSection.className = 'card tuning-section';
   validSection.innerHTML = `
     <div class="tuning-section__title">Model Validation</div>
-    <p class="tuning-section__desc">Run simulations to evaluate model fit. EKF reconstruction uses Kalman filtering with uncertainty bounds. Open-loop simulation tests the raw model without state correction.</p>
+    <p class="tuning-section__desc">Run simulations to evaluate model fit. EKF reconstruction uses Kalman filtering with uncertainty bounds. Open-loop simulation tests the raw model without state correction. Use <em>Apply to Model</em> to write the current parameter values into the active model.</p>
     <div class="tuning-params-grid">
       <div class="form-group">
-        <label class="form-label" for="param-sigma-w">Process Noise (\u03c3_w)</label>
+        <label class="form-label" for="param-sigma-w">Process Noise (σ_w)</label>
         <input class="form-input" type="number" id="param-sigma-w" step="0.01" min="0.001" value="${DEFAULTS.sigma_w}">
-        <span class="form-hint">K/\u221as</span>
+        <span class="form-hint">K/√s</span>
       </div>
       <div class="form-group">
-        <label class="form-label" for="param-sigma-v">Measurement Noise (\u03c3_v)</label>
+        <label class="form-label" for="param-sigma-v">Measurement Noise (σ_v)</label>
         <input class="form-input" type="number" id="param-sigma-v" step="0.01" min="0.001" value="${DEFAULTS.sigma_v}">
-        <span class="form-hint">\u00b0C</span>
+        <span class="form-hint">°C</span>
       </div>
       <div class="form-group">
         <label class="form-label" for="param-thermal-mass">Thermal Mass (C)</label>
@@ -213,7 +210,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     <div class="tuning-actions" style="margin-top:20px">
       <button class="btn btn--primary" id="btn-sysid">EKF Reconstruction</button>
       <button class="btn btn--secondary" id="btn-open-loop">Open-Loop Simulation</button>
-      <button class="btn btn--ghost" id="btn-reset-defaults" title="Reset all parameters to their default values">Reset to Defaults</button>
+      <button class="btn btn--accent" id="btn-apply-params" title="Apply the current C and R values above to the active model">Apply to Model</button>
+      <button class="btn btn--ghost" id="btn-reset-defaults" title="Reset the active model back to configured default parameters">Reset to Defaults</button>
       <span class="tuning-actions__status" id="sim-status"></span>
     </div>
   `;
@@ -229,8 +227,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   container.appendChild(ekfResultsSection);
 
   const ekfKpiGrid = ekfResultsSection.querySelector('#ekf-kpis');
-  const kpiEkfRmse = createKpiCard({ value: '\u2014', label: 'RMSE', unit: '' });
-  const kpiEkfMae = createKpiCard({ value: '\u2014', label: 'MAE', unit: '' });
+  const kpiEkfRmse = createKpiCard({ value: '—', label: 'RMSE', unit: '' });
+  const kpiEkfMae = createKpiCard({ value: '—', label: 'MAE', unit: '' });
   ekfKpiGrid.appendChild(kpiEkfRmse);
   ekfKpiGrid.appendChild(kpiEkfMae);
 
@@ -240,7 +238,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   const ekfChart = new TimeSeriesChart(ekfChartEl, {
     title: 'EKF RECONSTRUCTION',
-    yLabel: '\u00b0C',
+    yLabel: '°C',
     height: 260,
   });
 
@@ -254,8 +252,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   container.appendChild(olResultsSection);
 
   const olKpiGrid = olResultsSection.querySelector('#ol-kpis');
-  const kpiOlRmse = createKpiCard({ value: '\u2014', label: 'RMSE', unit: '' });
-  const kpiOlMae = createKpiCard({ value: '\u2014', label: 'MAE', unit: '' });
+  const kpiOlRmse = createKpiCard({ value: '—', label: 'RMSE', unit: '' });
+  const kpiOlMae = createKpiCard({ value: '—', label: 'MAE', unit: '' });
   olKpiGrid.appendChild(kpiOlRmse);
   olKpiGrid.appendChild(kpiOlMae);
 
@@ -265,7 +263,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   const olChart = new TimeSeriesChart(olChartEl, {
     title: 'OPEN-LOOP SIMULATION',
-    yLabel: '\u00b0C',
+    yLabel: '°C',
     height: 260,
   });
 
@@ -286,6 +284,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const horizonInput = container.querySelector('#param-horizon');
   const btnSysid = container.querySelector('#btn-sysid');
   const btnOpenLoop = container.querySelector('#btn-open-loop');
+  const btnApplyParams = container.querySelector('#btn-apply-params');
   const btnResetDefaults = container.querySelector('#btn-reset-defaults');
   const btnEstimateMl = container.querySelector('#btn-estimate-ml');
   const identStatusEl = container.querySelector('#ident-status');
@@ -297,6 +296,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     el.textContent = text;
     el.className = 'tuning-actions__status';
     if (type) el.classList.add(`tuning-actions__status--${type}`);
+  }
+
+  function filteredEntityId(slug) {
+    return `sensor.heating_assistant_${slug}_temperature_filtered`;
   }
 
   function sysidEntityId(slug) {
@@ -318,19 +321,24 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   }
 
   function populateParamsFromState(slug, st) {
-    const entity = st[sysidEntityId(slug)];
-    const attrs = entity?.attributes;
-    if (attrs) {
-      if (attrs.sigma_w != null) sigmaWInput.value = attrs.sigma_w;
-      if (attrs.sigma_v != null) sigmaVInput.value = attrs.sigma_v;
-      if (attrs.thermal_mass != null) thermalMassInput.value = attrs.thermal_mass;
-      if (attrs.r_external != null) rExternalInput.value = attrs.r_external;
-      if (attrs.horizon_hours != null) horizonInput.value = attrs.horizon_hours;
+    const filtered = st[filteredEntityId(slug)];
+    const filteredAttrs = filtered?.attributes;
+    if (filteredAttrs) {
+      if (filteredAttrs.thermal_mass != null) thermalMassInput.value = filteredAttrs.thermal_mass;
+      if (filteredAttrs.r_external != null) rExternalInput.value = filteredAttrs.r_external;
+    }
+    const sysidEntity = st[sysidEntityId(slug)];
+    const sysidAttrs = sysidEntity?.attributes;
+    if (sysidAttrs) {
+      if (sysidAttrs.sigma_w != null) sigmaWInput.value = sysidAttrs.sigma_w;
+      if (sysidAttrs.sigma_v != null) sigmaVInput.value = sysidAttrs.sigma_v;
+      if (sysidAttrs.horizon_hours != null) horizonInput.value = sysidAttrs.horizon_hours;
     }
   }
 
+  // Active model parameters — always read from the live temperature_filtered sensor.
   function renderIdentKpis(slug, st) {
-    const entity = st[sysidEntityId(slug)];
+    const entity = st[filteredEntityId(slug)];
     const attrs = entity?.attributes || {};
     updateKpiCard(kpiC, { value: attrs.thermal_mass != null ? formatMass(attrs.thermal_mass) : '\u2014' });
     updateKpiCard(kpiR, { value: attrs.r_external != null ? formatNumber(attrs.r_external, 4) + ' K/W' : '\u2014' });
@@ -436,14 +444,37 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnOpenLoop.disabled = false;
   });
 
+  // Apply manual params to active model
+  btnApplyParams.addEventListener('click', async () => {
+    setStatus(simStatusEl, 'Applying parameters to model\u2026', 'running');
+    btnApplyParams.disabled = true;
+    try {
+      await hass.callService('heating_assistant', 'apply_manual_parameters', {
+        room_name: roomSlug,
+        thermal_mass: parseFloat(thermalMassInput.value),
+        r_external: parseFloat(rExternalInput.value),
+      });
+      setStatus(simStatusEl, 'Parameters applied to active model.', 'success');
+    } catch (err) {
+      setStatus(simStatusEl, 'Error: ' + (err.message || err), 'error');
+    }
+    btnApplyParams.disabled = false;
+  });
+
   // Reset defaults
-  btnResetDefaults.addEventListener('click', () => {
-    sigmaWInput.value = DEFAULTS.sigma_w;
-    sigmaVInput.value = DEFAULTS.sigma_v;
-    thermalMassInput.value = DEFAULTS.thermal_mass;
-    rExternalInput.value = DEFAULTS.r_external;
-    horizonInput.value = DEFAULTS.horizon_hours;
-    setStatus(simStatusEl, 'Parameters reset to defaults.', '');
+  btnResetDefaults.addEventListener('click', async () => {
+    setStatus(simStatusEl, 'Resetting to defaults\u2026', 'running');
+    btnResetDefaults.disabled = true;
+    try {
+      await hass.callService('heating_assistant', 'reset_estimated_parameters', {});
+      sigmaWInput.value = DEFAULTS.sigma_w;
+      sigmaVInput.value = DEFAULTS.sigma_v;
+      horizonInput.value = DEFAULTS.horizon_hours;
+      setStatus(simStatusEl, 'Model reset to configured defaults.', 'success');
+    } catch (err) {
+      setStatus(simStatusEl, 'Error: ' + (err.message || err), 'error');
+    }
+    btnResetDefaults.disabled = false;
   });
 
   // Initial population
@@ -469,7 +500,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
 function formatMass(val) {
   const num = parseFloat(val);
-  if (isNaN(num)) return '\u2014';
+  if (isNaN(num)) return '—';
   if (num >= 1e6) return (num / 1e6).toFixed(2) + ' MJ/K';
   if (num >= 1e3) return (num / 1e3).toFixed(0) + ' kJ/K';
   return num.toFixed(0) + ' J/K';
@@ -509,10 +540,10 @@ function buildEkfChart(chart, simulation) {
       showLine: false,
     }),
     makeDataset('Predicted', predicted, '#4fc3f7', { borderWidth: 2 }),
-    makeDataset('Above 2\u03c3', covUpper, 'rgba(79,195,247,0.25)', {
+    makeDataset('Above 2σ', covUpper, 'rgba(79,195,247,0.25)', {
       borderWidth: 0, pointRadius: 0, fill: false,
     }),
-    makeDataset('Below 2\u03c3', covLower, 'rgba(79,195,247,0.25)', {
+    makeDataset('Below 2σ', covLower, 'rgba(79,195,247,0.25)', {
       borderWidth: 0, pointRadius: 0,
       fill: '-1', backgroundColor: 'rgba(79,195,247,0.10)',
     }),

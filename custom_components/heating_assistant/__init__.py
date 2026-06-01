@@ -94,6 +94,7 @@ from .const import (
     CONF_R_SG,
     CONF_SKY_RADIATIVE_UA,
     CONF_SOFT_CONSTRAINT_WEIGHT,
+    CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     CONF_THERMAL_BRIDGE_PSI_L,
     CONF_TRACKING_WEIGHT,
     CONF_WEATHER_ENTITY,
@@ -207,6 +208,8 @@ SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 SERVICE_REGENERATE_DASHBOARD = "regenerate_dashboard"
 SERVICE_COMPUTE_LOGLIK_SLICE = "compute_loglik_slice"
 SERVICE_RUN_SYSID_SIMULATION = "run_sysid_simulation"
+SERVICE_APPLY_MANUAL_PARAMETERS = "apply_manual_parameters"
+SERVICE_RESET_ESTIMATED_PARAMETERS = "reset_estimated_parameters"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
@@ -557,6 +560,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Watch only the entities this integration needs (outdoor sensor, weather,
+    # room temperature sensors) rather than waiting for EVENT_HOMEASSISTANT_STARTED
+    # which blocks on all integrations — including unrelated slow ones.
+    # Each listener fires a coordinator refresh as soon as its entity transitions
+    # from unknown/unavailable to a valid state.
+    cancel_startup = coordinator.setup_startup_listeners()
+    if cancel_startup is not None:
+        entry.async_on_unload(cancel_startup)
+
+    # Schedule immediate + deadline-aligned refreshes for window open/close
+    # events so debounce and settle timings are honoured independently of the
+    # coordinator's update interval.
+    cancel_window = coordinator.setup_window_listeners()
+    if cancel_window is not None:
+        entry.async_on_unload(cancel_window)
+
     # NOTE: Native Lovelace dashboards are kept in code but disabled.
     # The custom JS/CSS panel below is the primary dashboard.
     # written = await _async_auto_write_default_dashboard(hass, entry, coordinator)
@@ -596,7 +615,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=2",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=5",
                     "embed_iframe": False,
                 }
             },
@@ -1640,7 +1659,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
     _CONTROLLER_TUNING_KEYS = {
         CONF_TRACKING_WEIGHT, CONF_ENERGY_WEIGHT, CONF_ENERGY_PRICE_WEIGHT,
-        CONF_SMOOTHING_WEIGHT, CONF_SOFT_CONSTRAINT_WEIGHT, CONF_TERMINAL_WEIGHT,
+        CONF_SMOOTHING_WEIGHT, CONF_SOFT_CONSTRAINT_WEIGHT,
+        CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, CONF_TERMINAL_WEIGHT,
         CONF_HORIZON, CONF_UPDATE_INTERVAL, CONF_COMFORT_OFFSET,
     }
 
@@ -1683,6 +1703,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional(CONF_SOFT_CONSTRAINT_WEIGHT): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=10000.0)
                 ),
+                vol.Optional(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1000000.0)
+                ),
                 vol.Optional(CONF_TERMINAL_WEIGHT): vol.All(
                     vol.Coerce(float), vol.Range(min=1.0, max=10000.0)
                 ),
@@ -1694,6 +1717,32 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
                 vol.Optional(CONF_COMFORT_OFFSET): vol.All(
                     vol.Coerce(float), vol.Range(min=0.1, max=5.0)
+                ),
+            }
+        ),
+    )
+
+    async def handle_apply_manual_parameters(call: ServiceCall) -> None:
+        """Apply manually tuned thermal parameters for a single room."""
+        coordinator = _get_coordinator(hass)
+        room_name: str = call.data["room_name"]
+        thermal_mass: float = call.data["thermal_mass"]
+        r_external: float = call.data["r_external"]
+        coordinator.apply_manual_parameters(room_name, thermal_mass, r_external)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_APPLY_MANUAL_PARAMETERS,
+        handle_apply_manual_parameters,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("thermal_mass"): vol.All(
+                    vol.Coerce(float), vol.Range(min=1000.0)
+                ),
+                vol.Required("r_external"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0001)
                 ),
             }
         ),
@@ -1737,6 +1786,19 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
             }
         ),
+    )
+
+    async def handle_reset_estimated_parameters(call: ServiceCall) -> None:
+        """Reset the active model back to configured (YAML) default parameters."""
+        coordinator = _get_coordinator(hass)
+        coordinator.reset_estimated_parameters()
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RESET_ESTIMATED_PARAMETERS,
+        handle_reset_estimated_parameters,
+        schema=vol.Schema({}),
     )
 
     async def handle_regenerate_dashboard(call: ServiceCall) -> ServiceResponse:

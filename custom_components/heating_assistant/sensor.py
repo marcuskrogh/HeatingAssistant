@@ -670,7 +670,10 @@ class HeatPumpCOPSensor(CoordinatorEntity, SensorEntity):
         )
         if src is None or not isinstance(src, HeatPump):
             return None
-        return round(src.cop(self._coordinator.outdoor_temp), 2)
+        outdoor_temp = self._coordinator.outdoor_temp
+        if outdoor_temp is None:
+            return None
+        return round(src.cop(outdoor_temp), 2)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -710,8 +713,9 @@ class OutdoorTemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_outdoor_temperature_measured"
 
     @property
-    def native_value(self) -> float:
-        return round(self._coordinator.outdoor_temp, 2)
+    def native_value(self) -> Optional[float]:
+        t = self._coordinator.outdoor_temp
+        return None if t is None else round(t, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -754,19 +758,21 @@ class OutdoorTemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         return True
 
     @property
-    def native_value(self) -> float:
-        return round(self._coordinator.outdoor_temp, 2)
+    def native_value(self) -> Optional[float]:
+        t = self._coordinator.outdoor_temp
+        return None if t is None else round(t, 2)
 
     @property
     def extra_state_attributes(self) -> dict:
         outdoor_forecast = self._coordinator.outdoor_forecast
         dt = self._coordinator.dt
         now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
+        _ot = self._coordinator.outdoor_temp
 
         # Entry at t=now: bridge between history and prediction
         forecast: List[Dict[str, Any]] = [{
             "time": now.isoformat(),
-            "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
+            "outdoor_temp": None if _ot is None else round(_ot, 2),
         }]
         for i, temp in enumerate(outdoor_forecast):
             step_time = now + timedelta(seconds=dt * (i + 1))
@@ -855,6 +861,16 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         heating_schedule = self._coordinator.heating_schedule
         linearised_predictions = self._coordinator.linearised_predictions
 
+        # Use per-step setpoints and comfort offsets from the schedule
+        # trajectory so the forecast setpoint line and constraint corridor
+        # reflect scheduled changes over the horizon.
+        traj = getattr(self._coordinator, "_control_trajectory", None)
+        step_sp = traj.setpoints.get(self._room_name) if traj is not None else None
+        step_off = traj.comfort_offsets.get(self._room_name) if traj is not None else None
+
+        # Comfort offset for the current step (used in the bridge entry and as fallback).
+        comfort_offset = float(getattr(room, "comfort_offset", 2.0))
+
         # Current heating power for this room (actual, not planned)
         current_heating = sum(
             getattr(s, "current_power", 0.0)
@@ -869,14 +885,17 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             else round(room.temperature, 2)
         )
 
+        now_sp = round(float(room.setpoint), 2)
         # Entry at t=now: bridge between history and prediction
         forecast: List[Dict[str, Any]] = [{
             "time": now.isoformat(),
             "temperature": now_temp,
             "heating_power": round(current_heating, 1),
             "solar_gain": round(current_solar, 1),
-            "outdoor_temp": round(self._coordinator.outdoor_temp, 2),
-            "setpoint": room.setpoint,
+            "outdoor_temp": None if self._coordinator.outdoor_temp is None else round(self._coordinator.outdoor_temp, 2),
+            "setpoint": now_sp,
+            "constraint_upper": round(now_sp + comfort_offset, 2),
+            "constraint_lower": round(now_sp - comfort_offset, 2),
         }]
 
         # Walk predictions once, building both the scalar trajectory list and
@@ -892,9 +911,21 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             # Include this step in the forecast even if temperature is missing,
             # to keep time stamps correct (i always represents the actual step number)
             step_time = now + timedelta(seconds=dt * (i + 1))
+            have_traj = (
+                step_sp is not None and step_off is not None
+                and i < len(step_sp) and i < len(step_off)
+            )
+            if have_traj:
+                s = round(float(step_sp[i]), 2)
+                o = float(step_off[i])
+            else:
+                s = round(float(room.setpoint), 2)
+                o = comfort_offset
             entry: Dict[str, Any] = {
                 "time": step_time.isoformat(),
-                "setpoint": room.setpoint,
+                "setpoint": s,
+                "constraint_upper": round(s + o, 2),
+                "constraint_lower": round(s - o, 2),
             }
             if temp is not None:
                 temp_rounded = round(temp, 2)
@@ -915,10 +946,6 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
                 if lin_temp is not None:
                     entry["linearised_temperature"] = round(lin_temp, 2)
             forecast.append(entry)
-
-        # Expose the per-room comfort offset for dashboard constraint-band
-        # visualisation (setpoint ± comfort_offset).
-        comfort_offset = getattr(room, "comfort_offset", 2.0)
 
         return {
             "trajectory": trajectory,
@@ -1108,9 +1135,10 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
 
         # Effective system COP (thermal output / electrical input)
         electrical_input = 0.0
+        _outdoor_temp = self._coordinator.outdoor_temp
         for src in sources:
             if isinstance(src, HeatPump):
-                cop = src.cop(self._coordinator.outdoor_temp)
+                cop = src.cop(_outdoor_temp) if _outdoor_temp is not None else 0.0
                 if cop > 0:
                     electrical_input += src.current_power / cop
                 # If COP is 0, heat pump is off, no electrical input

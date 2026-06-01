@@ -490,13 +490,22 @@ update_controller_tuning:
           max: 10
           step: 0.05
     soft_constraint_weight:
-      name: Comfort band penalty
-      description: Penalty for staying outside the comfort band.
+      name: Comfort band quadratic penalty
+      description: Quadratic penalty for staying outside the comfort band.
       required: false
       selector:
         number:
           min: 0
           max: 10000
+          step: 1
+    soft_constraint_linear_weight:
+      name: Comfort band linear penalty
+      description: Linear penalty for comfort-band violations. 0 = disabled.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1000000
           step: 1
     terminal_weight:
       name: End-of-horizon weight

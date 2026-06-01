@@ -10,7 +10,8 @@ const PARAM_DEFS = [
   { key: 'energy_weight', label: 'Energy Weight', unit: '', hint: 'Energy-use penalty', step: 0.01, min: 0, max: 10, parse: parseFloat },
   { key: 'energy_price_weight', label: 'Price Sensitivity', unit: '', hint: 'Electricity price cost scaling', step: 0.1, min: 0, max: 10000, parse: parseFloat },
   { key: 'smoothing_weight', label: 'Output Smoothing', unit: '', hint: 'Penalises rapid output changes', step: 0.05, min: 0, max: 10, parse: parseFloat },
-  { key: 'soft_constraint_weight', label: 'Comfort Band Penalty', unit: '', hint: 'Penalty for leaving comfort zone', step: 1, min: 0, max: 10000, parse: parseFloat },
+  { key: 'soft_constraint_weight', label: 'Comfort Band Penalty (quadratic)', unit: '', hint: 'Quadratic penalty for leaving comfort zone', step: 1, min: 0, max: 10000, parse: parseFloat },
+  { key: 'soft_constraint_linear_weight', label: 'Comfort Band Penalty (linear)', unit: '', hint: 'Linear penalty for comfort-band violations (0 = disabled)', step: 1, min: 0, max: 1000000, parse: parseFloat },
   { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, min: 1, max: 10000, parse: parseFloat },
 ];
 
@@ -23,6 +24,7 @@ const DEFAULTS = {
   energy_price_weight: 1.0,
   smoothing_weight: 0.1,
   soft_constraint_weight: 10.0,
+  soft_constraint_linear_weight: 0.0,
   terminal_weight: 100.0,
 };
 
