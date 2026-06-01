@@ -52,20 +52,18 @@
         "description": "Configure how Heating Assistant controls your home. Changes are saved when you pick **Save & close**.",
         "menu_options": {
           "global_settings": "General & sensor settings",
-          "mpc_tuning": "Control behaviour",
           "manage_rooms": "Rooms, heaters & schedules",
           "save": "Save & close"
         },
         "menu_option_descriptions": {
-          "global_settings": "Outdoor sources, update cadence, and advanced state-estimation tuning.",
-          "mpc_tuning": "Balance comfort vs energy use and tune the predictive controller.",
+          "global_settings": "Outdoor sources, update cadence, and pricing configuration.",
           "manage_rooms": "Add rooms, configure heaters, windows and time-of-day schedules.",
           "save": "Apply all pending changes and exit."
         }
       },
       "global_settings": {
         "title": "General & sensor settings",
-        "description": "Outdoor sources and how often the controller re-plans. The fields lower down (model adaptation, window detection) are safe to leave at their defaults.",
+        "description": "Outdoor sources, pricing, and how often the controller re-plans.",
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor",
           "weather_entity": "Weather forecast",
@@ -73,50 +71,16 @@
           "price_entity": "Electricity price sensor",
           "price_net_tariff": "Net tariff (per kWh)",
           "price_spot_surcharge": "Spot price surcharge (per kWh)",
-          "update_interval": "Control interval (seconds)",
-          "sigma_w": "Model adaptation rate",
-          "sigma_v": "Sensor noise",
-          "sigma_b": "Sensor calibration drift",
-          "window_open_debounce": "Window open debounce (seconds)",
-          "window_open_close_settle": "Window close settle (seconds)",
-          "window_open_q_inflation": "Open-state uncertainty multiplier"
+          "update_interval": "Control interval (seconds)"
         },
         "data_description": {
           "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
           "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
           "solar_radiation_entity": "Optional. A sensor reporting the sun's solar irradiance (Global Horizontal Irradiance) in W/m² — e.g. Open-Meteo's shortwave_radiation, or a pyranometer — ideally with an hourly forecast in its attributes. When set, the forecast replaces the modelled clear-sky radiation in the solar-gain model (decomposed and transposed onto your windows by geometry); the clear-sky model stays as the automatic fallback. This is the sun's radiation, not solar-panel production.",
-          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating. Enable the price sensitivity slider in Control behaviour to activate.",
+          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating.",
           "price_net_tariff": "Fixed grid / network tariff to add to the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.20 DKK/kWh). Ensures the effective price seen by the controller is never below your actual cost of electricity.",
           "price_spot_surcharge": "Fixed spot price surcharge or electricity tax to add on top of the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.90 DKK/kWh for Danish elafgift). Together with the net tariff this floors the effective price at a realistic consumer value.",
-          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes.",
-          "sigma_w": "Advanced — how quickly the thermal model adapts to observed data. Higher values track changes faster but follow sensor noise more closely. Default 0.1 works for most homes.",
-          "sigma_v": "Advanced — expected indoor temperature sensor noise (K). Raise this if you have a noisy sensor; lower it for a precise one.",
-          "sigma_b": "Advanced — allowed rate of sensor calibration drift. Higher values forgive slow sensor offset over time.",
-          "window_open_debounce": "Advanced — how long a window must stay open before the controller responds. Prevents reacting to brief openings. Only matters when window sensors are configured for a room.",
-          "window_open_close_settle": "Advanced — how long a window must stay closed before the controller resumes normal control.",
-          "window_open_q_inflation": "Advanced — how much the controller distrusts the model while a window is open. Higher = adapts faster afterwards."
-        }
-      },
-      "mpc_tuning": {
-        "title": "Control behaviour",
-        "description": "Tune how the controller balances comfort, energy use and responsiveness. The top two are the everyday knobs; the rest are advanced and rarely need changing.",
-        "data": {
-          "tracking_weight": "Setpoint tracking strength",
-          "energy_weight": "Energy-use penalty",
-          "horizon": "Prediction horizon (steps)",
-          "smoothing_weight": "Output smoothing",
-          "soft_constraint_weight": "Comfort band penalty",
-          "terminal_weight": "End-of-horizon weight",
-          "energy_price_weight": "Price sensitivity"
-        },
-        "data_description": {
-          "tracking_weight": "How strongly the controller chases the exact setpoint. 0 = stay inside the comfort band only. Higher values mean tighter tracking at the cost of more energy use.",
-          "energy_weight": "How strongly the controller avoids running heaters. Higher values save energy but may drift toward the edges of the comfort band.",
-          "horizon": "Advanced — number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",
-          "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
-          "soft_constraint_weight": "Advanced — how hard the controller fights to stay inside your comfort band. Higher = stricter, may use more energy at the band edges.",
-          "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift.",
-          "energy_price_weight": "Scales how strongly the electricity price enters the MPC cost. Comfort is always respected first — the price term shifts heating timing within the comfort zone toward cheaper hours. Start at 1 (default). Raise to 5–20 for a stronger response; lower if comfort is being sacrificed. 0 disables price awareness. Only active when an electricity price sensor is configured."
+          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes."
         }
       },
       "manage_rooms": {

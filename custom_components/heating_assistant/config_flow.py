@@ -193,10 +193,6 @@ DEFAULT_ROOM_SETPOINT = 22.0
 SECTION_LOCATION = "location"
 SECTION_SENSORS = "sensors"
 SECTION_TIMING = "timing"
-SECTION_ADV_ESTIMATION = "advanced_estimation"
-SECTION_WINDOW_DETECTION = "window_detection"
-SECTION_COMFORT_VS_ENERGY = "comfort_vs_energy"
-SECTION_ADV_CONTROLLER = "advanced_controller"
 SECTION_ADV_ENVELOPE = "advanced_envelope"
 SECTION_PERFORMANCE = "performance"
 SECTION_ADV_PERIOD = "advanced_period"
@@ -861,14 +857,7 @@ def _period_form_schema(
 # ---------------------------------------------------------------------------
 
 
-_GLOBAL_SECTION_KEYS: Tuple[str, ...] = (
-    SECTION_ADV_ESTIMATION,
-    SECTION_WINDOW_DETECTION,
-)
-_MPC_SECTION_KEYS: Tuple[str, ...] = (
-    SECTION_COMFORT_VS_ENERGY,
-    SECTION_ADV_CONTROLLER,
-)
+_GLOBAL_SECTION_KEYS: Tuple[str, ...] = ()
 
 
 class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
@@ -900,7 +889,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_menu(
             step_id="init",
-            menu_options=["global_settings", "mpc_tuning", "manage_rooms", "save"],
+            menu_options=["global_settings", "manage_rooms", "save"],
         )
 
     # ------------------------------------------------------------------
@@ -983,122 +972,10 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                     current.get(CONF_UPDATE_INTERVAL) or DEFAULT_UPDATE_INTERVAL
                 ),
             ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
-            vol.Optional(
-                CONF_SIGMA_W,
-                default=float(current.get(CONF_SIGMA_W) or DEFAULT_SIGMA_W),
-            ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
-            vol.Optional(
-                CONF_SIGMA_V,
-                default=float(current.get(CONF_SIGMA_V) or DEFAULT_SIGMA_V),
-            ): vol.All(vol.Coerce(float), vol.Range(min=1e-6, max=10.0)),
-            vol.Optional(
-                CONF_SIGMA_B,
-                default=float(current.get(CONF_SIGMA_B) or DEFAULT_SIGMA_B),
-            ): vol.All(vol.Coerce(float), vol.Range(min=1e-8, max=1.0)),
-            vol.Optional(
-                CONF_WINDOW_OPEN_DEBOUNCE,
-                default=int(
-                    current.get(CONF_WINDOW_OPEN_DEBOUNCE)
-                    if current.get(CONF_WINDOW_OPEN_DEBOUNCE) is not None
-                    else DEFAULT_WINDOW_OPEN_DEBOUNCE
-                ),
-            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
-            vol.Optional(
-                CONF_WINDOW_OPEN_CLOSE_SETTLE,
-                default=int(
-                    current.get(CONF_WINDOW_OPEN_CLOSE_SETTLE)
-                    if current.get(CONF_WINDOW_OPEN_CLOSE_SETTLE) is not None
-                    else DEFAULT_WINDOW_OPEN_CLOSE_SETTLE
-                ),
-            ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
-            vol.Optional(
-                CONF_WINDOW_OPEN_Q_INFLATION,
-                default=float(
-                    current.get(CONF_WINDOW_OPEN_Q_INFLATION)
-                    or DEFAULT_WINDOW_OPEN_Q_INFLATION
-                ),
-            ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=1000.0)),
         }
 
         return self.async_show_form(
             step_id="global_settings", data_schema=vol.Schema(schema_dict),
-        )
-
-    # ------------------------------------------------------------------
-    # MPC tuning
-    # ------------------------------------------------------------------
-
-    async def async_step_mpc_tuning(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Form for MPC controller and model tuning parameters.
-
-        Kept flat (no sections) for the same robustness reason as
-        ``async_step_global_settings``.
-        """
-        if user_input is not None:
-            flat = _flatten_sections(user_input, _MPC_SECTION_KEYS)
-            self._data.update(flat)
-            return await self.async_step_init()
-
-        current = self._data
-        schema_dict: Dict[Any, Any] = {
-            vol.Optional(
-                CONF_TRACKING_WEIGHT,
-                default=float(
-                    current.get(CONF_TRACKING_WEIGHT)
-                    if current.get(CONF_TRACKING_WEIGHT) is not None
-                    else DEFAULT_TRACKING_WEIGHT
-                ),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.1),
-            vol.Optional(
-                CONF_ENERGY_WEIGHT,
-                default=float(
-                    current.get(CONF_ENERGY_WEIGHT)
-                    if current.get(CONF_ENERGY_WEIGHT) is not None
-                    else DEFAULT_ENERGY_WEIGHT
-                ),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.01),
-            vol.Optional(
-                CONF_HORIZON,
-                default=int(
-                    current.get(CONF_HORIZON) or DEFAULT_HORIZON
-                ),
-            ): _number_box(min_value=1, max_value=480, step=1),
-            vol.Optional(
-                CONF_SMOOTHING_WEIGHT,
-                default=float(
-                    current.get(CONF_SMOOTHING_WEIGHT)
-                    if current.get(CONF_SMOOTHING_WEIGHT) is not None
-                    else DEFAULT_SMOOTHING_WEIGHT
-                ),
-            ): _number_slider(min_value=0.0, max_value=10.0, step=0.05),
-            vol.Optional(
-                CONF_SOFT_CONSTRAINT_WEIGHT,
-                default=float(
-                    current.get(CONF_SOFT_CONSTRAINT_WEIGHT)
-                    if current.get(CONF_SOFT_CONSTRAINT_WEIGHT) is not None
-                    else DEFAULT_SOFT_CONSTRAINT_WEIGHT
-                ),
-            ): _number_box(min_value=0.0, max_value=10000.0, step=1.0),
-            vol.Optional(
-                CONF_TERMINAL_WEIGHT,
-                default=float(
-                    current.get(CONF_TERMINAL_WEIGHT) or DEFAULT_TERMINAL_WEIGHT
-                ),
-            ): _number_box(min_value=1.0, max_value=10000.0, step=1.0),
-            vol.Optional(
-                CONF_ENERGY_PRICE_WEIGHT,
-                default=float(
-                    current.get(CONF_ENERGY_PRICE_WEIGHT)
-                    if current.get(CONF_ENERGY_PRICE_WEIGHT) is not None
-                    else DEFAULT_ENERGY_PRICE_WEIGHT
-                ),
-            ): _number_box(min_value=0.0, max_value=10000.0, step=0.1),
-        }
-
-        return self.async_show_form(
-            step_id="mpc_tuning", data_schema=vol.Schema(schema_dict),
         )
 
     # ------------------------------------------------------------------

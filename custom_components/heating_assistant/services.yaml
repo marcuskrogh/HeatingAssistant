@@ -445,3 +445,161 @@ regenerate_dashboard:
       example: "heating_assistant.yaml"
       selector:
         text:
+
+update_controller_tuning:
+  name: Update controller tuning
+  description: >
+    Update MPC controller parameters at runtime from the Heating Assistant
+    dashboard. Changes take effect immediately and are persisted to the config
+    entry.
+  fields:
+    tracking_weight:
+      name: Tracking weight
+      description: How strongly the controller chases the exact setpoint (0 = comfort band only).
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.1
+    energy_weight:
+      name: Energy weight
+      description: How strongly the controller avoids running heaters.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.01
+    energy_price_weight:
+      name: Price sensitivity
+      description: How strongly the electricity price enters the MPC cost.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.1
+    smoothing_weight:
+      name: Output smoothing
+      description: Penalises rapid changes in heater output.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.05
+    soft_constraint_weight:
+      name: Comfort band penalty
+      description: Penalty for staying outside the comfort band.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 1
+    terminal_weight:
+      name: End-of-horizon weight
+      description: Weight applied at the prediction horizon.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 10000
+          step: 1
+    horizon:
+      name: Prediction horizon
+      description: Number of control intervals planned ahead.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 480
+          step: 1
+    update_interval:
+      name: Control interval
+      description: Re-planning cadence in seconds.
+      required: false
+      selector:
+        number:
+          min: 60
+          max: 3600
+          step: 30
+          unit_of_measurement: "s"
+    comfort_offset:
+      name: Comfort offset
+      description: Symmetric comfort band half-width around setpoint.
+      required: false
+      selector:
+        number:
+          min: 0.1
+          max: 5.0
+          step: 0.1
+          unit_of_measurement: "\u00b0C"
+
+update_estimation_params:
+  name: Update estimation parameters
+  description: >
+    Update state estimation and window detection parameters at runtime from the
+    Heating Assistant dashboard. Changes take effect immediately and are
+    persisted to the config entry.
+  fields:
+    sigma_w:
+      name: Model adaptation rate
+      description: Process noise intensity — how quickly the thermal model adapts.
+      required: false
+      selector:
+        number:
+          min: 0.000001
+          max: 10
+          step: 0.001
+          unit_of_measurement: "K/\u221as"
+    sigma_v:
+      name: Sensor noise
+      description: Expected indoor temperature sensor noise.
+      required: false
+      selector:
+        number:
+          min: 0.000001
+          max: 10
+          step: 0.001
+          unit_of_measurement: "K"
+    sigma_b:
+      name: Calibration drift
+      description: Allowed rate of sensor calibration drift.
+      required: false
+      selector:
+        number:
+          min: 0.00000001
+          max: 1
+          step: 0.0001
+          unit_of_measurement: "K/\u221as"
+    window_open_debounce:
+      name: Window open debounce
+      description: How long a window must stay open before responding.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 3600
+          step: 10
+          unit_of_measurement: "s"
+    window_open_close_settle:
+      name: Window close settle
+      description: How long a window must stay closed before resuming.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 3600
+          step: 10
+          unit_of_measurement: "s"
+    window_open_q_inflation:
+      name: Open-state uncertainty multiplier
+      description: How much the controller distrusts the model while a window is open.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 1000
+          step: 1

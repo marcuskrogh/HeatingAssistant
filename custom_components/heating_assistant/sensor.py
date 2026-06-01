@@ -112,6 +112,7 @@ async def async_setup_entry(
     entities.append(MPCPerformanceSensor(coordinator))
     entities.append(WeatherForecastStatusSensor(coordinator))
     entities.append(SolarRadiationStatusSensor(coordinator))
+    entities.append(ControllerConfigSensor(coordinator))
 
     # Price sensors — only when a price entity is configured
     if getattr(coordinator, "_price_entity", None):
@@ -2589,4 +2590,50 @@ class SysIdSimulationSensor(CoordinatorEntity, SensorEntity):
             "rmse": room_data.get("rmse"),
             "mae": room_data.get("mae"),
             "horizon_hours": horizon_hours,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Controller / estimation configuration — system-wide
+# ---------------------------------------------------------------------------
+
+
+class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
+    """Exposes current controller tuning and estimation parameters as attributes.
+
+    The frontend reads this entity reactively via state subscription to populate
+    the Controller Tuning and System Identification pages.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:tune-vertical"
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant \u2013 Controller Config"
+        self._attr_unique_id = f"{DOMAIN}_controller_config"
+
+    @property
+    def native_value(self) -> str:
+        return "active"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        c = self._coordinator
+        return {
+            "tracking_weight": c._tracking_weight,
+            "energy_weight": c._energy_weight,
+            "energy_price_weight": c._energy_price_weight,
+            "smoothing_weight": c._smoothing_weight,
+            "soft_constraint_weight": c._soft_constraint_weight,
+            "terminal_weight": c._terminal_weight,
+            "horizon": c._horizon,
+            "update_interval": c._update_interval,
+            "sigma_w": c._sigma_w,
+            "sigma_v": c._sigma_v,
+            "sigma_b": c._sigma_b,
+            "window_open_debounce": c._window_open_debounce,
+            "window_open_close_settle": c._window_open_close_settle,
+            "window_open_q_inflation": c._window_open_q_inflation,
         }

@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '2';
+const PANEL_VERSION = '3';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -35,14 +35,16 @@ class HaIndustrialPanel extends HTMLElement {
       { discoverRooms },
       { renderOverview },
       { renderRoomDetail },
-      { renderTuning },
+      { renderSystemIdentification },
+      { renderControllerTuning },
     ] = await Promise.all([
       import(`${BASE_PATH}/js/ha-connection.js?v=${PANEL_VERSION}`),
       import(`${BASE_PATH}/js/router.js?v=${PANEL_VERSION}`),
       import(`${BASE_PATH}/js/discovery.js?v=${PANEL_VERSION}`),
       import(`${BASE_PATH}/js/pages/overview.js?v=${PANEL_VERSION}`),
       import(`${BASE_PATH}/js/pages/room-detail.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/pages/tuning.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/pages/system-identification.js?v=${PANEL_VERSION}`),
+      import(`${BASE_PATH}/js/pages/tuning-controller.js?v=${PANEL_VERSION}`),
     ]);
 
     this._connection = new HaConnection(this._hass);
@@ -54,7 +56,8 @@ class HaIndustrialPanel extends HTMLElement {
     this._router = new Router(contentEl, {
       overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection),
       room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection),
-      tuning: () => renderTuning(contentEl, this._rooms, this._state, this._connection, this._hass),
+      identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+      tuning: () => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass),
     });
 
     this._unsubscribe = await this._connection.subscribe((event) => {
@@ -90,6 +93,7 @@ class HaIndustrialPanel extends HTMLElement {
             <h1 class="header__title">HEATING ASSISTANT</h1>
             <nav class="header__nav">
               <a class="header__nav-link" href="#overview">OVERVIEW</a>
+              <a class="header__nav-link" href="#identification">IDENTIFICATION</a>
               <a class="header__nav-link" href="#tuning">TUNING</a>
             </nav>
           </div>
