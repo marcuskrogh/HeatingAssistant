@@ -212,6 +212,7 @@ export function makeDataset(label, data, color, options = {}) {
     borderDash: options.dashed ? [5, 5] : (options.borderDash || []),
     yAxisID: options.yAxisID || 'y',
     order: options.order,
+    spanGaps: options.spanGaps ?? true,
   };
 
   if (options.stepped) ds.stepped = options.stepped;
@@ -247,4 +248,23 @@ export function forecastToDataPoints(forecastArray, field) {
       return { x: time.getTime(), y: num };
     })
     .filter(Boolean);
+}
+
+export async function createSparkline(canvas, datasets) {
+  await loadChartJs();
+  return new window.Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: {
+        x: { display: false, type: 'time' },
+        y: { display: false },
+      },
+      elements: { point: { radius: 0 }, line: { tension: 0.2 } },
+    },
+  });
 }

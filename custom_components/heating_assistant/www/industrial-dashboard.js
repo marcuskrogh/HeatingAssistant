@@ -67,7 +67,7 @@ class HaIndustrialPanel extends HTMLElement {
       overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection),
       room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
       identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
-      tuning: () => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass),
+      tuning: (slug) => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
     });
 
     this._unsubscribe = await this._connection.subscribe((event) => {

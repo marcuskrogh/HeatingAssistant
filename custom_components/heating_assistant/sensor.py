@@ -2649,6 +2649,24 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         c = self._coordinator
+        schedules = {}
+        for room_name, room_schedule in c._room_schedule.items():
+            if room_schedule and not room_schedule.is_empty:
+                schedules[room_name] = {
+                    "enabled": c._schedule_enabled.get(room_name, True),
+                    "periods": [
+                        {
+                            "name": p.name,
+                            "start": p.start.strftime("%H:%M"),
+                            "end": p.end.strftime("%H:%M"),
+                            "mode": p.mode,
+                            "setpoint": p.setpoint,
+                            "frost_protection": p.frost_protection,
+                            "days": sorted(p.days),
+                        }
+                        for p in room_schedule.periods
+                    ],
+                }
         return {
             "tracking_weight": c._tracking_weight,
             "energy_weight": c._energy_weight,
@@ -2664,4 +2682,5 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
             "window_open_debounce": c._window_open_debounce,
             "window_open_close_settle": c._window_open_close_settle,
             "window_open_q_inflation": c._window_open_q_inflation,
+            "room_schedules": schedules,
         }
