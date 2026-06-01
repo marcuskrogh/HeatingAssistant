@@ -36,9 +36,18 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const fitInfo = modelFitLabel(fitVal);
   const setpointVal = entityValue(state, room.entities['setpoint']);
 
+  const setpointKpiEl = createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint', unit: '' });
+  setpointKpiEl.classList.add('card--clickable', 'kpi--setpoint');
+  setpointKpiEl.title = 'Click to change setpoint';
+  // Append a persistent hint so users know the card is interactive.
+  const spHint = document.createElement('span');
+  spHint.className = 'kpi--setpoint__hint';
+  spHint.textContent = 'TAP TO CHANGE';
+  setpointKpiEl.appendChild(spHint);
+
   const kpis = [
+    setpointKpiEl,
     createKpiCard({ value: formatTemperature(tempVal), label: 'Temperature', unit: '' }),
-    createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint \u270e', unit: '' }),
     createKpiCard({ value: formatPower(powerVal), label: 'Power', unit: '' }),
     createKpiCard({
       value: `<span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>`,
@@ -51,9 +60,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   // Make setpoint KPI clickable for inline editing.
   let setpointEditing = false;
-  const setpointKpi = kpis[1];
-  setpointKpi.classList.add('card--clickable');
-  setpointKpi.title = 'Click to change setpoint';
+  const setpointKpi = kpis[0];
   const climateEntityId = `climate.heating_assistant_${roomSlug}`;
 
   setpointKpi.addEventListener('click', () => {
@@ -124,10 +131,10 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       const fi = modelFitLabel(fv);
       const sp = entityValue(newState, room.entities['setpoint']);
 
-      updateKpiCard(kpis[0], { value: formatTemperature(tv) });
       if (!setpointEditing) {
-        updateKpiCard(kpis[1], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
+        updateKpiCard(kpis[0], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
       }
+      updateKpiCard(kpis[1], { value: formatTemperature(tv) });
       updateKpiCard(kpis[2], { value: formatPower(pv) });
       updateKpiCard(kpis[3], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
 

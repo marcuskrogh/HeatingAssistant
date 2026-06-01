@@ -7,7 +7,7 @@ import {
   MAX_SOLVE_TIME_S,
 } from '../utils.js';
 
-export function renderOverview(container, rooms, state, connection) {
+export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';
 
   const kpiSection = document.createElement('div');
@@ -30,7 +30,7 @@ export function renderOverview(container, rooms, state, connection) {
   roomGrid.className = 'grid-rooms';
 
   const tiles = rooms.map((room) => {
-    const tile = createRoomTile(room, state);
+    const tile = createRoomTile(room, state, hass);
     roomGrid.appendChild(tile);
     return { room, element: tile };
   });
@@ -45,7 +45,7 @@ export function renderOverview(container, rooms, state, connection) {
     update(newState) {
       latestState = newState;
       gauges.forEach((g) => g.updater(newState));
-      tiles.forEach((t) => updateRoomTile(t.element, t.room, newState));
+      tiles.forEach((t) => updateRoomTile(t.element, t.room, newState, hass));
       updateCountdown(countdown, newState);
     },
     _countdownInterval: countdownInterval,
