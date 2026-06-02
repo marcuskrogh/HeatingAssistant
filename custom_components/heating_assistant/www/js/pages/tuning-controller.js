@@ -155,17 +155,22 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   // Try to find the config entity in a state snapshot by scanning all
   // sensor.heating_assistant_* entities for one that carries the tuning keys.
+  // Requires BOTH tracking_weight AND update_interval to be present at the top
+  // level — this uniquely identifies ControllerConfigSensor and prevents
+  // MPCPerformanceSensor (which has "horizon" but not "update_interval") from
+  // being returned as a false positive.
   function configFromStateSnapshot(snapshot) {
     // Direct lookup first
     const direct = snapshot[CONFIG_ENTITY];
-    if (direct?.attributes?.tracking_weight !== undefined) {
+    if (direct?.attributes?.tracking_weight !== undefined &&
+        direct?.attributes?.update_interval !== undefined) {
       return direct.attributes;
     }
     // Fallback: scan all heating_assistant sensors
     for (const [id, s] of Object.entries(snapshot)) {
       if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
         const a = s.attributes;
-        if (a.tracking_weight !== undefined || a.horizon !== undefined) {
+        if (a.tracking_weight !== undefined && a.update_interval !== undefined) {
           return a;
         }
       }
