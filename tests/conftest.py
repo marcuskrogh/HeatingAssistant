@@ -231,6 +231,28 @@ _coord.DataUpdateCoordinator = _DataUpdateCoordinatorStub  # type: ignore[attr-d
 _coord.CoordinatorEntity = _CoordinatorEntityStub  # type: ignore[attr-defined]
 _coord.UpdateFailed = Exception  # type: ignore[attr-defined]
 
+# homeassistant.helpers.event
+# Guarded so that when a real Home Assistant install is present these no-ops do
+# NOT clobber the genuine implementations — they only fill the gap in the
+# stub-only environment.
+def _async_call_later_stub(hass, delay, action):
+    """No-op stand-in returning a cancel callback."""
+    return lambda: None
+
+
+def _async_track_state_change_event_stub(hass, entity_ids, action):
+    """No-op stand-in returning an unsubscribe callback."""
+    return lambda: None
+
+
+_event_mod = sys.modules["homeassistant.helpers.event"]
+if not hasattr(_event_mod, "async_call_later"):
+    _event_mod.async_call_later = _async_call_later_stub  # type: ignore[attr-defined]
+if not hasattr(_event_mod, "async_track_state_change_event"):
+    _event_mod.async_track_state_change_event = (  # type: ignore[attr-defined]
+        _async_track_state_change_event_stub
+    )
+
 # homeassistant.helpers.entity_platform
 _ep = sys.modules["homeassistant.helpers.entity_platform"]
 _ep.AddEntitiesCallback = object  # type: ignore[attr-defined]
@@ -350,6 +372,8 @@ _vol.All = lambda *a: a[0] if a else None  # type: ignore[attr-defined]
 _vol.Coerce = lambda t: t  # type: ignore[attr-defined]
 _vol.Range = lambda **kw: None  # type: ignore[attr-defined]
 _vol.In = lambda v: None  # type: ignore[attr-defined]
+if not hasattr(_vol, "Any"):
+    _vol.Any = lambda *a, **kw: None  # type: ignore[attr-defined]
 _vol.REMOVE_EXTRA = "REMOVE_EXTRA"  # type: ignore[attr-defined]
 _vol.ALLOW_EXTRA = "ALLOW_EXTRA"  # type: ignore[attr-defined]
 _vol.PREVENT_EXTRA = "PREVENT_EXTRA"  # type: ignore[attr-defined]
