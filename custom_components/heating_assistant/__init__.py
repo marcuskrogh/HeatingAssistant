@@ -1873,7 +1873,13 @@ def _register_services(hass: HomeAssistant) -> None:
         if entry is None:
             raise ValueError("Config entry not found")
 
-        rooms_list = entry.data.get(CONF_ROOMS) or []
+        # Rooms can live in either ``entry.options`` (when configured via the
+        # UI options flow) or ``entry.data`` (YAML / initial config flow).
+        # Check both stores for room name resolution.
+        opts = entry.options
+        source_rooms = opts.get(CONF_ROOMS) if opts.get(CONF_ROOMS) else entry.data.get(CONF_ROOMS)
+        rooms_list = source_rooms or []
+
         canonical_name: str | None = None
         for room_cfg in rooms_list:
             cfg_name = room_cfg.get(CONF_ROOM_NAME, "")

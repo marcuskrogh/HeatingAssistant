@@ -6,7 +6,9 @@ from custom_components.heating_assistant.const import (
     CONF_MPC_ANALYTIC_DERIVATIVES,
     CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_ROOM_NAME,
     CONF_ROOMS,
+    CONF_SCHEDULE,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -93,6 +95,75 @@ def test_merge_populates_solver_defaults():
     assert merged[CONF_SIGMA_W] == DEFAULT_SIGMA_W
     assert merged[CONF_SIGMA_V] == DEFAULT_SIGMA_V
     assert merged[CONF_SIGMA_B] == DEFAULT_SIGMA_B
+
+
+def test_merge_yaml_rooms_preserve_stored_schedules():
+    """YAML rooms must not discard dashboard-configured schedules.
+
+    When rooms are defined in YAML (normal setup), merging YAML into entry data
+    previously replaced the room list completely, stripping any CONF_SCHEDULE key
+    that the update_room_schedule service had written to the config entry.  The
+    coordinator then loaded no schedule, the config sensor exposed empty
+    room_schedules, and the frontend showed nothing after a reload.
+    """
+    periods = [
+        {
+            "name": "Morning",
+            "mode": "comfort",
+            "start": "06:00",
+            "end": "09:00",
+            "days": [0, 1, 2, 3, 4],
+            "setpoint": 21.0,
+        }
+    ]
+    entry_data = {
+        CONF_ROOMS: [
+            {CONF_ROOM_NAME: "Living Room", "thermal_mass": 5_000_000.0, CONF_SCHEDULE: periods},
+            {CONF_ROOM_NAME: "Bedroom", "thermal_mass": 3_000_000.0},
+        ],
+        CONF_HEAT_SOURCES: [],
+    }
+    # YAML defines the same rooms but without any schedule key — typical real setup
+    yaml_cfg = {
+        CONF_ROOMS: [
+            {CONF_ROOM_NAME: "Living Room", "thermal_mass": 5_000_000.0},
+            {CONF_ROOM_NAME: "Bedroom", "thermal_mass": 3_000_000.0},
+        ],
+        CONF_HEAT_SOURCES: [],
+    }
+
+    merged = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
+
+    # Living Room had a schedule in entry_data — it must survive the YAML merge.
+    living = next(r for r in merged[CONF_ROOMS] if r[CONF_ROOM_NAME] == "Living Room")
+    assert living.get(CONF_SCHEDULE) == periods, (
+        "Schedule was discarded by YAML merge — schedules will disappear on reload"
+    )
+
+    # Bedroom had no schedule — no CONF_SCHEDULE key must be injected.
+    bedroom = next(r for r in merged[CONF_ROOMS] if r[CONF_ROOM_NAME] == "Bedroom")
+    assert CONF_SCHEDULE not in bedroom
+
+
+def test_merge_yaml_rooms_without_stored_schedules_unchanged():
+    """When stored entry rooms have no schedule the YAML rooms are used as-is."""
+    entry_data = {
+        CONF_ROOMS: [
+            {CONF_ROOM_NAME: "Living Room"},
+        ],
+        CONF_HEAT_SOURCES: [],
+    }
+    yaml_cfg = {
+        CONF_ROOMS: [
+            {CONF_ROOM_NAME: "Living Room", "thermal_mass": 5_000_000.0},
+            {CONF_ROOM_NAME: "Bedroom", "thermal_mass": 3_000_000.0},
+        ],
+        CONF_HEAT_SOURCES: [],
+    }
+
+    merged = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
+
+    assert merged[CONF_ROOMS] == yaml_cfg[CONF_ROOMS]
 
 
 def test_merge_preserves_entry_sigma_values():
