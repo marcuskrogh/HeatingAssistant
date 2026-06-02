@@ -259,6 +259,8 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
 
   let localPeriods = [];
   let dirty = false;
+  // Tracks which period indices are currently expanded in the UI
+  let expandedSet = new Set();
 
   function getScheduleData(st) {
     const config = st[CONFIG_ENTITY]?.attributes || {};
@@ -289,6 +291,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
       ...p,
       days: [...(p.days || [0, 1, 2, 3, 4, 5, 6])],
     }));
+    expandedSet = new Set();
     dirty = false;
   }
 
@@ -316,18 +319,31 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
     for (let i = 0; i < localPeriods.length; i++) {
       const p = localPeriods[i];
       const isActive = (p === activePeriod);
+      const isExpanded = expandedSet.has(i);
+      const { text: modeText, cls: modeCls } = periodModeDisplay(p);
 
       const card = document.createElement('div');
       card.className = 'card schedule-form__period' +
-        (isActive ? ' schedule-form__period--active' : '');
+        (isActive ? ' schedule-form__period--active' : '') +
+        (isExpanded ? ' schedule-form__period--expanded' : '');
 
-      // "ACTIVE NOW" badge at top of active period card
-      if (isActive) {
-        const badge = document.createElement('div');
-        badge.className = 'sched-detail__now-badge';
-        badge.textContent = 'ACTIVE NOW';
-        card.appendChild(badge);
-      }
+      // ── Collapsed header — always visible ──────────────────────────────────
+      const cardHeader = document.createElement('div');
+      cardHeader.className = 'schedule-form__period-header';
+      cardHeader.innerHTML = `
+        ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
+        <span class="schedule-form__period-name">${p.name || 'Period'}</span>
+        <span class="schedule-form__period-time">${p.start || '—'}–${p.end || '—'}</span>
+        <span class="sched-row__mode ${modeCls}">${modeText}</span>
+        <button class="schedule-form__delete" title="Delete period">×</button>
+        <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
+      `;
+      card.appendChild(cardHeader);
+
+      // ── Expandable body — hidden when collapsed ────────────────────────────
+      const cardBody = document.createElement('div');
+      cardBody.className = 'schedule-form__period-body';
+      if (!isExpanded) cardBody.hidden = true;
 
       const modeOptions = `
         <option value="comfort"${p.mode !== 'off' ? ' selected' : ''}>Comfort</option>
@@ -377,9 +393,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
         </div>
       `;
 
-      const body = document.createElement('div');
-      body.innerHTML = `
-        <button class="schedule-form__delete" data-idx="${i}" title="Delete period">×</button>
+      cardBody.innerHTML = `
         <div class="schedule-form__period-row">
           <div class="form-group">
             <label class="form-label">Name</label>
@@ -401,11 +415,36 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
         <div class="schedule-form__days" data-period="${i}">${daysHtml}</div>
         ${paramsHtml}
       `;
-      card.appendChild(body);
+
+      card.appendChild(cardBody);
       periodsContainer.appendChild(card);
 
-      // Wire all [data-field] inputs/selects
-      card.querySelectorAll('[data-field]').forEach((input) => {
+      // Toggle expansion on header click (except the delete button)
+      cardHeader.addEventListener('click', (e) => {
+        if (e.target.closest('.schedule-form__delete')) return;
+        const willExpand = !expandedSet.has(i);
+        if (willExpand) expandedSet.add(i); else expandedSet.delete(i);
+        card.classList.toggle('schedule-form__period--expanded', willExpand);
+        cardBody.hidden = !willExpand;
+        cardHeader.querySelector('.schedule-form__expand-chevron').textContent = willExpand ? '▲' : '▼';
+      });
+
+      // Delete — rebuild expandedSet with shifted indices
+      cardHeader.querySelector('.schedule-form__delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const newSet = new Set();
+        for (const idx of expandedSet) {
+          if (idx < i) newSet.add(idx);
+          else if (idx > i) newSet.add(idx - 1);
+        }
+        expandedSet = newSet;
+        localPeriods.splice(i, 1);
+        dirty = true;
+        renderPeriodForms();
+      });
+
+      // Wire all [data-field] inputs/selects inside body
+      cardBody.querySelectorAll('[data-field]').forEach((input) => {
         const field = input.dataset.field;
         input.addEventListener('change', () => {
           if (field === 'mode') {
@@ -424,6 +463,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
               localPeriods[i].energy_weight = localPeriods[i].energy_weight ?? defaults.energy_weight;
             }
             dirty = true;
+            expandedSet.add(i); // keep this card open after re-render
             renderPeriodForms();
           } else if (['setpoint', 'frost_protection', 'comfort_offset', 'tracking_weight', 'energy_weight'].includes(field)) {
             localPeriods[i][field] = parseFloat(input.value);
@@ -436,7 +476,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
       });
 
       // Wire day toggles
-      card.querySelectorAll('.schedule-form__day').forEach((dayEl) => {
+      cardBody.querySelectorAll('.schedule-form__day').forEach((dayEl) => {
         dayEl.addEventListener('click', () => {
           const d = parseInt(dayEl.dataset.day, 10);
           const idx = localPeriods[i].days.indexOf(d);
@@ -450,13 +490,6 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
           }
           dirty = true;
         });
-      });
-
-      // Wire delete button
-      card.querySelector('.schedule-form__delete').addEventListener('click', () => {
-        localPeriods.splice(i, 1);
-        dirty = true;
-        renderPeriodForms();
       });
     }
   }
@@ -472,15 +505,18 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
         room_name: room.slug,
         enabled: !currentEnabled,
       });
+      // Patch state optimistically for the enabled flag
+      patchStateSchedule(state, room.slug, localPeriods, !currentEnabled);
       toggleStatus.textContent = '';
       toggleStatus.className = 'tuning-actions__status';
+      renderToggle({ enabled: !currentEnabled });
     } catch (err) {
       toggleStatus.textContent = 'Error: ' + (err.message || err);
       toggleStatus.className = 'tuning-actions__status tuning-actions__status--error';
     }
   });
 
-  // Add a blank period
+  // Add a blank period — auto-expand it
   btnAdd.addEventListener('click', () => {
     const defaults = getDefaults(state);
     localPeriods.push({
@@ -495,8 +531,8 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
       days: [0, 1, 2, 3, 4, 5, 6],
     });
     dirty = true;
+    expandedSet.add(localPeriods.length - 1); // expand the new card
     renderPeriodForms();
-    // Scroll the new card into view
     const cards = periodsContainer.querySelectorAll('.schedule-form__period');
     if (cards.length > 0) cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
@@ -514,7 +550,6 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
           out.frost_protection = p.frost_protection ?? 12;
         } else {
           out.setpoint = p.setpoint ?? defaults.setpoint;
-          // Only include per-period overrides when they differ from defaults
           if (p.comfort_offset != null) out.comfort_offset = p.comfort_offset;
           if (p.tracking_weight != null) out.tracking_weight = p.tracking_weight;
           if (p.energy_weight != null) out.energy_weight = p.energy_weight;
@@ -526,25 +561,16 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
         periods,
       });
 
-      // Optimistically patch the shared state object (= this._state in the main component)
-      // so that any intermediate state_changed events from other entities don't call
-      // initLocalPeriods() with stale config-entity attributes and wipe the saved periods.
-      // The real state_changed for the config entity will overwrite this when it arrives.
-      if (state[CONFIG_ENTITY]) {
-        const existingAttrs = state[CONFIG_ENTITY].attributes || {};
-        const existingSchedules = existingAttrs.room_schedules || {};
-        const existingEnabled = existingSchedules[room.slug]?.enabled ?? true;
-        state[CONFIG_ENTITY] = {
-          ...state[CONFIG_ENTITY],
-          attributes: {
-            ...existingAttrs,
-            room_schedules: {
-              ...existingSchedules,
-              [room.slug]: { enabled: existingEnabled, periods },
-            },
-          },
-        };
-      }
+      // Patch the shared state object immediately — prevents any intermediate
+      // state_changed events (from other entities) from wiping localPeriods
+      // before the config entity's own state_changed arrives from the server.
+      patchStateSchedule(state, room.slug, periods);
+
+      // Re-sync localPeriods to the canonical saved data and re-render the
+      // form right away so the user sees the saved state without waiting for
+      // the server's state_changed event.
+      localPeriods = periods.map((p) => ({ ...p, days: [...(p.days || [])] }));
+      renderPeriodForms();
 
       dirty = false;
       saveStatus.textContent = 'Saved.';
@@ -573,5 +599,33 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
       }
     },
     destroy() {},
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper — optimistically patch the config entity in the state object
+// ---------------------------------------------------------------------------
+
+function patchStateSchedule(state, slug, periods, enabled) {
+  const existingEntity = state[CONFIG_ENTITY] || {
+    entity_id: CONFIG_ENTITY,
+    state: 'ok',
+    attributes: {},
+  };
+  const existingAttrs = existingEntity.attributes || {};
+  const existingSchedules = existingAttrs.room_schedules || {};
+  const resolvedEnabled = enabled !== undefined
+    ? enabled
+    : (existingSchedules[slug]?.enabled ?? true);
+
+  state[CONFIG_ENTITY] = {
+    ...existingEntity,
+    attributes: {
+      ...existingAttrs,
+      room_schedules: {
+        ...existingSchedules,
+        [slug]: { enabled: resolvedEnabled, periods },
+      },
+    },
   };
 }
