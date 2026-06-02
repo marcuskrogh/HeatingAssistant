@@ -449,7 +449,16 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     """Apply options in-place when possible; reload only for structural changes."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if isinstance(coordinator, HeatingAssistantCoordinator):
-        merged_config = {**dict(entry.data), **dict(entry.options)}
+        entry_data = dict(entry.data)
+        opts = entry.options
+        if opts.get(CONF_ROOMS):
+            entry_data[CONF_ROOMS] = opts[CONF_ROOMS]
+        if opts.get(CONF_HEAT_SOURCES):
+            entry_data[CONF_HEAT_SOURCES] = opts[CONF_HEAT_SOURCES]
+        yaml_cfg = hass.data.get(DOMAIN, {}).get("yaml_config", {})
+        if yaml_cfg:
+            entry_data = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
+        merged_config = {**entry_data, **dict(opts)}
         if coordinator.apply_runtime_reconfiguration(merged_config):
             return
     hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
@@ -616,7 +625,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=5",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=16",
                     "embed_iframe": False,
                 }
             },
@@ -1890,6 +1899,12 @@ def _register_services(hass: HomeAssistant) -> None:
         if canonical_name is None:
             raise ValueError(f"Room '{room_name}' not found in configuration")
 
+        # Rebuild schedule in coordinator and update entity states BEFORE
+        # persisting — this ensures the HA state machine has the correct
+        # attributes before _async_update_listener fires.
+        coordinator.reload_room_schedule(canonical_name, periods)
+        coordinator.async_update_listeners()
+
         # Persist schedules in a dedicated key that won't be overwritten by
         # YAML/options merging during integration reload (same pattern as
         # CONF_PERSISTED_SETPOINTS).
@@ -1900,10 +1915,6 @@ def _register_services(hass: HomeAssistant) -> None:
             entry,
             data={**dict(entry.data), CONF_PERSISTED_SCHEDULES: persisted},
         )
-
-        # Rebuild schedule in coordinator
-        coordinator.reload_room_schedule(canonical_name, periods)
-        coordinator.async_update_listeners()
 
     hass.services.async_register(
         DOMAIN,

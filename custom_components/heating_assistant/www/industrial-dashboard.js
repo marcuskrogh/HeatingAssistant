@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '15';
+const PANEL_VERSION = '16';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -69,9 +69,12 @@ class HaIndustrialPanel extends HTMLElement {
     ]);
 
     this._connection = new HaConnection(this._hass);
-    const states = await this._connection.getStates();
-    this._state = states;
-    this._rooms = discoverRooms(states);
+
+    // Read state from the LATEST hass (may have been updated via set hass()
+    // while modules were loading) rather than the stored connection snapshot.
+    const latestStates = this._hass.states;
+    this._state = { ...latestStates };
+    this._rooms = discoverRooms(this._state);
 
     const contentEl = this.shadowRoot.getElementById('content');
     this._router = new Router(contentEl, {
@@ -88,6 +91,24 @@ class HaIndustrialPanel extends HTMLElement {
 
     this._router.start();
     this._updateActiveNav();
+
+    // After the router renders the initial page, sync with the very latest
+    // hass.states to pick up any changes that arrived during boot.  This
+    // closes the window between the state snapshot above and subscription
+    // activation where state_changed events could be missed.
+    this._syncLatestState();
+  }
+
+  _syncLatestState() {
+    if (!this._hass || !this._router) return;
+    let changed = false;
+    for (const [id, state] of Object.entries(this._hass.states)) {
+      if (id.startsWith('sensor.heating_assistant_') && this._state[id] !== state) {
+        this._state[id] = state;
+        changed = true;
+      }
+    }
+    if (changed) this._router.update(this._state);
   }
 
   _onStateChanged(event) {
