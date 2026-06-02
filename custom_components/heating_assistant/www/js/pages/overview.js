@@ -41,12 +41,29 @@ export function renderOverview(container, rooms, state, connection, hass) {
   let latestState = state;
   const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
 
+  // Fetch fresh schedule data via WebSocket (bypasses entity-state cache) and
+  // push it to all tiles. This runs once on initial render and again on every
+  // state update so the schedule section never goes stale after a reload or
+  // after the enable/disable toggle fires.
+  function refreshSchedules() {
+    connection.getSchedules().then((scheduleData) => {
+      tiles.forEach((t) => updateRoomTile(t.element, t.room, latestState, hass, scheduleData));
+    });
+  }
+
+  // Initial fetch — runs after the tiles are already in the DOM so the first
+  // paint is instant and the schedule section fills in within one WS round-trip.
+  refreshSchedules();
+
   return {
     update(newState) {
       latestState = newState;
       gauges.forEach((g) => g.updater(newState));
       tiles.forEach((t) => updateRoomTile(t.element, t.room, newState, hass));
       updateCountdown(countdown, newState);
+      // Re-fetch schedules so the badge and period list reflect any toggle or
+      // save that triggered this state update.
+      refreshSchedules();
     },
     _countdownInterval: countdownInterval,
     destroy() {

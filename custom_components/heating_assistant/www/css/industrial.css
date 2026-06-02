@@ -1300,6 +1300,40 @@
   gap: 3px;
 }
 
+/* Header row inside the schedule section: label + active/inactive badge */
+.room-tile__sched-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.room-tile__sched-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.room-tile__sched-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.room-tile__sched-badge--on {
+  background: rgba(39, 174, 96, 0.15);
+  color: var(--good);
+}
+
+.room-tile__sched-badge--off {
+  background: rgba(231, 76, 60, 0.15);
+  color: var(--alarm);
+}
+
 .room-tile__sched-row {
   display: flex;
   align-items: center;
