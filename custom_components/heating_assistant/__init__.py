@@ -659,13 +659,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             [StaticPathConfig("/ha-industrial-panel", str(www_path), cache_headers=False)]
         )
 
+        # Register the custom icon set so it is available on every HA page
+        # (including the sidebar) before the frontend renders.  The icon JS
+        # lives in www/ and is served under the static path above.
+        _sidebar_icon = "mdi:radiator"
+        try:
+            from homeassistant.components.frontend import async_register_extra_urls
+
+            async_register_extra_urls(
+                hass, ["/ha-industrial-panel/heating-assistant-icons.js"]
+            )
+            _sidebar_icon = "heating-assistant:logo"
+        except (ImportError, AttributeError):
+            _LOGGER.debug(
+                "Heating Assistant: async_register_extra_urls unavailable, "
+                "falling back to mdi:radiator sidebar icon",
+            )
+
         from homeassistant.components.frontend import async_register_built_in_panel
 
         async_register_built_in_panel(
             hass,
             component_name="custom",
             sidebar_title="Heating Assistant",
-            sidebar_icon="mdi:radiator",
+            sidebar_icon=_sidebar_icon,
             frontend_url_path="ha-industrial",
             config={
                 "_panel_custom": {
