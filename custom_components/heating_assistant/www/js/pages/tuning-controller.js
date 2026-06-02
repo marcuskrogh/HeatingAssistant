@@ -43,14 +43,14 @@ const WINDOW_DEFAULTS = {
 };
 
 export function renderControllerTuning(container, rooms, state, connection, hass) {
-  return renderTuningIndex(container, rooms, state, connection, hass);
+  return renderTuningIndex(container, rooms, connection, hass);
 }
 
 // ---------------------------------------------------------------------------
 // Index view — MPC params + Window Configuration
 // ---------------------------------------------------------------------------
 
-function renderTuningIndex(container, rooms, state, connection, hass) {
+function renderTuningIndex(container, rooms, connection, hass) {
   container.innerHTML = '';
 
   const header = document.createElement('div');
