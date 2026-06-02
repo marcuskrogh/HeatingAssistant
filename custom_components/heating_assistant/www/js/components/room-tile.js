@@ -1,17 +1,12 @@
-/* room-tile.js — updated for design system v2.
+/* room-tile.js — design system v2 + schedule data fixes.
  *
- * Changes from v1:
- *  - Layout: temperature + power/status on one combined top row.
- *  - Setpoint box replaced with a full-width .sp-control card (SETPOINT label,
- *    large mono value, ✎ ADJUST affordance).
- *  - Inline editor upgraded to .sp-edit stepper (− / large-mono-value+TARGET / + / ✓ / ✗).
- *  - All functionality retained: entityValue, HA service calls, optimistic update,
- *    container._editing guard, updateRoomTile, schedule summary.
- *
- * New CSS classes required in industrial.css (added separately):
- *   .sp-control, .sp-control:hover, .sp-control__meta, .sp-control__label,
- *   .sp-control__value, .sp-control__hint, .sp-edit, .sp-edit__step,
- *   .sp-edit__readout, .sp-edit__val, .sp-edit__unit, .sp-edit__ok, .sp-edit__cancel
+ * Changes from v2:
+ *  - createRoomTile / updateRoomTile accept an optional scheduleData argument
+ *    (pre-fetched from connection.getSchedules()) so tiles never depend on the
+ *    entity-state attribute being fresh after a browser reload.
+ *  - Active/inactive badge added to the schedule summary section.
+ *  - All entity reading, HA service calls, optimistic updates, and the
+ *    container._editing guard are fully retained.
  */
 
 import { formatTemperature, formatPower, entityValue } from '../utils.js';
@@ -21,12 +16,13 @@ const SP_STEP = 0.5;
 const SP_MIN = 5;
 const SP_MAX = 30;
 
-export function createRoomTile(room, state, hass) {
+export function createRoomTile(room, state, hass, scheduleData) {
   const container = document.createElement('div');
   container.className = 'card card--clickable room-tile';
   container.dataset.room = room.slug;
   container._editing = false;
   container._hass = hass || null;
+  container._scheduleData = scheduleData || null;
 
   container.addEventListener('click', () => {
     if (!container._editing) {
@@ -38,8 +34,9 @@ export function createRoomTile(room, state, hass) {
   return container;
 }
 
-export function updateRoomTile(container, room, state, hass) {
+export function updateRoomTile(container, room, state, hass, scheduleData) {
   if (hass) container._hass = hass;
+  if (scheduleData !== undefined) container._scheduleData = scheduleData;
   if (container._editing) return;
   renderTileContent(container, room, state);
 }
@@ -54,13 +51,27 @@ function renderTileContent(container, room, state) {
   const setpoint = setpointEntity ? entityValue(state, setpointEntity) : null;
   const isActive = power !== null && power > 0;
 
-  // Schedule summaries from config entity
-  const roomSchedules = state[CONFIG_ENTITY]?.attributes?.room_schedules || {};
-  const schedData = roomSchedules[room.slug] || roomSchedules[room.name] || null;
-  const periods   = schedData?.periods || [];
+  // Prefer WebSocket-fetched schedule data (always fresh); fall back to the
+  // entity state attribute so the tile still works without the WS fetch.
+  let schedData = null;
+  if (container._scheduleData) {
+    schedData = container._scheduleData[room.slug] || container._scheduleData[room.name] || null;
+  }
+  if (!schedData) {
+    const roomSchedules = state[CONFIG_ENTITY]?.attributes?.room_schedules || {};
+    schedData = roomSchedules[room.slug] || roomSchedules[room.name] || null;
+  }
+
+  const periods = schedData?.periods || [];
+  const schedEnabled = schedData ? (schedData.enabled ?? true) : null;
 
   let schedulesHtml = '';
   if (periods.length > 0) {
+    const badgeCls = schedEnabled === false
+      ? 'room-tile__sched-badge room-tile__sched-badge--off'
+      : 'room-tile__sched-badge room-tile__sched-badge--on';
+    const badgeText = schedEnabled === false ? 'INACTIVE' : 'ACTIVE';
+
     const preview = periods.slice(0, 3);
     const rows = preview.map((p) => {
       const modeHtml = p.mode === 'off'
@@ -75,7 +86,14 @@ function renderTileContent(container, room, state) {
     const more = periods.length > 3
       ? `<div class="room-tile__sched-more">+${periods.length - 3} more</div>`
       : '';
-    schedulesHtml = `<div class="room-tile__schedules">${rows}${more}</div>`;
+    schedulesHtml = `
+      <div class="room-tile__schedules">
+        <div class="room-tile__sched-header">
+          <span class="room-tile__sched-title">SCHEDULE</span>
+          <span class="${badgeCls}">${badgeText}</span>
+        </div>
+        ${rows}${more}
+      </div>`;
   }
 
   // Setpoint display value

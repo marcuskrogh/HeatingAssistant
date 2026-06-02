@@ -1695,6 +1695,8 @@ def _register_services(hass: HomeAssistant) -> None:
             },
             blocking=False,
         )
+        # Push an immediate state_changed event so the overview tiles refresh.
+        coordinator.async_update_listeners()
 
     hass.services.async_register(
         DOMAIN,
