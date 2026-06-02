@@ -20,7 +20,9 @@ from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
+    CONF_ROOM_NAME,
     CONF_ROOMS,
+    CONF_SCHEDULE,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -66,7 +68,21 @@ def merge_yaml_into_entry_data(
     # ── Lists: YAML wins when non-empty ──────────────────────────────────
     yaml_rooms = yaml_cfg.get(CONF_ROOMS, None)
     if yaml_rooms not in (None, []):
-        merged[CONF_ROOMS] = yaml_rooms
+        # YAML is authoritative for room structure (thermal parameters, etc.),
+        # but dashboard-configured schedules (written by the update_room_schedule
+        # service into the config entry) must not be discarded.  Carry them over
+        # from entry_data by matching on room name.
+        stored_schedules: Dict[str, Any] = {
+            r.get(CONF_ROOM_NAME, ""): r[CONF_SCHEDULE]
+            for r in (entry_data.get(CONF_ROOMS) or [])
+            if CONF_SCHEDULE in r
+        }
+        merged[CONF_ROOMS] = [
+            ({**r, CONF_SCHEDULE: stored_schedules[r.get(CONF_ROOM_NAME, "")]}
+             if r.get(CONF_ROOM_NAME, "") in stored_schedules
+             else r)
+            for r in yaml_rooms
+        ]
     elif not merged.get(CONF_ROOMS):
         merged[CONF_ROOMS] = []
 
