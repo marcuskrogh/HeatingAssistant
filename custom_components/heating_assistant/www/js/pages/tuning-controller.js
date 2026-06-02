@@ -142,18 +142,36 @@ function renderTuningIndex(container, rooms, connection, hass) {
     if (type) statusEl.classList.add(`tuning-actions__status--${type}`);
   }
 
-  // Read the entity state through `connection`, whose internal _hass reference
-  // is kept current on every HA hass update (via connection.updateHass).
-  // The `hass` and `state` parameters passed to this function are one-time
-  // snapshots and go stale — connection is the only always-live source.
-  function populateFromState() {
-    const attrs = connection.getEntityState(CONFIG_ENTITY)?.attributes || {};
+  // Populate the boxes from an attribute/config object.  Values absent from
+  // the source fall back to the documented factory defaults.
+  function populate(config) {
     for (const def of PARAM_DEFS) {
-      inputs[def.key].value = attrs[def.key] ?? DEFAULTS[def.key];
+      inputs[def.key].value = config[def.key] ?? DEFAULTS[def.key];
     }
     for (const def of WINDOW_DEFS) {
-      windowInputs[def.key].value = attrs[def.key] ?? WINDOW_DEFAULTS[def.key];
+      windowInputs[def.key].value = config[def.key] ?? WINDOW_DEFAULTS[def.key];
     }
+  }
+
+  // Authoritative load: request the current parameters straight from the
+  // coordinator over WebSocket.  This is a deterministic request/response that
+  // does not depend on entity-state propagation timing, entity_id slugging, or
+  // stale hass/state snapshots — it is exactly the set of parameters currently
+  // applied to the controller.
+  async function loadConfig() {
+    const config = await connection.getControllerConfig();
+    if (config && Object.keys(config).length > 0) {
+      populate(config);
+    } else {
+      // Fall back to entity state if the WS command is unavailable.
+      populate(connection.getEntityState(CONFIG_ENTITY)?.attributes || {});
+    }
+  }
+
+  // Cheap refresh from entity state — used for live updates without spamming
+  // the WebSocket on every state_changed event.
+  function populateFromState() {
+    populate(connection.getEntityState(CONFIG_ENTITY)?.attributes || {});
   }
 
   btnApply.addEventListener('click', async () => {
@@ -172,6 +190,9 @@ function renderTuningIndex(container, rooms, connection, hass) {
       }
       await hass.callService('heating_assistant', 'update_estimation_params', windowData);
 
+      // Re-read the authoritative config so the boxes reflect exactly what the
+      // controller now holds (values are clamped/coerced backend-side).
+      await loadConfig();
       setStatus('Applied successfully.', 'success');
     } catch (err) {
       setStatus('Error: ' + (err.message || err), 'error');
@@ -190,7 +211,8 @@ function renderTuningIndex(container, rooms, connection, hass) {
     setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
-  populateFromState();
+  // Initial authoritative load via WebSocket.
+  loadConfig();
 
   return {
     update(_newState) {

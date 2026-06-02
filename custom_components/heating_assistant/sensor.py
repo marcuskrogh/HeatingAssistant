@@ -2693,6 +2693,7 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
             "energy_price_weight": c._energy_price_weight,
             "smoothing_weight": c._smoothing_weight,
             "soft_constraint_weight": c._soft_constraint_weight,
+            "soft_constraint_linear_weight": c._soft_constraint_linear_weight,
             "terminal_weight": c._terminal_weight,
             "horizon": c._horizon,
             "update_interval": c._update_interval,
