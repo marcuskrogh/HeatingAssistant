@@ -492,14 +492,7 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
     async def ws_get_controller_config(
         hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
     ) -> None:
-        """Return the current controller/estimation parameters straight from the
-        coordinator.
-
-        This is the authoritative, always-current set of parameters applied to
-        the controller.  The dashboard tuning page uses this request/response
-        path to populate its input boxes, which is more reliable than reading
-        propagated entity state on the frontend.
-        """
+        """Return current controller tuning parameters directly from the coordinator."""
         coordinator = _get_coordinator(hass)
         c = coordinator
         config = {
@@ -724,7 +717,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=21",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=22",
                     "embed_iframe": False,
                 }
             },

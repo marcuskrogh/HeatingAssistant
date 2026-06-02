@@ -31,8 +31,8 @@ export class HaConnection {
       });
       return result.config || {};
     } catch (e) {
-      console.warn('Failed to fetch controller config via WebSocket:', e);
-      return {};
+      console.warn('[HaConnection] getControllerConfig WS failed:', e);
+      return null;
     }
   }
 

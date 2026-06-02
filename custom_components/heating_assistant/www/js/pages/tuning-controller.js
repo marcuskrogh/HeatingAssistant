@@ -15,6 +15,7 @@ const PARAM_DEFS = [
   { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, min: 1, max: 10000, parse: parseFloat },
 ];
 
+// Must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
   update_interval: 900,
   comfort_offset: 2.0,
@@ -34,9 +35,10 @@ const WINDOW_DEFS = [
   { key: 'window_open_q_inflation', label: 'Uncertainty Multiplier', unit: '×', hint: 'Covariance inflation when window is open (1–1000)', step: 1, min: 1, max: 1000, parse: parseFloat },
 ];
 
+// Must match backend DEFAULT_WINDOW_* constants in const.py
 const WINDOW_DEFAULTS = {
-  window_open_debounce: 120,
-  window_open_close_settle: 300,
+  window_open_debounce: 60,
+  window_open_close_settle: 30,
   window_open_q_inflation: 10.0,
 };
 
@@ -142,8 +144,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
     if (type) statusEl.classList.add(`tuning-actions__status--${type}`);
   }
 
-  // Populate the boxes from an attribute/config object.  Values absent from
-  // the source fall back to the documented factory defaults.
   function populate(config) {
     for (const def of PARAM_DEFS) {
       inputs[def.key].value = config[def.key] ?? DEFAULTS[def.key];
@@ -153,25 +153,64 @@ function renderTuningIndex(container, rooms, connection, hass) {
     }
   }
 
-  // Authoritative load: request the current parameters straight from the
-  // coordinator over WebSocket.  This is a deterministic request/response that
-  // does not depend on entity-state propagation timing, entity_id slugging, or
-  // stale hass/state snapshots — it is exactly the set of parameters currently
-  // applied to the controller.
-  async function loadConfig() {
-    const config = await connection.getControllerConfig();
-    if (config && Object.keys(config).length > 0) {
-      populate(config);
-    } else {
-      // Fall back to entity state if the WS command is unavailable.
-      populate(connection.getEntityState(CONFIG_ENTITY)?.attributes || {});
+  // Try to find the config entity in a state snapshot by scanning all
+  // sensor.heating_assistant_* entities for one that carries the tuning keys.
+  function configFromStateSnapshot(snapshot) {
+    // Direct lookup first
+    const direct = snapshot[CONFIG_ENTITY];
+    if (direct?.attributes?.tracking_weight !== undefined) {
+      return direct.attributes;
     }
+    // Fallback: scan all heating_assistant sensors
+    for (const [id, s] of Object.entries(snapshot)) {
+      if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
+        const a = s.attributes;
+        if (a.tracking_weight !== undefined || a.horizon !== undefined) {
+          return a;
+        }
+      }
+    }
+    return null;
   }
 
-  // Cheap refresh from entity state — used for live updates without spamming
-  // the WebSocket on every state_changed event.
-  function populateFromState() {
-    populate(connection.getEntityState(CONFIG_ENTITY)?.attributes || {});
+  // Primary load: WS command reads directly from the coordinator — the single
+  // source of truth.  Falls back to entity state (available without restart if
+  // the entity already existed), then to the latest hass state snapshot.
+  async function loadConfig() {
+    // 1. WebSocket command — authoritative, real-time coordinator values.
+    const wsConfig = await connection.getControllerConfig();
+    if (wsConfig && Object.keys(wsConfig).length > 0) {
+      populate(wsConfig);
+      return;
+    }
+
+    // 2. Entity state via HaConnection (always-current hass reference).
+    const entityState = connection.getEntityState(CONFIG_ENTITY);
+    if (entityState?.attributes?.tracking_weight !== undefined) {
+      populate(entityState.attributes);
+      return;
+    }
+
+    // 3. Scan the state snapshot passed at render time (catches entities that
+    //    exist in hass.states but whose key differs from CONFIG_ENTITY).
+    const fromSnapshot = configFromStateSnapshot(state);
+    if (fromSnapshot) {
+      populate(fromSnapshot);
+      return;
+    }
+
+    // 4. No live data found — fill with backend factory defaults so the form
+    //    is at least usable.  This happens when HA has not been restarted
+    //    after first installing this version of the integration.
+    populate({});
+    setStatus('Could not read current parameters — restart Home Assistant and reload.', 'error');
+  }
+
+  // Lightweight refresh used on live state_changed events to stay in sync
+  // without spamming the WebSocket on every event.
+  function populateFromState(snapshot) {
+    const cfg = configFromStateSnapshot(snapshot);
+    if (cfg) populate(cfg);
   }
 
   btnApply.addEventListener('click', async () => {
@@ -190,8 +229,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
       }
       await hass.callService('heating_assistant', 'update_estimation_params', windowData);
 
-      // Re-read the authoritative config so the boxes reflect exactly what the
-      // controller now holds (values are clamped/coerced backend-side).
+      // Re-read authoritative config so boxes reflect what the controller now holds.
       await loadConfig();
       setStatus('Applied successfully.', 'success');
     } catch (err) {
@@ -211,17 +249,18 @@ function renderTuningIndex(container, rooms, connection, hass) {
     setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
-  // Initial authoritative load via WebSocket.
+  // Initial authoritative load via WebSocket (or entity state fallback).
   loadConfig();
 
   return {
-    update(_newState) {
-      // Resolve focus correctly inside a shadow DOM.
+    update(newState) {
+      // Resolve focus correctly inside a shadow DOM — document.activeElement
+      // returns the shadow host, not the focused input inside the shadow root.
       const rootNode = container.getRootNode();
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
       if (!allInputs.some((inp) => inp === focused)) {
-        populateFromState();
+        populateFromState(newState);
       }
     },
     destroy() {},
