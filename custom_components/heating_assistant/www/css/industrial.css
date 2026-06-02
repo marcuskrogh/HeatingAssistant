@@ -778,6 +778,10 @@
   margin-bottom: 24px;
 }
 
+.tuning-actions__btn {
+  min-width: 150px;
+}
+
 .tuning-actions__status {
   font-size: 11px;
   color: var(--text-dim);
