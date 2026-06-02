@@ -41,14 +41,14 @@ const WINDOW_DEFAULTS = {
 };
 
 export function renderControllerTuning(container, rooms, state, connection, hass) {
-  return renderTuningIndex(container, rooms, state, connection, hass);
+  return renderTuningIndex(container, rooms, connection, hass);
 }
 
 // ---------------------------------------------------------------------------
 // Index view — MPC params + Window Configuration
 // ---------------------------------------------------------------------------
 
-function renderTuningIndex(container, rooms, state, connection, hass) {
+function renderTuningIndex(container, rooms, connection, hass) {
   container.innerHTML = '';
 
   const header = document.createElement('div');
@@ -142,30 +142,17 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
     if (type) statusEl.classList.add(`tuning-actions__status--${type}`);
   }
 
-  // Read current values from the live hass object first, fall back to the
-  // cached state snapshot if the entity isn't in hass.states yet.
-  function currentConfig(st) {
-    return hass.states?.[CONFIG_ENTITY]?.attributes
-      || st[CONFIG_ENTITY]?.attributes
-      || {};
-  }
-
-  function populateFromState(st) {
-    const config = currentConfig(st);
+  // Read the entity state through `connection`, whose internal _hass reference
+  // is kept current on every HA hass update (via connection.updateHass).
+  // The `hass` and `state` parameters passed to this function are one-time
+  // snapshots and go stale — connection is the only always-live source.
+  function populateFromState() {
+    const attrs = connection.getEntityState(CONFIG_ENTITY)?.attributes || {};
     for (const def of PARAM_DEFS) {
-      inputs[def.key].value = config[def.key] ?? DEFAULTS[def.key];
+      inputs[def.key].value = attrs[def.key] ?? DEFAULTS[def.key];
     }
     for (const def of WINDOW_DEFS) {
-      windowInputs[def.key].value = config[def.key] ?? WINDOW_DEFAULTS[def.key];
-    }
-  }
-
-  function resetToDefaults() {
-    for (const def of PARAM_DEFS) {
-      inputs[def.key].value = DEFAULTS[def.key];
-    }
-    for (const def of WINDOW_DEFS) {
-      windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
+      windowInputs[def.key].value = attrs[def.key] ?? WINDOW_DEFAULTS[def.key];
     }
   }
 
@@ -194,21 +181,25 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
 
   // Reset only fills boxes with defaults — does NOT call any service.
   btnReset.addEventListener('click', () => {
-    resetToDefaults();
+    for (const def of PARAM_DEFS) {
+      inputs[def.key].value = DEFAULTS[def.key];
+    }
+    for (const def of WINDOW_DEFS) {
+      windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
+    }
     setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
-  populateFromState(state);
+  populateFromState();
 
   return {
-    update(newState) {
-      // Resolve the focused element correctly inside a shadow DOM.
+    update(_newState) {
+      // Resolve focus correctly inside a shadow DOM.
       const rootNode = container.getRootNode();
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
-      const isEditing = allInputs.some((inp) => inp === focused);
-      if (!isEditing) {
-        populateFromState(newState);
+      if (!allInputs.some((inp) => inp === focused)) {
+        populateFromState();
       }
     },
     destroy() {},
