@@ -355,6 +355,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_HORIZON,
         CONF_UPDATE_INTERVAL,
     }
+    _PERSISTED_STATE_KEYS: Set[str] = {
+        CONF_PERSISTED_SETPOINTS,
+        CONF_PERSISTED_SCHEDULES,
+        CONF_ESTIMATED_PARAMS,
+    }
     _RUNTIME_RECONFIG_KEYS: Set[str] = {
         CONF_OUTDOOR_TEMP_ENTITY,
         CONF_WEATHER_ENTITY,
@@ -931,6 +936,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             for key in set(self._last_runtime_config) | set(new_config)
             if self._last_runtime_config.get(key) != new_config.get(key)
         }
+        changed_keys -= self._PERSISTED_STATE_KEYS
         self._last_runtime_config = new_config
 
         if not changed_keys:
