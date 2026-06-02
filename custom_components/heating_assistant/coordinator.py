@@ -1024,6 +1024,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     CONF_WINDOW_OPEN_Q_INFLATION, self._window_open_q_inflation,
                 )
             )
+        if CONF_HORIZON in pending:
+            self._horizon = int(pending.get(CONF_HORIZON, self._horizon))
+            rebuild_controller = True
+        if CONF_ENERGY_PRICE_WEIGHT in pending:
+            self._energy_price_weight = float(
+                pending.get(CONF_ENERGY_PRICE_WEIGHT, self._energy_price_weight)
+            )
+            rebuild_controller = True
+        if CONF_UPDATE_INTERVAL in pending:
+            self._update_interval = int(
+                pending.get(CONF_UPDATE_INTERVAL, self._update_interval)
+            )
+            self.update_interval = timedelta(seconds=self._update_interval)
+        if CONF_COMFORT_OFFSET in pending:
+            new_offset = float(pending.get(CONF_COMFORT_OFFSET, 2.0))
+            for room_name in self._room_comfort_offset:
+                self._room_comfort_offset[room_name] = new_offset
+            rebuild_controller = True
 
         if rebuild_controller:
             self._build_controller()
