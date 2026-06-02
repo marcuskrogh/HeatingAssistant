@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '14';
+const PANEL_VERSION = '15';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -22,6 +22,15 @@ class HaIndustrialPanel extends HTMLElement {
     if (!this._initialized && hass) {
       this._initialized = true;
       this._boot();
+    } else if (this._initialized && this._router) {
+      let changed = false;
+      for (const [id, state] of Object.entries(hass.states)) {
+        if (id.startsWith('sensor.heating_assistant_') && this._state[id] !== state) {
+          this._state[id] = state;
+          changed = true;
+        }
+      }
+      if (changed) this._router.update(this._state);
     }
   }
 
