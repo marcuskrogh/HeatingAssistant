@@ -3,9 +3,25 @@ export class HaConnection {
     this._hass = hass;
   }
 
+  updateHass(hass) {
+    this._hass = hass;
+  }
+
   async getStates() {
     const states = this._hass.states;
     return { ...states };
+  }
+
+  async getSchedules() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/get_schedules',
+      });
+      return result.room_schedules || {};
+    } catch (e) {
+      console.warn('Failed to fetch schedules via WebSocket:', e);
+      return {};
+    }
   }
 
   async getHistory(entityIds, hoursBack = 12) {

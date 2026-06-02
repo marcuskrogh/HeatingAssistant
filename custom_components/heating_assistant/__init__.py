@@ -445,6 +445,46 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     return True
 
 
+def _register_websocket_api(hass: HomeAssistant) -> None:
+    """Register WebSocket commands for the dashboard frontend."""
+    from homeassistant.components import websocket_api
+
+    from .dashboard import slugify as _slugify
+
+    @websocket_api.websocket_command(
+        {vol.Required("type"): "heating_assistant/get_schedules"}
+    )
+    @websocket_api.async_response
+    async def ws_get_schedules(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return current schedule data directly from the coordinator."""
+        coordinator = _get_coordinator(hass)
+        schedules: dict = {}
+        for room_name, room_schedule in coordinator._room_schedule.items():
+            if room_schedule and not room_schedule.is_empty:
+                schedules[_slugify(room_name)] = {
+                    "enabled": coordinator._schedule_enabled.get(room_name, True),
+                    "periods": [
+                        {
+                            "name": p.name,
+                            "start": p.start.strftime("%H:%M"),
+                            "end": p.end.strftime("%H:%M"),
+                            "mode": p.mode,
+                            "setpoint": p.setpoint,
+                            "frost_protection": p.frost_protection,
+                            "days": sorted(p.days),
+                            "comfort_offset": p.comfort_offset,
+                            "tracking_weight": p.tracking_weight,
+                            "energy_weight": p.energy_weight,
+                        }
+                        for p in room_schedule.periods
+                    ],
+                }
+        connection.send_result(msg["id"], {"room_schedules": schedules})
+
+    websocket_api.async_register_command(hass, ws_get_schedules)
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply options in-place when possible; reload only for structural changes."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
@@ -562,6 +602,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_SIMULATE_THERMAL_RESPONSE):
         _register_services(hass)
 
+    # Register WebSocket API (only once for the domain)
+    if not hass.data[DOMAIN].get("_ws_registered"):
+        _register_websocket_api(hass)
+        hass.data[DOMAIN]["_ws_registered"] = True
+
     # Auto-reload when the user changes options via the integration UI.
     # Attached after the coordinator is stored so the persist-merged
     # async_update_entry call above (which already short-circuits when nothing
@@ -625,7 +670,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=16",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=17",
                     "embed_iframe": False,
                 }
             },
