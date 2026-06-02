@@ -1872,7 +1872,20 @@ def _register_services(hass: HomeAssistant) -> None:
         if entry is None:
             raise ValueError("Config entry not found")
 
-        rooms_list = list(entry.data.get(CONF_ROOMS) or [])
+        # Rooms can live in either ``entry.options`` (when configured via the
+        # UI options flow) or ``entry.data`` (YAML / initial config flow).  At
+        # setup ``entry.options[CONF_ROOMS]`` *overrides* and is copied back
+        # over ``entry.data[CONF_ROOMS]`` (see async_setup_entry), so writing
+        # the schedule to ``data`` alone is silently discarded on the next
+        # reload whenever options holds the rooms.  Base the update on whichever
+        # store is authoritative and persist the schedule to BOTH so it
+        # survives a reload regardless of how the integration was configured.
+        opts = dict(entry.options)
+        data = dict(entry.data)
+        options_has_rooms = bool(opts.get(CONF_ROOMS))
+        source_rooms = opts.get(CONF_ROOMS) if options_has_rooms else data.get(CONF_ROOMS)
+        rooms_list = [dict(r) for r in (source_rooms or [])]
+
         found = False
         for idx, room_cfg in enumerate(rooms_list):
             cfg_name = room_cfg.get(CONF_ROOM_NAME, "")
@@ -1886,11 +1899,17 @@ def _register_services(hass: HomeAssistant) -> None:
         if not found:
             raise ValueError(f"Room '{room_name}' not found in configuration")
 
-        # Persist updated rooms list
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**dict(entry.data), CONF_ROOMS: rooms_list},
-        )
+        # Persist updated rooms list to data, and to options when options is the
+        # authoritative store, keeping the two in sync so the schedule cannot be
+        # clobbered by the options→data override that runs on every setup.
+        new_data = {**data, CONF_ROOMS: rooms_list}
+        if options_has_rooms:
+            new_options = {**opts, CONF_ROOMS: rooms_list}
+            hass.config_entries.async_update_entry(
+                entry, data=new_data, options=new_options
+            )
+        else:
+            hass.config_entries.async_update_entry(entry, data=new_data)
 
         # Rebuild schedule in coordinator
         coordinator.reload_room_schedule(room_name, periods)
