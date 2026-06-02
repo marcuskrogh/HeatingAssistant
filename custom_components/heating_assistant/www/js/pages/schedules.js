@@ -5,7 +5,7 @@ export function renderSchedules(container, rooms, state, connection, hass, slug)
   if (slug) {
     return renderScheduleDetail(container, slug, rooms, state, connection, hass);
   }
-  return renderScheduleIndex(container, rooms, state, connection);
+  return renderScheduleIndex(container, rooms, state, connection, hass);
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ function makePeriodRow(p, isActive) {
 // Index view — room schedule cards
 // ---------------------------------------------------------------------------
 
-function renderScheduleIndex(container, rooms, state, connection) {
+function renderScheduleIndex(container, rooms, state, connection, hass) {
   container.innerHTML = '';
 
   const header = document.createElement('div');
@@ -94,10 +94,11 @@ function renderScheduleIndex(container, rooms, state, connection) {
   grid.className = 'grid-rooms';
   container.appendChild(grid);
 
-  function buildCards(st) {
+  let cachedSchedules = {};
+
+  function buildCards(roomSchedules) {
     grid.innerHTML = '';
-    const config = st[CONFIG_ENTITY]?.attributes || {};
-    const roomSchedules = config.room_schedules || {};
+    cachedSchedules = roomSchedules;
 
     for (const room of rooms) {
       const schedData = getScheduleDataForRoom(roomSchedules, room);
@@ -182,10 +183,18 @@ function renderScheduleIndex(container, rooms, state, connection) {
     }
   }
 
-  buildCards(state);
+  // Fetch schedules directly from the coordinator via WebSocket
+  connection.getSchedules().then((roomSchedules) => {
+    buildCards(roomSchedules);
+  });
 
   return {
-    update(newState) { buildCards(newState); },
+    update(newState) {
+      // On state update, re-fetch from WebSocket to stay in sync
+      connection.getSchedules().then((roomSchedules) => {
+        buildCards(roomSchedules);
+      });
+    },
     destroy() {},
   };
 }
@@ -262,9 +271,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
   // Tracks which period indices are currently expanded in the UI
   let expandedSet = new Set();
 
-  function getScheduleData(st) {
-    const config = st[CONFIG_ENTITY]?.attributes || {};
-    const roomSchedules = config.room_schedules || {};
+  function getScheduleFromWS(roomSchedules) {
     return getScheduleDataForRoom(roomSchedules, room);
   }
 
@@ -496,7 +503,8 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
 
   // Toggle enable/disable
   toggleBtn.addEventListener('click', async () => {
-    const schedData = getScheduleData(state);
+    const roomSchedules = await connection.getSchedules();
+    const schedData = getScheduleFromWS(roomSchedules);
     const currentEnabled = schedData?.enabled ?? true;
     toggleStatus.textContent = 'Saving…';
     toggleStatus.className = 'tuning-actions__status tuning-actions__status--running';
@@ -582,21 +590,25 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
     btnSave.disabled = false;
   });
 
-  // Initial render from current state
-  const schedData = getScheduleData(state);
-  renderToggle(schedData);
-  initLocalPeriods(schedData);
-  renderPeriodForms();
+  // Initial render — fetch from WebSocket to get persisted schedule data
+  connection.getSchedules().then((roomSchedules) => {
+    const schedData = getScheduleFromWS(roomSchedules);
+    renderToggle(schedData);
+    initLocalPeriods(schedData);
+    renderPeriodForms();
+  });
 
   return {
     update(newState) {
       state = newState;
-      const newData = getScheduleData(newState);
-      renderToggle(newData);
-      if (!dirty) {
-        initLocalPeriods(newData);
-        renderPeriodForms();
-      }
+      connection.getSchedules().then((roomSchedules) => {
+        const newData = getScheduleFromWS(roomSchedules);
+        renderToggle(newData);
+        if (!dirty) {
+          initLocalPeriods(newData);
+          renderPeriodForms();
+        }
+      });
     },
     destroy() {},
   };

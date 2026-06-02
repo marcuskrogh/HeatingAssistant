@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '16';
+const PANEL_VERSION = '17';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -16,6 +16,9 @@ class HaIndustrialPanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._connection) {
+      this._connection.updateHass(hass);
+    }
     if (this._menuButton) {
       this._menuButton.hass = hass;
     }
