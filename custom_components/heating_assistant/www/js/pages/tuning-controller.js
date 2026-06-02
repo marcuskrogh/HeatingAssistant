@@ -45,7 +45,7 @@ export function renderControllerTuning(container, rooms, state, connection, hass
 }
 
 // ---------------------------------------------------------------------------
-// Index view — MPC params
+// Index view — MPC params + Window Configuration
 // ---------------------------------------------------------------------------
 
 function renderTuningIndex(container, rooms, state, connection, hass) {
@@ -58,45 +58,36 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Configure MPC controller parameters. These determine how the controller balances comfort, energy use, and responsiveness. Changes take effect immediately.';
+  desc.textContent = 'Configure MPC controller and window detection parameters. Edit values below and click Apply Changes to send them to the system. Reset to Defaults fills the boxes with factory defaults without saving — you still need to click Apply Changes to commit them.';
   container.appendChild(desc);
 
-  // --- MPC Parameter form ---
+  // --- MPC Parameter section ---
   const formSection = document.createElement('div');
   formSection.className = 'card tuning-section';
 
+  const mpcTitle = document.createElement('div');
+  mpcTitle.className = 'tuning-section__title';
+  mpcTitle.textContent = 'MPC Controller Parameters';
+  formSection.appendChild(mpcTitle);
+
   const grid = document.createElement('div');
   grid.className = 'tuning-params-grid tuning-params-grid--wide';
+  formSection.appendChild(grid);
+  container.appendChild(formSection);
 
-  const activeConfig = state[CONFIG_ENTITY]?.attributes || {};
   const inputs = {};
   for (const def of PARAM_DEFS) {
-    const val = activeConfig[def.key] ?? DEFAULTS[def.key];
     const group = document.createElement('div');
     group.className = 'form-group';
     group.innerHTML = `
       <label class="form-label" for="ctrl-${def.key}">${def.label}</label>
       <input class="form-input" type="number" id="ctrl-${def.key}"
-        step="${def.step}" min="${def.min}" max="${def.max}"
-        value="${val}">
+        step="${def.step}" min="${def.min}" max="${def.max}" value="">
       <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
     `;
     grid.appendChild(group);
     inputs[def.key] = group.querySelector('input');
   }
-
-  formSection.appendChild(grid);
-
-  const actionsRow = document.createElement('div');
-  actionsRow.className = 'tuning-actions';
-  actionsRow.style.marginTop = '20px';
-  actionsRow.innerHTML = `
-    <button class="btn btn--accent tuning-actions__btn" id="btn-apply-ctrl">Apply Changes</button>
-    <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-ctrl">Reset to Defaults</button>
-    <span class="tuning-actions__status" id="ctrl-status"></span>
-  `;
-  formSection.appendChild(actionsRow);
-  container.appendChild(formSection);
 
   // --- Window Configuration section ---
   const windowSection = document.createElement('div');
@@ -109,54 +100,58 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
 
   const windowDesc = document.createElement('p');
   windowDesc.className = 'tuning-section__desc';
-  windowDesc.textContent = 'Global parameters for window open/close detection. Changes affect all rooms and take effect immediately.';
+  windowDesc.textContent = 'Global parameters for window open/close detection. Changes affect all rooms.';
   windowSection.appendChild(windowDesc);
 
   const windowGrid = document.createElement('div');
   windowGrid.className = 'tuning-params-grid';
   windowSection.appendChild(windowGrid);
+  container.appendChild(windowSection);
 
   const windowInputs = {};
   for (const def of WINDOW_DEFS) {
-    const val = activeConfig[def.key] ?? WINDOW_DEFAULTS[def.key];
     const group = document.createElement('div');
     group.className = 'form-group';
     group.innerHTML = `
       <label class="form-label" for="win-${def.key}">${def.label}</label>
       <input class="form-input" type="number" id="win-${def.key}"
-        step="${def.step}" min="${def.min}" max="${def.max}"
-        value="${val}">
+        step="${def.step}" min="${def.min}" max="${def.max}" value="">
       <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
     `;
     windowGrid.appendChild(group);
     windowInputs[def.key] = group.querySelector('input');
   }
 
-  const windowActionsRow = document.createElement('div');
-  windowActionsRow.className = 'tuning-actions';
-  windowActionsRow.style.marginTop = '20px';
-  windowActionsRow.innerHTML = `
-    <button class="btn btn--accent tuning-actions__btn" id="btn-apply-window">Apply Changes</button>
-    <span class="tuning-actions__status" id="window-status"></span>
+  // --- Unified action bar ---
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'tuning-actions';
+  actionsRow.innerHTML = `
+    <button class="btn btn--accent tuning-actions__btn" id="btn-apply-all">Apply Changes</button>
+    <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-all">Reset to Defaults</button>
+    <span class="tuning-actions__status" id="tuning-status"></span>
   `;
-  windowSection.appendChild(windowActionsRow);
-  container.appendChild(windowSection);
+  container.appendChild(actionsRow);
 
-  // --- Wire up controller params ---
-  const btnApply = container.querySelector('#btn-apply-ctrl');
-  const btnReset = container.querySelector('#btn-reset-ctrl');
-  const statusEl = container.querySelector('#ctrl-status');
-  const btnApplyWindow = container.querySelector('#btn-apply-window');
-  const windowStatusEl = container.querySelector('#window-status');
+  const btnApply = container.querySelector('#btn-apply-all');
+  const btnReset = container.querySelector('#btn-reset-all');
+  const statusEl = container.querySelector('#tuning-status');
 
-  function setStatus(el, text, type = '') {
-    el.textContent = text;
-    el.className = 'tuning-actions__status';
-    if (type) el.classList.add(`tuning-actions__status--${type}`);
+  function setStatus(text, type = '') {
+    statusEl.textContent = text;
+    statusEl.className = 'tuning-actions__status';
+    if (type) statusEl.classList.add(`tuning-actions__status--${type}`);
+  }
+
+  // Read current values from the live hass object first, fall back to the
+  // cached state snapshot if the entity isn't in hass.states yet.
+  function currentConfig(st) {
+    return hass.states?.[CONFIG_ENTITY]?.attributes
+      || st[CONFIG_ENTITY]?.attributes
+      || {};
   }
 
   function populateFromState(st) {
-    const config = st[CONFIG_ENTITY]?.attributes || {};
+    const config = currentConfig(st);
     for (const def of PARAM_DEFS) {
       inputs[def.key].value = config[def.key] ?? DEFAULTS[def.key];
     }
@@ -165,50 +160,51 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
     }
   }
 
+  function resetToDefaults() {
+    for (const def of PARAM_DEFS) {
+      inputs[def.key].value = DEFAULTS[def.key];
+    }
+    for (const def of WINDOW_DEFS) {
+      windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
+    }
+  }
+
   btnApply.addEventListener('click', async () => {
-    setStatus(statusEl, 'Applying…', 'running');
+    setStatus('Applying…', 'running');
     btnApply.disabled = true;
     try {
-      const data = {};
+      const mpcData = {};
       for (const def of PARAM_DEFS) {
-        data[def.key] = def.parse(inputs[def.key].value);
+        mpcData[def.key] = def.parse(inputs[def.key].value);
       }
-      await hass.callService('heating_assistant', 'update_controller_tuning', data);
-      setStatus(statusEl, 'Applied successfully.', 'success');
+      await hass.callService('heating_assistant', 'update_controller_tuning', mpcData);
+
+      const windowData = {};
+      for (const def of WINDOW_DEFS) {
+        windowData[def.key] = def.parse(windowInputs[def.key].value);
+      }
+      await hass.callService('heating_assistant', 'update_estimation_params', windowData);
+
+      setStatus('Applied successfully.', 'success');
     } catch (err) {
-      setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
+      setStatus('Error: ' + (err.message || err), 'error');
     }
     btnApply.disabled = false;
   });
 
+  // Reset only fills boxes with defaults — does NOT call any service.
   btnReset.addEventListener('click', () => {
-    for (const def of PARAM_DEFS) {
-      inputs[def.key].value = DEFAULTS[def.key];
-    }
-    setStatus(statusEl, 'Reset to defaults.', '');
-  });
-
-  btnApplyWindow.addEventListener('click', async () => {
-    setStatus(windowStatusEl, 'Applying…', 'running');
-    btnApplyWindow.disabled = true;
-    try {
-      const data = {};
-      for (const def of WINDOW_DEFS) {
-        data[def.key] = def.parse(windowInputs[def.key].value);
-      }
-      await hass.callService('heating_assistant', 'update_estimation_params', data);
-      setStatus(windowStatusEl, 'Applied successfully.', 'success');
-    } catch (err) {
-      setStatus(windowStatusEl, 'Error: ' + (err.message || err), 'error');
-    }
-    btnApplyWindow.disabled = false;
+    resetToDefaults();
+    setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
   populateFromState(state);
 
   return {
     update(newState) {
-      const focused = document.activeElement;
+      // Resolve the focused element correctly inside a shadow DOM.
+      const rootNode = container.getRootNode();
+      const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
       const isEditing = allInputs.some((inp) => inp === focused);
       if (!isEditing) {
