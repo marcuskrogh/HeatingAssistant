@@ -175,35 +175,39 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   // Primary load: WS command reads directly from the coordinator — the single
   // source of truth.  Falls back to entity state (available without restart if
-  // the entity already existed), then to the latest hass state snapshot.
+  // the entity already existed), then to a scan of the current hass states.
   async function loadConfig() {
-    // 1. WebSocket command — authoritative, real-time coordinator values.
-    const wsConfig = await connection.getControllerConfig();
-    if (wsConfig && Object.keys(wsConfig).length > 0) {
-      populate(wsConfig);
-      return;
-    }
+    try {
+      // 1. WebSocket command — authoritative, real-time coordinator values.
+      const wsConfig = await connection.getControllerConfig();
+      if (wsConfig && Object.keys(wsConfig).length > 0) {
+        populate(wsConfig);
+        return;
+      }
 
-    // 2. Entity state via HaConnection (always-current hass reference).
-    const entityState = connection.getEntityState(CONFIG_ENTITY);
-    if (entityState?.attributes?.tracking_weight !== undefined) {
-      populate(entityState.attributes);
-      return;
-    }
+      // 2. Entity state via HaConnection (always-current hass reference).
+      const entityState = connection.getEntityState(CONFIG_ENTITY);
+      if (entityState?.attributes?.tracking_weight !== undefined) {
+        populate(entityState.attributes);
+        return;
+      }
 
-    // 3. Scan the state snapshot passed at render time (catches entities that
-    //    exist in hass.states but whose key differs from CONFIG_ENTITY).
-    const fromSnapshot = configFromStateSnapshot(state);
-    if (fromSnapshot) {
-      populate(fromSnapshot);
-      return;
-    }
+      // 3. Scan connection._hass.states (catches entities whose id may differ
+      //    from CONFIG_ENTITY due to HA entity registry naming).
+      const fromSnapshot = configFromStateSnapshot(connection._hass?.states || {});
+      if (fromSnapshot) {
+        populate(fromSnapshot);
+        return;
+      }
 
-    // 4. No live data found — fill with backend factory defaults so the form
-    //    is at least usable.  This happens when HA has not been restarted
-    //    after first installing this version of the integration.
-    populate({});
-    setStatus('Could not read current parameters — restart Home Assistant and reload.', 'error');
+      // 4. No live data — fill with backend factory defaults so the form is
+      //    at least usable.  Restart HA to pick up the new sensor.
+      populate({});
+      setStatus('Could not read current parameters — restart Home Assistant and reload.', 'error');
+    } catch (e) {
+      console.error('[TuningPage] loadConfig failed:', e);
+      populate({});
+    }
   }
 
   // Lightweight refresh used on live state_changed events to stay in sync
