@@ -485,6 +485,43 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, ws_get_schedules)
 
+    @websocket_api.websocket_command(
+        {vol.Required("type"): "heating_assistant/get_controller_config"}
+    )
+    @websocket_api.async_response
+    async def ws_get_controller_config(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return the current controller/estimation parameters straight from the
+        coordinator.
+
+        This is the authoritative, always-current set of parameters applied to
+        the controller.  The dashboard tuning page uses this request/response
+        path to populate its input boxes, which is more reliable than reading
+        propagated entity state on the frontend.
+        """
+        coordinator = _get_coordinator(hass)
+        c = coordinator
+        config = {
+            "comfort_offset": next(iter(c._room_comfort_offset.values()), 2.0),
+            "tracking_weight": c._tracking_weight,
+            "energy_weight": c._energy_weight,
+            "energy_price_weight": c._energy_price_weight,
+            "smoothing_weight": c._smoothing_weight,
+            "soft_constraint_weight": c._soft_constraint_weight,
+            "soft_constraint_linear_weight": c._soft_constraint_linear_weight,
+            "terminal_weight": c._terminal_weight,
+            "horizon": c._horizon,
+            "update_interval": c._update_interval,
+            "window_open_debounce": c._window_open_debounce,
+            "window_open_close_settle": c._window_open_close_settle,
+            "window_open_q_inflation": c._window_open_q_inflation,
+        }
+        connection.send_result(msg["id"], {"config": config})
+
+    websocket_api.async_register_command(hass, ws_get_controller_config)
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply options in-place when possible; reload only for structural changes."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
@@ -687,7 +724,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=20",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=21",
                     "embed_iframe": False,
                 }
             },
