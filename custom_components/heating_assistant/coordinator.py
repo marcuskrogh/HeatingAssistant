@@ -34,6 +34,7 @@ from .const import (
     CONF_PRICE_SPOT_SURCHARGE,
     CONF_ESTIMATED_PARAMS,
     CONF_PERSISTED_SETPOINTS,
+    CONF_PERSISTED_SCHEDULES,
     CONF_TRACKING_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -640,6 +641,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if room_name in self._base_setpoint:
                 self._base_setpoint[room_name] = float(value)
                 self.model.rooms[room_name].setpoint = float(value)
+
+        # Overlay with user-modified schedules persisted across restarts.
+        persisted_schedules: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_SCHEDULES, {})
+        for room_name, periods_raw in persisted_schedules.items():
+            if room_name in self._room_schedule:
+                self._room_schedule[room_name] = build_schedule(periods_raw)
 
     def _read_binary_sensor_on(self, entity_id: str) -> bool:
         """Return True when the given binary sensor is currently ``on``."""
