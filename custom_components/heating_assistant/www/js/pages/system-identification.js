@@ -9,9 +9,6 @@ const DEFAULTS = {
   thermal_mass: 5000000,
   r_external: 0.05,
   horizon_hours: 6,
-  window_open_debounce: 120,
-  window_open_close_settle: 300,
-  window_open_q_inflation: 10.0,
 };
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
@@ -183,7 +180,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   estimSection.className = 'card tuning-section';
   estimSection.innerHTML = `
     <div class="tuning-section__title">State Estimation Parameters</div>
-    <p class="tuning-section__desc">Global parameters controlling the Kalman filter and window detection. Changes affect all rooms and take effect immediately.</p>
+    <p class="tuning-section__desc">Global parameters controlling the Kalman filter. Changes affect all rooms and take effect immediately.</p>
     <div class="tuning-params-grid">
       <div class="form-group">
         <label class="form-label" for="estim-sigma-w">Process Noise (\u03c3_w)</label>
@@ -199,21 +196,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <label class="form-label" for="estim-sigma-b">Calibration Drift (\u03c3_b)</label>
         <input class="form-input" type="number" id="estim-sigma-b" step="0.0001" min="0.00000001" max="1" value="${DEFAULTS.sigma_b}">
         <span class="form-hint">K/\u221as</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="estim-debounce">Window Open Debounce</label>
-        <input class="form-input" type="number" id="estim-debounce" step="10" min="0" max="3600" value="${DEFAULTS.window_open_debounce}">
-        <span class="form-hint">seconds</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="estim-settle">Window Close Settle</label>
-        <input class="form-input" type="number" id="estim-settle" step="10" min="0" max="3600" value="${DEFAULTS.window_open_close_settle}">
-        <span class="form-hint">seconds</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="estim-q-inflation">Uncertainty Multiplier</label>
-        <input class="form-input" type="number" id="estim-q-inflation" step="1" min="1" max="1000" value="${DEFAULTS.window_open_q_inflation}">
-        <span class="form-hint">\u00d7 covariance</span>
       </div>
     </div>
     <div class="tuning-actions" style="margin-top:16px">
@@ -415,9 +397,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const estimSigmaW = container.querySelector('#estim-sigma-w');
   const estimSigmaV = container.querySelector('#estim-sigma-v');
   const estimSigmaB = container.querySelector('#estim-sigma-b');
-  const estimDebounce = container.querySelector('#estim-debounce');
-  const estimSettle = container.querySelector('#estim-settle');
-  const estimQInflation = container.querySelector('#estim-q-inflation');
   const btnApplyEstim = container.querySelector('#btn-apply-estim');
   const estimApplyStatus = container.querySelector('#estim-apply-status');
 
@@ -460,9 +439,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     if (config.sigma_w != null) estimSigmaW.value = config.sigma_w;
     if (config.sigma_v != null) estimSigmaV.value = config.sigma_v;
     if (config.sigma_b != null) estimSigmaB.value = config.sigma_b;
-    if (config.window_open_debounce != null) estimDebounce.value = config.window_open_debounce;
-    if (config.window_open_close_settle != null) estimSettle.value = config.window_open_close_settle;
-    if (config.window_open_q_inflation != null) estimQInflation.value = config.window_open_q_inflation;
   }
 
   function populateParamsFromState(slug, st) {
@@ -520,9 +496,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         sigma_w: parseFloat(estimSigmaW.value),
         sigma_v: parseFloat(estimSigmaV.value),
         sigma_b: parseFloat(estimSigmaB.value),
-        window_open_debounce: parseInt(estimDebounce.value, 10),
-        window_open_close_settle: parseInt(estimSettle.value, 10),
-        window_open_q_inflation: parseFloat(estimQInflation.value),
       });
       setStatus(estimApplyStatus, 'Applied.', 'success');
     } catch (err) {
