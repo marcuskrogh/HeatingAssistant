@@ -1,5 +1,5 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '17';
+const PANEL_VERSION = '18';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -132,13 +132,11 @@ class HaIndustrialPanel extends HTMLElement {
         <div id="top-bar"></div>
         <nav class="panel-nav" id="panel-nav">
           <div class="panel-nav__brand">
-            <svg class="panel-nav__logo" viewBox="0 0 28 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path d="M7 1.5C7 1.5 5.5 3.5 7 5C8.5 6.5 7 8.5 7 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <path d="M14 1C14 1 12.5 3 14 4.5C15.5 6 14 8 14 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <path d="M21 1.5C21 1.5 19.5 3.5 21 5C22.5 6.5 21 8.5 21 8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              <rect x="2" y="10" width="24" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
-              <line x1="9" y1="10" x2="9" y2="22" stroke="currentColor" stroke-width="1.5"/>
-              <line x1="16" y1="10" x2="16" y2="22" stroke="currentColor" stroke-width="1.5"/>
+            <svg class="panel-nav__logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <line x1="31" y1="52" x2="71" y2="52" stroke="#00d4aa" stroke-width="2.5" stroke-linecap="round" opacity="0.32"/>
+              <path d="M 31 72 C 42 72, 45 53.5, 57 52.5 C 63 52, 67 52, 71 52" fill="none" stroke="#00d4aa" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="71" cy="52" r="3.6" fill="#00d4aa"/>
+              <path d="M 20 84 L 20 47 L 50 19 L 80 47 L 80 84 Z" fill="none" stroke="#00d4aa" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
             </svg>
             <span class="panel-nav__name">HEATING ASSISTANT</span>
           </div>
