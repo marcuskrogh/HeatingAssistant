@@ -687,7 +687,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=17",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=20",
                     "embed_iframe": False,
                 }
             },
