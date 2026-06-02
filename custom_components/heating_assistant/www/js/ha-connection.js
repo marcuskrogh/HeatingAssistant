@@ -24,6 +24,18 @@ export class HaConnection {
     }
   }
 
+  async getControllerConfig() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/get_controller_config',
+      });
+      return result.config || {};
+    } catch (e) {
+      console.warn('[HaConnection] getControllerConfig WS failed:', e);
+      return null;
+    }
+  }
+
   async getHistory(entityIds, hoursBack = 12) {
     const now = new Date();
     const start = new Date(now.getTime() - hoursBack * 3600 * 1000);

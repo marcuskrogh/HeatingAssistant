@@ -15,6 +15,7 @@ const PARAM_DEFS = [
   { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, min: 1, max: 10000, parse: parseFloat },
 ];
 
+// Must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
   update_interval: 900,
   comfort_offset: 2.0,
@@ -34,9 +35,10 @@ const WINDOW_DEFS = [
   { key: 'window_open_q_inflation', label: 'Uncertainty Multiplier', unit: '×', hint: 'Covariance inflation when window is open (1–1000)', step: 1, min: 1, max: 1000, parse: parseFloat },
 ];
 
+// Must match backend DEFAULT_WINDOW_* constants in const.py
 const WINDOW_DEFAULTS = {
-  window_open_debounce: 120,
-  window_open_close_settle: 300,
+  window_open_debounce: 60,
+  window_open_close_settle: 30,
   window_open_q_inflation: 10.0,
 };
 
@@ -45,7 +47,7 @@ export function renderControllerTuning(container, rooms, state, connection, hass
 }
 
 // ---------------------------------------------------------------------------
-// Index view — MPC params
+// Index view — MPC params + Window Configuration
 // ---------------------------------------------------------------------------
 
 function renderTuningIndex(container, rooms, state, connection, hass) {
@@ -58,45 +60,36 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Configure MPC controller parameters. These determine how the controller balances comfort, energy use, and responsiveness. Changes take effect immediately.';
+  desc.textContent = 'Configure MPC controller and window detection parameters. Edit values below and click Apply Changes to send them to the system. Reset to Defaults fills the boxes with factory defaults without saving — you still need to click Apply Changes to commit them.';
   container.appendChild(desc);
 
-  // --- MPC Parameter form ---
+  // --- MPC Parameter section ---
   const formSection = document.createElement('div');
   formSection.className = 'card tuning-section';
 
+  const mpcTitle = document.createElement('div');
+  mpcTitle.className = 'tuning-section__title';
+  mpcTitle.textContent = 'MPC Controller Parameters';
+  formSection.appendChild(mpcTitle);
+
   const grid = document.createElement('div');
   grid.className = 'tuning-params-grid tuning-params-grid--wide';
+  formSection.appendChild(grid);
+  container.appendChild(formSection);
 
-  const activeConfig = state[CONFIG_ENTITY]?.attributes || {};
   const inputs = {};
   for (const def of PARAM_DEFS) {
-    const val = activeConfig[def.key] ?? DEFAULTS[def.key];
     const group = document.createElement('div');
     group.className = 'form-group';
     group.innerHTML = `
       <label class="form-label" for="ctrl-${def.key}">${def.label}</label>
       <input class="form-input" type="number" id="ctrl-${def.key}"
-        step="${def.step}" min="${def.min}" max="${def.max}"
-        value="${val}">
+        step="${def.step}" min="${def.min}" max="${def.max}" value="">
       <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
     `;
     grid.appendChild(group);
     inputs[def.key] = group.querySelector('input');
   }
-
-  formSection.appendChild(grid);
-
-  const actionsRow = document.createElement('div');
-  actionsRow.className = 'tuning-actions';
-  actionsRow.style.marginTop = '20px';
-  actionsRow.innerHTML = `
-    <button class="btn btn--accent tuning-actions__btn" id="btn-apply-ctrl">Apply Changes</button>
-    <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-ctrl">Reset to Defaults</button>
-    <span class="tuning-actions__status" id="ctrl-status"></span>
-  `;
-  formSection.appendChild(actionsRow);
-  container.appendChild(formSection);
 
   // --- Window Configuration section ---
   const windowSection = document.createElement('div');
@@ -109,54 +102,49 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
 
   const windowDesc = document.createElement('p');
   windowDesc.className = 'tuning-section__desc';
-  windowDesc.textContent = 'Global parameters for window open/close detection. Changes affect all rooms and take effect immediately.';
+  windowDesc.textContent = 'Global parameters for window open/close detection. Changes affect all rooms.';
   windowSection.appendChild(windowDesc);
 
   const windowGrid = document.createElement('div');
   windowGrid.className = 'tuning-params-grid';
   windowSection.appendChild(windowGrid);
+  container.appendChild(windowSection);
 
   const windowInputs = {};
   for (const def of WINDOW_DEFS) {
-    const val = activeConfig[def.key] ?? WINDOW_DEFAULTS[def.key];
     const group = document.createElement('div');
     group.className = 'form-group';
     group.innerHTML = `
       <label class="form-label" for="win-${def.key}">${def.label}</label>
       <input class="form-input" type="number" id="win-${def.key}"
-        step="${def.step}" min="${def.min}" max="${def.max}"
-        value="${val}">
+        step="${def.step}" min="${def.min}" max="${def.max}" value="">
       <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
     `;
     windowGrid.appendChild(group);
     windowInputs[def.key] = group.querySelector('input');
   }
 
-  const windowActionsRow = document.createElement('div');
-  windowActionsRow.className = 'tuning-actions';
-  windowActionsRow.style.marginTop = '20px';
-  windowActionsRow.innerHTML = `
-    <button class="btn btn--accent tuning-actions__btn" id="btn-apply-window">Apply Changes</button>
-    <span class="tuning-actions__status" id="window-status"></span>
+  // --- Unified action bar ---
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'tuning-actions';
+  actionsRow.innerHTML = `
+    <button class="btn btn--accent tuning-actions__btn" id="btn-apply-all">Apply Changes</button>
+    <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-all">Reset to Defaults</button>
+    <span class="tuning-actions__status" id="tuning-status"></span>
   `;
-  windowSection.appendChild(windowActionsRow);
-  container.appendChild(windowSection);
+  container.appendChild(actionsRow);
 
-  // --- Wire up controller params ---
-  const btnApply = container.querySelector('#btn-apply-ctrl');
-  const btnReset = container.querySelector('#btn-reset-ctrl');
-  const statusEl = container.querySelector('#ctrl-status');
-  const btnApplyWindow = container.querySelector('#btn-apply-window');
-  const windowStatusEl = container.querySelector('#window-status');
+  const btnApply = container.querySelector('#btn-apply-all');
+  const btnReset = container.querySelector('#btn-reset-all');
+  const statusEl = container.querySelector('#tuning-status');
 
-  function setStatus(el, text, type = '') {
-    el.textContent = text;
-    el.className = 'tuning-actions__status';
-    if (type) el.classList.add(`tuning-actions__status--${type}`);
+  function setStatus(text, type = '') {
+    statusEl.textContent = text;
+    statusEl.className = 'tuning-actions__status';
+    if (type) statusEl.classList.add(`tuning-actions__status--${type}`);
   }
 
-  function populateFromState(st) {
-    const config = st[CONFIG_ENTITY]?.attributes || {};
+  function populate(config) {
     for (const def of PARAM_DEFS) {
       inputs[def.key].value = config[def.key] ?? DEFAULTS[def.key];
     }
@@ -165,53 +153,113 @@ function renderTuningIndex(container, rooms, state, connection, hass) {
     }
   }
 
+  // Try to find the config entity in a state snapshot by scanning all
+  // sensor.heating_assistant_* entities for one that carries the tuning keys.
+  function configFromStateSnapshot(snapshot) {
+    // Direct lookup first
+    const direct = snapshot[CONFIG_ENTITY];
+    if (direct?.attributes?.tracking_weight !== undefined) {
+      return direct.attributes;
+    }
+    // Fallback: scan all heating_assistant sensors
+    for (const [id, s] of Object.entries(snapshot)) {
+      if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
+        const a = s.attributes;
+        if (a.tracking_weight !== undefined || a.horizon !== undefined) {
+          return a;
+        }
+      }
+    }
+    return null;
+  }
+
+  // Primary load: WS command reads directly from the coordinator — the single
+  // source of truth.  Falls back to entity state (available without restart if
+  // the entity already existed), then to the latest hass state snapshot.
+  async function loadConfig() {
+    // 1. WebSocket command — authoritative, real-time coordinator values.
+    const wsConfig = await connection.getControllerConfig();
+    if (wsConfig && Object.keys(wsConfig).length > 0) {
+      populate(wsConfig);
+      return;
+    }
+
+    // 2. Entity state via HaConnection (always-current hass reference).
+    const entityState = connection.getEntityState(CONFIG_ENTITY);
+    if (entityState?.attributes?.tracking_weight !== undefined) {
+      populate(entityState.attributes);
+      return;
+    }
+
+    // 3. Scan the state snapshot passed at render time (catches entities that
+    //    exist in hass.states but whose key differs from CONFIG_ENTITY).
+    const fromSnapshot = configFromStateSnapshot(state);
+    if (fromSnapshot) {
+      populate(fromSnapshot);
+      return;
+    }
+
+    // 4. No live data found — fill with backend factory defaults so the form
+    //    is at least usable.  This happens when HA has not been restarted
+    //    after first installing this version of the integration.
+    populate({});
+    setStatus('Could not read current parameters — restart Home Assistant and reload.', 'error');
+  }
+
+  // Lightweight refresh used on live state_changed events to stay in sync
+  // without spamming the WebSocket on every event.
+  function populateFromState(snapshot) {
+    const cfg = configFromStateSnapshot(snapshot);
+    if (cfg) populate(cfg);
+  }
+
   btnApply.addEventListener('click', async () => {
-    setStatus(statusEl, 'Applying…', 'running');
+    setStatus('Applying…', 'running');
     btnApply.disabled = true;
     try {
-      const data = {};
+      const mpcData = {};
       for (const def of PARAM_DEFS) {
-        data[def.key] = def.parse(inputs[def.key].value);
+        mpcData[def.key] = def.parse(inputs[def.key].value);
       }
-      await hass.callService('heating_assistant', 'update_controller_tuning', data);
-      setStatus(statusEl, 'Applied successfully.', 'success');
+      await hass.callService('heating_assistant', 'update_controller_tuning', mpcData);
+
+      const windowData = {};
+      for (const def of WINDOW_DEFS) {
+        windowData[def.key] = def.parse(windowInputs[def.key].value);
+      }
+      await hass.callService('heating_assistant', 'update_estimation_params', windowData);
+
+      // Re-read authoritative config so boxes reflect what the controller now holds.
+      await loadConfig();
+      setStatus('Applied successfully.', 'success');
     } catch (err) {
-      setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
+      setStatus('Error: ' + (err.message || err), 'error');
     }
     btnApply.disabled = false;
   });
 
+  // Reset only fills boxes with defaults — does NOT call any service.
   btnReset.addEventListener('click', () => {
     for (const def of PARAM_DEFS) {
       inputs[def.key].value = DEFAULTS[def.key];
     }
-    setStatus(statusEl, 'Reset to defaults.', '');
-  });
-
-  btnApplyWindow.addEventListener('click', async () => {
-    setStatus(windowStatusEl, 'Applying…', 'running');
-    btnApplyWindow.disabled = true;
-    try {
-      const data = {};
-      for (const def of WINDOW_DEFS) {
-        data[def.key] = def.parse(windowInputs[def.key].value);
-      }
-      await hass.callService('heating_assistant', 'update_estimation_params', data);
-      setStatus(windowStatusEl, 'Applied successfully.', 'success');
-    } catch (err) {
-      setStatus(windowStatusEl, 'Error: ' + (err.message || err), 'error');
+    for (const def of WINDOW_DEFS) {
+      windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
     }
-    btnApplyWindow.disabled = false;
+    setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
-  populateFromState(state);
+  // Initial authoritative load via WebSocket (or entity state fallback).
+  loadConfig();
 
   return {
     update(newState) {
-      const focused = document.activeElement;
+      // Resolve focus correctly inside a shadow DOM — document.activeElement
+      // returns the shadow host, not the focused input inside the shadow root.
+      const rootNode = container.getRootNode();
+      const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
-      const isEditing = allInputs.some((inp) => inp === focused);
-      if (!isEditing) {
+      if (!allInputs.some((inp) => inp === focused)) {
         populateFromState(newState);
       }
     },
