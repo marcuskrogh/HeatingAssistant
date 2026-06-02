@@ -514,3 +514,7 @@ CONF_ESTIMATED_PARAMS = "estimated_params"
 #: entry.data key that stores user-modified room setpoints so they survive a
 #: full Home Assistant restart and the end of a scheduled "off" period.
 CONF_PERSISTED_SETPOINTS = "persisted_setpoints"
+
+#: entry.data key that stores user-modified room schedules so they survive
+#: reloads and restarts regardless of whether rooms come from YAML or options.
+CONF_PERSISTED_SCHEDULES = "persisted_schedules"

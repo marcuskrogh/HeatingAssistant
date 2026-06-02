@@ -116,6 +116,7 @@ from .const import (
     CONF_SCHEDULE_NAME,
     CONF_SCHEDULE_SETPOINT,
     CONF_SCHEDULE_START,
+    CONF_PERSISTED_SCHEDULES,
     CONF_SETPOINT,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
@@ -1867,52 +1868,41 @@ def _register_services(hass: HomeAssistant) -> None:
         room_name: str = call.data["room_name"]
         periods: list = call.data["periods"]
 
-        # Find and update the room in the config entry
+        # Resolve the canonical room name from the slug sent by the frontend.
         entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
         if entry is None:
             raise ValueError("Config entry not found")
 
         # Rooms can live in either ``entry.options`` (when configured via the
-        # UI options flow) or ``entry.data`` (YAML / initial config flow).  At
-        # setup ``entry.options[CONF_ROOMS]`` *overrides* and is copied back
-        # over ``entry.data[CONF_ROOMS]`` (see async_setup_entry), so writing
-        # the schedule to ``data`` alone is silently discarded on the next
-        # reload whenever options holds the rooms.  Base the update on whichever
-        # store is authoritative and persist the schedule to BOTH so it
-        # survives a reload regardless of how the integration was configured.
-        opts = dict(entry.options)
-        data = dict(entry.data)
-        options_has_rooms = bool(opts.get(CONF_ROOMS))
-        source_rooms = opts.get(CONF_ROOMS) if options_has_rooms else data.get(CONF_ROOMS)
-        rooms_list = [dict(r) for r in (source_rooms or [])]
+        # UI options flow) or ``entry.data`` (YAML / initial config flow).
+        # Check both stores for room name resolution.
+        opts = entry.options
+        source_rooms = opts.get(CONF_ROOMS) if opts.get(CONF_ROOMS) else entry.data.get(CONF_ROOMS)
+        rooms_list = source_rooms or []
 
-        found = False
-        for idx, room_cfg in enumerate(rooms_list):
+        canonical_name: str | None = None
+        for room_cfg in rooms_list:
             cfg_name = room_cfg.get(CONF_ROOM_NAME, "")
             if cfg_name == room_name or _slugify(cfg_name) == room_name:
-                rooms_list[idx] = {**room_cfg, CONF_SCHEDULE: periods}
-                found = True
-                # Use the actual room name for coordinator reload
-                room_name = cfg_name
+                canonical_name = cfg_name
                 break
 
-        if not found:
+        if canonical_name is None:
             raise ValueError(f"Room '{room_name}' not found in configuration")
 
-        # Persist updated rooms list to data, and to options when options is the
-        # authoritative store, keeping the two in sync so the schedule cannot be
-        # clobbered by the options→data override that runs on every setup.
-        new_data = {**data, CONF_ROOMS: rooms_list}
-        if options_has_rooms:
-            new_options = {**opts, CONF_ROOMS: rooms_list}
-            hass.config_entries.async_update_entry(
-                entry, data=new_data, options=new_options
-            )
-        else:
-            hass.config_entries.async_update_entry(entry, data=new_data)
+        # Persist schedules in a dedicated key that won't be overwritten by
+        # YAML/options merging during integration reload (same pattern as
+        # CONF_PERSISTED_SETPOINTS).
+        persisted: dict = dict(entry.data.get(CONF_PERSISTED_SCHEDULES) or {})
+        persisted[canonical_name] = periods
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**dict(entry.data), CONF_PERSISTED_SCHEDULES: persisted},
+        )
 
         # Rebuild schedule in coordinator
-        coordinator.reload_room_schedule(room_name, periods)
+        coordinator.reload_room_schedule(canonical_name, periods)
         coordinator.async_update_listeners()
 
     hass.services.async_register(
