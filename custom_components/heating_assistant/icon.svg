@@ -1,35 +1,17 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0"?>
+
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- Heating Assistant: MPC + setpoint tracking
-       - Transparent background
-       - House silhouette in Home Assistant blue
-       - Setpoint: white dashed line (target temperature)
-       - Predicted trajectory: white solid curve settling onto the setpoint
-       - All lines contained inside the house -->
 
-  <!-- House silhouette (HA blue, rounded joins) -->
-  <path d="M 60 200 L 60 138 L 128 72 L 196 138 L 196 200 Z"
-        fill="#41BDF5"
-        stroke="#41BDF5"
-        stroke-width="8"
-        stroke-linejoin="round"
-        stroke-linecap="round"/>
+  
+  <line x1="72" y1="134" x2="184" y2="134" stroke="#00d4aa" stroke-width="6" stroke-linecap="round" opacity="0.35"></line>
 
-  <!-- Setpoint reference (slim white dashed line, inside the house) -->
-  <line x1="78" y1="156" x2="180" y2="156"
-        stroke="#FFFFFF"
-        stroke-width="4"
-        stroke-linecap="round"
-        stroke-dasharray="4 10"/>
+  
+  <path d="M 72 185&#xA;           C 100 185, 108 137, 136 135&#xA;           C 158 133, 170 134, 184 134" fill="none" stroke="#00d4aa" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"></path>
 
-  <!-- Predicted trajectory: white solid curve rising and settling tangentially on the setpoint -->
-  <path d="M 78 190
-           C 102 190, 118 184, 130 174
-           C 142 164, 154 156, 166 156
-           L 180 156"
-        fill="none"
-        stroke="#FFFFFF"
-        stroke-width="8"
-        stroke-linecap="round"
-        stroke-linejoin="round"/>
+  
+  <circle cx="184" cy="134" r="9" fill="#00d4aa"></circle>
+
+  
+  <path d="M 44 210 L 44 116 L 128 38 L 212 116 L 212 210 Z" fill="none" stroke="#00d4aa" stroke-width="14" stroke-linejoin="round" stroke-linecap="round"></path>
+
 </svg>
