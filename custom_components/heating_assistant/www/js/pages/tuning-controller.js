@@ -187,51 +187,65 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     return null;
   }
 
-  // Load the authoritative current values.
-  //
-  // Entity-state is checked synchronously first (zero latency) so the user
-  // sees current values immediately.  The WebSocket command is then awaited
-  // for the authoritative coordinator values and overwrites the entity-state
-  // values if they differ (e.g. after Apply Changes before the next HA tick).
-  //
-  // Defaults are NEVER used here — inputs are left at whatever they were
-  // (empty on first load, previously-set on refresh) if loading fails.
-  async function loadConfig() {
-    let populated = false;
+  // ---- Robust loading -----------------------------------------------------
+  // The integration may not be fully ready the instant this page renders, and
+  // the config entity may land in hass.states slightly after navigation.  We
+  // therefore (a) try entity-state synchronously for an instant fill, (b) poll
+  // the authoritative WebSocket command with backoff, and (c) keep recovering
+  // from live state_changed events.  Defaults are NEVER shown here — only the
+  // Reset button fills defaults.
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let loaded = false; // true once real backend values have been shown
+  let destroyed = false; // stop the retry loop when navigating away
 
-    // Step 1 — synchronous: entity state is available instantly, no network.
-    const fromState =
+  // Apply a config object and mark the page as loaded.  Returns true when the
+  // object actually carried values.
+  function applyConfig(config) {
+    if (!config || Object.keys(config).length === 0) return false;
+    populate(config);
+    loaded = true;
+    setStatus('');
+    return true;
+  }
+
+  // Try every available state snapshot for the config entity's attributes.
+  function tryEntityState() {
+    const cfg =
       configFromStateSnapshot(initialState) ||
       configFromStateSnapshot(hass?.states || {}) ||
       configFromStateSnapshot(connection._hass?.states || {});
-    if (fromState) {
-      populate(fromState);
-      populated = true;
-    }
+    return cfg ? applyConfig(cfg) : false;
+  }
 
-    // Step 2 — async: WebSocket reads directly from the coordinator and is
-    // the single authoritative source.  Overwrites step-1 values when it
-    // arrives (coordinator may have been updated since the last entity tick).
+  // One round: authoritative WebSocket first, entity-state as fallback.
+  async function fetchOnce() {
     try {
       const wsConfig = await connection.getControllerConfig();
-      if (wsConfig && Object.keys(wsConfig).length > 0) {
-        populate(wsConfig);
-        populated = true;
-      }
+      if (applyConfig(wsConfig)) return true;
     } catch (e) {
       console.warn('[TuningPage] WS config fetch failed:', e);
     }
-
-    if (!populated) {
-      setStatus('Could not load current values — check that the integration is running.', 'error');
-    }
+    return tryEntityState();
   }
 
-  // Lightweight refresh used on live state_changed events to stay in sync
-  // without spamming the WebSocket on every event.
-  function populateFromState(snapshot) {
-    const cfg = configFromStateSnapshot(snapshot);
-    if (cfg) populate(cfg);
+  // Full load: instant entity fill, then WS polling with backoff.  The WS is
+  // authoritative (reads coordinator memory directly) and overwrites any
+  // entity-state values, so it runs even when the instant fill succeeded.
+  async function loadConfig() {
+    tryEntityState();
+    if (!loaded) setStatus('Loading current values…', 'running');
+
+    const delays = [0, 400, 800, 1500, 3000, 5000];
+    for (let i = 0; i < delays.length; i++) {
+      if (destroyed) return;
+      if (delays[i]) await sleep(delays[i]);
+      if (destroyed) return;
+      if (await fetchOnce()) return;
+    }
+
+    if (!loaded) {
+      setStatus('Could not load current values — check that the integration is running.', 'error');
+    }
   }
 
   btnApply.addEventListener('click', async () => {
@@ -250,8 +264,10 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
       }
       await hass.callService('heating_assistant', 'update_estimation_params', windowData);
 
-      // Re-read authoritative config so boxes reflect what the controller now holds.
-      await loadConfig();
+      // Re-read authoritative config so boxes reflect what the controller now
+      // holds.  apply_tuning_updates runs synchronously in the service call, so
+      // a single round is enough — no need for the full retry loop here.
+      await fetchOnce();
       setStatus('Applied successfully.', 'success');
     } catch (err) {
       setStatus('Error: ' + (err.message || err), 'error');
@@ -274,10 +290,16 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
       const rootNode = container.getRootNode();
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
-      if (!allInputs.some((inp) => inp === focused)) {
-        populateFromState(newState);
-      }
+      if (allInputs.some((inp) => inp === focused)) return; // don't clobber edits
+
+      // Stay in sync with live coordinator changes, and recover here if the
+      // config entity only appeared after the initial load attempts (clears a
+      // stale "Loading…"/error message via applyConfig).
+      const cfg = configFromStateSnapshot(newState);
+      if (cfg) applyConfig(cfg);
     },
-    destroy() {},
+    destroy() {
+      destroyed = true; // halt any in-flight retry backoff loop
+    },
   };
 }

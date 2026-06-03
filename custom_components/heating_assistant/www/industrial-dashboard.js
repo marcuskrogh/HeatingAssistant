@@ -1,5 +1,9 @@
 const BASE_PATH = '/ha-industrial-panel';
-const PANEL_VERSION = '28';
+// Cache-bust token for all dynamically-imported submodules (js/pages/*, css).
+// MUST be kept in sync with the `?v=` on `js_url` in __init__.py — bump BOTH
+// together on every frontend change, or browsers load a stale entry point that
+// pulls in stale submodules.
+const PANEL_VERSION = '29';
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
