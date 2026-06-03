@@ -2644,49 +2644,23 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_controller_config"
 
     @property
+    def available(self) -> bool:
+        # Tuning parameters live on the coordinator object from __init__ and
+        # are not produced by the periodic update cycle.  Always return True
+        # so that hass.states always carries the tuning attributes even when
+        # an MPC solve or data-fetch step fails and last_update_success is False.
+        return True
+
+    @property
     def native_value(self) -> str:
         return "active"
 
     @property
     def extra_state_attributes(self) -> dict:
         c = self._coordinator
-        schedules = {}
-        for room_name, room_schedule in c._room_schedule.items():
-            if room_schedule and not room_schedule.is_empty:
-                schedules[slugify(room_name)] = {
-                    "enabled": c._schedule_enabled.get(room_name, True),
-                    "periods": [
-                        {
-                            "name": p.name,
-                            "start": p.start.strftime("%H:%M"),
-                            "end": p.end.strftime("%H:%M"),
-                            "mode": p.mode,
-                            "setpoint": p.setpoint,
-                            "frost_protection": p.frost_protection,
-                            "days": sorted(p.days),
-                            "comfort_offset": p.comfort_offset,
-                            "tracking_weight": p.tracking_weight,
-                            "energy_weight": p.energy_weight,
-                        }
-                        for p in room_schedule.periods
-                    ],
-                }
-        # Extract parameter history from the persisted snapshot.
-        param_history: list = []
-        try:
-            snap = c.estimated_params_snapshot
-            if snap and isinstance(snap, dict) and "history" in snap:
-                param_history = snap["history"]
-        except Exception:
-            pass
 
-        room_setpoints = {}
-        room_comfort_offsets = {}
-        for rn in c.model.room_names:
-            room_setpoints[slugify(rn)] = c.model.rooms[rn].setpoint
-            room_comfort_offsets[slugify(rn)] = c._room_comfort_offset.get(rn, 2.0)
-
-        return {
+        # Core tuning parameters — set in coordinator __init__, always accessible.
+        attrs: dict = {
             "comfort_offset": next(iter(c._room_comfort_offset.values()), 2.0),
             "tracking_weight": c._tracking_weight,
             "energy_weight": c._energy_weight,
@@ -2703,8 +2677,48 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
             "window_open_debounce": c._window_open_debounce,
             "window_open_close_settle": c._window_open_close_settle,
             "window_open_q_inflation": c._window_open_q_inflation,
-            "room_schedules": schedules,
-            "room_setpoints": room_setpoints,
-            "room_comfort_offsets": room_comfort_offsets,
-            "parameter_history": param_history,
         }
+
+        # Schedule, setpoint and room data — requires model to be initialised.
+        try:
+            schedules: dict = {}
+            for room_name, room_schedule in c._room_schedule.items():
+                if room_schedule and not room_schedule.is_empty:
+                    schedules[slugify(room_name)] = {
+                        "enabled": c._schedule_enabled.get(room_name, True),
+                        "periods": [
+                            {
+                                "name": p.name,
+                                "start": p.start.strftime("%H:%M"),
+                                "end": p.end.strftime("%H:%M"),
+                                "mode": p.mode,
+                                "setpoint": p.setpoint,
+                                "frost_protection": p.frost_protection,
+                                "days": sorted(p.days),
+                                "comfort_offset": p.comfort_offset,
+                                "tracking_weight": p.tracking_weight,
+                                "energy_weight": p.energy_weight,
+                            }
+                            for p in room_schedule.periods
+                        ],
+                    }
+            room_setpoints: dict = {}
+            room_comfort_offsets: dict = {}
+            for rn in c.model.room_names:
+                room_setpoints[slugify(rn)] = c.model.rooms[rn].setpoint
+                room_comfort_offsets[slugify(rn)] = c._room_comfort_offset.get(rn, 2.0)
+            attrs["room_schedules"] = schedules
+            attrs["room_setpoints"] = room_setpoints
+            attrs["room_comfort_offsets"] = room_comfort_offsets
+        except Exception:
+            pass
+
+        # Parameter estimation history from the persisted snapshot.
+        try:
+            snap = c.estimated_params_snapshot
+            if snap and isinstance(snap, dict) and "history" in snap:
+                attrs["parameter_history"] = snap["history"]
+        except Exception:
+            pass
+
+        return attrs

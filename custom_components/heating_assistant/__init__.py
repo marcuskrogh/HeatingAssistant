@@ -178,6 +178,7 @@ from .const import (
     DEFAULT_SIGMA_W,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_TRACKING_WEIGHT,
     DEFAULT_THERMAL_MASS,
@@ -493,24 +494,30 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
         hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
     ) -> None:
         """Return current controller tuning parameters directly from the coordinator."""
-        coordinator = _get_coordinator(hass)
-        c = coordinator
-        config = {
-            "comfort_offset": next(iter(c._room_comfort_offset.values()), 2.0),
-            "tracking_weight": c._tracking_weight,
-            "energy_weight": c._energy_weight,
-            "energy_price_weight": c._energy_price_weight,
-            "smoothing_weight": c._smoothing_weight,
-            "soft_constraint_weight": c._soft_constraint_weight,
-            "soft_constraint_linear_weight": c._soft_constraint_linear_weight,
-            "terminal_weight": c._terminal_weight,
-            "horizon": c._horizon,
-            "update_interval": c._update_interval,
-            "window_open_debounce": c._window_open_debounce,
-            "window_open_close_settle": c._window_open_close_settle,
-            "window_open_q_inflation": c._window_open_q_inflation,
-        }
-        connection.send_result(msg["id"], {"config": config})
+        try:
+            coordinator = _get_coordinator(hass)
+            c = coordinator
+            config = {
+                "comfort_offset": next(
+                    iter(getattr(c, "_room_comfort_offset", {}).values()), 2.0
+                ),
+                "tracking_weight": getattr(c, "_tracking_weight", DEFAULT_TRACKING_WEIGHT),
+                "energy_weight": getattr(c, "_energy_weight", DEFAULT_ENERGY_WEIGHT),
+                "energy_price_weight": getattr(c, "_energy_price_weight", DEFAULT_ENERGY_PRICE_WEIGHT),
+                "smoothing_weight": getattr(c, "_smoothing_weight", DEFAULT_SMOOTHING_WEIGHT),
+                "soft_constraint_weight": getattr(c, "_soft_constraint_weight", DEFAULT_SOFT_CONSTRAINT_WEIGHT),
+                "soft_constraint_linear_weight": getattr(c, "_soft_constraint_linear_weight", DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT),
+                "terminal_weight": getattr(c, "_terminal_weight", DEFAULT_TERMINAL_WEIGHT),
+                "horizon": getattr(c, "_horizon", DEFAULT_HORIZON),
+                "update_interval": getattr(c, "_update_interval", DEFAULT_UPDATE_INTERVAL),
+                "window_open_debounce": getattr(c, "_window_open_debounce", DEFAULT_WINDOW_OPEN_DEBOUNCE),
+                "window_open_close_settle": getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE),
+                "window_open_q_inflation": getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION),
+            }
+            connection.send_result(msg["id"], {"config": config})
+        except Exception as err:
+            _LOGGER.error("Heating Assistant: get_controller_config WS failed: %s", err)
+            connection.send_error(msg["id"], "config_fetch_failed", str(err))
 
     websocket_api.async_register_command(hass, ws_get_controller_config)
 
@@ -717,7 +724,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=25",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=26",
                     "embed_iframe": False,
                 }
             },
