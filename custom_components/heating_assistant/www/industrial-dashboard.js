@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '31';
+  return '32';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -37,6 +37,7 @@ class HaIndustrialPanel extends HTMLElement {
     this._state = {};
     this._initialized = false;
     this._unsubscribe = null;
+    this._systemRunning = true;
   }
 
   set hass(hass) {
@@ -58,7 +59,10 @@ class HaIndustrialPanel extends HTMLElement {
           changed = true;
         }
       }
-      if (changed) this._router.update(this._state);
+      if (changed) {
+        this._router.update(this._state);
+        this._syncSystemRunning();
+      }
     }
   }
 
@@ -119,6 +123,7 @@ class HaIndustrialPanel extends HTMLElement {
 
     this._router.start();
     this._updateActiveNav();
+    this._syncSystemRunning();
 
     // After the router renders the initial page, sync with the very latest
     // hass.states to pick up any changes that arrived during boot.  This
@@ -147,6 +152,19 @@ class HaIndustrialPanel extends HTMLElement {
     if (newState) {
       this._state[entityId] = newState;
       if (this._router) this._router.update(this._state);
+      if (entityId === 'sensor.heating_assistant_system_summary') {
+        this._syncSystemRunning();
+      }
+    }
+  }
+
+  _syncSystemRunning() {
+    const summary = this._state['sensor.heating_assistant_system_summary'];
+    if (!summary) return;
+    const enabled = summary.attributes?.system_enabled;
+    if (typeof enabled === 'boolean') {
+      this._systemRunning = enabled;
+      this._updateRunButton();
     }
   }
 
@@ -176,10 +194,15 @@ class HaIndustrialPanel extends HTMLElement {
             <a class="panel-nav__link" href="#tuning">TUNING</a>
           </div>
           <span class="panel-nav__fill"></span>
-          <span class="panel-nav__status">
-            <span class="status-dot status-dot--live"></span>
-            <span class="status-label">LIVE</span>
-          </span>
+          <div class="panel-nav__controls">
+            <button class="panel-nav__run-btn" id="run-btn" aria-label="Start or stop the heating assistant">
+              <span class="panel-nav__run-btn-label">START</span>
+            </button>
+            <span class="panel-nav__status" id="system-status">
+              <span class="status-dot" id="status-dot"></span>
+              <span class="status-label" id="status-label">STOPPED</span>
+            </span>
+          </div>
         </nav>
         <main id="content" class="content">
           <div class="loading">INITIALIZING...</div>
@@ -199,6 +222,13 @@ class HaIndustrialPanel extends HTMLElement {
       });
     }
 
+    const runBtn = this.shadowRoot.getElementById('run-btn');
+    if (runBtn) {
+      runBtn.addEventListener('click', () => this._toggleSystem());
+    }
+
+    this._updateRunButton();
+
     this.shadowRoot.querySelectorAll('.panel-nav__link').forEach((link) => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
@@ -213,6 +243,40 @@ class HaIndustrialPanel extends HTMLElement {
     });
 
     window.addEventListener('hashchange', () => this._updateActiveNav());
+  }
+
+  _updateRunButton() {
+    const dot = this.shadowRoot.getElementById('status-dot');
+    const label = this.shadowRoot.getElementById('status-label');
+    const btn = this.shadowRoot.getElementById('run-btn');
+    const btnLabel = btn?.querySelector('.panel-nav__run-btn-label');
+    if (!dot || !label || !btn || !btnLabel) return;
+
+    if (this._systemRunning) {
+      dot.className = 'status-dot status-dot--live';
+      label.textContent = 'LIVE';
+      btn.classList.add('panel-nav__run-btn--running');
+      btnLabel.textContent = 'STOP';
+    } else {
+      dot.className = 'status-dot';
+      label.textContent = 'STOPPED';
+      btn.classList.remove('panel-nav__run-btn--running');
+      btnLabel.textContent = 'START';
+    }
+  }
+
+  async _toggleSystem() {
+    if (!this._hass) return;
+    const newEnabled = !this._systemRunning;
+    this._systemRunning = newEnabled;
+    this._updateRunButton();
+    try {
+      await this._hass.callService('heating_assistant', 'set_system_enabled', { enabled: newEnabled });
+    } catch (e) {
+      // Revert on failure
+      this._systemRunning = !newEnabled;
+      this._updateRunButton();
+    }
   }
 
   _buildTopBar() {
