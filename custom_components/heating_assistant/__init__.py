@@ -1798,6 +1798,7 @@ def _register_services(hass: HomeAssistant) -> None:
             new_data = {**dict(entry.data), **updates}
             hass.config_entries.async_update_entry(entry, data=new_data)
         coordinator.apply_tuning_updates(updates)
+        coordinator.async_update_listeners()
 
     hass.services.async_register(
         DOMAIN,
@@ -1876,6 +1877,7 @@ def _register_services(hass: HomeAssistant) -> None:
             new_data = {**dict(entry.data), **updates}
             hass.config_entries.async_update_entry(entry, data=new_data)
         coordinator.apply_tuning_updates(updates)
+        coordinator.async_update_listeners()
 
     hass.services.async_register(
         DOMAIN,
