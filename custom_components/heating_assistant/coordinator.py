@@ -418,15 +418,25 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             options.get(CONF_HORIZON)
             or data.get(CONF_HORIZON, DEFAULT_HORIZON)
         )
-        self._tracking_weight: float = data.get(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT)
-        self._energy_weight: float = data.get(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
+        # Tuning weights, like update_interval/horizon above, honour ``options``
+        # first and fall back to initial ``data`` so values reconfigured at
+        # runtime survive a reload.  ``_opt`` returns the options value when the
+        # key is present (even if falsy, e.g. tracking_weight = 0.0), otherwise
+        # the data value, otherwise the default.
+        def _opt(key: str, default: Any) -> Any:
+            if key in options:
+                return options[key]
+            return data.get(key, default)
+
+        self._tracking_weight: float = float(_opt(CONF_TRACKING_WEIGHT, DEFAULT_TRACKING_WEIGHT))
+        self._energy_weight: float = float(_opt(CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT))
         self._energy_price_weight: float = float(
-            data.get(CONF_ENERGY_PRICE_WEIGHT, DEFAULT_ENERGY_PRICE_WEIGHT)
+            _opt(CONF_ENERGY_PRICE_WEIGHT, DEFAULT_ENERGY_PRICE_WEIGHT)
         )
-        self._smoothing_weight: float = data.get(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
-        self._soft_constraint_weight: float = data.get(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)
-        self._soft_constraint_linear_weight: float = data.get(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT)
-        self._terminal_weight: float = data.get(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT)
+        self._smoothing_weight: float = float(_opt(CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT))
+        self._soft_constraint_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT))
+        self._soft_constraint_linear_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT))
+        self._terminal_weight: float = float(_opt(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT))
         self._sigma_w: float = float(
             options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
         )

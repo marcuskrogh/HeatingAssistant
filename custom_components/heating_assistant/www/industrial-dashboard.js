@@ -1,9 +1,28 @@
 const BASE_PATH = '/ha-industrial-panel';
+
 // Cache-bust token for all dynamically-imported submodules (js/pages/*, css).
-// MUST be kept in sync with the `?v=` on `js_url` in __init__.py — bump BOTH
-// together on every frontend change, or browsers load a stale entry point that
-// pulls in stale submodules.
-const PANEL_VERSION = '29';
+//
+// This is derived automatically from THIS file's OWN URL query string — the
+// `?v=` that HA's panel registration appends via `js_url` in __init__.py.  The
+// browser fetches this entry point at exactly that `?v=`, so reusing the same
+// token for every submodule import guarantees the entry point and its
+// submodules are ALWAYS loaded at the same version.
+//
+// This removes a whole class of bugs: previously PANEL_VERSION was a hardcoded
+// literal that had to be hand-bumped in lockstep with `js_url`, and whenever
+// the two drifted (e.g. js_url frozen at v=26 while this advanced to v=27) the
+// browser kept serving a cached entry point that pulled in stale submodules —
+// so frontend fixes never reached the page.  There is now a SINGLE source of
+// truth for the frontend cache-bust token: the `?v=` on `js_url`.
+const PANEL_VERSION = (() => {
+  try {
+    const v = new URL(import.meta.url).searchParams.get('v');
+    if (v) return v;
+  } catch (e) {
+    /* import.meta unavailable (non-module context) — fall through */
+  }
+  return 'dev';
+})();
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
