@@ -501,6 +501,12 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
             # may be numpy scalar types (numpy.float64, numpy.int64, etc.) which
             # are not JSON-serializable.  Python's built-in float()/int() converts
             # any numeric type — including numpy scalars — to a plain Python type.
+            #
+            # update_interval: HA's DataUpdateCoordinator base class stores
+            # self._update_interval as a timedelta (via its property setter), which
+            # overwrites the int set in our __init__.  Read through the public
+            # .update_interval property and convert via total_seconds() instead.
+            ui = c.update_interval
             config = {
                 "comfort_offset": float(next(
                     iter(getattr(c, "_room_comfort_offset", {}).values()), 2.0
@@ -513,7 +519,7 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                 "soft_constraint_linear_weight": float(getattr(c, "_soft_constraint_linear_weight", DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT)),
                 "terminal_weight": float(getattr(c, "_terminal_weight", DEFAULT_TERMINAL_WEIGHT)),
                 "horizon": int(getattr(c, "_horizon", DEFAULT_HORIZON)),
-                "update_interval": int(getattr(c, "_update_interval", DEFAULT_UPDATE_INTERVAL)),
+                "update_interval": int(ui.total_seconds() if hasattr(ui, "total_seconds") else ui),
                 "window_open_debounce": int(getattr(c, "_window_open_debounce", DEFAULT_WINDOW_OPEN_DEBOUNCE)),
                 "window_open_close_settle": int(getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE)),
                 "window_open_q_inflation": float(getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION)),
