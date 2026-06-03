@@ -495,17 +495,12 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
     ) -> None:
         """Return current controller tuning parameters directly from the coordinator."""
         try:
-            coordinator = _get_coordinator(hass)
-            c = coordinator
-            # Explicit float()/int() casts on every value: coordinator attributes
-            # may be numpy scalar types (numpy.float64, numpy.int64, etc.) which
-            # are not JSON-serializable.  Python's built-in float()/int() converts
-            # any numeric type — including numpy scalars — to a plain Python type.
-            #
-            # update_interval: HA's DataUpdateCoordinator base class stores
-            # self._update_interval as a timedelta (via its property setter), which
-            # overwrites the int set in our __init__.  Read through the public
-            # .update_interval property and convert via total_seconds() instead.
+            c = _get_coordinator(hass)
+            # float()/int() casts required: coordinator attrs may be numpy scalars,
+            # which HA's JSON serialiser cannot handle.
+            # update_interval: DataUpdateCoordinator stores self._update_interval as
+            # a timedelta (its property setter overwrites our int), so read the public
+            # property and convert via total_seconds().
             ui = c.update_interval
             config = {
                 "comfort_offset": float(next(
