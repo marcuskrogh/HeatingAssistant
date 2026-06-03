@@ -514,6 +514,7 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                 "window_open_close_settle": getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE),
                 "window_open_q_inflation": getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION),
             }
+            _LOGGER.debug("Heating Assistant: get_controller_config -> %s", config)
             connection.send_result(msg["id"], {"config": config})
         except Exception as err:
             _LOGGER.error("Heating Assistant: get_controller_config WS failed: %s", err)
@@ -724,7 +725,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=26",
+                    # The ?v= token busts the browser cache for the panel entry
+                    # point.  It MUST match PANEL_VERSION in industrial-dashboard.js
+                    # — bump BOTH together on every frontend change, otherwise the
+                    # browser serves a cached entry point that imports stale
+                    # submodules (e.g. an old tuning-controller.js).
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=29",
                     "embed_iframe": False,
                 }
             },
