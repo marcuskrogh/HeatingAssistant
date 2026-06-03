@@ -497,22 +497,26 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
         try:
             coordinator = _get_coordinator(hass)
             c = coordinator
+            # Explicit float()/int() casts on every value: coordinator attributes
+            # may be numpy scalar types (numpy.float64, numpy.int64, etc.) which
+            # are not JSON-serializable.  Python's built-in float()/int() converts
+            # any numeric type — including numpy scalars — to a plain Python type.
             config = {
-                "comfort_offset": next(
+                "comfort_offset": float(next(
                     iter(getattr(c, "_room_comfort_offset", {}).values()), 2.0
-                ),
-                "tracking_weight": getattr(c, "_tracking_weight", DEFAULT_TRACKING_WEIGHT),
-                "energy_weight": getattr(c, "_energy_weight", DEFAULT_ENERGY_WEIGHT),
-                "energy_price_weight": getattr(c, "_energy_price_weight", DEFAULT_ENERGY_PRICE_WEIGHT),
-                "smoothing_weight": getattr(c, "_smoothing_weight", DEFAULT_SMOOTHING_WEIGHT),
-                "soft_constraint_weight": getattr(c, "_soft_constraint_weight", DEFAULT_SOFT_CONSTRAINT_WEIGHT),
-                "soft_constraint_linear_weight": getattr(c, "_soft_constraint_linear_weight", DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT),
-                "terminal_weight": getattr(c, "_terminal_weight", DEFAULT_TERMINAL_WEIGHT),
-                "horizon": getattr(c, "_horizon", DEFAULT_HORIZON),
-                "update_interval": getattr(c, "_update_interval", DEFAULT_UPDATE_INTERVAL),
-                "window_open_debounce": getattr(c, "_window_open_debounce", DEFAULT_WINDOW_OPEN_DEBOUNCE),
-                "window_open_close_settle": getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE),
-                "window_open_q_inflation": getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION),
+                )),
+                "tracking_weight": float(getattr(c, "_tracking_weight", DEFAULT_TRACKING_WEIGHT)),
+                "energy_weight": float(getattr(c, "_energy_weight", DEFAULT_ENERGY_WEIGHT)),
+                "energy_price_weight": float(getattr(c, "_energy_price_weight", DEFAULT_ENERGY_PRICE_WEIGHT)),
+                "smoothing_weight": float(getattr(c, "_smoothing_weight", DEFAULT_SMOOTHING_WEIGHT)),
+                "soft_constraint_weight": float(getattr(c, "_soft_constraint_weight", DEFAULT_SOFT_CONSTRAINT_WEIGHT)),
+                "soft_constraint_linear_weight": float(getattr(c, "_soft_constraint_linear_weight", DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT)),
+                "terminal_weight": float(getattr(c, "_terminal_weight", DEFAULT_TERMINAL_WEIGHT)),
+                "horizon": int(getattr(c, "_horizon", DEFAULT_HORIZON)),
+                "update_interval": int(getattr(c, "_update_interval", DEFAULT_UPDATE_INTERVAL)),
+                "window_open_debounce": int(getattr(c, "_window_open_debounce", DEFAULT_WINDOW_OPEN_DEBOUNCE)),
+                "window_open_close_settle": int(getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE)),
+                "window_open_q_inflation": float(getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION)),
             }
             _LOGGER.debug("Heating Assistant: get_controller_config -> %s", config)
             connection.send_result(msg["id"], {"config": config})
