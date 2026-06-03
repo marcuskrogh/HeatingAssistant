@@ -1,5 +1,3 @@
-import { entityValue, formatNumber } from '../utils.js';
-
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
 const PARAM_DEFS = [
@@ -42,15 +40,11 @@ const WINDOW_DEFAULTS = {
   window_open_q_inflation: 10.0,
 };
 
-export function renderControllerTuning(container, rooms, state, connection, hass) {
-  return renderTuningIndex(container, rooms, state, connection, hass);
+export function renderControllerTuning(container, _rooms, _state, connection, hass) {
+  return renderTuningIndex(container, connection, hass);
 }
 
-// ---------------------------------------------------------------------------
-// Index view — MPC params + Window Configuration
-// ---------------------------------------------------------------------------
-
-function renderTuningIndex(container, rooms, initialState, connection, hass) {
+function renderTuningIndex(container, connection, hass) {
   container.innerHTML = '';
 
   const header = document.createElement('div');
@@ -144,7 +138,6 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     if (type) statusEl.classList.add(`tuning-actions__status--${type}`);
   }
 
-  // Populate inputs from a live config object — never falls back to defaults.
   function populate(config) {
     for (const def of PARAM_DEFS) {
       const val = config[def.key];
@@ -156,68 +149,38 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     }
   }
 
-  // Fill every box with factory defaults — only used by the Reset button.
   function populateDefaults() {
-    for (const def of PARAM_DEFS) {
-      inputs[def.key].value = DEFAULTS[def.key];
-    }
-    for (const def of WINDOW_DEFS) {
-      windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
-    }
+    for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
+    for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
   }
 
-  // ---- Config loading -------------------------------------------------------
-  // Two sources, tried in order on each attempt:
-  //   1. hass.states — synchronous, zero latency, always correct when the
-  //      integration is running (the sensor writes state on every coordinator
-  //      update AND immediately after Apply Changes via async_update_listeners).
-  //   2. WebSocket — calls the backend directly, bypassing any stale state
-  //      snapshot; used as confirmation and fallback.
-  // Defaults are NEVER used here.  Inputs stay blank until real values arrive.
-
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  let loaded = false;
-  let destroyed = false;
-
-  // Return the most up-to-date hass object available.
+  // Return the most up-to-date hass object — connection._hass is updated on
+  // every set hass() call in the panel element, whereas the `hass` closure
+  // variable is the snapshot from when this page was rendered.
   function liveHass() {
     return connection._hass ?? hass;
   }
 
-  // Scan hass.states for the config entity.
   function fromEntityState() {
     const states = liveHass()?.states ?? {};
-    // Direct lookup first.
     const direct = states[CONFIG_ENTITY];
-    if (direct?.attributes?.tracking_weight !== undefined) {
-      return direct.attributes;
-    }
-    // Fallback scan for any sensor with both tuning keys (handles renamed entities).
+    if (direct?.attributes?.tracking_weight !== undefined) return direct.attributes;
     for (const [id, s] of Object.entries(states)) {
       if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
         const a = s.attributes;
-        if (a.tracking_weight !== undefined && a.update_interval !== undefined) {
-          return a;
-        }
+        if (a.tracking_weight !== undefined && a.update_interval !== undefined) return a;
       }
     }
     return null;
   }
 
-  // Call the backend WebSocket command directly (no wrapper, no extra layer).
   async function fromWebSocket() {
     const h = liveHass();
     if (typeof h?.callWS !== 'function') return null;
     try {
-      const result = await h.callWS({
-        type: 'heating_assistant/get_controller_config',
-      });
-      // callWS resolves with the `result` field of the HA WS response,
-      // which is {"config": {...}} for this command.
+      const result = await h.callWS({ type: 'heating_assistant/get_controller_config' });
       const cfg = result?.config;
-      if (cfg && typeof cfg === 'object' && Object.keys(cfg).length > 0) {
-        return cfg;
-      }
+      if (cfg && typeof cfg === 'object' && Object.keys(cfg).length > 0) return cfg;
       console.warn('[TuningPage] WS returned empty config:', result);
     } catch (e) {
       console.error('[TuningPage] WS call failed:', e);
@@ -228,22 +191,16 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
   function applyConfig(cfg) {
     if (!cfg) return false;
     populate(cfg);
-    loaded = true;
     setStatus('');
     return true;
   }
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let destroyed = false;
+
   async function loadConfig() {
-    // Attempt 1: entity state (instant — entity writes state on every
-    // coordinator tick and after Apply Changes).
     if (applyConfig(fromEntityState())) return;
-
     setStatus('Loading current values…', 'running');
-
-    // Retry loop: covers the startup window before the first coordinator tick
-    // writes entity state.  Each iteration tries WS first (authoritative),
-    // then entity state again in case a state_changed event landed while we
-    // were awaiting the WS round-trip.
     for (const delay of [0, 500, 1000, 2000, 4000]) {
       if (destroyed) return;
       if (delay) await sleep(delay);
@@ -251,13 +208,8 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
       if (applyConfig(await fromWebSocket())) return;
       if (applyConfig(fromEntityState())) return;
     }
-
-    // Nothing worked — show a clear message.  The update() handler below will
-    // still recover if entity state arrives later (e.g. after coordinator ticks).
     setStatus(
-      'Could not load current values. ' +
-      'Check the browser console (F12) for details and ensure the ' +
-      'Heating Assistant integration is running.',
+      'Could not load current values. Check the browser console (F12) for details and ensure the Heating Assistant integration is running.',
       'error',
     );
   }
@@ -267,20 +219,13 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     btnApply.disabled = true;
     try {
       const mpcData = {};
-      for (const def of PARAM_DEFS) {
-        mpcData[def.key] = def.parse(inputs[def.key].value);
-      }
+      for (const def of PARAM_DEFS) mpcData[def.key] = def.parse(inputs[def.key].value);
       await hass.callService('heating_assistant', 'update_controller_tuning', mpcData);
 
       const windowData = {};
-      for (const def of WINDOW_DEFS) {
-        windowData[def.key] = def.parse(windowInputs[def.key].value);
-      }
+      for (const def of WINDOW_DEFS) windowData[def.key] = def.parse(windowInputs[def.key].value);
       await hass.callService('heating_assistant', 'update_estimation_params', windowData);
 
-      // Re-read so boxes reflect what the backend now holds.
-      // async_update_listeners() fires in the service handler, so a single
-      // WS round-trip (reading coordinator memory directly) is sufficient.
       applyConfig(await fromWebSocket()) || applyConfig(fromEntityState());
       setStatus('Applied successfully.', 'success');
     } catch (err) {
@@ -289,7 +234,6 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     btnApply.disabled = false;
   });
 
-  // Reset only fills boxes with defaults — does NOT call any service.
   btnReset.addEventListener('click', () => {
     populateDefaults();
     setStatus('Default values loaded — click Apply Changes to save.', '');
@@ -298,22 +242,16 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
   loadConfig();
 
   return {
-    update(newState) {
-      // Resolve focus correctly inside a shadow DOM — document.activeElement
-      // returns the shadow host, not the focused input inside the shadow root.
+    update() {
+      // Don't overwrite a value the user is actively editing.
       const rootNode = container.getRootNode();
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
-      if (allInputs.some((inp) => inp === focused)) return; // don't clobber edits
-
-      // Stay in sync with live coordinator changes, and recover from the
-      // initial-load error if a state_changed event arrives later.
-      // fromEntityState() reads the current live hass.states, so newState
-      // (the incremental update) doesn't need to be scanned separately.
+      if (allInputs.some((inp) => inp === focused)) return;
       applyConfig(fromEntityState());
     },
     destroy() {
-      destroyed = true; // halt any in-flight retry backoff loop
+      destroyed = true;
     },
   };
 }
