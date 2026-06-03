@@ -725,12 +725,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    # The ?v= token busts the browser cache for the panel entry
-                    # point.  It MUST match PANEL_VERSION in industrial-dashboard.js
-                    # — bump BOTH together on every frontend change, otherwise the
-                    # browser serves a cached entry point that imports stale
-                    # submodules (e.g. an old tuning-controller.js).
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=29",
+                    # This ?v= token is the SINGLE source of truth for the
+                    # frontend cache-bust version.  industrial-dashboard.js reads
+                    # this exact token off its own URL (import.meta.url) and reuses
+                    # it for every dynamically-imported submodule, so the entry
+                    # point and its submodules can never drift out of sync.  Bump
+                    # this token (and nothing else) on every frontend change to
+                    # force browsers/service-workers to fetch fresh assets.
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=30",
                     "embed_iframe": False,
                 }
             },
