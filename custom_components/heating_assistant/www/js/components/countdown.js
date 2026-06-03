@@ -7,7 +7,7 @@ export function createCountdown(state, small = false) {
   const dtS = getDtSeconds(state);
   const remaining = computeRemaining(state, dtS);
 
-  renderCountdownContent(container, remaining, dtS, small);
+  renderCountdownContent(container, remaining, dtS, small, isSystemStopped(state));
 
   return {
     element: container,
@@ -15,13 +15,22 @@ export function createCountdown(state, small = false) {
     tick(currentState) {
       const dt = getDtSeconds(currentState);
       const rem = computeRemaining(currentState, dt);
-      updateCountdownDOM(container, rem, dt, small);
+      updateCountdownDOM(container, rem, dt, isSystemStopped(currentState));
     },
   };
 }
 
 export function updateCountdown(countdown, state) {
   countdown._dtS = getDtSeconds(state);
+}
+
+// The control countdown is meaningless while the system is stopped: no control
+// action is taken at the next tick, so the ring is frozen and the value is
+// blanked rather than counting down. Driven by the same system_enabled flag the
+// nav-bar START/STOP button reflects.
+function isSystemStopped(state) {
+  const enabled = entityAttr(state, systemEntity('system_summary'), 'system_enabled');
+  return enabled === false;
 }
 
 function getDtSeconds(state) {
@@ -39,42 +48,34 @@ function computeRemaining(state, dtS) {
   return remaining;
 }
 
-function renderCountdownContent(container, remaining, dtS, small) {
-  const progress = Math.min(1, Math.max(0, 1 - remaining / dtS));
+function renderCountdownContent(container, remaining, dtS, small, stopped) {
+  const progress = stopped ? 0 : Math.min(1, Math.max(0, 1 - remaining / dtS));
   const circumference = 2 * Math.PI * 34;
   const dashOffset = circumference * (1 - progress);
+  const ringClass = small ? 'countdown__ring countdown__ring--small' : 'countdown__ring';
+  const valueText = stopped ? '—' : formatCountdown(remaining);
+  const labelText = stopped ? 'STOPPED' : 'NEXT CONTROL';
 
-  if (small) {
-    container.innerHTML = `
-      <svg class="countdown__ring countdown__ring--small" viewBox="0 0 80 80">
-        <circle class="countdown__ring-track" cx="40" cy="40" r="34" />
-        <circle class="countdown__ring-fill" cx="40" cy="40" r="34"
-          stroke-dasharray="${circumference}"
-          stroke-dashoffset="${dashOffset}" />
-      </svg>
-      <span class="countdown__value">${formatCountdown(remaining)}</span>
-      <span class="countdown__interval">\u0394t = ${Math.round(dtS)}s</span>
-      <span class="countdown__label">NEXT CONTROL</span>
-    `;
-  } else {
-    container.innerHTML = `
-      <svg class="countdown__ring" viewBox="0 0 80 80">
-        <circle class="countdown__ring-track" cx="40" cy="40" r="34" />
-        <circle class="countdown__ring-fill" cx="40" cy="40" r="34"
-          stroke-dasharray="${circumference}"
-          stroke-dashoffset="${dashOffset}" />
-      </svg>
-      <span class="countdown__value">${formatCountdown(remaining)}</span>
-      <span class="countdown__interval">\u0394t = ${Math.round(dtS)}s</span>
-      <span class="countdown__label">NEXT CONTROL</span>
-    `;
-  }
+  container.classList.toggle('countdown--paused', !!stopped);
+  container.innerHTML = `
+    <svg class="${ringClass}" viewBox="0 0 80 80">
+      <circle class="countdown__ring-track" cx="40" cy="40" r="34" />
+      <circle class="countdown__ring-fill" cx="40" cy="40" r="34"
+        stroke-dasharray="${circumference}"
+        stroke-dashoffset="${dashOffset}" />
+    </svg>
+    <span class="countdown__value">${valueText}</span>
+    <span class="countdown__interval">Δt = ${Math.round(dtS)}s</span>
+    <span class="countdown__label">${labelText}</span>
+  `;
 }
 
-function updateCountdownDOM(container, remaining, dtS, small) {
-  const progress = Math.min(1, Math.max(0, 1 - remaining / dtS));
+function updateCountdownDOM(container, remaining, dtS, stopped) {
+  const progress = stopped ? 0 : Math.min(1, Math.max(0, 1 - remaining / dtS));
   const circumference = 2 * Math.PI * 34;
   const dashOffset = circumference * (1 - progress);
+
+  container.classList.toggle('countdown--paused', !!stopped);
 
   const ring = container.querySelector('.countdown__ring-fill');
   if (ring) {
@@ -83,5 +84,8 @@ function updateCountdownDOM(container, remaining, dtS, small) {
   }
 
   const valueEl = container.querySelector('.countdown__value');
-  if (valueEl) valueEl.textContent = formatCountdown(remaining);
+  if (valueEl) valueEl.textContent = stopped ? '—' : formatCountdown(remaining);
+
+  const labelEl = container.querySelector('.countdown__label');
+  if (labelEl) labelEl.textContent = stopped ? 'STOPPED' : 'NEXT CONTROL';
 }

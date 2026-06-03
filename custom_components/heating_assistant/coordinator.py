@@ -1659,6 +1659,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 if self.is_window_override_active(src.room):
                     self.actions[src.name] = 0.0
 
+            # System STOPPED: the controller still computed the optimal actions
+            # above (so predictions, forecasts and the heating schedule stay
+            # live), but the dashboard stop switch means we must not push any
+            # signal to the heater entities this cycle.  Replace the *commanded*
+            # actions and power with what each heater is actually delivering —
+            # read back from its real entity state — and tell the EKF the true
+            # applied input (via notify_applied_u inside the helper) so the
+            # state estimate and predictions stay grounded in reality instead of
+            # drifting on inputs that were never applied.
+            if not self._system_enabled:
+                self.actions = self._read_delivered_actions(outdoor_temp)
+
             # 5. Store heat-flow breakdown (independent of MPC solve success)
             self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
 
@@ -1728,14 +1740,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 7. Write set-points to heater entities. Keep the latest
             # forecast/prediction entities available even if HA service calls
             # fail for a specific heater entity.
-            try:
-                await self._apply_actions(outdoor_temp)
-            except Exception:
-                _LOGGER.warning(
-                    "Failed to apply computed heater actions; keeping forecast "
-                    "and prediction entities available",
-                    exc_info=True,
-                )
+            #
+            # Skipped entirely while the system is stopped: the controller keeps
+            # computing optimal actions for display, but no signals are pushed to
+            # the heaters — they are left in whatever state they were last
+            # commanded to, since the dashboard stop relinquishes control.
+            if self._system_enabled:
+                try:
+                    await self._apply_actions(outdoor_temp)
+                except Exception:
+                    _LOGGER.warning(
+                        "Failed to apply computed heater actions; keeping forecast "
+                        "and prediction entities available",
+                        exc_info=True,
+                    )
 
             return {
                 "temperatures": dict(self.model.temperatures),
@@ -2204,6 +2222,111 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     _parse_weather_forecast = staticmethod(_weather.parse_temperature_forecast)
     _parse_cloud_forecast = staticmethod(_weather.parse_cloud_forecast)
     _interpolate_forecast = staticmethod(_weather.interpolate_forecast)
+
+    # ------------------------------------------------------------------
+    # Delivered-power read-back (used while the system is stopped)
+    # ------------------------------------------------------------------
+
+    def _read_delivered_actions(self, outdoor_temp: float) -> Dict[str, float]:
+        """Return the *actually delivered* control fraction for every source.
+
+        Used when the dashboard stop switch is off: instead of the controller's
+        freshly computed (but un-applied) optimal actions, read each heater
+        entity's real state back from Home Assistant and derive the fraction it
+        is currently delivering.  Each source's ``current_power`` is updated to
+        match so the power sensors report what the hardware is doing, and the
+        controller's EKF is notified of the true applied input via
+        :meth:`HeatingController.notify_applied_u` so predictions stay
+        consistent on the next cycle.
+
+        ``switch`` and ``number`` heaters report an exact delivered fraction.
+        For ``climate`` heaters the instantaneous modulation is not observable,
+        so it is estimated from the entity's reported ``hvac_action`` and the
+        gap between its target and current temperature (inverting the
+        proportional setpoint this integration writes when commanding it).
+        """
+        controller = getattr(self, "controller", None)
+        applied: Dict[str, float] = {}
+        for src in self.heat_sources:
+            frac = self._read_delivered_fraction(src)
+            self._set_source_power(src, frac, outdoor_temp)
+            applied[src.name] = frac
+            if controller is not None:
+                controller.notify_applied_u(src.name, frac)
+        return applied
+
+    def _read_delivered_fraction(self, src: HeatSource) -> float:
+        """Read one heat source's actually-delivered control fraction.
+
+        Returns a value in ``[-1, 1]`` (negative = active cooling).  Returns
+        ``0.0`` when the heater entity is missing, unavailable, or off.
+        """
+        entity_id = src.heater_entity
+        if not entity_id:
+            return 0.0
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return 0.0
+        domain = entity_id.split(".")[0]
+        if domain == "switch":
+            return 1.0 if state.state == "on" else 0.0
+        if domain == "number":
+            value = _coerce_opt_float(state.state)
+            if value is None:
+                return 0.0
+            return max(0.0, min(1.0, value / 100.0))
+        if domain == "climate":
+            return self._read_delivered_fraction_climate(src, state)
+        return 0.0
+
+    def _read_delivered_fraction_climate(self, src: HeatSource, state: Any) -> float:
+        """Best-effort delivered fraction for a climate heater.
+
+        Modulating climate entities do not report instantaneous power, so the
+        magnitude is inferred from the gap between the entity's own target and
+        current temperature — the inverse of the proportional setpoint this
+        integration writes when commanding the unit — gated by the reported
+        ``hvac_action`` so an idle/off unit reads as zero.
+        """
+        if state.state == "off":
+            return 0.0
+        attrs = getattr(state, "attributes", {}) or {}
+        action = attrs.get("hvac_action")
+        if action in ("off", "idle"):
+            return 0.0
+
+        target = _coerce_opt_float(attrs.get("temperature"))
+        current = _coerce_opt_float(attrs.get("current_temperature"))
+        offset = float(getattr(src, "max_temp_offset", 0.0) or 0.0)
+        gap: Optional[float] = None
+        if target is not None and current is not None and offset > 0.0:
+            gap = (target - current) / offset
+
+        # Cooling: only meaningful for sources that can actively cool.
+        if action == "cooling" or (gap is not None and gap < 0.0):
+            if getattr(src, "can_cool", False):
+                mag = abs(gap) if gap is not None else 1.0
+                return -max(0.0, min(1.0, mag))
+            return 0.0
+
+        # Heating.
+        if gap is not None:
+            return max(0.0, min(1.0, gap))
+        # No usable temperature telemetry: trust hvac_action if it reports the
+        # unit is heating, otherwise assume it is delivering nothing.
+        return 1.0 if action == "heating" else 0.0
+
+    def _set_source_power(
+        self, src: HeatSource, frac: float, outdoor_temp: float
+    ) -> None:
+        """Set ``src.current_power`` from a delivered fraction in ``[-1, 1]``."""
+        if frac >= 0.0:
+            # set_power clamps to [0, 1] and stores thermal_power as current.
+            src.set_power(frac, outdoor_temp)
+        elif hasattr(src, "cooling_power"):
+            src._current_power = src.cooling_power(outdoor_temp) * min(1.0, abs(frac))
+        else:
+            src._current_power = 0.0
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         """Write the computed set-point fractions to heater entities via HA services."""
