@@ -30,8 +30,17 @@ function findActivePeriod(periods) {
   const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   for (const p of periods) {
     const days = p.days || [0, 1, 2, 3, 4, 5, 6];
-    if (!days.includes(day)) continue;
-    if (hhmm >= p.start && hhmm < p.end) return p;
+    // Periods where end <= start cross midnight (e.g. 22:00 → 06:00).
+    // Mirror the Python SchedulePeriod.matches() logic for these.
+    if (p.end <= p.start) {
+      const prevDay = (day + 6) % 7;
+      const inFirstHalf = hhmm >= p.start && days.includes(day);
+      const inSecondHalf = hhmm < p.end && days.includes(prevDay);
+      if (inFirstHalf || inSecondHalf) return p;
+    } else {
+      if (!days.includes(day)) continue;
+      if (hhmm >= p.start && hhmm < p.end) return p;
+    }
   }
   return null;
 }
