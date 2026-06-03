@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '32';
+  return '33';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -183,6 +183,17 @@ class HaIndustrialPanel extends HTMLElement {
             </svg>
             <span class="panel-nav__name">HEATING ASSISTANT</span>
           </div>
+          <div class="panel-nav__controls">
+            <button class="panel-nav__run-btn" id="run-btn" aria-label="Start or stop the heating assistant">
+              <span class="panel-nav__run-btn-icon" id="run-btn-icon">&#9654;</span>
+              <span class="panel-nav__run-btn-label">START</span>
+            </button>
+            <span class="panel-nav__status" id="system-status">
+              <span class="status-dot" id="status-dot"></span>
+              <span class="status-label" id="status-label">STOPPED</span>
+            </span>
+          </div>
+          <span class="panel-nav__fill"></span>
           <button class="panel-nav__toggle" id="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
             <span class="panel-nav__toggle-icon">&#9776;</span>
             <span class="panel-nav__toggle-label">PAGES</span>
@@ -192,16 +203,6 @@ class HaIndustrialPanel extends HTMLElement {
             <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
             <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
             <a class="panel-nav__link" href="#tuning">TUNING</a>
-          </div>
-          <span class="panel-nav__fill"></span>
-          <div class="panel-nav__controls">
-            <button class="panel-nav__run-btn" id="run-btn" aria-label="Start or stop the heating assistant">
-              <span class="panel-nav__run-btn-label">START</span>
-            </button>
-            <span class="panel-nav__status" id="system-status">
-              <span class="status-dot" id="status-dot"></span>
-              <span class="status-label" id="status-label">STOPPED</span>
-            </span>
           </div>
         </nav>
         <main id="content" class="content">
@@ -250,18 +251,21 @@ class HaIndustrialPanel extends HTMLElement {
     const label = this.shadowRoot.getElementById('status-label');
     const btn = this.shadowRoot.getElementById('run-btn');
     const btnLabel = btn?.querySelector('.panel-nav__run-btn-label');
-    if (!dot || !label || !btn || !btnLabel) return;
+    const btnIcon = btn?.querySelector('.panel-nav__run-btn-icon');
+    if (!dot || !label || !btn || !btnLabel || !btnIcon) return;
 
     if (this._systemRunning) {
       dot.className = 'status-dot status-dot--live';
       label.textContent = 'LIVE';
       btn.classList.add('panel-nav__run-btn--running');
       btnLabel.textContent = 'STOP';
+      btnIcon.innerHTML = '&#9632;'; // ■ stop
     } else {
       dot.className = 'status-dot';
       label.textContent = 'STOPPED';
       btn.classList.remove('panel-nav__run-btn--running');
       btnLabel.textContent = 'START';
+      btnIcon.innerHTML = '&#9654;'; // ▶ play
     }
   }
 

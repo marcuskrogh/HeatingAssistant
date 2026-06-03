@@ -74,6 +74,7 @@ async def _run_apply_actions(heat_sources, actions, entity_states, room_setpoint
     model.rooms = model_rooms
     coord.model = model
 
+    coord._system_enabled = True
     coord._room_enabled = {name: True for name in room_setpoints}
     if room_enabled:
         coord._room_enabled.update(room_enabled)
@@ -767,6 +768,195 @@ class TestScaledIdleOffsetNonHP:
         assert calls[0].args[2]["hvac_mode"] == "heat"
         # overshoot = 0 → offset = 1.0; 22.0 - 1.0 = 21.0
         assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests: delivered-power read-back (system stopped)
+# ---------------------------------------------------------------------------
+
+
+def _make_readback_coord(heat_sources, entity_states, controller=None):
+    """Bare coordinator wired only for the delivered-power read-back helpers."""
+    from custom_components.heating_assistant.coordinator import (
+        HeatingAssistantCoordinator,
+    )
+
+    coord = object.__new__(HeatingAssistantCoordinator)
+    coord.hass = _make_fake_hass(entity_states)
+    coord.heat_sources = heat_sources
+    coord.controller = controller
+    return coord
+
+
+class TestReadDeliveredFraction:
+    """switch.* / number.* heaters report an exact delivered fraction."""
+
+    def test_switch_on(self):
+        h = ElectricHeater("e1", "k", max_power=2000, heater_entity="switch.h")
+        coord = _make_readback_coord([h], {"switch.h": "on"})
+        assert coord._read_delivered_fraction(h) == 1.0
+
+    def test_switch_off(self):
+        h = ElectricHeater("e1", "k", max_power=2000, heater_entity="switch.h")
+        coord = _make_readback_coord([h], {"switch.h": "off"})
+        assert coord._read_delivered_fraction(h) == 0.0
+
+    def test_number_value(self):
+        h = ElectricHeater("e1", "o", max_power=1500, heater_entity="number.p")
+        coord = _make_readback_coord([h], {"number.p": "60"})
+        assert coord._read_delivered_fraction(h) == pytest.approx(0.6)
+
+    def test_number_clamped_above_100(self):
+        h = ElectricHeater("e1", "o", max_power=1500, heater_entity="number.p")
+        coord = _make_readback_coord([h], {"number.p": "150"})
+        assert coord._read_delivered_fraction(h) == 1.0
+
+    def test_number_unparsable(self):
+        h = ElectricHeater("e1", "o", max_power=1500, heater_entity="number.p")
+        coord = _make_readback_coord([h], {"number.p": "n/a"})
+        assert coord._read_delivered_fraction(h) == 0.0
+
+    def test_no_entity_configured(self):
+        h = ElectricHeater("e1", "o", max_power=1500)
+        coord = _make_readback_coord([h], {})
+        assert coord._read_delivered_fraction(h) == 0.0
+
+    def test_missing_entity(self):
+        h = ElectricHeater("e1", "o", max_power=1500, heater_entity="switch.gone")
+        coord = _make_readback_coord([h], {})
+        assert coord._read_delivered_fraction(h) == 0.0
+
+    def test_unavailable_entity(self):
+        h = ElectricHeater("e1", "o", max_power=1500, heater_entity="switch.h")
+        coord = _make_readback_coord([h], {"switch.h": "unavailable"})
+        assert coord._read_delivered_fraction(h) == 0.0
+
+
+class TestReadDeliveredFractionClimate:
+    """climate.* delivered fraction is estimated from hvac_action + setpoint gap."""
+
+    def _hp(self, mode="heat"):
+        return HeatPump(
+            "hp1", "living_room", max_power=5000, max_temp_offset=5.0,
+            hvac_mode=mode, heater_entity="climate.hp",
+        )
+
+    def test_off_state_reads_zero(self):
+        hp = self._hp()
+        coord = _make_readback_coord(
+            [hp], {"climate.hp": {"state": "off", "attributes": {}}}
+        )
+        assert coord._read_delivered_fraction(hp) == 0.0
+
+    def test_idle_action_reads_zero(self):
+        hp = self._hp()
+        coord = _make_readback_coord(
+            [hp],
+            {"climate.hp": {"state": "heat", "attributes": {"hvac_action": "idle"}}},
+        )
+        assert coord._read_delivered_fraction(hp) == 0.0
+
+    def test_heating_infers_from_setpoint_gap(self):
+        hp = self._hp()
+        coord = _make_readback_coord(
+            [hp],
+            {"climate.hp": {"state": "heat", "attributes": {
+                "hvac_action": "heating",
+                "temperature": 24.0,
+                "current_temperature": 22.0,
+            }}},
+        )
+        # gap = (24 - 22) / 5 = 0.4
+        assert coord._read_delivered_fraction(hp) == pytest.approx(0.4)
+
+    def test_heating_no_telemetry_assumes_full(self):
+        hp = self._hp()
+        coord = _make_readback_coord(
+            [hp],
+            {"climate.hp": {"state": "heat", "attributes": {"hvac_action": "heating"}}},
+        )
+        assert coord._read_delivered_fraction(hp) == 1.0
+
+    def test_heating_no_action_no_telemetry_reads_zero(self):
+        hp = self._hp()
+        coord = _make_readback_coord(
+            [hp], {"climate.hp": {"state": "heat", "attributes": {}}}
+        )
+        assert coord._read_delivered_fraction(hp) == 0.0
+
+    def test_cooling_on_can_cool_source_is_negative(self):
+        hp = self._hp(mode="heat_cool")  # can_cool == True
+        coord = _make_readback_coord(
+            [hp],
+            {"climate.hp": {"state": "cool", "attributes": {
+                "hvac_action": "cooling",
+                "temperature": 20.0,
+                "current_temperature": 24.0,
+            }}},
+        )
+        # gap = (20 - 24) / 5 = -0.8 → cooling
+        assert coord._read_delivered_fraction(hp) == pytest.approx(-0.8)
+
+    def test_cooling_on_heating_only_source_reads_zero(self):
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000, heater_entity="climate.h"
+        )  # can_cool == False
+        coord = _make_readback_coord(
+            [heater],
+            {"climate.h": {"state": "cool", "attributes": {"hvac_action": "cooling"}}},
+        )
+        assert coord._read_delivered_fraction(heater) == 0.0
+
+
+class TestSetSourcePower:
+    """_set_source_power maps a delivered fraction onto current_power."""
+
+    def test_heating_sets_thermal_power(self):
+        h = ElectricHeater("e1", "k", max_power=2000, heater_entity="switch.h")
+        coord = _make_readback_coord([h], {})
+        coord._set_source_power(h, 0.5, outdoor_temp=5.0)
+        assert h.current_power == pytest.approx(1000.0)  # 2000 * 0.5
+
+    def test_cooling_sets_negative_power(self):
+        hp = HeatPump(
+            "hp1", "lr", max_power=5000, hvac_mode="heat_cool",
+            heater_entity="climate.hp",
+        )
+        coord = _make_readback_coord([hp], {})
+        coord._set_source_power(hp, -0.5, outdoor_temp=5.0)
+        assert hp.current_power < 0.0
+
+
+class TestReadDeliveredActions:
+    """The aggregate read-back updates power, notifies the EKF, returns fractions."""
+
+    def test_updates_power_and_notifies_controller(self):
+        h1 = ElectricHeater("e1", "k", max_power=2000, heater_entity="switch.h1")
+        h2 = ElectricHeater("e2", "o", max_power=1000, heater_entity="number.h2")
+        controller = MagicMock()
+        coord = _make_readback_coord(
+            [h1, h2],
+            {"switch.h1": "on", "number.h2": "50"},
+            controller=controller,
+        )
+
+        applied = coord._read_delivered_actions(outdoor_temp=5.0)
+
+        assert applied == {"e1": pytest.approx(1.0), "e2": pytest.approx(0.5)}
+        assert h1.current_power == pytest.approx(2000.0)
+        assert h2.current_power == pytest.approx(500.0)
+        notified = {
+            c.args[0]: c.args[1]
+            for c in controller.notify_applied_u.call_args_list
+        }
+        assert notified == {"e1": pytest.approx(1.0), "e2": pytest.approx(0.5)}
+
+    def test_no_controller_is_tolerated(self):
+        h = ElectricHeater("e1", "k", max_power=2000, heater_entity="switch.h")
+        coord = _make_readback_coord([h], {"switch.h": "off"}, controller=None)
+        applied = coord._read_delivered_actions(outdoor_temp=5.0)
+        assert applied == {"e1": 0.0}
+        assert h.current_power == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
