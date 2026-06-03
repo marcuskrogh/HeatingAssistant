@@ -15,6 +15,14 @@ from custom_components.heating_assistant.const import (
 )
 
 
+class _SetupListenerCoordinatorMixin:
+    def setup_startup_listeners(self):
+        return None
+
+    def setup_window_listeners(self):
+        return None
+
+
 @pytest.mark.asyncio
 async def test_setup_entry_continues_on_first_refresh_failure(monkeypatch):
     entry = SimpleNamespace(
@@ -42,7 +50,7 @@ async def test_setup_entry_continues_on_first_refresh_failure(monkeypatch):
         async_forward_entry_setups=AsyncMock(),
     )
 
-    class _FailingCoordinator:
+    class _FailingCoordinator(_SetupListenerCoordinatorMixin):
         def __init__(self, *_args, **_kwargs):
             pass
 
@@ -86,7 +94,7 @@ async def test_setup_entry_uses_rooms_from_options_when_no_yaml(monkeypatch):
 
     captured: dict = {}
 
-    class _CapturingCoordinator:
+    class _CapturingCoordinator(_SetupListenerCoordinatorMixin):
         def __init__(self, _hass, merged_entry, *_args, **_kwargs):
             captured["entry_data"] = merged_entry.data
 
@@ -125,7 +133,7 @@ async def test_setup_entry_yaml_overrides_options_rooms(monkeypatch):
 
     captured: dict = {}
 
-    class _CapturingCoordinator:
+    class _CapturingCoordinator(_SetupListenerCoordinatorMixin):
         def __init__(self, _hass, merged_entry, *_args, **_kwargs):
             captured["entry_data"] = merged_entry.data
 

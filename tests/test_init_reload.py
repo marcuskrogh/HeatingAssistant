@@ -13,6 +13,14 @@ from custom_components.heating_assistant.const import (
 )
 
 
+class _SetupListenerCoordinatorMixin:
+    def setup_startup_listeners(self):
+        return None
+
+    def setup_window_listeners(self):
+        return None
+
+
 def _make_entry(entry_id: str = "entry-1") -> SimpleNamespace:
     return SimpleNamespace(
         data={CONF_ROOMS: [], CONF_HEAT_SOURCES: []},
@@ -87,7 +95,7 @@ async def test_setup_entry_restores_stashed_state(monkeypatch):
         def __init__(self):
             self.setpoint = 22.0
 
-    class _Coordinator:
+    class _Coordinator(_SetupListenerCoordinatorMixin):
         def __init__(self, *_args, **_kwargs):
             self._history_buffer = []
             self._room_enabled = {"living_room": True, "kitchen": True}
@@ -120,7 +128,7 @@ async def test_setup_entry_attaches_update_listener(monkeypatch):
     entry = _make_entry()
     hass.data[DOMAIN] = {"yaml_config": {CONF_ROOMS: [], CONF_HEAT_SOURCES: []}}
 
-    class _Coordinator:
+    class _Coordinator(_SetupListenerCoordinatorMixin):
         def __init__(self, *_args, **_kwargs):
             self._history_buffer = []
             self._room_enabled = {}
