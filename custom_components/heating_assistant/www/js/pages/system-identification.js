@@ -439,11 +439,17 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   function renderParamHistory(st) {
     historyListEl.innerHTML = '';
     const config = st[CONFIG_ENTITY]?.attributes || {};
-    const history = config.parameter_history?.[roomSlug] || [];
-    if (history.length === 0) {
+
+    // parameter_history is a LIST of full-system snapshots (most recent first).
+    // Each entry: { rooms: { "Actual Room Name": { thermal_mass, r_external, ... } },
+    //               estimated_at, source, rmse? }
+    // We look up per-room data using room.name (the reconstructed actual name).
+    const allHistory = config.parameter_history || [];
+    if (allHistory.length === 0) {
       historyListEl.innerHTML = '<span class="tuning-section__desc">No history available.</span>';
       return;
     }
+
     const table = document.createElement('table');
     table.className = 'param-history-table';
     table.innerHTML = `
@@ -456,8 +462,12 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       <tbody></tbody>
     `;
     const tbody = table.querySelector('tbody');
-    for (let i = 0; i < history.length; i++) {
-      const entry = history[i];
+    for (let i = 0; i < allHistory.length; i++) {
+      const entry = allHistory[i];
+      // Per-room params are nested under entry.rooms[actual_room_name].
+      const roomData = entry.rooms?.[room.name] || {};
+      const thermalMass = roomData.thermal_mass;
+      const rExternal = roomData.r_external;
       const date = entry.estimated_at
         ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '—';
@@ -466,8 +476,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <td>${i + 1}</td>
         <td>${date}</td>
         <td>${(entry.source || 'manual').toUpperCase()}</td>
-        <td>${entry.thermal_mass != null ? formatMass(entry.thermal_mass) : '—'}</td>
-        <td>${entry.r_external != null ? formatNumber(entry.r_external, 4) : '—'}</td>
+        <td>${thermalMass != null ? formatMass(thermalMass) : '—'}</td>
+        <td>${rExternal != null ? formatNumber(rExternal, 4) : '—'}</td>
         <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' °C' : '—'}</td>
         <td><button class="btn btn--ghost btn--sm" data-revert="${i}">Revert</button></td>
       `;
@@ -481,8 +491,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         btn.disabled = true;
         btn.textContent = '…';
         try {
+          // room.name is the actual configured room name (e.g. "Living Room"),
+          // which is what model.rooms uses as its key.
           await hass.callService('heating_assistant', 'revert_parameters', {
-            room_name: roomSlug,
+            room_name: room.name,
             history_index: idx,
           });
           btn.textContent = '✓';
@@ -528,7 +540,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnApplyParams.disabled = true;
     try {
       await hass.callService('heating_assistant', 'store_identified_parameters', {
-        room_name: roomSlug,
+        room_name: room.name,
         thermal_mass: parseFloat(thermalMassInput.value),
         r_external: parseFloat(rExternalInput.value),
         source: 'manual',
@@ -562,8 +574,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
+      // room.name is the actual configured room name the backend expects.
+      // The thermal_mass_*/r_external_* override keys still use roomSlug because
+      // the backend derives them via slugify(room_name) which maps to roomSlug.
       await hass.callService('heating_assistant', 'run_sysid_simulation', {
-        room_name: roomSlug,
+        room_name: room.name,
         horizon_hours: parseFloat(horizonInput.value),
         sigma_w: parseFloat(sigmaWInput.value),
         sigma_v: parseFloat(sigmaVInput.value),
@@ -585,7 +600,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnOpenLoop.disabled = true;
     try {
       await hass.callService('heating_assistant', 'run_open_loop_simulation', {
-        room_name: roomSlug,
+        room_name: room.name,
         segment_length: 30,
         horizon_hours: parseFloat(horizonInput.value),
       });
