@@ -43,14 +43,14 @@ const WINDOW_DEFAULTS = {
 };
 
 export function renderControllerTuning(container, rooms, state, connection, hass) {
-  return renderTuningIndex(container, rooms, connection, hass);
+  return renderTuningIndex(container, rooms, state, connection, hass);
 }
 
 // ---------------------------------------------------------------------------
 // Index view — MPC params + Window Configuration
 // ---------------------------------------------------------------------------
 
-function renderTuningIndex(container, rooms, connection, hass) {
+function renderTuningIndex(container, rooms, initialState, connection, hass) {
   container.innerHTML = '';
 
   const header = document.createElement('div');
@@ -153,20 +153,16 @@ function renderTuningIndex(container, rooms, connection, hass) {
     }
   }
 
-  // Try to find the config entity in a state snapshot by scanning all
-  // sensor.heating_assistant_* entities for one that carries the tuning keys.
-  // Requires BOTH tracking_weight AND update_interval to be present at the top
-  // level — this uniquely identifies ControllerConfigSensor and prevents
-  // MPCPerformanceSensor (which has "horizon" but not "update_interval") from
-  // being returned as a false positive.
+  // Scan a state snapshot for the config entity.  Requires BOTH tracking_weight
+  // AND update_interval to avoid matching MPCPerformanceSensor (has "horizon"
+  // but not "update_interval").
   function configFromStateSnapshot(snapshot) {
-    // Direct lookup first
+    if (!snapshot) return null;
     const direct = snapshot[CONFIG_ENTITY];
     if (direct?.attributes?.tracking_weight !== undefined &&
         direct?.attributes?.update_interval !== undefined) {
       return direct.attributes;
     }
-    // Fallback: scan all heating_assistant sensors
     for (const [id, s] of Object.entries(snapshot)) {
       if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
         const a = s.attributes;
@@ -178,40 +174,59 @@ function renderTuningIndex(container, rooms, connection, hass) {
     return null;
   }
 
-  // Primary load: WS command reads directly from the coordinator — the single
-  // source of truth.  Falls back to entity state (available without restart if
-  // the entity already existed), then to a scan of the current hass states.
+  // Fill inputs immediately with factory defaults so boxes are never blank
+  // while the async load is in flight.
+  populate({});
+
+  // Loading order: synchronous state lookups first (zero latency), then the
+  // WebSocket command (authoritative but async), then a final scan of the
+  // connection's latest hass reference.
   async function loadConfig() {
     try {
-      // 1. WebSocket command — authoritative, real-time coordinator values.
+      // 1. Router's current state snapshot — fastest path, no network round-trip.
+      //    initialState contains all sensor.heating_assistant_* entities already
+      //    present in hass.states at navigation time.
+      const fromRouterState = configFromStateSnapshot(initialState);
+      if (fromRouterState) {
+        populate(fromRouterState);
+        // Confirm with the WS command and silently update if it returns fresher data.
+        connection.getControllerConfig().then((cfg) => {
+          if (cfg && Object.keys(cfg).length > 0) populate(cfg);
+        }).catch(() => {});
+        return;
+      }
+
+      // 2. hass.states direct lookup (render-time hass object).
+      const fromHass = configFromStateSnapshot(hass.states || {});
+      if (fromHass) {
+        populate(fromHass);
+        connection.getControllerConfig().then((cfg) => {
+          if (cfg && Object.keys(cfg).length > 0) populate(cfg);
+        }).catch(() => {});
+        return;
+      }
+
+      // 3. WebSocket command — reads directly from the coordinator, bypasses
+      //    the entity entirely.  Requires the integration to be loaded.
       const wsConfig = await connection.getControllerConfig();
       if (wsConfig && Object.keys(wsConfig).length > 0) {
         populate(wsConfig);
         return;
       }
 
-      // 2. Entity state via HaConnection (always-current hass reference).
-      const entityState = connection.getEntityState(CONFIG_ENTITY);
-      if (entityState?.attributes?.tracking_weight !== undefined) {
-        populate(entityState.attributes);
+      // 4. connection._hass.states — may have fresher state than render-time hass
+      //    if updates arrived while the async steps above were running.
+      const fromConnectionState = configFromStateSnapshot(connection._hass?.states || {});
+      if (fromConnectionState) {
+        populate(fromConnectionState);
         return;
       }
 
-      // 3. Scan connection._hass.states (catches entities whose id may differ
-      //    from CONFIG_ENTITY due to HA entity registry naming).
-      const fromSnapshot = configFromStateSnapshot(connection._hass?.states || {});
-      if (fromSnapshot) {
-        populate(fromSnapshot);
-        return;
-      }
-
-      // 4. No live data — fill with backend factory defaults so the form is
-      //    at least usable.  Restart HA to pick up the new sensor.
-      populate({});
-      setStatus('Could not read current parameters — restart Home Assistant and reload.', 'error');
+      // Nothing found — inputs already show factory defaults from the pre-fill above.
+      setStatus('Showing factory defaults — current values could not be loaded.', '');
     } catch (e) {
       console.error('[TuningPage] loadConfig failed:', e);
-      populate({});
+      // Inputs remain at factory defaults.
     }
   }
 
@@ -258,7 +273,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
     setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
-  // Initial authoritative load via WebSocket (or entity state fallback).
   loadConfig();
 
   return {
