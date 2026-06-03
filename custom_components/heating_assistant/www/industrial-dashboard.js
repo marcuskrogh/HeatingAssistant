@@ -2,26 +2,28 @@ const BASE_PATH = '/ha-industrial-panel';
 
 // Cache-bust token for all dynamically-imported submodules (js/pages/*, css).
 //
-// This is derived automatically from THIS file's OWN URL query string — the
-// `?v=` that HA's panel registration appends via `js_url` in __init__.py.  The
-// browser fetches this entry point at exactly that `?v=`, so reusing the same
-// token for every submodule import guarantees the entry point and its
-// submodules are ALWAYS loaded at the same version.
+// Derived from THIS file's own URL query string — the `?v=` that HA's panel
+// registration appends via `js_url` in __init__.py.  Reusing the same token
+// for every submodule import guarantees the entry point and its submodules
+// are always loaded at the same version, so the two can never drift.
 //
-// This removes a whole class of bugs: previously PANEL_VERSION was a hardcoded
-// literal that had to be hand-bumped in lockstep with `js_url`, and whenever
-// the two drifted (e.g. js_url frozen at v=26 while this advanced to v=27) the
-// browser kept serving a cached entry point that pulled in stale submodules —
-// so frontend fixes never reached the page.  There is now a SINGLE source of
-// truth for the frontend cache-bust token: the `?v=` on `js_url`.
+// Uses document.currentScript.src (available in classic scripts throughout
+// synchronous top-level execution).  import.meta.url is NOT used here because
+// HA loads panel JS as a classic <script>, and import.meta is module-only
+// syntax that causes a parse-time SyntaxError in classic scripts regardless of
+// any try/catch.
+//
+// Single source of truth: the `?v=` on `js_url` in __init__.py.  Bump that
+// one number on every frontend change — no need to touch this file.
 const PANEL_VERSION = (() => {
   try {
-    const v = new URL(import.meta.url).searchParams.get('v');
+    const src = document.currentScript?.src ?? '';
+    const v = new URLSearchParams(src.split('?')[1] ?? '').get('v');
     if (v) return v;
   } catch (e) {
-    /* import.meta unavailable (non-module context) — fall through */
+    /* unexpected — fall through to hardcoded fallback */
   }
-  return 'dev';
+  return '30';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
