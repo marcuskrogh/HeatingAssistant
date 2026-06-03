@@ -144,12 +144,25 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     if (type) statusEl.classList.add(`tuning-actions__status--${type}`);
   }
 
+  // Populate inputs from a live config object — never falls back to defaults.
   function populate(config) {
     for (const def of PARAM_DEFS) {
-      inputs[def.key].value = config[def.key] ?? DEFAULTS[def.key];
+      const val = config[def.key];
+      if (val !== undefined && val !== null) inputs[def.key].value = val;
     }
     for (const def of WINDOW_DEFS) {
-      windowInputs[def.key].value = config[def.key] ?? WINDOW_DEFAULTS[def.key];
+      const val = config[def.key];
+      if (val !== undefined && val !== null) windowInputs[def.key].value = val;
+    }
+  }
+
+  // Fill every box with factory defaults — only used by the Reset button.
+  function populateDefaults() {
+    for (const def of PARAM_DEFS) {
+      inputs[def.key].value = DEFAULTS[def.key];
+    }
+    for (const def of WINDOW_DEFS) {
+      windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
     }
   }
 
@@ -174,59 +187,33 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     return null;
   }
 
-  // Fill inputs immediately with factory defaults so boxes are never blank
-  // while the async load is in flight.
-  populate({});
-
-  // Loading order: synchronous state lookups first (zero latency), then the
-  // WebSocket command (authoritative but async), then a final scan of the
-  // connection's latest hass reference.
+  // Load the authoritative current values.  The WebSocket command reads
+  // directly from the coordinator and is the single source of truth.
+  // Entity-state snapshots serve as a fallback when the WS round-trip fails.
+  // Defaults are NEVER used here — inputs are left unchanged on failure.
   async function loadConfig() {
     try {
-      // 1. Router's current state snapshot — fastest path, no network round-trip.
-      //    initialState contains all sensor.heating_assistant_* entities already
-      //    present in hass.states at navigation time.
-      const fromRouterState = configFromStateSnapshot(initialState);
-      if (fromRouterState) {
-        populate(fromRouterState);
-        // Confirm with the WS command and silently update if it returns fresher data.
-        connection.getControllerConfig().then((cfg) => {
-          if (cfg && Object.keys(cfg).length > 0) populate(cfg);
-        }).catch(() => {});
-        return;
-      }
-
-      // 2. hass.states direct lookup (render-time hass object).
-      const fromHass = configFromStateSnapshot(hass.states || {});
-      if (fromHass) {
-        populate(fromHass);
-        connection.getControllerConfig().then((cfg) => {
-          if (cfg && Object.keys(cfg).length > 0) populate(cfg);
-        }).catch(() => {});
-        return;
-      }
-
-      // 3. WebSocket command — reads directly from the coordinator, bypasses
-      //    the entity entirely.  Requires the integration to be loaded.
+      // Primary: WebSocket command — reads directly from coordinator.
       const wsConfig = await connection.getControllerConfig();
       if (wsConfig && Object.keys(wsConfig).length > 0) {
         populate(wsConfig);
         return;
       }
 
-      // 4. connection._hass.states — may have fresher state than render-time hass
-      //    if updates arrived while the async steps above were running.
-      const fromConnectionState = configFromStateSnapshot(connection._hass?.states || {});
-      if (fromConnectionState) {
-        populate(fromConnectionState);
+      // Fallback: entity state from any available snapshot.
+      const fromState =
+        configFromStateSnapshot(initialState) ||
+        configFromStateSnapshot(hass?.states || {}) ||
+        configFromStateSnapshot(connection._hass?.states || {});
+      if (fromState) {
+        populate(fromState);
         return;
       }
 
-      // Nothing found — inputs already show factory defaults from the pre-fill above.
-      setStatus('Showing factory defaults — current values could not be loaded.', '');
+      setStatus('Could not load current values — check that the integration is running.', 'error');
     } catch (e) {
       console.error('[TuningPage] loadConfig failed:', e);
-      // Inputs remain at factory defaults.
+      setStatus('Error loading configuration.', 'error');
     }
   }
 
@@ -264,12 +251,7 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
 
   // Reset only fills boxes with defaults — does NOT call any service.
   btnReset.addEventListener('click', () => {
-    for (const def of PARAM_DEFS) {
-      inputs[def.key].value = DEFAULTS[def.key];
-    }
-    for (const def of WINDOW_DEFS) {
-      windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
-    }
+    populateDefaults();
     setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
