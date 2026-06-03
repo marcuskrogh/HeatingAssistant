@@ -166,95 +166,86 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     }
   }
 
-  // Scan a state snapshot for the config entity.  Requires BOTH tracking_weight
-  // AND update_interval to avoid matching MPCPerformanceSensor (has "horizon"
+  // Return the config attributes from a state snapshot.
+  // Direct lookup by known entity_id only needs one tuning key to match —
+  // the scan used as fallback requires both tracking_weight + update_interval
+  // to avoid accidentally matching MPCPerformanceSensor (which has "horizon"
   // but not "update_interval").
   function configFromStateSnapshot(snapshot) {
     if (!snapshot) return null;
     const direct = snapshot[CONFIG_ENTITY];
-    if (direct?.attributes?.tracking_weight !== undefined &&
-        direct?.attributes?.update_interval !== undefined) {
+    if (direct?.attributes &&
+        ('tracking_weight' in direct.attributes || 'update_interval' in direct.attributes)) {
       return direct.attributes;
     }
     for (const [id, s] of Object.entries(snapshot)) {
       if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
         const a = s.attributes;
-        if (a.tracking_weight !== undefined && a.update_interval !== undefined) {
-          return a;
-        }
+        if ('tracking_weight' in a && 'update_interval' in a) return a;
       }
     }
     return null;
   }
 
+  // ---- Robust loading -----------------------------------------------------
+  // The integration may not be fully ready the instant this page renders, and
+  // the config entity may land in hass.states slightly after navigation.  We
+  // therefore (a) try entity-state synchronously for an instant fill, (b) poll
+  // the authoritative WebSocket command with backoff, and (c) keep recovering
+  // from live state_changed events.  Defaults are NEVER shown here — only the
+  // Reset button fills defaults.
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let loaded = false; // true once real backend values have been shown
-  let destroyed = false; // halt the retry loop when navigating away
+  let destroyed = false; // stop the retry loop when navigating away
+
+  // Apply a config object and mark the page as loaded.  Returns true when the
+  // object actually carried values.
+  function applyConfig(config) {
+    if (!config || Object.keys(config).length === 0) return false;
+    populate(config);
+    loaded = true;
+    setStatus('');
+    return true;
+  }
 
   // Try every available state snapshot for the config entity's attributes.
-  // On a page refresh/reload of a running system, HA delivers the full state
-  // snapshot on connect, so this is the most reliable source and needs no
-  // round-trip.  Returns true when values were applied.
   function tryEntityState() {
     const cfg =
       configFromStateSnapshot(initialState) ||
       configFromStateSnapshot(hass?.states || {}) ||
       configFromStateSnapshot(connection._hass?.states || {});
-    if (cfg) {
-      populate(cfg);
-      loaded = true;
-      setStatus('');
-      return true;
-    }
-    return false;
+    return cfg ? applyConfig(cfg) : false;
   }
 
-  // Confirm via the authoritative WebSocket command, which reads directly from
-  // the coordinator.  Returns true when values were applied.
-  async function tryWebSocket() {
+  // One round: authoritative WebSocket first, entity-state as fallback.
+  async function fetchOnce() {
     try {
       const wsConfig = await connection.getControllerConfig();
-      if (wsConfig && Object.keys(wsConfig).length > 0) {
-        populate(wsConfig);
-        loaded = true;
-        setStatus('');
-        return true;
-      }
+      if (applyConfig(wsConfig)) return true;
     } catch (e) {
       console.warn('[TuningPage] WS config fetch failed:', e);
     }
-    return false;
+    return tryEntityState();
   }
 
-  // Load the current values.  Strategy: take the instant entity-state read
-  // first (reliable on reload), then poll the authoritative WebSocket command
-  // with backoff to cover the window where the integration is still starting
-  // up and neither source is ready yet.  Defaults are NEVER used here — inputs
-  // are left unchanged on failure, and the live update() handler below keeps
-  // recovering from state_changed events afterwards.
+  // Full load: instant entity fill, then WS polling with backoff.  The WS is
+  // authoritative (reads coordinator memory directly) and overwrites any
+  // entity-state values, so it runs even when the instant fill succeeded.
   async function loadConfig() {
     tryEntityState();
     if (!loaded) setStatus('Loading current values…', 'running');
 
-    const delays = [0, 300, 700, 1500, 3000];
+    const delays = [0, 400, 800, 1500, 3000, 5000];
     for (let i = 0; i < delays.length; i++) {
       if (destroyed) return;
       if (delays[i]) await sleep(delays[i]);
       if (destroyed) return;
-      if (await tryWebSocket()) return;
-      if (tryEntityState()) return;
+      if (await fetchOnce()) return;
     }
 
     if (!loaded) {
       setStatus('Could not load current values — check that the integration is running.', 'error');
     }
-  }
-
-  // Lightweight refresh used on live state_changed events to stay in sync
-  // without spamming the WebSocket on every event.
-  function populateFromState(snapshot) {
-    const cfg = configFromStateSnapshot(snapshot);
-    if (cfg) populate(cfg);
   }
 
   btnApply.addEventListener('click', async () => {
@@ -275,8 +266,8 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
 
       // Re-read authoritative config so boxes reflect what the controller now
       // holds.  apply_tuning_updates runs synchronously in the service call, so
-      // a single WS round-trip is enough here.
-      await tryWebSocket();
+      // a single round is enough — no need for the full retry loop here.
+      await fetchOnce();
       setStatus('Applied successfully.', 'success');
     } catch (err) {
       setStatus('Error: ' + (err.message || err), 'error');
@@ -299,9 +290,13 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
       const rootNode = container.getRootNode();
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
-      if (!allInputs.some((inp) => inp === focused)) {
-        populateFromState(newState);
-      }
+      if (allInputs.some((inp) => inp === focused)) return; // don't clobber edits
+
+      // Stay in sync with live coordinator changes, and recover here if the
+      // config entity only appeared after the initial load attempts (clears a
+      // stale "Loading…"/error message via applyConfig).
+      const cfg = configFromStateSnapshot(newState);
+      if (cfg) applyConfig(cfg);
     },
     destroy() {
       destroyed = true; // halt any in-flight retry backoff loop

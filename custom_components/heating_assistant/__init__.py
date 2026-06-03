@@ -514,6 +514,7 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                 "window_open_close_settle": getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE),
                 "window_open_q_inflation": getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION),
             }
+            _LOGGER.debug("Heating Assistant: get_controller_config -> %s", config)
             connection.send_result(msg["id"], {"config": config})
         except Exception as err:
             _LOGGER.error("Heating Assistant: get_controller_config WS failed: %s", err)
@@ -724,14 +725,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config={
                 "_panel_custom": {
                     "name": "ha-industrial-panel",
-                    # The `?v=` token is the SINGLE source of truth for the
+                    # This ?v= token is the SINGLE source of truth for the
                     # frontend cache-bust version.  industrial-dashboard.js reads
                     # this exact token off its own URL (import.meta.url) and reuses
                     # it for every dynamically-imported submodule, so the entry
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=28",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=30",
                     "embed_iframe": False,
                 }
             },

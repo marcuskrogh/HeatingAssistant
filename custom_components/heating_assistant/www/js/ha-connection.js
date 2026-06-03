@@ -26,10 +26,16 @@ export class HaConnection {
 
   async getControllerConfig() {
     try {
-      const result = await this._hass.callWS({
-        type: 'heating_assistant/get_controller_config',
-      });
-      return result.config || {};
+      const msg = { type: 'heating_assistant/get_controller_config' };
+      // hass.callWS is available in HA 2022.6+; fall back to the lower-level
+      // sendMessagePromise for older installs.
+      const result = await (typeof this._hass.callWS === 'function'
+        ? this._hass.callWS(msg)
+        : this._hass.connection.sendMessagePromise(msg));
+      return (result && typeof result === 'object' && result.config
+        && typeof result.config === 'object')
+        ? result.config
+        : {};
     } catch (e) {
       console.warn('[HaConnection] getControllerConfig WS failed:', e);
       return null;

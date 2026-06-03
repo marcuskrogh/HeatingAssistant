@@ -45,6 +45,7 @@ _HA_PACKAGES = [
     "homeassistant.helpers.reload",
     "homeassistant.helpers.service",
     "homeassistant.components",
+    "homeassistant.components.websocket_api",
     "homeassistant.components.sensor",
     "homeassistant.components.climate",
     "homeassistant.components.button",
@@ -230,6 +231,15 @@ _coord = sys.modules["homeassistant.helpers.update_coordinator"]
 _coord.DataUpdateCoordinator = _DataUpdateCoordinatorStub  # type: ignore[attr-defined]
 _coord.CoordinatorEntity = _CoordinatorEntityStub  # type: ignore[attr-defined]
 _coord.UpdateFailed = Exception  # type: ignore[attr-defined]
+
+# homeassistant.components.websocket_api
+_ws_api = sys.modules["homeassistant.components.websocket_api"]
+_ws_api.ActiveConnection = object  # type: ignore[attr-defined]
+_ws_api.websocket_command = lambda *_args, **_kwargs: (  # type: ignore[attr-defined]
+    lambda func: func
+)
+_ws_api.async_response = lambda func: func  # type: ignore[attr-defined]
+_ws_api.async_register_command = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
 
 # homeassistant.helpers.event
 # Guarded so that when a real Home Assistant install is present these no-ops do
