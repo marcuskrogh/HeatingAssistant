@@ -166,54 +166,64 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     }
   }
 
-  // Scan a state snapshot for the config entity.  Requires BOTH tracking_weight
-  // AND update_interval to avoid matching MPCPerformanceSensor (has "horizon"
+  // Return the config attributes from a state snapshot.
+  // Direct lookup by known entity_id only needs one tuning key to match —
+  // the scan used as fallback requires both tracking_weight + update_interval
+  // to avoid accidentally matching MPCPerformanceSensor (which has "horizon"
   // but not "update_interval").
   function configFromStateSnapshot(snapshot) {
     if (!snapshot) return null;
     const direct = snapshot[CONFIG_ENTITY];
-    if (direct?.attributes?.tracking_weight !== undefined &&
-        direct?.attributes?.update_interval !== undefined) {
+    if (direct?.attributes &&
+        ('tracking_weight' in direct.attributes || 'update_interval' in direct.attributes)) {
       return direct.attributes;
     }
     for (const [id, s] of Object.entries(snapshot)) {
       if (id.startsWith('sensor.heating_assistant_') && s?.attributes) {
         const a = s.attributes;
-        if (a.tracking_weight !== undefined && a.update_interval !== undefined) {
-          return a;
-        }
+        if ('tracking_weight' in a && 'update_interval' in a) return a;
       }
     }
     return null;
   }
 
-  // Load the authoritative current values.  The WebSocket command reads
-  // directly from the coordinator and is the single source of truth.
-  // Entity-state snapshots serve as a fallback when the WS round-trip fails.
-  // Defaults are NEVER used here — inputs are left unchanged on failure.
+  // Load the authoritative current values.
+  //
+  // Entity-state is checked synchronously first (zero latency) so the user
+  // sees current values immediately.  The WebSocket command is then awaited
+  // for the authoritative coordinator values and overwrites the entity-state
+  // values if they differ (e.g. after Apply Changes before the next HA tick).
+  //
+  // Defaults are NEVER used here — inputs are left at whatever they were
+  // (empty on first load, previously-set on refresh) if loading fails.
   async function loadConfig() {
+    let populated = false;
+
+    // Step 1 — synchronous: entity state is available instantly, no network.
+    const fromState =
+      configFromStateSnapshot(initialState) ||
+      configFromStateSnapshot(hass?.states || {}) ||
+      configFromStateSnapshot(connection._hass?.states || {});
+    if (fromState) {
+      populate(fromState);
+      populated = true;
+    }
+
+    // Step 2 — async: WebSocket reads directly from the coordinator and is
+    // the single authoritative source.  Overwrites step-1 values when it
+    // arrives (coordinator may have been updated since the last entity tick).
     try {
-      // Primary: WebSocket command — reads directly from coordinator.
       const wsConfig = await connection.getControllerConfig();
       if (wsConfig && Object.keys(wsConfig).length > 0) {
         populate(wsConfig);
-        return;
+        populated = true;
       }
-
-      // Fallback: entity state from any available snapshot.
-      const fromState =
-        configFromStateSnapshot(initialState) ||
-        configFromStateSnapshot(hass?.states || {}) ||
-        configFromStateSnapshot(connection._hass?.states || {});
-      if (fromState) {
-        populate(fromState);
-        return;
-      }
-
-      setStatus('Could not load current values — check that the integration is running.', 'error');
     } catch (e) {
-      console.error('[TuningPage] loadConfig failed:', e);
-      setStatus('Error loading configuration.', 'error');
+      console.warn('[TuningPage] WS config fetch failed:', e);
+    }
+
+    if (!populated) {
+      setStatus('Could not load current values — check that the integration is running.', 'error');
     }
   }
 
