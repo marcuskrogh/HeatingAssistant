@@ -653,6 +653,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Push the current coordinator attribute values into every registered
+    # entity's HA state immediately after setup.  Without this call,
+    # ControllerConfigSensor (and others) only write state when the coordinator
+    # runs its next scheduled tick, which can be up to update_interval seconds
+    # away.  The Tuning page reads hass.states on load, so without this call
+    # the entity state may be missing until the first coordinator tick fires.
+    coordinator.async_update_listeners()
+
     # Watch only the entities this integration needs (outdoor sensor, weather,
     # room temperature sensors) rather than waiting for EVENT_HOMEASSISTANT_STARTED
     # which blocks on all integrations — including unrelated slow ones.
@@ -732,7 +740,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=30",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=31",
                     "embed_iframe": False,
                 }
             },
