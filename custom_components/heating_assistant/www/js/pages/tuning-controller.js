@@ -187,33 +187,66 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
     return null;
   }
 
-  // Load the authoritative current values.  The WebSocket command reads
-  // directly from the coordinator and is the single source of truth.
-  // Entity-state snapshots serve as a fallback when the WS round-trip fails.
-  // Defaults are NEVER used here — inputs are left unchanged on failure.
-  async function loadConfig() {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let loaded = false; // true once real backend values have been shown
+  let destroyed = false; // halt the retry loop when navigating away
+
+  // Try every available state snapshot for the config entity's attributes.
+  // On a page refresh/reload of a running system, HA delivers the full state
+  // snapshot on connect, so this is the most reliable source and needs no
+  // round-trip.  Returns true when values were applied.
+  function tryEntityState() {
+    const cfg =
+      configFromStateSnapshot(initialState) ||
+      configFromStateSnapshot(hass?.states || {}) ||
+      configFromStateSnapshot(connection._hass?.states || {});
+    if (cfg) {
+      populate(cfg);
+      loaded = true;
+      setStatus('');
+      return true;
+    }
+    return false;
+  }
+
+  // Confirm via the authoritative WebSocket command, which reads directly from
+  // the coordinator.  Returns true when values were applied.
+  async function tryWebSocket() {
     try {
-      // Primary: WebSocket command — reads directly from coordinator.
       const wsConfig = await connection.getControllerConfig();
       if (wsConfig && Object.keys(wsConfig).length > 0) {
         populate(wsConfig);
-        return;
+        loaded = true;
+        setStatus('');
+        return true;
       }
-
-      // Fallback: entity state from any available snapshot.
-      const fromState =
-        configFromStateSnapshot(initialState) ||
-        configFromStateSnapshot(hass?.states || {}) ||
-        configFromStateSnapshot(connection._hass?.states || {});
-      if (fromState) {
-        populate(fromState);
-        return;
-      }
-
-      setStatus('Could not load current values — check that the integration is running.', 'error');
     } catch (e) {
-      console.error('[TuningPage] loadConfig failed:', e);
-      setStatus('Error loading configuration.', 'error');
+      console.warn('[TuningPage] WS config fetch failed:', e);
+    }
+    return false;
+  }
+
+  // Load the current values.  Strategy: take the instant entity-state read
+  // first (reliable on reload), then poll the authoritative WebSocket command
+  // with backoff to cover the window where the integration is still starting
+  // up and neither source is ready yet.  Defaults are NEVER used here — inputs
+  // are left unchanged on failure, and the live update() handler below keeps
+  // recovering from state_changed events afterwards.
+  async function loadConfig() {
+    tryEntityState();
+    if (!loaded) setStatus('Loading current values…', 'running');
+
+    const delays = [0, 300, 700, 1500, 3000];
+    for (let i = 0; i < delays.length; i++) {
+      if (destroyed) return;
+      if (delays[i]) await sleep(delays[i]);
+      if (destroyed) return;
+      if (await tryWebSocket()) return;
+      if (tryEntityState()) return;
+    }
+
+    if (!loaded) {
+      setStatus('Could not load current values — check that the integration is running.', 'error');
     }
   }
 
@@ -240,8 +273,10 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
       }
       await hass.callService('heating_assistant', 'update_estimation_params', windowData);
 
-      // Re-read authoritative config so boxes reflect what the controller now holds.
-      await loadConfig();
+      // Re-read authoritative config so boxes reflect what the controller now
+      // holds.  apply_tuning_updates runs synchronously in the service call, so
+      // a single WS round-trip is enough here.
+      await tryWebSocket();
       setStatus('Applied successfully.', 'success');
     } catch (err) {
       setStatus('Error: ' + (err.message || err), 'error');
@@ -268,6 +303,8 @@ function renderTuningIndex(container, rooms, initialState, connection, hass) {
         populateFromState(newState);
       }
     },
-    destroy() {},
+    destroy() {
+      destroyed = true; // halt any in-flight retry backoff loop
+    },
   };
 }
