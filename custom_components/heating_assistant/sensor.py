@@ -1166,6 +1166,7 @@ class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
             "total_sources": len(sources),
             "room_heating_power": room_heating,
             "outdoor_temperature": self._coordinator.outdoor_temp,
+            "system_enabled": self._coordinator.system_enabled,
         }
 
 

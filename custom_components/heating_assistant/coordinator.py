@@ -625,6 +625,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         configured rules.
         """
         room_names = self.model.room_names
+        self._system_enabled: bool = True
         self._room_enabled: Dict[str, bool] = {name: True for name in room_names}
         self._schedule_disabled: Dict[str, bool] = {name: False for name in room_names}
 
@@ -2210,7 +2211,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             fraction = self.actions.get(src.name, 0.0)
             room_enabled = self.is_room_enabled(src.room)
             window_override_active = self.is_window_override_active(src.room)
-            effective_room_enabled = room_enabled and not window_override_active
+            effective_room_enabled = self._system_enabled and room_enabled and not window_override_active
             controller = getattr(self, "controller", None)
 
             # If the room is disabled, force fraction to 0 (turn off).
@@ -2456,6 +2457,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if room_name in self._base_setpoint:
             return self._base_setpoint[room_name]
         return self.get_room_setpoint(room_name)
+
+    # ------------------------------------------------------------------
+    # System-level enable/disable
+    # ------------------------------------------------------------------
+
+    @property
+    def system_enabled(self) -> bool:
+        """Return whether the heating assistant controller is active."""
+        return self._system_enabled
+
+    def set_system_enabled(self, enabled: bool) -> None:
+        """Enable or disable the entire heating assistant controller."""
+        self._system_enabled = bool(enabled)
 
     # ------------------------------------------------------------------
     # Room enable/disable helpers (called by climate platform)
