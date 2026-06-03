@@ -2,6 +2,7 @@ import { TimeSeriesChart, makeDataset, loadChartJs, createSparkline, historyToDa
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js';
 import { entityValue, formatNumber, systemEntity } from '../utils.js';
 
+// Default parameter values — must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
   sigma_w: 0.1,
   sigma_v: 0.5,
@@ -61,7 +62,7 @@ function renderIdentificationIndex(container, rooms, state, connection) {
           </div>
           <div class="identification-tile__kpi-box">
             <span class="identification-tile__kpi-label">RMSE</span>
-            <span class="identification-tile__kpi-value" data-room="${room.slug}">\u2014</span>
+            <span class="identification-tile__kpi-value" data-room="${room.slug}">—</span>
           </div>
         </div>
         <div class="identification-tile__sparkline">
@@ -108,7 +109,7 @@ function renderIdentificationIndex(container, rooms, state, connection) {
       const rmse = computeRMSE(filteredPts, measuredPts);
       const rmseEl = grid.querySelector(`[data-room="${room.slug}"]`);
       if (rmseEl) {
-        rmseEl.textContent = rmse != null ? `${rmse.toFixed(3)} \u00b0C` : '\u2014';
+        rmseEl.textContent = rmse != null ? `${rmse.toFixed(3)} °C` : '—';
       }
 
       const canvas = grid.querySelector(`[data-sparkline="${room.slug}"]`);
@@ -166,7 +167,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // Back navigation
   const nav = document.createElement('button');
   nav.className = 'nav-back';
-  nav.innerHTML = '<span class="nav-back__arrow">\u2190</span> IDENTIFICATION';
+  nav.innerHTML = '<span class="nav-back__arrow">←</span> IDENTIFICATION';
   nav.addEventListener('click', () => { window.location.hash = '#identification'; });
   container.appendChild(nav);
 
@@ -175,103 +176,116 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   header.innerHTML = `<h2 class="room-header__title">${room.name}</h2>`;
   container.appendChild(header);
 
-  // --- Section: State Estimation Parameters (global) ---
-  const estimSection = document.createElement('div');
-  estimSection.className = 'card tuning-section';
-  estimSection.innerHTML = `
-    <div class="tuning-section__title">State Estimation Parameters</div>
-    <p class="tuning-section__desc">Global parameters controlling the Kalman filter. Changes affect all rooms and take effect immediately.</p>
-    <div class="tuning-params-grid">
-      <div class="form-group">
-        <label class="form-label" for="estim-sigma-w">Process Noise (\u03c3_w)</label>
-        <input class="form-input" type="number" id="estim-sigma-w" step="0.001" min="0.000001" max="10" value="${DEFAULTS.sigma_w}">
-        <span class="form-hint">K/\u221as</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="estim-sigma-v">Sensor Noise (\u03c3_v)</label>
-        <input class="form-input" type="number" id="estim-sigma-v" step="0.001" min="0.000001" max="10" value="${DEFAULTS.sigma_v}">
-        <span class="form-hint">K</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="estim-sigma-b">Calibration Drift (\u03c3_b)</label>
-        <input class="form-input" type="number" id="estim-sigma-b" step="0.0001" min="0.00000001" max="1" value="${DEFAULTS.sigma_b}">
-        <span class="form-hint">K/\u221as</span>
-      </div>
-    </div>
-    <div class="tuning-actions" style="margin-top:16px">
-      <button class="btn btn--primary" id="btn-apply-estim">Apply</button>
-      <span class="tuning-actions__status" id="estim-apply-status"></span>
-    </div>
-  `;
-  container.appendChild(estimSection);
-
-  // --- Section: Parameter Identification ---
-  const identSection = document.createElement('div');
-  identSection.className = 'card tuning-section';
-  identSection.innerHTML = `
-    <div class="tuning-section__title">Parameter Identification</div>
-    <p class="tuning-section__desc">Run maximum-likelihood estimation to identify thermal model parameters from historical data. Results are shown for review — click "Apply Identified Model" to commit them to the active model.</p>
+  // -----------------------------------------------------------------------
+  // Section 1: Action buttons (top of page)
+  // -----------------------------------------------------------------------
+  const actionsCard = document.createElement('div');
+  actionsCard.className = 'card tuning-section';
+  actionsCard.innerHTML = `
+    <div class="tuning-section__title">Actions</div>
+    <p class="tuning-section__desc">
+      <strong>Run Auto-Identification</strong> runs ML estimation (dry run) and populates the fields below with the identified values — no changes are committed yet.
+      <strong>Apply Parameters</strong> writes the current field values to the active model.
+      <strong>Reset to Defaults</strong> fills all fields with factory defaults without committing.
+    </p>
     <div class="tuning-actions">
-      <button class="btn btn--accent" id="btn-estimate-ml">Run Identification</button>
-      <button class="btn btn--primary" id="btn-apply-identified" disabled>Apply Identified Model</button>
-      <span class="tuning-actions__status" id="ident-status"></span>
+      <button class="btn btn--accent tuning-actions__btn" id="btn-auto-identify">Run Auto-Identification</button>
+      <button class="btn btn--primary tuning-actions__btn" id="btn-apply-params">Apply Parameters</button>
+      <button class="btn btn--ghost tuning-actions__btn" id="btn-reset-defaults">Reset to Defaults</button>
+      <span class="tuning-actions__status" id="action-status"></span>
     </div>
-    <div class="tuning-section__title" style="margin-top:20px">Active Model Parameters</div>
-    <p class="tuning-section__desc" style="margin-bottom:8px">Currently applied parameters in the active thermal model.</p>
-    <div class="grid-kpi" id="ident-kpis"></div>
   `;
-  container.appendChild(identSection);
+  container.appendChild(actionsCard);
 
-  const identKpiGrid = identSection.querySelector('#ident-kpis');
-  const kpiC = createKpiCard({ value: '—', label: 'Thermal Mass', unit: '' });
-  const kpiR = createKpiCard({ value: '—', label: 'R External', unit: '' });
-  identKpiGrid.appendChild(kpiC);
-  identKpiGrid.appendChild(kpiR);
+  // -----------------------------------------------------------------------
+  // Section 2: Parameter fields (organised by category)
+  // -----------------------------------------------------------------------
+  const paramsCard = document.createElement('div');
+  paramsCard.className = 'card tuning-section';
+  paramsCard.innerHTML = `
+    <div class="tuning-section__title">Identification Parameters</div>
 
-  // --- Section: Model Validation ---
-  const validSection = document.createElement('div');
-  validSection.className = 'card tuning-section';
-  validSection.innerHTML = `
-    <div class="tuning-section__title">Model Validation</div>
-    <p class="tuning-section__desc">Run simulations to evaluate model fit. EKF reconstruction uses Kalman filtering with uncertainty bounds. Open-loop simulation tests the raw model without state correction. Use <em>Apply to Model</em> to write the current parameter values into the active model.</p>
-    <div class="tuning-params-grid">
-      <div class="form-group">
-        <label class="form-label" for="param-sigma-w">Process Noise (σ_w)</label>
-        <input class="form-input" type="number" id="param-sigma-w" step="0.01" min="0.001" value="${DEFAULTS.sigma_w}">
-        <span class="form-hint">K/√s</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="param-sigma-v">Measurement Noise (σ_v)</label>
-        <input class="form-input" type="number" id="param-sigma-v" step="0.01" min="0.001" value="${DEFAULTS.sigma_v}">
-        <span class="form-hint">°C</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="param-thermal-mass">Thermal Mass (C)</label>
-        <input class="form-input" type="number" id="param-thermal-mass" step="100000" min="10000" value="${DEFAULTS.thermal_mass}">
-        <span class="form-hint">J/K</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="param-r-external">Thermal Resistance (R)</label>
-        <input class="form-input" type="number" id="param-r-external" step="0.001" min="0.0001" value="${DEFAULTS.r_external}">
-        <span class="form-hint">K/W</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="param-horizon">Horizon</label>
-        <input class="form-input" type="number" id="param-horizon" step="0.5" min="0.5" max="72" value="${DEFAULTS.horizon_hours}">
-        <span class="form-hint">hours</span>
+    <div class="params-subsection">
+      <div class="params-subsection__title">Model Parameters</div>
+      <div class="tuning-params-grid">
+        <div class="form-group">
+          <label class="form-label" for="param-thermal-mass">Thermal Mass (C)</label>
+          <input class="form-input" type="number" id="param-thermal-mass"
+            step="100000" min="10000" value="${DEFAULTS.thermal_mass}">
+          <span class="form-hint">J/K &mdash; thermal storage capacity of the room</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="param-r-external">Thermal Resistance (R<sub>ext</sub>)</label>
+          <input class="form-input" type="number" id="param-r-external"
+            step="0.001" min="0.0001" value="${DEFAULTS.r_external}">
+          <span class="form-hint">K/W &mdash; envelope resistance to outdoor</span>
+        </div>
       </div>
     </div>
-    <div class="tuning-actions" style="margin-top:20px">
+
+    <div class="params-subsection">
+      <div class="params-subsection__title">Stochastic Parameters</div>
+      <div class="tuning-params-grid">
+        <div class="form-group">
+          <label class="form-label" for="param-sigma-w">Process Noise (&sigma;<sub>w</sub>)</label>
+          <input class="form-input" type="number" id="param-sigma-w"
+            step="0.001" min="0.000001" max="10" value="${DEFAULTS.sigma_w}">
+          <span class="form-hint">K/&radic;s &mdash; model adaptation rate</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="param-sigma-v">Sensor Noise (&sigma;<sub>v</sub>)</label>
+          <input class="form-input" type="number" id="param-sigma-v"
+            step="0.001" min="0.000001" max="10" value="${DEFAULTS.sigma_v}">
+          <span class="form-hint">K &mdash; expected temperature sensor noise</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="param-sigma-b">Calibration Drift (&sigma;<sub>b</sub>)</label>
+          <input class="form-input" type="number" id="param-sigma-b"
+            step="0.0001" min="0.00000001" max="1" value="${DEFAULTS.sigma_b}">
+          <span class="form-hint">K/&radic;s &mdash; allowed sensor drift rate</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="params-subsection params-subsection--last">
+      <div class="params-subsection__title">Identification Window</div>
+      <div class="tuning-params-grid">
+        <div class="form-group">
+          <label class="form-label" for="param-horizon">Horizon</label>
+          <input class="form-input" type="number" id="param-horizon"
+            step="0.5" min="0.5" max="72" value="${DEFAULTS.horizon_hours}">
+          <span class="form-hint">hours &mdash; history window used for simulation and validation</span>
+        </div>
+      </div>
+    </div>
+  `;
+  container.appendChild(paramsCard);
+
+  // -----------------------------------------------------------------------
+  // Section 3: Model validation (clearly separated from parameters)
+  // -----------------------------------------------------------------------
+  const divider = document.createElement('hr');
+  divider.className = 'section-divider';
+  container.appendChild(divider);
+
+  const simulationsCard = document.createElement('div');
+  simulationsCard.className = 'card tuning-section';
+  simulationsCard.innerHTML = `
+    <div class="tuning-section__title">Model Validation</div>
+    <p class="tuning-section__desc">
+      Run simulations using the parameter values above to evaluate model fit.
+      <strong>EKF Reconstruction</strong> uses a Kalman filter with &plusmn;2&sigma; uncertainty bounds.
+      <strong>Open-Loop Simulation</strong> tests the raw thermal model without state correction.
+    </p>
+    <div class="tuning-actions">
       <button class="btn btn--primary" id="btn-sysid">EKF Reconstruction</button>
       <button class="btn btn--secondary" id="btn-open-loop">Open-Loop Simulation</button>
-      <button class="btn btn--accent" id="btn-apply-params" title="Apply the current C and R values above to the active model">Apply to Model</button>
-      <button class="btn btn--ghost" id="btn-reset-defaults" title="Reset the active model back to configured default parameters">Reset to Defaults</button>
       <span class="tuning-actions__status" id="sim-status"></span>
     </div>
   `;
-  container.appendChild(validSection);
+  container.appendChild(simulationsCard);
 
-  // --- Results: EKF ---
+  // EKF results
   const ekfResultsSection = document.createElement('div');
   ekfResultsSection.className = 'tuning-section';
   ekfResultsSection.innerHTML = `
@@ -296,7 +310,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     height: 260,
   });
 
-  // --- Results: Open-Loop ---
+  // Open-loop results
   const olResultsSection = document.createElement('div');
   olResultsSection.className = 'tuning-section';
   olResultsSection.innerHTML = `
@@ -321,100 +335,42 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     height: 260,
   });
 
-  // --- Section: Parameter History ---
+  // -----------------------------------------------------------------------
+  // Section 4: Applied model history
+  // -----------------------------------------------------------------------
   const historySection = document.createElement('div');
   historySection.className = 'card tuning-section';
   historySection.innerHTML = `
     <div class="tuning-section__title">Applied Model History</div>
-    <p class="tuning-section__desc" style="margin-bottom:12px">Up to 10 most recent parameter sets that have been applied to this room. Use "Revert" to restore a previous set.</p>
+    <p class="tuning-section__desc" style="margin-bottom:12px">Up to 10 most recent parameter sets applied to this room. Click <strong>Revert</strong> to restore a previous set.</p>
     <div id="param-history-list"></div>
   `;
   container.appendChild(historySection);
 
   const historyListEl = historySection.querySelector('#param-history-list');
 
-  function renderParamHistory(st) {
-    historyListEl.innerHTML = '';
-    const config = st[CONFIG_ENTITY]?.attributes || {};
-    const history = config.parameter_history?.[roomSlug] || [];
-    if (history.length === 0) {
-      historyListEl.innerHTML = '<span class="tuning-section__desc">No history available.</span>';
-      return;
-    }
-    const table = document.createElement('table');
-    table.className = 'param-history-table';
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>Date</th>
-          <th>Source</th>
-          <th>Thermal Mass</th>
-          <th>R External</th>
-          <th>RMSE</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    `;
-    const tbody = table.querySelector('tbody');
-    for (let i = 0; i < history.length; i++) {
-      const entry = history[i];
-      const date = entry.estimated_at ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '\u2014';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${i + 1}</td>
-        <td>${date}</td>
-        <td>${(entry.source || 'manual').toUpperCase()}</td>
-        <td>${entry.thermal_mass != null ? formatMass(entry.thermal_mass) : '\u2014'}</td>
-        <td>${entry.r_external != null ? formatNumber(entry.r_external, 4) : '\u2014'}</td>
-        <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' \u00b0C' : '\u2014'}</td>
-        <td><button class="btn btn--ghost btn--sm" data-revert="${i}">Revert</button></td>
-      `;
-      tbody.appendChild(tr);
-    }
-    historyListEl.appendChild(table);
-
-    table.querySelectorAll('[data-revert]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const idx = parseInt(btn.dataset.revert, 10);
-        btn.disabled = true;
-        btn.textContent = '\u2026';
-        try {
-          await hass.callService('heating_assistant', 'revert_parameters', {
-            room_name: roomSlug,
-            history_index: idx,
-          });
-          btn.textContent = '\u2713';
-        } catch (err) {
-          btn.textContent = 'ERR';
-        }
-      });
-    });
-  }
-
-  // --- Wire up interactions ---
-  const estimSigmaW = container.querySelector('#estim-sigma-w');
-  const estimSigmaV = container.querySelector('#estim-sigma-v');
-  const estimSigmaB = container.querySelector('#estim-sigma-b');
-  const btnApplyEstim = container.querySelector('#btn-apply-estim');
-  const estimApplyStatus = container.querySelector('#estim-apply-status');
-
-  const sigmaWInput = container.querySelector('#param-sigma-w');
-  const sigmaVInput = container.querySelector('#param-sigma-v');
+  // -----------------------------------------------------------------------
+  // Input references
+  // -----------------------------------------------------------------------
   const thermalMassInput = container.querySelector('#param-thermal-mass');
   const rExternalInput = container.querySelector('#param-r-external');
+  const sigmaWInput = container.querySelector('#param-sigma-w');
+  const sigmaVInput = container.querySelector('#param-sigma-v');
+  const sigmaBInput = container.querySelector('#param-sigma-b');
   const horizonInput = container.querySelector('#param-horizon');
-  const btnSysid = container.querySelector('#btn-sysid');
-  const btnOpenLoop = container.querySelector('#btn-open-loop');
+  const btnAutoIdentify = container.querySelector('#btn-auto-identify');
   const btnApplyParams = container.querySelector('#btn-apply-params');
   const btnResetDefaults = container.querySelector('#btn-reset-defaults');
-  const btnEstimateMl = container.querySelector('#btn-estimate-ml');
-  const btnApplyIdentified = container.querySelector('#btn-apply-identified');
-  const identStatusEl = container.querySelector('#ident-status');
+  const btnSysid = container.querySelector('#btn-sysid');
+  const btnOpenLoop = container.querySelector('#btn-open-loop');
+  const actionStatusEl = container.querySelector('#action-status');
   const simStatusEl = container.querySelector('#sim-status');
 
   let latestState = state;
+
+  // -----------------------------------------------------------------------
+  // Helpers
+  // -----------------------------------------------------------------------
 
   function setStatus(el, text, type = '') {
     el.textContent = text;
@@ -434,114 +390,175 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     return `sensor.heating_assistant_${slug}_open_loop_rmse`;
   }
 
-  function populateEstimFromState(st) {
-    const config = st[CONFIG_ENTITY]?.attributes || {};
-    if (config.sigma_w != null) estimSigmaW.value = config.sigma_w;
-    if (config.sigma_v != null) estimSigmaV.value = config.sigma_v;
-    if (config.sigma_b != null) estimSigmaB.value = config.sigma_b;
-  }
-
-  function populateParamsFromState(slug, st) {
-    const filtered = st[filteredEntityId(slug)];
-    const filteredAttrs = filtered?.attributes;
+  // Populate all parameter fields from current system state.
+  // Model params come from the active temperature_filtered sensor (authoritative
+  // source for the live thermal model). Stochastic params come from the
+  // controller_config sensor. Horizon falls back to the last sysid run or the
+  // default of 6 h.
+  function populateFromState(slug, st) {
+    const filteredAttrs = st[filteredEntityId(slug)]?.attributes;
     if (filteredAttrs) {
       if (filteredAttrs.thermal_mass != null) thermalMassInput.value = filteredAttrs.thermal_mass;
       if (filteredAttrs.r_external != null) rExternalInput.value = filteredAttrs.r_external;
     }
-    const sysidEntity = st[sysidEntityId(slug)];
-    const sysidAttrs = sysidEntity?.attributes;
-    if (sysidAttrs) {
-      if (sysidAttrs.sigma_w != null) sigmaWInput.value = sysidAttrs.sigma_w;
-      if (sysidAttrs.sigma_v != null) sigmaVInput.value = sysidAttrs.sigma_v;
-      if (sysidAttrs.horizon_hours != null) horizonInput.value = sysidAttrs.horizon_hours;
-    }
+
+    const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
+    if (configAttrs.sigma_w != null) sigmaWInput.value = configAttrs.sigma_w;
+    if (configAttrs.sigma_v != null) sigmaVInput.value = configAttrs.sigma_v;
+    if (configAttrs.sigma_b != null) sigmaBInput.value = configAttrs.sigma_b;
+
+    const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
+    if (sysidAttrs?.horizon_hours != null) horizonInput.value = sysidAttrs.horizon_hours;
   }
 
-  // Active model parameters — always read from the live temperature_filtered sensor.
-  function renderIdentKpis(slug, st) {
-    const entity = st[filteredEntityId(slug)];
-    const attrs = entity?.attributes || {};
-    updateKpiCard(kpiC, { value: attrs.thermal_mass != null ? formatMass(attrs.thermal_mass) : '\u2014' });
-    updateKpiCard(kpiR, { value: attrs.r_external != null ? formatNumber(attrs.r_external, 4) + ' K/W' : '\u2014' });
+  // After an ML dry-run the coordinator writes identified C and R into
+  // sysid_results and fires async_update_listeners(), so the sysid sensor
+  // attributes carry the freshly estimated values.  Populate only the model
+  // parameter fields from those attributes.
+  function populateModelFromSysid(slug, st) {
+    const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
+    if (!sysidAttrs) return;
+    if (sysidAttrs.thermal_mass != null) thermalMassInput.value = sysidAttrs.thermal_mass;
+    if (sysidAttrs.r_external != null) rExternalInput.value = sysidAttrs.r_external;
   }
 
   function renderEkfResults(slug, st) {
-    const entity = st[sysidEntityId(slug)];
-    const attrs = entity?.attributes || {};
-    updateKpiCard(kpiEkfRmse, { value: attrs.rmse != null ? formatNumber(attrs.rmse, 3) + ' \u00b0C' : '\u2014' });
-    updateKpiCard(kpiEkfMae, { value: attrs.mae != null ? formatNumber(attrs.mae, 3) + ' \u00b0C' : '\u2014' });
+    const attrs = st[sysidEntityId(slug)]?.attributes || {};
+    updateKpiCard(kpiEkfRmse, { value: attrs.rmse != null ? formatNumber(attrs.rmse, 3) + ' °C' : '—' });
+    updateKpiCard(kpiEkfMae, { value: attrs.mae != null ? formatNumber(attrs.mae, 3) + ' °C' : '—' });
     buildEkfChart(ekfChart, attrs.simulation);
   }
 
   function renderOlResults(slug, st) {
-    const entity = st[openLoopEntityId(slug)];
-    const attrs = entity?.attributes || {};
-    updateKpiCard(kpiOlRmse, { value: attrs.open_loop_rmse != null ? formatNumber(attrs.open_loop_rmse, 3) + ' \u00b0C' : '\u2014' });
-    updateKpiCard(kpiOlMae, { value: attrs.open_loop_mae != null ? formatNumber(attrs.open_loop_mae, 3) + ' \u00b0C' : '\u2014' });
+    const attrs = st[openLoopEntityId(slug)]?.attributes || {};
+    updateKpiCard(kpiOlRmse, { value: attrs.open_loop_rmse != null ? formatNumber(attrs.open_loop_rmse, 3) + ' °C' : '—' });
+    updateKpiCard(kpiOlMae, { value: attrs.open_loop_mae != null ? formatNumber(attrs.open_loop_mae, 3) + ' °C' : '—' });
     buildOlChart(olChart, attrs.simulation);
   }
 
-  function renderAll(slug, st) {
-    renderIdentKpis(slug, st);
-    renderEkfResults(slug, st);
-    renderOlResults(slug, st);
+  function renderParamHistory(st) {
+    historyListEl.innerHTML = '';
+    const config = st[CONFIG_ENTITY]?.attributes || {};
+    const history = config.parameter_history?.[roomSlug] || [];
+    if (history.length === 0) {
+      historyListEl.innerHTML = '<span class="tuning-section__desc">No history available.</span>';
+      return;
+    }
+    const table = document.createElement('table');
+    table.className = 'param-history-table';
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>#</th><th>Date</th><th>Source</th>
+          <th>Thermal Mass</th><th>R External</th><th>RMSE</th><th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody');
+    for (let i = 0; i < history.length; i++) {
+      const entry = history[i];
+      const date = entry.estimated_at
+        ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '—';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${i + 1}</td>
+        <td>${date}</td>
+        <td>${(entry.source || 'manual').toUpperCase()}</td>
+        <td>${entry.thermal_mass != null ? formatMass(entry.thermal_mass) : '—'}</td>
+        <td>${entry.r_external != null ? formatNumber(entry.r_external, 4) : '—'}</td>
+        <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' °C' : '—'}</td>
+        <td><button class="btn btn--ghost btn--sm" data-revert="${i}">Revert</button></td>
+      `;
+      tbody.appendChild(tr);
+    }
+    historyListEl.appendChild(table);
+
+    table.querySelectorAll('[data-revert]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.revert, 10);
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          await hass.callService('heating_assistant', 'revert_parameters', {
+            room_name: roomSlug,
+            history_index: idx,
+          });
+          btn.textContent = '✓';
+        } catch (err) {
+          btn.textContent = 'ERR';
+        }
+      });
+    });
   }
 
-  // Apply estimation params
-  btnApplyEstim.addEventListener('click', async () => {
-    setStatus(estimApplyStatus, 'Saving\u2026', 'running');
-    btnApplyEstim.disabled = true;
+  // -----------------------------------------------------------------------
+  // Button interactions
+  // -----------------------------------------------------------------------
+
+  // Run Auto-Identification: dry-run ML estimation, then populate model
+  // parameter fields with the identified C and R from the sysid sensor.
+  btnAutoIdentify.addEventListener('click', async () => {
+    setStatus(actionStatusEl, 'Running identification…', 'running');
+    btnAutoIdentify.disabled = true;
     try {
-      await hass.callService('heating_assistant', 'update_estimation_params', {
-        sigma_w: parseFloat(estimSigmaW.value),
-        sigma_v: parseFloat(estimSigmaV.value),
-        sigma_b: parseFloat(estimSigmaB.value),
+      await hass.callService('heating_assistant', 'estimate_parameters_ml', {
+        apply_parameters: false,
       });
-      setStatus(estimApplyStatus, 'Applied.', 'success');
+      // The coordinator updates sysid_results and fires async_update_listeners()
+      // before the service call resolves.  Allow ~800 ms for the HA websocket
+      // state event to arrive and update latestState via the update() callback.
+      await new Promise((res) => setTimeout(res, 800));
+      populateModelFromSysid(roomSlug, latestState);
+      setStatus(
+        actionStatusEl,
+        'Identified parameters loaded — review above, then click “Apply Parameters” to commit.',
+        '',
+      );
     } catch (err) {
-      setStatus(estimApplyStatus, 'Error: ' + (err.message || err), 'error');
+      setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
     }
-    btnApplyEstim.disabled = false;
+    btnAutoIdentify.disabled = false;
   });
 
-  // Run ML identification
-  btnEstimateMl.addEventListener('click', async () => {
-    setStatus(identStatusEl, 'Running identification\u2026', 'running');
-    btnEstimateMl.disabled = true;
+  // Apply Parameters: persist model params + stochastic params to the system.
+  btnApplyParams.addEventListener('click', async () => {
+    setStatus(actionStatusEl, 'Applying parameters…', 'running');
+    btnApplyParams.disabled = true;
     try {
-      await hass.callService('heating_assistant', 'estimate_parameters_ml', {});
-      setStatus(identStatusEl, 'Complete \u2014 review results below, then click Apply to use them.', '');
-      btnApplyIdentified.disabled = false;
-    } catch (err) {
-      setStatus(identStatusEl, 'Error: ' + (err.message || err), 'error');
-    }
-    btnEstimateMl.disabled = false;
-  });
-
-  // Apply identified model — stores ML result into history + makes active
-  btnApplyIdentified.addEventListener('click', async () => {
-    setStatus(identStatusEl, 'Applying identified model\u2026', 'running');
-    btnApplyIdentified.disabled = true;
-    try {
-      const entity = latestState[filteredEntityId(roomSlug)];
-      const attrs = entity?.attributes || {};
-      const cVal = parseFloat(thermalMassInput.value) || attrs.thermal_mass;
-      const rVal = parseFloat(rExternalInput.value) || attrs.r_external;
       await hass.callService('heating_assistant', 'store_identified_parameters', {
         room_name: roomSlug,
-        thermal_mass: cVal,
-        r_external: rVal,
-        source: 'ml',
+        thermal_mass: parseFloat(thermalMassInput.value),
+        r_external: parseFloat(rExternalInput.value),
+        source: 'manual',
       });
-      setStatus(identStatusEl, 'Identified model applied and stored in history.', 'success');
+      await hass.callService('heating_assistant', 'update_estimation_params', {
+        sigma_w: parseFloat(sigmaWInput.value),
+        sigma_v: parseFloat(sigmaVInput.value),
+        sigma_b: parseFloat(sigmaBInput.value),
+      });
+      setStatus(actionStatusEl, 'Parameters applied and stored in history.', 'success');
     } catch (err) {
-      setStatus(identStatusEl, 'Error: ' + (err.message || err), 'error');
+      setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
     }
+    btnApplyParams.disabled = false;
   });
 
-  // EKF reconstruction
+  // Reset to Defaults: fill all fields with factory defaults, no service call.
+  btnResetDefaults.addEventListener('click', () => {
+    thermalMassInput.value = DEFAULTS.thermal_mass;
+    rExternalInput.value = DEFAULTS.r_external;
+    sigmaWInput.value = DEFAULTS.sigma_w;
+    sigmaVInput.value = DEFAULTS.sigma_v;
+    sigmaBInput.value = DEFAULTS.sigma_b;
+    horizonInput.value = DEFAULTS.horizon_hours;
+    setStatus(actionStatusEl, 'Default values loaded — click “Apply Parameters” to commit.', '');
+  });
+
+  // EKF Reconstruction: run with the current parameter field values.
   btnSysid.addEventListener('click', async () => {
-    setStatus(simStatusEl, 'Running EKF reconstruction\u2026', 'running');
+    setStatus(simStatusEl, 'Running EKF reconstruction…', 'running');
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
@@ -561,9 +578,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnOpenLoop.disabled = false;
   });
 
-  // Open-loop simulation
+  // Open-Loop Simulation: run with the current horizon field value.
   btnOpenLoop.addEventListener('click', async () => {
-    setStatus(simStatusEl, 'Running open-loop simulation\u2026', 'running');
+    setStatus(simStatusEl, 'Running open-loop simulation…', 'running');
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
@@ -580,50 +597,26 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnOpenLoop.disabled = false;
   });
 
-  // Apply manual params to active model
-  btnApplyParams.addEventListener('click', async () => {
-    setStatus(simStatusEl, 'Applying parameters to model\u2026', 'running');
-    btnApplyParams.disabled = true;
-    try {
-      await hass.callService('heating_assistant', 'store_identified_parameters', {
-        room_name: roomSlug,
-        thermal_mass: parseFloat(thermalMassInput.value),
-        r_external: parseFloat(rExternalInput.value),
-        source: 'manual',
-      });
-      setStatus(simStatusEl, 'Parameters applied and stored in history.', 'success');
-    } catch (err) {
-      setStatus(simStatusEl, 'Error: ' + (err.message || err), 'error');
-    }
-    btnApplyParams.disabled = false;
-  });
-
-  // Reset defaults
-  btnResetDefaults.addEventListener('click', async () => {
-    setStatus(simStatusEl, 'Resetting to defaults\u2026', 'running');
-    btnResetDefaults.disabled = true;
-    try {
-      await hass.callService('heating_assistant', 'reset_estimated_parameters', {});
-      sigmaWInput.value = DEFAULTS.sigma_w;
-      sigmaVInput.value = DEFAULTS.sigma_v;
-      horizonInput.value = DEFAULTS.horizon_hours;
-      setStatus(simStatusEl, 'Model reset to configured defaults.', 'success');
-    } catch (err) {
-      setStatus(simStatusEl, 'Error: ' + (err.message || err), 'error');
-    }
-    btnResetDefaults.disabled = false;
-  });
-
-  // Initial population
-  populateEstimFromState(state);
-  populateParamsFromState(roomSlug, state);
-  renderAll(roomSlug, state);
+  // -----------------------------------------------------------------------
+  // Initial render
+  // -----------------------------------------------------------------------
+  populateFromState(roomSlug, state);
+  renderEkfResults(roomSlug, state);
+  renderOlResults(roomSlug, state);
   renderParamHistory(state);
 
   return {
     update(newState) {
       latestState = newState;
-      renderAll(roomSlug, newState);
+      // Do not overwrite values the user is actively editing.
+      const rootNode = container.getRootNode();
+      const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
+      const allInputs = [thermalMassInput, rExternalInput, sigmaWInput, sigmaVInput, sigmaBInput, horizonInput];
+      if (!allInputs.some((inp) => inp === focused)) {
+        populateFromState(roomSlug, newState);
+      }
+      renderEkfResults(roomSlug, newState);
+      renderOlResults(roomSlug, newState);
       renderParamHistory(newState);
     },
     destroy() {
@@ -646,7 +639,7 @@ function formatMass(val) {
 }
 
 function modelFitBadge(val) {
-  if (val == null || isNaN(val)) return { label: '\u2014', class: '' };
+  if (val == null || isNaN(val)) return { label: '—', class: '' };
   if (val > 0.8) return { label: 'GOOD', class: 'fit--good' };
   if (val > 0.5) return { label: 'ACCEPTABLE', class: 'fit--acceptable' };
   return { label: 'POOR', class: 'fit--poor' };
