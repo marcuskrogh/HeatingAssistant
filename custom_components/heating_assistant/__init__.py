@@ -791,7 +791,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=42",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=43",
                     "embed_iframe": False,
                 }
             },
@@ -1129,12 +1129,34 @@ def _persist_tuning_updates(
 
     Writing the updates to **both** stores keeps them consistent and ensures the
     options-first read picks up the latest dashboard values after a restart.
+
+    ``CONF_COMFORT_OFFSET`` is a special case: the Tuning dashboard sends it as
+    a single global value that applies to every room, but the coordinator reads
+    it **per-room** from the rooms list (``CONF_ROOMS[i][CONF_COMFORT_OFFSET]``),
+    not from a top-level key.  Writing only the top-level key therefore has no
+    effect on restart.  We propagate the value into every room entry in both
+    stores so that a restart correctly reflects the user's intent.
     """
     entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
     if entry is None:
         return
     new_data = {**dict(entry.data), **updates}
     new_options = {**dict(entry.options), **updates}
+
+    if CONF_COMFORT_OFFSET in updates:
+        new_co = float(updates[CONF_COMFORT_OFFSET])
+        new_data[CONF_ROOMS] = [
+            {**r, CONF_COMFORT_OFFSET: new_co}
+            for r in new_data.get(CONF_ROOMS, [])
+        ]
+        # Update options rooms only when they already exist; if options has no
+        # CONF_ROOMS yet the coordinator falls back to the updated data rooms.
+        if CONF_ROOMS in new_options:
+            new_options[CONF_ROOMS] = [
+                {**r, CONF_COMFORT_OFFSET: new_co}
+                for r in new_options.get(CONF_ROOMS, [])
+            ]
+
     hass.config_entries.async_update_entry(
         entry, data=new_data, options=new_options
     )

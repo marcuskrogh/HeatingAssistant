@@ -2107,14 +2107,14 @@
 /* ── Comfort-corridor track: target centred, current temp marker slides ── */
 .climate-card__track {
   position: relative;
-  height: 6px;
-  border-radius: 3px;
+  height: 10px;
+  border-radius: 5px;
   margin-top: 2px;
   background: linear-gradient(90deg,
-    rgba(79, 195, 247, 0.45) 0%,
+    rgba(79, 195, 247, 0.55) 0%,
     var(--bg-elevated) 42%,
     var(--bg-elevated) 58%,
-    rgba(255, 183, 77, 0.45) 100%);
+    rgba(255, 183, 77, 0.55) 100%);
 }
 
 /* Comfort corridor band — the setpoint ± offset region the controller keeps
@@ -2123,19 +2123,19 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  background: rgba(0, 212, 170, 0.28);
-  border-left: 1px solid rgba(0, 212, 170, 0.55);
-  border-right: 1px solid rgba(0, 212, 170, 0.55);
-  border-radius: 2px;
+  background: rgba(0, 212, 170, 0.40);
+  border-left: 2px solid rgba(0, 212, 170, 0.80);
+  border-right: 2px solid rgba(0, 212, 170, 0.80);
+  border-radius: 3px;
   transition: left 0.4s ease, width 0.4s ease;
 }
 
 .climate-card__track-setpoint {
   position: absolute;
   left: 50%;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
+  top: -5px;
+  bottom: -5px;
+  width: 3px;
   transform: translateX(-50%);
   background: var(--accent);
   border-radius: 1px;
@@ -2145,19 +2145,35 @@
 .climate-card__track-marker {
   position: absolute;
   top: 50%;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  border: 2px solid var(--bg-card);
+  border: 2.5px solid var(--bg-card);
   box-shadow: 0 0 0 1px var(--border);
   transition: left 0.6s ease, background-color 0.3s ease;
   z-index: 2;
 }
 
-.climate-card__track-marker--on   { background-color: var(--good); }
-.climate-card__track-marker--cool { background-color: var(--chart-temp); }
-.climate-card__track-marker--warm { background-color: var(--chart-power); }
+.climate-card__track-marker--on {
+  background-color: var(--good);
+  animation: climate-marker-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes climate-marker-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--border), 0 0 4px 1px rgba(0, 212, 170, 0.25); }
+  50%       { box-shadow: 0 0 0 1px var(--border), 0 0 9px 3px rgba(0, 212, 170, 0.55); }
+}
+
+.climate-card__track-marker--cool {
+  background-color: var(--chart-temp);
+  box-shadow: 0 0 0 1px var(--border), 0 0 5px 1px rgba(79, 195, 247, 0.40);
+}
+
+.climate-card__track-marker--warm {
+  background-color: var(--chart-power);
+  box-shadow: 0 0 0 1px var(--border), 0 0 5px 1px rgba(255, 183, 77, 0.40);
+}
 
 .climate-card__track-scale {
   display: flex;
@@ -2168,7 +2184,7 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--text-dim);
-  margin-top: -8px;
+  margin-top: -12px;
 }
 
 .climate-card__track-comfort-label {

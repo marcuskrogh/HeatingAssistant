@@ -15,6 +15,9 @@ import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
 from custom_components.heating_assistant.const import (
+    CONF_COMFORT_OFFSET,
+    CONF_ROOMS,
+    CONF_ROOM_NAME,
     CONF_TRACKING_WEIGHT,
     CONF_SIGMA_W,
     DOMAIN,
@@ -100,3 +103,61 @@ async def test_estimation_params_written_to_both_data_and_options(monkeypatch):
     call = update_calls[0]
     assert call["options"][CONF_SIGMA_W] == 0.5
     assert call["data"][CONF_SIGMA_W] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_comfort_offset_propagated_to_per_room_config(monkeypatch):
+    """comfort_offset must be written into every room's dict so the coordinator
+    reads the updated value on restart (it reads per-room, not the global key)."""
+    rooms = [
+        {CONF_ROOM_NAME: "Living Room", CONF_COMFORT_OFFSET: 2.0},
+        {CONF_ROOM_NAME: "Bedroom", CONF_COMFORT_OFFSET: 2.0},
+    ]
+    entry = SimpleNamespace(
+        data={CONF_ROOMS: rooms},
+        options={},
+        entry_id="entry-1",
+    )
+    coordinator = _make_coordinator()
+    update_calls: list = []
+    hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
+
+    handlers = _capture_handlers(hass)
+    await handlers["update_controller_tuning"](
+        SimpleNamespace(data={CONF_COMFORT_OFFSET: 3.0})
+    )
+
+    assert len(update_calls) == 1
+    call = update_calls[0]
+    # Global key must be present in both stores.
+    assert call["data"][CONF_COMFORT_OFFSET] == 3.0
+    assert call["options"][CONF_COMFORT_OFFSET] == 3.0
+    # Per-room values in data must be updated so a restart picks up the new offset.
+    for room in call["data"][CONF_ROOMS]:
+        assert room[CONF_COMFORT_OFFSET] == 3.0, f"Room {room[CONF_ROOM_NAME]} not updated"
+
+
+@pytest.mark.asyncio
+async def test_comfort_offset_updates_options_rooms_when_present(monkeypatch):
+    """When options already has CONF_ROOMS, comfort_offset must be propagated there
+    too — the coordinator prefers options over data when reading rooms on restart."""
+    rooms_data = [{CONF_ROOM_NAME: "Living Room", CONF_COMFORT_OFFSET: 2.0}]
+    rooms_opts = [{CONF_ROOM_NAME: "Living Room", CONF_COMFORT_OFFSET: 1.5}]
+    entry = SimpleNamespace(
+        data={CONF_ROOMS: rooms_data},
+        options={CONF_ROOMS: rooms_opts},
+        entry_id="entry-1",
+    )
+    coordinator = _make_coordinator()
+    update_calls: list = []
+    hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
+
+    handlers = _capture_handlers(hass)
+    await handlers["update_controller_tuning"](
+        SimpleNamespace(data={CONF_COMFORT_OFFSET: 2.5})
+    )
+
+    call = update_calls[0]
+    # Both stores' room lists must carry the updated value.
+    assert call["data"][CONF_ROOMS][0][CONF_COMFORT_OFFSET] == 2.5
+    assert call["options"][CONF_ROOMS][0][CONF_COMFORT_OFFSET] == 2.5
