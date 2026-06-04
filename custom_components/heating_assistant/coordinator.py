@@ -408,7 +408,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # re-creating the entry.  Falls back to DEFAULT_UPDATE_INTERVAL when absent.
         # Old config entries that stored a separate "dt" key are silently ignored;
         # the update_interval is the single source of truth.
-        self._update_interval: int = int(
+        self._update_interval_s: int = int(
             _coerce_interval_seconds(
                 options.get(CONF_UPDATE_INTERVAL)
                 or data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
@@ -566,7 +566,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=self._update_interval),
+            update_interval=timedelta(seconds=self._update_interval_s),
         )
 
     # ------------------------------------------------------------------
@@ -809,6 +809,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # None when no price entity is configured or the fetch fails.
         self.price_forecast: Optional[List[float]] = None
 
+        # UNIX timestamp (seconds) of the last successful MPC solve.  Set inside
+        # _async_update_data after controller.compute() succeeds and exposed via
+        # the mpc_performance sensor so the dashboard countdown is anchored to
+        # the actual internal MPC schedule — NOT the entity's HA last_updated,
+        # which is also bumped by the fast UI refresh that runs between solves.
+        self._last_mpc_run_ts: Optional[float] = None
+
 
     # ------------------------------------------------------------------
     # Public properties
@@ -817,12 +824,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     @property
     def dt(self) -> float:
         """Return the OCP/EKF time step (= update interval) in seconds."""
-        return _coerce_interval_seconds(self._update_interval)
+        return _coerce_interval_seconds(self._update_interval_s)
 
     @property
     def update_interval_seconds(self) -> int:
         """Return the coordinator / EKF update period in seconds."""
-        return self._update_interval
+        return self._update_interval_s
 
     @property
     def history_buffer(self) -> deque:
@@ -1045,10 +1052,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             )
             rebuild_controller = True
         if CONF_UPDATE_INTERVAL in pending:
-            self._update_interval = int(
-                pending.get(CONF_UPDATE_INTERVAL, self._update_interval)
+            self._update_interval_s = int(
+                pending.get(CONF_UPDATE_INTERVAL, self._update_interval_s)
             )
-            self.update_interval = timedelta(seconds=self._update_interval)
+            self.update_interval = timedelta(seconds=self._update_interval_s)
         if CONF_COMFORT_OFFSET in pending:
             new_offset = float(pending.get(CONF_COMFORT_OFFSET, 2.0))
             for room_name in self._room_comfort_offset:
@@ -1623,6 +1630,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # controller.last_innovation is populated by compute() after splitting
                 # the EKF predict/update steps to record ν = y − hm(x̂⁻).
                 kalman_innovation: Optional[List[float]] = self.controller.last_innovation
+
+                # Record the instant the MPC actually solved so the dashboard
+                # countdown reflects the true internal schedule.  Only set on a
+                # successful solve — a failed cycle leaves the previous value so
+                # the countdown keeps ticking toward the next scheduled attempt.
+                self._last_mpc_run_ts = now.timestamp()
             except Exception:
                 _LOGGER.warning(
                     "Failed to compute MPC actions; clearing forecast data so "
@@ -1689,7 +1702,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 if self._history_buffer else 0.0
             )
             _should_record_history = (
-                now.timestamp() - _last_history_ts >= 0.5 * self._update_interval
+                now.timestamp() - _last_history_ts >= 0.5 * self._update_interval_s
             )
 
             if _should_record_history:
@@ -2347,27 +2360,34 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         else:
             src._current_power = 0.0
 
-    async def _async_push_window_override(self) -> None:
-        """Apply window overrides, push actuator commands, and refresh entity states.
+    def _refresh_live_state(self) -> Optional[float]:
+        """Re-read live inputs and recompute cheap visualisation state.
 
-        Called directly by window-sensor callbacks so that the heater-off (window
-        open) or heater-on (window closed) command is issued immediately, without
-        triggering a coordinator refresh and without disturbing the MPC or EKF.
+        This is the lightweight counterpart to ``_async_update_data`` used by
+        the fast UI refresh and the window-override push.  It updates everything
+        the dashboard needs to stay live between scheduled MPC ticks WITHOUT
+        running the MPC controller or advancing the EKF:
 
-        Sensor values (temperatures, outdoor temp) are re-read from HA state so
-        entities report current values, not values from the previous scheduled tick.
-        ``async_update_listeners()`` is always called at the end so the UI refreshes
-        immediately regardless of whether actuator commands could be applied.
+          * measured room temperatures (from HA sensor states),
+          * the active schedule (live setpoints / enabled flags),
+          * the window state machine,
+          * the outdoor temperature,
+          * solar gains and the heat-flow breakdown (pure model evaluations).
 
-        The MPC runs strictly at the scheduled update interval via the coordinator
-        timer.  This method is the sole path for window events to affect actuators
-        between those scheduled ticks.
+        The MPC-derived fields (predictions, filtered temperatures, forecasts,
+        heating schedule) are deliberately left untouched — they only advance at
+        the scheduled update interval.
+
+        Returns the effective outdoor temperature (the fresh reading, or the last
+        valid value when the entity is transiently unavailable), or ``None`` when
+        no valid reading has ever been obtained.
         """
         # Stamp a fresh "now" so forecast-timestamp calculations in entity
         # extra_state_attributes use the current time, not the last tick's.
         self.now_utc = datetime.now(tz=timezone.utc)
 
-        # Re-read measured room temperatures so entities show current readings.
+        # Measured room temperatures.
+        self.measured_temperatures = {}
         for room_name, entity_ids in self._temp_sensors.items():
             readings: List[float] = []
             for entity_id in entity_ids:
@@ -2381,13 +2401,76 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 avg = sum(readings) / len(readings)
                 self.model.rooms[room_name].temperature = avg
                 self.measured_temperatures[room_name] = avg
+        self._rooms_ever_measured.update(self.measured_temperatures.keys())
 
-        # Re-read outdoor temperature.
+        # Live setpoints / enabled flags from the active schedule.
+        try:
+            self._apply_schedule(datetime.now())
+        except Exception:
+            _LOGGER.debug("UI refresh: schedule apply failed", exc_info=True)
+
+        # Advance the window debounce/settle state machine.
+        self._update_window_state_machine(self.now_utc)
+
+        # Outdoor temperature: expose the raw reading (None → "unknown") but use
+        # the last valid value for the model evaluations below.
         _outdoor = self._read_outdoor_temp()
+        self.outdoor_temp = _outdoor
         if _outdoor is not None:
-            self.outdoor_temp = _outdoor
             self._last_valid_outdoor_temp = _outdoor
         outdoor_temp = _outdoor if _outdoor is not None else self._last_valid_outdoor_temp
+
+        if outdoor_temp is not None:
+            # Solar gains (clear-sky / forecast model — no MPC involved).
+            try:
+                self.solar_gains = {
+                    name: self._room_solar_gain(
+                        name, self.now_utc, self.cloud_cover, self.ghi_now
+                    )
+                    for name in self.model.room_names
+                }
+            except Exception:
+                _LOGGER.debug("UI refresh: solar-gain recompute failed", exc_info=True)
+            # Instantaneous heat-flow breakdown.
+            try:
+                self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
+            except Exception:
+                _LOGGER.debug("UI refresh: heat-flow recompute failed", exc_info=True)
+
+        return outdoor_temp
+
+    async def async_refresh_ui(self) -> None:
+        """Refresh live UI state without running the MPC.
+
+        Scheduled on a fast cadence (see ``setup_entry``) so the dashboard's
+        measurements, setpoints, solar gains, and KPI cards stay live between
+        scheduled MPC ticks.  The MPC and EKF advance strictly at the coordinator's
+        ``update_interval``; this path never touches them.
+        """
+        try:
+            self._refresh_live_state()
+        except Exception:
+            _LOGGER.warning("Fast UI refresh failed", exc_info=True)
+            return
+        self.async_update_listeners()
+
+    async def _async_push_window_override(self) -> None:
+        """Apply window overrides, push actuator commands, and refresh entity states.
+
+        Called directly by window-sensor callbacks so that the heater-off (window
+        open) or heater-on (window closed) command is issued immediately, without
+        triggering a coordinator refresh and without disturbing the MPC or EKF.
+
+        Live inputs are re-read via ``_refresh_live_state()`` so entities report
+        current values, and ``async_update_listeners()`` is always called at the
+        end so the UI refreshes immediately regardless of whether actuator
+        commands could be applied.
+
+        The MPC runs strictly at the scheduled update interval via the coordinator
+        timer.  This method is the sole path for window events to affect actuators
+        between those scheduled ticks.
+        """
+        outdoor_temp = self._refresh_live_state()
 
         # Push actuator commands only when we have an MPC solution and a valid
         # outdoor temperature.  Missing either means we're still in startup or
@@ -3022,7 +3105,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=_coerce_interval_seconds(self._update_interval),  # must match history buffer sampling interval, not MPC horizon
+            dt=_coerce_interval_seconds(self._update_interval_s),  # must match history buffer sampling interval, not MPC horizon
         )
 
         history = list(self._history_buffer)
@@ -3080,7 +3163,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=_coerce_interval_seconds(self._update_interval),
+            dt=_coerce_interval_seconds(self._update_interval_s),
         )
 
         history = list(self._history_buffer)

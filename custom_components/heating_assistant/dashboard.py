@@ -2329,7 +2329,7 @@ def build_dashboard_from_coordinator(coordinator: Any) -> Dict[str, Any]:
         ))
 
     horizon = getattr(coordinator, "_horizon", None)
-    dt = getattr(coordinator, "dt", None) or getattr(coordinator, "_update_interval", None)
+    dt = getattr(coordinator, "dt", None) or getattr(coordinator, "_update_interval_s", None)
     if horizon is not None and dt is not None:
         forecast_hours = horizon * float(dt) / 3600.0
     else:
@@ -2376,7 +2376,7 @@ def build_dashboard_variant_from_coordinator(
         ))
 
     horizon = getattr(coordinator, "_horizon", None)
-    dt = getattr(coordinator, "dt", None) or getattr(coordinator, "_update_interval", None)
+    dt = getattr(coordinator, "dt", None) or getattr(coordinator, "_update_interval_s", None)
     if horizon is not None and dt is not None:
         forecast_hours = horizon * float(dt) / 3600.0
     else:

@@ -90,7 +90,7 @@ class _FakeCoordinator:
         self._estimation_log_likelihood = None
         self._entry = SimpleNamespace(entry_id="test-entry-1", data=dict(entry_data))
         self._horizon = 6
-        self._update_interval = 900
+        self._update_interval_s = 900
         self._tracking_weight = 0.0
         self._energy_weight = 0.01
         self._smoothing_weight = 0.1

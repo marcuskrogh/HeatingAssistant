@@ -29,7 +29,7 @@ def _make_coordinator(radiation_entity, entity_states, *, rooms=None):
     coord._latitude = LAT
     coord._longitude = LON
     coord._horizon = 4
-    coord._update_interval = 3600  # backs the read-only ``dt`` property
+    coord._update_interval_s = 3600  # backs the read-only ``dt`` property
     coord.now_utc = NOW
     # Failure-tracking state used by the record helpers.
     coord.solar_fc_last_error = None

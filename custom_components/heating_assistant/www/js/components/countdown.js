@@ -39,10 +39,23 @@ function getDtSeconds(state) {
 }
 
 function computeRemaining(state, dtS) {
-  const lastUpdated = entityLastUpdated(state, systemEntity('mpc_performance'));
-  if (!lastUpdated) return dtS;
+  // Prefer the explicit MPC-run timestamp the coordinator publishes: it is
+  // anchored to the actual internal solve schedule and is NOT bumped by the
+  // fast UI refresh that writes entity state between solves.  Fall back to the
+  // entity's HA last_updated for older integration versions.
+  const lastRunTs = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
+  let lastRunMs = null;
+  if (lastRunTs != null) {
+    const parsed = parseFloat(lastRunTs);
+    if (!isNaN(parsed)) lastRunMs = parsed * 1000;
+  }
+  if (lastRunMs == null) {
+    const lastUpdated = entityLastUpdated(state, systemEntity('mpc_performance'));
+    if (!lastUpdated) return dtS;
+    lastRunMs = lastUpdated.getTime();
+  }
 
-  const elapsed = (Date.now() - lastUpdated.getTime()) / 1000;
+  const elapsed = (Date.now() - lastRunMs) / 1000;
   if (elapsed < 0) return dtS;
   const remaining = dtS - (elapsed % dtS);
   return remaining;

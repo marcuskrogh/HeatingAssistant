@@ -124,10 +124,38 @@ async def async_setup_entry(
 
 
 # ---------------------------------------------------------------------------
+# Mixin: keep live-value sensors visible across transient update failures
+# ---------------------------------------------------------------------------
+
+class _LiveValueSensorMixin:
+    """Keep a sensor available even when a coordinator update cycle fails.
+
+    The live readout sensors (measured / filtered temperature, setpoint, solar
+    gain, power, model-fit KPIs, …) read their value from coordinator *instance
+    attributes* that persist between cycles and are refreshed by BOTH the
+    scheduled MPC tick and the fast UI refresh.  By default ``CoordinatorEntity``
+    ties ``available`` to ``coordinator.last_update_success``, so a single failed
+    update (e.g. a transient sensor/weather/solver hiccup) makes every one of
+    these entities report ``unavailable`` — the dashboard then shows no KPIs,
+    setpoints, or measurements until the next *successful* full update, even
+    though the last-known values are perfectly usable.
+
+    Mirroring the forecast sensors (which already pin ``available`` to ``True``),
+    this mixin keeps the cached live value on screen.  ``native_value`` still
+    returns ``None`` — surfaced as ``unknown`` — when there is genuinely no data
+    yet, so nothing fabricated is ever displayed.
+    """
+
+    @property
+    def available(self) -> bool:
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Temperature sensors (measured and Kalman-filtered) — per room
 # ---------------------------------------------------------------------------
 
-class TemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
+class TemperatureMeasuredSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the room temperature measurement used by the integration.
 
     When multiple ``temp_sensors`` are configured for the room their readings
@@ -161,7 +189,7 @@ class TemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
         return round(float(temp), 2)
 
 
-class TemperatureFilteredSensor(CoordinatorEntity, SensorEntity):
+class TemperatureFilteredSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the Kalman-filtered room temperature estimate x̂⁺.
 
     The state estimator fuses the raw measurement with the thermal model
@@ -203,7 +231,7 @@ class TemperatureFilteredSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class TemperatureOffsetSensor(CoordinatorEntity, SensorEntity):
+class TemperatureOffsetSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the EKF-estimated measurement offset state b [°C]."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -241,7 +269,7 @@ class TemperatureOffsetSensor(CoordinatorEntity, SensorEntity):
 # Setpoint and soft-constraint sensors (per room)
 # ---------------------------------------------------------------------------
 
-class SetpointSensor(CoordinatorEntity, SensorEntity):
+class SetpointSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the active per-room setpoint [°C].
 
     Exposes both the current scalar (used by entities cards) and a
@@ -293,7 +321,7 @@ class SetpointSensor(CoordinatorEntity, SensorEntity):
         )
 
 
-class WindowStateSensor(CoordinatorEntity, SensorEntity):
+class WindowStateSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Per-room open-window state-machine state (Phase 3 W1)."""
 
     _attr_icon = "mdi:window-open-variant"
@@ -318,7 +346,7 @@ class WindowStateSensor(CoordinatorEntity, SensorEntity):
         return "closed"
 
 
-class _ConstraintSensorBase(CoordinatorEntity, SensorEntity):
+class _ConstraintSensorBase(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Shared base for the MPC soft-constraint bound sensors.
 
     Exposes both the current scalar (used by entities cards) and a
@@ -513,7 +541,7 @@ def _build_horizon_forecast(
 # Heating power sensor
 # ---------------------------------------------------------------------------
 
-class HeatingPowerMeasuredSensor(CoordinatorEntity, SensorEntity):
+class HeatingPowerMeasuredSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the total active heating/cooling power for a room.
 
     Positive values indicate heating, negative values indicate cooling
@@ -557,7 +585,7 @@ class HeatingPowerMeasuredSensor(CoordinatorEntity, SensorEntity):
 # Solar gain sensor
 # ---------------------------------------------------------------------------
 
-class SolarGainMeasuredSensor(CoordinatorEntity, SensorEntity):
+class SolarGainMeasuredSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the current solar heat gain for a room [W]."""
 
     _attr_device_class = SensorDeviceClass.POWER
@@ -602,7 +630,7 @@ class SolarGainMeasuredSensor(CoordinatorEntity, SensorEntity):
 # Control action sensor (per heat source)
 # ---------------------------------------------------------------------------
 
-class ControlActionSensor(CoordinatorEntity, SensorEntity):
+class ControlActionSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the MPC control action for a heat source [%]."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -645,7 +673,7 @@ class ControlActionSensor(CoordinatorEntity, SensorEntity):
 # Heat pump COP sensor
 # ---------------------------------------------------------------------------
 
-class HeatPumpCOPSensor(CoordinatorEntity, SensorEntity):
+class HeatPumpCOPSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the current COP of a heat pump source."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -696,7 +724,7 @@ class HeatPumpCOPSensor(CoordinatorEntity, SensorEntity):
 # Outdoor temperature sensor
 # ---------------------------------------------------------------------------
 
-class OutdoorTemperatureMeasuredSensor(CoordinatorEntity, SensorEntity):
+class OutdoorTemperatureMeasuredSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Sensor reporting the outdoor temperature as read by the integration."""
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
@@ -964,7 +992,7 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
 # Heat loss sensor (per room)
 # ---------------------------------------------------------------------------
 
-class HeatLossSensor(CoordinatorEntity, SensorEntity):
+class HeatLossSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the instantaneous heat-loss breakdown for a room.
 
@@ -1017,7 +1045,7 @@ class HeatLossSensor(CoordinatorEntity, SensorEntity):
 # Energy balance sensor (per room)
 # ---------------------------------------------------------------------------
 
-class EnergyBalanceSensor(CoordinatorEntity, SensorEntity):
+class EnergyBalanceSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the net energy balance for a room [W].
 
@@ -1082,7 +1110,7 @@ class EnergyBalanceSensor(CoordinatorEntity, SensorEntity):
 # System efficiency sensor
 # ---------------------------------------------------------------------------
 
-class SystemEfficiencySensor(CoordinatorEntity, SensorEntity):
+class SystemEfficiencySensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     System-wide sensor reporting aggregate heating metrics.
 
@@ -1349,7 +1377,7 @@ class SolarGainForecastSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class ElectricityPriceSensor(CoordinatorEntity, SensorEntity):
+class ElectricityPriceSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Current electricity spot price from the configured price entity.
 
     The state mirrors ``coordinator.price_forecast[0]`` (the price for the
@@ -1477,7 +1505,7 @@ class ElectricityPriceForecastSensor(CoordinatorEntity, SensorEntity):
 # Prediction error sensor (per room) - for model fit visualization
 # ---------------------------------------------------------------------------
 
-class PredictionErrorSensor(CoordinatorEntity, SensorEntity):
+class PredictionErrorSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the current prediction error (residual) for a room.
 
@@ -1570,7 +1598,7 @@ class PredictionErrorSensor(CoordinatorEntity, SensorEntity):
 # Model fit quality sensor (per room)
 # ---------------------------------------------------------------------------
 
-class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
+class ModelFitQualitySensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting overall model fit quality for a room.
 
@@ -1685,7 +1713,7 @@ class ModelFitQualitySensor(CoordinatorEntity, SensorEntity):
 # Parameter confidence sensor (per room)
 # ---------------------------------------------------------------------------
 
-class ParameterConfidenceSensor(CoordinatorEntity, SensorEntity):
+class ParameterConfidenceSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting confidence/validity of thermal parameters for a room.
 
@@ -1791,7 +1819,7 @@ class ParameterConfidenceSensor(CoordinatorEntity, SensorEntity):
 # Open-loop RMSE sensor (per room) – direct model quality indicator
 # ---------------------------------------------------------------------------
 
-class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
+class OpenLoopRMSESensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the open-loop prediction RMSE for a room.
 
@@ -1861,7 +1889,7 @@ class OpenLoopRMSESensor(CoordinatorEntity, SensorEntity):
 # Kalman innovation sensor (per room)
 # ---------------------------------------------------------------------------
 
-class KalmanInnovationSensor(CoordinatorEntity, SensorEntity):
+class KalmanInnovationSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the most recent Kalman filter innovation ν = y − C x̂⁻.
 
@@ -1956,7 +1984,7 @@ class KalmanInnovationSensor(CoordinatorEntity, SensorEntity):
 # Residual ACF sensor (per room)
 # ---------------------------------------------------------------------------
 
-class ResidualACFSensor(CoordinatorEntity, SensorEntity):
+class ResidualACFSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the lag-1 autocorrelation of 1-step prediction residuals.
 
@@ -2021,7 +2049,7 @@ class ResidualACFSensor(CoordinatorEntity, SensorEntity):
 # Heater scale sensor (per heat source) — estimated power-scale factor
 # ---------------------------------------------------------------------------
 
-class HeaterScaleSensor(CoordinatorEntity, SensorEntity):
+class HeaterScaleSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting the current power-scale factor for a heat source.
 
@@ -2091,7 +2119,7 @@ class HeaterScaleSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class LoglikSliceSensor(CoordinatorEntity, SensorEntity):
+class LoglikSliceSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Most recent log-likelihood slice computed for a room.
 
     Populated by the :meth:`HeatingAssistantCoordinator.async_compute_loglik_slice`
@@ -2225,7 +2253,7 @@ class HeatingEnergyTotalSensor(CoordinatorEntity, RestoreSensor):
 # Estimated parameters status sensor (system-wide)
 # ---------------------------------------------------------------------------
 
-class EstimatedParametersStatusSensor(CoordinatorEntity, SensorEntity):
+class EstimatedParametersStatusSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     System-wide sensor summarising all currently active thermal parameters.
 
@@ -2397,6 +2425,15 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
             "dt_s": self._coordinator.dt,
         }
 
+        # Explicit MPC schedule timestamps so the dashboard countdown is anchored
+        # to the actual internal solve cadence rather than the entity's HA
+        # last_updated (which the fast UI refresh also bumps between solves).
+        last_run_ts = getattr(self._coordinator, "_last_mpc_run_ts", None)
+        attrs["last_run_ts"] = last_run_ts
+        attrs["next_run_ts"] = (
+            last_run_ts + self._coordinator.dt if last_run_ts else None
+        )
+
         # Tracking error per room (absolute deviation from setpoint)
         room_names = self._coordinator.model.room_names
         tracking_error_values = [
@@ -2435,7 +2472,7 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
 # Weather forecast status sensor (system-wide, diagnostic)
 # ---------------------------------------------------------------------------
 
-class WeatherForecastStatusSensor(CoordinatorEntity, SensorEntity):
+class WeatherForecastStatusSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Diagnostic sensor reporting the health of the weather-forecast fetch.
 
     The state is one of:
@@ -2485,7 +2522,7 @@ class WeatherForecastStatusSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class SolarRadiationStatusSensor(CoordinatorEntity, SensorEntity):
+class SolarRadiationStatusSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Diagnostic sensor reporting the health of the solar-radiation forecast.
 
     The state is one of:
@@ -2548,7 +2585,7 @@ class SolarRadiationStatusSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class SysIdSimulationSensor(CoordinatorEntity, SensorEntity):
+class SysIdSimulationSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor exposing the most recent system-identification EKF reconstruction.
 
@@ -2628,7 +2665,7 @@ class SysIdSimulationSensor(CoordinatorEntity, SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
+class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """Exposes current controller tuning and estimation parameters as attributes.
 
     The frontend reads this entity reactively via state subscription to populate
@@ -2671,7 +2708,13 @@ class ControllerConfigSensor(CoordinatorEntity, SensorEntity):
             "soft_constraint_linear_weight": c._soft_constraint_linear_weight,
             "terminal_weight": c._terminal_weight,
             "horizon": c._horizon,
-            "update_interval": c._update_interval,
+            # Always expose as a plain number of seconds.  ``_update_interval``
+            # can end up as a ``datetime.timedelta`` (e.g. when the config entry
+            # stored it that way), and a single non-JSON-serialisable attribute
+            # makes Home Assistant's WebSocket API fail to serialise the *whole*
+            # state payload — which silently starves the dashboard of every
+            # heating_assistant entity.  ``coordinator.dt`` is the coerced value.
+            "update_interval": c.dt,
             "sigma_w": c._sigma_w,
             "sigma_v": c._sigma_v,
             "sigma_b": c._sigma_b,
