@@ -127,20 +127,25 @@ def run_sysid_ekf(
     if len(window) < 2:
         window = list(history)[-(min(horizon_steps, len(history) - 1) + 1):]
 
-    # Filter out entries with large gaps (> 3× dt) from their predecessor.
-    # Such gaps break the fixed-dt EKF assumption and produce nonsense.
+    # Split the window into contiguous segments at timestamp gaps.
+    # The EKF is reinitialised at each segment boundary so that pre-restart
+    # data is not discarded — all segments within the horizon are used.
     max_gap = 3.0 * dt
-    filtered = [window[0]]
+    segments: List[List[Any]] = []
+    cur_seg: List[Any] = [window[0]]
     for i in range(1, len(window)):
         t_cur = float(window[i].get("timestamp", 0.0))
         t_prv = float(window[i - 1].get("timestamp", 0.0))
         if 0 < (t_cur - t_prv) <= max_gap:
-            filtered.append(window[i])
+            cur_seg.append(window[i])
         else:
-            # Restart contiguous segment from this point
-            filtered = [window[i]]
-    window = filtered
-    if len(window) < 2:
+            if len(cur_seg) >= 2:
+                segments.append(cur_seg)
+            cur_seg = [window[i]]
+    if len(cur_seg) >= 2:
+        segments.append(cur_seg)
+
+    if not segments:
         return {
             "error": (
                 f"No contiguous data segment found within the requested "
@@ -150,7 +155,7 @@ def run_sysid_ekf(
             "per_room": {},
             "horizon_steps": 0,
         }
-    actual_steps = len(window) - 1
+    actual_steps = sum(len(s) - 1 for s in segments)
 
     # ------------------------------------------------------------------
     # Build parametrised HouseModel copy
@@ -160,31 +165,6 @@ def run_sysid_ekf(
     except Exception as exc:
         _LOGGER.error("SysID: model construction failed: %s", exc, exc_info=True)
         return {"error": f"Model construction failed: {exc}", "per_room": {}}
-
-    # ------------------------------------------------------------------
-    # Skip any leading records that pre-date a room-count change.
-    # ------------------------------------------------------------------
-    start_idx = 0
-    found = False
-    for start_idx, rec in enumerate(window):
-        if len(rec.get("y", [])) >= n:
-            found = True
-            break
-    if not found:
-        return {
-            "error": (
-                f"No history record with ≥ {n} room temperatures "
-                f"(all {len(window)} records in the window are too short). "
-                "This can happen if rooms were recently added to the configuration."
-            ),
-            "per_room": {},
-        }
-    window = window[start_idx:]
-    if len(window) < 2:
-        return {
-            "error": "Fewer than 2 usable records after skipping short y-vectors.",
-            "per_room": {},
-        }
 
     # ------------------------------------------------------------------
     # Build HouseThermalSDE  (augment_offsets=False: state = [T(n), φ(m)])
@@ -205,100 +185,107 @@ def run_sysid_ekf(
     n_x = sde.nx                              # n_rooms + n_emitter_lags
     room_list = sde._room_list                # authoritative room order from SDE
 
-    # ------------------------------------------------------------------
-    # Initialise CD-EKF from first measurement
-    # ------------------------------------------------------------------
-    y0 = window[0].get("y", [])
-    x0 = np.zeros(n_x, dtype=float)
-    x0[:n] = [float(y0[i]) if i < len(y0) else 0.0 for i in range(n)]
-    P0 = (sigma_v ** 2) * np.eye(n_x)
-
-    ekf = _ContinuousDiscreteEKF(
-        sde, x0, P0, dt,
-        n_steps=10,
-        scheme="implicit-euler",
-    )
-
     p = np.array([])    # use model-default parameters
 
     # ------------------------------------------------------------------
-    # ZOH bookkeeping: u[k] and d[k] drive interval [t_k, t_{k+1}]
+    # ZOH bookkeeping
     # ------------------------------------------------------------------
-    n_u   = len(heat_sources)
-    n_d   = sde.nd   # 1 + n_rooms
-
-    u_prev = _record_u(window[0], n_u)
-    d_prev = _record_d(window[0], room_list, n_d)
-    t_prev = float(window[0].get("timestamp", 0.0))
+    n_u = len(heat_sources)
+    n_d = sde.nd   # 1 + n_rooms
 
     # ------------------------------------------------------------------
-    # Output containers — initial point (no prediction available yet)
+    # Output containers — filled across all segments
     # ------------------------------------------------------------------
     per_room_sim: Dict[str, List[Dict[str, Any]]] = {name: [] for name in room_names}
-    ts0 = t_prev
-    for i, name in enumerate(room_names):
-        per_room_sim[name].append({
-            "time":      ts0,
-            "measured":  float(y0[i]) if i < len(y0) else None,
-            "predicted": float(x0[i]),
-            "cov_upper": float(x0[i] + 2.0 * sigma_v),
-            "cov_lower": float(x0[i] - 2.0 * sigma_v),
-        })
 
     # ------------------------------------------------------------------
-    # Main CD-EKF loop
+    # Multi-segment CD-EKF: reinitialise at each gap boundary so that
+    # pre-restart history is not discarded.
     # ------------------------------------------------------------------
-    for record in window[1:]:
-        timestamp = float(record.get("timestamp", 0.0))
-        y_raw     = record.get("y", [])
-        y_meas: List[Optional[float]] = [
-            float(y_raw[i]) if i < len(y_raw) else None for i in range(n)
-        ]
-        u_curr = _record_u(record, n_u)
-        d_curr = _record_d(record, room_list, n_d)
+    for seg in segments:
+        # Skip leading records that pre-date a room-count change.
+        seg_start = 0
+        for seg_start, rec in enumerate(seg):
+            if len(rec.get("y", [])) >= n:
+                break
+        seg = seg[seg_start:]
+        if len(seg) < 2:
+            continue
 
-        # ---- Prediction step ----------------------------------------
-        # Propagate from x̂⁺(k-1) using u_prev, d_prev (ZOH).
-        try:
-            x_pred, P_pred = ekf.predict(u_prev, d_prev, p, t_prev)
-        except Exception as exc:
-            _LOGGER.warning("SysID CD-EKF predict failed at ts=%.0f: %s", timestamp, exc)
-            break
+        # Initialise EKF from first measurement of this segment.
+        y0 = seg[0].get("y", [])
+        x0 = np.zeros(n_x, dtype=float)
+        x0[:n] = [float(y0[i]) if i < len(y0) else 0.0 for i in range(n)]
+        P0 = (sigma_v ** 2) * np.eye(n_x)
 
-        # Room-temperature block: x_pred[:n], P_pred[:n, :n]
-        T_pred    = x_pred[:n]
-        P_pred_rr = P_pred[:n, :n]
+        ekf = _ContinuousDiscreteEKF(
+            sde, x0, P0, dt,
+            n_steps=10,
+            scheme="implicit-euler",
+        )
 
-        # ---- Record one-step-ahead prediction -----------------------
-        # Output variance: S_i = P⁻[i,i] + σ_v²
+        # Add initial point for this segment.
+        ts0 = float(seg[0].get("timestamp", 0.0))
         for i, name in enumerate(room_names):
-            std_i = float(np.sqrt(max(0.0, P_pred_rr[i, i] + sigma_v ** 2)))
             per_room_sim[name].append({
-                "time":      timestamp,
-                "measured":  y_meas[i],
-                "predicted": float(T_pred[i]),
-                "cov_upper": float(T_pred[i] + 2.0 * std_i),
-                "cov_lower": float(T_pred[i] - 2.0 * std_i),
+                "time":      ts0,
+                "measured":  float(y0[i]) if i < len(y0) else None,
+                "predicted": float(x0[i]),
+                "cov_upper": float(x0[i] + 2.0 * sigma_v),
+                "cov_lower": float(x0[i] - 2.0 * sigma_v),
             })
 
-        # ---- Update step --------------------------------------------
-        valid = np.array([m is not None for m in y_meas], dtype=bool)
-        y_k   = np.array([
-            y_meas[i] if y_meas[i] is not None else float(T_pred[i])
-            for i in range(n)
-        ], dtype=float)
-        mask  = valid if not valid.all() else None   # None = use all (faster path)
+        u_prev = _record_u(seg[0], n_u)
+        d_prev = _record_d(seg[0], room_list, n_d)
+        t_prev = float(seg[0].get("timestamp", 0.0))
 
-        try:
-            ekf.update(y_k, u_curr, d_curr, p, mask=mask)
-        except Exception as exc:
-            _LOGGER.warning("SysID CD-EKF update failed at ts=%.0f: %s", timestamp, exc)
-            break
+        for record in seg[1:]:
+            timestamp = float(record.get("timestamp", 0.0))
+            y_raw     = record.get("y", [])
+            y_meas: List[Optional[float]] = [
+                float(y_raw[i]) if i < len(y_raw) else None for i in range(n)
+            ]
+            u_curr = _record_u(record, n_u)
+            d_curr = _record_d(record, room_list, n_d)
 
-        # Advance ZOH state
-        u_prev = u_curr
-        d_prev = d_curr
-        t_prev = timestamp
+            # ---- Prediction step ----------------------------------------
+            try:
+                x_pred, P_pred = ekf.predict(u_prev, d_prev, p, t_prev)
+            except Exception as exc:
+                _LOGGER.warning("SysID CD-EKF predict failed at ts=%.0f: %s", timestamp, exc)
+                break
+
+            T_pred    = x_pred[:n]
+            P_pred_rr = P_pred[:n, :n]
+
+            # ---- Record one-step-ahead prediction -----------------------
+            for i, name in enumerate(room_names):
+                std_i = float(np.sqrt(max(0.0, P_pred_rr[i, i] + sigma_v ** 2)))
+                per_room_sim[name].append({
+                    "time":      timestamp,
+                    "measured":  y_meas[i],
+                    "predicted": float(T_pred[i]),
+                    "cov_upper": float(T_pred[i] + 2.0 * std_i),
+                    "cov_lower": float(T_pred[i] - 2.0 * std_i),
+                })
+
+            # ---- Update step --------------------------------------------
+            valid = np.array([m is not None for m in y_meas], dtype=bool)
+            y_k   = np.array([
+                y_meas[i] if y_meas[i] is not None else float(T_pred[i])
+                for i in range(n)
+            ], dtype=float)
+            mask  = valid if not valid.all() else None
+
+            try:
+                ekf.update(y_k, u_curr, d_curr, p, mask=mask)
+            except Exception as exc:
+                _LOGGER.warning("SysID CD-EKF update failed at ts=%.0f: %s", timestamp, exc)
+                break
+
+            u_prev = u_curr
+            d_prev = d_curr
+            t_prev = timestamp
 
     # ------------------------------------------------------------------
     # One-step prediction RMSE / MAE per room
