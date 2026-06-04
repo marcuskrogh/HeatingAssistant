@@ -1112,6 +1112,34 @@ def _get_coordinator(hass: HomeAssistant) -> HeatingAssistantCoordinator:
     raise ValueError("No Heating Assistant coordinator found")
 
 
+def _persist_tuning_updates(
+    hass: HomeAssistant,
+    coordinator: HeatingAssistantCoordinator,
+    updates: Dict[str, Any],
+) -> None:
+    """Persist dashboard tuning changes so they survive a reload/restart.
+
+    The coordinator reads tuning/estimation parameters with **options-first**
+    precedence (see ``HeatingAssistantCoordinator.__init__``): an ``options``
+    value always shadows the matching ``data`` value.  The options flow
+    ("Configure") snapshots the whole config into ``entry.options`` the first
+    time it is saved, so writing dashboard updates to ``entry.data`` alone left
+    a stale ``entry.options`` value that re-won on the next restart — the
+    parameters silently reverted to the previously-configured set.
+
+    Writing the updates to **both** stores keeps them consistent and ensures the
+    options-first read picks up the latest dashboard values after a restart.
+    """
+    entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
+    if entry is None:
+        return
+    new_data = {**dict(entry.data), **updates}
+    new_options = {**dict(entry.options), **updates}
+    hass.config_entries.async_update_entry(
+        entry, data=new_data, options=new_options
+    )
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register domain services for setup assistance."""
 
@@ -1867,10 +1895,7 @@ def _register_services(hass: HomeAssistant) -> None:
         updates = {k: v for k, v in call.data.items() if k in _CONTROLLER_TUNING_KEYS}
         if not updates:
             return
-        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
-        if entry:
-            new_data = {**dict(entry.data), **updates}
-            hass.config_entries.async_update_entry(entry, data=new_data)
+        _persist_tuning_updates(hass, coordinator, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
@@ -1946,10 +1971,7 @@ def _register_services(hass: HomeAssistant) -> None:
         updates = {k: v for k, v in call.data.items() if k in _ESTIMATION_PARAM_KEYS}
         if not updates:
             return
-        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
-        if entry:
-            new_data = {**dict(entry.data), **updates}
-            hass.config_entries.async_update_entry(entry, data=new_data)
+        _persist_tuning_updates(hass, coordinator, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
