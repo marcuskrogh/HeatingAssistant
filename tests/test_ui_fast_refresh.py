@@ -137,3 +137,56 @@ def test_live_value_sensor_mixin_stays_available():
         pass
 
     assert _Dummy().available is True
+
+
+def test_controller_config_update_interval_is_json_serialisable():
+    """Regression: a single non-serialisable attribute breaks the whole payload.
+
+    ``DataUpdateCoordinator`` backs its ``update_interval`` property with
+    ``self._update_interval``; assigning a ``timedelta`` (which the runtime
+    reconfiguration does) used to clobber the coordinator's own interval field
+    with a ``timedelta``.  ``ControllerConfigSensor`` then exposed that timedelta
+    in its attributes, and Home Assistant's WebSocket API failed to serialise the
+    *entire* state payload — starving the dashboard of every entity.
+
+    The sensor now publishes the coerced numeric seconds (``coordinator.dt``), so
+    the attributes must always be JSON-serialisable.
+    """
+    import json
+    from datetime import timedelta
+
+    from custom_components.heating_assistant.coordinator import _coerce_interval_seconds
+    from custom_components.heating_assistant.sensor import ControllerConfigSensor
+
+    class _FakeCoord:
+        _room_comfort_offset = {"living_room": 2.0}
+        _tracking_weight = 1.0
+        _energy_weight = 1.0
+        _energy_price_weight = 0.0
+        _smoothing_weight = 1.0
+        _soft_constraint_weight = 1.0
+        _soft_constraint_linear_weight = 1.0
+        _terminal_weight = 1.0
+        _horizon = 100
+        _sigma_w = 1.0
+        _sigma_v = 1.0
+        _sigma_b = 1.0
+        _window_open_debounce = 60.0
+        _window_open_close_settle = 30.0
+        _window_open_q_inflation = 1.0
+
+        @property
+        def dt(self):
+            # Mirror the real coerced property: even when the underlying interval
+            # is a timedelta, dt returns plain float seconds.
+            return _coerce_interval_seconds(timedelta(seconds=300))
+
+    sensor = object.__new__(ControllerConfigSensor)
+    sensor._coordinator = _FakeCoord()
+
+    attrs = sensor.extra_state_attributes
+
+    assert attrs["update_interval"] == pytest.approx(300.0)
+    assert not isinstance(attrs["update_interval"], timedelta)
+    # Must not raise — this is exactly what the HA WebSocket serialiser does.
+    json.dumps(attrs)

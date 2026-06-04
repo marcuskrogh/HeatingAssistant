@@ -216,7 +216,7 @@ async def test_update_cycle_projects_schedule_with_mpc_timestep() -> None:
         _apply_schedule=lambda now: None,
         _compute_control_trajectory=_capture_trajectory,
         _horizon=8,
-        _update_interval=300,
+        _update_interval_s=300,
         dt=900.0,
         _update_window_state_machine=lambda now: None,
         _read_outdoor_temp=lambda: (_ for _ in ()).throw(RuntimeError("stop")),

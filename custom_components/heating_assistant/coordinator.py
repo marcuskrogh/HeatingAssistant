@@ -408,7 +408,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # re-creating the entry.  Falls back to DEFAULT_UPDATE_INTERVAL when absent.
         # Old config entries that stored a separate "dt" key are silently ignored;
         # the update_interval is the single source of truth.
-        self._update_interval: int = int(
+        self._update_interval_s: int = int(
             _coerce_interval_seconds(
                 options.get(CONF_UPDATE_INTERVAL)
                 or data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
@@ -566,7 +566,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=self._update_interval),
+            update_interval=timedelta(seconds=self._update_interval_s),
         )
 
     # ------------------------------------------------------------------
@@ -824,12 +824,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     @property
     def dt(self) -> float:
         """Return the OCP/EKF time step (= update interval) in seconds."""
-        return _coerce_interval_seconds(self._update_interval)
+        return _coerce_interval_seconds(self._update_interval_s)
 
     @property
     def update_interval_seconds(self) -> int:
         """Return the coordinator / EKF update period in seconds."""
-        return self._update_interval
+        return self._update_interval_s
 
     @property
     def history_buffer(self) -> deque:
@@ -1052,10 +1052,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             )
             rebuild_controller = True
         if CONF_UPDATE_INTERVAL in pending:
-            self._update_interval = int(
-                pending.get(CONF_UPDATE_INTERVAL, self._update_interval)
+            self._update_interval_s = int(
+                pending.get(CONF_UPDATE_INTERVAL, self._update_interval_s)
             )
-            self.update_interval = timedelta(seconds=self._update_interval)
+            self.update_interval = timedelta(seconds=self._update_interval_s)
         if CONF_COMFORT_OFFSET in pending:
             new_offset = float(pending.get(CONF_COMFORT_OFFSET, 2.0))
             for room_name in self._room_comfort_offset:
@@ -1702,7 +1702,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 if self._history_buffer else 0.0
             )
             _should_record_history = (
-                now.timestamp() - _last_history_ts >= 0.5 * self._update_interval
+                now.timestamp() - _last_history_ts >= 0.5 * self._update_interval_s
             )
 
             if _should_record_history:
@@ -3105,7 +3105,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=_coerce_interval_seconds(self._update_interval),  # must match history buffer sampling interval, not MPC horizon
+            dt=_coerce_interval_seconds(self._update_interval_s),  # must match history buffer sampling interval, not MPC horizon
         )
 
         history = list(self._history_buffer)
@@ -3163,7 +3163,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=_coerce_interval_seconds(self._update_interval),
+            dt=_coerce_interval_seconds(self._update_interval_s),
         )
 
         history = list(self._history_buffer)

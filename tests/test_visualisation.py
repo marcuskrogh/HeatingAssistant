@@ -774,7 +774,7 @@ class TestCoordinatorUpdateResilience:
         coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
-        coordinator._update_interval = 900
+        coordinator._update_interval_s = 900
         coordinator.model = model
         coordinator.heat_sources = [source]
         coordinator.actions = {}
@@ -841,7 +841,7 @@ class TestCoordinatorUpdateResilience:
         coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
-        coordinator._update_interval = 900
+        coordinator._update_interval_s = 900
         coordinator.model = model
         coordinator.heat_sources = [source]
         coordinator.actions = {}
@@ -902,7 +902,7 @@ class TestCoordinatorUpdateResilience:
         coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
-        coordinator._update_interval = 900
+        coordinator._update_interval_s = 900
         coordinator.model = model
         coordinator.heat_sources = [source]
         coordinator.actions = {}
@@ -967,7 +967,7 @@ class TestCoordinatorUpdateResilience:
         coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
-        coordinator._update_interval = 900
+        coordinator._update_interval_s = 900
         coordinator._horizon = 3
         coordinator.model = model
         coordinator.heat_sources = [source]
@@ -1034,7 +1034,7 @@ class TestCoordinatorUpdateResilience:
         coordinator._window_open_q_inflation = 1.0
         coordinator._latitude = 0.0
         coordinator._longitude = 0.0
-        coordinator._update_interval = 900
+        coordinator._update_interval_s = 900
         coordinator._horizon = 4
         coordinator.model = model
         coordinator.heat_sources = [source]

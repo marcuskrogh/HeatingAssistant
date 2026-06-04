@@ -34,7 +34,7 @@ async def test_estimate_parameters_ml_passes_float_dt():
 
     # Minimal coordinator stand-in – only the attributes used by the method.
     coordinator = SimpleNamespace()
-    coordinator._update_interval = 900  # int, as stored by the real coordinator
+    coordinator._update_interval_s = 900  # int, as stored by the real coordinator
     coordinator.model = SimpleNamespace(rooms={})
     coordinator.heat_sources = []
     coordinator._history_buffer = deque()
@@ -77,7 +77,7 @@ async def test_estimate_parameters_ml_accepts_timedelta_update_interval():
             return {"success": False}
 
     coordinator = SimpleNamespace()
-    coordinator._update_interval = timedelta(minutes=15)
+    coordinator._update_interval_s = timedelta(minutes=15)
     coordinator.model = SimpleNamespace(rooms={})
     coordinator.heat_sources = []
     coordinator._history_buffer = deque()

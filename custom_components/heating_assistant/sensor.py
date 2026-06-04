@@ -2708,7 +2708,13 @@ class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
             "soft_constraint_linear_weight": c._soft_constraint_linear_weight,
             "terminal_weight": c._terminal_weight,
             "horizon": c._horizon,
-            "update_interval": c._update_interval,
+            # Always expose as a plain number of seconds.  ``_update_interval``
+            # can end up as a ``datetime.timedelta`` (e.g. when the config entry
+            # stored it that way), and a single non-JSON-serialisable attribute
+            # makes Home Assistant's WebSocket API fail to serialise the *whole*
+            # state payload — which silently starves the dashboard of every
+            # heating_assistant entity.  ``coordinator.dt`` is the coerced value.
+            "update_interval": c.dt,
             "sigma_w": c._sigma_w,
             "sigma_v": c._sigma_v,
             "sigma_b": c._sigma_b,
