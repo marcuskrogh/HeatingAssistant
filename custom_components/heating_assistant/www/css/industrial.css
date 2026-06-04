@@ -898,6 +898,34 @@
   color: var(--good);
 }
 
+/* Identification detail — parameter subsections within a card */
+.params-subsection {
+  margin-bottom: 28px;
+}
+
+.params-subsection--last {
+  margin-bottom: 0;
+}
+
+.params-subsection__title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Visual separator between the parameters section and the simulations section */
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 36px 0 28px;
+  opacity: 0.6;
+}
+
 /* Identification page — room tiles */
 .identification-tile {
   padding: 20px;
