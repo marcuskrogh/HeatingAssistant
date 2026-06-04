@@ -42,6 +42,18 @@ export class HaConnection {
     }
   }
 
+  async getForecasts() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/get_forecasts',
+      });
+      return result || {};
+    } catch (e) {
+      console.warn('Failed to fetch forecasts via WebSocket:', e);
+      return {};
+    }
+  }
+
   async getHistory(entityIds, hoursBack = 12) {
     const now = new Date();
     const start = new Date(now.getTime() - hoursBack * 3600 * 1000);

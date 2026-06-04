@@ -139,6 +139,108 @@ def test_live_value_sensor_mixin_stays_available():
     assert _Dummy().available is True
 
 
+def _make_forecast_coord() -> HeatingAssistantCoordinator:
+    """Coordinator skeleton with minimal forecast-related state for WS tests."""
+    from datetime import timezone
+
+    coord = object.__new__(HeatingAssistantCoordinator)
+    coord.predictions = [{"living_room": 20.0 + i * 0.1} for i in range(3)]
+    coord.outdoor_forecast = [5.0, 5.1, 5.2]
+    coord.solar_forecast = [{"living_room": 100.0 + i * 10} for i in range(3)]
+    coord.heating_schedule = [{"living_room": 500.0} for _ in range(3)]
+    coord.linearised_predictions = []
+    coord.price_forecast = [0.10, 0.11, 0.12]
+    coord.outdoor_temp = 4.5
+    coord.solar_gains = {"living_room": 90.0}
+    coord.filtered_temperatures = {"living_room": 19.8}
+    coord._control_trajectory = None
+    coord.now_utc = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    coord._update_interval_s = 300
+
+    room = SimpleNamespace(
+        temperature=19.5,
+        setpoint=21.0,
+        comfort_offset=2.0,
+        windows=[],
+    )
+    coord.model = SimpleNamespace(
+        room_names=["living_room"],
+        rooms={"living_room": room},
+    )
+    coord._sources_by_room = {}  # used by sources_for_room()
+    return coord
+
+
+def test_build_forecast_payload_structure():
+    coord = _make_forecast_coord()
+
+    payload = coord.build_forecast_payload()
+
+    assert "rooms" in payload
+    assert "living_room" in payload["rooms"]
+    room_fc = payload["rooms"]["living_room"]
+
+    # trajectory is the scalar list of predicted temps
+    assert len(room_fc["trajectory"]) == 3
+    assert room_fc["trajectory"][0] == pytest.approx(20.0)
+
+    # forecast array contains bridge entry + N horizon entries
+    assert len(room_fc["forecast"]) == 4  # 1 bridge + 3 steps
+    assert "temperature" in room_fc["forecast"][1]
+    assert "setpoint" in room_fc["forecast"][0]
+    assert "heating_power" in room_fc["forecast"][1]
+    assert "solar_gain" in room_fc["forecast"][1]
+
+    # outdoor and price forecasts present
+    assert len(payload["outdoor_forecast"]) == 4  # 1 bridge + 3 steps
+    assert len(payload["price_forecast"]) == 3
+    assert payload["price_forecast"][0]["price"] == pytest.approx(0.10)
+    assert payload["step_seconds"] == pytest.approx(300.0)
+
+
+def test_forecast_sensor_attributes_no_large_arrays():
+    """Forecast sensors must not store timestamped arrays in attributes.
+
+    Attributes exceeding 16 KB cause HA Recorder warnings and can break the
+    database.  The forecast data is now served via the
+    heating_assistant/get_forecasts WebSocket command instead.
+    """
+    import json
+    from custom_components.heating_assistant.sensor import (
+        TemperatureForecastSensor,
+        HeatingPowerForecastSensor,
+        SolarGainForecastSensor,
+        OutdoorTemperatureForecastSensor,
+        ElectricityPriceForecastSensor,
+    )
+
+    coord = _make_forecast_coord()
+    # SolarGainForecastSensor reads room.windows
+    coord.model.rooms["living_room"].windows = []
+
+    for SensorClass in (
+        TemperatureForecastSensor,
+        HeatingPowerForecastSensor,
+        SolarGainForecastSensor,
+    ):
+        sensor = object.__new__(SensorClass)
+        sensor._coordinator = coord
+        sensor._room_name = "living_room"
+        attrs = sensor.extra_state_attributes
+        assert "forecast" not in attrs, f"{SensorClass.__name__} still exposes 'forecast' in attributes"
+        # Must stay small enough to be serialisable without 16 KB concerns
+        serialised = json.dumps(attrs)
+        assert len(serialised) < 1000, f"{SensorClass.__name__} attributes too large: {len(serialised)} bytes"
+
+    for SensorClass in (OutdoorTemperatureForecastSensor, ElectricityPriceForecastSensor):
+        sensor = object.__new__(SensorClass)
+        sensor._coordinator = coord
+        attrs = sensor.extra_state_attributes
+        assert "forecast" not in attrs, f"{SensorClass.__name__} still exposes 'forecast' in attributes"
+        serialised = json.dumps(attrs)
+        assert len(serialised) < 500
+
+
 def test_controller_config_update_interval_is_json_serialisable():
     """Regression: a single non-serialisable attribute breaks the whole payload.
 

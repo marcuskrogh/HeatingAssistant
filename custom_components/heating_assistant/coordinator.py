@@ -1077,6 +1077,156 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """
         return self._sources_by_room.get(room_name, [])
 
+    def build_forecast_payload(
+        self, room_names: Optional[List[str]] = None
+    ) -> dict:
+        """Build the full forecast payload for WebSocket delivery.
+
+        Returns per-room trajectory/forecast arrays plus the outdoor and price
+        forecasts.  This is the authoritative source used by the custom
+        ``heating_assistant/get_forecasts`` WS command; sensor attributes only
+        keep lightweight metadata to stay under HA Recorder's 16 KB limit.
+        """
+        from .dashboard import slugify as _slugify
+
+        if room_names is None:
+            room_names = self.model.room_names
+
+        now = getattr(self, "now_utc", None) or datetime.now(tz=timezone.utc)
+        dt = self.dt
+        predictions = self.predictions
+        outdoor_forecast = self.outdoor_forecast
+        solar_forecast = self.solar_forecast
+        heating_schedule = self.heating_schedule
+        linearised_predictions = self.linearised_predictions
+        price_forecast = self.price_forecast or []
+        traj = getattr(self, "_control_trajectory", None)
+
+        rooms_payload: dict = {}
+        for room_name in room_names:
+            room = self.model.rooms[room_name]
+            step_sp = traj.setpoints.get(room_name) if traj is not None else None
+            step_off = traj.comfort_offsets.get(room_name) if traj is not None else None
+            comfort_offset = float(getattr(room, "comfort_offset", 2.0))
+
+            current_heating = sum(
+                getattr(s, "current_power", 0.0)
+                for s in self.sources_for_room(room_name)
+            )
+            current_solar = self.solar_gains.get(room_name, 0.0)
+            filtered_now = self.filtered_temperatures.get(room_name)
+            now_temp = (
+                round(float(filtered_now), 2)
+                if filtered_now is not None
+                else round(room.temperature, 2)
+            )
+            now_sp = round(float(room.setpoint), 2)
+
+            forecast: List[Dict[str, Any]] = [{
+                "time": now.isoformat(),
+                "temperature": now_temp,
+                "heating_power": round(current_heating, 1),
+                "solar_gain": round(current_solar, 1),
+                "outdoor_temp": (
+                    None if self.outdoor_temp is None
+                    else round(self.outdoor_temp, 2)
+                ),
+                "setpoint": now_sp,
+                "constraint_upper": round(now_sp + comfort_offset, 2),
+                "constraint_lower": round(now_sp - comfort_offset, 2),
+            }]
+
+            trajectory: List[float] = []
+            n_sched = len(heating_schedule)
+            n_solar = len(solar_forecast)
+            n_outdoor = len(outdoor_forecast)
+            n_lin = len(linearised_predictions)
+            for i, pred in enumerate(predictions):
+                temp = pred.get(room_name)
+                step_time = now + timedelta(seconds=dt * (i + 1))
+                have_traj = (
+                    step_sp is not None and step_off is not None
+                    and i < len(step_sp) and i < len(step_off)
+                )
+                s = (
+                    round(float(step_sp[i]), 2) if have_traj
+                    else round(float(room.setpoint), 2)
+                )
+                o = float(step_off[i]) if have_traj else comfort_offset
+                entry: Dict[str, Any] = {
+                    "time": step_time.isoformat(),
+                    "setpoint": s,
+                    "constraint_upper": round(s + o, 2),
+                    "constraint_lower": round(s - o, 2),
+                }
+                if temp is not None:
+                    temp_r = round(temp, 2)
+                    trajectory.append(temp_r)
+                    entry["temperature"] = temp_r
+                if i < n_sched:
+                    entry["heating_power"] = round(
+                        heating_schedule[i].get(room_name, 0.0), 1
+                    )
+                if i < n_solar:
+                    entry["solar_gain"] = round(
+                        solar_forecast[i].get(room_name, 0.0), 1
+                    )
+                if i < n_outdoor:
+                    entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
+                if i < n_lin:
+                    lin_temp = linearised_predictions[i].get(room_name)
+                    if lin_temp is not None:
+                        entry["linearised_temperature"] = round(lin_temp, 2)
+                forecast.append(entry)
+
+            max_power = sum(s.max_power for s in self.sources_for_room(room_name))
+
+            rooms_payload[_slugify(room_name)] = {
+                "trajectory": trajectory,
+                "forecast": forecast,
+                "setpoint": now_sp,
+                "comfort_offset": comfort_offset,
+                "horizon_steps": len(predictions),
+                "step_seconds": dt,
+                "horizon_minutes": round(len(predictions) * dt / 60, 1),
+                "max_power": max_power if max_power > 0 else None,
+            }
+
+        # Outdoor forecast
+        outdoor_data: List[Dict[str, Any]] = [{
+            "time": now.isoformat(),
+            "outdoor_temp": (
+                None if self.outdoor_temp is None
+                else round(self.outdoor_temp, 2)
+            ),
+        }]
+        for i, temp in enumerate(outdoor_forecast):
+            step_time = now + timedelta(seconds=dt * (i + 1))
+            outdoor_data.append({
+                "time": step_time.isoformat(),
+                "outdoor_temp": round(temp, 2),
+            })
+
+        # Price forecast
+        price_data: List[Dict[str, Any]] = []
+        for i, price in enumerate(price_forecast):
+            step_time = now + timedelta(seconds=dt * i)
+            try:
+                price_data.append({
+                    "time": step_time.isoformat(),
+                    "price": round(float(price), 5),
+                })
+            except (TypeError, ValueError):
+                pass
+
+        return {
+            "rooms": rooms_payload,
+            "outdoor_forecast": outdoor_data,
+            "price_forecast": price_data,
+            "step_seconds": dt,
+            "horizon_steps": len(predictions),
+        }
+
     def reset_estimated_parameters(self) -> None:
         """Discard persisted estimation and revert the live model to the
         configured (YAML / config-entry default) parameter values.

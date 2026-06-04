@@ -26,8 +26,8 @@ from custom_components.heating_assistant.sensor import (
 
 def _make_room_coordinator():
     """Coordinator stub with populated horizon data for one room."""
-    room = SimpleNamespace(temperature=20.5, setpoint=21.0, windows=[])
-    sources = [SimpleNamespace(room="living_room", current_power=900.0)]
+    room = SimpleNamespace(temperature=20.5, setpoint=21.0, windows=[], comfort_offset=2.0)
+    sources = [SimpleNamespace(room="living_room", current_power=900.0, max_power=2000.0)]
     coord = SimpleNamespace(
         predictions=[{"living_room": 20.6}, {"living_room": 20.7}],
         linearised_predictions=[{"living_room": 20.58}, {"living_room": 20.68}],
@@ -38,12 +38,19 @@ def _make_room_coordinator():
             {"living_room": 70.0},
         ],
         outdoor_forecast=[5.0, 4.5],
+        price_forecast=[0.10, 0.11],
         filtered_temperatures={"living_room": 20.63},
         solar_gains={"living_room": 50.0},
         heat_sources=sources,
-        model=SimpleNamespace(rooms={"living_room": room}),
+        model=SimpleNamespace(
+            rooms={"living_room": room},
+            room_names=["living_room"],
+        ),
         outdoor_temp=5.0,
         dt=900,
+        _update_interval_s=900,
+        _control_trajectory=None,
+        _sources_by_room={"living_room": sources},
         controller=SimpleNamespace(constraint_offset=2.0),
         last_update_success=False,  # simulate a recent UpdateFailed
     )
@@ -132,14 +139,17 @@ def test_forecast_sensors_remain_available_when_update_failed(sensor_cls, args):
     assert sensor.available is True
 
 
-# ── Forecast attributes are produced as expected ───────────────────────
+# ── Forecast attributes: large arrays removed, metadata kept ──────────
+# Forecast arrays are now served via the heating_assistant/get_forecasts
+# WebSocket endpoint to avoid HA Recorder's 16 KB attribute size limit.
 
 
 def test_temperature_forecast_exposes_forecast_attribute():
+    """forecast array removed from attributes; lightweight metadata stays."""
     coord = _make_room_coordinator()
     sensor = TemperatureForecastSensor(coord, "living_room")
     attrs = sensor.extra_state_attributes
-    assert "forecast" in attrs
+    assert "forecast" not in attrs
     assert "trajectory" in attrs
     assert attrs["horizon_steps"] == 2
 
@@ -148,7 +158,7 @@ def test_temperature_forecast_bridge_uses_filtered_measurement_estimate():
     coord = _make_room_coordinator()
     sensor = TemperatureForecastSensor(coord, "living_room")
     attrs = sensor.extra_state_attributes
-    assert attrs["forecast"][0]["temperature"] == pytest.approx(20.63)
+    # Bridge value is still surfaced via current_temperature attribute
     assert attrs["current_temperature"] == pytest.approx(20.63)
 
 
@@ -157,53 +167,67 @@ def test_temperature_forecast_bridge_falls_back_to_measurement_when_filtered_mis
     coord.filtered_temperatures = {}
     sensor = TemperatureForecastSensor(coord, "living_room")
     attrs = sensor.extra_state_attributes
-    assert attrs["forecast"][0]["temperature"] == pytest.approx(20.5)
     assert attrs["current_temperature"] == pytest.approx(20.5)
 
 
 def test_heating_power_forecast_exposes_forecast_attribute():
+    """forecast array removed from attributes; horizon_steps metadata stays."""
     coord = _make_room_coordinator()
     sensor = HeatingPowerForecastSensor(coord, "living_room")
     attrs = sensor.extra_state_attributes
-    assert "forecast" in attrs
+    assert "forecast" not in attrs
     assert attrs["horizon_steps"] == 2
 
 
 def test_temperature_and_power_forecast_time_axes_are_interval_aligned():
-    """Power plan is indexed at interval start; temperature forecast at interval end."""
-    coord = _make_room_coordinator()
-    coord.now_utc = datetime(2026, 1, 5, 7, 30)
-    temp_sensor = TemperatureForecastSensor(coord, "living_room")
-    power_sensor = HeatingPowerForecastSensor(coord, "living_room")
+    """Power plan is indexed at interval start; temperature forecast at interval end.
 
-    temp_fc = temp_sensor.extra_state_attributes["forecast"]
-    power_fc = power_sensor.extra_state_attributes["forecast"]
+    Verified via build_forecast_payload() which is the authoritative source
+    for forecast array data (previously was sensor attributes).
+    """
+    from datetime import timezone
+
+    from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+
+    coord = _make_room_coordinator()
+    now = datetime(2026, 1, 5, 7, 30, tzinfo=timezone.utc)
+    coord.now_utc = now
+
+    payload = HeatingAssistantCoordinator.build_forecast_payload(
+        coord, room_names=["living_room"]
+    )
+    room_fc = payload["rooms"]["living_room"]
+    temp_fc = room_fc["forecast"]
     dt = coord.dt
 
     t_temp0 = datetime.fromisoformat(temp_fc[0]["time"])
     t_temp1 = datetime.fromisoformat(temp_fc[1]["time"])
-    t_power0 = datetime.fromisoformat(power_fc[0]["time"])
-    t_power1 = datetime.fromisoformat(power_fc[1]["time"])
 
-    assert (t_power0 - t_temp0).total_seconds() == pytest.approx(0.0, abs=1e-6)
-    assert (t_temp1 - t_power0).total_seconds() == pytest.approx(dt)
-    assert (t_power1 - t_power0).total_seconds() == pytest.approx(dt)
+    # Bridge entry is at t=now; first predicted step is at t=now+dt
+    assert t_temp0 == now
+    assert (t_temp1 - t_temp0).total_seconds() == pytest.approx(dt)
+
+    # Heating power and temperature share the same timestamped entries
+    assert "heating_power" in temp_fc[1]  # first planned step
+    assert "temperature" in temp_fc[1]
 
 
 def test_solar_gain_forecast_exposes_forecast_attribute():
+    """forecast array removed from attributes; horizon_steps metadata stays."""
     coord = _make_room_coordinator()
     sensor = SolarGainForecastSensor(coord, "living_room")
     attrs = sensor.extra_state_attributes
-    assert "forecast" in attrs
+    assert "forecast" not in attrs
     # solar_forecast has N+1 entries → horizon_steps = N
     assert attrs["horizon_steps"] == 2
 
 
 def test_outdoor_temperature_forecast_exposes_forecast_attribute():
+    """forecast array removed from attributes; horizon_steps metadata stays."""
     coord = _make_room_coordinator()
     sensor = OutdoorTemperatureForecastSensor(coord)
     attrs = sensor.extra_state_attributes
-    assert "forecast" in attrs
+    assert "forecast" not in attrs
     assert attrs["horizon_steps"] == 2
 
 
