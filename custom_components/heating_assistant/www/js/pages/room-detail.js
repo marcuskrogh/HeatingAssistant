@@ -1,8 +1,9 @@
 import { TimeSeriesChart, makeDataset, historyToDataPoints, forecastToDataPoints, loadChartJs } from '../components/time-series-chart.js';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js';
+import { createClimateCard } from '../components/climate-card.js';
 import { createCountdown } from '../components/countdown.js';
 import {
-  formatTemperature, formatPower, formatNumber,
+  formatPower,
   entityValue, entityAttr, systemEntity, modelFitLabel,
 } from '../utils.js';
 
@@ -26,28 +27,41 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   header.innerHTML = `<h2 class="room-header__title">${room.name}</h2>`;
   container.appendChild(header);
 
-  const kpiGrid = document.createElement('div');
-  kpiGrid.className = 'grid-kpi';
-  container.appendChild(kpiGrid);
-
   const tempVal = entityValue(state, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
   const powerVal = entityValue(state, room.entities['heating_power_measured']);
   const fitVal = entityValue(state, room.entities['model_fit_quality']);
   const fitInfo = modelFitLabel(fitVal);
   const setpointVal = entityValue(state, room.entities['setpoint']);
+  const climateEntityId = `climate.heating_assistant_${roomSlug}`;
 
-  const setpointKpiEl = createKpiCard({ value: setpointVal !== null ? formatTemperature(setpointVal) : '\u2014', label: 'Setpoint', unit: '' });
-  setpointKpiEl.classList.add('card--clickable', 'kpi--setpoint');
-  setpointKpiEl.title = 'Click to change setpoint';
-  // Append a persistent hint so users know the card is interactive.
-  const spHint = document.createElement('span');
-  spHint.className = 'kpi--setpoint__hint';
-  spHint.textContent = 'TAP TO CHANGE';
-  setpointKpiEl.appendChild(spHint);
+  // Climate card replaces the standalone Temperature + Setpoint KPIs: it shows
+  // the current temperature, the active setpoint, and lets the user retarget
+  // the setpoint inline (committed to HA after a short debounce).
+  const climateCard = createClimateCard({
+    temperature: tempVal,
+    setpoint: setpointVal,
+    power: powerVal,
+    onSetpointChange: async (newSp) => {
+      try {
+        await hass.callService('climate', 'set_temperature', {
+          entity_id: climateEntityId,
+          temperature: newSp,
+        });
+      } catch (err) {
+        // Service call failed; the display self-corrects on the next state update.
+      }
+    },
+  });
+  const climateSection = document.createElement('div');
+  climateSection.className = 'room-climate';
+  climateSection.appendChild(climateCard.element);
+  container.appendChild(climateSection);
+
+  const kpiGrid = document.createElement('div');
+  kpiGrid.className = 'grid-kpi';
+  container.appendChild(kpiGrid);
 
   const kpis = [
-    setpointKpiEl,
-    createKpiCard({ value: formatTemperature(tempVal), label: 'Temperature', unit: '' }),
     createKpiCard({ value: formatPower(powerVal), label: 'Power', unit: '' }),
     createKpiCard({
       value: `<span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>`,
@@ -57,28 +71,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     }),
   ];
   kpis.forEach((k) => kpiGrid.appendChild(k));
-
-  // Make setpoint KPI clickable for inline editing.
-  let setpointEditing = false;
-  const setpointKpi = kpis[0];
-  const climateEntityId = `climate.heating_assistant_${roomSlug}`;
-
-  setpointKpi.addEventListener('click', () => {
-    if (setpointEditing) return;
-    const currentSp = entityValue(latestState, room.entities['setpoint']) ?? 22;
-    setpointEditing = true;
-    _showSetpointEditor(setpointKpi, currentSp, async (newSp) => {
-      try {
-        await hass.callService('climate', 'set_temperature', {
-          entity_id: climateEntityId,
-          temperature: newSp,
-        });
-      } catch (err) {
-        // Service call failed; the display will self-correct on next state update.
-      }
-      setpointEditing = false;
-    }, () => { setpointEditing = false; });
-  });
 
   const countdown = createCountdown(state, true);
   kpiGrid.appendChild(countdown.element);
@@ -134,116 +126,20 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       const fi = modelFitLabel(fv);
       const sp = entityValue(newState, room.entities['setpoint']);
 
-      if (!setpointEditing) {
-        updateKpiCard(kpis[0], { value: sp !== null ? formatTemperature(sp) : '\u2014' });
-      }
-      updateKpiCard(kpis[1], { value: formatTemperature(tv) });
-      updateKpiCard(kpis[2], { value: formatPower(pv) });
-      updateKpiCard(kpis[3], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
+      climateCard.update({ temperature: tv, setpoint: sp, power: pv });
+      updateKpiCard(kpis[0], { value: formatPower(pv) });
+      updateKpiCard(kpis[1], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
 
       updateChartsFromState(room, newState, connection, tempChart, powerChart, disturbChart, lastRunTs);
     },
     destroy() {
       clearInterval(countdownInterval);
+      climateCard.destroy();
       tempChart.destroy();
       powerChart.destroy();
       disturbChart.destroy();
     },
   };
-}
-
-function _showSetpointEditor(kpiCard, currentValue, onConfirm, onCancel) {
-  const valueEl = kpiCard.querySelector('.kpi__value');
-  if (!valueEl) return;
-
-  const savedHtml = valueEl.innerHTML;
-  const STEP = 0.5;
-  const MIN = 5;
-  const MAX = 30;
-
-  // Snap incoming value to the nearest 0.5 °C so the stepper is never
-  // in an invalid state regardless of what the sensor reported.
-  let selected = Math.round((currentValue ?? 22) / STEP) * STEP;
-  selected = Math.max(MIN, Math.min(MAX, selected));
-
-  function restore() {
-    valueEl.innerHTML = savedHtml;
-  }
-
-  // ── Stepper row: [−]  22.0°  [+] ─────────────────────────────────
-  const stepperRow = document.createElement('div');
-  stepperRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:6px;';
-
-  const downBtn = document.createElement('button');
-  downBtn.className = 'btn btn--ghost';
-  downBtn.textContent = '−';
-  downBtn.style.cssText = 'padding:1px 10px;font-size:17px;min-width:0;line-height:1.4;';
-
-  const valueDisplay = document.createElement('span');
-  valueDisplay.style.cssText = 'font-family:var(--font-mono);font-size:18px;color:var(--text-primary);min-width:52px;text-align:center;display:inline-block;';
-
-  const upBtn = document.createElement('button');
-  upBtn.className = 'btn btn--ghost';
-  upBtn.textContent = '+';
-  upBtn.style.cssText = 'padding:1px 10px;font-size:17px;min-width:0;line-height:1.4;';
-
-  stepperRow.appendChild(downBtn);
-  stepperRow.appendChild(valueDisplay);
-  stepperRow.appendChild(upBtn);
-
-  // ── Confirm / Cancel row ──────────────────────────────────────────
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'display:flex;justify-content:center;gap:4px;margin-top:6px;';
-
-  const confirmBtn = document.createElement('button');
-  confirmBtn.className = 'btn btn--primary';
-  confirmBtn.textContent = '✓';
-  confirmBtn.style.cssText = 'padding:2px 10px;font-size:13px;min-width:0;';
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'btn btn--ghost';
-  cancelBtn.textContent = '✗';
-  cancelBtn.style.cssText = 'padding:2px 10px;font-size:13px;min-width:0;';
-
-  btnRow.appendChild(confirmBtn);
-  btnRow.appendChild(cancelBtn);
-
-  valueEl.innerHTML = '';
-  valueEl.appendChild(stepperRow);
-  valueEl.appendChild(btnRow);
-
-  function refresh() {
-    valueDisplay.textContent = selected.toFixed(1) + '°';
-    downBtn.disabled = selected <= MIN;
-    upBtn.disabled = selected >= MAX;
-  }
-  refresh();
-
-  downBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    selected = Math.max(MIN, selected - STEP);
-    refresh();
-  });
-
-  upBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    selected = Math.min(MAX, selected + STEP);
-    refresh();
-  });
-
-  confirmBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Optimistic update: show the new value immediately so the KPI reflects
-    // the change before the HA state event arrives on the next cycle.
-    valueEl.textContent = selected.toFixed(1) + '°C';
-    onConfirm(selected);
-  });
-
-  cancelBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    restore();
-    onCancel();
-  });
 }
 
 async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs) {

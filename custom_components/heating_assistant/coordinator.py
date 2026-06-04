@@ -625,7 +625,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         configured rules.
         """
         room_names = self.model.room_names
-        self._system_enabled: bool = True
+        # The controller starts STOPPED after every (re)start.  The user must
+        # explicitly press START in the dashboard to engage the MPC backend.
+        # State estimation and logging still run while stopped; only the MPC
+        # optimisation and actuator commands are gated on this flag.
+        self._system_enabled: bool = False
         self._room_enabled: Dict[str, bool] = {name: True for name in room_names}
         self._schedule_disabled: Dict[str, bool] = {name: False for name in room_names}
 
@@ -1797,6 +1801,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     disabled_sources=disabled_src_names or None,
                     control_trajectory=control_traj,
                     price_forecast=self.price_forecast,
+                    # While stopped, run state estimation only — the MPC
+                    # optimisation is skipped so no control trajectory is solved.
+                    run_optimization=self._system_enabled,
                 )
                 self.predictions = self.controller.predictions
                 self.linearised_predictions = self.controller.linearised_predictions
@@ -1822,7 +1829,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # countdown reflects the true internal schedule.  Only set on a
                 # successful solve — a failed cycle leaves the previous value so
                 # the countdown keeps ticking toward the next scheduled attempt.
-                self._last_mpc_run_ts = now.timestamp()
+                # While stopped the MPC does not solve, so the timestamp is left
+                # untouched and the countdown stays paused.
+                if self._system_enabled:
+                    self._last_mpc_run_ts = now.timestamp()
             except Exception:
                 _LOGGER.warning(
                     "Failed to compute MPC actions; clearing forecast data so "
@@ -1860,15 +1870,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 if self.is_window_override_active(src.room):
                     self.actions[src.name] = 0.0
 
-            # System STOPPED: the controller still computed the optimal actions
-            # above (so predictions, forecasts and the heating schedule stay
-            # live), but the dashboard stop switch means we must not push any
-            # signal to the heater entities this cycle.  Replace the *commanded*
-            # actions and power with what each heater is actually delivering —
-            # read back from its real entity state — and tell the EKF the true
-            # applied input (via notify_applied_u inside the helper) so the
-            # state estimate and predictions stay grounded in reality instead of
-            # drifting on inputs that were never applied.
+            # System STOPPED: the MPC optimisation was skipped above (only the
+            # CD-EKF state estimation ran), so there is no fresh control
+            # trajectory and the dashboard stop switch means we must not push
+            # any signal to the heater entities this cycle.  Replace the
+            # commanded actions and power with what each heater is actually
+            # delivering — read back from its real entity state — and tell the
+            # EKF the true applied input (via notify_applied_u inside the
+            # helper) so the next cycle's state estimate stays grounded in
+            # reality instead of drifting on inputs that were never applied.
             if not self._system_enabled:
                 self.actions = self._read_delivered_actions(outdoor_temp)
 
@@ -1957,10 +1967,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # forecast/prediction entities available even if HA service calls
             # fail for a specific heater entity.
             #
-            # Skipped entirely while the system is stopped: the controller keeps
-            # computing optimal actions for display, but no signals are pushed to
-            # the heaters — they are left in whatever state they were last
-            # commanded to, since the dashboard stop relinquishes control.
+            # Skipped entirely while the system is stopped: the MPC optimisation
+            # does not run, so there is nothing to apply — heaters are left in
+            # whatever state they were last commanded to, since the dashboard
+            # stop relinquishes control.
             if self._system_enabled:
                 try:
                     await self._apply_actions(outdoor_temp)

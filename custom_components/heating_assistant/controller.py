@@ -1714,6 +1714,37 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
 
         return u_abs, U_abs, X_abs
 
+    def estimate_only(
+        self,
+        y: np.ndarray,
+        d: np.ndarray,
+        p: Optional[np.ndarray] = None,
+        t: float = 0.0,
+    ) -> np.ndarray:
+        """Run the CD-EKF predict+update without solving the OCP.
+
+        Used when the controller is stopped: state estimation and innovation
+        logging must keep running so the filtered temperatures stay grounded in
+        reality, but the (expensive) MPC optimisation — QP solve, linearisation
+        and prediction rollout — is skipped entirely.
+
+        ``self._u_prev`` is left untouched so the coordinator can correct it to
+        the actually-delivered input via ``notify_applied_u`` before the next
+        cycle, exactly as in the normal path.  ``self._d_prev`` is advanced so
+        the next EKF prediction integrates from the current disturbance.
+
+        Returns the filtered state estimate ``x_hat``.
+        """
+        y = np.asarray(y, dtype=float).reshape(self._model.nym)
+        d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
+        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
+
+        est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
+        x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
+
+        self._d_prev = d_now.copy()
+        return x_hat
+
 
 # ============================================================
 # House-heating linearised MPC facade
@@ -2148,6 +2179,7 @@ class HeatingMPCController:
         disabled_sources: Optional[Set[str]] = None,
         control_trajectory: Optional[Any] = None,
         price_forecast: Optional[List[float]] = None,
+        run_optimization: bool = True,
     ) -> Dict[str, float]:
         """
         Compute optimal control actions for the current time step.
@@ -2194,6 +2226,12 @@ class HeatingMPCController:
             [currency/kWh].  When provided and energy_price_weight > 0 the
             controller penalises electrical consumption proportional to the
             spot price at each step.
+        run_optimization : bool
+            When ``True`` (default) the full MPC optimisation runs.  When
+            ``False`` — i.e. the system is stopped — only the CD-EKF state
+            estimation runs (so filtered temperatures and innovation logging
+            stay live); the QP solve and prediction rollout are skipped and
+            the forecast / heating-schedule fields are cleared.
 
         Returns
         -------
@@ -2239,6 +2277,25 @@ class HeatingMPCController:
 
         # ── Current disturbance vector ───────────────────────────────────
         d = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
+
+        # ── Stopped: run the EKF only, skip the MPC optimisation ──────────
+        # State estimation and logging continue (the coordinator still records
+        # the observation in its history buffer), but no optimal trajectory is
+        # produced.  Clearing the prediction / schedule fields makes the
+        # dashboard render a visible gap instead of a stale forecast while the
+        # system is stopped.
+        if not run_optimization:
+            self._mpc.estimate_only(y, d, p, 0.0)
+            self._last_innovation = self._ekf.last_innovation
+            self._predictions = []
+            self._linearised_predictions = []
+            self._heating_schedule = []
+            # Report each source's current commanded fraction; the coordinator
+            # overwrites these with the actually-delivered values anyway.
+            return {
+                src.name: float(np.clip(self._mpc._u_prev[j], src.u_min, src.u_max))
+                for j, src in enumerate(self._sources)
+            }
 
         # ── Disturbance forecast matrix for the OCP ──────────────────────
         # D_forecast[k] = disturbance during horizon step k (k=0..N-1).

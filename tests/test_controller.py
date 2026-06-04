@@ -1267,6 +1267,58 @@ class TestKalmanInnovation:
         )
 
 
+class TestRunOptimizationGate:
+    """compute(run_optimization=False) runs only the EKF, skipping the MPC.
+
+    When the system is stopped the controller must keep estimating state (so
+    filtered temperatures and the Kalman innovation stay live) but must not
+    solve the QP or produce a control trajectory.
+    """
+
+    _NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+    def test_state_estimation_runs_while_stopped(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        # Seed the EKF with one normal cycle, then change the measurement.
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+        model.rooms["living_room"].temperature = 25.0
+        model.rooms["bedroom"].temperature = 24.0
+
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW, run_optimization=False)
+
+        innov = ctrl.last_innovation
+        assert innov is not None, "EKF innovation must be populated while stopped"
+        assert len(innov) == len(model.room_names)
+        # Filtered temperatures move toward the new (warmer) measurement.
+        filt = ctrl.filtered_temperatures
+        assert filt["living_room"] > 21.0, (
+            "EKF must fuse the new measurement even while the MPC is stopped"
+        )
+
+    def test_mpc_skipped_while_stopped(self):
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+
+        actions = ctrl.compute(outdoor_temp=-10.0, now=self._NOW, run_optimization=False)
+
+        # No QP solve recorded, no forecast trajectory produced.
+        assert ctrl.total_computes == 0, "No MPC solve should be counted while stopped"
+        assert ctrl.predictions == [], "Predictions must be cleared while stopped"
+        assert ctrl.heating_schedule == [], "Heating schedule must be cleared while stopped"
+        # Still returns a full action dict (current commanded fractions).
+        for src in sources:
+            assert src.name in actions
+
+    def test_optimization_runs_when_enabled(self):
+        """Sanity: the default path still solves the QP and predicts a trajectory."""
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        ctrl.compute(outdoor_temp=-10.0, now=self._NOW)
+        assert ctrl.total_computes == 1
+        assert len(ctrl.predictions) > 0
+
+
 class TestTerminalWeight:
     """HeatingMPCController.terminal_weight exposes the configured weight."""
 

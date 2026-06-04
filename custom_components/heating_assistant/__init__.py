@@ -791,7 +791,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=40",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=41",
                     "embed_iframe": False,
                 }
             },
@@ -1862,8 +1862,15 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_set_system_enabled(call: ServiceCall) -> None:
         """Enable or disable the heating assistant controller globally."""
         coordinator = _get_coordinator(hass)
-        coordinator.set_system_enabled(call.data["enabled"])
-        coordinator.async_update_listeners()
+        enabled = call.data["enabled"]
+        coordinator.set_system_enabled(enabled)
+        if enabled:
+            # Engage the controller immediately on START rather than waiting for
+            # the next scheduled tick — this runs the MPC and pushes commands to
+            # the heaters right away so the action feels responsive.
+            await coordinator.async_request_refresh()
+        else:
+            coordinator.async_update_listeners()
 
     hass.services.async_register(
         DOMAIN,
