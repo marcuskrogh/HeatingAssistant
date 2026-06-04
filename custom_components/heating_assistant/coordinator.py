@@ -809,11 +809,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # None when no price entity is configured or the fetch fails.
         self.price_forecast: Optional[List[float]] = None
 
-        # Timestamp of the last successful MPC solve.  Used to gate solver
-        # calls to the scheduled update interval — event-driven refreshes
-        # (window open/close, startup listeners) check this and skip the
-        # controller.compute() call if the interval hasn't elapsed yet.
-        self._last_mpc_run_ts: float = 0.0
 
     # ------------------------------------------------------------------
     # Public properties
@@ -1583,117 +1578,81 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             }
 
             # 4. Run MPC controller
-            #
-            # The MPC is only solved at the scheduled sample interval.
-            # Event-driven refreshes (window open/close, startup sensor
-            # transitions) arrive between timer ticks; they must NOT trigger
-            # a new MPC solve because:
-            #   • the MPC horizon is formulated for steps of exactly dt [s],
-            #   • the EKF inside the controller advances one dt step per call,
-            #   • solving at off-schedule instants shifts all future prediction
-            #     timestamps and corrupts the state estimate's time alignment.
-            # On a skipped cycle the last computed actions are retained as-is;
-            # the window-override block below still zeroes open-window rooms
-            # before the actuator commands are sent.
-            _should_run_mpc = (
-                now.timestamp() - self._last_mpc_run_ts
-                >= 0.9 * self._update_interval
-            )
-            kalman_innovation: Optional[List[float]] = None
-
-            if _should_run_mpc:
-                # Collect heat sources whose rooms are currently off so the
-                # controller can zero them out in both the first-step action
-                # and the full predicted heating schedule before returning.
-                # Also disable sources for rooms that have never had a valid
-                # sensor reading so we never actuate on the 20 °C default.
-                disabled_src_names = {
-                    src.name
-                    for src in self.heat_sources
-                    if not self.is_room_enabled(src.room)
-                    or self.is_window_override_active(src.room)
-                    or src.room in rooms_not_ready
-                }
-                try:
-                    self.actions = self.controller.compute(
-                        outdoor_temp=outdoor_temp,
-                        solar_gains=self.solar_gains,
-                        now=now,
-                        outdoor_forecast=outdoor_forecast,
-                        cloud_forecast=cloud_forecast,
-                        cloud_cover_now=cloud_cover_now,
-                        ghi_forecast=ghi_forecast,
-                        ghi_now=ghi_now,
-                        disabled_sources=disabled_src_names or None,
-                        control_trajectory=control_traj,
-                        price_forecast=self.price_forecast,
-                    )
-                    self.predictions = self.controller.predictions
-                    self.linearised_predictions = self.controller.linearised_predictions
-                    self.outdoor_forecast = self.controller.outdoor_forecast
-                    self.solar_forecast = self.controller.solar_forecast
-                    self.heating_schedule = self.controller.heating_schedule
-                    self.filtered_temperatures = dict(self.controller.filtered_temperatures)
-                    # Rooms that have never had a valid reading expose "unknown"
-                    # so the dashboard falls back to the raw sensor value.
-                    for _r in rooms_not_ready:
-                        self.filtered_temperatures.pop(_r, None)
-                    # Mirror the price forecast that was actually used so sensors
-                    # can expose it (may differ from self.price_forecast if the
-                    # controller truncated / padded it).
-                    self.price_forecast = (
-                        self.controller.price_forecast or self.price_forecast
-                    )
-
-                    # Capture Kalman innovation for diagnostics.
-                    # controller.last_innovation is populated by compute() after
-                    # splitting the EKF predict/update steps to record
-                    # ν = y − hm(x̂⁻).
-                    kalman_innovation = self.controller.last_innovation
-                    self._last_mpc_run_ts = now.timestamp()
-
-                except Exception:
-                    _LOGGER.warning(
-                        "Failed to compute MPC actions; clearing forecast data so "
-                        "dashboards show a visible gap at the failure point",
-                        exc_info=True,
-                    )
-                    # Keep previous actions if available; otherwise default to
-                    # all-off so the applied heater commands stay safe.
-                    if not self.actions:
-                        self.actions = {src.name: 0.0 for src in self.heat_sources}
-
-                    # Pass the weather forecast through (it's read independently
-                    # of the MPC), but clear all forecast/filtered fields so the
-                    # visualization sensors expose "unknown" instead of
-                    # fabricating a thermal-model trajectory.  This makes
-                    # failures plot as a visible gap rather than a silent fake
-                    # forecast.
-                    if outdoor_forecast:
-                        self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
-                        if len(self.outdoor_forecast) < self._horizon:
-                            self.outdoor_forecast.extend(
-                                [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
-                            )
-                    else:
-                        self.outdoor_forecast = [outdoor_temp] * self._horizon
-                    self.predictions = []
-                    self.linearised_predictions = []
-                    self.heating_schedule = []
-                    self.solar_forecast = []
-                    self.filtered_temperatures = {}
-
-            else:
-                _LOGGER.debug(
-                    "Event-driven refresh (%.0f s since last MPC run, interval %.0f s): "
-                    "skipping controller solve — applying actuator overrides only",
-                    now.timestamp() - self._last_mpc_run_ts,
-                    self._update_interval,
+            # Collect heat sources whose rooms are currently off so the
+            # controller can zero them out in both the first-step action and
+            # the full predicted heating schedule before returning.  Also
+            # disable sources for rooms that have never had a valid sensor
+            # reading so we never actuate based on the 20 °C model default.
+            disabled_src_names = {
+                src.name
+                for src in self.heat_sources
+                if not self.is_room_enabled(src.room)
+                or self.is_window_override_active(src.room)
+                or src.room in rooms_not_ready
+            }
+            try:
+                self.actions = self.controller.compute(
+                    outdoor_temp=outdoor_temp,
+                    solar_gains=self.solar_gains,
+                    now=now,
+                    outdoor_forecast=outdoor_forecast,
+                    cloud_forecast=cloud_forecast,
+                    cloud_cover_now=cloud_cover_now,
+                    ghi_forecast=ghi_forecast,
+                    ghi_now=ghi_now,
+                    disabled_sources=disabled_src_names or None,
+                    control_trajectory=control_traj,
+                    price_forecast=self.price_forecast,
                 )
-                # Ensure actions dict is always populated for the override /
-                # apply steps below, even before the very first MPC solve.
+                self.predictions = self.controller.predictions
+                self.linearised_predictions = self.controller.linearised_predictions
+                self.outdoor_forecast = self.controller.outdoor_forecast
+                self.solar_forecast = self.controller.solar_forecast
+                self.heating_schedule = self.controller.heating_schedule
+                self.filtered_temperatures = dict(self.controller.filtered_temperatures)
+                # Rooms that have never had a valid reading expose "unknown"
+                # so the dashboard falls back to the raw sensor value.
+                for _r in rooms_not_ready:
+                    self.filtered_temperatures.pop(_r, None)
+                # Mirror the price forecast that was actually used so sensors can
+                # expose it (may differ from self.price_forecast if the controller
+                # truncated / padded it).
+                self.price_forecast = self.controller.price_forecast or self.price_forecast
+
+                # Capture Kalman innovation for diagnostics (may be None on first step)
+                # controller.last_innovation is populated by compute() after splitting
+                # the EKF predict/update steps to record ν = y − hm(x̂⁻).
+                kalman_innovation: Optional[List[float]] = self.controller.last_innovation
+            except Exception:
+                _LOGGER.warning(
+                    "Failed to compute MPC actions; clearing forecast data so "
+                    "dashboards show a visible gap at the failure point",
+                    exc_info=True,
+                )
+                # Keep previous actions if available; otherwise default to all-off
+                # so the applied heater commands stay safe.
                 if not self.actions:
                     self.actions = {src.name: 0.0 for src in self.heat_sources}
+
+                # Pass the weather forecast through (it's read independently of
+                # the MPC), but clear all forecast/filtered fields so the
+                # visualization sensors expose "unknown" instead of fabricating
+                # a thermal-model trajectory.  This makes failures plot as a
+                # visible gap rather than a silent fake forecast.
+                if outdoor_forecast:
+                    self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
+                    if len(self.outdoor_forecast) < self._horizon:
+                        self.outdoor_forecast.extend(
+                            [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
+                        )
+                else:
+                    self.outdoor_forecast = [outdoor_temp] * self._horizon
+                self.predictions = []
+                self.linearised_predictions = []
+                self.heating_schedule = []
+                self.solar_forecast = []
+                self.filtered_temperatures = {}
+                kalman_innovation = None
 
             # Dispatch-layer W1 override: clamp all sources in open-window
             # rooms to u=0 before history write and actuator commands.
@@ -1719,12 +1678,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 6. Record observation in the rolling history buffer for ML
             #    parameter estimation and model fit analysis.
             #
-            # Rate-limit to the scheduled update interval.  Event-driven
-            # refreshes (startup / window-state listeners) skip the MPC solve
-            # (see step 4 above) and must also NOT add sub-interval entries to
-            # the history buffer — irregular spacing would break the sysid EKF
-            # and open-loop simulation diagnostics, which assume samples are
-            # spaced by the nominal dt.
+            # Rate-limit to the scheduled update interval.  Window events no
+            # longer call _async_update_data (they use _async_push_window_override
+            # directly), but startup listeners may still trigger a refresh shortly
+            # after the coordinator's own first scheduled tick.  Guard against
+            # that by skipping the append when fewer than 0.5 × update_interval
+            # seconds have elapsed since the last history entry.
             _last_history_ts = (
                 float(self._history_buffer[-1].get("timestamp", 0.0))
                 if self._history_buffer else 0.0
@@ -1879,17 +1838,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """Set up window-sensor listeners for event-driven debounce/settle timing.
 
         The state machine is advanced DIRECTLY from the event callbacks rather
-        than relying on coordinator refreshes to check elapsed time:
+        than relying on coordinator refreshes to check elapsed time.  Actuator
+        commands are pushed via ``_async_push_window_override()`` rather than
+        ``async_request_refresh()`` so the MPC and EKF are never triggered by
+        window events — they run strictly at the scheduled update interval.
 
         * Sensor opens  → ``closed → pending_open`` immediately; after
           ``window_open_debounce`` seconds, verify still open, advance to
-          ``open``, then fire ONE coordinator refresh (heater-off command).
+          ``open``, then push heater-off override immediately.
         * Sensor closes (all room sensors closed) + state is ``open`` →
           ``open → pending_closed`` immediately; after
           ``window_open_close_settle`` seconds, verify still closed, advance
-          to ``closed``, then fire ONE coordinator refresh (heater-on command).
+          to ``closed``, then push last MPC actions back to actuators.
         * Sensor closes while ``pending_open`` (closed before debounce) →
-          revert to ``closed`` immediately, fire ONE coordinator refresh.
+          revert to ``closed`` immediately, push last MPC actions.
 
         Pending timers are keyed by room name so a second sensor event in
         the same room correctly cancels the previous in-flight timer.
@@ -1959,7 +1921,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             "Window debounce elapsed for %s — heater override active",
                             _rn,
                         )
-                    self.hass.async_create_task(self.async_request_refresh())
+                    self.hass.async_create_task(self._async_push_window_override())
 
                 _pending[room_name] = async_call_later(
                     self.hass, self._window_open_debounce, _advance_open
@@ -1979,7 +1941,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         "Window sensor %s closed before debounce for %s — reverted",
                         sensor_id, room_name,
                     )
-                    self.hass.async_create_task(self.async_request_refresh())
+                    self.hass.async_create_task(self._async_push_window_override())
 
                 elif current == "open" and not any_still_open:
                     # All sensors closed while open — enter settle period.
@@ -2006,7 +1968,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                                 "Window settle elapsed for %s — heater override cleared",
                                 _rn,
                             )
-                        self.hass.async_create_task(self.async_request_refresh())
+                        self.hass.async_create_task(self._async_push_window_override())
 
                     _pending[room_name] = async_call_later(
                         self.hass, self._window_open_close_settle, _advance_closed
@@ -2384,6 +2346,39 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             src._current_power = src.cooling_power(outdoor_temp) * min(1.0, abs(frac))
         else:
             src._current_power = 0.0
+
+    async def _async_push_window_override(self) -> None:
+        """Apply window overrides and push actuator commands without re-solving MPC.
+
+        Called directly by window-sensor callbacks so that the heater-off (window
+        open) or heater-on (window closed) command is issued immediately, without
+        triggering a coordinator refresh and without disturbing the MPC or EKF.
+
+        The MPC runs strictly at the scheduled update interval via the coordinator
+        timer.  This method is the sole path for window events to affect actuators
+        between those scheduled ticks.
+        """
+        if not self.actions:
+            # No MPC solution yet — nothing to override.
+            return
+
+        outdoor_temp = self._read_outdoor_temp() or self._last_valid_outdoor_temp
+        if outdoor_temp is None:
+            return
+
+        # Apply dispatch-layer window override: clamp open-window rooms to 0.
+        for src in self.heat_sources:
+            if self.is_window_override_active(src.room):
+                self.actions[src.name] = 0.0
+
+        if self._system_enabled:
+            try:
+                await self._apply_actions(outdoor_temp)
+            except Exception:
+                _LOGGER.warning(
+                    "Window override: failed to push actuator commands",
+                    exc_info=True,
+                )
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         """Write the computed set-point fractions to heater entities via HA services."""
