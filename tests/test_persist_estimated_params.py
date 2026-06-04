@@ -96,7 +96,9 @@ class _FakeCoordinator:
         self._smoothing_weight = 0.1
         self._constraint_offset = 2.0
         self._soft_constraint_weight = 10.0
+        self._soft_constraint_linear_weight = 0.0
         self._terminal_weight = 100.0
+        self._base_setpoint = {}
         self._sigma_w = 0.25
         self._sigma_v = 0.75
         self._sigma_b = 0.01
@@ -307,6 +309,70 @@ def test_restore_estimated_parameters_active_history_format():
     assert coordinator.model.rooms["lr"].thermal_mass == pytest.approx(1.5e6)
     assert coordinator.model.rooms["lr"].r_external == pytest.approx(0.07)
     assert coordinator.model.rooms["lr"].internal_gain == pytest.approx(42.0)
+
+
+def test_store_identified_parameters_snapshot_survives_restart():
+    """A snapshot written by store_identified_parameters must be restorable.
+
+    Regression for the bug where manually-stored model parameters reverted to
+    the configured defaults on restart: store_identified_parameters wrote a
+    nested {"active": ..., "history": ...} snapshot but _restore_estimated_parameters
+    read the flat {"rooms": ...} layout, so nothing was restored.
+    """
+    import custom_components.heating_assistant.coordinator as coord_mod
+    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+
+    room = _make_room("lr", 5e6, 0.05)
+    src = _make_source("hp", 1.0)
+    coordinator = _FakeCoordinator([room], [src])
+
+    mock_controller = MagicMock()
+    with patch(
+        "custom_components.heating_assistant.coordinator.HeatingMPCController",
+        return_value=mock_controller,
+    ):
+        coord_mod.HeatingAssistantCoordinator.store_identified_parameters(
+            coordinator, "lr", 2.5e6, 0.025, source="manual"
+        )
+
+    snapshot = coordinator._real_entry.data[CONF_ESTIMATED_PARAMS]
+    # Flat mirror must be present so the restart-time restore can read it.
+    assert snapshot["rooms"]["lr"]["thermal_mass"] == pytest.approx(2.5e6)
+    assert snapshot["rooms"]["lr"]["r_external"] == pytest.approx(0.025)
+    # And the nested history layout is preserved for the dashboard.
+    assert "active" in snapshot and "history" in snapshot
+
+    # Simulate a restart: build a fresh model at the configured defaults and
+    # restore from the persisted snapshot.
+    fresh_room = _make_room("lr", 5e6, 0.05)
+    fresh_src = _make_source("hp", 1.0)
+    fresh = _FakeCoordinator([fresh_room], [fresh_src])
+    coord_mod.HeatingAssistantCoordinator._restore_estimated_parameters(
+        fresh, snapshot
+    )
+    assert fresh.model.rooms["lr"].thermal_mass == pytest.approx(2.5e6)
+    assert fresh.model.rooms["lr"].r_external == pytest.approx(0.025)
+
+
+def test_restore_estimated_parameters_handles_legacy_nested_only():
+    """A legacy nested-only snapshot (no flat mirror) must still restore."""
+    import custom_components.heating_assistant.coordinator as coord_mod
+
+    room = _make_room("lr", 5e6, 0.05)
+    coordinator = _FakeCoordinator([room])
+    legacy_snapshot = {
+        "active": {
+            "rooms": {"lr": {"thermal_mass": 1.5e6, "r_external": 0.015}},
+            "estimated_at": "2025-01-01T00:00:00+00:00",
+            "source": "manual",
+        },
+        "history": [],
+    }
+    coord_mod.HeatingAssistantCoordinator._restore_estimated_parameters(
+        coordinator, legacy_snapshot
+    )
+    assert coordinator.model.rooms["lr"].thermal_mass == pytest.approx(1.5e6)
+    assert coordinator.model.rooms["lr"].r_external == pytest.approx(0.015)
 
 
 def test_restore_estimated_parameters_unknown_room_is_ignored():
