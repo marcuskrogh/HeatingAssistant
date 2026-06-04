@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '33';
+  return '41';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -37,7 +37,10 @@ class HaIndustrialPanel extends HTMLElement {
     this._state = {};
     this._initialized = false;
     this._unsubscribe = null;
-    this._systemRunning = true;
+    // The backend starts STOPPED after every (re)start; the user must press
+    // START to engage the controller.  Reflect that default until the real
+    // system_enabled attribute syncs in from the coordinator.
+    this._systemRunning = false;
   }
 
   set hass(hass) {
@@ -247,12 +250,20 @@ class HaIndustrialPanel extends HTMLElement {
   }
 
   _updateRunButton() {
+    const nav = this.shadowRoot.getElementById('panel-nav');
     const dot = this.shadowRoot.getElementById('status-dot');
     const label = this.shadowRoot.getElementById('status-label');
     const btn = this.shadowRoot.getElementById('run-btn');
     const btnLabel = btn?.querySelector('.panel-nav__run-btn-label');
     const btnIcon = btn?.querySelector('.panel-nav__run-btn-icon');
     if (!dot || !label || !btn || !btnLabel || !btnIcon) return;
+
+    // The whole second bar signals system state: --live tints and animates the
+    // bar when the controller is running, --stopped marks it dormant.
+    if (nav) {
+      nav.classList.toggle('panel-nav--live', this._systemRunning);
+      nav.classList.toggle('panel-nav--stopped', !this._systemRunning);
+    }
 
     if (this._systemRunning) {
       dot.className = 'status-dot status-dot--live';

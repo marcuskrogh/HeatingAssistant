@@ -51,8 +51,11 @@
               0 3px 1px rgba(0, 0, 0, 0.2);
 }
 
-/* Panel navigation — the secondary tab bar below the HA top bar */
+/* Panel navigation — the secondary tab bar below the HA top bar.
+   Doubles as the "live-bar": the whole strip changes appearance to signal
+   whether the controller is running (see .panel-nav--live / --stopped). */
 .panel-nav {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -60,6 +63,50 @@
   min-height: 48px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
+  transition: background var(--transition), border-color var(--transition),
+              box-shadow var(--transition);
+}
+
+/* ── Live-bar states ──────────────────────────────────────────────────────
+   The entire second bar — not just the status dot — signals run state. */
+.panel-nav--live {
+  border-bottom-color: var(--accent);
+  background:
+    linear-gradient(90deg,
+      rgba(0, 212, 170, 0.10) 0%,
+      rgba(0, 212, 170, 0.035) 38%,
+      transparent 100%),
+    var(--bg-card);
+  box-shadow: inset 0 -2px 0 0 var(--accent),
+              0 6px 18px rgba(0, 212, 170, 0.07);
+}
+
+/* Animated accent sweep tracing the bottom edge while live. */
+.panel-nav--live::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 38% 100%;
+  background-repeat: no-repeat;
+  animation: live-sweep 3.2s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes live-sweep {
+  0%   { background-position: -40% 0; }
+  100% { background-position: 140% 0; }
+}
+
+.panel-nav--stopped {
+  border-bottom-color: var(--border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-nav--live::after { animation: none; }
 }
 
 .panel-nav__links {
@@ -1277,41 +1324,6 @@
   cursor: pointer;
 }
 
-/* ── Setpoint KPI card (room-detail page, first KPI) ── */
-.kpi--setpoint {
-  border-color: var(--accent);
-  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(0, 212, 170, 0.06) 100%);
-  position: relative;
-  padding-bottom: 28px;
-}
-
-.kpi--setpoint:hover {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-}
-
-.kpi--setpoint .kpi__label {
-  color: var(--accent);
-}
-
-.kpi--setpoint__hint {
-  position: absolute;
-  bottom: 8px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--accent);
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.kpi--setpoint:hover .kpi--setpoint__hint {
-  opacity: 1;
-}
-
 /* ── Room tile — setpoint box ── */
 .room-tile__setpoint-box {
   display: inline-flex;
@@ -1932,4 +1944,228 @@
   border: 1px solid var(--border);
   background: transparent;
   color: var(--alarm);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLIMATE CARD  (.climate-card) — room-detail current temp + setpoint control
+   Replaces the standalone Temperature / Setpoint KPIs with an HA-thermostat-
+   style control rendered in the Heating Assistant design language.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.room-climate {
+  margin-bottom: 32px;
+}
+
+.climate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(0, 212, 170, 0.045) 100%);
+  border-color: rgba(0, 212, 170, 0.28);
+}
+
+.climate-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.climate-card__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.climate-card__status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.climate-card__status--heating {
+  background: rgba(255, 183, 77, 0.15);
+  color: var(--chart-power);
+}
+
+.climate-card__status--cooling {
+  background: rgba(79, 195, 247, 0.15);
+  color: var(--chart-temp);
+}
+
+.climate-card__status--idle {
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+}
+
+.climate-card__body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+/* ── Current temperature readout ── */
+.climate-card__current {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.climate-card__current-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--chart-temp);
+  line-height: 1;
+}
+
+.climate-card__current-num {
+  font-size: 46px;
+}
+
+.climate-card__current-unit {
+  font-size: 20px;
+  color: var(--text-secondary);
+  margin-left: 3px;
+}
+
+.climate-card__current-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+/* ── Setpoint stepper:  −  [ target ]  + ── */
+.climate-card__control {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.climate-card__step {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: border-color var(--transition), color var(--transition),
+              background var(--transition);
+}
+
+.climate-card__step:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.climate-card__step:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.climate-card__step:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.climate-card__target {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.climate-card__target-value {
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.climate-card__target-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+/* ── Comfort-corridor track: target centred, current temp marker slides ── */
+.climate-card__track {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  margin-top: 2px;
+  background: linear-gradient(90deg,
+    rgba(79, 195, 247, 0.45) 0%,
+    var(--bg-elevated) 42%,
+    var(--bg-elevated) 58%,
+    rgba(255, 183, 77, 0.45) 100%);
+}
+
+.climate-card__track-setpoint {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+.climate-card__track-marker {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--bg-card);
+  box-shadow: 0 0 0 1px var(--border);
+  transition: left 0.6s ease, background-color 0.3s ease;
+}
+
+.climate-card__track-marker--on   { background-color: var(--good); }
+.climate-card__track-marker--cool { background-color: var(--chart-temp); }
+.climate-card__track-marker--warm { background-color: var(--chart-power); }
+
+.climate-card__track-scale {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-top: -8px;
+}
+
+.climate-card__track-mid {
+  font-family: var(--font-sans);
+  letter-spacing: 0.12em;
+}
+
+@media (max-width: 480px) {
+  .climate-card__body {
+    justify-content: center;
+  }
+  .climate-card__current {
+    align-items: center;
+  }
 }
