@@ -1677,65 +1677,81 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 6. Record observation in the rolling history buffer for ML
             #    parameter estimation and model fit analysis.
             #
-            # y_pred alignment: the MPC predictions[0] is the one-step-ahead
-            # prediction for time k+1 (not time k).  To get a properly aligned
-            # diagnostic (prediction vs measurement at the *same* timestep) we
-            # store that forward prediction as "y_pred_for_next" and retrieve
-            # the *previous* record's "y_pred_for_next" as the aligned y_pred
-            # for the current step.
-            y_pred_aligned = None
-            if len(self._history_buffer) > 0:
-                y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
+            # Rate-limit to the scheduled update interval.  Event-driven
+            # refreshes (startup / window-state listeners) call
+            # _async_update_data more often than the timer; those extra calls
+            # still run the full controller update above (keeping the live
+            # state fresh) but must NOT add sub-interval entries to the history
+            # buffer — irregular spacing breaks the sysid EKF and open-loop
+            # simulation diagnostics, which assume samples are spaced by dt.
+            _last_history_ts = (
+                float(self._history_buffer[-1].get("timestamp", 0.0))
+                if self._history_buffer else 0.0
+            )
+            _should_record_history = (
+                now.timestamp() - _last_history_ts >= 0.5 * self._update_interval
+            )
 
-            # Compute the one-step-ahead prediction for the NEXT cycle.
-            y_pred_for_next: List[float]
-            if self.predictions and len(self.predictions) > 0:
-                first_pred = self.predictions[0]
-                y_pred_for_next = [
-                    first_pred.get(name, self.model.rooms[name].temperature)
-                    for name in self.model.room_names
-                ]
-            else:
-                y_pred_for_next = [
-                    self.model.rooms[name].temperature
-                    for name in self.model.room_names
-                ]
+            if _should_record_history:
+                # y_pred alignment: the MPC predictions[0] is the one-step-ahead
+                # prediction for time k+1 (not time k).  To get a properly aligned
+                # diagnostic (prediction vs measurement at the *same* timestep) we
+                # store that forward prediction as "y_pred_for_next" and retrieve
+                # the *previous* record's "y_pred_for_next" as the aligned y_pred
+                # for the current step.
+                y_pred_aligned = None
+                if len(self._history_buffer) > 0:
+                    y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
 
-            self._history_buffer.append({
-                # Store the raw sensor measurements as y so the open-loop
-                # simulation and EKF diagnostics start from what the sensor
-                # actually read, not from any model-internal estimate.  For
-                # rooms without a sensor configured the model temperature is
-                # used as a fallback, but those rooms have no meaningful
-                # simulation target anyway.
-                "y": [
-                    self.measured_temperatures.get(
-                        name, self.model.rooms[name].temperature
-                    )
-                    for name in self.model.room_names
-                ],
-                # y_pred: prediction made at k-1 FOR step k — aligned with y.
-                # None for the very first record (no prior prediction exists yet).
-                "y_pred": y_pred_aligned,
-                # y_pred_for_next: prediction made NOW (at k) FOR step k+1.
-                # Retrieved by the next cycle as y_pred_aligned.
-                "y_pred_for_next": y_pred_for_next,
-                "u": [
-                    self.actions.get(src.name, 0.0)
-                    for src in self.heat_sources
-                ],
-                "d_outdoor": outdoor_temp,
-                "d_solar": dict(self.solar_gains),
-                "cloud_cover": cloud_cover_now,
-                # Scalar only — the full horizon-length GHI array is kept off
-                # the bounded history buffer (it lives on the diagnostic
-                # SolarRadiationStatusSensor instead) to limit recorder growth.
-                "ghi_now": ghi_now,
-                "solar_source": self.solar_source,
-                "timestamp": now.timestamp(),
-                # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
-                "kalman_innovation": kalman_innovation,
-            })
+                # Compute the one-step-ahead prediction for the NEXT cycle.
+                y_pred_for_next: List[float]
+                if self.predictions and len(self.predictions) > 0:
+                    first_pred = self.predictions[0]
+                    y_pred_for_next = [
+                        first_pred.get(name, self.model.rooms[name].temperature)
+                        for name in self.model.room_names
+                    ]
+                else:
+                    y_pred_for_next = [
+                        self.model.rooms[name].temperature
+                        for name in self.model.room_names
+                    ]
+
+                self._history_buffer.append({
+                    # Store the raw sensor measurements as y so the open-loop
+                    # simulation and EKF diagnostics start from what the sensor
+                    # actually read, not from any model-internal estimate.  For
+                    # rooms without a sensor configured the model temperature is
+                    # used as a fallback, but those rooms have no meaningful
+                    # simulation target anyway.
+                    "y": [
+                        self.measured_temperatures.get(
+                            name, self.model.rooms[name].temperature
+                        )
+                        for name in self.model.room_names
+                    ],
+                    # y_pred: prediction made at k-1 FOR step k — aligned with y.
+                    # None for the very first record (no prior prediction exists yet).
+                    "y_pred": y_pred_aligned,
+                    # y_pred_for_next: prediction made NOW (at k) FOR step k+1.
+                    # Retrieved by the next cycle as y_pred_aligned.
+                    "y_pred_for_next": y_pred_for_next,
+                    "u": [
+                        self.actions.get(src.name, 0.0)
+                        for src in self.heat_sources
+                    ],
+                    "d_outdoor": outdoor_temp,
+                    "d_solar": dict(self.solar_gains),
+                    "cloud_cover": cloud_cover_now,
+                    # Scalar only — the full horizon-length GHI array is kept off
+                    # the bounded history buffer (it lives on the diagnostic
+                    # SolarRadiationStatusSensor instead) to limit recorder growth.
+                    "ghi_now": ghi_now,
+                    "solar_source": self.solar_source,
+                    "timestamp": now.timestamp(),
+                    # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
+                    "kalman_innovation": kalman_innovation,
+                })
 
             # 7. Write set-points to heater entities. Keep the latest
             # forecast/prediction entities available even if HA service calls
