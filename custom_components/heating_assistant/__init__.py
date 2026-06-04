@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 import voluptuous as vol
@@ -69,6 +70,7 @@ from homeassistant.const import SERVICE_RELOAD
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.reload import async_integration_yaml_config
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.storage import Store
@@ -196,6 +198,7 @@ from .const import (
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
     UPDATE_INTERVAL,
+    UI_REFRESH_INTERVAL,
 )
 from .coordinator import HeatingAssistantCoordinator
 from .yaml_merge import MergedEntry as _MergedEntry, merge_yaml_into_entry_data as _merge_yaml_into_entry_data
@@ -682,6 +685,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if cancel_window is not None:
         entry.async_on_unload(cancel_window)
 
+    # Fast UI refresh: re-read measurements / setpoints / solar and push them to
+    # the dashboard on a short cadence so KPIs, measurement cards, and plots stay
+    # live between scheduled MPC ticks.  The MPC and EKF advance strictly at the
+    # coordinator's update_interval; this loop never runs the controller.  The
+    # cadence is capped at the update interval so it never fires more often than
+    # the MPC when a very short interval is configured.
+    ui_refresh_seconds = min(UI_REFRESH_INTERVAL, coordinator.update_interval_seconds)
+    if ui_refresh_seconds > 0:
+
+        async def _async_ui_refresh(_now) -> None:
+            await coordinator.async_refresh_ui()
+
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass,
+                _async_ui_refresh,
+                timedelta(seconds=ui_refresh_seconds),
+            )
+        )
+
     # NOTE: Native Lovelace dashboards are kept in code but disabled.
     # The custom JS/CSS panel below is the primary dashboard.
     # written = await _async_auto_write_default_dashboard(hass, entry, coordinator)
@@ -745,7 +768,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=38",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=39",
                     "embed_iframe": False,
                 }
             },

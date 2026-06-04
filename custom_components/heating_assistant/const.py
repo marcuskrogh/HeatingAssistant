@@ -496,6 +496,13 @@ SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU: dict = {
 # from the config entry (CONF_UPDATE_INTERVAL) at coordinator start-up.
 UPDATE_INTERVAL = DEFAULT_UPDATE_INTERVAL
 
+# Cadence [s] of the fast UI refresh that re-reads measurements / setpoints and
+# pushes them to the dashboard between scheduled MPC ticks.  The MPC itself runs
+# only at CONF_UPDATE_INTERVAL; this refresh never runs the controller.  Capped
+# at the update interval so it never fires more often than the MPC on very short
+# intervals.
+UI_REFRESH_INTERVAL = 60
+
 # Parameter estimation
 #: Number of update steps to keep in the rolling history buffer.
 #: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is exactly 120 hours of data.

@@ -255,12 +255,21 @@ def _async_track_state_change_event_stub(hass, entity_ids, action):
     return lambda: None
 
 
+def _async_track_time_interval_stub(hass, action, interval, *args, **kwargs):
+    """No-op stand-in returning a cancel callback."""
+    return lambda: None
+
+
 _event_mod = sys.modules["homeassistant.helpers.event"]
 if not hasattr(_event_mod, "async_call_later"):
     _event_mod.async_call_later = _async_call_later_stub  # type: ignore[attr-defined]
 if not hasattr(_event_mod, "async_track_state_change_event"):
     _event_mod.async_track_state_change_event = (  # type: ignore[attr-defined]
         _async_track_state_change_event_stub
+    )
+if not hasattr(_event_mod, "async_track_time_interval"):
+    _event_mod.async_track_time_interval = (  # type: ignore[attr-defined]
+        _async_track_time_interval_stub
     )
 
 # homeassistant.helpers.entity_platform
