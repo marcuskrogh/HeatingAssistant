@@ -2354,39 +2354,61 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         open) or heater-on (window closed) command is issued immediately, without
         triggering a coordinator refresh and without disturbing the MPC or EKF.
 
-        After pushing the commands, ``async_update_listeners()`` is called so that
-        all HA entity subscribers reflect the new window-override state in the UI
-        without waiting for the next scheduled MPC tick.
+        Sensor values (temperatures, outdoor temp) are re-read from HA state so
+        entities report current values, not values from the previous scheduled tick.
+        ``async_update_listeners()`` is always called at the end so the UI refreshes
+        immediately regardless of whether actuator commands could be applied.
 
         The MPC runs strictly at the scheduled update interval via the coordinator
         timer.  This method is the sole path for window events to affect actuators
         between those scheduled ticks.
         """
-        if not self.actions:
-            # No MPC solution yet — nothing to override.
-            return
+        # Stamp a fresh "now" so forecast-timestamp calculations in entity
+        # extra_state_attributes use the current time, not the last tick's.
+        self.now_utc = datetime.now(tz=timezone.utc)
 
-        outdoor_temp = self._read_outdoor_temp() or self._last_valid_outdoor_temp
-        if outdoor_temp is None:
-            return
+        # Re-read measured room temperatures so entities show current readings.
+        for room_name, entity_ids in self._temp_sensors.items():
+            readings: List[float] = []
+            for entity_id in entity_ids:
+                state = self.hass.states.get(entity_id)
+                if state and state.state not in ("unknown", "unavailable"):
+                    try:
+                        readings.append(float(state.state))
+                    except (ValueError, TypeError):
+                        pass
+            if readings:
+                avg = sum(readings) / len(readings)
+                self.model.rooms[room_name].temperature = avg
+                self.measured_temperatures[room_name] = avg
 
-        # Apply dispatch-layer window override: clamp open-window rooms to 0.
-        for src in self.heat_sources:
-            if self.is_window_override_active(src.room):
-                self.actions[src.name] = 0.0
+        # Re-read outdoor temperature.
+        _outdoor = self._read_outdoor_temp()
+        if _outdoor is not None:
+            self.outdoor_temp = _outdoor
+            self._last_valid_outdoor_temp = _outdoor
+        outdoor_temp = _outdoor if _outdoor is not None else self._last_valid_outdoor_temp
 
-        if self._system_enabled:
-            try:
-                await self._apply_actions(outdoor_temp)
-            except Exception:
-                _LOGGER.warning(
-                    "Window override: failed to push actuator commands",
-                    exc_info=True,
-                )
+        # Push actuator commands only when we have an MPC solution and a valid
+        # outdoor temperature.  Missing either means we're still in startup or
+        # the outdoor sensor is transiently unavailable — in both cases the last
+        # commanded state is the safest thing to leave the heaters in.
+        if self.actions and outdoor_temp is not None:
+            for src in self.heat_sources:
+                if self.is_window_override_active(src.room):
+                    self.actions[src.name] = 0.0
 
-        # Notify all entity subscribers so the UI immediately reflects the new
-        # window-override state (heater on/off, action values, etc.) without
-        # waiting for the next scheduled MPC tick.
+            if self._system_enabled:
+                try:
+                    await self._apply_actions(outdoor_temp)
+                except Exception:
+                    _LOGGER.warning(
+                        "Window override: failed to push actuator commands",
+                        exc_info=True,
+                    )
+
+        # Always notify entity subscribers so the UI immediately reflects both
+        # the new window-override state and the freshly read sensor values.
         self.async_update_listeners()
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
