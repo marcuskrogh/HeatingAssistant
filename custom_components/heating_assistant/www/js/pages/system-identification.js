@@ -368,6 +368,21 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   let latestState = state;
 
+  // All user-editable parameter fields.
+  const paramInputs = [thermalMassInput, rExternalInput, sigmaWInput, sigmaVInput, sigmaBInput, horizonInput];
+
+  // Tracks whether the user has begun a manual identification process (i.e.
+  // changed any parameter). Once true, the reactive update() callback stops
+  // overwriting the form from system state, so running a reconstruction or
+  // open-loop simulation — which triggers a state update — cannot reset the
+  // parameters the user is testing. It is reset only when the page is
+  // re-created (navigation / page refresh) or after the user commits or
+  // reverts parameters.
+  let userEditing = false;
+  paramInputs.forEach((inp) => {
+    inp.addEventListener('input', () => { userEditing = true; });
+  });
+
   // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
@@ -495,6 +510,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
             room_name: roomSlug,
             history_index: idx,
           });
+          // The reverted set is now the applied one; resume state syncing so
+          // the form updates to reflect it.
+          userEditing = false;
           btn.textContent = '✓';
         } catch (err) {
           btn.textContent = 'ERR';
@@ -521,6 +539,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       // state event to arrive and update latestState via the update() callback.
       await new Promise((res) => setTimeout(res, 800));
       populateModelFromSysid(roomSlug, latestState);
+      // Loaded values are pending review; protect them from state-sync resets.
+      userEditing = true;
       setStatus(
         actionStatusEl,
         'Identified parameters loaded — review above, then click “Apply Parameters” to commit.',
@@ -548,6 +568,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         sigma_v: parseFloat(sigmaVInput.value),
         sigma_b: parseFloat(sigmaBInput.value),
       });
+      // Edits are now the applied parameters; resume syncing the form from
+      // system state so it reflects the authoritative committed values.
+      userEditing = false;
       setStatus(actionStatusEl, 'Parameters applied and stored in history.', 'success');
     } catch (err) {
       setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
@@ -563,6 +586,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     sigmaVInput.value = DEFAULTS.sigma_v;
     sigmaBInput.value = DEFAULTS.sigma_b;
     horizonInput.value = DEFAULTS.horizon_hours;
+    // Defaults are pending review; protect them from state-sync resets.
+    userEditing = true;
     setStatus(actionStatusEl, 'Default values loaded — click “Apply Parameters” to commit.', '');
   });
 
@@ -618,11 +643,14 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   return {
     update(newState) {
       latestState = newState;
-      // Do not overwrite values the user is actively editing.
+      // Only sync the form from system state before the user has begun a manual
+      // identification process and while no field is focused. Once the user has
+      // edited a parameter, running a reconstruction / open-loop simulation (or
+      // any other state update) must not reset their values — that should only
+      // happen on navigation or page refresh, which re-creates this page.
       const rootNode = container.getRootNode();
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
-      const allInputs = [thermalMassInput, rExternalInput, sigmaWInput, sigmaVInput, sigmaBInput, horizonInput];
-      if (!allInputs.some((inp) => inp === focused)) {
+      if (!userEditing && !paramInputs.some((inp) => inp === focused)) {
         populateFromState(roomSlug, newState);
       }
       renderEkfResults(roomSlug, newState);

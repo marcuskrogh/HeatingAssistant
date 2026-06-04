@@ -198,6 +198,19 @@ function renderTuningIndex(container, connection, hass) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let destroyed = false;
 
+  // All user-editable parameter fields (MPC + window config).
+  const allParamInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
+
+  // Tracks whether the user has begun a manual tuning process (i.e. changed any
+  // parameter). Once true, the reactive update() callback stops overwriting the
+  // form from system state, so a background state update cannot reset the values
+  // the user is editing. It is reset only when the page is re-created
+  // (navigation / page refresh) or after the user applies the changes.
+  let userEditing = false;
+  allParamInputs.forEach((inp) => {
+    inp.addEventListener('input', () => { userEditing = true; });
+  });
+
   async function loadConfig() {
     if (applyConfig(fromEntityState())) return;
     setStatus('Loading current values…', 'running');
@@ -227,6 +240,8 @@ function renderTuningIndex(container, connection, hass) {
       await hass.callService('heating_assistant', 'update_estimation_params', windowData);
 
       applyConfig(await fromWebSocket()) || applyConfig(fromEntityState());
+      // Edits are now the applied configuration; resume syncing from state.
+      userEditing = false;
       setStatus('Applied successfully.', 'success');
     } catch (err) {
       setStatus('Error: ' + (err.message || err), 'error');
@@ -236,6 +251,8 @@ function renderTuningIndex(container, connection, hass) {
 
   btnReset.addEventListener('click', () => {
     populateDefaults();
+    // Defaults are pending review; protect them from state-sync resets.
+    userEditing = true;
     setStatus('Default values loaded — click Apply Changes to save.', '');
   });
 
@@ -243,11 +260,13 @@ function renderTuningIndex(container, connection, hass) {
 
   return {
     update() {
-      // Don't overwrite a value the user is actively editing.
+      // Once the user has started editing, never overwrite the form from state;
+      // values should only reset on navigation or page refresh, which re-creates
+      // this page. Also skip while a field is focused (before any edit).
+      if (userEditing) return;
       const rootNode = container.getRootNode();
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
-      const allInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
-      if (allInputs.some((inp) => inp === focused)) return;
+      if (allParamInputs.some((inp) => inp === focused)) return;
       applyConfig(fromEntityState());
     },
     destroy() {
