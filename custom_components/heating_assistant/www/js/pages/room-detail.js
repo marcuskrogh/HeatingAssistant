@@ -32,15 +32,20 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const fitVal = entityValue(state, room.entities['model_fit_quality']);
   const fitInfo = modelFitLabel(fitVal);
   const setpointVal = entityValue(state, room.entities['setpoint']);
+  const comfortLowerVal = entityValue(state, room.entities['constraint_lower']);
+  const comfortUpperVal = entityValue(state, room.entities['constraint_upper']);
   const climateEntityId = `climate.heating_assistant_${roomSlug}`;
 
   // Climate card replaces the standalone Temperature + Setpoint KPIs: it shows
-  // the current temperature, the active setpoint, and lets the user retarget
-  // the setpoint inline (committed to HA after a short debounce).
+  // the current temperature, the active setpoint, the comfort corridor, and
+  // lets the user retarget the setpoint inline (committed to HA after a short
+  // debounce).
   const climateCard = createClimateCard({
     temperature: tempVal,
     setpoint: setpointVal,
     power: powerVal,
+    comfortLower: comfortLowerVal,
+    comfortUpper: comfortUpperVal,
     onSetpointChange: async (newSp) => {
       try {
         await hass.callService('climate', 'set_temperature', {
@@ -125,8 +130,13 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       const fv = entityValue(newState, room.entities['model_fit_quality']);
       const fi = modelFitLabel(fv);
       const sp = entityValue(newState, room.entities['setpoint']);
+      const cl = entityValue(newState, room.entities['constraint_lower']);
+      const cu = entityValue(newState, room.entities['constraint_upper']);
 
-      climateCard.update({ temperature: tv, setpoint: sp, power: pv });
+      climateCard.update({
+        temperature: tv, setpoint: sp, power: pv,
+        comfortLower: cl, comfortUpper: cu,
+      });
       updateKpiCard(kpis[0], { value: formatPower(pv) });
       updateKpiCard(kpis[1], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
 
@@ -317,7 +327,11 @@ function buildTemperatureChart(
 
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
   const maxPower = roomForecast?.max_power ?? null;
-  const minPower = maxPower !== null ? -maxPower : null;
+  // Cooling capacity is asymmetric to heating: use the backend-provided
+  // max_cooling_power (magnitude) for the lower bound, defaulting to 0 (no
+  // cooling) rather than a mirror of the heating limit.
+  const maxCoolingPower = roomForecast?.max_cooling_power ?? null;
+  const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const allPower = [powerHistory, powerForecast];
   const boundsArr = [maxPower, minPower, 0];
@@ -342,7 +356,7 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
     }),
   ];
 
-  if (maxPower !== null) {
+  if (maxPower !== null || maxCoolingPower !== null) {
     const now = Date.now();
     const past = now - 13 * 3600 * 1000;
     const lastTime = powerForecast.length > 0
@@ -350,16 +364,24 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
       : now + 3 * 3600 * 1000;
     const boundTimes = [past, now, lastTime];
 
-    datasets.push(
-      makeDataset('Above Max', boundTimes.map((t) => ({ x: t, y: yMax + 1000 })), 'transparent', {
-        fill: { target: { value: maxPower }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
-        borderWidth: 0, pointRadius: 0, showLine: true,
-      }),
-      makeDataset('Below Min', boundTimes.map((t) => ({ x: t, y: yMin - 1000 })), 'transparent', {
-        fill: { target: { value: minPower }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
-        borderWidth: 0, pointRadius: 0, showLine: true,
-      })
-    );
+    if (maxPower !== null) {
+      datasets.push(
+        makeDataset('Above Max', boundTimes.map((t) => ({ x: t, y: yMax + 1000 })), 'transparent', {
+          fill: { target: { value: maxPower }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
+          borderWidth: 0, pointRadius: 0, showLine: true,
+        })
+      );
+    }
+    // Only shade the cooling bound when the room actually has cooling capacity;
+    // a heating-only room has no negative-power limit to draw.
+    if (maxCoolingPower !== null) {
+      datasets.push(
+        makeDataset('Below Min', boundTimes.map((t) => ({ x: t, y: yMin - 1000 })), 'transparent', {
+          fill: { target: { value: minPower }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
+          borderWidth: 0, pointRadius: 0, showLine: true,
+        })
+      );
+    }
   }
 
   chart.render(datasets, { yMin, yMax, y2Min: priceMin, y2Max: priceMax });

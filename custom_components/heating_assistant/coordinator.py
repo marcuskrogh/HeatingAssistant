@@ -864,7 +864,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         controller always starts with the most recently identified values.
         Note: ``self.hass`` is **not** available at this point — this method
         only modifies Python objects in memory.
+
+        Two persisted layouts are supported:
+          * the ML estimator's flat snapshot — ``{"rooms": {...}, "sources":
+            {...}, ...}``; and
+          * the manual / identification ``store_identified_parameters`` layout —
+            ``{"active": {"rooms": {...}}, "history": [...]}``.
+        Unwrap the ``active`` block so manually-applied parameters survive a
+        restart (previously they were silently dropped because the restore only
+        looked at the top-level ``rooms`` key).
         """
+        if isinstance(snapshot, dict) and "active" in snapshot:
+            snapshot = snapshot.get("active") or {}
+
         for room_name, params in snapshot.get("rooms", {}).items():
             if room_name not in self.model.rooms:
                 continue
@@ -1183,7 +1195,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         entry["linearised_temperature"] = round(lin_temp, 2)
                 forecast.append(entry)
 
-            max_power = sum(s.max_power for s in self.sources_for_room(room_name))
+            # Heating and cooling bounds are asymmetric: a heat pump's cooling
+            # capacity is derived from its electrical input × cooling COP, which
+            # differs from the rated thermal heating output.  Expose both so the
+            # power chart can draw the true (non-symmetric) corridor.
+            room_sources = self.sources_for_room(room_name)
+            max_power = sum(s.max_power for s in room_sources)
+            outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
+            max_cooling_power = sum(
+                -s.cooling_power(outdoor_now)
+                for s in room_sources
+                if getattr(s, "can_cool", False) and hasattr(s, "cooling_power")
+            )
 
             rooms_payload[_slugify(room_name)] = {
                 "trajectory": trajectory,
@@ -1194,6 +1217,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "step_seconds": dt,
                 "horizon_minutes": round(len(predictions) * dt / 60, 1),
                 "max_power": max_power if max_power > 0 else None,
+                "max_cooling_power": max_cooling_power if max_cooling_power > 0 else None,
             }
 
         # Outdoor forecast

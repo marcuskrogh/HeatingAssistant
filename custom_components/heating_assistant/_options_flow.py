@@ -48,6 +48,9 @@ from .const import (
     CONF_SOURCE_HVAC_MODE,
     DEFAULT_SOURCE_HVAC_MODE,
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
+    CONF_SOURCE_COOLING_COP,
+    CONF_SOURCE_COOLING_EFFICIENCY,
+    CONF_SOURCE_HEATING_EFFICIENCY,
     CONF_SCHEDULE,
     CONF_SCHEDULE_NAME,
     CONF_SCHEDULE_START,
@@ -561,6 +564,9 @@ class HeaterFlowHelper:
         max_temp_offset: float | None = None,
         hvac_mode: str | None = None,
         emitter_time_constant: float | None = None,
+        cooling_cop: float | None = None,
+        cooling_efficiency: float | None = None,
+        heating_efficiency: float | None = None,
     ) -> None:
         """Append a new heater to the room."""
         new_heater: Dict[str, Any] = {
@@ -583,6 +589,12 @@ class HeaterFlowHelper:
             new_heater[CONF_SOURCE_HVAC_MODE] = str(hvac_mode)
         if emitter_time_constant is not None:
             new_heater[CONF_SOURCE_EMITTER_TIME_CONSTANT] = float(emitter_time_constant)
+        if cooling_cop is not None:
+            new_heater[CONF_SOURCE_COOLING_COP] = float(cooling_cop)
+        if cooling_efficiency is not None:
+            new_heater[CONF_SOURCE_COOLING_EFFICIENCY] = float(cooling_efficiency)
+        if heating_efficiency is not None:
+            new_heater[CONF_SOURCE_HEATING_EFFICIENCY] = float(heating_efficiency)
         self._heat_sources_list.append(new_heater)
 
     def update(
@@ -600,6 +612,9 @@ class HeaterFlowHelper:
         max_temp_offset: float | None = None,
         hvac_mode: str | None = None,
         emitter_time_constant: float | None = None,
+        cooling_cop: float | None = None,
+        cooling_efficiency: float | None = None,
+        heating_efficiency: float | None = None,
     ) -> bool:
         """Update heater at idx. Returns False if out of range."""
         if not (0 <= idx < len(self._heat_sources_list)):
@@ -623,6 +638,12 @@ class HeaterFlowHelper:
             heater[CONF_SOURCE_HVAC_MODE] = str(hvac_mode)
         if emitter_time_constant is not None:
             heater[CONF_SOURCE_EMITTER_TIME_CONSTANT] = float(emitter_time_constant)
+        if cooling_cop is not None:
+            heater[CONF_SOURCE_COOLING_COP] = float(cooling_cop)
+        if cooling_efficiency is not None:
+            heater[CONF_SOURCE_COOLING_EFFICIENCY] = float(cooling_efficiency)
+        if heating_efficiency is not None:
+            heater[CONF_SOURCE_HEATING_EFFICIENCY] = float(heating_efficiency)
         return True
 
     def remove(self, idx: int) -> bool:

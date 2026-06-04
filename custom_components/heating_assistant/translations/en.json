@@ -288,6 +288,9 @@
           "min_power": "Minimum power (W)",
           "max_temp_offset": "Max supply temp offset (°C)",
           "hvac_mode": "Operating mode",
+          "heating_efficiency": "Heating efficiency (heat pump)",
+          "cooling_cop": "Cooling COP / EER (heat pump)",
+          "cooling_efficiency": "Cooling efficiency (heat pump)",
           "emitter_time_constant": "Emitter response time (s)"
         },
         "data_description": {
@@ -301,6 +304,9 @@
           "min_power": "Lowest stable thermal output. 0 = no minimum. Helps the controller avoid short-cycling.",
           "max_temp_offset": "Largest temperature lift this heat pump will attempt at full power (°C above outdoor).",
           "hvac_mode": "Whether this unit can heat, cool, or do both.",
+          "heating_efficiency": "Fraction of rated thermal heating capacity actually delivered (0–1).",
+          "cooling_cop": "Cooling coefficient of performance (EER). Cooling capacity = rated electrical input × this value, so it sets the (asymmetric) maximum cooling power independently of heating. Set 0 to disable cooling.",
+          "cooling_efficiency": "Fraction of the rated cooling capacity used (0–1). Lower for gentle dry/dehumidify modes.",
           "emitter_time_constant": "Lag between the controller's command and heat actually reaching the room. Radiators ≈ 600 s; fan coils ≈ 60 s; resistive heaters ≈ 0 s."
         }
       },
@@ -325,6 +331,9 @@
           "min_power": "Minimum power (W)",
           "max_temp_offset": "Max supply temp offset (°C)",
           "hvac_mode": "Operating mode",
+          "heating_efficiency": "Heating efficiency (heat pump)",
+          "cooling_cop": "Cooling COP / EER (heat pump)",
+          "cooling_efficiency": "Cooling efficiency (heat pump)",
           "emitter_time_constant": "Emitter response time (s)"
         },
         "data_description": {
@@ -338,6 +347,9 @@
           "min_power": "Lowest stable thermal output. 0 = no minimum.",
           "max_temp_offset": "Largest temperature lift this heat pump will attempt.",
           "hvac_mode": "Whether this unit can heat, cool, or do both.",
+          "heating_efficiency": "Fraction of rated thermal heating capacity actually delivered (0–1).",
+          "cooling_cop": "Cooling COP (EER). Sets the maximum cooling power (rated electrical input × this value), independent of heating. Set 0 to disable cooling.",
+          "cooling_efficiency": "Fraction of rated cooling capacity used (0–1).",
           "emitter_time_constant": "Lag between command and delivered heat."
         }
       },

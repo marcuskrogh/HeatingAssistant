@@ -554,6 +554,25 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_forecasts)
 
 
+def _persist_runtime_updates(
+    hass: HomeAssistant, entry: ConfigEntry, updates: Dict[str, Any]
+) -> None:
+    """Persist runtime-tuned parameters so they survive a full restart.
+
+    The coordinator reads these keys with ``options`` taking precedence over
+    ``data`` (see ``HeatingAssistantCoordinator.__init__``).  The options flow
+    snapshots ``data`` into ``options`` whenever it is saved, so writing updates
+    to ``data`` alone would be shadowed by a stale ``options`` value after a
+    restart.  Writing to both layers keeps the new value authoritative
+    regardless of which one the coordinator consults.
+    """
+    new_data = {**dict(entry.data), **updates}
+    new_options = {**dict(entry.options), **updates}
+    hass.config_entries.async_update_entry(
+        entry, data=new_data, options=new_options
+    )
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply options in-place when possible; reload only for structural changes."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
@@ -791,7 +810,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=41",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=42",
                     "embed_iframe": False,
                 }
             },
@@ -1876,8 +1895,7 @@ def _register_services(hass: HomeAssistant) -> None:
             return
         entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
         if entry:
-            new_data = {**dict(entry.data), **updates}
-            hass.config_entries.async_update_entry(entry, data=new_data)
+            _persist_runtime_updates(hass, entry, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
@@ -1955,8 +1973,7 @@ def _register_services(hass: HomeAssistant) -> None:
             return
         entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
         if entry:
-            new_data = {**dict(entry.data), **updates}
-            hass.config_entries.async_update_entry(entry, data=new_data)
+            _persist_runtime_updates(hass, entry, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 

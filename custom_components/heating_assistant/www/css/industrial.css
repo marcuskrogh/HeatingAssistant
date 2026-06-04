@@ -2117,6 +2117,19 @@
     rgba(255, 183, 77, 0.45) 100%);
 }
 
+/* Comfort corridor band — the setpoint ± offset region the controller keeps
+   the room inside.  Drawn beneath the setpoint tick and current-temp marker. */
+.climate-card__track-comfort {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 212, 170, 0.28);
+  border-left: 1px solid rgba(0, 212, 170, 0.55);
+  border-right: 1px solid rgba(0, 212, 170, 0.55);
+  border-radius: 2px;
+  transition: left 0.4s ease, width 0.4s ease;
+}
+
 .climate-card__track-setpoint {
   position: absolute;
   left: 50%;
@@ -2126,6 +2139,7 @@
   transform: translateX(-50%);
   background: var(--accent);
   border-radius: 1px;
+  z-index: 1;
 }
 
 .climate-card__track-marker {
@@ -2138,6 +2152,7 @@
   border: 2px solid var(--bg-card);
   box-shadow: 0 0 0 1px var(--border);
   transition: left 0.6s ease, background-color 0.3s ease;
+  z-index: 2;
 }
 
 .climate-card__track-marker--on   { background-color: var(--good); }
@@ -2156,9 +2171,10 @@
   margin-top: -8px;
 }
 
-.climate-card__track-mid {
+.climate-card__track-comfort-label {
   font-family: var(--font-sans);
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
+  color: var(--accent);
 }
 
 @media (max-width: 480px) {

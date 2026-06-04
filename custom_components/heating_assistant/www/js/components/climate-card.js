@@ -1,19 +1,20 @@
 /* climate-card.js — Home-Assistant-style climate control card in the
  * Heating Assistant industrial design language.
  *
- * Shows the current (filtered) room temperature, the active setpoint, and an
- * inline stepper that lets the user retarget the setpoint just like a native
- * HA climate entity.  A slim corridor track visualises how far the current
- * temperature sits from the target.
+ * Shows the current (filtered) room temperature, the active setpoint, the
+ * comfort corridor, and an inline stepper that lets the user retarget the
+ * setpoint just like a native HA climate entity.  A slim track visualises the
+ * comfort region and where the current temperature sits relative to it.
  *
  * Setpoint changes are applied optimistically and committed to HA after a
  * short debounce so rapid +/- presses collapse into a single service call —
  * mirroring the behaviour of the HA thermostat card.
  *
  * Usage:
- *   const card = createClimateCard({ temperature, setpoint, power, onSetpointChange });
+ *   const card = createClimateCard({ temperature, setpoint, power,
+ *                                    comfortLower, comfortUpper, onSetpointChange });
  *   container.appendChild(card.element);
- *   card.update({ temperature, setpoint, power });   // on every state tick
+ *   card.update({ temperature, setpoint, power, comfortLower, comfortUpper });
  *   card.destroy();                                  // on teardown
  */
 
@@ -23,11 +24,17 @@ const SP_STEP = 0.5;
 const SP_MIN = 5;
 const SP_MAX = 30;
 const COMMIT_DEBOUNCE_MS = 700;
-const TRACK_HALF_WIDTH = 3; // °C either side of the setpoint shown on the track
+const TRACK_HALF_WIDTH = 3; // minimum °C either side of the setpoint shown on the track
 
 function clampSetpoint(v) {
   const snapped = Math.round((v ?? 22) / SP_STEP) * SP_STEP;
   return Math.max(SP_MIN, Math.min(SP_MAX, snapped));
+}
+
+function numOrNull(v) {
+  if (v === undefined || v === null) return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
 }
 
 function statusInfo(power) {
@@ -39,7 +46,9 @@ function statusInfo(power) {
   return { label: 'COOLING', cls: 'climate-card__status--cooling' };
 }
 
-export function createClimateCard({ temperature, setpoint, power, onSetpointChange } = {}) {
+export function createClimateCard({
+  temperature, setpoint, power, comfortLower, comfortUpper, onSetpointChange,
+} = {}) {
   const container = document.createElement('div');
   container.className = 'card climate-card';
 
@@ -47,6 +56,8 @@ export function createClimateCard({ temperature, setpoint, power, onSetpointChan
     temperature,
     setpoint: clampSetpoint(setpoint),
     power,
+    comfortLower: numOrNull(comfortLower),
+    comfortUpper: numOrNull(comfortUpper),
     editing: false,      // true while the user is mid-adjustment
     commitTimer: null,   // pending debounce timer id
   };
@@ -71,12 +82,13 @@ export function createClimateCard({ temperature, setpoint, power, onSetpointChan
       </div>
     </div>
     <div class="climate-card__track">
+      <span class="climate-card__track-comfort"></span>
       <span class="climate-card__track-setpoint"></span>
       <span class="climate-card__track-marker"></span>
     </div>
     <div class="climate-card__track-scale">
       <span class="climate-card__track-min"></span>
-      <span class="climate-card__track-mid">TARGET</span>
+      <span class="climate-card__track-comfort-label"></span>
       <span class="climate-card__track-max"></span>
     </div>
   `;
@@ -87,9 +99,11 @@ export function createClimateCard({ temperature, setpoint, power, onSetpointChan
     target: container.querySelector('.climate-card__target-value'),
     down: container.querySelector('.climate-card__step--down'),
     up: container.querySelector('.climate-card__step--up'),
+    comfort: container.querySelector('.climate-card__track-comfort'),
     marker: container.querySelector('.climate-card__track-marker'),
     trackMin: container.querySelector('.climate-card__track-min'),
     trackMax: container.querySelector('.climate-card__track-max'),
+    comfortLabel: container.querySelector('.climate-card__track-comfort-label'),
   };
 
   function scheduleCommit() {
@@ -131,24 +145,54 @@ export function createClimateCard({ temperature, setpoint, power, onSetpointChan
     els.down.disabled = st.setpoint <= SP_MIN;
     els.up.disabled = st.setpoint >= SP_MAX;
 
-    // Corridor track: setpoint pinned at centre, current temp marker slides
-    // within ±TRACK_HALF_WIDTH °C of it.
-    const lo = st.setpoint - TRACK_HALF_WIDTH;
-    const hi = st.setpoint + TRACK_HALF_WIDTH;
+    // Corridor track: setpoint pinned at centre, the comfort region drawn as a
+    // highlighted band, and the current temp marker sliding within it.  The
+    // half-width grows to keep the comfort band comfortably inside the track.
+    const hasComfort =
+      st.comfortLower !== null && st.comfortUpper !== null &&
+      st.comfortUpper > st.comfortLower;
+    let half = TRACK_HALF_WIDTH;
+    if (hasComfort) {
+      const spread = Math.max(st.setpoint - st.comfortLower, st.comfortUpper - st.setpoint);
+      half = Math.max(TRACK_HALF_WIDTH, spread + 0.75);
+    }
+    const lo = st.setpoint - half;
+    const hi = st.setpoint + half;
+    const toPct = (v) => Math.max(0, Math.min(100, ((v - lo) / (hi - lo)) * 100));
+
     els.trackMin.textContent = lo.toFixed(0) + '°';
     els.trackMax.textContent = hi.toFixed(0) + '°';
+
+    if (hasComfort) {
+      const l = toPct(st.comfortLower);
+      const r = toPct(st.comfortUpper);
+      els.comfort.style.display = '';
+      els.comfort.style.left = l + '%';
+      els.comfort.style.width = Math.max(0, r - l) + '%';
+      els.comfortLabel.textContent =
+        `COMFORT ${st.comfortLower.toFixed(1)}–${st.comfortUpper.toFixed(1)}°`;
+      els.comfortLabel.style.display = '';
+    } else {
+      els.comfort.style.display = 'none';
+      els.comfortLabel.style.display = 'none';
+    }
 
     if (isNaN(num)) {
       els.marker.style.display = 'none';
     } else {
       els.marker.style.display = '';
-      const pct = Math.max(1, Math.min(99, ((num - lo) / (hi - lo)) * 100));
-      els.marker.style.left = pct + '%';
-      // Tint the marker by deviation from target: cool below, warm above.
-      const dev = num - st.setpoint;
+      els.marker.style.left = Math.max(1, Math.min(99, toPct(num))) + '%';
+      // Tint the marker by position relative to the comfort region (falling
+      // back to a ±0.5 °C band around the setpoint when no corridor is known).
       let tone = 'climate-card__track-marker--on';
-      if (dev <= -0.5) tone = 'climate-card__track-marker--cool';
-      else if (dev >= 0.5) tone = 'climate-card__track-marker--warm';
+      if (hasComfort) {
+        if (num < st.comfortLower) tone = 'climate-card__track-marker--cool';
+        else if (num > st.comfortUpper) tone = 'climate-card__track-marker--warm';
+      } else {
+        const dev = num - st.setpoint;
+        if (dev <= -0.5) tone = 'climate-card__track-marker--cool';
+        else if (dev >= 0.5) tone = 'climate-card__track-marker--warm';
+      }
       els.marker.className = 'climate-card__track-marker ' + tone;
     }
   }
@@ -157,9 +201,11 @@ export function createClimateCard({ temperature, setpoint, power, onSetpointChan
 
   return {
     element: container,
-    update({ temperature, setpoint, power } = {}) {
+    update({ temperature, setpoint, power, comfortLower, comfortUpper } = {}) {
       if (temperature !== undefined) st.temperature = temperature;
       if (power !== undefined) st.power = power;
+      if (comfortLower !== undefined) st.comfortLower = numOrNull(comfortLower);
+      if (comfortUpper !== undefined) st.comfortUpper = numOrNull(comfortUpper);
       // Never overwrite the setpoint while the user is mid-edit or a commit is
       // still pending — the optimistic value must win until HA confirms it.
       if (setpoint !== undefined && setpoint !== null && !st.editing && !st.commitTimer) {
