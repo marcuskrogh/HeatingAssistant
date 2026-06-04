@@ -2348,11 +2348,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             src._current_power = 0.0
 
     async def _async_push_window_override(self) -> None:
-        """Apply window overrides and push actuator commands without re-solving MPC.
+        """Apply window overrides, push actuator commands, and refresh entity states.
 
         Called directly by window-sensor callbacks so that the heater-off (window
         open) or heater-on (window closed) command is issued immediately, without
         triggering a coordinator refresh and without disturbing the MPC or EKF.
+
+        After pushing the commands, ``async_update_listeners()`` is called so that
+        all HA entity subscribers reflect the new window-override state in the UI
+        without waiting for the next scheduled MPC tick.
 
         The MPC runs strictly at the scheduled update interval via the coordinator
         timer.  This method is the sole path for window events to affect actuators
@@ -2379,6 +2383,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     "Window override: failed to push actuator commands",
                     exc_info=True,
                 )
+
+        # Notify all entity subscribers so the UI immediately reflects the new
+        # window-override state (heater on/off, action values, etc.) without
+        # waiting for the next scheduled MPC tick.
+        self.async_update_listeners()
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         """Write the computed set-point fractions to heater entities via HA services."""
