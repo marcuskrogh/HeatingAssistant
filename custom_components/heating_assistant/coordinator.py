@@ -809,6 +809,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # None when no price entity is configured or the fetch fails.
         self.price_forecast: Optional[List[float]] = None
 
+        # Timestamp of the last successful MPC solve.  Used to gate solver
+        # calls to the scheduled update interval — event-driven refreshes
+        # (window open/close, startup listeners) check this and skip the
+        # controller.compute() call if the interval hasn't elapsed yet.
+        self._last_mpc_run_ts: float = 0.0
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------
@@ -1577,81 +1583,117 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             }
 
             # 4. Run MPC controller
-            # Collect heat sources whose rooms are currently off so the
-            # controller can zero them out in both the first-step action and
-            # the full predicted heating schedule before returning.  Also
-            # disable sources for rooms that have never had a valid sensor
-            # reading so we never actuate based on the 20 °C model default.
-            disabled_src_names = {
-                src.name
-                for src in self.heat_sources
-                if not self.is_room_enabled(src.room)
-                or self.is_window_override_active(src.room)
-                or src.room in rooms_not_ready
-            }
-            try:
-                self.actions = self.controller.compute(
-                    outdoor_temp=outdoor_temp,
-                    solar_gains=self.solar_gains,
-                    now=now,
-                    outdoor_forecast=outdoor_forecast,
-                    cloud_forecast=cloud_forecast,
-                    cloud_cover_now=cloud_cover_now,
-                    ghi_forecast=ghi_forecast,
-                    ghi_now=ghi_now,
-                    disabled_sources=disabled_src_names or None,
-                    control_trajectory=control_traj,
-                    price_forecast=self.price_forecast,
-                )
-                self.predictions = self.controller.predictions
-                self.linearised_predictions = self.controller.linearised_predictions
-                self.outdoor_forecast = self.controller.outdoor_forecast
-                self.solar_forecast = self.controller.solar_forecast
-                self.heating_schedule = self.controller.heating_schedule
-                self.filtered_temperatures = dict(self.controller.filtered_temperatures)
-                # Rooms that have never had a valid reading expose "unknown"
-                # so the dashboard falls back to the raw sensor value.
-                for _r in rooms_not_ready:
-                    self.filtered_temperatures.pop(_r, None)
-                # Mirror the price forecast that was actually used so sensors can
-                # expose it (may differ from self.price_forecast if the controller
-                # truncated / padded it).
-                self.price_forecast = self.controller.price_forecast or self.price_forecast
+            #
+            # The MPC is only solved at the scheduled sample interval.
+            # Event-driven refreshes (window open/close, startup sensor
+            # transitions) arrive between timer ticks; they must NOT trigger
+            # a new MPC solve because:
+            #   • the MPC horizon is formulated for steps of exactly dt [s],
+            #   • the EKF inside the controller advances one dt step per call,
+            #   • solving at off-schedule instants shifts all future prediction
+            #     timestamps and corrupts the state estimate's time alignment.
+            # On a skipped cycle the last computed actions are retained as-is;
+            # the window-override block below still zeroes open-window rooms
+            # before the actuator commands are sent.
+            _should_run_mpc = (
+                now.timestamp() - self._last_mpc_run_ts
+                >= 0.9 * self._update_interval
+            )
+            kalman_innovation: Optional[List[float]] = None
 
-                # Capture Kalman innovation for diagnostics (may be None on first step)
-                # controller.last_innovation is populated by compute() after splitting
-                # the EKF predict/update steps to record ν = y − hm(x̂⁻).
-                kalman_innovation: Optional[List[float]] = self.controller.last_innovation
-            except Exception:
-                _LOGGER.warning(
-                    "Failed to compute MPC actions; clearing forecast data so "
-                    "dashboards show a visible gap at the failure point",
-                    exc_info=True,
+            if _should_run_mpc:
+                # Collect heat sources whose rooms are currently off so the
+                # controller can zero them out in both the first-step action
+                # and the full predicted heating schedule before returning.
+                # Also disable sources for rooms that have never had a valid
+                # sensor reading so we never actuate on the 20 °C default.
+                disabled_src_names = {
+                    src.name
+                    for src in self.heat_sources
+                    if not self.is_room_enabled(src.room)
+                    or self.is_window_override_active(src.room)
+                    or src.room in rooms_not_ready
+                }
+                try:
+                    self.actions = self.controller.compute(
+                        outdoor_temp=outdoor_temp,
+                        solar_gains=self.solar_gains,
+                        now=now,
+                        outdoor_forecast=outdoor_forecast,
+                        cloud_forecast=cloud_forecast,
+                        cloud_cover_now=cloud_cover_now,
+                        ghi_forecast=ghi_forecast,
+                        ghi_now=ghi_now,
+                        disabled_sources=disabled_src_names or None,
+                        control_trajectory=control_traj,
+                        price_forecast=self.price_forecast,
+                    )
+                    self.predictions = self.controller.predictions
+                    self.linearised_predictions = self.controller.linearised_predictions
+                    self.outdoor_forecast = self.controller.outdoor_forecast
+                    self.solar_forecast = self.controller.solar_forecast
+                    self.heating_schedule = self.controller.heating_schedule
+                    self.filtered_temperatures = dict(self.controller.filtered_temperatures)
+                    # Rooms that have never had a valid reading expose "unknown"
+                    # so the dashboard falls back to the raw sensor value.
+                    for _r in rooms_not_ready:
+                        self.filtered_temperatures.pop(_r, None)
+                    # Mirror the price forecast that was actually used so sensors
+                    # can expose it (may differ from self.price_forecast if the
+                    # controller truncated / padded it).
+                    self.price_forecast = (
+                        self.controller.price_forecast or self.price_forecast
+                    )
+
+                    # Capture Kalman innovation for diagnostics.
+                    # controller.last_innovation is populated by compute() after
+                    # splitting the EKF predict/update steps to record
+                    # ν = y − hm(x̂⁻).
+                    kalman_innovation = self.controller.last_innovation
+                    self._last_mpc_run_ts = now.timestamp()
+
+                except Exception:
+                    _LOGGER.warning(
+                        "Failed to compute MPC actions; clearing forecast data so "
+                        "dashboards show a visible gap at the failure point",
+                        exc_info=True,
+                    )
+                    # Keep previous actions if available; otherwise default to
+                    # all-off so the applied heater commands stay safe.
+                    if not self.actions:
+                        self.actions = {src.name: 0.0 for src in self.heat_sources}
+
+                    # Pass the weather forecast through (it's read independently
+                    # of the MPC), but clear all forecast/filtered fields so the
+                    # visualization sensors expose "unknown" instead of
+                    # fabricating a thermal-model trajectory.  This makes
+                    # failures plot as a visible gap rather than a silent fake
+                    # forecast.
+                    if outdoor_forecast:
+                        self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
+                        if len(self.outdoor_forecast) < self._horizon:
+                            self.outdoor_forecast.extend(
+                                [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
+                            )
+                    else:
+                        self.outdoor_forecast = [outdoor_temp] * self._horizon
+                    self.predictions = []
+                    self.linearised_predictions = []
+                    self.heating_schedule = []
+                    self.solar_forecast = []
+                    self.filtered_temperatures = {}
+
+            else:
+                _LOGGER.debug(
+                    "Event-driven refresh (%.0f s since last MPC run, interval %.0f s): "
+                    "skipping controller solve — applying actuator overrides only",
+                    now.timestamp() - self._last_mpc_run_ts,
+                    self._update_interval,
                 )
-                # Keep previous actions if available; otherwise default to all-off
-                # so the applied heater commands stay safe.
+                # Ensure actions dict is always populated for the override /
+                # apply steps below, even before the very first MPC solve.
                 if not self.actions:
                     self.actions = {src.name: 0.0 for src in self.heat_sources}
-
-                # Pass the weather forecast through (it's read independently of
-                # the MPC), but clear all forecast/filtered fields so the
-                # visualization sensors expose "unknown" instead of fabricating
-                # a thermal-model trajectory.  This makes failures plot as a
-                # visible gap rather than a silent fake forecast.
-                if outdoor_forecast:
-                    self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
-                    if len(self.outdoor_forecast) < self._horizon:
-                        self.outdoor_forecast.extend(
-                            [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
-                        )
-                else:
-                    self.outdoor_forecast = [outdoor_temp] * self._horizon
-                self.predictions = []
-                self.linearised_predictions = []
-                self.heating_schedule = []
-                self.solar_forecast = []
-                self.filtered_temperatures = {}
-                kalman_innovation = None
 
             # Dispatch-layer W1 override: clamp all sources in open-window
             # rooms to u=0 before history write and actuator commands.
@@ -1678,12 +1720,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #    parameter estimation and model fit analysis.
             #
             # Rate-limit to the scheduled update interval.  Event-driven
-            # refreshes (startup / window-state listeners) call
-            # _async_update_data more often than the timer; those extra calls
-            # still run the full controller update above (keeping the live
-            # state fresh) but must NOT add sub-interval entries to the history
-            # buffer — irregular spacing breaks the sysid EKF and open-loop
-            # simulation diagnostics, which assume samples are spaced by dt.
+            # refreshes (startup / window-state listeners) skip the MPC solve
+            # (see step 4 above) and must also NOT add sub-interval entries to
+            # the history buffer — irregular spacing would break the sysid EKF
+            # and open-loop simulation diagnostics, which assume samples are
+            # spaced by the nominal dt.
             _last_history_ts = (
                 float(self._history_buffer[-1].get("timestamp", 0.0))
                 if self._history_buffer else 0.0
