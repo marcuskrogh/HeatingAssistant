@@ -127,35 +127,22 @@ def run_sysid_ekf(
     if len(window) < 2:
         window = list(history)[-(min(horizon_steps, len(history) - 1) + 1):]
 
-    # Split the window into contiguous segments at timestamp gaps.
-    # The EKF is reinitialised at each segment boundary so that pre-restart
-    # data is not discarded — all segments within the horizon are used.
-    max_gap = 3.0 * dt
-    segments: List[List[Any]] = []
-    cur_seg: List[Any] = [window[0]]
-    for i in range(1, len(window)):
-        t_cur = float(window[i].get("timestamp", 0.0))
-        t_prv = float(window[i - 1].get("timestamp", 0.0))
-        if 0 < (t_cur - t_prv) <= max_gap:
-            cur_seg.append(window[i])
-        else:
-            if len(cur_seg) >= 2:
-                segments.append(cur_seg)
-            cur_seg = [window[i]]
-    if len(cur_seg) >= 2:
-        segments.append(cur_seg)
+    # Skip leading records that pre-date a room-count change (e.g. config
+    # edits that added rooms while the buffer was already populated).
+    win_start = 0
+    for win_start, rec in enumerate(window):
+        if len(rec.get("y", [])) >= n:
+            break
+    window = window[win_start:]
 
-    if not segments:
+    if len(window) < 2:
         return {
-            "error": (
-                f"No contiguous data segment found within the requested "
-                f"horizon ({horizon_steps * dt / 3600:.1f} h). "
-                f"History has gaps exceeding {max_gap / 60:.0f} min."
-            ),
+            "error": "Insufficient valid history (room-count mismatch).",
             "per_room": {},
             "horizon_steps": 0,
         }
-    actual_steps = sum(len(s) - 1 for s in segments)
+
+    actual_steps = len(window) - 1
 
     # ------------------------------------------------------------------
     # Build parametrised HouseModel copy
@@ -194,98 +181,127 @@ def run_sysid_ekf(
     n_d = sde.nd   # 1 + n_rooms
 
     # ------------------------------------------------------------------
-    # Output containers — filled across all segments
+    # Output containers
     # ------------------------------------------------------------------
     per_room_sim: Dict[str, List[Dict[str, Any]]] = {name: [] for name in room_names}
 
     # ------------------------------------------------------------------
-    # Multi-segment CD-EKF: reinitialise at each gap boundary so that
-    # pre-restart history is not discarded.
+    # Variable-dt CD-EKF over the entire window.
+    #
+    # The model is continuous-time, so the EKF can propagate between any
+    # two observations regardless of the interval between them.  We create
+    # a fresh EKF object per step using the *actual* elapsed time derived
+    # from the timestamps.  This correctly handles:
+    #   • normal operation with a fixed update interval,
+    #   • brief restarts (small gap — EKF bridges the gap naturally), and
+    #   • longer down-times (larger gap — EKF propagates uncertainty over
+    #     the actual outage duration, which is then corrected by the update).
     # ------------------------------------------------------------------
-    for seg in segments:
-        # Skip leading records that pre-date a room-count change.
-        seg_start = 0
-        for seg_start, rec in enumerate(seg):
-            if len(rec.get("y", [])) >= n:
-                break
-        seg = seg[seg_start:]
-        if len(seg) < 2:
+    y0 = window[0].get("y", [])
+    x_curr = np.zeros(n_x, dtype=float)
+    x_curr[:n] = [float(y0[i]) if i < len(y0) else 0.0 for i in range(n)]
+    P_curr = (sigma_v ** 2) * np.eye(n_x)
+
+    # Record the initial anchor point.
+    ts0 = float(window[0].get("timestamp", 0.0))
+    for i, name in enumerate(room_names):
+        per_room_sim[name].append({
+            "time":      ts0,
+            "measured":  float(y0[i]) if i < len(y0) else None,
+            "predicted": float(x_curr[i]),
+            "cov_upper": float(x_curr[i] + 2.0 * sigma_v),
+            "cov_lower": float(x_curr[i] - 2.0 * sigma_v),
+        })
+
+    u_prev = _record_u(window[0], n_u)
+    d_prev = _record_d(window[0], room_list, n_d)
+    t_prev = ts0
+
+    for record in window[1:]:
+        timestamp = float(record.get("timestamp", 0.0))
+        dt_step   = timestamp - t_prev
+
+        if dt_step <= 0:
+            # Skip duplicate or out-of-order timestamps.
             continue
 
-        # Initialise EKF from first measurement of this segment.
-        y0 = seg[0].get("y", [])
-        x0 = np.zeros(n_x, dtype=float)
-        x0[:n] = [float(y0[i]) if i < len(y0) else 0.0 for i in range(n)]
-        P0 = (sigma_v ** 2) * np.eye(n_x)
+        y_raw  = record.get("y", [])
+        y_meas: List[Optional[float]] = [
+            float(y_raw[i]) if i < len(y_raw) else None for i in range(n)
+        ]
+        u_curr = _record_u(record, n_u)
+        d_curr = _record_d(record, room_list, n_d)
 
-        ekf = _ContinuousDiscreteEKF(
-            sde, x0, P0, dt,
-            n_steps=10,
+        # Build an EKF for this specific interval length.
+        # n_steps scales with dt_step so the sub-step size stays ≤ dt/10
+        # (same accuracy as the nominal filter).
+        n_steps_step = max(1, min(200, round(dt_step * 10.0 / dt)))
+        ekf_step = _ContinuousDiscreteEKF(
+            sde, x_curr, P_curr, dt_step,
+            n_steps=n_steps_step,
             scheme="implicit-euler",
         )
 
-        # Add initial point for this segment.
-        ts0 = float(seg[0].get("timestamp", 0.0))
-        for i, name in enumerate(room_names):
-            per_room_sim[name].append({
-                "time":      ts0,
-                "measured":  float(y0[i]) if i < len(y0) else None,
-                "predicted": float(x0[i]),
-                "cov_upper": float(x0[i] + 2.0 * sigma_v),
-                "cov_lower": float(x0[i] - 2.0 * sigma_v),
-            })
-
-        u_prev = _record_u(seg[0], n_u)
-        d_prev = _record_d(seg[0], room_list, n_d)
-        t_prev = float(seg[0].get("timestamp", 0.0))
-
-        for record in seg[1:]:
-            timestamp = float(record.get("timestamp", 0.0))
-            y_raw     = record.get("y", [])
-            y_meas: List[Optional[float]] = [
-                float(y_raw[i]) if i < len(y_raw) else None for i in range(n)
-            ]
-            u_curr = _record_u(record, n_u)
-            d_curr = _record_d(record, room_list, n_d)
-
-            # ---- Prediction step ----------------------------------------
-            try:
-                x_pred, P_pred = ekf.predict(u_prev, d_prev, p, t_prev)
-            except Exception as exc:
-                _LOGGER.warning("SysID CD-EKF predict failed at ts=%.0f: %s", timestamp, exc)
-                break
-
-            T_pred    = x_pred[:n]
-            P_pred_rr = P_pred[:n, :n]
-
-            # ---- Record one-step-ahead prediction -----------------------
-            for i, name in enumerate(room_names):
-                std_i = float(np.sqrt(max(0.0, P_pred_rr[i, i] + sigma_v ** 2)))
-                per_room_sim[name].append({
-                    "time":      timestamp,
-                    "measured":  y_meas[i],
-                    "predicted": float(T_pred[i]),
-                    "cov_upper": float(T_pred[i] + 2.0 * std_i),
-                    "cov_lower": float(T_pred[i] - 2.0 * std_i),
-                })
-
-            # ---- Update step --------------------------------------------
-            valid = np.array([m is not None for m in y_meas], dtype=bool)
-            y_k   = np.array([
-                y_meas[i] if y_meas[i] is not None else float(T_pred[i])
+        # ---- Prediction step ----------------------------------------
+        try:
+            x_pred, P_pred = ekf_step.predict(u_prev, d_prev, p, t_prev)
+        except Exception as exc:
+            _LOGGER.warning(
+                "SysID CD-EKF predict failed at ts=%.0f (dt_step=%.1f s): %s",
+                timestamp, dt_step, exc,
+            )
+            # Reinitialise from the raw measurement and continue.
+            x_curr = np.zeros(n_x, dtype=float)
+            x_curr[:n] = [
+                float(y_meas[i]) if y_meas[i] is not None else x_curr[i]
                 for i in range(n)
-            ], dtype=float)
-            mask  = valid if not valid.all() else None
-
-            try:
-                ekf.update(y_k, u_curr, d_curr, p, mask=mask)
-            except Exception as exc:
-                _LOGGER.warning("SysID CD-EKF update failed at ts=%.0f: %s", timestamp, exc)
-                break
-
+            ]
+            P_curr = (sigma_v ** 2) * np.eye(n_x)
+            t_prev = timestamp
             u_prev = u_curr
             d_prev = d_curr
+            continue
+
+        T_pred    = x_pred[:n]
+        P_pred_rr = P_pred[:n, :n]
+
+        # ---- Record one-step-ahead prediction -----------------------
+        for i, name in enumerate(room_names):
+            std_i = float(np.sqrt(max(0.0, P_pred_rr[i, i] + sigma_v ** 2)))
+            per_room_sim[name].append({
+                "time":      timestamp,
+                "measured":  y_meas[i],
+                "predicted": float(T_pred[i]),
+                "cov_upper": float(T_pred[i] + 2.0 * std_i),
+                "cov_lower": float(T_pred[i] - 2.0 * std_i),
+            })
+
+        # ---- Update step --------------------------------------------
+        valid = np.array([m is not None for m in y_meas], dtype=bool)
+        y_k   = np.array([
+            y_meas[i] if y_meas[i] is not None else float(T_pred[i])
+            for i in range(n)
+        ], dtype=float)
+        mask  = valid if not valid.all() else None
+
+        try:
+            ekf_step.update(y_k, u_curr, d_curr, p, mask=mask)
+        except Exception as exc:
+            _LOGGER.warning(
+                "SysID CD-EKF update failed at ts=%.0f: %s", timestamp, exc,
+            )
+            x_curr[:n] = [float(y_k[i]) for i in range(n)]
+            P_curr = (sigma_v ** 2) * np.eye(n_x)
             t_prev = timestamp
+            u_prev = u_curr
+            d_prev = d_curr
+            continue
+
+        x_curr = ekf_step.x_hat
+        P_curr = ekf_step.P
+        u_prev = u_curr
+        d_prev = d_curr
+        t_prev = timestamp
 
     # ------------------------------------------------------------------
     # One-step prediction RMSE / MAE per room

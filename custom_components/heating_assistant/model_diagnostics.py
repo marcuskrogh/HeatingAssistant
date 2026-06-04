@@ -701,6 +701,12 @@ def compute_open_loop_predictions(
     This reveals the true multi-step prediction quality of the thermal model,
     which is what the MPC actually relies on.
 
+    Integration uses the **actual elapsed time** between consecutive history
+    entries (derived from their ``timestamp`` fields) rather than the nominal
+    ``dt``.  This correctly handles history buffers that contain small gaps
+    from restarts or brief data interruptions — the continuous-time model
+    simply propagates over the true interval.
+
     Parameters
     ----------
     history : list of dicts
@@ -715,10 +721,11 @@ def compute_open_loop_predictions(
     n_rooms : int
         Number of rooms (= len(room_names)).
     dt : float
-        Sampling interval [s] – must match the history buffer step.
+        Nominal sampling interval [s] – used only as a fallback when a
+        consecutive pair of entries lacks a valid timestamp difference.
     segment_length : int
-        Number of steps per open-loop segment (default 30, i.e. 30 min at
-        60 s / step).
+        Number of steps per open-loop segment (default 30).  Automatically
+        clamped to ``len(history) // 2`` when the history is shorter.
 
     Returns
     -------
@@ -731,17 +738,21 @@ def compute_open_loop_predictions(
         ``error``           : str (only present on failure)
     """
     n = n_rooms
-    if len(history) < segment_length + 1:
+
+    # Clamp segment_length to what the available history allows.
+    effective_segment_length = min(segment_length, max(1, len(history) // 2))
+    if len(history) < effective_segment_length + 1:
         return {
             "error": (
-                f"Insufficient history: need ≥ {segment_length + 1} steps, "
+                f"Insufficient history: need ≥ {effective_segment_length + 1} steps, "
                 f"have {len(history)}."
             ),
             "per_room": {},
             "overall_rmse": {},
             "n_segments": 0,
-            "segment_length": segment_length,
+            "segment_length": effective_segment_length,
         }
+    segment_length = effective_segment_length
 
     # Prefer the system's own disturbance builder so the open-loop diagnostic
     # uses *exactly* the same heat balance as the live MPC/EKF.  Crucially this
@@ -815,12 +826,12 @@ def compute_open_loop_predictions(
         # Anchor point: record the t=0 initial state so the chart shows the
         # simulation starting exactly at the measurement.  predicted == measured
         # here by construction; the error at t=0 is always zero.
-        ts0 = float(seg[0].get("timestamp", 0.0))
+        ts_prev = float(seg[0].get("timestamp", 0.0))
         for room_idx, room_name in enumerate(room_names):
             if room_idx < len(y0):
                 init_val = round(float(y0[room_idx]), 3)
                 simulation[room_name].append({
-                    "time": ts0,
+                    "time": ts_prev,
                     "measured": init_val,
                     "predicted": init_val,
                 })
@@ -835,6 +846,15 @@ def compute_open_loop_predictions(
                 if k < n_u:
                     u[k] = float(v)
 
+            # Use actual elapsed time between the two history entries so the
+            # integration is correct regardless of gaps in the buffer
+            # (restarts, brief outages).  Fall back to the nominal dt only
+            # when timestamps are unavailable or identical.
+            ts = float(record.get("timestamp", 0.0))
+            dt_step = ts - ts_prev
+            if dt_step <= 0:
+                dt_step = system._dt
+
             # Implicit-Euler sub-stepping over one cycle; matches the
             # controller's prediction scheme so open-loop and closed-loop
             # diagnostics use the same integrator.  Zero-order hold:
@@ -842,8 +862,7 @@ def compute_open_loop_predictions(
             # interval being reproduced here) and d_prev is the
             # disturbance at the start of that interval — the same ZOH
             # convention as the live MPC.
-            dt = system._dt
-            n_steps = 10  # Sub-steps; L-stable, so step size is for accuracy
+            n_steps = max(1, min(200, round(dt_step * 10.0 / system._dt)))
 
             d_zoh = d_prev
             u_zoh = u_prev
@@ -856,16 +875,16 @@ def compute_open_loop_predictions(
                 return system.dfdx(state, u_loc, d_loc, _params, 0.0)
 
             try:
-                x = implicit_euler_substeps(rhs, jac, x, dt, n_steps)
+                x = implicit_euler_substeps(rhs, jac, x, dt_step, n_steps)
             except (ImplicitEulerConvergenceError, Exception):
                 valid_segment = False
                 break
 
             d_prev = d
             u_prev = u
+            ts_prev = ts
 
             y_meas = record.get("y", [])
-            ts = record.get("timestamp", 0.0)
 
             for room_idx, room_name in enumerate(room_names):
                 if room_idx < len(y_meas):

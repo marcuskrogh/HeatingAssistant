@@ -745,7 +745,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=36",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=37",
                     "embed_iframe": False,
                 }
             },
@@ -1304,7 +1304,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 system,
                 room_names,
                 n_rooms,
-                float(UPDATE_INTERVAL),
+                coordinator.dt,
                 segment_length,
             )
 

@@ -809,6 +809,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # None when no price entity is configured or the fetch fails.
         self.price_forecast: Optional[List[float]] = None
 
+
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------
@@ -1677,65 +1678,80 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 6. Record observation in the rolling history buffer for ML
             #    parameter estimation and model fit analysis.
             #
-            # y_pred alignment: the MPC predictions[0] is the one-step-ahead
-            # prediction for time k+1 (not time k).  To get a properly aligned
-            # diagnostic (prediction vs measurement at the *same* timestep) we
-            # store that forward prediction as "y_pred_for_next" and retrieve
-            # the *previous* record's "y_pred_for_next" as the aligned y_pred
-            # for the current step.
-            y_pred_aligned = None
-            if len(self._history_buffer) > 0:
-                y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
+            # Rate-limit to the scheduled update interval.  Window events no
+            # longer call _async_update_data (they use _async_push_window_override
+            # directly), but startup listeners may still trigger a refresh shortly
+            # after the coordinator's own first scheduled tick.  Guard against
+            # that by skipping the append when fewer than 0.5 × update_interval
+            # seconds have elapsed since the last history entry.
+            _last_history_ts = (
+                float(self._history_buffer[-1].get("timestamp", 0.0))
+                if self._history_buffer else 0.0
+            )
+            _should_record_history = (
+                now.timestamp() - _last_history_ts >= 0.5 * self._update_interval
+            )
 
-            # Compute the one-step-ahead prediction for the NEXT cycle.
-            y_pred_for_next: List[float]
-            if self.predictions and len(self.predictions) > 0:
-                first_pred = self.predictions[0]
-                y_pred_for_next = [
-                    first_pred.get(name, self.model.rooms[name].temperature)
-                    for name in self.model.room_names
-                ]
-            else:
-                y_pred_for_next = [
-                    self.model.rooms[name].temperature
-                    for name in self.model.room_names
-                ]
+            if _should_record_history:
+                # y_pred alignment: the MPC predictions[0] is the one-step-ahead
+                # prediction for time k+1 (not time k).  To get a properly aligned
+                # diagnostic (prediction vs measurement at the *same* timestep) we
+                # store that forward prediction as "y_pred_for_next" and retrieve
+                # the *previous* record's "y_pred_for_next" as the aligned y_pred
+                # for the current step.
+                y_pred_aligned = None
+                if len(self._history_buffer) > 0:
+                    y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
 
-            self._history_buffer.append({
-                # Store the raw sensor measurements as y so the open-loop
-                # simulation and EKF diagnostics start from what the sensor
-                # actually read, not from any model-internal estimate.  For
-                # rooms without a sensor configured the model temperature is
-                # used as a fallback, but those rooms have no meaningful
-                # simulation target anyway.
-                "y": [
-                    self.measured_temperatures.get(
-                        name, self.model.rooms[name].temperature
-                    )
-                    for name in self.model.room_names
-                ],
-                # y_pred: prediction made at k-1 FOR step k — aligned with y.
-                # None for the very first record (no prior prediction exists yet).
-                "y_pred": y_pred_aligned,
-                # y_pred_for_next: prediction made NOW (at k) FOR step k+1.
-                # Retrieved by the next cycle as y_pred_aligned.
-                "y_pred_for_next": y_pred_for_next,
-                "u": [
-                    self.actions.get(src.name, 0.0)
-                    for src in self.heat_sources
-                ],
-                "d_outdoor": outdoor_temp,
-                "d_solar": dict(self.solar_gains),
-                "cloud_cover": cloud_cover_now,
-                # Scalar only — the full horizon-length GHI array is kept off
-                # the bounded history buffer (it lives on the diagnostic
-                # SolarRadiationStatusSensor instead) to limit recorder growth.
-                "ghi_now": ghi_now,
-                "solar_source": self.solar_source,
-                "timestamp": now.timestamp(),
-                # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
-                "kalman_innovation": kalman_innovation,
-            })
+                # Compute the one-step-ahead prediction for the NEXT cycle.
+                y_pred_for_next: List[float]
+                if self.predictions and len(self.predictions) > 0:
+                    first_pred = self.predictions[0]
+                    y_pred_for_next = [
+                        first_pred.get(name, self.model.rooms[name].temperature)
+                        for name in self.model.room_names
+                    ]
+                else:
+                    y_pred_for_next = [
+                        self.model.rooms[name].temperature
+                        for name in self.model.room_names
+                    ]
+
+                self._history_buffer.append({
+                    # Store the raw sensor measurements as y so the open-loop
+                    # simulation and EKF diagnostics start from what the sensor
+                    # actually read, not from any model-internal estimate.  For
+                    # rooms without a sensor configured the model temperature is
+                    # used as a fallback, but those rooms have no meaningful
+                    # simulation target anyway.
+                    "y": [
+                        self.measured_temperatures.get(
+                            name, self.model.rooms[name].temperature
+                        )
+                        for name in self.model.room_names
+                    ],
+                    # y_pred: prediction made at k-1 FOR step k — aligned with y.
+                    # None for the very first record (no prior prediction exists yet).
+                    "y_pred": y_pred_aligned,
+                    # y_pred_for_next: prediction made NOW (at k) FOR step k+1.
+                    # Retrieved by the next cycle as y_pred_aligned.
+                    "y_pred_for_next": y_pred_for_next,
+                    "u": [
+                        self.actions.get(src.name, 0.0)
+                        for src in self.heat_sources
+                    ],
+                    "d_outdoor": outdoor_temp,
+                    "d_solar": dict(self.solar_gains),
+                    "cloud_cover": cloud_cover_now,
+                    # Scalar only — the full horizon-length GHI array is kept off
+                    # the bounded history buffer (it lives on the diagnostic
+                    # SolarRadiationStatusSensor instead) to limit recorder growth.
+                    "ghi_now": ghi_now,
+                    "solar_source": self.solar_source,
+                    "timestamp": now.timestamp(),
+                    # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
+                    "kalman_innovation": kalman_innovation,
+                })
 
             # 7. Write set-points to heater entities. Keep the latest
             # forecast/prediction entities available even if HA service calls
@@ -1822,17 +1838,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """Set up window-sensor listeners for event-driven debounce/settle timing.
 
         The state machine is advanced DIRECTLY from the event callbacks rather
-        than relying on coordinator refreshes to check elapsed time:
+        than relying on coordinator refreshes to check elapsed time.  Actuator
+        commands are pushed via ``_async_push_window_override()`` rather than
+        ``async_request_refresh()`` so the MPC and EKF are never triggered by
+        window events — they run strictly at the scheduled update interval.
 
         * Sensor opens  → ``closed → pending_open`` immediately; after
           ``window_open_debounce`` seconds, verify still open, advance to
-          ``open``, then fire ONE coordinator refresh (heater-off command).
+          ``open``, then push heater-off override immediately.
         * Sensor closes (all room sensors closed) + state is ``open`` →
           ``open → pending_closed`` immediately; after
           ``window_open_close_settle`` seconds, verify still closed, advance
-          to ``closed``, then fire ONE coordinator refresh (heater-on command).
+          to ``closed``, then push last MPC actions back to actuators.
         * Sensor closes while ``pending_open`` (closed before debounce) →
-          revert to ``closed`` immediately, fire ONE coordinator refresh.
+          revert to ``closed`` immediately, push last MPC actions.
 
         Pending timers are keyed by room name so a second sensor event in
         the same room correctly cancels the previous in-flight timer.
@@ -1902,7 +1921,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             "Window debounce elapsed for %s — heater override active",
                             _rn,
                         )
-                    self.hass.async_create_task(self.async_request_refresh())
+                    self.hass.async_create_task(self._async_push_window_override())
 
                 _pending[room_name] = async_call_later(
                     self.hass, self._window_open_debounce, _advance_open
@@ -1922,7 +1941,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         "Window sensor %s closed before debounce for %s — reverted",
                         sensor_id, room_name,
                     )
-                    self.hass.async_create_task(self.async_request_refresh())
+                    self.hass.async_create_task(self._async_push_window_override())
 
                 elif current == "open" and not any_still_open:
                     # All sensors closed while open — enter settle period.
@@ -1949,7 +1968,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                                 "Window settle elapsed for %s — heater override cleared",
                                 _rn,
                             )
-                        self.hass.async_create_task(self.async_request_refresh())
+                        self.hass.async_create_task(self._async_push_window_override())
 
                     _pending[room_name] = async_call_later(
                         self.hass, self._window_open_close_settle, _advance_closed
@@ -2327,6 +2346,39 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             src._current_power = src.cooling_power(outdoor_temp) * min(1.0, abs(frac))
         else:
             src._current_power = 0.0
+
+    async def _async_push_window_override(self) -> None:
+        """Apply window overrides and push actuator commands without re-solving MPC.
+
+        Called directly by window-sensor callbacks so that the heater-off (window
+        open) or heater-on (window closed) command is issued immediately, without
+        triggering a coordinator refresh and without disturbing the MPC or EKF.
+
+        The MPC runs strictly at the scheduled update interval via the coordinator
+        timer.  This method is the sole path for window events to affect actuators
+        between those scheduled ticks.
+        """
+        if not self.actions:
+            # No MPC solution yet — nothing to override.
+            return
+
+        outdoor_temp = self._read_outdoor_temp() or self._last_valid_outdoor_temp
+        if outdoor_temp is None:
+            return
+
+        # Apply dispatch-layer window override: clamp open-window rooms to 0.
+        for src in self.heat_sources:
+            if self.is_window_override_active(src.room):
+                self.actions[src.name] = 0.0
+
+        if self._system_enabled:
+            try:
+                await self._apply_actions(outdoor_temp)
+            except Exception:
+                _LOGGER.warning(
+                    "Window override: failed to push actuator commands",
+                    exc_info=True,
+                )
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         """Write the computed set-point fractions to heater entities via HA services."""
