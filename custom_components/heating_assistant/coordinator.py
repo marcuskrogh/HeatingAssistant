@@ -860,7 +860,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         controller always starts with the most recently identified values.
         Note: ``self.hass`` is **not** available at this point — this method
         only modifies Python objects in memory.
+
+        Two on-disk snapshot layouts are supported:
+
+        * the flat layout (``{"rooms": ..., "sources": ..., "connections": ...}``)
+          written by the ML estimation path, and
+        * the nested layout (``{"active": {"rooms": ...}, "history": [...]}``)
+          written by ``store_identified_parameters`` / ``revert_parameters``.
+
+        New snapshots from the nested path also mirror the flat keys at the top
+        level (see those methods), but older entries only carry the nested
+        form, so unwrap ``active`` here when the flat ``rooms`` key is absent.
         """
+        if "rooms" not in snapshot and isinstance(snapshot.get("active"), dict):
+            snapshot = snapshot["active"]
         for room_name, params in snapshot.get("rooms", {}).items():
             if room_name not in self.model.rooms:
                 continue
@@ -1398,9 +1411,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._estimation_timestamp = now_iso
 
         # --- Persist with new structure ---
+        # The ``active``/``history`` layout drives the dashboard's revert
+        # history.  We also mirror the flat ``rooms``/``sources``/``connections``
+        # keys at the top level because ``_restore_estimated_parameters`` (run on
+        # restart/reload) and the dashboard sensors read that flat layout — without
+        # the mirror, manually-stored parameters were never restored and silently
+        # reverted to the configured room defaults.
         snapshot: Dict[str, Any] = {
             "active": new_active,
             "history": history,
+            "rooms": new_active["rooms"],
+            "sources": {
+                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
+                for src in self.heat_sources
+            },
+            "connections": {},
+            "estimated_at": now_iso,
+            "log_likelihood": None,
         }
 
         real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
@@ -1512,10 +1539,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         }
         self._estimation_timestamp = now_iso
 
-        # Persist
+        # Persist.  Mirror the flat rooms/sources/connections keys at the top
+        # level so the restart-time restore and the dashboard sensors (which read
+        # the flat layout) see the reverted values — see store_identified_parameters.
         snapshot: Dict[str, Any] = {
             "active": new_active,
             "history": history,
+            "rooms": new_active["rooms"],
+            "sources": {
+                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
+                for src in self.heat_sources
+            },
+            "connections": {},
+            "estimated_at": now_iso,
+            "log_likelihood": None,
         }
         real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
         if real_entry is not None:
