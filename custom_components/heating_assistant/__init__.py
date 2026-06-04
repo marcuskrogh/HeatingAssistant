@@ -530,6 +530,29 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, ws_get_controller_config)
 
+    @websocket_api.websocket_command(
+        {vol.Required("type"): "heating_assistant/get_forecasts"}
+    )
+    @websocket_api.async_response
+    async def ws_get_forecasts(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return current forecast arrays directly from the coordinator.
+
+        Forecast data is no longer stored in sensor attributes (to avoid the
+        HA Recorder 16 KB size limit), so the dashboard frontend fetches it
+        via this endpoint instead.
+        """
+        try:
+            coordinator = _get_coordinator(hass)
+            payload = coordinator.build_forecast_payload()
+            connection.send_result(msg["id"], payload)
+        except Exception as err:
+            _LOGGER.error("Heating Assistant: get_forecasts WS failed: %s", err)
+            connection.send_error(msg["id"], "forecasts_fetch_failed", str(err))
+
+    websocket_api.async_register_command(hass, ws_get_forecasts)
+
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply options in-place when possible; reload only for structural changes."""
@@ -768,7 +791,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=39",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=40",
                     "embed_iframe": False,
                 }
             },

@@ -212,6 +212,7 @@ async def test_update_cycle_projects_schedule_with_mpc_timestep() -> None:
     coord = SimpleNamespace(
         _apply_pending_runtime_reconfiguration=lambda: None,
         _temp_sensors={},
+        _rooms_ever_measured=set(),
         model=SimpleNamespace(rooms={}),
         _apply_schedule=lambda now: None,
         _compute_control_trajectory=_capture_trajectory,

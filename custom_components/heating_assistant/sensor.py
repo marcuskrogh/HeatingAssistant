@@ -795,23 +795,7 @@ class OutdoorTemperatureForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         outdoor_forecast = self._coordinator.outdoor_forecast
         dt = self._coordinator.dt
-        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
-        _ot = self._coordinator.outdoor_temp
-
-        # Entry at t=now: bridge between history and prediction
-        forecast: List[Dict[str, Any]] = [{
-            "time": now.isoformat(),
-            "outdoor_temp": None if _ot is None else round(_ot, 2),
-        }]
-        for i, temp in enumerate(outdoor_forecast):
-            step_time = now + timedelta(seconds=dt * (i + 1))
-            forecast.append({
-                "time": step_time.isoformat(),
-                "outdoor_temp": round(temp, 2),
-            })
-
         return {
-            "forecast": forecast,
             "horizon_steps": len(outdoor_forecast),
             "step_seconds": dt,
             "horizon_minutes": round(len(outdoor_forecast) * dt / 60, 1),
@@ -875,37 +859,16 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
         predictions = self._coordinator.predictions
         room = self._coordinator.model.rooms[self._room_name]
         dt = self._coordinator.dt
-
-        # Build timestamped forecast entries for dashboard visualisation.
-        # Each entry combines temperature, heating power, solar gain,
-        # outdoor temperature, and setpoint so cards (e.g. apexcharts-card)
-        # can plot them all from a single attribute.
-        #
-        # The first entry is at t=now with the current filtered measurement
-        # estimate y(k|k) so the predicted trace starts from the same point as
-        # the estimator state exposed by TemperatureFilteredSensor.
-        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
-        outdoor_forecast = self._coordinator.outdoor_forecast
-        solar_forecast = self._coordinator.solar_forecast
-        heating_schedule = self._coordinator.heating_schedule
-        linearised_predictions = self._coordinator.linearised_predictions
-
-        # Use per-step setpoints and comfort offsets from the schedule
-        # trajectory so the forecast setpoint line and constraint corridor
-        # reflect scheduled changes over the horizon.
-        traj = getattr(self._coordinator, "_control_trajectory", None)
-        step_sp = traj.setpoints.get(self._room_name) if traj is not None else None
-        step_off = traj.comfort_offsets.get(self._room_name) if traj is not None else None
-
-        # Comfort offset for the current step (used in the bridge entry and as fallback).
         comfort_offset = float(getattr(room, "comfort_offset", 2.0))
 
-        # Current heating power for this room (actual, not planned)
-        current_heating = sum(
-            getattr(s, "current_power", 0.0)
-            for s in self._coordinator.sources_for_room(self._room_name)
-        )
-        current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
+        # Scalar trajectory kept in attributes so it fits in HA Recorder.
+        # The full timestamped forecast array is served via the
+        # heating_assistant/get_forecasts WebSocket command.
+        trajectory: List[float] = []
+        for pred in predictions:
+            temp = pred.get(self._room_name)
+            if temp is not None:
+                trajectory.append(round(temp, 2))
 
         filtered_now = self._coordinator.filtered_temperatures.get(self._room_name)
         now_temp = (
@@ -914,71 +877,8 @@ class TemperatureForecastSensor(CoordinatorEntity, SensorEntity):
             else round(room.temperature, 2)
         )
 
-        now_sp = round(float(room.setpoint), 2)
-        # Entry at t=now: bridge between history and prediction
-        forecast: List[Dict[str, Any]] = [{
-            "time": now.isoformat(),
-            "temperature": now_temp,
-            "heating_power": round(current_heating, 1),
-            "solar_gain": round(current_solar, 1),
-            "outdoor_temp": None if self._coordinator.outdoor_temp is None else round(self._coordinator.outdoor_temp, 2),
-            "setpoint": now_sp,
-            "constraint_upper": round(now_sp + comfort_offset, 2),
-            "constraint_lower": round(now_sp - comfort_offset, 2),
-        }]
-
-        # Walk predictions once, building both the scalar trajectory list and
-        # the per-step forecast dict in lock-step (P5 — was previously two
-        # passes over ``predictions``).
-        trajectory: List[float] = []
-        n_sched = len(heating_schedule)
-        n_solar = len(solar_forecast)
-        n_outdoor = len(outdoor_forecast)
-        n_lin = len(linearised_predictions)
-        for i, pred in enumerate(predictions):
-            temp = pred.get(self._room_name)
-            # Include this step in the forecast even if temperature is missing,
-            # to keep time stamps correct (i always represents the actual step number)
-            step_time = now + timedelta(seconds=dt * (i + 1))
-            have_traj = (
-                step_sp is not None and step_off is not None
-                and i < len(step_sp) and i < len(step_off)
-            )
-            if have_traj:
-                s = round(float(step_sp[i]), 2)
-                o = float(step_off[i])
-            else:
-                s = round(float(room.setpoint), 2)
-                o = comfort_offset
-            entry: Dict[str, Any] = {
-                "time": step_time.isoformat(),
-                "setpoint": s,
-                "constraint_upper": round(s + o, 2),
-                "constraint_lower": round(s - o, 2),
-            }
-            if temp is not None:
-                temp_rounded = round(temp, 2)
-                trajectory.append(temp_rounded)
-                entry["temperature"] = temp_rounded
-            if i < n_sched:
-                entry["heating_power"] = round(
-                    heating_schedule[i].get(self._room_name, 0.0), 1
-                )
-            if i < n_solar:
-                entry["solar_gain"] = round(
-                    solar_forecast[i].get(self._room_name, 0.0), 1
-                )
-            if i < n_outdoor:
-                entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
-            if i < n_lin:
-                lin_temp = linearised_predictions[i].get(self._room_name)
-                if lin_temp is not None:
-                    entry["linearised_temperature"] = round(lin_temp, 2)
-            forecast.append(entry)
-
         return {
             "trajectory": trajectory,
-            "forecast": forecast,
             "setpoint": room.setpoint,
             "comfort_offset": comfort_offset,
             "current_temperature": now_temp,
@@ -1254,33 +1154,12 @@ class HeatingPowerForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         schedule = self._coordinator.heating_schedule
         dt = self._coordinator.dt
-        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
-
-        forecast = []
-        if schedule:
-            # heating_schedule[i] = planned power for [now + i*dt, now + (i+1)*dt]
-            # Label at start of interval (now + i*dt); i=0 bridges history to plan
-            for i, step in enumerate(schedule):
-                step_time = now + timedelta(seconds=dt * i)
-                forecast.append({
-                    "time": step_time.isoformat(),
-                    "heating_power": round(step.get(self._room_name, 0.0), 1),
-                })
-        else:
-            # Fallback: bridge from current actual power when no schedule is available
-            current_heating = sum(
-                getattr(s, "current_power", 0.0)
-                for s in self._coordinator.sources_for_room(self._room_name)
-            )
-            forecast.append({
-                "time": now.isoformat(),
-                "heating_power": round(current_heating, 1),
-            })
-
+        sources = self._coordinator.sources_for_room(self._room_name)
+        max_power = sum(s.max_power for s in sources)
         return {
-            "forecast": forecast,
             "horizon_steps": len(schedule),
             "step_seconds": dt,
+            "max_power": max_power if max_power > 0 else None,
         }
 
 
@@ -1337,34 +1216,9 @@ class SolarGainForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         solar_forecast = self._coordinator.solar_forecast
         dt = self._coordinator.dt
-        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
-
-        # solar_forecast has N+1 entries: solar_forecast[k] = solar at now + k*dt
-        # for k = 0, …, N.  Entry k=0 is at "now" and acts as the bridge point
-        # that connects the forecast trace to the HA recorder history.
-        forecast = []
-        for i, step in enumerate(solar_forecast):
-            step_time = now + timedelta(seconds=dt * i)
-            forecast.append({
-                "time": step_time.isoformat(),
-                "solar_gain": round(step.get(self._room_name, 0.0), 1),
-            })
-
-        # Fallback: if solar_forecast is empty (before first compute), provide
-        # a single bridge point using the coordinator's current solar_gains.
-        if not forecast:
-            current_solar = self._coordinator.solar_gains.get(self._room_name, 0.0)
-            forecast.append({
-                "time": now.isoformat(),
-                "solar_gain": round(current_solar, 1),
-            })
-
         room = self._coordinator.model.rooms[self._room_name]
-        # horizon_steps is N (the OCP horizon), which is len(solar_forecast) - 1
-        # when solar_forecast is populated (N+1 entries), or 0 when empty.
         horizon_steps = max(0, len(solar_forecast) - 1)
         return {
-            "forecast": forecast,
             "horizon_steps": horizon_steps,
             "step_seconds": dt,
             "window_count": len(room.windows),
@@ -1478,23 +1332,7 @@ class ElectricityPriceForecastSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         forecast = self._coordinator.price_forecast or []
         dt = self._coordinator.dt
-        now = getattr(self._coordinator, "now_utc", None) or datetime.now(tz=timezone.utc)
-
-        # Entry at t=now bridges history to forecast; then one entry per OCP step.
-        forecast_list: List[Dict[str, Any]] = []
-        if forecast:
-            for i, price in enumerate(forecast):
-                step_time = now + timedelta(seconds=dt * i)
-                try:
-                    forecast_list.append({
-                        "time": step_time.isoformat(),
-                        "price": round(float(price), 5),
-                    })
-                except (TypeError, ValueError):
-                    pass
-
         return {
-            "forecast": forecast_list,
             "horizon_steps": len(forecast),
             "step_seconds": dt,
             "horizon_minutes": round(len(forecast) * dt / 60, 1),
