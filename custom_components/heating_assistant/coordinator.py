@@ -473,7 +473,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._last_runtime_config: Dict[str, Any] = {**dict(data), **dict(options)}
         self._pending_runtime_reconfiguration: Dict[str, Any] = {}
 
-        rooms_cfg: List[Dict[str, Any]] = data.get(CONF_ROOMS, [])
+        # Prefer options over data for rooms so that edits made through the
+        # "Configure" options flow (which writes to entry.options) are picked
+        # up on restart.  Falls back to entry.data for fresh installs where
+        # options has never been saved yet.
+        rooms_cfg: List[Dict[str, Any]] = options.get(CONF_ROOMS) or data.get(CONF_ROOMS, [])
         sources_cfg: List[Dict[str, Any]] = data.get(CONF_HEAT_SOURCES, [])
 
         self.model: HouseModel = build_house_model(rooms_cfg)
