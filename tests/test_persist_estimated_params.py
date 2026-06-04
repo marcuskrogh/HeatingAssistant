@@ -279,6 +279,38 @@ def test_restore_estimated_parameters_applies_to_model():
     assert coordinator._estimation_log_likelihood == pytest.approx(-55.0)
 
 
+def test_restore_estimated_parameters_active_history_format():
+    """Regression: parameters stored by store_identified_parameters use the
+    ``{"active": {"rooms": {...}}, "history": [...]}`` layout.  The restore must
+    unwrap ``active`` so manually-applied model parameters survive a restart
+    (previously they were dropped, reverting the model to YAML defaults)."""
+    import custom_components.heating_assistant.coordinator as coord_mod
+
+    room = _make_room("lr", 5e6, 0.05, internal_gain=0.0)
+    coordinator = _FakeCoordinator([room])
+
+    snapshot = {
+        "active": {
+            "rooms": {
+                "lr": {"thermal_mass": 1.5e6, "r_external": 0.07, "internal_gain": 42.0}
+            },
+            "estimated_at": "2025-02-02T00:00:00+00:00",
+            "source": "manual",
+        },
+        "history": [
+            {"rooms": {"lr": {"thermal_mass": 5e6, "r_external": 0.05}}},
+        ],
+    }
+
+    coord_mod.HeatingAssistantCoordinator._restore_estimated_parameters(
+        coordinator, snapshot
+    )
+
+    assert coordinator.model.rooms["lr"].thermal_mass == pytest.approx(1.5e6)
+    assert coordinator.model.rooms["lr"].r_external == pytest.approx(0.07)
+    assert coordinator.model.rooms["lr"].internal_gain == pytest.approx(42.0)
+
+
 def test_store_identified_parameters_snapshot_survives_restart():
     """A snapshot written by store_identified_parameters must be restorable.
 

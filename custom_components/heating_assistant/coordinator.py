@@ -1196,7 +1196,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         entry["linearised_temperature"] = round(lin_temp, 2)
                 forecast.append(entry)
 
-            max_power = sum(s.max_power for s in self.sources_for_room(room_name))
+            # Heating and cooling bounds are asymmetric: a heat pump's cooling
+            # capacity is derived from its electrical input × cooling COP, which
+            # differs from the rated thermal heating output.  Expose both so the
+            # power chart can draw the true (non-symmetric) corridor.
+            room_sources = self.sources_for_room(room_name)
+            max_power = sum(s.max_power for s in room_sources)
+            outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
+            max_cooling_power = sum(
+                -s.cooling_power(outdoor_now)
+                for s in room_sources
+                if getattr(s, "can_cool", False) and hasattr(s, "cooling_power")
+            )
 
             rooms_payload[_slugify(room_name)] = {
                 "trajectory": trajectory,
@@ -1207,6 +1218,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "step_seconds": dt,
                 "horizon_minutes": round(len(predictions) * dt / 60, 1),
                 "max_power": max_power if max_power > 0 else None,
+                "max_cooling_power": max_cooling_power if max_cooling_power > 0 else None,
             }
 
         # Outdoor forecast

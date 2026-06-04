@@ -133,6 +133,12 @@ from .const import (
     SOURCE_HVAC_MODE_COOL,
     SOURCE_HVAC_MODE_HEAT_COOL,
     CONF_SOURCE_EMITTER_TIME_CONSTANT,
+    CONF_SOURCE_COOLING_COP,
+    CONF_SOURCE_COOLING_EFFICIENCY,
+    CONF_SOURCE_HEATING_EFFICIENCY,
+    DEFAULT_COOLING_COP,
+    DEFAULT_COOLING_EFFICIENCY,
+    DEFAULT_HEATING_EFFICIENCY,
     CONF_SCHEDULE,
     CONF_SCHEDULE_NAME,
     CONF_SCHEDULE_START,
@@ -680,6 +686,9 @@ def _heater_form_schema(
     max_temp_offset_default: float = DEFAULT_MAX_TEMP_OFFSET,
     hvac_mode_default: str = DEFAULT_SOURCE_HVAC_MODE,
     emitter_time_constant_default: float = _DEFAULT_EMITTER_TIME_CONSTANT,
+    heating_efficiency_default: float = DEFAULT_HEATING_EFFICIENCY,
+    cooling_cop_default: float = DEFAULT_COOLING_COP,
+    cooling_efficiency_default: float = DEFAULT_COOLING_EFFICIENCY,
 ) -> vol.Schema:
     """Flat schema for adding/editing a heat source (heater)."""
     schema_dict: Dict[Any, Any] = {
@@ -726,6 +735,19 @@ def _heater_form_schema(
                 [SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL],
                 translation_key="hvac_mode",
             ),
+            # Heat-pump heating/cooling capacity is asymmetric: the rated thermal
+            # max_power drives heating, while cooling is derived from the rated
+            # electrical input × cooling COP (EER).  These knobs let the UI
+            # configure that asymmetry (matching the YAML schema).
+            vol.Optional(
+                CONF_SOURCE_HEATING_EFFICIENCY, default=float(heating_efficiency_default),
+            ): _number_slider(min_value=0.1, max_value=1.0, step=0.05),
+            vol.Optional(
+                CONF_SOURCE_COOLING_COP, default=float(cooling_cop_default),
+            ): _number_slider(min_value=0.0, max_value=8.0, step=0.1),
+            vol.Optional(
+                CONF_SOURCE_COOLING_EFFICIENCY, default=float(cooling_efficiency_default),
+            ): _number_slider(min_value=0.0, max_value=1.0, step=0.05),
             vol.Optional(
                 CONF_SOURCE_EMITTER_TIME_CONSTANT,
                 default=float(emitter_time_constant_default),
@@ -1272,6 +1294,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 max_temp_offset=flat.get(CONF_SOURCE_MAX_TEMP_OFFSET),
                 hvac_mode=flat.get(CONF_SOURCE_HVAC_MODE),
                 emitter_time_constant=flat.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
+                heating_efficiency=flat.get(CONF_SOURCE_HEATING_EFFICIENCY),
+                cooling_cop=flat.get(CONF_SOURCE_COOLING_COP),
+                cooling_efficiency=flat.get(CONF_SOURCE_COOLING_EFFICIENCY),
             )
             return await self.async_step_manage_heaters()
 
@@ -1332,6 +1357,9 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
                 max_temp_offset=flat.get(CONF_SOURCE_MAX_TEMP_OFFSET),
                 hvac_mode=flat.get(CONF_SOURCE_HVAC_MODE),
                 emitter_time_constant=flat.get(CONF_SOURCE_EMITTER_TIME_CONSTANT),
+                heating_efficiency=flat.get(CONF_SOURCE_HEATING_EFFICIENCY),
+                cooling_cop=flat.get(CONF_SOURCE_COOLING_COP),
+                cooling_efficiency=flat.get(CONF_SOURCE_COOLING_EFFICIENCY),
             )
             self._selected_heater_idx = None
             return await self.async_step_manage_heaters()
@@ -1349,6 +1377,13 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             hvac_mode_default=heater.get(CONF_SOURCE_HVAC_MODE, DEFAULT_SOURCE_HVAC_MODE),
             emitter_time_constant_default=float(
                 heater.get(CONF_SOURCE_EMITTER_TIME_CONSTANT, _DEFAULT_EMITTER_TIME_CONSTANT)
+            ),
+            heating_efficiency_default=float(
+                heater.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY)
+            ),
+            cooling_cop_default=float(heater.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP)),
+            cooling_efficiency_default=float(
+                heater.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY)
             ),
         )
         return self.async_show_form(
