@@ -854,3 +854,45 @@ def test_build_variant_from_coordinator_supports_industrial():
     )
     assert dashboard["title"] == "Heating Assistant – Industrial"
     assert [v["title"] for v in dashboard["views"]] == ["Overview", "Office"]
+
+
+# ---------------------------------------------------------------------------
+# Custom panel (Chart.js) – price series step-line
+# ---------------------------------------------------------------------------
+
+
+def test_room_detail_js_price_series_use_stepped_before():
+    """The Price and Price Forecast datasets in room-detail.js must use
+    ``stepped: 'before'`` so electricity prices render as a zero-order-hold
+    step line rather than a linear (bezier) interpolation."""
+    js_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "custom_components",
+        "heating_assistant",
+        "www",
+        "js",
+        "pages",
+        "room-detail.js",
+    )
+    with open(js_path) as fh:
+        source = fh.read()
+
+    # Both the history ('Price') and forecast ('Price Forecast') datasets must
+    # carry the stepped option.  We look for the makeDataset calls that
+    # mention 'y2' (price axis) and assert they also carry stepped: 'before'.
+    import re
+
+    price_dataset_blocks = re.findall(
+        r"makeDataset\('Price[^']*'.*?\)",
+        source,
+        re.DOTALL,
+    )
+    assert len(price_dataset_blocks) >= 2, (
+        "Expected at least two makeDataset calls for Price / Price Forecast, "
+        f"found {len(price_dataset_blocks)}"
+    )
+    for block in price_dataset_blocks:
+        assert "stepped" in block and "'before'" in block, (
+            f"makeDataset block for price series is missing stepped: 'before':\n{block}"
+        )
