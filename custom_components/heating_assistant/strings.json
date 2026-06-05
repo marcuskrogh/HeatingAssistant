@@ -232,6 +232,7 @@
         "description": "Solar gain is computed for each configured window. Window-open detection uses the room's binary sensors instead.",
         "menu_options": {
           "add_window": "Add a window",
+          "edit_window": "Edit a window",
           "remove_window": "Remove a window",
           "finish_windows": "Done"
         }
@@ -239,6 +240,27 @@
       "add_window": {
         "title": "Add a window to {name}",
         "description": "Tell Heating Assistant about a window so it can compute its solar gain.",
+        "data": {
+          "area": "Glazed area (m²)",
+          "orientation": "Orientation",
+          "tilt": "Tilt from horizontal (°)"
+        },
+        "data_description": {
+          "area": "The glazed surface area in m². Frames are not counted.",
+          "orientation": "Compass direction the window faces (where the sun strikes it most directly).",
+          "tilt": "Tilt of the window pane. 90° is a normal vertical window in a wall; 0° is a horizontal skylight."
+        }
+      },
+      "edit_window": {
+        "title": "Edit a window in {name}",
+        "description": "Pick which window to edit.",
+        "data": {
+          "window_idx": "Window"
+        }
+      },
+      "window_detail": {
+        "title": "Edit window: {name}",
+        "description": "Update this window's area, orientation, and tilt.",
         "data": {
           "area": "Glazed area (m²)",
           "orientation": "Orientation",

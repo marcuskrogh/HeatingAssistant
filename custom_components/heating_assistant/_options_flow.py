@@ -487,6 +487,17 @@ class WindowFlowHelper:
             }
         )
 
+    def update(self, idx: int, *, area: float, compass: str, tilt: float) -> bool:
+        """Update the window at ``idx``.  Returns ``False`` if out of range."""
+        if not (0 <= idx < len(self.windows)):
+            return False
+        self.windows[idx] = {
+            CONF_WINDOW_AREA: area,
+            CONF_WINDOW_ORIENTATION: COMPASS_TO_DEGREES[compass],
+            CONF_WINDOW_TILT: tilt,
+        }
+        return True
+
     def remove(self, idx: int) -> bool:
         """Remove the window at ``idx``.  Returns ``False`` if out of range."""
         if 0 <= idx < len(self.windows):
