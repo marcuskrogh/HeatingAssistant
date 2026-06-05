@@ -2267,10 +2267,27 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     ) -> Optional[List[float]]:
         """Read the electricity price forecast from the configured price entity.
 
-        Supports the Nord Pool custom component (HACS) and any sensor that
-        exposes hourly price lists in ``today`` and ``tomorrow`` attributes.
-        Falls back to persistence (current price repeated over the horizon)
-        when only the sensor state is available.
+        Three attribute formats are supported, tried in order:
+
+        **Path A – timestamped dicts (Nord Pool HACS v2)**
+            ``raw_today`` / ``raw_tomorrow`` are lists of dicts with an
+            explicit ``start`` ISO-8601 datetime and a ``value``/``price``/
+            ``total`` key.  Each horizon step is mapped to the price whose
+            ``start <= step_time``, so the transition to the next hourly price
+            happens at the exact wall-clock moment regardless of the MPC step
+            size.
+
+        **Path B – plain hourly lists (Nord Pool HACS v1 / generic)**
+            ``today`` / ``tomorrow`` (or ``prices_today`` / ``prices_tomorrow``)
+            are 24-element lists where index ``h`` holds the price for local
+            hour ``h``.  The number of steps already elapsed within the
+            current hour is taken into account so that the price change
+            propagates at the correct MPC step rather than always at the top
+            of the hour.
+
+        **Fallback – current sensor state**
+            The numeric state of the price entity is repeated over the full
+            horizon.
 
         Returns a list of N prices [currency/kWh] aligned to horizon steps,
         or None when no price entity is configured or the sensor is unavailable.
@@ -2282,8 +2299,59 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             return None
 
         attrs = state.attributes
+        adder = self._price_net_tariff + self._price_spot_surcharge
+        N = self._horizon
+        dt_s = float(self.dt)
 
-        # ── Try attribute-based forecast (Nord Pool / Tibber style) ──────
+        # ── Path A: timestamped dicts with explicit ``start`` key ─────────
+        #
+        # Nord Pool HACS v2 exposes raw_today / raw_tomorrow as lists of dicts
+        # like {"start": "<iso-dt>", "end": "<iso-dt>", "value": <float>}.
+        # We sort them by start time and, for each horizon step, walk forward
+        # to find the last entry whose start <= step_time.  This is immune to
+        # sub-hourly rounding because we compare real wall-clock times rather
+        # than doing hour-index arithmetic.
+        raw_today = attrs.get("raw_today") or []
+        raw_tomorrow = attrs.get("raw_tomorrow") or []
+        if raw_today or raw_tomorrow:
+            timed_prices: List[Tuple[datetime, float]] = []
+            for entry in list(raw_today) + list(raw_tomorrow):
+                if not isinstance(entry, dict):
+                    continue
+                start_str = entry.get("start")
+                v = entry.get("value") or entry.get("price") or entry.get("total")
+                if start_str is None or v is None:
+                    continue
+                try:
+                    start_dt = datetime.fromisoformat(str(start_str))
+                    timed_prices.append((start_dt, float(v)))
+                except (TypeError, ValueError):
+                    continue
+            if timed_prices:
+                timed_prices.sort(key=lambda tp: tp[0])
+                aligned_a: List[float] = []
+                for k in range(N):
+                    step_time = now + timedelta(seconds=dt_s * k)
+                    # Initialise with the first available price in case now is
+                    # before all known entries.
+                    price = timed_prices[0][1]
+                    for start_dt, p in timed_prices:
+                        if start_dt <= step_time:
+                            price = p
+                        else:
+                            break
+                    aligned_a.append(max(0.0, price + adder))
+                return aligned_a
+
+        # ── Path B: plain hourly lists ────────────────────────────────────
+        #
+        # today / tomorrow (or prices_today / prices_tomorrow) are 24-element
+        # lists where index h holds the price for local hour h.  We correct
+        # for sub-hourly position by counting how many MPC steps have already
+        # elapsed within the current hour (elapsed_steps).  Without this
+        # correction the code would treat now as always being at the top of
+        # the hour, causing the transition to the next hourly price to arrive
+        # up to (steps_per_hour − 1) steps too late.
         today_raw = attrs.get("today") or attrs.get("prices_today") or []
         tomorrow_raw = attrs.get("tomorrow") or attrs.get("prices_tomorrow") or []
 
@@ -2313,31 +2381,31 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         pass
 
         all_prices = today_prices + tomorrow_prices
-
-        # ── Align hourly prices to horizon steps ─────────────────────────
-        adder = self._price_net_tariff + self._price_spot_surcharge
         if all_prices:
-            # Determine current hour index within today_prices.
             now_local = now.astimezone()
             current_hour = now_local.hour
-            # Offset into all_prices: today starts at hour 0.
-            offset = current_hour
-            aligned: List[float] = []
-            N = self._horizon
-            dt_s = float(self.dt)
             steps_per_hour = max(1, round(3600.0 / dt_s))
+            # Steps already elapsed within the current hour.
+            elapsed_steps = int(
+                (now_local.minute * 60 + now_local.second) / dt_s
+            )
+            aligned_b: List[float] = []
             for k in range(N):
-                hour_idx = offset + k // steps_per_hour
-                raw = all_prices[hour_idx] if hour_idx < len(all_prices) else all_prices[-1]
-                aligned.append(max(0.0, raw + adder))
-            return aligned
+                hour_idx = current_hour + (elapsed_steps + k) // steps_per_hour
+                raw = (
+                    all_prices[hour_idx]
+                    if hour_idx < len(all_prices)
+                    else all_prices[-1]
+                )
+                aligned_b.append(max(0.0, raw + adder))
+            return aligned_b
 
-        # ── Fall back to current sensor state (persistence) ───────────────
+        # ── Fallback: current sensor state repeated over full horizon ─────
         try:
             current_price = float(state.state)
         except (ValueError, TypeError):
             return None
-        return [max(0.0, current_price + adder)] * self._horizon
+        return [max(0.0, current_price + adder)] * N
 
     def _record_weather_success(self) -> None:
         """Mark the most recent forecast fetch as successful."""
