@@ -1,11 +1,20 @@
 import { TimeSeriesChart, makeDataset, historyToDataPoints, forecastToDataPoints, loadChartJs } from '../components/time-series-chart.js';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js';
+import { createGauge, updateGauge } from '../components/gauge.js';
 import { createClimateCard } from '../components/climate-card.js';
 import { createCountdown } from '../components/countdown.js';
+import { createScheduleOverview } from '../components/schedule-overview.js';
+import { getRoomScheduleData } from '../schedule-utils.js';
 import {
   formatPower,
   entityValue, entityAttr, systemEntity, modelFitLabel,
 } from '../utils.js';
+
+// Model-fit gauge severity mirrors the overview page's MODEL FIT gauge so the
+// colour thresholds (GOOD / ACCEPTABLE / POOR) are identical across pages.
+const FIT_SEVERITY = { good: 0.8, warning: 0.5, alarm: 0 };
+// Fallback power-gauge span used until the room forecast supplies the actual
+// heating/cooling capacity for this room.
+const DEFAULT_MAX_POWER = 2000;
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -88,19 +97,57 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   kpiGrid.className = 'grid-kpi';
   container.appendChild(kpiGrid);
 
-  const kpis = [
-    createKpiCard({ value: formatPower(powerVal), label: 'Power', unit: '' }),
-    createKpiCard({
-      value: `<span class="fit-badge ${fitInfo.class}">${fitInfo.label}</span>`,
-      label: 'Model Fit',
-      unit: '',
-      html: true,
-    }),
-  ];
-  kpis.forEach((k) => kpiGrid.appendChild(k));
+  // KPIs use the same gauge design as the overview page (label + value +
+  // severity bar) so the two overview surfaces share a common visual language.
+  // The metrics differ — here the room-level Power and Model Fit.
+  const powerBounds = { min: 0, max: DEFAULT_MAX_POWER };
+
+  const powerGauge = createGauge({
+    value: powerVal,
+    min: powerBounds.min,
+    max: powerBounds.max,
+    label: 'POWER',
+    format: formatPower,
+  });
+
+  const fitGauge = createGauge({
+    value: fitVal,
+    min: 0,
+    max: 1,
+    label: 'MODEL FIT',
+    format: () => fitInfo.label,
+    severity: FIT_SEVERITY,
+  });
+
+  kpiGrid.appendChild(powerGauge);
+  kpiGrid.appendChild(fitGauge);
+
+  function paintPowerGauge(value) {
+    updateGauge(powerGauge, {
+      value, min: powerBounds.min, max: powerBounds.max, format: formatPower,
+    });
+  }
 
   const countdown = createCountdown(state, true);
   kpiGrid.appendChild(countdown.element);
+
+  // ── Schedule overview ──────────────────────────────────────────────────────
+  // Mirrors the schedules index-card design; clicking opens the editable
+  // schedule detail page for this room.
+  const scheduleOverview = createScheduleOverview(room, null, {
+    onEdit: () => { window.location.hash = `#schedules/${roomSlug}`; },
+  });
+  const scheduleSection = document.createElement('div');
+  scheduleSection.className = 'room-schedule-overview';
+  scheduleSection.appendChild(scheduleOverview.element);
+  container.appendChild(scheduleSection);
+
+  function refreshSchedule() {
+    connection.getSchedules().then((roomSchedules) => {
+      scheduleOverview.update(getRoomScheduleData(roomSchedules, room));
+    }).catch(() => { /* leave the last-rendered schedule in place on failure */ });
+  }
+  refreshSchedule();
 
   const chartsContainer = document.createElement('div');
   chartsContainer.className = 'grid-charts';
@@ -138,7 +185,13 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // lastRunTs tracks the MPC solve timestamp; when it changes we know new
   // forecast data is available and re-fetch via the WS endpoint.
   const lastRunTs = { value: null };
-  loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs);
+  loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, (roomForecast) => {
+    // The forecast carries this room's heating/cooling capacity — use it to
+    // scale the power gauge so the bar reflects power as a fraction of capacity.
+    if (roomForecast?.max_power != null) powerBounds.max = roomForecast.max_power;
+    if (roomForecast?.max_cooling_power != null) powerBounds.min = -roomForecast.max_cooling_power;
+    paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']));
+  });
 
   let latestState = state;
   const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
@@ -160,8 +213,14 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
         temperature: tv, setpoint: sp, power: pv,
         comfortLower: cl, comfortUpper: cu, off,
       });
-      updateKpiCard(kpis[0], { value: formatPower(pv) });
-      updateKpiCard(kpis[1], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });
+      paintPowerGauge(pv);
+      updateGauge(fitGauge, {
+        value: fv, min: 0, max: 1, format: () => fi.label, severity: FIT_SEVERITY,
+      });
+
+      // Keep the schedule overview in sync with any toggle/save that triggered
+      // this state update.
+      refreshSchedule();
 
       updateChartsFromState(room, newState, connection, tempChart, powerChart, disturbChart, lastRunTs);
     },
@@ -175,7 +234,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   };
 }
 
-async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs) {
+async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onPowerBounds) {
   const tempFilteredEntity = room.entities['temperature_filtered'];
   const tempMeasuredEntity = room.entities['temperature_measured'];
   const setpointEntity = room.entities['setpoint'];
@@ -217,7 +276,10 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
   const priceHistory = appendCurrentValue(historyToDataPoints(history[priceEntity]), state, priceEntity);
 
-  const forecastData = forecasts.rooms?.[room.slug]?.forecast || [];
+  const roomForecast = forecasts.rooms?.[room.slug];
+  if (onPowerBounds) onPowerBounds(roomForecast);
+
+  const forecastData = roomForecast?.forecast || [];
   const priceForecastData = forecasts.price_forecast || [];
   const priceForecast = forecastToDataPoints(priceForecastData, 'price');
 
@@ -238,7 +300,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     constraintUpperHistory, constraintUpperForecast,
     constraintLowerHistory, constraintLowerForecast,
   );
-  buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, forecasts.rooms?.[room.slug]);
+  buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
 }
 

@@ -45,6 +45,20 @@ export function findNextPeriod(periods) {
   return best;
 }
 
+/** Robust per-room schedule lookup: tries slug, name, and a case-insensitive
+ *  normalised match.  Shared by the schedules page and the room-detail schedule
+ *  overview so both resolve the same data from the coordinator payload. */
+export function getRoomScheduleData(roomSchedules, room) {
+  if (!roomSchedules) return null;
+  if (roomSchedules[room.slug]) return roomSchedules[room.slug];
+  if (roomSchedules[room.name]) return roomSchedules[room.name];
+  const slug = room.slug.toLowerCase();
+  for (const key of Object.keys(roomSchedules)) {
+    if (key.toLowerCase().replace(/\s+/g, '_') === slug) return roomSchedules[key];
+  }
+  return null;
+}
+
 /** Returns { text, cls } describing a period's mode for display. */
 export function periodModeDisplay(p) {
   if (p.mode === 'off') return { text: 'OFF', cls: 'sched-row__mode--off' };
