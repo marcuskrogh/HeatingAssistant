@@ -1172,10 +1172,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         windows = self._current_windows()
         if windows is None:
             return await self.async_step_manage_room_windows()
-        menu_options: List[str] = ["add_window"]
-        if windows:
-            menu_options += ["edit_window", "remove_window"]
-        menu_options.append("finish_windows")
+        menu_options = ["add_window", "edit_window", "remove_window", "finish_windows"]
         return self.async_show_menu(
             step_id="manage_windows",
             menu_options=menu_options,
@@ -1332,10 +1329,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         heaters = self._current_heaters()
         if heaters is None:
             return await self.async_step_manage_room_heaters()
-        menu_options: List[str] = ["add_heater"]
-        if heaters:
-            menu_options += ["edit_heater", "remove_heater"]
-        menu_options.append("finish_heaters")
+        menu_options = ["add_heater", "edit_heater", "remove_heater", "finish_heaters"]
         return self.async_show_menu(
             step_id="manage_heaters",
             menu_options=menu_options,

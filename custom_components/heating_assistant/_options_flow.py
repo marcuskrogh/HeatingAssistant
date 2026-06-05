@@ -537,19 +537,16 @@ class HeaterFlowHelper:
     def __init__(self, room_or_sources: Dict[str, Any] | List[Dict[str, Any]] | None = None) -> None:
         if room_or_sources is None:
             self._room = None
-            self._heat_sources_list = []
-        elif isinstance(room_or_sources, dict) and CONF_HEAT_SOURCES not in room_or_sources:
-            # It's a room dict
+            self._heat_sources_list: List[Dict[str, Any]] = []
+        elif isinstance(room_or_sources, dict):
+            # Room dict — use setdefault so new rooms get an empty list AND
+            # existing rooms with heat_sources already set share the same list.
             self._room = room_or_sources
             self._heat_sources_list = self._room.setdefault(CONF_HEAT_SOURCES, [])
-        elif isinstance(room_or_sources, list):
-            # It's a heat sources list
+        else:
+            # Direct list of heat-source dicts.
             self._room = None
             self._heat_sources_list = room_or_sources
-        else:
-            # It's a dict with CONF_HEAT_SOURCES (unlikely but handle it)
-            self._room = None
-            self._heat_sources_list = room_or_sources.get(CONF_HEAT_SOURCES, [])
 
     @property
     def heat_sources(self) -> List[Dict[str, Any]]:
