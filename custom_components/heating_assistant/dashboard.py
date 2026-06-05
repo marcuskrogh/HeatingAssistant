@@ -816,10 +816,30 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
         room_snapshot_entities.extend(
             [
                 {"type": "section", "label": room.name},
-                {"entity": _eid("sensor", room.name, "temperature_filtered"), "name": "Temperature"},
-                {"entity": _eid("sensor", room.name, "setpoint"), "name": "Setpoint"},
-                {"entity": _eid("sensor", room.name, "heating_power_measured"), "name": "Power"},
-                {"entity": _eid("sensor", room.name, "model_fit_quality"), "name": "Fit R²"},
+                {
+                    "entity": _eid("sensor", room.name, "temperature_filtered"),
+                    "name": "Temperature",
+                    "icon": "mdi:thermometer",
+                    "icon_color": "#1E88E5",
+                },
+                {
+                    "entity": _eid("sensor", room.name, "setpoint"),
+                    "name": "Setpoint",
+                    "icon": "mdi:target",
+                    "icon_color": "#FB8C00",
+                },
+                {
+                    "entity": _eid("sensor", room.name, "heating_power_measured"),
+                    "name": "Power",
+                    "icon": "mdi:fire",
+                    "icon_color": "#E53935",
+                },
+                {
+                    "entity": _eid("sensor", room.name, "model_fit_quality"),
+                    "name": "Fit R²",
+                    "icon": "mdi:chart-line",
+                    "icon_color": "#43A047",
+                },
             ]
         )
     if not room_snapshot_entities:
@@ -863,13 +883,42 @@ def _overview_view(spec: DashboardSpec) -> Dict[str, Any]:
             "cards": [
                 {"type": "heading", "heading": "System status", "heading_style": "title"},
                 {
-                    "type": "glance",
+                    "type": "gauge",
+                    "name": "MPC Compute Time",
+                    "entity": mpc_perf,
+                    "needle": True,
+                    "min": 0,
+                    "max": 60,
+                    "severity": {"green": 0, "yellow": 20, "red": 40},
+                },
+                {
+                    "type": "entities",
+                    "state_color": True,
                     "entities": [
-                        {"entity": system_summary, "name": "Total power"},
-                        {"entity": _system_eid("sensor", "outdoor_temperature_measured"), "name": "Outdoor"},
-                        {"entity": mpc_perf, "name": "MPC solve"},
-                        {"entity": weather_status, "name": "Weather"},
-                        {"entity": est_status, "name": "Parameters"},
+                        {
+                            "entity": system_summary,
+                            "name": "Total power",
+                            "icon": "mdi:fire",
+                            "icon_color": "#E53935",
+                        },
+                        {
+                            "entity": _system_eid("sensor", "outdoor_temperature_measured"),
+                            "name": "Outdoor temperature",
+                            "icon": "mdi:thermometer",
+                            "icon_color": "#1E88E5",
+                        },
+                        {
+                            "entity": weather_status,
+                            "name": "Weather forecast",
+                            "icon": "mdi:weather-partly-cloudy",
+                            "icon_color": "#00ACC1",
+                        },
+                        {
+                            "entity": est_status,
+                            "name": "Model parameters",
+                            "icon": "mdi:function-variant",
+                            "icon_color": "#43A047",
+                        },
                     ],
                 },
             ],
@@ -1264,48 +1313,57 @@ def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
 
 
 def _industrial_overview_view(spec: DashboardSpec) -> Dict[str, Any]:
-    """Industrial-process style overview with gauge KPIs and room navigation."""
-    kpi_cards: List[Dict[str, Any]] = [
+    """Industrial-process style overview with compact KPI cards and room navigation."""
+    # MPC countdown ring – kept as needle gauge for the ring/arc animation.
+    # No secondary text about the update interval; the ring makes the cadence visible.
+    mpc_gauge: Dict[str, Any] = {
+        "type": "gauge",
+        "name": "MPC Compute Time",
+        "entity": _system_eid("sensor", "mpc_performance"),
+        "needle": True,
+        "min": 0,
+        "max": 60,
+        "severity": {"green": 0, "yellow": 20, "red": 40},
+    }
+
+    # Compact process-status card groups the remaining KPIs into a single entity
+    # list instead of individual large gauge cards, saving significant vertical
+    # space especially on phone.
+    compact_status_entities: List[Dict[str, Any]] = [
         {
-            "type": "gauge",
-            "name": "MPC Compute Time",
-            "entity": _system_eid("sensor", "mpc_performance"),
-            "needle": True,
-            "min": 0,
-            "max": 60,
-            "severity": {"green": 0, "yellow": 20, "red": 40},
-        },
-        {
-            "type": "gauge",
-            "name": "Total Heating Power",
             "entity": _system_eid("sensor", "system_summary"),
-            "needle": True,
-            "min": 0,
-            "max": 15000,
-            "severity": {"green": 0, "yellow": 6000, "red": 10000},
+            "name": "Total Heating Power",
+            "icon": "mdi:fire",
+            "icon_color": "#E53935",
         },
         {
-            "type": "gauge",
-            "name": "Outdoor Temperature",
             "entity": _system_eid("sensor", "outdoor_temperature_measured"),
-            "needle": True,
-            "min": -30,
-            "max": 35,
-            "severity": {"green": 5, "yellow": -5, "red": -15},
+            "name": "Outdoor Temperature",
+            "icon": "mdi:thermometer",
+            "icon_color": "#1E88E5",
+        },
+        {
+            "entity": _system_eid("sensor", "weather_forecast_status"),
+            "name": "Weather Forecast",
+            "icon": "mdi:weather-partly-cloudy",
+            "icon_color": "#00ACC1",
         },
     ]
     if spec.rooms:
-        kpi_cards.append(
+        compact_status_entities.append(
             {
-                "type": "gauge",
-                "name": f"{spec.rooms[0].name} Fit (R²)",
                 "entity": _eid("sensor", spec.rooms[0].name, "model_fit_quality"),
-                "needle": True,
-                "min": 0,
-                "max": 1,
-                "severity": {"green": 0.85, "yellow": 0.6, "red": 0.0},
+                "name": f"{spec.rooms[0].name} Fit R²",
+                "icon": "mdi:chart-line",
+                "icon_color": "#43A047",
             }
         )
+
+    compact_status_card: Dict[str, Any] = {
+        "type": "entities",
+        "state_color": True,
+        "entities": compact_status_entities,
+    }
 
     room_tiles: List[Dict[str, Any]] = [
         {
@@ -1332,7 +1390,8 @@ def _industrial_overview_view(spec: DashboardSpec) -> Dict[str, Any]:
                 "type": "grid",
                 "cards": [
                     {"type": "heading", "heading": "Process KPIs", "heading_style": "title"},
-                    *kpi_cards,
+                    mpc_gauge,
+                    compact_status_card,
                 ],
             },
             {
@@ -1539,35 +1598,43 @@ def _industrial_disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[st
 
 
 def _industrial_room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
-    kpi_cards = [
-        {
-            "type": "gauge",
-            "entity": _eid("sensor", room.name, "temperature_filtered"),
-            "name": "Room Temperature",
-            "needle": True,
-            "min": 10,
-            "max": 30,
-            "severity": {"green": 18, "yellow": 16, "red": 14},
-        },
-        {
-            "type": "gauge",
-            "entity": _eid("sensor", room.name, "heating_power_measured"),
-            "name": "Delivered Power",
-            "needle": True,
-            "min": 0,
-            "max": 6000,
-            "severity": {"green": 0, "yellow": 2500, "red": 4500},
-        },
-        {
-            "type": "gauge",
-            "entity": _eid("sensor", room.name, "model_fit_quality"),
-            "name": "Model Fit R²",
-            "needle": True,
-            "min": 0,
-            "max": 1,
-            "severity": {"green": 0.85, "yellow": 0.6, "red": 0.0},
-        },
-    ]
+    # Room-temperature gauge retains the ring/arc for at-a-glance comfort status.
+    temperature_gauge: Dict[str, Any] = {
+        "type": "gauge",
+        "entity": _eid("sensor", room.name, "temperature_filtered"),
+        "name": "Room Temperature",
+        "needle": True,
+        "min": 10,
+        "max": 30,
+        "severity": {"green": 18, "yellow": 16, "red": 14},
+    }
+
+    # Power and model-fit are surfaced in a compact entities card with design
+    # palette icon colours instead of large individual gauge cards.
+    compact_room_kpis: Dict[str, Any] = {
+        "type": "entities",
+        "state_color": True,
+        "entities": [
+            {
+                "entity": _eid("sensor", room.name, "heating_power_measured"),
+                "name": "Delivered Power",
+                "icon": "mdi:fire",
+                "icon_color": "#E53935",
+            },
+            {
+                "entity": _eid("sensor", room.name, "model_fit_quality"),
+                "name": "Model Fit R²",
+                "icon": "mdi:chart-line",
+                "icon_color": "#43A047",
+            },
+            {
+                "entity": _eid("sensor", room.name, "setpoint"),
+                "name": "Setpoint",
+                "icon": "mdi:target",
+                "icon_color": "#FB8C00",
+            },
+        ],
+    }
 
     return {
         "title": room.name,
@@ -1581,7 +1648,8 @@ def _industrial_room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
                 "cards": [
                     {"type": "heading", "heading": "Unit KPIs", "heading_style": "title"},
                     {"type": "thermostat", "entity": _climate_eid(room.name), "name": room.name},
-                    *kpi_cards,
+                    temperature_gauge,
+                    compact_room_kpis,
                 ],
             },
             {

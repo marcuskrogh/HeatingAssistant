@@ -721,11 +721,16 @@ def test_industrial_overview_uses_gauge_kpis(two_room_spec):
     overview = build_dashboard_variant(
         two_room_spec, variant=DASHBOARD_VARIANT_INDUSTRIAL
     )["views"][0]
+    # MPC countdown ring is the single needle gauge; other KPIs are in a compact entities card.
     gauges = [c for c in _iter_cards(overview) if c.get("type") == "gauge"]
-    assert len(gauges) >= 3
+    assert len(gauges) >= 1
     names = {g.get("name") for g in gauges}
     assert "MPC Compute Time" in names
-    assert "Total Heating Power" in names
+    # Non-MPC metrics live in a compact entities card with icon_color, not separate gauges.
+    refs = set(_iter_entity_refs(overview))
+    from custom_components.heating_assistant.const import DOMAIN
+    assert f"sensor.{DOMAIN}_system_summary" in refs
+    assert f"sensor.{DOMAIN}_outdoor_temperature_measured" in refs
 
 
 def test_industrial_room_view_contains_temperature_power_disturbance_plots(two_room_spec):
