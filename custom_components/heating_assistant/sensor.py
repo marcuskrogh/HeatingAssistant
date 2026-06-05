@@ -2586,12 +2586,23 @@ class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
                     }
             room_setpoints: dict = {}
             room_comfort_offsets: dict = {}
+            # ``room_enabled`` reflects the user's manual on/off toggle, while
+            # ``room_active`` is the *effective* state (user toggle AND no active
+            # off-schedule).  The dashboard uses ``room_active`` to drive the
+            # clear "OFF" state on the climate cards and ``room_enabled`` to
+            # reflect the user's intent on the power toggle.
+            room_enabled: dict = {}
+            room_active: dict = {}
             for rn in c.model.room_names:
                 room_setpoints[slugify(rn)] = c.model.rooms[rn].setpoint
                 room_comfort_offsets[slugify(rn)] = c._room_comfort_offset.get(rn, 2.0)
+                room_enabled[slugify(rn)] = bool(c._room_enabled.get(rn, True))
+                room_active[slugify(rn)] = bool(c.is_room_enabled(rn))
             attrs["room_schedules"] = schedules
             attrs["room_setpoints"] = room_setpoints
             attrs["room_comfort_offsets"] = room_comfort_offsets
+            attrs["room_enabled"] = room_enabled
+            attrs["room_active"] = room_active
         except Exception:
             pass
 

@@ -10,11 +10,17 @@
  * short debounce so rapid +/- presses collapse into a single service call —
  * mirroring the behaviour of the HA thermostat card.
  *
+ * The room can also be turned off from the card via the power toggle.  When
+ * off — whether from the user toggle or an active off-schedule — the card
+ * collapses into a clear OFF state that hides the now-irrelevant setpoint,
+ * comfort corridor and temperature marker.
+ *
  * Usage:
  *   const card = createClimateCard({ temperature, setpoint, power,
- *                                    comfortLower, comfortUpper, onSetpointChange });
+ *                                    comfortLower, comfortUpper, off,
+ *                                    onSetpointChange, onPowerToggle });
  *   container.appendChild(card.element);
- *   card.update({ temperature, setpoint, power, comfortLower, comfortUpper });
+ *   card.update({ temperature, setpoint, power, comfortLower, comfortUpper, off });
  *   card.destroy();                                  // on teardown
  */
 
@@ -24,6 +30,9 @@ const SP_STEP = 0.5;
 const SP_MIN = 5;
 const SP_MAX = 30;
 const COMMIT_DEBOUNCE_MS = 700;
+// After toggling power we optimistically hold the new state for a short window
+// so the card reacts instantly; backend truth resumes once this elapses.
+const POWER_OPTIMISTIC_MS = 6000;
 const TRACK_HALF_WIDTH = 3; // minimum °C either side of the setpoint shown on the track
 
 function clampSetpoint(v) {
@@ -47,7 +56,8 @@ function statusInfo(power) {
 }
 
 export function createClimateCard({
-  temperature, setpoint, power, comfortLower, comfortUpper, onSetpointChange,
+  temperature, setpoint, power, comfortLower, comfortUpper, off,
+  onSetpointChange, onPowerToggle,
 } = {}) {
   const container = document.createElement('div');
   container.className = 'card climate-card';
@@ -58,6 +68,9 @@ export function createClimateCard({
     power,
     comfortLower: numOrNull(comfortLower),
     comfortUpper: numOrNull(comfortUpper),
+    off: !!off,          // backend off-state (user toggle or off-schedule)
+    optimisticOff: null, // optimistic power override (null = follow backend)
+    powerTimer: null,    // clears optimisticOff after POWER_OPTIMISTIC_MS
     editing: false,      // true while the user is mid-adjustment
     commitTimer: null,   // pending debounce timer id
   };
@@ -65,7 +78,10 @@ export function createClimateCard({
   container.innerHTML = `
     <div class="climate-card__header">
       <span class="climate-card__title">CLIMATE</span>
-      <span class="climate-card__status"></span>
+      <div class="climate-card__header-right">
+        <span class="climate-card__status"></span>
+        <button class="climate-card__power" aria-label="Turn heating on or off" title="Turn heating on or off">⏻</button>
+      </div>
     </div>
     <div class="climate-card__body">
       <div class="climate-card__current">
@@ -80,6 +96,7 @@ export function createClimateCard({
         </div>
         <button class="climate-card__step climate-card__step--up" aria-label="Raise setpoint">+</button>
       </div>
+      <div class="climate-card__off-note">HEATING OFF</div>
     </div>
     <div class="climate-card__track">
       <span class="climate-card__track-comfort"></span>
@@ -95,6 +112,7 @@ export function createClimateCard({
 
   const els = {
     status: container.querySelector('.climate-card__status'),
+    power: container.querySelector('.climate-card__power'),
     current: container.querySelector('.climate-card__current-value'),
     target: container.querySelector('.climate-card__target-value'),
     down: container.querySelector('.climate-card__step--down'),
@@ -106,6 +124,25 @@ export function createClimateCard({
     comfortLabel: container.querySelector('.climate-card__track-comfort-label'),
   };
 
+  function currentOff() {
+    return st.optimisticOff !== null ? st.optimisticOff : st.off;
+  }
+
+  function togglePower() {
+    const turnOff = !currentOff();
+    st.optimisticOff = turnOff;
+    if (st.powerTimer) clearTimeout(st.powerTimer);
+    st.powerTimer = setTimeout(() => {
+      st.powerTimer = null;
+      st.optimisticOff = null;
+      paint();
+    }, POWER_OPTIMISTIC_MS);
+    paint();
+    if (typeof onPowerToggle === 'function') onPowerToggle(turnOff);
+  }
+
+  els.power.addEventListener('click', togglePower);
+
   function scheduleCommit() {
     if (st.commitTimer) clearTimeout(st.commitTimer);
     st.commitTimer = setTimeout(() => {
@@ -116,6 +153,7 @@ export function createClimateCard({
   }
 
   function adjust(delta) {
+    if (currentOff()) return; // setpoint is irrelevant while off
     const next = clampSetpoint(st.setpoint + delta);
     if (next === st.setpoint) return;
     st.setpoint = next;
@@ -128,9 +166,18 @@ export function createClimateCard({
   els.up.addEventListener('click', () => adjust(SP_STEP));
 
   function paint() {
-    const info = statusInfo(st.power);
-    els.status.textContent = info.label;
-    els.status.className = 'climate-card__status ' + info.cls;
+    const off = currentOff();
+    container.classList.toggle('climate-card--off', off);
+    els.power.classList.toggle('climate-card__power--off', off);
+
+    if (off) {
+      els.status.textContent = 'OFF';
+      els.status.className = 'climate-card__status climate-card__status--off';
+    } else {
+      const info = statusInfo(st.power);
+      els.status.textContent = info.label;
+      els.status.className = 'climate-card__status ' + info.cls;
+    }
 
     const num = parseFloat(st.temperature);
     if (isNaN(num)) {
@@ -140,6 +187,10 @@ export function createClimateCard({
         `<span class="climate-card__current-num">${num.toFixed(1)}</span>` +
         `<span class="climate-card__current-unit">°C</span>`;
     }
+
+    // When off, the setpoint / comfort corridor / marker are irrelevant — the
+    // CSS hides them via .climate-card--off, so skip the rest of the paint.
+    if (off) return;
 
     els.target.textContent = st.setpoint.toFixed(1) + '°';
     els.down.disabled = st.setpoint <= SP_MIN;
@@ -201,11 +252,12 @@ export function createClimateCard({
 
   return {
     element: container,
-    update({ temperature, setpoint, power, comfortLower, comfortUpper } = {}) {
+    update({ temperature, setpoint, power, comfortLower, comfortUpper, off } = {}) {
       if (temperature !== undefined) st.temperature = temperature;
       if (power !== undefined) st.power = power;
       if (comfortLower !== undefined) st.comfortLower = numOrNull(comfortLower);
       if (comfortUpper !== undefined) st.comfortUpper = numOrNull(comfortUpper);
+      if (off !== undefined) st.off = !!off;
       // Never overwrite the setpoint while the user is mid-edit or a commit is
       // still pending — the optimistic value must win until HA confirms it.
       if (setpoint !== undefined && setpoint !== null && !st.editing && !st.commitTimer) {
@@ -217,6 +269,10 @@ export function createClimateCard({
       if (st.commitTimer) {
         clearTimeout(st.commitTimer);
         st.commitTimer = null;
+      }
+      if (st.powerTimer) {
+        clearTimeout(st.powerTimer);
+        st.powerTimer = null;
       }
     },
   };
