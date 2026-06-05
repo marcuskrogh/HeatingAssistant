@@ -52,18 +52,20 @@
         "description": "Configure how Heating Assistant controls your home. Changes are saved when you pick **Save & close**.",
         "menu_options": {
           "global_settings": "General & sensor settings",
+          "mpc_tuning": "Control behaviour",
           "manage_rooms": "Rooms, heaters & schedules",
           "save": "Save & close"
         },
         "menu_option_descriptions": {
-          "global_settings": "Outdoor sources, update cadence, and pricing configuration.",
+          "global_settings": "Outdoor sources, update cadence, and advanced state-estimation tuning.",
+          "mpc_tuning": "Balance comfort vs energy use and tune the predictive controller.",
           "manage_rooms": "Add rooms, configure heaters, windows and time-of-day schedules.",
           "save": "Apply all pending changes and exit."
         }
       },
       "global_settings": {
         "title": "General & sensor settings",
-        "description": "Outdoor sources, pricing, and how often the controller re-plans.",
+        "description": "Outdoor sources and how often the controller re-plans. The fields lower down (model adaptation, window detection) are safe to leave at their defaults.",
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor",
           "weather_entity": "Weather forecast",
@@ -71,16 +73,52 @@
           "price_entity": "Electricity price sensor",
           "price_net_tariff": "Net tariff (per kWh)",
           "price_spot_surcharge": "Spot price surcharge (per kWh)",
-          "update_interval": "Control interval (seconds)"
+          "update_interval": "Control interval (seconds)",
+          "sigma_w": "Model adaptation rate",
+          "sigma_v": "Sensor noise",
+          "sigma_b": "Sensor calibration drift",
+          "window_open_debounce": "Window open debounce (seconds)",
+          "window_open_close_settle": "Window close settle (seconds)",
+          "window_open_q_inflation": "Open-state uncertainty multiplier"
         },
         "data_description": {
           "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
           "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
           "solar_radiation_entity": "Optional. A sensor reporting the sun's solar irradiance (Global Horizontal Irradiance) in W/m² — e.g. Open-Meteo's shortwave_radiation, or a pyranometer — ideally with an hourly forecast in its attributes. When set, the forecast replaces the modelled clear-sky radiation in the solar-gain model (decomposed and transposed onto your windows by geometry); the clear-sky model stays as the automatic fallback. This is the sun's radiation, not solar-panel production.",
-          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating.",
+          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating. Enable the price sensitivity slider in Control behaviour to activate.",
           "price_net_tariff": "Fixed grid / network tariff to add to the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.20 DKK/kWh). Ensures the effective price seen by the controller is never below your actual cost of electricity.",
           "price_spot_surcharge": "Fixed spot price surcharge or electricity tax to add on top of the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.90 DKK/kWh for Danish elafgift). Together with the net tariff this floors the effective price at a realistic consumer value.",
-          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes."
+          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes.",
+          "sigma_w": "Advanced — how quickly the thermal model adapts to observed data. Higher values track changes faster but follow sensor noise more closely. Default 0.1 works for most homes.",
+          "sigma_v": "Advanced — expected indoor temperature sensor noise (K). Raise this if you have a noisy sensor; lower it for a precise one.",
+          "sigma_b": "Advanced — allowed rate of sensor calibration drift. Higher values forgive slow sensor offset over time.",
+          "window_open_debounce": "Advanced — how long a window must stay open before the controller responds. Prevents reacting to brief openings. Only matters when window sensors are configured for a room.",
+          "window_open_close_settle": "Advanced — how long a window must stay closed before the controller resumes normal control.",
+          "window_open_q_inflation": "Advanced — how much the controller distrusts the model while a window is open. Higher = adapts faster afterwards."
+        }
+      },
+      "mpc_tuning": {
+        "title": "Control behaviour",
+        "description": "Tune how the controller balances comfort, energy use and responsiveness. The top two are the everyday knobs; the rest are advanced and rarely need changing.",
+        "data": {
+          "tracking_weight": "Setpoint tracking strength",
+          "energy_weight": "Energy-use penalty",
+          "horizon": "Prediction horizon (steps)",
+          "smoothing_weight": "Output smoothing",
+          "soft_constraint_weight": "Comfort band quadratic penalty",
+          "soft_constraint_linear_weight": "Comfort band linear penalty",
+          "terminal_weight": "End-of-horizon weight",
+          "energy_price_weight": "Price sensitivity"
+        },
+        "data_description": {
+          "tracking_weight": "How strongly the controller chases the exact setpoint. 0 = stay inside the comfort band only. Higher values mean tighter tracking at the cost of more energy use.",
+          "energy_weight": "How strongly the controller avoids running heaters. Higher values save energy but may drift toward the edges of the comfort band.",
+          "horizon": "Advanced — number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",
+          "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
+          "soft_constraint_weight": "Advanced — quadratic penalty ρ on comfort-band violations (ρ·ε²). Higher = stronger restoring force proportional to how far outside the band the temperature is.",
+          "soft_constraint_linear_weight": "Advanced — linear penalty ρ_lin on comfort-band violations (ρ_lin·ε). Applies a constant restoring force as soon as the temperature leaves the band, regardless of the magnitude of the violation. Combine with the quadratic penalty or use alone. 0 = disabled.",
+          "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift.",
+          "energy_price_weight": "Scales how strongly the electricity price enters the MPC cost. Comfort is always respected first — the price term shifts heating timing within the comfort zone toward cheaper hours. Start at 1 (default). Raise to 5–20 for a stronger response; lower if comfort is being sacrificed. 0 disables price awareness. Only active when an electricity price sensor is configured."
         }
       },
       "manage_rooms": {
@@ -91,6 +129,7 @@
           "edit_room": "Edit a room",
           "manage_room_windows": "Configure room windows",
           "manage_room_heaters": "Configure heat sources",
+          "manage_room_schedule": "Manage schedule",
           "remove_room": "Remove a room",
           "finish_rooms": "Back to main menu"
         }
@@ -323,9 +362,89 @@
       },
       "manage_room_schedule": {
         "title": "Schedule: pick a room",
-        "description": "Schedule management has moved to the dashboard. Use the Tuning page to configure room schedules.",
+        "description": "Choose which room's schedule to manage.",
         "data": {
           "room_name": "Room"
+        }
+      },
+      "manage_schedule": {
+        "title": "Schedule for {name}",
+        "description": "Periods define time-of-day comfort and setback. Outside any active period the room uses its default setpoint.",
+        "menu_options": {
+          "add_period": "Add a period",
+          "select_edit_period": "Edit a period",
+          "remove_period": "Remove a period",
+          "finish_schedule": "Done"
+        }
+      },
+      "add_period": {
+        "title": "Add a schedule period to {name}",
+        "description": "Create a time-of-day setpoint override (e.g. warm in the evening, cool overnight). The bottom three fields are optional per-period tweaks.",
+        "data": {
+          "name": "Label",
+          "mode": "Mode",
+          "start": "Start time",
+          "end": "End time",
+          "days": "Days of the week",
+          "setpoint": "Setpoint override (°C)",
+          "comfort_offset": "Comfort band override (± °C)",
+          "tracking_weight": "Tracking strength multiplier",
+          "energy_weight": "Energy-use penalty multiplier",
+          "frost_protection": "Frost protection (°C)"
+        },
+        "data_description": {
+          "name": "A short label for this period (e.g. 'morning', 'night').",
+          "mode": "Comfort = follow the setpoint. Off = disable heating (with frost protection).",
+          "start": "Local time when this period begins.",
+          "end": "Local time when this period ends. May cross midnight.",
+          "days": "Leave empty to apply every day.",
+          "setpoint": "Target temperature during this period. Leave at the room default if you don't want an override.",
+          "comfort_offset": "Comfort band width during this period. Leave at the room default if you don't want an override.",
+          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period. 1.0 = no change.",
+          "energy_weight": "Advanced — multiplier on the global energy penalty during this period. 1.0 = no change.",
+          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
+        }
+      },
+      "select_edit_period": {
+        "title": "Edit a schedule period",
+        "description": "Pick which period to edit.",
+        "data": {
+          "period_idx": "Period"
+        }
+      },
+      "edit_period": {
+        "title": "Edit period: {name}",
+        "description": "Update this period's timing and overrides.",
+        "data": {
+          "name": "Label",
+          "mode": "Mode",
+          "start": "Start time",
+          "end": "End time",
+          "days": "Days of the week",
+          "setpoint": "Setpoint override (°C)",
+          "comfort_offset": "Comfort band override (± °C)",
+          "tracking_weight": "Tracking strength multiplier",
+          "energy_weight": "Energy-use penalty multiplier",
+          "frost_protection": "Frost protection (°C)"
+        },
+        "data_description": {
+          "name": "A short label for this period.",
+          "mode": "Comfort = follow the setpoint. Off = disable heating (with frost protection).",
+          "start": "Local time when this period begins.",
+          "end": "Local time when this period ends. May cross midnight.",
+          "days": "Leave empty to apply every day.",
+          "setpoint": "Target temperature during this period.",
+          "comfort_offset": "Comfort band width during this period.",
+          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period.",
+          "energy_weight": "Advanced — multiplier on the global energy penalty during this period.",
+          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
+        }
+      },
+      "remove_period": {
+        "title": "Remove a schedule period",
+        "description": "Pick which period to delete.",
+        "data": {
+          "period_idx": "Period"
         }
       }
     },
