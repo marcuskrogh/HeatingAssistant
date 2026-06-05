@@ -708,6 +708,95 @@ def test_build_from_coordinator_scales_forecast_to_mpc_horizon():
         )
 
 
+# ---------------------------------------------------------------------------
+# Step-plot assertions – price and heating power charts
+# ---------------------------------------------------------------------------
+
+
+def test_price_and_power_card_series_all_use_stepline():
+    """All series in the price+power chart (has_price=True) must use stepline –
+    both the historical and forecasted series."""
+    spec = DashboardSpec(
+        rooms=(RoomSpec(name="Living Room"),),
+        sources=(),
+        has_price=True,
+    )
+    view = _room_view(build_dashboard(spec), "Living Room")
+    power_price_card = next(
+        c for c in _iter_cards(view)
+        if c.get("type") == "custom:apexcharts-card"
+        and "Power & Price" in c.get("header", {}).get("title", "")
+    )
+    for series in power_price_card["series"]:
+        assert series.get("curve") == "stepline", (
+            f"Series {series.get('name')!r} in power+price card should use "
+            "curve: stepline"
+        )
+
+
+def test_price_and_power_card_enforces_stepline_via_apex_config():
+    """The price+power card must set apex_config.stroke.curve for ALL series to
+    stepline.  Per-series ``curve`` alone is unreliable when area and line
+    series coexist in the same chart; the chart-level override is the fix."""
+    spec = DashboardSpec(
+        rooms=(RoomSpec(name="Living Room"),),
+        sources=(),
+        has_price=True,
+    )
+    view = _room_view(build_dashboard(spec), "Living Room")
+    power_price_card = next(
+        c for c in _iter_cards(view)
+        if c.get("type") == "custom:apexcharts-card"
+        and "Power & Price" in c.get("header", {}).get("title", "")
+    )
+    n_series = len(power_price_card["series"])
+    curves = power_price_card.get("apex_config", {}).get("stroke", {}).get("curve")
+    assert curves is not None, (
+        "price+power card must set apex_config.stroke.curve to enforce stepline "
+        "for all series"
+    )
+    assert len(curves) == n_series, (
+        f"apex_config.stroke.curve must have one entry per series "
+        f"(expected {n_series}, got {len(curves)})"
+    )
+    assert all(c == "stepline" for c in curves), (
+        f"Every entry in apex_config.stroke.curve must be 'stepline', got {curves!r}"
+    )
+
+
+def test_mpc_control_card_series_all_use_stepline(two_room_spec):
+    """Both series in the heater-power-only card (has_price=False) must use stepline."""
+    view = _room_view(build_dashboard(two_room_spec), "Living Room")
+    power_card = next(
+        c for c in _iter_cards(view)
+        if c.get("type") == "custom:apexcharts-card"
+        and c.get("header", {}).get("title", "").endswith("– Power")
+    )
+    for series in power_card["series"]:
+        assert series.get("curve") == "stepline", (
+            f"Series {series.get('name')!r} in MPC control card should use "
+            "curve: stepline"
+        )
+
+
+def test_industrial_power_card_series_all_use_stepline(two_room_spec):
+    """Both series in the industrial variant heating-power chart must use stepline."""
+    room = _room_view(
+        build_dashboard_variant(two_room_spec, variant=DASHBOARD_VARIANT_INDUSTRIAL),
+        "Living Room",
+    )
+    power_card = next(
+        c for c in _iter_cards(room)
+        if c.get("type") == "custom:apexcharts-card"
+        and "Heating Power" in c.get("header", {}).get("title", "")
+    )
+    for series in power_card["series"]:
+        assert series.get("curve") == "stepline", (
+            f"Series {series.get('name')!r} in industrial power card should use "
+            "curve: stepline"
+        )
+
+
 def test_industrial_dashboard_has_overview_and_room_subviews(two_room_spec):
     dashboard = build_dashboard_variant(two_room_spec, variant=DASHBOARD_VARIANT_INDUSTRIAL)
     assert dashboard["title"] == "Heating Assistant – Industrial"

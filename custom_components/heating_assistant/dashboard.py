@@ -466,6 +466,15 @@ def _price_and_power_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
         "graph_span": f"{int(spec.graph_span_hours)}h",
         "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
         "now": {"show": True, "label": "", "color": "#424242"},
+        # ApexCharts requires stroke.curve as a per-series array; the per-series
+        # ``curve`` key in apexcharts-card is unreliable when area and line series
+        # are mixed in the same chart (the line/price series reverts to smooth).
+        # Setting it here at the chart level is the authoritative fix.
+        "apex_config": {
+            "stroke": {
+                "curve": ["stepline", "stepline", "stepline", "stepline"],
+            },
+        },
         "yaxis": [
             {
                 "id": "power",
