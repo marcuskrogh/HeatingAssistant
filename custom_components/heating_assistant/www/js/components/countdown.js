@@ -78,7 +78,6 @@ function renderCountdownContent(container, remaining, dtS, small, stopped) {
         stroke-dashoffset="${dashOffset}" />
     </svg>
     <span class="countdown__value">${valueText}</span>
-    <span class="countdown__interval">Δt = ${Math.round(dtS)}s</span>
     <span class="countdown__label">${labelText}</span>
   `;
 }

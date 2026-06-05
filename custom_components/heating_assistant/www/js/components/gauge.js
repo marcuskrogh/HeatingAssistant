@@ -4,20 +4,14 @@ export function createGauge({ value, min, max, label, format, severity }) {
 
   const normalized = Math.max(0, Math.min(1, (value - min) / (max - min)));
   const color = getGaugeColor(value, severity);
-  const arcLength = 180;
-  const dashOffset = arcLength - normalized * arcLength;
   const displayValue = format ? format(value) : value?.toFixed(1) ?? '—';
 
   container.innerHTML = `
-    <svg class="gauge__svg" viewBox="0 0 120 70">
-      <path class="gauge__track"
-        d="M 10 65 A 50 50 0 0 1 110 65" />
-      <path class="gauge__fill"
-        d="M 10 65 A 50 50 0 0 1 110 65"
-        style="stroke: ${color}; stroke-dasharray: ${arcLength}; stroke-dashoffset: ${dashOffset};" />
-    </svg>
-    <span class="gauge__value">${displayValue}</span>
     <span class="gauge__label">${label}</span>
+    <span class="gauge__value">${displayValue}</span>
+    <div class="gauge__bar-track">
+      <div class="gauge__bar-fill" style="width: ${(normalized * 100).toFixed(1)}%; background: ${color};"></div>
+    </div>
   `;
 
   container.dataset.entityKey = label;
@@ -27,14 +21,12 @@ export function createGauge({ value, min, max, label, format, severity }) {
 export function updateGauge(container, { value, min, max, format, severity }) {
   const normalized = Math.max(0, Math.min(1, (value - min) / (max - min)));
   const color = getGaugeColor(value, severity);
-  const arcLength = 180;
-  const dashOffset = arcLength - normalized * arcLength;
   const displayValue = format ? format(value) : value?.toFixed(1) ?? '—';
 
-  const fill = container.querySelector('.gauge__fill');
+  const fill = container.querySelector('.gauge__bar-fill');
   if (fill) {
-    fill.style.strokeDashoffset = dashOffset;
-    fill.style.stroke = color;
+    fill.style.width = `${(normalized * 100).toFixed(1)}%`;
+    fill.style.background = color;
   }
 
   const valueEl = container.querySelector('.gauge__value');
@@ -44,11 +36,11 @@ export function updateGauge(container, { value, min, max, format, severity }) {
 function getGaugeColor(value, severity) {
   if (!severity) return 'var(--accent)';
   if (severity.inverse) {
-    if (value <= severity.good) return 'var(--good)';
+    if (value <= severity.good) return 'var(--accent)';
     if (value <= severity.warning) return 'var(--warning)';
     return 'var(--alarm)';
   }
-  if (value >= severity.good) return 'var(--good)';
+  if (value >= severity.good) return 'var(--accent)';
   if (value >= severity.warning) return 'var(--warning)';
   return 'var(--alarm)';
 }
