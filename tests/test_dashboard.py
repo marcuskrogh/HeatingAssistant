@@ -734,6 +734,36 @@ def test_price_and_power_card_series_all_use_stepline():
         )
 
 
+def test_price_and_power_card_enforces_stepline_via_apex_config():
+    """The price+power card must set apex_config.stroke.curve for ALL series to
+    stepline.  Per-series ``curve`` alone is unreliable when area and line
+    series coexist in the same chart; the chart-level override is the fix."""
+    spec = DashboardSpec(
+        rooms=(RoomSpec(name="Living Room"),),
+        sources=(),
+        has_price=True,
+    )
+    view = _room_view(build_dashboard(spec), "Living Room")
+    power_price_card = next(
+        c for c in _iter_cards(view)
+        if c.get("type") == "custom:apexcharts-card"
+        and "Power & Price" in c.get("header", {}).get("title", "")
+    )
+    n_series = len(power_price_card["series"])
+    curves = power_price_card.get("apex_config", {}).get("stroke", {}).get("curve")
+    assert curves is not None, (
+        "price+power card must set apex_config.stroke.curve to enforce stepline "
+        "for all series"
+    )
+    assert len(curves) == n_series, (
+        f"apex_config.stroke.curve must have one entry per series "
+        f"(expected {n_series}, got {len(curves)})"
+    )
+    assert all(c == "stepline" for c in curves), (
+        f"Every entry in apex_config.stroke.curve must be 'stepline', got {curves!r}"
+    )
+
+
 def test_mpc_control_card_series_all_use_stepline(two_room_spec):
     """Both series in the heater-power-only card (has_price=False) must use stepline."""
     view = _room_view(build_dashboard(two_room_spec), "Living Room")
