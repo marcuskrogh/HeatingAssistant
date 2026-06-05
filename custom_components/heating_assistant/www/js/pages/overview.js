@@ -1,5 +1,5 @@
 import { createGauge, updateGauge } from '../components/gauge.js';
-import { createRoomTile, updateRoomTile } from '../components/room-tile.js';
+import { createRoomClimateTile } from '../components/room-climate-tile.js';
 import { createCountdown, updateCountdown } from '../components/countdown.js';
 import {
   formatPercent, formatEnergy, formatTemperature, formatPower,
@@ -30,9 +30,9 @@ export function renderOverview(container, rooms, state, connection, hass) {
   roomGrid.className = 'grid-rooms';
 
   const tiles = rooms.map((room) => {
-    const tile = createRoomTile(room, state, hass);
-    roomGrid.appendChild(tile);
-    return { room, element: tile };
+    const tile = createRoomClimateTile(room, state, hass);
+    roomGrid.appendChild(tile.element);
+    return { room, tile };
   });
 
   roomSection.appendChild(roomGrid);
@@ -47,7 +47,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
   // after the enable/disable toggle fires.
   function refreshSchedules() {
     connection.getSchedules().then((scheduleData) => {
-      tiles.forEach((t) => updateRoomTile(t.element, t.room, latestState, hass, scheduleData));
+      tiles.forEach((t) => t.tile.update(latestState, hass, scheduleData));
     });
   }
 
@@ -59,7 +59,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
     update(newState) {
       latestState = newState;
       gauges.forEach((g) => g.updater(newState));
-      tiles.forEach((t) => updateRoomTile(t.element, t.room, newState, hass));
+      tiles.forEach((t) => t.tile.update(newState, hass));
       updateCountdown(countdown, newState);
       // Re-fetch schedules so the badge and period list reflect any toggle or
       // save that triggered this state update.
@@ -68,6 +68,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
     _countdownInterval: countdownInterval,
     destroy() {
       clearInterval(countdownInterval);
+      tiles.forEach((t) => t.tile.destroy());
     },
   };
 }
