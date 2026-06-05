@@ -2201,3 +2201,27 @@
     align-items: center;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ROOM CLIMATE TILE (.room-climate-tile) — overview-page card that combines
+   climate-card visuals with the schedule summary section.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.room-climate-tile__name {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+/* Scale the temperature readout down slightly for the overview grid columns */
+.room-climate-tile .climate-card__current-num {
+  font-size: 36px;
+}
+
+/* The flex gap on .climate-card already provides vertical spacing; remove the
+   extra top margin that .room-tile__schedules normally adds. */
+.room-climate-tile .room-tile__schedules {
+  margin-top: 0;
+}
