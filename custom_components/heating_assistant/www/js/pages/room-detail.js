@@ -7,6 +7,17 @@ import {
   entityValue, entityAttr, systemEntity, modelFitLabel,
 } from '../utils.js';
 
+const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+
+/** Whether the room is currently off — the effective state published by the
+ *  coordinator (covers both the user power toggle and an active off-schedule). */
+function computeRoomOff(state, slug) {
+  const attrs = state[CONFIG_ENTITY]?.attributes || {};
+  if (attrs.room_active && slug in attrs.room_active) return attrs.room_active[slug] === false;
+  if (attrs.room_enabled && slug in attrs.room_enabled) return attrs.room_enabled[slug] === false;
+  return false;
+}
+
 export function renderRoomDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
   if (!room) {
@@ -35,6 +46,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const comfortLowerVal = entityValue(state, room.entities['constraint_lower']);
   const comfortUpperVal = entityValue(state, room.entities['constraint_upper']);
   const climateEntityId = `climate.heating_assistant_${roomSlug}`;
+  const offVal = computeRoomOff(state, roomSlug);
 
   // Climate card replaces the standalone Temperature + Setpoint KPIs: it shows
   // the current temperature, the active setpoint, the comfort corridor, and
@@ -46,11 +58,21 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     power: powerVal,
     comfortLower: comfortLowerVal,
     comfortUpper: comfortUpperVal,
+    off: offVal,
     onSetpointChange: async (newSp) => {
       try {
         await hass.callService('climate', 'set_temperature', {
           entity_id: climateEntityId,
           temperature: newSp,
+        });
+      } catch (err) {
+        // Service call failed; the display self-corrects on the next state update.
+      }
+    },
+    onPowerToggle: async (turnOff) => {
+      try {
+        await hass.callService('climate', turnOff ? 'turn_off' : 'turn_on', {
+          entity_id: climateEntityId,
         });
       } catch (err) {
         // Service call failed; the display self-corrects on the next state update.
@@ -132,10 +154,11 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       const sp = entityValue(newState, room.entities['setpoint']);
       const cl = entityValue(newState, room.entities['constraint_lower']);
       const cu = entityValue(newState, room.entities['constraint_upper']);
+      const off = computeRoomOff(newState, roomSlug);
 
       climateCard.update({
         temperature: tv, setpoint: sp, power: pv,
-        comfortLower: cl, comfortUpper: cu,
+        comfortLower: cl, comfortUpper: cu, off,
       });
       updateKpiCard(kpis[0], { value: formatPower(pv) });
       updateKpiCard(kpis[1], { value: `<span class="fit-badge ${fi.class}">${fi.label}</span>`, html: true });

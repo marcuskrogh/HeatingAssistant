@@ -1,3 +1,5 @@
+import { findActivePeriod, findNextPeriod, periodModeDisplay } from '../schedule-utils.js';
+
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -21,51 +23,6 @@ function getScheduleDataForRoom(roomSchedules, room) {
     if (key.toLowerCase().replace(/\s+/g, '_') === slug) return roomSchedules[key];
   }
   return null;
-}
-
-function findActivePeriod(periods) {
-  if (!periods.length) return null;
-  const now = new Date();
-  const day = (now.getDay() + 6) % 7;
-  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  for (const p of periods) {
-    const days = p.days || [0, 1, 2, 3, 4, 5, 6];
-    // Periods where end <= start cross midnight (e.g. 22:00 → 06:00).
-    // Mirror the Python SchedulePeriod.matches() logic for these.
-    if (p.end <= p.start) {
-      const prevDay = (day + 6) % 7;
-      const inFirstHalf = hhmm >= p.start && days.includes(day);
-      const inSecondHalf = hhmm < p.end && days.includes(prevDay);
-      if (inFirstHalf || inSecondHalf) return p;
-    } else {
-      if (!days.includes(day)) continue;
-      if (hhmm >= p.start && hhmm < p.end) return p;
-    }
-  }
-  return null;
-}
-
-function findNextPeriod(periods) {
-  if (!periods.length) return null;
-  const now = new Date();
-  const day = (now.getDay() + 6) % 7;
-  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  let best = null;
-  for (const p of periods) {
-    const days = p.days || [0, 1, 2, 3, 4, 5, 6];
-    if (!days.includes(day)) continue;
-    if (p.start > hhmm) {
-      if (!best || p.start < best.start) best = p;
-    }
-  }
-  return best;
-}
-
-/** Returns { text, cls } for the mode label in a period row. */
-function periodModeDisplay(p) {
-  if (p.mode === 'off') return { text: 'OFF', cls: 'sched-row__mode--off' };
-  if (p.setpoint != null) return { text: `${p.setpoint}°C`, cls: 'sched-row__mode--comfort' };
-  return { text: 'COMFORT', cls: 'sched-row__mode--comfort' };
 }
 
 /** Renders a single period summary row element. */

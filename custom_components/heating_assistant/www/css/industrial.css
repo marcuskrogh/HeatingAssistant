@@ -1489,6 +1489,27 @@
   font-weight: 600;
 }
 
+/* Currently active period — tinted + accent border with a NOW badge, mirroring
+   the highlight used on the schedules page so the live period is unmistakable. */
+.room-tile__sched-row--active {
+  padding: 5px 8px;
+  background: rgba(0, 212, 170, 0.06);
+  border: 1px solid rgba(0, 212, 170, 0.28);
+  border-radius: var(--radius-sm);
+  margin-bottom: 2px;
+}
+
+.room-tile__sched-now {
+  flex-shrink: 0;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  background: var(--accent-dim);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    SCHEDULE INDEX CARDS  (.sched-index-card)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -2183,6 +2204,94 @@
   .climate-card__current {
     align-items: center;
   }
+}
+
+/* ── Header right cluster: status badge + power toggle ── */
+.climate-card__header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Power toggle — turns the room's heating on/off, mirroring the off switch on
+   a native HA climate entity. */
+.climate-card__power {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--accent);
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition),
+              background var(--transition);
+}
+
+.climate-card__power:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.climate-card__power:active {
+  transform: scale(0.92);
+}
+
+/* When the room is off the toggle reads as the (red) affordance to turn it on */
+.climate-card__power--off {
+  color: var(--alarm);
+  border-color: rgba(231, 76, 60, 0.45);
+  background: rgba(231, 76, 60, 0.10);
+}
+
+.climate-card__power--off:hover {
+  border-color: var(--alarm);
+  background: rgba(231, 76, 60, 0.18);
+}
+
+/* "OFF" status badge */
+.climate-card__status--off {
+  background: rgba(231, 76, 60, 0.15);
+  color: var(--alarm);
+}
+
+/* ── OFF state ── the setpoint, comfort corridor and marker are irrelevant when
+   the room is off, so collapse the card to the current temperature + an OFF
+   note and let the power toggle bring it back. */
+.climate-card__off-note {
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--alarm);
+  align-self: center;
+}
+
+.climate-card--off {
+  border-color: rgba(231, 76, 60, 0.30);
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(231, 76, 60, 0.045) 100%);
+}
+
+.climate-card--off .climate-card__control,
+.climate-card--off .climate-card__track,
+.climate-card--off .climate-card__track-scale {
+  display: none;
+}
+
+.climate-card--off .climate-card__off-note {
+  display: block;
+}
+
+/* Dim the surviving current-temperature readout so the off-state reads clearly */
+.climate-card--off .climate-card__current-value {
+  color: var(--text-dim);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
