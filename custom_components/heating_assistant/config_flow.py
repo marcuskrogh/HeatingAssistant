@@ -654,16 +654,21 @@ def _room_form_schema(
     )
 
 
-def _window_form_schema() -> vol.Schema:
+def _window_form_schema(
+    *,
+    area_default: float = 1.0,
+    orientation_default: str = "S",
+    tilt_default: float = DEFAULT_WINDOW_TILT,
+) -> vol.Schema:
     return vol.Schema(
         {
-            vol.Required(CONF_WINDOW_AREA): _number_box(
+            vol.Required(CONF_WINDOW_AREA, default=float(area_default)): _number_box(
                 min_value=0.01, max_value=50.0, step=0.1, unit="m²",
             ),
-            vol.Required(CONF_WINDOW_ORIENTATION, default="S"): _dropdown(
+            vol.Required(CONF_WINDOW_ORIENTATION, default=orientation_default): _dropdown(
                 list(COMPASS_TO_DEGREES), translation_key="orientation",
             ),
-            vol.Optional(CONF_WINDOW_TILT, default=float(DEFAULT_WINDOW_TILT)): _number_slider(
+            vol.Optional(CONF_WINDOW_TILT, default=float(tilt_default)): _number_slider(
                 min_value=0.0, max_value=90.0, step=5.0, unit="°",
             ),
         }
@@ -785,6 +790,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         self._data: Dict[str, Any] = {}
         self._rooms: RoomFlowHelper = RoomFlowHelper()
         self._initialized: bool = False
+        self._selected_window_idx: Optional[int] = None
         self._selected_heater_idx: Optional[int] = None
 
     # ------------------------------------------------------------------
@@ -1166,10 +1172,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         windows = self._current_windows()
         if windows is None:
             return await self.async_step_manage_room_windows()
-        menu_options: List[str] = ["add_window"]
-        if windows:
-            menu_options.append("remove_window")
-        menu_options.append("finish_windows")
+        menu_options = ["add_window", "edit_window", "remove_window", "finish_windows"]
         return self.async_show_menu(
             step_id="manage_windows",
             menu_options=menu_options,
@@ -1196,6 +1199,70 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
             step_id="add_window",
             data_schema=_window_form_schema(),
             description_placeholders={"name": self._current_room_name()},
+        )
+
+    async def async_step_edit_window(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Select which window to edit."""
+        windows = self._current_windows()
+        if windows is None or not windows:
+            return await self.async_step_manage_windows()
+
+        if user_input is not None:
+            self._selected_window_idx = int(user_input["window_idx"])
+            return await self.async_step_window_detail()
+
+        room = self._rooms.current_room() or {}
+        window_options = windows.display_options(room.get(CONF_ROOM_NAME, "Room"))
+        schema = vol.Schema(
+            {vol.Required("window_idx", default="0"): vol.In(window_options)}
+        )
+        return self.async_show_form(
+            step_id="edit_window",
+            data_schema=schema,
+            description_placeholders={"name": self._current_room_name()},
+        )
+
+    async def async_step_window_detail(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> ConfigFlowResult:
+        """Edit a window's configuration."""
+        windows = self._current_windows()
+        if windows is None:
+            return await self.async_step_manage_room_windows()
+
+        idx = self._selected_window_idx
+        if idx is None or not (0 <= idx < len(windows.windows)):
+            self._selected_window_idx = None
+            return await self.async_step_edit_window()
+
+        window = windows.windows[idx]
+
+        if user_input is not None:
+            windows.update(
+                idx,
+                area=user_input[CONF_WINDOW_AREA],
+                compass=user_input[CONF_WINDOW_ORIENTATION],
+                tilt=user_input[CONF_WINDOW_TILT],
+            )
+            self._selected_window_idx = None
+            return await self.async_step_manage_windows()
+
+        orientation_default = _degrees_to_compass(
+            window.get(CONF_WINDOW_ORIENTATION, COMPASS_TO_DEGREES["S"])
+        )
+        schema = _window_form_schema(
+            area_default=float(window.get(CONF_WINDOW_AREA, 1.0)),
+            orientation_default=orientation_default,
+            tilt_default=float(window.get(CONF_WINDOW_TILT, DEFAULT_WINDOW_TILT)),
+        )
+        return self.async_show_form(
+            step_id="window_detail",
+            data_schema=schema,
+            description_placeholders={
+                "name": f"{orientation_default} · {window.get(CONF_WINDOW_AREA, 1.0)} m²"
+            },
         )
 
     async def async_step_remove_window(
@@ -1262,10 +1329,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         heaters = self._current_heaters()
         if heaters is None:
             return await self.async_step_manage_room_heaters()
-        menu_options: List[str] = ["add_heater"]
-        if heaters:
-            menu_options += ["edit_heater", "remove_heater"]
-        menu_options.append("finish_heaters")
+        menu_options = ["add_heater", "edit_heater", "remove_heater", "finish_heaters"]
         return self.async_show_menu(
             step_id="manage_heaters",
             menu_options=menu_options,
