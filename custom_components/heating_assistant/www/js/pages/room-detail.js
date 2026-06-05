@@ -349,10 +349,10 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
       dashed: true, borderWidth: 2, stepped: 'before',
     }),
     makeDataset('Price', priceHistory, '#81c784', {
-      borderWidth: 2, yAxisID: 'y2',
+      borderWidth: 2, yAxisID: 'y2', stepped: 'before',
     }),
     makeDataset('Price Forecast', priceForecast, '#81c784', {
-      dashed: true, borderWidth: 1.5, yAxisID: 'y2',
+      dashed: true, borderWidth: 1.5, yAxisID: 'y2', stepped: 'before',
     }),
   ];
 
