@@ -118,12 +118,17 @@ def run_sysid_ekf(
             "horizon_steps": 0,
         }
 
-    # Select window by actual timestamps rather than step count.
-    # The history buffer may contain gaps (standby, restarts) so step-count
-    # selection can span far more wall-clock time than intended.
-    last_ts = float(history[-1].get("timestamp", 0.0))
-    cutoff_ts = last_ts - horizon_steps * dt
-    window = [h for h in history if float(h.get("timestamp", 0.0)) >= cutoff_ts]
+    # Select the window by *active sampled time* rather than raw wall-clock or
+    # step count.  The history buffer may contain gaps (standby, restarts).
+    # Pure step-count selection can span far more wall-clock time than intended,
+    # while a pure wall-clock cutoff lets a single restart gap inside the window
+    # consume the whole horizon — leaving only post-restart samples.  Counting
+    # active time (capping each interval so a gap costs at most one nominal step)
+    # spans ~horizon of real operation and bridges restarts naturally; the
+    # continuous-time CD-EKF then propagates across each gap using the true dt.
+    from .history_window import select_recent_window  # noqa: PLC0415
+
+    window = select_recent_window(history, horizon_steps * dt, dt)
     if len(window) < 2:
         window = list(history)[-(min(horizon_steps, len(history) - 1) + 1):]
 
