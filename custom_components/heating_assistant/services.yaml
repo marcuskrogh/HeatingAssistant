@@ -13,8 +13,9 @@ simulate_thermal_response:
     Run a standalone thermal simulation showing how a room responds to constant
     heating power over a specified duration.  Useful during setup to verify that
     configured thermal parameters and heater power are realistic.  The result is
-    returned as a persistent notification containing the predicted temperature
-    trajectory, time constant, and steady-state temperature.
+    returned in the service response (visible in Developer Tools → Actions) and
+    contains the predicted temperature trajectory, time constant, and
+    steady-state temperature.
   fields:
     room_name:
       name: Room name
@@ -77,8 +78,8 @@ estimate_parameters:
   description: >
     Back-calculate thermal_mass and r_external from an observed heating
     experiment.  Heat a room with known power for a known time and record the
-    start and end temperatures.  The service returns estimated values as a
-    persistent notification.
+    start and end temperatures.  The service returns the estimated values in
+    the service response (visible in Developer Tools → Actions).
   fields:
     room_name:
       name: Room name
@@ -150,9 +151,11 @@ estimate_parameters_ml:
     optimisation of the Kalman-filter prediction-error decomposition
     log-likelihood.  The estimation uses the rolling observation history that
     HeatingAssistant accumulates automatically during normal operation (at least
-    30 steps, ~30 minutes, of data are required).  The result is reported as a
-    persistent notification.  By default the estimated parameters are NOT applied
-    to the live model; set apply_parameters to true to apply them immediately.
+    30 steps, ~30 minutes, of data are required).  The estimates are surfaced
+    through the per-room parameter / diagnostic sensors and fired on the
+    ``heating_assistant_ml_estimation_result`` event.  By default the estimated
+    parameters are NOT applied to the live model; set apply_parameters to true
+    to apply them immediately.
   fields:
     apply_parameters:
       name: Apply parameters
@@ -171,8 +174,9 @@ analyze_model_fit:
     Perform comprehensive analysis of model fit quality for all rooms.
     Computes goodness-of-fit metrics (RMSE, MAE, R²), residual statistics,
     and autocorrelation analysis from the accumulated history buffer.
-    Results are reported as a persistent notification with detailed metrics
-    for each room, helping identify when model parameters need adjustment.
+    The per-room metrics are continuously exposed by the model-fit-quality
+    sensors and also returned in the service response (visible in Developer
+    Tools → Actions), helping identify when model parameters need adjustment.
   fields:
     room_name:
       name: Room name
@@ -190,7 +194,8 @@ validate_parameters:
     (thermal_mass, r_external) for all rooms. Checks if parameters are
     within expected ranges and computes thermal time constants.
     Warns about potentially invalid or extreme parameter values that
-    may indicate estimation problems or configuration errors.
+    may indicate estimation problems or configuration errors.  The result is
+    returned in the service response (visible in Developer Tools → Actions).
   fields:
     room_name:
       name: Room name
@@ -208,7 +213,8 @@ controller_performance_report:
     tracking. Analyzes tracking errors, overshoot/undershoot, time spent
     above/below setpoint, and overall control quality. Helps identify
     whether controller tuning parameters (energy_weight, smoothing_weight,
-    constraint_offset) need adjustment.
+    constraint_offset) need adjustment.  The report is returned in the service
+    response (visible in Developer Tools → Actions).
   fields:
     room_name:
       name: Room name
@@ -259,10 +265,10 @@ run_open_loop_simulation:
     model state at each step — errors therefore accumulate, exposing any
     systematic model drift.
 
-    Results are exposed on the OpenLoopRMSESensor for each room and reported
-    as a persistent notification.  Use this service after parameter estimation
-    to verify that the updated model genuinely predicts temperature evolution
-    rather than merely fitting a one-step-ahead filter.
+    Results are exposed on the OpenLoopRMSESensor for each room.  Use this
+    service after parameter estimation to verify that the updated model
+    genuinely predicts temperature evolution rather than merely fitting a
+    one-step-ahead filter.
 
     Rule of thumb: open-loop RMSE < 0.2 °C over 30 steps (30 min) is
     excellent; > 0.5 °C indicates that the model should be re-estimated.
@@ -344,8 +350,7 @@ run_sysid_simulation:
     measurement (red line) with a ±2σ confidence band.  Unlike a free-run
     simulation the EKF residuals stay bounded, exposing model-plant mismatch
     without accumulated drift.  Results are stored on the per-room
-    ``…_sysid_simulation`` sensor entities and reported as a persistent
-    notification.
+    ``…_sysid_simulation`` sensor entities.
   fields:
     room_name:
       name: Room name
@@ -426,8 +431,7 @@ regenerate_dashboard:
       name: Dry run
       description: >
         When enabled, the YAML is returned in the response but no file is
-        written and no notification is created.  Useful for previewing the
-        dashboard before installing it.
+        written.  Useful for previewing the dashboard before installing it.
       required: false
       default: false
       example: false

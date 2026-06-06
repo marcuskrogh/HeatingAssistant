@@ -1165,7 +1165,7 @@ def _persist_tuning_updates(
 def _register_services(hass: HomeAssistant) -> None:
     """Register domain services for setup assistance."""
 
-    async def handle_simulate(call: ServiceCall) -> None:
+    async def handle_simulate(call: ServiceCall) -> ServiceResponse:
         coordinator = _get_coordinator(hass)
         result = coordinator.simulate_thermal_response(
             room_name=call.data["room_name"],
@@ -1174,42 +1174,16 @@ def _register_services(hass: HomeAssistant) -> None:
             heating_power=call.data["heating_power"],
             duration_hours=call.data["duration_hours"],
         )
-        # Fire an event so automations or the UI can consume the result
+        # Fire an event so automations can consume the result via a trigger,
+        # and return it as service-response data so it shows up inline in
+        # Developer Tools → Actions rather than as a persistent notification.
         hass.bus.async_fire(
             f"{DOMAIN}_simulation_result",
             result,
         )
-        # Also create a persistent notification for easy access
-        if "error" in result:
-            message = f"**Error:** {result['error']}"
-        else:
-            traj = result.get("trajectory", [])
-            traj_lines = "\n".join(
-                f"  {p['time_minutes']} min → {p['temperature']} °C"
-                for p in traj[-10:]  # last 10 data points
-            )
-            message = (
-                f"**Room:** {call.data['room_name']}\n"
-                f"**Heating power:** {call.data['heating_power']} W\n"
-                f"**Outdoor temp:** {call.data['outdoor_temp']} °C\n"
-                f"**Start temp:** {call.data['initial_temp']} °C\n\n"
-                f"**Final temperature:** {result['final_temperature']} °C\n"
-                f"**Steady-state temperature:** {result['steady_state_temperature']} °C\n"
-                f"**Time constant:** {result['time_constant_hours']} hours\n\n"
-                f"**Trajectory (last points):**\n{traj_lines}"
-            )
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – Thermal Response Simulation",
-                "message": message,
-                "notification_id": f"{DOMAIN}_simulation",
-            },
-            blocking=False,
-        )
+        return result
 
-    async def handle_estimate(call: ServiceCall) -> None:
+    async def handle_estimate(call: ServiceCall) -> ServiceResponse:
         coordinator = _get_coordinator(hass)
         result = coordinator.estimate_parameters(
             room_name=call.data["room_name"],
@@ -1219,31 +1193,13 @@ def _register_services(hass: HomeAssistant) -> None:
             final_temp=call.data["final_temp"],
             duration_seconds=call.data["duration_seconds"],
         )
+        # Fire an event for automations and return the result as service
+        # response data (Developer Tools → Actions); no notification is raised.
         hass.bus.async_fire(
             f"{DOMAIN}_estimation_result",
             result,
         )
-        if "error" in result:
-            message = f"**Error:** {result['error']}"
-        else:
-            message = (
-                f"**Room:** {call.data['room_name']}\n\n"
-                f"**Estimated thermal_mass:** {result['estimated_thermal_mass']:,.0f} J/K\n"
-                f"**Estimated r_external:** {result['estimated_r_external']} K/W\n\n"
-                f"**Current thermal_mass:** {result['current_thermal_mass']:,.0f} J/K\n"
-                f"**Current r_external:** {result['current_r_external']} K/W\n\n"
-                f"**Notes:** {result['notes']}"
-            )
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – Parameter Estimation",
-                "message": message,
-                "notification_id": f"{DOMAIN}_estimation",
-            },
-            blocking=False,
-        )
+        return result
 
     async def handle_estimate_ml(call: ServiceCall) -> None:
         """Run ML parameter estimation using the Kalman filter log-likelihood."""
@@ -1264,6 +1220,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 coordinator.sysid_results[room_name] = existing
             coordinator.async_update_listeners()
 
+        # Fire an event so automations can consume the full result. The
+        # outcome is surfaced in the UI through the per-room parameter and
+        # diagnostic sensors, so no persistent notification is raised.
         hass.bus.async_fire(
             f"{DOMAIN}_ml_estimation_result",
             {
@@ -1271,63 +1230,6 @@ def _register_services(hass: HomeAssistant) -> None:
                 for k, v in result.items()
                 if isinstance(v, (str, int, float, bool, type(None)))
             },
-        )
-        if not result["success"]:
-            message = (
-                f"**Status:** {result['message']}\n\n"
-                f"**Steps in buffer:** {result['n_steps']}"
-            )
-        else:
-            lines = []
-            estimated_internal_gains = result.get("estimated_internal_gains", {})
-            for room, params in result["estimated_params"].items():
-                curr = result["current_params"][room]
-                ig = estimated_internal_gains.get(room)
-                ig_str = f"\n  internal\\_gain: {ig:+.1f} W" if ig is not None else ""
-                lines.append(
-                    f"**{room}**\n"
-                    f"  thermal\\_mass: {params['thermal_mass']:,.0f} J/K "
-                    f"(was {curr['thermal_mass']:,.0f})\n"
-                    f"  r\\_external: {params['r_external']:.5f} K/W "
-                    f"(was {curr['r_external']:.5f})"
-                    f"{ig_str}"
-                )
-            identifiable_sources = result.get("identifiable_sources", [])
-            heater_scales = result.get("estimated_heater_scales", {})
-            if identifiable_sources:
-                scale_lines = [
-                    f"  {name}: {heater_scales[name]:.3f}×"
-                    for name in identifiable_sources
-                    if name in heater_scales
-                ]
-                if scale_lines:
-                    lines.append("**Heater power-scale factors:**\n" + "\n".join(scale_lines))
-            applied_str = (
-                "Parameters applied and persisted (survive restart)."
-                if apply_params
-                else "Dry run – parameters NOT applied."
-            )
-            ll_str = (
-                f"{result['log_likelihood']:.1f}"
-                if result["log_likelihood"] is not None
-                else "n/a"
-            )
-            message = (
-                f"**{applied_str}**\n\n"
-                + "\n\n".join(lines)
-                + f"\n\n**Data steps used:** {result['n_steps']}\n"
-                f"**Log-likelihood:** {ll_str}\n"
-                f"**Status:** {result['message']}"
-            )
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – ML Parameter Estimation",
-                "message": message,
-                "notification_id": f"{DOMAIN}_ml_estimation",
-            },
-            blocking=False,
         )
 
     hass.services.async_register(
@@ -1343,6 +1245,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("duration_hours"): vol.Coerce(float),
             }
         ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     hass.services.async_register(
@@ -1359,6 +1262,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("duration_seconds"): vol.Coerce(float),
             }
         ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     hass.services.async_register(
@@ -1377,7 +1281,6 @@ def _register_services(hass: HomeAssistant) -> None:
         from .model_diagnostics import compute_open_loop_predictions
 
         coordinator = _get_coordinator(hass)
-        room_name_filter = call.data.get("room_name")
         segment_length = int(call.data.get("segment_length", 30))
         horizon_hours: Optional[float] = call.data.get("horizon_hours")
 
@@ -1393,6 +1296,9 @@ def _register_services(hass: HomeAssistant) -> None:
         room_names = coordinator.model.room_names
         n_rooms = len(room_names)
 
+        # Results are surfaced in the UI via the per-room OpenLoopRMSESensor
+        # entities, so this service writes its output to the coordinator cache
+        # rather than raising a persistent notification.
         try:
             result = await hass.async_add_executor_job(
                 compute_open_loop_predictions,
@@ -1404,9 +1310,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 segment_length,
             )
 
-            if "error" in result:
-                message = f"**Error:** {result['error']}"
-            else:
+            if "error" not in result:
                 per_room = result.get("per_room", {})
 
                 # Write per-room results to coordinator cache so that
@@ -1415,53 +1319,18 @@ def _register_services(hass: HomeAssistant) -> None:
                 coordinator.open_loop_results.update(per_room)
                 coordinator.async_update_listeners()
 
-                lines = [
-                    f"**Segment length:** {result['segment_length']} steps "
-                    f"({result['segment_length']} min)\n"
-                    f"**Segments evaluated:** {result['n_segments']}\n"
-                ]
-                rooms_to_report = (
-                    [room_name_filter]
-                    if room_name_filter and room_name_filter in per_room
-                    else list(per_room.keys())
-                )
-                for room in rooms_to_report:
-                    data = per_room.get(room, {})
-                    rmse = data.get("rmse")
-                    mae = data.get("mae")
-                    if rmse is None:
-                        lines.append(f"**{room}:** no data")
-                        continue
-                    quality = (
-                        "excellent" if rmse < 0.2
-                        else "acceptable" if rmse < 0.5
-                        else "poor – re-run parameter estimation"
-                    )
-                    lines.append(
-                        f"**{room}**\n"
-                        f"  Open-loop RMSE: {rmse:.3f} °C ({quality})\n"
-                        f"  Open-loop MAE:  {mae:.3f} °C"
-                    )
-
-                message = "\n\n".join(lines)
-
         except Exception as exc:
             _LOGGER.error("Open-loop simulation failed: %s", exc, exc_info=True)
-            message = f"**Error:** {exc}"
 
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – Open-Loop Simulation",
-                "message": message,
-                "notification_id": f"{DOMAIN}_open_loop_sim",
-            },
-            blocking=False,
-        )
+    async def handle_analyze_model_fit(call: ServiceCall) -> ServiceResponse:
+        """Analyze model-fit quality for all or a specific room.
 
-    async def handle_analyze_model_fit(call: ServiceCall) -> None:
-        """Analyze model fit quality for all or specific room."""
+        The fit metrics (R², RMSE, MAE, bias, …) are continuously exposed by
+        the per-room ``…_model_fit_quality`` sensor. This service refreshes
+        those sensors and returns the full report as service-response data so
+        Developer Tools → Actions shows it inline; no persistent notification
+        is raised.
+        """
         from .model_diagnostics import generate_model_fit_report
 
         coordinator = _get_coordinator(hass)
@@ -1481,60 +1350,24 @@ def _register_services(hass: HomeAssistant) -> None:
                 room_params,
                 setpoints,
             )
-
-            # Filter to specific room if requested
-            if room_name_filter and room_name_filter in report.get("rooms", {}):
-                filtered_rooms = {room_name_filter: report["rooms"][room_name_filter]}
-                report["rooms"] = filtered_rooms
-
-            # Format message
-            if "error" in report:
-                message = f"**Error:** {report['error']}"
-            else:
-                lines = [f"**Data steps analyzed:** {report['n_steps']}\n"]
-                for room, data in report["rooms"].items():
-                    if "error" in data:
-                        lines.append(f"**{room}:** {data['error']}")
-                        continue
-
-                    fit = data.get("fit_metrics", {})
-                    lines.append(
-                        f"**{room}**\n"
-                        f"  R² score: {fit.get('r_squared', 'n/a')}\n"
-                        f"  RMSE: {fit.get('rmse', 'n/a')} °C\n"
-                        f"  MAE: {fit.get('mae', 'n/a')} °C\n"
-                        f"  Bias: {fit.get('bias', 'n/a')} °C\n"
-                        f"  Max error: {fit.get('max_error', 'n/a')} °C\n"
-                        f"  Autocorr (lag-1): {fit.get('residual_autocorr_lag1', 'n/a')}"
-                    )
-
-                message = "\n\n".join(lines)
-
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "Heating Assistant – Model Fit Analysis",
-                    "message": message,
-                    "notification_id": f"{DOMAIN}_model_fit",
-                },
-                blocking=False,
-            )
         except Exception as exc:
             _LOGGER.error("Model fit analysis failed: %s", exc, exc_info=True)
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "Heating Assistant – Model Fit Analysis",
-                    "message": f"**Error:** {exc}",
-                    "notification_id": f"{DOMAIN}_model_fit",
-                },
-                blocking=False,
-            )
+            return {"error": str(exc)}
 
-    async def handle_validate_parameters(call: ServiceCall) -> None:
-        """Validate thermal parameters for all or specific room."""
+        # Filter to specific room if requested
+        if room_name_filter and room_name_filter in report.get("rooms", {}):
+            report["rooms"] = {room_name_filter: report["rooms"][room_name_filter]}
+
+        # Refresh the model-fit sensors so the dashboard reflects the latest data.
+        coordinator.async_update_listeners()
+        return report
+
+    async def handle_validate_parameters(call: ServiceCall) -> ServiceResponse:
+        """Validate thermal parameters for all or a specific room.
+
+        Returns the validation result as service-response data (visible in
+        Developer Tools → Actions); no persistent notification is raised.
+        """
         from .model_diagnostics import validate_parameters
 
         coordinator = _get_coordinator(hass)
@@ -1546,54 +1379,39 @@ def _register_services(hass: HomeAssistant) -> None:
             else coordinator.model.room_names
         )
 
-        lines = []
+        rooms: Dict[str, Any] = {}
         for room_name in rooms_to_check:
             room = coordinator.model.rooms[room_name]
             try:
                 validation = validate_parameters(
                     room_name, room.thermal_mass, room.r_external
                 )
-
-                status = "✓ Valid" if all([
-                    validation.mass_valid,
-                    validation.r_external_valid,
-                    validation.time_constant_valid,
-                ]) else "⚠ Warnings"
-
-                lines.append(
-                    f"**{room_name}** – {status}\n"
-                    f"  Thermal mass: {validation.thermal_mass:,.0f} J/K "
-                    f"({'✓' if validation.mass_valid else '⚠'})\n"
-                    f"  R external: {validation.r_external:.5f} K/W "
-                    f"({'✓' if validation.r_external_valid else '⚠'})\n"
-                    f"  Time constant: {validation.time_constant_hours:.2f} hours "
-                    f"({'✓' if validation.time_constant_valid else '⚠'})"
-                )
-
-                if validation.warnings:
-                    lines.append("  **Warnings:**")
-                    for warning in validation.warnings:
-                        lines.append(f"    • {warning}")
-
+                rooms[room_name] = {
+                    "valid": all([
+                        validation.mass_valid,
+                        validation.r_external_valid,
+                        validation.time_constant_valid,
+                    ]),
+                    "thermal_mass": validation.thermal_mass,
+                    "thermal_mass_valid": validation.mass_valid,
+                    "r_external": validation.r_external,
+                    "r_external_valid": validation.r_external_valid,
+                    "time_constant_hours": validation.time_constant_hours,
+                    "time_constant_valid": validation.time_constant_valid,
+                    "warnings": list(validation.warnings),
+                }
             except Exception as exc:
                 _LOGGER.error("Parameter validation failed for %s: %s", room_name, exc)
-                lines.append(f"**{room_name}:** Error – {exc}")
+                rooms[room_name] = {"error": str(exc)}
 
-        message = "\n\n".join(lines)
+        return {"rooms": rooms}
 
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – Parameter Validation",
-                "message": message,
-                "notification_id": f"{DOMAIN}_param_validation",
-            },
-            blocking=False,
-        )
+    async def handle_controller_performance(call: ServiceCall) -> ServiceResponse:
+        """Generate a controller performance report for all or a specific room.
 
-    async def handle_controller_performance(call: ServiceCall) -> None:
-        """Generate controller performance report for all or specific room."""
+        Returns the report as service-response data (visible in Developer
+        Tools → Actions); no persistent notification is raised.
+        """
         from .model_diagnostics import compute_controller_performance
 
         coordinator = _get_coordinator(hass)
@@ -1605,7 +1423,7 @@ def _register_services(hass: HomeAssistant) -> None:
             else coordinator.model.room_names
         )
 
-        lines = []
+        rooms: Dict[str, Any] = {}
         for room_name in rooms_to_check:
             room = coordinator.model.rooms[room_name]
 
@@ -1618,42 +1436,29 @@ def _register_services(hass: HomeAssistant) -> None:
                     temperatures.append(y[room_idx])
 
             if len(temperatures) < 2:
-                lines.append(f"**{room_name}:** Insufficient data")
+                rooms[room_name] = {"error": "insufficient_data"}
                 continue
 
             try:
                 perf = compute_controller_performance(
                     temperatures, room.setpoint, room_name
                 )
-
-                lines.append(
-                    f"**{room_name}** (setpoint: {room.setpoint} °C)\n"
-                    f"  Mean tracking error: {perf.mean_tracking_error:+.3f} °C\n"
-                    f"  Tracking error std: {perf.tracking_error_std:.3f} °C\n"
-                    f"  Time above setpoint: {perf.time_above_setpoint * 100:.1f}%\n"
-                    f"  Time below setpoint: {perf.time_below_setpoint * 100:.1f}%\n"
-                    f"  Time in deadband (±0.5°C): {perf.time_in_deadband * 100:.1f}%\n"
-                    f"  Max overshoot: {perf.max_overshoot:.2f} °C\n"
-                    f"  Max undershoot: {perf.max_undershoot:.2f} °C\n"
-                    f"  Samples: {perf.n_samples}"
-                )
-
+                rooms[room_name] = {
+                    "setpoint": room.setpoint,
+                    "mean_tracking_error": perf.mean_tracking_error,
+                    "tracking_error_std": perf.tracking_error_std,
+                    "time_above_setpoint": perf.time_above_setpoint,
+                    "time_below_setpoint": perf.time_below_setpoint,
+                    "time_in_deadband": perf.time_in_deadband,
+                    "max_overshoot": perf.max_overshoot,
+                    "max_undershoot": perf.max_undershoot,
+                    "n_samples": perf.n_samples,
+                }
             except Exception as exc:
                 _LOGGER.error("Controller performance analysis failed for %s: %s", room_name, exc)
-                lines.append(f"**{room_name}:** Error – {exc}")
+                rooms[room_name] = {"error": str(exc)}
 
-        message = "\n\n".join(lines)
-
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – Controller Performance",
-                "message": message,
-                "notification_id": f"{DOMAIN}_controller_perf",
-            },
-            blocking=False,
-        )
+        return {"rooms": rooms}
 
     hass.services.async_register(
         DOMAIN,
@@ -1664,6 +1469,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("room_name"): cv.string,
             }
         ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     hass.services.async_register(
@@ -1675,6 +1481,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("room_name"): cv.string,
             }
         ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     hass.services.async_register(
@@ -1686,6 +1493,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("room_name"): cv.string,
             }
         ),
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
     hass.services.async_register(
@@ -1752,9 +1560,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 sigma_v,
             )
 
-            if "error" in result:
-                message = f"**Error:** {result['error']}"
-            else:
+            if "error" not in result:
                 per_room = result.get("per_room", {})
 
                 # Tag each per-room result with the horizon so the sensor can
@@ -1769,48 +1575,14 @@ def _register_services(hass: HomeAssistant) -> None:
                         if k == room_name_filter
                     }
 
+                # Results are surfaced via the per-room SysID diagnostic
+                # sensors, so this service stores them on the coordinator and
+                # refreshes listeners instead of raising a notification.
                 coordinator.sysid_results.update(per_room)
                 coordinator.async_update_listeners()
 
-                lines = [
-                    f"**Horizon:** {horizon_hours} h "
-                    f"({result.get('horizon_steps', horizon_steps)} steps)\n"
-                    f"**σ_w:** {sigma_w}  **σ_v:** {sigma_v}"
-                ]
-                for room, data in per_room.items():
-                    rmse = data.get("rmse")
-                    mae = data.get("mae")
-                    tm = data.get("thermal_mass")
-                    re = data.get("r_external")
-                    quality = (
-                        "excellent" if rmse is not None and rmse < 0.2
-                        else "acceptable" if rmse is not None and rmse < 0.5
-                        else "poor"
-                    )
-                    lines.append(
-                        f"**{room}**\n"
-                        f"  thermal\\_mass: {tm:,.0f} J/K  r\\_external: {re:.5f} K/W\n"
-                        f"  RMSE: {rmse:.3f} °C ({quality})  MAE: {mae:.3f} °C"
-                        if rmse is not None and tm is not None and re is not None
-                        else f"**{room}:** no data"
-                    )
-
-                message = "\n\n".join(lines)
-
         except Exception as exc:
             _LOGGER.error("SysID simulation failed: %s", exc, exc_info=True)
-            message = f"**Error:** {exc}"
-
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – System Identification Simulation",
-                "message": message,
-                "notification_id": f"{DOMAIN}_sysid_simulation",
-            },
-            blocking=False,
-        )
 
     hass.services.async_register(
         DOMAIN,
@@ -1843,30 +1615,14 @@ def _register_services(hass: HomeAssistant) -> None:
         else:
             targets = list(coordinator.model.room_names)
 
-        applied: list[str] = []
-        skipped: list[str] = []
         for name in targets:
             if name not in coordinator.model.rooms:
-                skipped.append(name)
                 continue
             coordinator.set_schedule_enabled(name, enabled)
-            applied.append(name)
 
-        action = "resumed" if enabled else "suspended"
-        lines = [f"**Schedules {action} for:** {', '.join(applied) if applied else '(none)'}"]
-        if skipped:
-            lines.append(f"**Unknown rooms ignored:** {', '.join(skipped)}")
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – Comfort Schedule",
-                "message": "\n".join(lines),
-                "notification_id": f"{DOMAIN}_schedule_toggle",
-            },
-            blocking=False,
-        )
         # Push an immediate state_changed event so the overview tiles refresh.
+        # The new schedule state is visible on those tiles, so no persistent
+        # notification is raised.
         coordinator.async_update_listeners()
 
     hass.services.async_register(
@@ -2230,22 +1986,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
             await hass.async_add_executor_job(_write)
 
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "Heating Assistant dashboard regenerated",
-                    "message": (
-                        f"Wrote {variant} dashboard YAML to `{write_path}`. "
-                        "Add a `lovelace.dashboards` entry referencing this file "
-                        "or paste the contents into a new dashboard via "
-                        "Settings → Dashboards."
-                    ),
-                    "notification_id": f"{DOMAIN}_dashboard_regenerated",
-                },
-                blocking=False,
-            )
-
+        # The write path is returned in the service response (``written_to``)
+        # for programmatic callers; no persistent notification is raised.
         return {
             "yaml": yaml_text,
             "variant": variant,
@@ -2272,9 +2014,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
         The slice is stored on the coordinator and exposed via the
         per-room ``…_loglik_slice`` sensor so dashboards can visualise it
-        without re-running the computation.  A persistent notification
-        reports the peak log-likelihood so Lovelace button presses give
-        immediate feedback.
+        without re-running the computation, giving Lovelace button presses
+        immediate feedback through the sensor state.
 
         The service intentionally has no ``supports_response`` registration
         so Lovelace button cards can fire it without the frontend requiring
@@ -2291,49 +2032,14 @@ def _register_services(hass: HomeAssistant) -> None:
             room_name, n_grid=n_grid, span_log=span_log
         )
         if result is None:
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "Heating Assistant – log-likelihood slice",
-                    "message": (
-                        f"Could not compute the slice for `{room_name}`. The "
-                        "history buffer may be too short, or the room is not "
-                        "configured."
-                    ),
-                    "notification_id": f"{DOMAIN}_loglik_slice_{room_name}",
-                },
-                blocking=False,
-            )
             return {
                 "room": room_name,
                 "error": "history_too_short_or_unknown_room",
             }
 
-        # Surface a compact summary so a dashboard call gives the user
-        # immediate feedback even when they didn't ask for the full grid.
-        grid = result.get("log_likelihood") or []
-        flat = [v for row in grid for v in row if isinstance(v, (int, float))]
-        peak = max(flat) if flat else None
-        await hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – log-likelihood slice",
-                "message": (
-                    f"Computed {n_grid}×{n_grid} (log C, log R_ext) grid for "
-                    f"**{room_name}** (span ±{span_log} log-units).\n\n"
-                    f"Peak log-likelihood: "
-                    f"{'%.2f' % peak if peak is not None else 'n/a'}\n\n"
-                    "Use `sensor.heating_assistant_"
-                    f"{room_name.lower().replace(' ', '_')}_loglik_slice` "
-                    "for the full grid, or call this service from Developer "
-                    "Tools with `return_response: true`."
-                ),
-                "notification_id": f"{DOMAIN}_loglik_slice_{room_name}",
-            },
-            blocking=False,
-        )
+        # The computed grid is stored on the per-room ``…_loglik_slice`` sensor
+        # (and returned here for callers using ``return_response: true``), so no
+        # persistent notification is raised.
         return result
 
     hass.services.async_register(
