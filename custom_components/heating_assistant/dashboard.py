@@ -1866,7 +1866,7 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
 
     # One button card per room – standalone so the frontend does not need to
     # handle a service response inline (compute_loglik_slice stores its result
-    # on the LoglikSliceSensor attribute and posts a persistent notification).
+    # on the LoglikSliceSensor attribute).
     loglik_button_cards: List[Dict[str, Any]] = [
         {
             "type": "button",
@@ -1888,9 +1888,9 @@ def _diagnostics_view(spec: DashboardSpec) -> Dict[str, Any]:
             "compute_loglik_slice` on the matching room, which evaluates the"
             " CD-EKF log-likelihood on an 11×11 (log C, log R_ext) grid"
             " around the current MLE.\n\n"
-            "The result is stored on the per-room `…_loglik_slice` sensor and"
-            " summarised in a persistent notification. To read the full grid,"
-            " use `state_attr('sensor.heating_assistant_<room>_loglik_slice',"
+            "The result is stored on the per-room `…_loglik_slice` sensor."
+            " To read the full grid, use"
+            " `state_attr('sensor.heating_assistant_<room>_loglik_slice',"
             " 'log_likelihood')` from a template or Plotly card."
         ),
     }

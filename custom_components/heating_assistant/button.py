@@ -4,7 +4,7 @@ Heating Assistant – Button platform.
 Provides a single button entity that triggers maximum-likelihood thermal
 parameter estimation (via the accumulated history buffer) with one press.
 The estimated parameters are applied to the running model automatically and
-a persistent notification reports the results.
+the results are reflected in the per-room diagnostic sensors.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class EstimateParametersButton(ButtonEntity):
     Pressing this button runs the Kalman-filter PED log-likelihood
     optimisation over the rolling observation history.  Estimated values for
     ``thermal_mass`` and ``r_external`` are applied to the live model and
-    reported via a persistent notification.
+    surfaced through the per-room parameter / diagnostic sensors.
     """
 
     _attr_icon = "mdi:chart-bell-curve-cumulative"
@@ -107,15 +107,10 @@ class ResetParametersButton(ButtonEntity):
         }
 
     async def async_press(self) -> None:
-        """Handle button press – revert to default parameters."""
+        """Handle button press – revert to default parameters.
+
+        The reset is reflected immediately in the UI via the entity state and
+        the per-room parameter sensors, so no notification is raised.
+        """
         self._coordinator.reset_estimated_parameters()
-        await self.hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant – Parameters Reset",
-                "message": "Thermal parameters have been reset to their configured defaults.",
-                "notification_id": f"{DOMAIN}_params_reset",
-            },
-            blocking=False,
-        )
+        self._coordinator.async_update_listeners()
