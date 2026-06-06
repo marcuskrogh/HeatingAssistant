@@ -738,8 +738,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         return self._window_state.get(room_name, "closed")
 
     def is_window_override_active(self, room_name: str) -> bool:
-        """Return True while the room is in the ``open`` window state."""
-        return self.get_window_state(room_name) == "open"
+        """Return True while the room's heater must be held off for a window.
+
+        The override is active for the whole period the heater is suppressed:
+        from the moment the open-debounce expires (state ``open``) until the
+        close-settle timer expires (leaving ``pending_closed`` for ``closed``).
+        It is **not** active during ``pending_open`` — opening a window starts
+        the debounce timer but the heater keeps running until it elapses — nor
+        once the room returns to ``closed``.
+        """
+        return self.get_window_state(room_name) in ("open", "pending_closed")
 
     def _init_runtime_buffers(self) -> None:
         """Initialise per-cycle and visualisation state.
@@ -748,8 +756,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         by sensor entities between ticks; the empty initial values are what
         the sensors see before the first cycle completes.
         """
-        # Latest control actions (source_name → fraction in [u_min, u_max])
+        # Latest control actions (source_name → fraction in [u_min, u_max]).
+        # These are the actions actually commanded to the heaters: rooms under
+        # an open-window override are clamped to 0 here.
         self.actions: Dict[str, float] = {}
+
+        # Latest *unconstrained* MPC optimum (source_name → fraction), mirrored
+        # from controller.mpc_actions each successful solve.  Unlike
+        # ``self.actions`` these are not zeroed for window-override rooms, so
+        # when a window-close settle timer expires between scheduled solves the
+        # coordinator can bring the heater back online at the level the MPC was
+        # planning all along.
+        self._mpc_shadow_actions: Dict[str, float] = {}
 
         # Visualization data
         self.solar_gains: Dict[str, float] = {}
@@ -1842,6 +1860,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     # optimisation is skipped so no control trajectory is solved.
                     run_optimization=self._system_enabled,
                 )
+                # Mirror the unconstrained MPC optimum (before window-override
+                # zeroing) so a heater can resume at the planned level the
+                # instant its window-close settle timer expires between solves.
+                self._mpc_shadow_actions = dict(self.controller.mpc_actions)
                 self.predictions = self.controller.predictions
                 self.linearised_predictions = self.controller.linearised_predictions
                 self.outdoor_forecast = self.controller.outdoor_forecast
@@ -2090,18 +2112,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         ``async_request_refresh()`` so the MPC and EKF are never triggered by
         window events — they run strictly at the scheduled update interval.
 
-        * Sensor opens  → ``closed → pending_open`` immediately; after
-          ``window_open_debounce`` seconds, verify still open, advance to
-          ``open``, then push heater-off override immediately.
-        * Sensor closes (all room sensors closed) + state is ``open`` →
-          ``open → pending_closed`` immediately; after
-          ``window_open_close_settle`` seconds, verify still closed, advance
-          to ``closed``, then push last MPC actions back to actuators.
-        * Sensor closes while ``pending_open`` (closed before debounce) →
-          revert to ``closed`` immediately, push last MPC actions.
+        * Sensor opens  → ``closed → pending_open`` and start the
+          ``window_open_debounce`` timer.  The heater keeps running until it
+          elapses; only then does the room advance to ``open`` and the
+          heater-off override get pushed.
+        * Sensor closes before the debounce elapses → cancel the timer and
+          revert to ``closed``; the heater was never turned off.
+        * All room sensors close while ``open`` → ``open → pending_closed``
+          and start the ``window_open_close_settle`` timer.  The heater stays
+          off until it elapses; only then does the room return to ``closed``
+          and the heater resume at the actuation the MPC kept solving for in
+          the background.
+        * A sensor re-opens while ``pending_closed`` → cancel the settle timer
+          and return to ``open`` immediately; the heater stays off.
 
-        Pending timers are keyed by room name so a second sensor event in
-        the same room correctly cancels the previous in-flight timer.
+        Each running timer cancels only on the transition that ends it, so a
+        second sensor opening/closing in the same direction leaves the
+        in-flight debounce/settle timer untouched rather than restarting it.
 
         Returns a cancel callable suitable for ``entry.async_on_unload``,
         or ``None`` when no window sensors are configured.
@@ -2141,27 +2168,52 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
             now_utc = datetime.now(tz=timezone.utc)
 
-            # Cancel any in-flight timer for this room before issuing a new one.
-            if room_name in _pending:
-                _pending.pop(room_name)()
+            def _cancel_pending() -> None:
+                """Cancel this room's in-flight debounce/settle timer, if any."""
+                if room_name in _pending:
+                    _pending.pop(room_name)()
 
             current = self._window_state.get(room_name, "closed")
+            sensors = self._window_sensors.get(room_name, [])
+            any_open_now = any(self._read_binary_sensor_on(s) for s in sensors)
 
             if new_open:
-                # ── Window just opened ─────────────────────────────────────
-                if current == "closed":
-                    self._set_window_state(room_name, "pending_open", now_utc)
+                # ── A sensor in this room just opened ──────────────────────
+                if current in ("open", "pending_open"):
+                    # Already open, or already counting down the open debounce:
+                    # a second window opening changes nothing and must NOT
+                    # restart the in-flight timer.
+                    return
+
+                if current == "pending_closed":
+                    # Re-opened during the close-settle window — stop the
+                    # settle timer and return to the open override at once.
+                    # The heater stays off; no debounce is re-run.
+                    _cancel_pending()
+                    self._set_window_state(room_name, "open", now_utc)
                     _LOGGER.debug(
-                        "Window sensor %s opened for %s — pending_open (debounce %.0fs)",
-                        sensor_id, room_name, self._window_open_debounce,
+                        "Window sensor %s re-opened during settle for %s — "
+                        "back to open (heater stays off)",
+                        sensor_id, room_name,
                     )
+                    self.hass.async_create_task(self._async_push_window_override())
+                    return
+
+                # current == "closed": start the open-debounce timer.  The
+                # heater keeps running until it elapses.
+                _cancel_pending()
+                self._set_window_state(room_name, "pending_open", now_utc)
+                _LOGGER.debug(
+                    "Window sensor %s opened for %s — pending_open (debounce %.0fs)",
+                    sensor_id, room_name, self._window_open_debounce,
+                )
 
                 @callback
                 def _advance_open(_now=None, _rn=room_name) -> None:
                     _pending.pop(_rn, None)
                     _now_inner = datetime.now(tz=timezone.utc)
-                    sensors = self._window_sensors.get(_rn, [])
-                    any_open = any(self._read_binary_sensor_on(s) for s in sensors)
+                    sensors_in = self._window_sensors.get(_rn, [])
+                    any_open = any(self._read_binary_sensor_on(s) for s in sensors_in)
                     if any_open and self._window_state.get(_rn) == "pending_open":
                         self._set_window_state(_rn, "open", _now_inner)
                         _LOGGER.debug(
@@ -2175,23 +2227,28 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 )
 
             else:
-                # ── Window just closed ─────────────────────────────────────
-                sensors = self._window_sensors.get(room_name, [])
-                any_still_open = any(
-                    self._read_binary_sensor_on(s) for s in sensors
-                )
+                # ── A sensor in this room just closed ──────────────────────
+                if any_open_now:
+                    # Another sensor in the room is still open — the override
+                    # state and any running timer are unaffected.
+                    return
 
                 if current == "pending_open":
-                    # Closed before debounce elapsed — revert to closed.
+                    # Closed before the open debounce elapsed — stop the timer
+                    # and revert to closed; the heater was never turned off.
+                    _cancel_pending()
                     self._set_window_state(room_name, "closed", now_utc)
                     _LOGGER.debug(
                         "Window sensor %s closed before debounce for %s — reverted",
                         sensor_id, room_name,
                     )
                     self.hass.async_create_task(self._async_push_window_override())
+                    return
 
-                elif current == "open" and not any_still_open:
-                    # All sensors closed while open — enter settle period.
+                if current == "open":
+                    # All sensors closed while open — start the close-settle
+                    # timer.  The heater stays off until it elapses.
+                    _cancel_pending()
                     self._set_window_state(room_name, "pending_closed", now_utc)
                     _LOGGER.debug(
                         "Window sensor %s closed for %s — pending_closed (settle %.0fs)",
@@ -2202,9 +2259,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     def _advance_closed(_now=None, _rn=room_name) -> None:
                         _pending.pop(_rn, None)
                         _now_inner = datetime.now(tz=timezone.utc)
-                        sensors2 = self._window_sensors.get(_rn, [])
+                        sensors_in = self._window_sensors.get(_rn, [])
                         any_open2 = any(
-                            self._read_binary_sensor_on(s) for s in sensors2
+                            self._read_binary_sensor_on(s) for s in sensors_in
                         )
                         if (
                             not any_open2
@@ -2212,7 +2269,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         ):
                             self._set_window_state(_rn, "closed", _now_inner)
                             _LOGGER.debug(
-                                "Window settle elapsed for %s — heater override cleared",
+                                "Window settle elapsed for %s — heater override "
+                                "cleared, resuming MPC actuation",
                                 _rn,
                             )
                         self.hass.async_create_task(self._async_push_window_override())
@@ -2220,6 +2278,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     _pending[room_name] = async_call_later(
                         self.hass, self._window_open_close_settle, _advance_closed
                     )
+                # current in ("closed", "pending_closed"): nothing to do.
 
         cancel_listener = async_track_state_change_event(
             self.hass, all_sensor_ids, _on_window_changed
@@ -2779,6 +2838,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # the outdoor sensor is transiently unavailable — in both cases the last
         # commanded state is the safest thing to leave the heaters in.
         if self.actions and outdoor_temp is not None:
+            # A room whose window-override just cleared (open/pending_closed →
+            # closed) must come back on at the actuation the MPC kept solving
+            # for while the heater was off, not the 0 it was clamped to.  Pull
+            # that value from the shadow optimum before the override clamp
+            # below.  Rooms disabled for other reasons (user toggle / schedule)
+            # are still forced off by ``_apply_actions``.
+            for src in self.heat_sources:
+                if (
+                    not self.is_window_override_active(src.room)
+                    and self.is_room_enabled(src.room)
+                    and src.name in self._mpc_shadow_actions
+                ):
+                    self.actions[src.name] = self._mpc_shadow_actions[src.name]
+
             for src in self.heat_sources:
                 if self.is_window_override_active(src.room):
                     self.actions[src.name] = 0.0

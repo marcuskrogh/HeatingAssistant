@@ -1420,6 +1420,23 @@ class TestDisabledSources:
         assert actions["lr_heater"] == pytest.approx(0.0)
         assert actions["br_heater"] == pytest.approx(0.0)
 
+    def test_mpc_actions_holds_unzeroed_optimum_for_disabled_source(self):
+        # The MPC keeps solving for a disabled source in the background; the
+        # returned ``actions`` are zeroed for it, but ``mpc_actions`` exposes
+        # the actuation it would command if the source were available — what a
+        # window-override room should resume at once its window closes again.
+        model, sources = self._make_cold_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 3, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(
+            outdoor_temp=0.0, now=now, disabled_sources={"br_heater"}
+        )
+        assert actions["br_heater"] == pytest.approx(0.0)
+        # The cold bedroom still wants heat — the shadow optimum is positive.
+        assert ctrl.mpc_actions["br_heater"] > 0.0
+        # Enabled sources match between the two views.
+        assert ctrl.mpc_actions["lr_heater"] == pytest.approx(actions["lr_heater"])
+
 
 # ---------------------------------------------------------------------------
 # Tests for equilibrium-input linearisation and full-trajectory bounds clipping

@@ -1967,6 +1967,11 @@ class HeatingMPCController:
         self._solar_forecast: List[Dict[str, float]] = []
         self._heating_schedule: List[Dict[str, float]] = []
         self._price_forecast: List[float] = []
+        # Unconstrained MPC optimum per source from the last compute(), captured
+        # *before* disabled-source zeroing.  Used to resume a force-disabled
+        # heater (e.g. open-window override) at the value the MPC kept solving
+        # for in the background once the override clears.
+        self._mpc_actions: Dict[str, float] = {}
 
     # ── Visualisation / diagnostic properties ────────────────────────────
 
@@ -2088,6 +2093,18 @@ class HeatingMPCController:
     def heating_schedule(self) -> List[Dict[str, float]]:
         """Planned heating power schedule from the last compute()."""
         return self._heating_schedule
+
+    @property
+    def mpc_actions(self) -> Dict[str, float]:
+        """Unconstrained MPC optimum per source from the last compute().
+
+        Unlike the dict returned by :meth:`compute`, these values are *not*
+        zeroed for ``disabled_sources``: they are the actuation the MPC would
+        command if every source were available.  The coordinator uses them to
+        bring a heater back online at the right level the instant an
+        open-window override settle timer expires.
+        """
+        return dict(self._mpc_actions)
 
     @property
     def price_forecast(self) -> List[float]:
@@ -2292,10 +2309,12 @@ class HeatingMPCController:
             self._heating_schedule = []
             # Report each source's current commanded fraction; the coordinator
             # overwrites these with the actually-delivered values anyway.
-            return {
+            actions = {
                 src.name: float(np.clip(self._mpc._u_prev[j], src.u_min, src.u_max))
                 for j, src in enumerate(self._sources)
             }
+            self._mpc_actions = dict(actions)
+            return actions
 
         # ── Disturbance forecast matrix for the OCP ──────────────────────
         # D_forecast[k] = disturbance during horizon step k (k=0..N-1).
@@ -2373,6 +2392,18 @@ class HeatingMPCController:
 
         # Capture innovation from the EKF wrapper
         self._last_innovation = self._ekf.last_innovation
+
+        # Capture the unconstrained MPC optimum for every source *before* the
+        # disabled-source zeroing below.  The coordinator uses this as the
+        # value to resume a heater at when an open-window override clears: the
+        # MPC keeps solving for the room while its heater is forced off, and the
+        # room should pick up that intended actuation the moment the
+        # window-settle timer expires (rather than waiting a full update
+        # interval for the next scheduled solve).
+        self._mpc_actions = {
+            src.name: float(np.clip(u_abs[j], src.u_min, src.u_max))
+            for j, src in enumerate(self._sources)
+        }
 
         # ── Zero out disabled sources ─────────────────────────────────────
         # Rooms in off-mode (schedule, user toggle, or window override) must
