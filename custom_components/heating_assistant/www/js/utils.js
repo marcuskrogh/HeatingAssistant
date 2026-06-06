@@ -25,6 +25,18 @@ export function formatDuration(seconds) {
   return num.toFixed(2) + ' s';
 }
 
+export function formatIrradiance(value) {
+  const num = parseFloat(value);
+  if (isNaN(num)) return '—';
+  return num.toFixed(0) + ' W/m²';
+}
+
+export function formatPrice(value) {
+  const num = parseFloat(value);
+  if (isNaN(num)) return '—';
+  return num.toFixed(2);
+}
+
 export function formatPercent(value) {
   const num = parseFloat(value);
   if (isNaN(num)) return '—';

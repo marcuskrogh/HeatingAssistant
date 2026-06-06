@@ -334,6 +334,52 @@ def clear_sky_plane_poa(
     )
 
 
+def horizontal_irradiance(
+    dt: datetime,
+    latitude: float,
+    longitude: float,
+    cloud_cover: float | None = None,
+    ghi: float | None = None,
+) -> float:
+    """
+    Global Horizontal Irradiance (GHI) at the site [W/m²].
+
+    A building-level, location-only solar intensity: the sun's power landing on
+    a flat horizontal surface, independent of any individual room's windows or
+    orientation.  This is the "how strong is the sun right now" figure used for
+    the overview KPI.
+
+    Precedence mirrors the gains path: a forecast/measured ``ghi`` is returned
+    verbatim; otherwise the clear-sky model — attenuated by the optional
+    Kasten–Czeplak cloud factor — supplies a modeled GHI so the value is
+    available even when no irradiance sensor is configured.
+
+    Parameters
+    ----------
+    dt : datetime          current datetime (UTC or aware).
+    latitude : float       site latitude [degrees].
+    longitude : float      site longitude [degrees].
+    cloud_cover : float, optional  fraction in [0, 1]; used only when ``ghi``
+                                   is ``None`` to attenuate the clear-sky model.
+    ghi : float, optional  measured/forecast GHI [W/m²]; returned directly.
+
+    Returns
+    -------
+    float : GHI in W/m²; ``0.0`` at night.
+    """
+    if ghi is not None:
+        return max(0.0, ghi)
+
+    altitude, _azimuth = solar_angles(dt, latitude, longitude)
+    if altitude <= 0.0:
+        return 0.0
+
+    n = _day_of_year(dt)
+    dni, dhi = _intensity_dni_dhi(altitude, n, cloud_cover, None)
+    # GHI = beam-horizontal (DNI·sin(altitude)) + diffuse-horizontal (DHI).
+    return max(0.0, dni * math.sin(altitude) + dhi)
+
+
 # ---------------------------------------------------------------------------
 # Incidence angle on tilted surface
 # ---------------------------------------------------------------------------

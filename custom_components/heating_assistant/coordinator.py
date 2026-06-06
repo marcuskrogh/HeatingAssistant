@@ -152,7 +152,11 @@ from .heat_sources import ElectricHeater, HeatPump, HeatSource
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import HeatingMPCController
 from .ground_temp import ground_temperature
-from .solar_model import room_solar_gains, room_solar_gains_from_exposure
+from .solar_model import (
+    room_solar_gains,
+    room_solar_gains_from_exposure,
+    horizontal_irradiance,
+)
 from . import solar_forecast as _solar_fc
 from .schedule import (
     EffectiveControlParams,
@@ -521,6 +525,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.solar_source: str = "analytical"
         self.ghi_now: Optional[float] = None
         self.ghi_forecast: List[Optional[float]] = []
+        # Effective GHI for display [W/m²]: the measured/forecast value when one
+        # is available, else the clear-sky model attenuated by cloud cover. This
+        # is always computable from the site location, so the overview's solar
+        # irradiance KPI never goes blank just because no irradiance sensor is
+        # configured.
+        self.ghi_now_effective: Optional[float] = None
 
         # Restore persisted estimated parameters so that identified values
         # survive a full Home Assistant restart (not just an in-memory reload).
@@ -1784,6 +1794,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "forecast" if ghi_forecast or ghi_now is not None
                 else "analytical"
             )
+            # Effective GHI for display: fall back to the modeled clear-sky GHI
+            # (cloud-attenuated) when no sensor value is available. Mirrors the
+            # intensity the analytical gains path uses, so the KPI and the gains
+            # tell a consistent story.
+            try:
+                self.ghi_now_effective = horizontal_irradiance(
+                    now, self._latitude, self._longitude,
+                    cloud_cover=cloud_cover_now, ghi=ghi_now,
+                )
+            except Exception:  # pragma: no cover - defensive; never block a cycle
+                self.ghi_now_effective = ghi_now
             self.solar_gains = {
                 name: self._room_solar_gain(
                     name, now, cloud_cover_now, ghi_now

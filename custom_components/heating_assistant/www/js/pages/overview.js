@@ -2,10 +2,14 @@ import { createGauge, updateGauge } from '../components/gauge.js';
 import { createRoomClimateTile } from '../components/room-climate-tile.js';
 import { createCountdown, updateCountdown } from '../components/countdown.js';
 import {
-  formatPercent, formatEnergy, formatTemperature, formatPower,
-  formatNumber, entityValue, entityAttr, systemEntity, modelFitLabel,
+  formatEnergy, formatTemperature, formatPercent, formatIrradiance,
+  entityValue, entityAttr, systemEntity, modelFitLabel,
   MAX_SOLVE_TIME_S,
 } from '../utils.js';
+
+// Sensor whose ``ghi_now_effective`` attribute carries the building-level solar
+// irradiance [W/m²] (measured/forecast when available, else modeled clear-sky).
+const SOLAR_STATUS_ENTITY = systemEntity('solar_radiation_status');
 
 export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';
@@ -15,9 +19,11 @@ export function renderOverview(container, rooms, state, connection, hass) {
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'grid-kpi';
 
-  const gauges = buildGauges(state, rooms);
+  const gauges = buildGauges(state, rooms, connection);
   gauges.forEach((g) => kpiGrid.appendChild(g.element));
 
+  // MPC load and the next-control countdown are operational/diagnostic, so they
+  // come last — after the metrics that describe the building's climate state.
   const countdown = createCountdown(state, false);
   kpiGrid.appendChild(countdown.element);
 
@@ -73,169 +79,221 @@ export function renderOverview(container, rooms, state, connection, hass) {
   };
 }
 
-function buildGauges(state, rooms) {
-  const mpcSolveTime = entityValue(state, systemEntity('mpc_performance'));
-  const mpcPercent = mpcSolveTime !== null ? (mpcSolveTime / MAX_SOLVE_TIME_S) * 100 : 0;
+function buildGauges(state, rooms, connection) {
+  const gauges = [];
 
-  const mpcGauge = createGauge({
-    value: mpcPercent,
-    min: 0,
-    max: 100,
-    label: 'MPC LOAD',
-    format: (v) => formatPercent(v),
-    severity: { good: 0, warning: 50, alarm: 80, inverse: true },
-  });
-
-  const outdoorValue = entityValue(state, systemEntity('outdoor_temperature_measured'));
+  // ── Outdoor temperature ────────────────────────────────────────────────────
+  const outdoorEntity = systemEntity('outdoor_temperature_measured');
   const outdoorGauge = createGauge({
-    value: outdoorValue ?? 0,
+    value: entityValue(state, outdoorEntity) ?? 0,
     min: -30,
     max: 40,
     label: 'OUTDOOR',
     format: formatTemperature,
     severity: { good: 5, warning: -5, alarm: -15 },
   });
+  gauges.push({
+    element: outdoorGauge,
+    updater: (s) => updateGauge(outdoorGauge, {
+      value: entityValue(s, outdoorEntity) ?? 0, min: -30, max: 40,
+      format: formatTemperature,
+      severity: { good: 5, warning: -5, alarm: -15 },
+    }),
+  });
 
-  const totalSolar = computeTotalSolar(state, rooms);
+  // ── Solar irradiance ─────────────────────────────────────────────────────────
+  // A building-level, location-only metric (W/m²) — "how strong is the sun" —
+  // rather than a sum of per-room window gains, which only makes sense per room.
+  // The backend always supplies an effective value (measured/forecast, else a
+  // modeled clear-sky value), so the card is only hidden if that value is
+  // genuinely unavailable (e.g. no site location).
   const solarGauge = createGauge({
-    value: totalSolar,
+    value: solarIrradiance(state) ?? 0,
     min: 0,
-    max: 5000,
-    label: 'SOLAR GAIN',
-    format: formatPower,
-    severity: { good: 1000, warning: 200, alarm: 0 },
+    max: 1000,
+    label: 'SOLAR',
+    format: formatIrradiance,
+    severity: { good: 400, warning: 100, alarm: 0 },
+  });
+  if (solarIrradiance(state) === null) solarGauge.style.display = 'none';
+  gauges.push({
+    element: solarGauge,
+    updater: (s) => {
+      const ghi = solarIrradiance(s);
+      solarGauge.style.display = ghi === null ? 'none' : '';
+      updateGauge(solarGauge, {
+        value: ghi ?? 0, min: 0, max: 1000,
+        format: formatIrradiance,
+        severity: { good: 400, warning: 100, alarm: 0 },
+      });
+    },
   });
 
-  const fitEval = computeOverallFit(state, rooms);
-  const fitGauge = createGauge({
-    value: fitEval.value,
-    min: 0,
-    max: 1,
-    label: 'MODEL FIT',
-    format: () => fitEval.label,
-    severity: { good: 0.8, warning: 0.5, alarm: 0 },
-  });
-
-  const dailyEnergy = computeDailyEnergy(state);
+  // ── Daily energy ─────────────────────────────────────────────────────────────
+  // Energy delivered since local midnight. The cumulative ``*_energy_total``
+  // sensors are TOTAL_INCREASING, so today's usage is current − value-at-midnight.
+  // The midnight baseline is fetched from HA history (see DailyEnergyTracker) so
+  // it is correct regardless of when the page is loaded and survives reloads.
+  const dailyEnergy = new DailyEnergyTracker(connection);
   const energyGauge = createGauge({
-    value: dailyEnergy,
+    value: 0,
     min: 0,
     max: 100,
     label: 'DAILY ENERGY',
-    format: () => formatEnergy(dailyEnergy),
+    format: () => formatEnergy(dailyEnergy.value()),
     severity: { good: 0, warning: 50, alarm: 80, inverse: true },
   });
-
-  return [
-    {
-      element: mpcGauge,
-      updater: (s) => {
-        const v = entityValue(s, systemEntity('mpc_performance'));
-        const pct = v !== null ? (v / MAX_SOLVE_TIME_S) * 100 : 0;
-        updateGauge(mpcGauge, {
-          value: pct, min: 0, max: 100,
-          format: (v) => formatPercent(v),
-          severity: { good: 0, warning: 50, alarm: 80, inverse: true },
-        });
-      },
-    },
-    {
-      element: outdoorGauge,
-      updater: (s) => {
-        const v = entityValue(s, systemEntity('outdoor_temperature_measured'));
-        updateGauge(outdoorGauge, {
-          value: v ?? 0, min: -30, max: 40,
-          format: formatTemperature,
-          severity: { good: 5, warning: -5, alarm: -15 },
-        });
-      },
-    },
-    {
-      element: solarGauge,
-      updater: (s) => {
-        const total = computeTotalSolar(s, rooms);
-        updateGauge(solarGauge, {
-          value: total, min: 0, max: 5000,
-          format: formatPower,
-          severity: { good: 1000, warning: 200, alarm: 0 },
-        });
-      },
-    },
-    {
-      element: energyGauge,
-      updater: (s) => {
-        const energy = computeDailyEnergy(s);
-        updateGauge(energyGauge, {
-          value: energy, min: 0, max: 100,
-          format: () => formatEnergy(energy),
-          severity: { good: 0, warning: 50, alarm: 80, inverse: true },
-        });
-      },
-    },
-    {
-      element: fitGauge,
-      updater: (s) => {
-        const fit = computeOverallFit(s, rooms);
-        updateGauge(fitGauge, {
-          value: fit.value, min: 0, max: 1,
-          format: () => fit.label,
-          severity: { good: 0.8, warning: 0.5, alarm: 0 },
-        });
-      },
-    },
-  ];
-}
-
-function computeTotalSolar(state, rooms) {
-  let total = 0;
-  for (const room of rooms) {
-    const entity = room.entities['solar_gain_measured'];
-    if (entity) {
-      const v = entityValue(state, entity);
-      if (v !== null) total += v;
-    }
+  dailyEnergy.init(state).then(() => paintEnergy(state));
+  function paintEnergy(s) {
+    dailyEnergy.observe(s);
+    updateGauge(energyGauge, {
+      value: dailyEnergy.value(), min: 0, max: 100,
+      format: () => formatEnergy(dailyEnergy.value()),
+      severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+    });
   }
-  return total;
+  gauges.push({ element: energyGauge, updater: paintEnergy });
+
+  // ── Model fit ──────────────────────────────────────────────────────────────
+  const initialFit = computeOverallFit(state, rooms);
+  const fitGauge = createGauge({
+    value: initialFit.value,
+    min: 0,
+    max: 1,
+    label: 'MODEL FIT',
+    format: () => initialFit.label,
+    severity: { good: 0.8, warning: 0.5, alarm: 0 },
+  });
+  gauges.push({
+    element: fitGauge,
+    updater: (s) => {
+      const fit = computeOverallFit(s, rooms);
+      updateGauge(fitGauge, {
+        value: fit.value, min: 0, max: 1,
+        format: () => fit.label,
+        severity: { good: 0.8, warning: 0.5, alarm: 0 },
+      });
+    },
+  });
+
+  // ── MPC load ─────────────────────────────────────────────────────────────────
+  const mpcEntity = systemEntity('mpc_performance');
+  const mpcPercent = (s) => {
+    const v = entityValue(s, mpcEntity);
+    return v !== null ? (v / MAX_SOLVE_TIME_S) * 100 : 0;
+  };
+  const mpcGauge = createGauge({
+    value: mpcPercent(state),
+    min: 0,
+    max: 100,
+    label: 'MPC LOAD',
+    format: (v) => formatPercent(v),
+    severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+  });
+  gauges.push({
+    element: mpcGauge,
+    updater: (s) => updateGauge(mpcGauge, {
+      value: mpcPercent(s), min: 0, max: 100,
+      format: (v) => formatPercent(v),
+      severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+    }),
+  });
+
+  return gauges;
 }
 
-function computeDailyEnergy(state) {
-  // Sum the cumulative kWh from all energy_total sensors (already the correct integral).
-  let cumulative = 0;
-  let anyValid = false;
-  for (const entityId of Object.keys(state)) {
-    if (entityId.startsWith('sensor.heating_assistant_') && entityId.endsWith('_energy_total')) {
-      const entity = state[entityId];
-      if (entity) {
-        const v = parseFloat(entity.state);
-        if (!isNaN(v)) {
-          cumulative += v;
-          anyValid = true;
+/** Building-level solar irradiance [W/m²] for display, or null when unavailable. */
+function solarIrradiance(state) {
+  const ghi = entityAttr(state, SOLAR_STATUS_ENTITY, 'ghi_now_effective');
+  const num = parseFloat(ghi);
+  return isNaN(num) ? null : num;
+}
+
+/** Entity ids of every cumulative heat-source energy-total sensor. */
+function energyTotalEntities(state) {
+  return Object.keys(state).filter(
+    (id) => id.startsWith('sensor.heating_assistant_') && id.endsWith('_energy_total')
+  );
+}
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Tracks energy delivered since local midnight across all ``*_energy_total``
+ * sensors. The per-entity baseline (cumulative kWh at midnight) is read from HA
+ * history so it is correct no matter when the dashboard was opened, then today's
+ * usage is computed from the live cumulative values without further fetches.
+ */
+class DailyEnergyTracker {
+  constructor(connection) {
+    this._connection = connection;
+    this._baselines = {}; // entityId → cumulative kWh at start of today
+    this._latest = {};     // entityId → most recent cumulative kWh
+    this._day = startOfToday().toDateString();
+    this._ready = false;
+  }
+
+  async init(state) {
+    const entities = energyTotalEntities(state);
+    if (entities.length === 0) { this._ready = true; return; }
+    const history = await this._connection.getHistorySince(entities, startOfToday());
+    for (const id of entities) {
+      const points = history?.[id];
+      // First recorded sample of the day is the cumulative total at (or just
+      // after) midnight; fall back to the current value (→ 0 used today) when
+      // history has no sample yet.
+      const firstVal = Array.isArray(points) && points.length > 0
+        ? parseFloat(points[0].s ?? points[0].state)
+        : entityValue(state, id);
+      if (firstVal !== null && !isNaN(firstVal)) this._baselines[id] = firstVal;
+    }
+    this._ready = true;
+    this.observe(state);
+  }
+
+  /** Refresh the cached live cumulative totals from a state snapshot. */
+  observe(state) {
+    // Roll the baseline over at midnight without needing a page reload.
+    const today = startOfToday().toDateString();
+    if (today !== this._day) {
+      this._day = today;
+      this._baselines = { ...this._latest };
+    }
+    for (const id of energyTotalEntities(state)) {
+      const v = entityValue(state, id);
+      if (v !== null) {
+        this._latest[id] = v;
+        // A sensor that appears after init (or reset below its baseline) seeds
+        // its own baseline so it never contributes a negative amount.
+        if (!(id in this._baselines) || v < this._baselines[id]) {
+          this._baselines[id] = v;
         }
       }
     }
   }
-  if (!anyValid) return 0;
 
-  // Subtract the cumulative total recorded at the start of today so the gauge
-  // reflects energy used since midnight rather than since the sensor was created.
-  const today = new Date().toDateString();
-  let stored = null;
-  try {
-    stored = JSON.parse(localStorage.getItem('ha_daily_energy_baseline') || 'null');
-  } catch (_) { /* ignore parse errors */ }
-
-  if (!stored || stored.date !== today) {
-    localStorage.setItem('ha_daily_energy_baseline', JSON.stringify({ date: today, value: cumulative }));
-    return 0;
+  /** Energy used since midnight [kWh]. */
+  value() {
+    let total = 0;
+    for (const id of Object.keys(this._latest)) {
+      const base = this._baselines[id];
+      if (base !== undefined) total += Math.max(0, this._latest[id] - base);
+    }
+    return total;
   }
-
-  return Math.max(0, cumulative - stored.value);
 }
 
 function computeOverallFit(state, rooms) {
+  // Evaluate the overall model on the MEAN R² across rooms, and derive the
+  // GOOD / ACCEPTABLE / POOR label from that same mean — so the bar fill and
+  // the label always describe the same quantity (previously the bar showed the
+  // average while the label reflected the single worst room).
   let sum = 0;
   let count = 0;
-  let worstR2 = 1;
 
   for (const room of rooms) {
     const entity = room.entities['model_fit_quality'];
@@ -244,12 +302,11 @@ function computeOverallFit(state, rooms) {
       if (v !== null) {
         sum += v;
         count++;
-        if (v < worstR2) worstR2 = v;
       }
     }
   }
 
   const avg = count > 0 ? sum / count : 0;
-  const fit = modelFitLabel(worstR2);
+  const fit = count > 0 ? modelFitLabel(avg) : { label: '—' };
   return { value: avg, label: fit.label };
 }

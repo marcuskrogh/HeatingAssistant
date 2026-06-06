@@ -5,18 +5,30 @@ import { createCountdown } from '../components/countdown.js';
 import { createScheduleOverview } from '../components/schedule-overview.js';
 import { getRoomScheduleData } from '../schedule-utils.js';
 import {
-  formatPower,
-  entityValue, entityAttr, systemEntity, modelFitLabel,
+  formatPower, formatTemperature, formatPrice,
+  entityValue, entityAttr, systemEntity,
 } from '../utils.js';
 
-// Model-fit gauge severity mirrors the overview page's MODEL FIT gauge so the
-// colour thresholds (GOOD / ACCEPTABLE / POOR) are identical across pages.
-const FIT_SEVERITY = { good: 0.8, warning: 0.5, alarm: 0 };
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
 const DEFAULT_MAX_POWER = 2000;
+// Outdoor-temperature gauge thresholds, matched to the overview page so the
+// colour bands are identical across surfaces.
+const OUTDOOR_SEVERITY = { good: 5, warning: -5, alarm: -15 };
+// Per-room solar-gain gauge span [W]; typical sunlit windows land well within.
+const DEFAULT_MAX_SOLAR = 1000;
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+
+/** Format the current electricity price with the unit the price entity reports
+ *  (currency/kWh), falling back to a bare number when no unit is available. */
+function formatPriceWithUnit(state, priceEntity) {
+  const value = entityValue(state, priceEntity);
+  const text = formatPrice(value);
+  if (text === '—') return text;
+  const unit = entityAttr(state, priceEntity, 'unit_of_measurement');
+  return unit ? `${text} ${unit}` : text;
+}
 
 /** Whether the room is currently off — the effective state published by the
  *  coordinator (covers both the user power toggle and an active off-schedule). */
@@ -36,6 +48,10 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   container.innerHTML = '';
 
+  // Tracks the freshest state snapshot; declared up-front because some gauge
+  // formatters (e.g. the price unit) read live attributes lazily on each paint.
+  let latestState = state;
+
   const nav = document.createElement('button');
   nav.className = 'nav-back';
   nav.innerHTML = '<span class="nav-back__arrow">\u2190</span> OVERVIEW';
@@ -49,8 +65,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   const tempVal = entityValue(state, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
   const powerVal = entityValue(state, room.entities['heating_power_measured']);
-  const fitVal = entityValue(state, room.entities['model_fit_quality']);
-  const fitInfo = modelFitLabel(fitVal);
   const setpointVal = entityValue(state, room.entities['setpoint']);
   const comfortLowerVal = entityValue(state, room.entities['constraint_lower']);
   const comfortUpperVal = entityValue(state, room.entities['constraint_upper']);
@@ -98,9 +112,16 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   container.appendChild(kpiGrid);
 
   // KPIs use the same gauge design as the overview page (label + value +
-  // severity bar) so the two overview surfaces share a common visual language.
-  // The metrics differ — here the room-level Power and Model Fit.
+  // severity bar). At room level these are the *current system values for this
+  // room* — heater power, energy price, outdoor temperature and solar gain —
+  // since indoor temperature / setpoint / comfort band already live on the
+  // climate card above. Model fit is an overall-model metric and lives only on
+  // the main overview.
   const powerBounds = { min: 0, max: DEFAULT_MAX_POWER };
+
+  const priceEntity = systemEntity('electricity_price');
+  const outdoorEntity = systemEntity('outdoor_temperature_measured');
+  const solarEntity = room.entities['solar_gain_measured'];
 
   const powerGauge = createGauge({
     value: powerVal,
@@ -110,21 +131,76 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     format: formatPower,
   });
 
-  const fitGauge = createGauge({
-    value: fitVal,
+  // Price bar spans the upcoming forecast range (filled in from getForecasts);
+  // until then it falls back to a 0-based unit scale. Cheaper = greener.
+  const priceBounds = { min: 0, max: 1 };
+  const priceGauge = createGauge({
+    value: entityValue(state, priceEntity) ?? 0,
+    min: priceBounds.min,
+    max: priceBounds.max,
+    label: 'ENERGY PRICE',
+    format: () => formatPriceWithUnit(latestState, priceEntity),
+  });
+  if (!(priceEntity in state)) priceGauge.style.display = 'none';
+
+  const outdoorGauge = createGauge({
+    value: entityValue(state, outdoorEntity) ?? 0,
+    min: -30,
+    max: 40,
+    label: 'OUTDOOR',
+    format: formatTemperature,
+    severity: OUTDOOR_SEVERITY,
+  });
+
+  const solarGauge = createGauge({
+    value: entityValue(state, solarEntity) ?? 0,
     min: 0,
-    max: 1,
-    label: 'MODEL FIT',
-    format: () => fitInfo.label,
-    severity: FIT_SEVERITY,
+    max: DEFAULT_MAX_SOLAR,
+    label: 'SOLAR GAIN',
+    format: formatPower,
+    severity: { good: 300, warning: 50, alarm: 0 },
   });
 
   kpiGrid.appendChild(powerGauge);
-  kpiGrid.appendChild(fitGauge);
+  kpiGrid.appendChild(priceGauge);
+  kpiGrid.appendChild(outdoorGauge);
+  kpiGrid.appendChild(solarGauge);
 
   function paintPowerGauge(value) {
     updateGauge(powerGauge, {
       value, min: powerBounds.min, max: powerBounds.max, format: formatPower,
+    });
+  }
+
+  function paintPriceGauge(value) {
+    // Hide the price KPI entirely when no price entity is configured (the
+    // backend then publishes no electricity-price sensor at all).
+    priceGauge.style.display = priceEntity in latestState ? '' : 'none';
+    // Colour cheaper prices green: position within the forecast range, inverted.
+    const span = priceBounds.max - priceBounds.min || 1;
+    updateGauge(priceGauge, {
+      value: value ?? 0, min: priceBounds.min, max: priceBounds.max,
+      format: () => formatPriceWithUnit(latestState, priceEntity),
+      severity: {
+        good: priceBounds.min + span / 3,
+        warning: priceBounds.min + (2 * span) / 3,
+        alarm: priceBounds.max,
+        inverse: true,
+      },
+    });
+  }
+
+  function paintOutdoorGauge(value) {
+    updateGauge(outdoorGauge, {
+      value: value ?? 0, min: -30, max: 40,
+      format: formatTemperature, severity: OUTDOOR_SEVERITY,
+    });
+  }
+
+  function paintSolarGauge(value) {
+    updateGauge(solarGauge, {
+      value: value ?? 0, min: 0, max: DEFAULT_MAX_SOLAR,
+      format: formatPower, severity: { good: 300, warning: 50, alarm: 0 },
     });
   }
 
@@ -185,15 +261,25 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // lastRunTs tracks the MPC solve timestamp; when it changes we know new
   // forecast data is available and re-fetch via the WS endpoint.
   const lastRunTs = { value: null };
-  loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, (roomForecast) => {
+  loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, (roomForecast, priceForecast) => {
     // The forecast carries this room's heating/cooling capacity — use it to
     // scale the power gauge so the bar reflects power as a fraction of capacity.
     if (roomForecast?.max_power != null) powerBounds.max = roomForecast.max_power;
     if (roomForecast?.max_cooling_power != null) powerBounds.min = -roomForecast.max_cooling_power;
     paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']));
+
+    // Span the price bar over the upcoming price range so the fill shows where
+    // the current price sits within the forecast horizon.
+    const prices = (priceForecast || []).map((p) => p.y).filter((y) => y != null);
+    const current = entityValue(latestState, priceEntity);
+    if (current != null) prices.push(current);
+    if (prices.length > 0) {
+      priceBounds.min = Math.min(...prices);
+      priceBounds.max = Math.max(...prices);
+    }
+    paintPriceGauge(current);
   });
 
-  let latestState = state;
   const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
 
   return {
@@ -202,8 +288,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
       const tv = entityValue(newState, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
       const pv = entityValue(newState, room.entities['heating_power_measured']);
-      const fv = entityValue(newState, room.entities['model_fit_quality']);
-      const fi = modelFitLabel(fv);
       const sp = entityValue(newState, room.entities['setpoint']);
       const cl = entityValue(newState, room.entities['constraint_lower']);
       const cu = entityValue(newState, room.entities['constraint_upper']);
@@ -214,9 +298,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
         comfortLower: cl, comfortUpper: cu, off,
       });
       paintPowerGauge(pv);
-      updateGauge(fitGauge, {
-        value: fv, min: 0, max: 1, format: () => fi.label, severity: FIT_SEVERITY,
-      });
+      paintPriceGauge(entityValue(newState, priceEntity));
+      paintOutdoorGauge(entityValue(newState, outdoorEntity));
+      paintSolarGauge(entityValue(newState, solarEntity));
 
       // Keep the schedule overview in sync with any toggle/save that triggered
       // this state update.
@@ -277,11 +361,13 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const priceHistory = appendCurrentValue(historyToDataPoints(history[priceEntity]), state, priceEntity);
 
   const roomForecast = forecasts.rooms?.[room.slug];
-  if (onPowerBounds) onPowerBounds(roomForecast);
 
   const forecastData = roomForecast?.forecast || [];
   const priceForecastData = forecasts.price_forecast || [];
   const priceForecast = forecastToDataPoints(priceForecastData, 'price');
+
+  // Hand the room capacity and the price-forecast range to the KPI gauges.
+  if (onPowerBounds) onPowerBounds(roomForecast, priceForecast);
 
   const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
   const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');

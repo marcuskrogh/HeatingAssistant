@@ -2406,6 +2406,12 @@ class SolarRadiationStatusSensor(_LiveValueSensorMixin, CoordinatorEntity, Senso
             ),
             "active_source": getattr(self._coordinator, "solar_source", "analytical"),
             "ghi_now": getattr(self._coordinator, "ghi_now", None),
+            # Effective GHI used by the overview's solar-irradiance KPI: the
+            # measured/forecast value when present, else the modeled clear-sky
+            # value. Always populated when a site location is known.
+            "ghi_now_effective": getattr(
+                self._coordinator, "ghi_now_effective", None
+            ),
             "ghi_forecast": list(
                 getattr(self._coordinator, "ghi_forecast", []) or []
             ),
