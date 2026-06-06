@@ -289,3 +289,112 @@ def test_event_handler_reopen_during_settle_cancels_timer_and_reverts(monkeypatc
     assert coord.get_window_state("living_room") == "open"
     settle_cancel.assert_called_once()
     assert len(timers) == 2  # no fresh debounce timer was armed
+
+
+def test_event_handler_full_multi_window_walkthrough(monkeypatch):
+    """End-to-end trace of the documented multi-window behaviour for one room
+    with two windows.  Mirrors the consistent logic table exactly."""
+    import custom_components.heating_assistant.coordinator as coord_mod
+
+    timers: list = []
+
+    def fake_call_later(hass, delay, cb):
+        rec = {"delay": delay, "cb": cb, "active": True}
+        cancel = MagicMock(side_effect=lambda: rec.update(active=False))
+        rec["cancel"] = cancel
+        timers.append(rec)
+        return cancel
+
+    captured: dict = {}
+
+    def fake_track(hass, ids, listener):
+        captured["listener"] = listener
+        return MagicMock()
+
+    monkeypatch.setattr(coord_mod, "async_call_later", fake_call_later)
+    monkeypatch.setattr(coord_mod, "async_track_state_change_event", fake_track)
+
+    W1, W2 = "binary_sensor.w1", "binary_sensor.w2"
+    states = {W1: "off", W2: "off"}
+    coord = object.__new__(HeatingAssistantCoordinator)
+    coord.hass = _FakeHass(states)
+    coord._window_sensors = {"lr": [W1, W2]}
+    coord._window_state = {"lr": "closed"}
+    coord._window_state_since = {}
+    coord._window_open_debounce = 60.0
+    coord._window_open_close_settle = 30.0
+
+    coord.setup_window_listeners()
+    listener = captured["listener"]
+
+    def fire(sensor: str, new_open: bool):
+        old = states[sensor]
+        states[sensor] = "on" if new_open else "off"
+        listener(SimpleNamespace(data={
+            "entity_id": sensor,
+            "new_state": SimpleNamespace(state=states[sensor]),
+            "old_state": SimpleNamespace(state=old),
+        }))
+
+    def active():
+        return [t for t in timers if t["active"]]
+
+    def state():
+        return coord.get_window_state("lr")
+
+    # All windows start closed.
+    assert state() == "closed"
+
+    # 1) Open W1 -> timer starts (pending_open).
+    fire(W1, True)
+    assert state() == "pending_open"
+    assert [t["delay"] for t in active()] == [60.0]
+    debounce = active()[0]
+
+    # 2) Open W2 -> timer keeps running, no reset, nothing else.
+    fire(W2, True)
+    assert state() == "pending_open"
+    assert active() == [debounce]
+
+    # 3) Close W1 (W2 still open) -> timer continues unchanged.
+    fire(W1, False)
+    assert state() == "pending_open"
+    assert active() == [debounce]
+
+    # 4) Debounce timer finishes -> open window state (heater off, MPC keeps running).
+    debounce["cb"]()
+    debounce["active"] = False  # a fired timer is no longer pending
+    assert state() == "open"
+
+    # 5) Open another window (W1) -> nothing happens, stay open.
+    fire(W1, True)
+    assert state() == "open"
+    assert active() == []
+
+    # 6) Close one of the two open windows (W2, W1 still open) -> nothing happens.
+    fire(W2, False)
+    assert state() == "open"
+    assert active() == []
+
+    # 7) Close the final open window (all closed) -> settle timer starts (pending_closed).
+    fire(W1, False)
+    assert state() == "pending_closed"
+    assert [t["delay"] for t in active()] == [30.0]
+    settle1 = active()[0]
+
+    # 8) Open a window -> settle timer stops, stay in open window state.
+    fire(W1, True)
+    assert state() == "open"
+    assert settle1["active"] is False  # settle cancelled
+    assert active() == []  # and no fresh timer armed
+
+    # 9) Close window again (all closed) -> fresh settle timer starts (pending_closed).
+    fire(W1, False)
+    assert state() == "pending_closed"
+    assert [t["delay"] for t in active()] == [30.0]
+    settle2 = active()[0]
+    assert settle2 is not settle1
+
+    # 10) Settle timer finishes -> closed window state (heater on at latest MPC actuation).
+    settle2["cb"]()
+    assert state() == "closed"
