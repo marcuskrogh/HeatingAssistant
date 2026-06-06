@@ -1,4 +1,4 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay } from '../schedule-utils.js';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData } from '../schedule-utils.js';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -15,15 +15,7 @@ export function renderSchedules(container, rooms, state, connection, hass, slug)
 // ---------------------------------------------------------------------------
 
 /** Robust lookup: tries slug, name, and case-insensitive normalised match. */
-function getScheduleDataForRoom(roomSchedules, room) {
-  if (roomSchedules[room.slug]) return roomSchedules[room.slug];
-  if (roomSchedules[room.name]) return roomSchedules[room.name];
-  const slug = room.slug.toLowerCase();
-  for (const key of Object.keys(roomSchedules)) {
-    if (key.toLowerCase().replace(/\s+/g, '_') === slug) return roomSchedules[key];
-  }
-  return null;
-}
+const getScheduleDataForRoom = getRoomScheduleData;
 
 /** Renders a single period summary row element. */
 function makePeriodRow(p, isActive) {

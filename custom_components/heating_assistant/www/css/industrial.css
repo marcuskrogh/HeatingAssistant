@@ -318,6 +318,12 @@
   gap: 24px;
 }
 
+/* Schedule overview block on the room-detail page — spaces the schedule card
+   off from the KPI grid above and the charts below. */
+.room-schedule-overview {
+  margin-bottom: 24px;
+}
+
 /* Card Base */
 .card {
   background: var(--bg-card);
