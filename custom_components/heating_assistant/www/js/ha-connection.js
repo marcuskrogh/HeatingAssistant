@@ -73,6 +73,24 @@ export class HaConnection {
     }
   }
 
+  async getHistorySince(entityIds, start) {
+    const now = new Date();
+    try {
+      const result = await this._hass.callWS({
+        type: 'history/history_during_period',
+        start_time: start.toISOString(),
+        end_time: now.toISOString(),
+        entity_ids: entityIds,
+        minimal_response: true,
+        significant_changes_only: false,
+      });
+      return result;
+    } catch (e) {
+      console.warn('History-since fetch failed:', e);
+      return {};
+    }
+  }
+
   async subscribe(callback) {
     const unsub = await this._hass.connection.subscribeEvents(
       callback,
