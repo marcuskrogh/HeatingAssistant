@@ -305,6 +305,9 @@ class _StoreStub:
     async def async_load(self):
         return None
 
+    def async_delay_save(self, data_func, delay=0):
+        pass
+
 
 _storage_mod = sys.modules["homeassistant.helpers.storage"]
 _storage_mod.Store = _StoreStub  # type: ignore[attr-defined]

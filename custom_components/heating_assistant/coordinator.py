@@ -23,6 +23,7 @@ import numpy as np
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -143,6 +144,8 @@ from .const import (
     DOMAIN,
     ESTIMATION_HISTORY_SIZE,
     HISTORY_BUFFER_SIZE,
+    CLOUD_SMOOTHING_TAU_S,
+    RUNTIME_STATE_SAVE_DELAY_S,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
     SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
@@ -774,6 +777,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Current cloud-cover fraction in [0, 1], or None when unavailable;
         # used to attenuate the clear-sky solar model.
         self.cloud_cover: Optional[float] = None
+        # Low-pass (EMA) state of the cloud cover.  The weather entity reports an
+        # instantaneous value that can jump between cycles and is often
+        # unavailable on the first cycle after a restart; the filtered value
+        # keeps the solar attenuation continuous and is persisted across
+        # restarts so the first post-restart cycle does not spike.
+        self._cloud_cover_filtered: Optional[float] = None
+        self._runtime_state_loaded: bool = False
+        self._runtime_store: Store = Store(
+            hass, version=1, key=f"{DOMAIN}_runtime_{entry.entry_id}"
+        )
         self.outdoor_temp: Optional[float] = None
         # Last valid outdoor temperature reading.  When outdoor_temp is
         # transiently None (entity unavailable mid-run) this value is used as a
@@ -871,6 +884,55 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     def history_buffer(self) -> deque:
         """Return a view of the rolling observation history buffer."""
         return self._history_buffer
+
+    # ------------------------------------------------------------------
+    # Cloud-cover smoothing & runtime-state persistence
+    # ------------------------------------------------------------------
+    async def _ensure_runtime_state_loaded(self) -> None:
+        """Load persisted smoothed runtime weather state once, on first use.
+
+        Seeds the cloud-cover EMA from the value saved by the previous session
+        so the first cycle after a restart attenuates the solar model instead of
+        emitting an unattenuated clear-sky spike.
+        """
+        if self._runtime_state_loaded:
+            return
+        self._runtime_state_loaded = True
+        try:
+            data = await self._runtime_store.async_load()
+        except Exception:  # pragma: no cover - defensive; never block a cycle
+            data = None
+        if isinstance(data, dict) and self._cloud_cover_filtered is None:
+            cc = data.get("cloud_cover_filtered")
+            if cc is not None:
+                try:
+                    self._cloud_cover_filtered = max(0.0, min(1.0, float(cc)))
+                except (TypeError, ValueError):
+                    pass
+
+    def _smooth_cloud_cover(self, cc_obs: Optional[float]) -> Optional[float]:
+        """Exponentially smooth the live cloud-cover observation.
+
+        Clouds change gradually, so the instantaneous weather reading is
+        low-pass filtered with a ``CLOUD_SMOOTHING_TAU_S`` time constant.  The
+        EMA is seeded on the first valid observation (no startup transient).
+        When the observation is missing (entity briefly unavailable) the last
+        filtered value is held rather than reverting to an unattenuated model.
+        """
+        self._cloud_cover_filtered = _weather.smooth_cloud_cover_step(
+            self._cloud_cover_filtered, cc_obs, self.dt, CLOUD_SMOOTHING_TAU_S
+        )
+        return self._cloud_cover_filtered
+
+    def _save_runtime_state(self) -> None:
+        """Persist the smoothed cloud cover (throttled) so it survives restarts."""
+        try:
+            self._runtime_store.async_delay_save(
+                lambda: {"cloud_cover_filtered": self._cloud_cover_filtered},
+                RUNTIME_STATE_SAVE_DELAY_S,
+            )
+        except Exception:  # pragma: no cover - defensive; never block a cycle
+            pass
 
     @property
     def estimated_params_snapshot(self) -> Optional[Dict[str, Any]]:
@@ -1753,8 +1815,21 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # 2c. Read weather forecast for outdoor temperature prediction
             #     and cloud-cover (used to attenuate the clear-sky solar model)
             outdoor_forecast = await self._async_read_weather_forecast()
-            cloud_cover_now = self._read_cloud_cover_now()
+            await self._ensure_runtime_state_loaded()
+            # Low-pass the live cloud cover so the solar attenuation is
+            # continuous and robust to the weather entity being briefly
+            # unavailable right after a restart (which previously produced an
+            # unattenuated clear-sky spike on the first cycle).
+            cloud_cover_raw = self._read_cloud_cover_now()
+            cloud_cover_now = self._smooth_cloud_cover(cloud_cover_raw)
+            # Anchor the forecast on the smoothed current value so the current
+            # solar gain and its forecast transition continuously into each other.
             cloud_forecast = await self._async_read_cloud_forecast(cloud_cover_now=cloud_cover_now)
+            # Cold-start fallback: with no live reading and no persisted EMA,
+            # adopt the first forecast value rather than an unattenuated model.
+            if cloud_cover_now is None and cloud_forecast:
+                cloud_cover_now = max(0.0, min(1.0, float(cloud_forecast[0])))
+                self._cloud_cover_filtered = cloud_cover_now
 
             # 2c'. Read the optional solar forecast and derive a GHI series.
             #      When no entity is configured (or it is unavailable / stale /
@@ -1829,6 +1904,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 )
                 for name in self.model.room_names
             }
+            # Persist the smoothed cloud cover so the next restart seeds from it.
+            self._save_runtime_state()
 
             # 4. Run MPC controller
             # Collect heat sources whose rooms are currently off so the
