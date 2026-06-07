@@ -742,3 +742,32 @@ update_room_schedule:
           start: "22:00"
           end: "06:00"
           frost_protection: 12.0
+
+set_room_comfort_offset:
+  name: Set room comfort offset
+  description: >
+    Set the default comfort-band half-width (symmetric ±offset around the
+    setpoint) for a single room. Called from the dashboard climate cards so the
+    comfort corridor can be widened or narrowed without editing a schedule. The
+    change is applied to the live model immediately and persisted to the config
+    entry. A schedule period with its own comfort_offset still overrides this
+    default while that period is active.
+  fields:
+    room_name:
+      name: Room name
+      description: Name or slug of the room (must match a configured room).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    comfort_offset:
+      name: Comfort offset
+      description: Symmetric comfort-band half-width around the setpoint.
+      required: true
+      example: 2.0
+      selector:
+        number:
+          min: 0.1
+          max: 5.0
+          step: 0.1
+          unit_of_measurement: "°C"

@@ -2114,6 +2114,71 @@
   color: var(--text-dim);
 }
 
+/* ── Comfort-band stepper:  COMFORT BAND  −  ±X.X°  + ──
+   A secondary control below the main setpoint stepper that widens / narrows
+   the comfort corridor (setpoint ± offset).  Kept visually lighter than the
+   primary TARGET control so the setpoint stays the focal point. */
+.climate-card__comfort {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.climate-card__comfort-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  margin-right: 2px;
+}
+
+.climate-card__offset-step {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: border-color var(--transition), color var(--transition),
+              background var(--transition);
+}
+
+.climate-card__offset-step:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.climate-card__offset-step:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.climate-card__offset-step:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.climate-card__offset-value {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1;
+  min-width: 52px;
+  text-align: center;
+}
+
 /* ── Comfort-corridor track: target centred, current temp marker slides ── */
 .climate-card__track {
   position: relative;
@@ -2286,6 +2351,7 @@
 }
 
 .climate-card--off .climate-card__control,
+.climate-card--off .climate-card__comfort,
 .climate-card--off .climate-card__track,
 .climate-card--off .climate-card__track-scale {
   display: none;

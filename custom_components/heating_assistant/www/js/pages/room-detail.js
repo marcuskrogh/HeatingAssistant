@@ -92,6 +92,16 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
         // Service call failed; the display self-corrects on the next state update.
       }
     },
+    onComfortOffsetChange: async (newOffset) => {
+      try {
+        await hass.callService('heating_assistant', 'set_room_comfort_offset', {
+          room_name: roomSlug,
+          comfort_offset: newOffset,
+        });
+      } catch (err) {
+        // Service call failed; the display self-corrects on the next state update.
+      }
+    },
     onPowerToggle: async (turnOff) => {
       try {
         await hass.callService('climate', turnOff ? 'turn_off' : 'turn_on', {

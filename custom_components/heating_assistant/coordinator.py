@@ -36,6 +36,7 @@ from .const import (
     CONF_ESTIMATED_PARAMS,
     CONF_PERSISTED_SETPOINTS,
     CONF_PERSISTED_SCHEDULES,
+    CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_TRACKING_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -678,6 +679,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if room_name in self._base_setpoint:
                 self._base_setpoint[room_name] = float(value)
                 self.model.rooms[room_name].setpoint = float(value)
+
+        # Overlay with user-modified comfort offsets persisted across restarts.
+        persisted_offsets: Dict[str, Any] = self._entry.data.get(
+            CONF_PERSISTED_COMFORT_OFFSETS, {}
+        )
+        for room_name, value in persisted_offsets.items():
+            if room_name in self._room_comfort_offset:
+                self._room_comfort_offset[room_name] = float(value)
+                self.model.rooms[room_name].comfort_offset = float(value)
 
         # Overlay with user-modified schedules persisted across restarts.
         persisted_schedules: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_SCHEDULES, {})
@@ -3224,6 +3234,40 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if room_name in self._base_setpoint:
             return self._base_setpoint[room_name]
         return self.get_room_setpoint(room_name)
+
+    def set_room_comfort_offset(self, room_name: str, comfort_offset: float) -> None:
+        """Update the default comfort-band half-width (°C) for a room.
+
+        Mirrors :meth:`set_room_setpoint`: the value becomes the room's
+        default comfort offset — the symmetric ±band around the setpoint the
+        controller keeps the room inside — used whenever no schedule period
+        overrides it.  It is applied to the live model immediately (so the
+        controller corridor updates on the next plan) and persisted so the
+        choice survives HA restarts.  When a schedule period is currently
+        active with its own ``comfort_offset`` the live value still reverts to
+        the schedule on the next coordinator tick, exactly like the setpoint.
+        """
+        if room_name not in self.model.rooms:
+            return
+        value = float(comfort_offset)
+        self._room_comfort_offset[room_name] = value
+        self.model.rooms[room_name].comfort_offset = value
+        # Rebuild the controller so the widened/narrowed corridor takes effect.
+        self._build_controller()
+        # Persist so the offset survives HA restarts (same pattern as setpoints).
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={
+                    **dict(real_entry.data),
+                    CONF_PERSISTED_COMFORT_OFFSETS: dict(self._room_comfort_offset),
+                },
+            )
+
+    def get_room_comfort_offset(self, room_name: str) -> float:
+        """Return the default comfort-band half-width [°C] for a room."""
+        return self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
 
     # ------------------------------------------------------------------
     # System-level enable/disable
