@@ -790,8 +790,24 @@ def compute_open_loop_predictions(
 
     n_segments = 0
 
-    for start in range(0, len(history) - segment_length, segment_length):
-        seg = history[start: start + segment_length]
+    # Split the history into contiguous runs at restart gaps so a segment never
+    # straddles a dead interval: free-running the model across a multi-hour (or
+    # multi-day) gap with stale held inputs would otherwise produce a large
+    # spurious error spike.  Each run is independently divided into fixed-length
+    # open-loop segments.
+    # The final stride covers the trailing records too (a partial last segment)
+    # so the most recent samples are not dropped from the plot — previously up to
+    # ``segment_length - 1`` of the newest points were silently discarded.
+    from .history_window import split_contiguous_runs
+
+    segments = [
+        run[s: s + segment_length]
+        for run in split_contiguous_runs(history, dt)
+        for s in range(0, max(1, len(run) - 1), segment_length)
+    ]
+    for seg in segments:
+        if len(seg) < 2:
+            continue
         y0 = seg[0].get("y", [])
         if len(y0) < n:
             continue

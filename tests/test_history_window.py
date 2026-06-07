@@ -1,132 +1,229 @@
 """
-Tests for active-time history-window selection across restart gaps.
+Tests for history-window selection, contiguous-run splitting, and stale-record
+pruning used by the identification diagnostics.
 
-The identification diagnostics (EKF reconstruction and open-loop simulation)
-must keep working across short system restarts: a gap in the history buffer
-should be bridged by the continuous-time model rather than truncating the
-usable data to whatever was recorded *after* the most recent restart.
+The window is wall-clock: every record within ``horizon`` of the most recent
+record is included.  This guards two failure modes:
+
+* A short restart gap must NOT truncate the window — data on both sides is
+  within the horizon and is kept (the continuous-time model bridges the gap).
+* The window must never reach further back than ``horizon`` — a previous
+  operating session weeks earlier (sitting in the same count-bounded buffer)
+  must never be pulled in, so the chart never renders "sporadic points spread
+  over several weeks".
 """
 
 import numpy as np
 
 from custom_components.heating_assistant.history_window import (
     DEFAULT_MAX_GAP_FACTOR,
+    prune_stale_records,
     select_recent_window,
+    split_contiguous_runs,
 )
 
 
-def _regular(n, dt=900.0, t0=1000.0):
+def _regular(n, dt=900.0, t0=1_000_000.0):
     return [{"timestamp": t0 + dt * i} for i in range(n)]
 
 
 # ---------------------------------------------------------------------------
-# select_recent_window
+# select_recent_window — basics
 # ---------------------------------------------------------------------------
 
 def test_empty_and_singleton():
-    assert select_recent_window([], 3600.0, 900.0) == []
+    assert select_recent_window([], 3600.0) == []
     one = [{"timestamp": 5.0}]
-    assert select_recent_window(one, 3600.0, 900.0) == one
+    assert select_recent_window(one, 3600.0) == one
 
 
 def test_non_positive_horizon_returns_all():
     h = _regular(50)
-    assert select_recent_window(h, 0.0, 900.0) == h
-    assert select_recent_window(h, -1.0, 900.0) == h
+    assert select_recent_window(h, 0.0) == h
+    assert select_recent_window(h, -1.0) == h
 
 
-def test_regular_data_matches_wall_clock():
-    """With no gaps the active-time window equals the wall-clock window:
-    ~horizon/dt steps (inclusive of the anchor sample)."""
+def test_regular_data_is_exactly_wall_clock():
     dt = 900.0
-    h = _regular(200, dt=dt)
-    w = select_recent_window(h, 6 * 3600.0, dt)   # 24 steps
-    assert 24 <= len(w) <= 26
+    h = _regular(500, dt=dt)                         # ~5.2 days
+    w = select_recent_window(h, 24 * 3600.0)         # last 24 h
+    span = (w[-1]["timestamp"] - w[0]["timestamp"]) / 3600.0
+    assert span <= 24.0
+    # 24 h at 15-min spacing is 96 intervals → 96 or 97 inclusive samples.
+    assert 96 <= len(w) <= 97
     assert w[-1] is h[-1]
 
 
-def test_short_horizon_not_regressed():
-    """A short horizon must still select only a few of the most recent steps
-    (regression guard for the earlier short-horizon fix)."""
+def test_short_horizon():
     dt = 900.0
     h = _regular(200, dt=dt)
-    w = select_recent_window(h, 0.5 * 3600.0, dt)  # 2 steps
-    assert 2 <= len(w) <= 4
+    w = select_recent_window(h, 0.5 * 3600.0)        # 30 min
+    assert 2 <= len(w) <= 3
 
 
-def test_restart_gap_does_not_consume_budget():
-    """A restart gap inside the requested horizon must NOT shrink the window to
-    just the post-restart samples — the gap is bridged for ~one step's cost."""
+# ---------------------------------------------------------------------------
+# Short restart gap is bridged; large epoch gap is excluded
+# ---------------------------------------------------------------------------
+
+def test_short_restart_gap_is_bridged():
+    """A few-minutes restart (one or two missed samples) must keep data on both
+    sides of the gap as long as it falls within the horizon."""
     dt = 900.0
-    pre = _regular(40, dt=dt)                       # 10 h before restart
-    gap_start = pre[-1]["timestamp"] + 4 * 3600.0   # 4 h outage
+    pre = _regular(80, dt=dt)                          # 20 h of data
+    gap_start = pre[-1]["timestamp"] + 30 * 60.0       # 30-min interruption
     post = [{"timestamp": gap_start + dt * i} for i in range(8)]  # 2 h after
     history = pre + post
 
-    # Naive wall-clock selection keeps only the couple of boundary samples
-    # before the gap (the 4 h outage swallows the 6 h budget).
-    cutoff = history[-1]["timestamp"] - 6 * 3600.0
-    naive_pre = len([h for h in history
-                     if h["timestamp"] >= cutoff and h["timestamp"] < gap_start])
-    assert naive_pre <= 2
-
-    # Active-time selection spans the gap and keeps plenty of pre-restart data.
-    w = select_recent_window(history, 6 * 3600.0, dt)
-    pre_count = len([h for h in w if h["timestamp"] < gap_start])
-    assert pre_count >= 5, f"only {pre_count} pre-restart samples retained"
-    assert pre_count > naive_pre
+    w = select_recent_window(history, 24 * 3600.0)     # 24 h covers both sides
+    pre_count = len([h for h in w if h["timestamp"] <= pre[-1]["timestamp"]])
+    post_count = len([h for h in w if h["timestamp"] >= gap_start])
+    assert pre_count >= 5 and post_count == 8, (
+        f"restart not bridged: {pre_count} pre / {post_count} post"
+    )
 
 
-def test_small_interval_discrepancy_is_bridged():
-    """Small sample-interval jitter (below the gap factor) is counted normally,
-    so the window is not distorted by minor timing noise."""
+def test_large_epoch_gap_is_excluded_by_horizon():
+    """The user scenario: a previous session weeks ago shares the buffer with a
+    dense recent session.  A 24 h request must stay within the recent session."""
     dt = 900.0
-    rng = np.random.default_rng(0)
-    ts = 1000.0
-    history = []
-    for _ in range(200):
-        history.append({"timestamp": ts})
-        ts += dt * (1.0 + 0.1 * rng.standard_normal())  # ±10 % jitter
-    w = select_recent_window(history, 6 * 3600.0, dt)
-    assert 22 <= len(w) <= 28
+    old = [{"timestamp": 1_000_000.0 + 3600.0 * i} for i in range(30)]
+    recent_t0 = old[-1]["timestamp"] + 21 * 24 * 3600.0
+    recent = [{"timestamp": recent_t0 + dt * i} for i in range(192)]  # 48 h
+    history = old + recent
+
+    w = select_recent_window(history, 24 * 3600.0)
+    assert all(h["timestamp"] >= recent_t0 for h in w), "epoch leak into old data"
+    span_hours = (w[-1]["timestamp"] - w[0]["timestamp"]) / 3600.0
+    assert span_hours <= 24.0, f"window spans {span_hours:.1f} h"
+    assert 96 <= len(w) <= 97
+
+
+def test_sparse_uniform_data_does_not_overspan():
+    """Even if recording were uniformly sparse (large but regular intervals), a
+    24 h window must still span at most 24 h — never weeks."""
+    dt = 4 * 3600.0  # pathological: one sample every 4 h
+    h = _regular(200, dt=dt)
+    w = select_recent_window(h, 24 * 3600.0)
+    span = (w[-1]["timestamp"] - w[0]["timestamp"]) / 3600.0
+    assert span <= 24.0
+
+
+def test_non_monotonic_timestamps_are_normalised():
+    dt = 900.0
+    h = _regular(50, dt=dt)
+    shuffled = [h[i] for i in [3, 1, 0, 2]] + h[4:]
+    shuffled.append(dict(h[10]))                       # duplicate timestamp
+    w = select_recent_window(shuffled, 24 * 3600.0)
+    times = [r["timestamp"] for r in w]
+    assert times == sorted(times)
+    assert len(times) == len(set(times))
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: EKF reconstruction spans a restart gap
+# split_contiguous_runs
 # ---------------------------------------------------------------------------
 
-def test_ekf_reconstruction_uses_pre_restart_data():
-    from custom_components.heating_assistant.controller import HouseThermalSDE  # noqa: F401
-    from custom_components.heating_assistant.thermal_model import HouseModel, Room
-    from custom_components.heating_assistant.heat_sources import ElectricHeater
-    from custom_components.heating_assistant.sysid import run_sysid_ekf
+def test_split_no_gap_single_run():
+    runs = split_contiguous_runs(_regular(50), 900.0)
+    assert len(runs) == 1 and len(runs[0]) == 50
 
+
+def test_split_at_gap():
     dt = 900.0
-    room = Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0)
-    model = HouseModel([room])
-    heater = ElectricHeater("h", "studio", 3000.0)
+    a = _regular(20, dt=dt)
+    b = [{"timestamp": a[-1]["timestamp"] + 5 * 3600.0 + dt * i} for i in range(15)]
+    runs = split_contiguous_runs(a + b, dt)
+    assert [len(r) for r in runs] == [20, 15]
 
-    history = []
-    ts = 1000.0
-    for i in range(40):
-        history.append({"y": [20.0 + 0.01 * i], "u": [0.3], "d_outdoor": 5.0,
-                        "d_solar": {"studio": 50.0}, "timestamp": ts})
-        ts += dt
-    ts += 4 * 3600.0          # restart gap
-    restart_ts = ts
-    for i in range(8):
-        history.append({"y": [21.0 + 0.01 * i], "u": [0.3], "d_outdoor": 5.0,
-                        "d_solar": {"studio": 50.0}, "timestamp": ts})
-        ts += dt
 
-    horizon_steps = int(6 * 3600.0 / dt)   # 6 h horizon (< distance to restart)
-    res = run_sysid_ekf(history, model, [heater], ["studio"], dt,
-                        horizon_steps=horizon_steps, room_params={},
-                        sigma_w=0.1, sigma_v=0.5)
-    sim = res["per_room"]["studio"]["simulation"]
-    pre = [s for s in sim if s["time"] < restart_ts]
-    assert len(pre) >= 5, "reconstruction ignored pre-restart history"
+# ---------------------------------------------------------------------------
+# prune_stale_records
+# ---------------------------------------------------------------------------
+
+def test_prune_drops_old_keeps_recent():
+    now = 10_000_000.0
+    recs = [
+        {"timestamp": now - 40 * 24 * 3600.0},
+        {"timestamp": now - 3 * 24 * 3600.0},
+        {"timestamp": now - 3600.0},
+    ]
+    kept = prune_stale_records(recs, now, max_age_seconds=5 * 24 * 3600.0)
+    assert len(kept) == 2
+
+
+def test_prune_non_positive_age_is_noop():
+    recs = _regular(5)
+    assert prune_stale_records(recs, 0.0, 0.0) == recs
 
 
 def test_gap_factor_constant_sane():
     assert DEFAULT_MAX_GAP_FACTOR > 1.0
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: EKF reconstruction and open-loop agree and stay within 24 h
+# ---------------------------------------------------------------------------
+
+def _make_system(dt):
+    from custom_components.heating_assistant.controller import HouseThermalSDE
+    from custom_components.heating_assistant.thermal_model import HouseModel, Room
+    from custom_components.heating_assistant.heat_sources import ElectricHeater
+
+    room = Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0)
+    model = HouseModel([room])
+    heater = ElectricHeater("h", "studio", 3000.0)
+    return model, heater, HouseThermalSDE(model, [heater], dt)
+
+
+def _scenario_history(dt):
+    """Old 3-week-ago session + dense recent 48 h of 15-min data."""
+    history = []
+    t = 1_000_000.0
+    for i in range(30):
+        history.append({"y": [19.0], "u": [0.2], "d_outdoor": 4.0,
+                        "d_solar": {"studio": 0.0}, "timestamp": t + 3600.0 * i})
+    t = history[-1]["timestamp"] + 21 * 24 * 3600.0
+    for i in range(192):
+        history.append({"y": [20.0 + 0.01 * (i % 20)], "u": [0.3], "d_outdoor": 5.0,
+                        "d_solar": {"studio": 50.0}, "timestamp": t + dt * i})
+    return history, t
+
+
+def test_ekf_reconstruction_stays_in_recent_24h():
+    from custom_components.heating_assistant.sysid import run_sysid_ekf
+
+    dt = 900.0
+    model, heater, _ = _make_system(dt)
+    history, recent_t0 = _scenario_history(dt)
+
+    horizon_steps = int(24 * 3600.0 / dt)
+    res = run_sysid_ekf(history, model, [heater], ["studio"], dt,
+                        horizon_steps=horizon_steps, room_params={},
+                        sigma_w=0.1, sigma_v=0.5)
+    sim = res["per_room"]["studio"]["simulation"]
+    assert sim
+    assert all(s["time"] >= recent_t0 for s in sim)
+    span = (sim[-1]["time"] - sim[0]["time"]) / 3600.0
+    assert span <= 24.0, f"reconstruction spans {span:.1f} h"
+
+
+def test_open_loop_stays_in_recent_24h_and_keeps_latest():
+    from custom_components.heating_assistant.model_diagnostics import (
+        compute_open_loop_predictions,
+    )
+
+    dt = 900.0
+    _, _, system = _make_system(dt)
+    history, recent_t0 = _scenario_history(dt)
+
+    window = select_recent_window(history, 24 * 3600.0)
+    res = compute_open_loop_predictions(history=window, system=system,
+                                        room_names=["studio"], n_rooms=1, dt=dt,
+                                        segment_length=30)
+    sim = res["per_room"]["studio"]["simulation"]
+    assert sim
+    assert all(s["time"] >= recent_t0 for s in sim)
+    span = (sim[-1]["time"] - sim[0]["time"]) / 3600.0
+    assert span <= 24.0, f"open-loop spans {span:.1f} h"
+    # The latest sample must be represented (within one sample of the window end).
+    assert window[-1]["timestamp"] - sim[-1]["time"] <= dt + 1.0
