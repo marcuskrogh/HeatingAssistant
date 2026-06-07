@@ -1812,11 +1812,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 )
                 if not self.actions:
                     self.actions = {src.name: 0.0 for src in self.heat_sources}
+                # Solar gain does not depend on the outdoor temperature, so
+                # publish it even on this startup path instead of leaving the
+                # dashboard's solar value at 0 until the outdoor entity comes
+                # online.  Seed the cloud-cover EMA from persistence first so the
+                # clear-sky model is attenuated.
+                await self._ensure_runtime_state_loaded()
+                self._publish_current_solar_gains()
                 return {
                     "temperatures": dict(self.model.temperatures),
                     "outdoor_temp": None,
                     "actions": dict(self.actions),
-                    "solar_gains": {},
+                    "solar_gains": dict(self.solar_gains),
                     "predictions": [],
                     "heat_flows": {},
                     "outdoor_forecast": [],
@@ -2702,6 +2709,41 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             cloud_cover=cloud_cover, ghi=ghi,
         )
 
+    def _resolve_display_cloud_cover(self) -> Optional[float]:
+        """Best-effort cloud cover for an out-of-cycle solar-gain snapshot.
+
+        Prefers the value the last full MPC cycle published, then the EMA
+        (seeded from persistence on restart), then a fresh live read.  Returns
+        ``None`` only when there is genuinely no cloud information available.
+        """
+        cloud_cover = self.cloud_cover
+        if cloud_cover is None:
+            cloud_cover = self._cloud_cover_filtered
+        if cloud_cover is None:
+            cloud_cover = self._read_cloud_cover_now()
+        return cloud_cover
+
+    def _publish_current_solar_gains(self) -> None:
+        """Recompute and publish ``self.solar_gains`` / ``self.cloud_cover`` for now.
+
+        Solar gain depends only on the time, the site location, the cloud cover
+        and (optionally) the GHI — never on the outdoor temperature.  Keeping
+        this out of the outdoor-temperature gate means the dashboard shows the
+        real, sun-driven (and cloud-attenuated) value right after a restart
+        instead of dropping to 0 while the outdoor entity is still unavailable.
+        """
+        cloud_cover = self._resolve_display_cloud_cover()
+        self.cloud_cover = cloud_cover
+        try:
+            self.solar_gains = {
+                name: self._room_solar_gain(
+                    name, self.now_utc, cloud_cover, self.ghi_now
+                )
+                for name in self.model.room_names
+            }
+        except Exception:  # pragma: no cover - defensive; never block a cycle
+            _LOGGER.debug("Solar-gain recompute failed", exc_info=True)
+
     # Backwards-compatible aliases for any caller / test that imported the
     # static helpers from the coordinator before the U3 weather extraction.
     _parse_weather_forecast = staticmethod(_weather.parse_temperature_forecast)
@@ -2873,33 +2915,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._last_valid_outdoor_temp = _outdoor
         outdoor_temp = _outdoor if _outdoor is not None else self._last_valid_outdoor_temp
 
+        # Solar gains (clear-sky / forecast model — no MPC involved).  Computed
+        # unconditionally because solar gain does not depend on the outdoor
+        # temperature: gating it on a valid outdoor reading made the value drop
+        # to 0 right after a restart while the outdoor entity was still
+        # unavailable.  ``_publish_current_solar_gains`` resolves a non-None
+        # cloud cover (last published value, then the EMA seeded from
+        # persistence, then a fresh live read) so the clear-sky model is
+        # attenuated and never emits an unattenuated spike either.
+        self._publish_current_solar_gains()
+
         if outdoor_temp is not None:
-            # Solar gains (clear-sky / forecast model — no MPC involved).
-            # Use the smoothed / persisted cloud cover rather than the raw
-            # ``self.cloud_cover`` attribute.  That attribute is ``None`` until
-            # the first full MPC cycle publishes it, and the clear-sky model
-            # skips attenuation when cloud cover is ``None`` — so a fast UI
-            # refresh landing before that first cycle (the common case right
-            # after a restart, once the outdoor sensor comes online) would emit
-            # an unattenuated clear-sky spike.  Prefer the value the last full
-            # cycle published, then the EMA seeded from persistence by
-            # ``async_refresh_ui``/the full cycle, then a fresh live read.
-            cloud_cover = self.cloud_cover
-            if cloud_cover is None:
-                cloud_cover = self._cloud_cover_filtered
-            if cloud_cover is None:
-                cloud_cover = self._read_cloud_cover_now()
-            self.cloud_cover = cloud_cover
-            try:
-                self.solar_gains = {
-                    name: self._room_solar_gain(
-                        name, self.now_utc, cloud_cover, self.ghi_now
-                    )
-                    for name in self.model.room_names
-                }
-            except Exception:
-                _LOGGER.debug("UI refresh: solar-gain recompute failed", exc_info=True)
-            # Instantaneous heat-flow breakdown.
+            # Instantaneous heat-flow breakdown (this one genuinely needs the
+            # outdoor temperature).
             try:
                 self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
             except Exception:
