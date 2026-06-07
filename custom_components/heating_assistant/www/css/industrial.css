@@ -1192,6 +1192,12 @@
 }
 
 /* Parameter History Table */
+.param-history-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
 .param-history-table {
   width: 100%;
   border-collapse: collapse;

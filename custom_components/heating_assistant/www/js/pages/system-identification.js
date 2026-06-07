@@ -558,7 +558,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     table.innerHTML = `
       <thead>
         <tr>
-          <th>#</th><th>Date</th><th>Source</th>
+          <th>#</th><th>Date</th>
           <th>Thermal Mass</th><th>R External</th><th>RMSE</th><th></th>
         </tr>
       </thead>
@@ -578,7 +578,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       tr.innerHTML = `
         <td>${i + 1}</td>
         <td>${date}</td>
-        <td>${(entry.source || 'manual').toUpperCase()}</td>
         <td>${thermalMass != null ? formatMass(thermalMass) : '—'}</td>
         <td>${rExternal != null ? formatNumber(rExternal, 4) : '—'}</td>
         <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' °C' : '—'}</td>
@@ -586,7 +585,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       `;
       tbody.appendChild(tr);
     }
-    historyListEl.appendChild(table);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'param-history-table-wrapper';
+    wrapper.appendChild(table);
+    historyListEl.appendChild(wrapper);
 
     table.querySelectorAll('[data-revert]').forEach((btn) => {
       btn.addEventListener('click', async () => {
