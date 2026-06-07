@@ -1973,6 +1973,46 @@ def _register_services(hass: HomeAssistant) -> None:
         ),
     )
 
+    async def handle_set_room_comfort_offset(call: ServiceCall) -> None:
+        """Set the default comfort-band half-width for a single room.
+
+        Called from the dashboard climate cards so users can widen or narrow a
+        room's comfort corridor without editing a schedule.  Resolves the
+        canonical room name from the slug sent by the frontend, applies the
+        change to the live model and persists it (mirroring set_room_setpoint).
+        """
+        from .dashboard import slugify as _slugify
+
+        coordinator = _get_coordinator(hass)
+        room_name: str = call.data["room_name"]
+        comfort_offset: float = call.data["comfort_offset"]
+
+        canonical_name: str | None = None
+        for name in coordinator.model.room_names:
+            if name == room_name or _slugify(name) == room_name:
+                canonical_name = name
+                break
+
+        if canonical_name is None:
+            raise ValueError(f"Room '{room_name}' not found in configuration")
+
+        coordinator.set_room_comfort_offset(canonical_name, comfort_offset)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "set_room_comfort_offset",
+        handle_set_room_comfort_offset,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("comfort_offset"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.1, max=5.0)
+                ),
+            }
+        ),
+    )
+
     async def handle_regenerate_dashboard(call: ServiceCall) -> ServiceResponse:
         """Regenerate the Heating Assistant Lovelace dashboard.
 

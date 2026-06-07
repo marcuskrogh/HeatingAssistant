@@ -533,3 +533,8 @@ CONF_PERSISTED_SETPOINTS = "persisted_setpoints"
 #: entry.data key that stores user-modified room schedules so they survive
 #: reloads and restarts regardless of whether rooms come from YAML or options.
 CONF_PERSISTED_SCHEDULES = "persisted_schedules"
+
+#: entry.data key that stores user-modified per-room comfort offsets (the
+#: symmetric comfort-band half-width set from the dashboard climate cards) so
+#: they survive a full Home Assistant restart, mirroring CONF_PERSISTED_SETPOINTS.
+CONF_PERSISTED_COMFORT_OFFSETS = "persisted_comfort_offsets"

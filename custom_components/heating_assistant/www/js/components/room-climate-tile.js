@@ -23,6 +23,12 @@ const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
 const SP_MIN = 5;
 const SP_MAX = 30;
+// Comfort offset = symmetric ±band half-width around the setpoint the controller
+// keeps the room inside.  Stepped on a 0.5 °C grid like the setpoint.
+const OFFSET_STEP = 0.5;
+const OFFSET_MIN = 0.5;
+const OFFSET_MAX = 5.0;
+const DEFAULT_OFFSET = 2.0;
 const COMMIT_DEBOUNCE_MS = 700;
 // After toggling power we optimistically hold the new state for a short window
 // so the card reacts instantly; backend truth resumes once this elapses.
@@ -34,10 +40,22 @@ function clampSetpoint(v) {
   return Math.max(SP_MIN, Math.min(SP_MAX, snapped));
 }
 
+function clampOffset(v) {
+  const snapped = Math.round((v ?? DEFAULT_OFFSET) / OFFSET_STEP) * OFFSET_STEP;
+  return Math.max(OFFSET_MIN, Math.min(OFFSET_MAX, snapped));
+}
+
 function numOrNull(v) {
   if (v === undefined || v === null) return null;
   const n = parseFloat(v);
   return isNaN(n) ? null : n;
+}
+
+/** Derive the comfort-band half-width [°C] from a constraint corridor, or null
+ *  when the corridor is unavailable / degenerate. */
+function offsetFromCorridor(lower, upper) {
+  if (lower === null || upper === null || upper <= lower) return null;
+  return (upper - lower) / 2;
 }
 
 function statusInfo(power) {
@@ -124,10 +142,14 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     temperature: entityValue(state, room.entities['temperature_filtered'] || room.entities['temperature_measured']),
     setpoint: clampSetpoint(entityValue(state, room.entities['setpoint'])),
     power: entityValue(state, room.entities['heating_power_measured']),
-    comfortLower: numOrNull(entityValue(state, room.entities['constraint_lower'])),
-    comfortUpper: numOrNull(entityValue(state, room.entities['constraint_upper'])),
+    comfortOffset: offsetFromCorridor(
+      numOrNull(entityValue(state, room.entities['constraint_lower'])),
+      numOrNull(entityValue(state, room.entities['constraint_upper'])),
+    ) ?? DEFAULT_OFFSET,
     editing: false,
     commitTimer: null,
+    offsetEditing: false,    // true while the user is mid comfort-offset adjustment
+    offsetCommitTimer: null, // pending comfort-offset debounce timer id
     optimisticOff: null,   // optimistic power override (null = follow backend)
     powerTimer: null,      // clears optimisticOff after POWER_OPTIMISTIC_MS
   };
@@ -155,6 +177,12 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
       </div>
       <div class="climate-card__off-note">HEATING OFF</div>
     </div>
+    <div class="climate-card__comfort">
+      <span class="climate-card__comfort-title">COMFORT BAND</span>
+      <button class="climate-card__offset-step climate-card__offset-step--down" aria-label="Narrow comfort band">−</button>
+      <span class="climate-card__offset-value"></span>
+      <button class="climate-card__offset-step climate-card__offset-step--up" aria-label="Widen comfort band">+</button>
+    </div>
     <div class="climate-card__track">
       <span class="climate-card__track-comfort"></span>
       <span class="climate-card__track-setpoint"></span>
@@ -175,6 +203,9 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     target:       container.querySelector('.climate-card__target-value'),
     down:         container.querySelector('.climate-card__step--down'),
     up:           container.querySelector('.climate-card__step--up'),
+    offsetValue:  container.querySelector('.climate-card__offset-value'),
+    offsetDown:   container.querySelector('.climate-card__offset-step--down'),
+    offsetUp:     container.querySelector('.climate-card__offset-step--up'),
     comfort:      container.querySelector('.climate-card__track-comfort'),
     marker:       container.querySelector('.climate-card__track-marker'),
     trackMin:     container.querySelector('.climate-card__track-min'),
@@ -185,10 +216,12 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
 
   els.down.addEventListener('click', (e) => { e.stopPropagation(); adjust(-SP_STEP); });
   els.up.addEventListener('click', (e) => { e.stopPropagation(); adjust(SP_STEP); });
+  els.offsetDown.addEventListener('click', (e) => { e.stopPropagation(); adjustOffset(-OFFSET_STEP); });
+  els.offsetUp.addEventListener('click', (e) => { e.stopPropagation(); adjustOffset(OFFSET_STEP); });
   els.power.addEventListener('click', (e) => { e.stopPropagation(); togglePower(); });
 
   container.addEventListener('click', () => {
-    if (!st.editing && !st.commitTimer) {
+    if (!st.editing && !st.commitTimer && !st.offsetEditing && !st.offsetCommitTimer) {
       window.location.hash = `#room/${room.slug}`;
     }
   });
@@ -215,6 +248,30 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     st.editing = true;
     paint();
     scheduleCommit();
+  }
+
+  function scheduleOffsetCommit() {
+    if (st.offsetCommitTimer) clearTimeout(st.offsetCommitTimer);
+    st.offsetCommitTimer = setTimeout(() => {
+      st.offsetCommitTimer = null;
+      st.offsetEditing = false;
+      if (st.hass) {
+        st.hass.callService('heating_assistant', 'set_room_comfort_offset', {
+          room_name: room.slug,
+          comfort_offset: st.comfortOffset,
+        }).catch(() => {});
+      }
+    }, COMMIT_DEBOUNCE_MS);
+  }
+
+  function adjustOffset(delta) {
+    if (currentOff()) return; // comfort band is irrelevant while off
+    const next = clampOffset(st.comfortOffset + delta);
+    if (next === st.comfortOffset) return;
+    st.comfortOffset = next;
+    st.offsetEditing = true;
+    paint();
+    scheduleOffsetCommit();
   }
 
   /** Effective off-state: optimistic override wins, else backend/schedule. */
@@ -284,13 +341,20 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     els.down.disabled = st.setpoint <= SP_MIN;
     els.up.disabled = st.setpoint >= SP_MAX;
 
-    const hasComfort =
-      st.comfortLower !== null && st.comfortUpper !== null &&
-      st.comfortUpper > st.comfortLower;
+    // Comfort-band stepper: the symmetric ±offset the controller keeps the room
+    // inside.  Adjusting it widens / narrows the corridor live (drawn below).
+    els.offsetValue.textContent = '±' + st.comfortOffset.toFixed(1) + '°';
+    els.offsetDown.disabled = st.comfortOffset <= OFFSET_MIN;
+    els.offsetUp.disabled = st.comfortOffset >= OFFSET_MAX;
+
+    // Corridor (setpoint ± offset) — redrawn live as the user edits either the
+    // setpoint or the comfort offset.
+    const hasComfort = st.comfortOffset !== null && st.comfortOffset > 0;
+    const comfortLower = hasComfort ? st.setpoint - st.comfortOffset : null;
+    const comfortUpper = hasComfort ? st.setpoint + st.comfortOffset : null;
     let half = TRACK_HALF_WIDTH;
     if (hasComfort) {
-      const spread = Math.max(st.setpoint - st.comfortLower, st.comfortUpper - st.setpoint);
-      half = Math.max(TRACK_HALF_WIDTH, spread + 0.75);
+      half = Math.max(TRACK_HALF_WIDTH, st.comfortOffset + 0.75);
     }
     const lo = st.setpoint - half;
     const hi = st.setpoint + half;
@@ -300,13 +364,13 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     els.trackMax.textContent = hi.toFixed(0) + '°';
 
     if (hasComfort) {
-      const l = toPct(st.comfortLower);
-      const r = toPct(st.comfortUpper);
+      const l = toPct(comfortLower);
+      const r = toPct(comfortUpper);
       els.comfort.style.display = '';
       els.comfort.style.left = l + '%';
       els.comfort.style.width = Math.max(0, r - l) + '%';
       els.comfortLabel.textContent =
-        `COMFORT ${st.comfortLower.toFixed(1)}–${st.comfortUpper.toFixed(1)}°`;
+        `COMFORT ${comfortLower.toFixed(1)}–${comfortUpper.toFixed(1)}°`;
       els.comfortLabel.style.display = '';
     } else {
       els.comfort.style.display = 'none';
@@ -320,8 +384,8 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
       els.marker.style.left = Math.max(1, Math.min(99, toPct(num))) + '%';
       let tone = 'climate-card__track-marker--on';
       if (hasComfort) {
-        if (num < st.comfortLower) tone = 'climate-card__track-marker--cool';
-        else if (num > st.comfortUpper) tone = 'climate-card__track-marker--warm';
+        if (num < comfortLower) tone = 'climate-card__track-marker--cool';
+        else if (num > comfortUpper) tone = 'climate-card__track-marker--warm';
       } else {
         const dev = num - st.setpoint;
         if (dev <= -0.5) tone = 'climate-card__track-marker--cool';
@@ -342,12 +406,20 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
 
       st.temperature = entityValue(newState, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
       st.power = entityValue(newState, room.entities['heating_power_measured']);
-      st.comfortLower = numOrNull(entityValue(newState, room.entities['constraint_lower']));
-      st.comfortUpper = numOrNull(entityValue(newState, room.entities['constraint_upper']));
 
       const newSp = entityValue(newState, room.entities['setpoint']);
       if (newSp !== null && newSp !== undefined && !st.editing && !st.commitTimer) {
         st.setpoint = clampSetpoint(newSp);
+      }
+
+      // Derive the comfort offset from the live corridor, but never clobber an
+      // in-flight user adjustment (mirrors the setpoint guard above).
+      const derived = offsetFromCorridor(
+        numOrNull(entityValue(newState, room.entities['constraint_lower'])),
+        numOrNull(entityValue(newState, room.entities['constraint_upper'])),
+      );
+      if (derived !== null && !st.offsetEditing && !st.offsetCommitTimer) {
+        st.comfortOffset = derived;
       }
 
       paint();
@@ -356,6 +428,10 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
       if (st.commitTimer) {
         clearTimeout(st.commitTimer);
         st.commitTimer = null;
+      }
+      if (st.offsetCommitTimer) {
+        clearTimeout(st.offsetCommitTimer);
+        st.offsetCommitTimer = null;
       }
       if (st.powerTimer) {
         clearTimeout(st.powerTimer);
