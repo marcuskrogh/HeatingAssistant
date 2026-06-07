@@ -155,6 +155,58 @@ def test_fast_refresh_uses_persisted_cloud_cover_not_unattenuated():
     assert coord.cloud_cover == pytest.approx(0.9)
 
 
+def test_fast_refresh_computes_solar_even_when_outdoor_unavailable():
+    """Regression: solar gain must not drop to 0 when the outdoor sensor is
+    unavailable (the common case right after a restart).
+
+    Solar gain depends only on time, location and cloud cover — never on the
+    outdoor temperature — so the fast UI refresh must publish it even with no
+    outdoor reading.  Heat flows, which do need the outdoor temperature, are
+    still skipped.
+    """
+    coord = _make_live_coord(
+        temp_states={"sensor.lr": "20.0"},
+        temp_sensors={"living_room": ["sensor.lr"]},
+        outdoor=None,
+    )
+    coord._last_valid_outdoor_temp = None  # never had a valid outdoor reading
+    coord._cloud_cover_filtered = 0.5
+
+    outdoor = coord._refresh_live_state()
+
+    assert outdoor is None
+    # Solar gain is published rather than left empty (which the sensor reports
+    # as 0).
+    assert coord.solar_gains["living_room"] == pytest.approx(123.0)
+    # Heat flows need the outdoor temperature, so they are skipped.
+    coord.model.compute_heat_flows.assert_not_called()
+
+
+def test_publish_current_solar_gains_uses_resolved_cloud_cover():
+    """The shared snapshot helper attenuates with the resolved cloud cover."""
+    coord = object.__new__(HeatingAssistantCoordinator)
+    coord.now_utc = datetime(2024, 6, 1, 12, 0, tzinfo=timezone.utc)
+    coord.cloud_cover = None
+    coord._cloud_cover_filtered = 0.3  # e.g. EMA seeded from persistence
+    coord.ghi_now = None
+    coord.solar_gains = {}
+    coord.model = SimpleNamespace(room_names=["living_room"])
+
+    seen: dict = {}
+
+    def _gain(name, now, cloud_cover, ghi):
+        seen["cloud_cover"] = cloud_cover
+        return 200.0
+
+    coord._room_solar_gain = _gain
+
+    coord._publish_current_solar_gains()
+
+    assert seen["cloud_cover"] == pytest.approx(0.3)
+    assert coord.solar_gains["living_room"] == pytest.approx(200.0)
+    assert coord.cloud_cover == pytest.approx(0.3)
+
+
 @pytest.mark.asyncio
 async def test_async_refresh_ui_seeds_runtime_state_before_refresh():
     """The fast UI refresh must load persisted runtime state before refreshing.
