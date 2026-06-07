@@ -329,7 +329,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // ---- Open-Loop Simulation section ----
   const olSection = buildValidationSection({
     title: 'Open-Loop Simulation',
-    btnId: 'btn-open-loop', btnClass: 'btn--secondary', btnLabel: 'Run Open-Loop Simulation',
+    btnId: 'btn-open-loop', btnClass: 'btn--primary', btnLabel: 'Run Open-Loop Simulation',
     statusId: 'ol-status', kpiId: 'ol-kpis',
   });
 
@@ -849,7 +849,7 @@ function buildOlChart(chart, simulation) {
       pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
       showLine: false,
     }),
-    makeDataset('Predicted', predicted, '#ffb74d', { borderWidth: 2 }),
+    makeDataset('Predicted', predicted, '#4fc3f7', { borderWidth: 2 }),
   ];
 
   const { yMin, yMax } = computeChartLimits([measured, predicted]);
