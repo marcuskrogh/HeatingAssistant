@@ -3631,6 +3631,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     async def async_estimate_parameters_ml(
         self,
         apply_params: bool = True,
+        horizon_hours: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Estimate thermal parameters using Kalman-filter maximum-likelihood.
@@ -3645,6 +3646,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             When *True* (default) the estimated parameters are immediately
             applied to the live model and the MPC controller is rebuilt.
             When *False* the result is only reported (dry run).
+        horizon_hours : float or None
+            When provided, only the most recent ``horizon_hours`` of data
+            (wall-clock) are passed to the estimator.  Use the same value
+            as the sysid simulation horizon so identification and fit
+            evaluation cover identical data.  ``None`` uses the full buffer.
 
         Returns
         -------
@@ -3659,6 +3665,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         history = list(self._history_buffer)
+        if horizon_hours is not None and history:
+            from .history_window import select_recent_window
+            history = select_recent_window(
+                history, float(horizon_hours) * 3600.0
+            )
 
         # Optimisation may take a few seconds; run in a thread executor.
         result: Dict[str, Any] = await self.hass.async_add_executor_job(

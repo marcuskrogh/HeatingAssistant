@@ -1240,8 +1240,10 @@ def _register_services(hass: HomeAssistant) -> None:
         """Run ML parameter estimation using the Kalman filter log-likelihood."""
         coordinator = _get_coordinator(hass)
         apply_params: bool = call.data.get("apply_parameters", False)
+        horizon_hours: Optional[float] = call.data.get("horizon_hours")
         result = await coordinator.async_estimate_parameters_ml(
             apply_params=apply_params,
+            horizon_hours=horizon_hours,
         )
 
         # Update sysid_results so that the dashboard sensor entities reflect
@@ -1307,6 +1309,9 @@ def _register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema(
             {
                 vol.Optional("apply_parameters", default=False): cv.boolean,
+                vol.Optional("horizon_hours"): vol.All(
+                    vol.Coerce(float), vol.Range(min=1.0)
+                ),
             }
         ),
     )

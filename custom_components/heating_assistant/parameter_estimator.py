@@ -258,7 +258,7 @@ class KalmanMLEstimator:
         Q_var: float = 0.01,
         R_var: float = 0.25,
         regularization: float = 1.0,
-        max_window_steps: int = 120,
+        max_window_steps: int = 48,
     ) -> None:
         self._rooms = rooms
         self._sources = sources
@@ -272,8 +272,8 @@ class KalmanMLEstimator:
         # trajectory to diverge meaningfully on a wrong R_ext / Q_int —
         # otherwise those slow parameters are unconstrained and collapse onto
         # the (possibly poor) prior.  The window is still bounded so a single
-        # bad data stretch can't dominate the gradient.  Default 120 steps
-        # (= 2 h at the 60 s sampling interval).
+        # bad data stretch can't dominate the gradient.  Default 48 steps
+        # (= 12 h at the 900 s sampling interval).
         self._max_window_steps = int(max(20, max_window_steps))
 
         self._room_names: List[str] = [r.name for r in rooms]
@@ -588,16 +588,7 @@ class KalmanMLEstimator:
                 layout.identifiable_sources,
             )
 
-        # ── Custom perturbation: scale q_int by 200 for physical restarts ──
-        def _perturb(theta0: np.ndarray,
-                     rng: np.random.Generator,
-                     _restart_idx: int) -> np.ndarray:
-            pert = rng.normal(0.0, _RESTART_PERT, size=theta0.size)
-            a, b = layout.idx_q_int
-            pert[a:b] *= 200.0   # std ≈ 100 W in linear space
-            return theta0 + pert
-
-        # ── IPOPT multi-start optimisation with analytical gradients ──────────
+        # ── IPOPT optimisation with analytical gradients ──────────────────────
         # Objective: multi-step open-loop simulation MSE (see
         # _simulation_mse_and_grad).  The EKF PED likelihood is retained
         # for diagnostics (compute_log_likelihood / compute_loglik_slice)
@@ -645,76 +636,55 @@ class KalmanMLEstimator:
         )
         _active_backend = ipopt_backend
 
-        rng = np.random.default_rng(0)
         best_theta = theta_prior.copy()
         best_f = float("inf")
         best_converged = False
 
-        # ── Build the set of starting points ───────────────────────────────
-        # Always include the configured prior.  Add a physics-informed start
-        # derived from a coarse least-squares fit of the per-room 1R1C energy
-        # balance: this makes the search robust to a poor configured prior
-        # (the common case before the first good estimate) and gives the
-        # optimiser a basin close to the data-consistent C / R_ext / Q_int.
-        # The remaining starts are small random perturbations of the prior.
-        # Multi-start keeps the lowest-objective result, so extra candidates
-        # can only help.
-        start_points: List[Tuple[str, np.ndarray]] = [("prior", theta_prior.copy())]
+        # ── Choose a single starting point ─────────────────────────────────
+        # Prefer the physics-informed start (a coarse least-squares fit of the
+        # per-room 1R1C energy balance) — it places the search in a basin
+        # consistent with the data even when the configured prior is far off.
+        # Fall back to the prior when the LS fit fails or the data are too
+        # sparse to constrain it.
         phys_theta = self._physics_informed_theta(
             std_history, layout, theta_prior, lb, ub,
         )
-        if phys_theta is not None:
-            start_points.append(("physics", phys_theta))
-            start_points.append(
-                ("physics+jitter", np.clip(_perturb(phys_theta, rng, 1), lb, ub))
-            )
-        for restart in range(1, _N_RESTARTS):
-            start_points.append(
-                (f"perturb{restart}",
-                 np.clip(_perturb(theta_prior, rng, restart), lb, ub))
-            )
+        theta_start = phys_theta if phys_theta is not None else theta_prior.copy()
 
-        for restart, (_start_label, theta_start) in enumerate(start_points):
-            _cache[0] = None  # invalidate cache for new starting point
+        _cache[0] = None
 
+        try:
+            problem = NLPProblem(
+                objective=_fun,
+                objective_jac=_jac,
+                x0=theta_start,
+                lb=lb,
+                ub=ub,
+                constraints=(),
+            )
+            res = _active_backend.solve(problem)
+            if np.isfinite(res.fun):
+                best_f = float(res.fun)
+                best_theta = np.asarray(res.x, dtype=float)
+                best_converged = bool(res.success)
+        except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
+            _LOGGER.warning(
+                "IPOPT backend unavailable for parameter estimation (%s); "
+                "falling back to L-BFGS-B.",
+                exc,
+            )
+            _active_backend = scipy_backend
+            _cache[0] = None
             try:
-                problem = NLPProblem(
-                    objective=_fun,
-                    objective_jac=_jac,
-                    x0=theta_start,
-                    lb=lb,
-                    ub=ub,
-                    constraints=(),
-                )
                 res = _active_backend.solve(problem)
-                f_val = float(res.fun) if np.isfinite(res.fun) else float("inf")
-                if f_val < best_f:
-                    best_f = f_val
+                if np.isfinite(res.fun):
+                    best_f = float(res.fun)
                     best_theta = np.asarray(res.x, dtype=float)
                     best_converged = bool(res.success)
-            except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
-                if _active_backend is ipopt_backend:
-                    _LOGGER.warning(
-                        "IPOPT backend unavailable for parameter estimation (%s); "
-                        "falling back to L-BFGS-B.",
-                        exc,
-                    )
-                    _active_backend = scipy_backend
-                    # Retry this restart with the fallback backend
-                    _cache[0] = None
-                    try:
-                        res = _active_backend.solve(problem)
-                        f_val = float(res.fun) if np.isfinite(res.fun) else float("inf")
-                        if f_val < best_f:
-                            best_f = f_val
-                            best_theta = np.asarray(res.x, dtype=float)
-                            best_converged = bool(res.success)
-                    except Exception as exc2:
-                        _LOGGER.debug("SLSQP restart %d failed: %s", restart, exc2)
-                else:
-                    _LOGGER.debug("SLSQP restart %d failed: %s", restart, exc)
-            except Exception as exc:
-                _LOGGER.debug("Optimiser restart %d failed: %s", restart, exc)
+            except Exception as exc2:
+                _LOGGER.debug("Optimiser fallback failed: %s", exc2)
+        except Exception as exc:
+            _LOGGER.debug("Optimiser failed: %s", exc)
 
         # ── Unpack and clip the best solution ──────────────────────────────
         log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(best_theta)
@@ -987,7 +957,7 @@ class KalmanMLEstimator:
 
         n = self._n
         nx = int(model.nx)
-        n_sub = 10
+        n_sub = 1
 
         _skip_analytic_grad = (model._F.shape[0] > n)
 
@@ -1006,6 +976,10 @@ class KalmanMLEstimator:
         n_alpha = len(layout.identifiable_sources)
 
         _p0 = model.params
+
+        # Precompute index arrays and constant diagonal for dfdtheta.
+        _j_idx = np.arange(n)
+        _Gd_diag = G_d_mat[_j_idx, 1 + _j_idx]  # ∂f_j/∂q_int_j = 1/C_j
 
         # Precompute dFdtheta (constant — independent of state/input)
         dFdtheta = np.zeros((ntheta, nx, nx))
@@ -1105,14 +1079,9 @@ class KalmanMLEstimator:
 
                         dfdtheta_val = np.zeros((ntheta, nx))
                         if not _skip_analytic_grad:
-                            for j in range(n):
-                                dfdtheta_val[j, j] = -f_val[j]
-                            for j in range(n):
-                                dfdtheta_val[n + j, j] = (
-                                    (g_ext[j] / C_cap[j]) * (T[j] - T_out_k)
-                                )
-                            for j in range(n):
-                                dfdtheta_val[2 * n + j, j] = G_d_mat[j, 1 + j]
+                            dfdtheta_val[_j_idx, _j_idx] = -f_val[:n]
+                            dfdtheta_val[n + _j_idx, _j_idx] = (g_ext / C_cap) * (T - T_out_k)
+                            dfdtheta_val[2 * n + _j_idx, _j_idx] = _Gd_diag
                             for k_la, s_idx in enumerate(layout.identifiable_sources):
                                 src = self._sources[s_idx]
                                 i_src = model._room_idx[src.room]
@@ -1220,7 +1189,7 @@ class KalmanMLEstimator:
 
         n = self._n
         nx = int(model.nx)     # n for 1R1C (no augmented offset states)
-        n_sub = 10
+        n_sub = 1
         h_sub = self._dt / n_sub
 
         # Analytical gradient is valid when the drift Jacobian _F has the
@@ -1249,6 +1218,10 @@ class KalmanMLEstimator:
 
         n_alpha = len(layout.identifiable_sources)
         n_pairs = len(layout.identifiable_pairs)
+
+        # Precompute index arrays and constant diagonal for dfdtheta.
+        _j_idx = np.arange(n)
+        _Gd_diag = G_d_mat[_j_idx, 1 + _j_idx]  # ∂f_j/∂q_int_j = 1/C_j
 
         # ── Precompute dFdtheta (constant – doesn't depend on x/u/d) ───────
         dFdtheta = np.zeros((ntheta, nx, nx))
@@ -1320,19 +1293,9 @@ class KalmanMLEstimator:
                 dfdtheta_val = np.zeros((ntheta, nx))
 
                 if not _skip_analytic_grad:
-                    # log_mass[j]: ∂f_j/∂log_mass_j = −f_val[j]
-                    for j in range(n):
-                        dfdtheta_val[j, j] = -f_val[j]
-
-                    # log_r[j]: ∂f_j/∂log_r_j = (g_ext_j/C_j)(T_j − T_out)
-                    for j in range(n):
-                        dfdtheta_val[n + j, j] = (g_ext[j] / C_cap[j]) * (
-                            T[j] - T_out_k
-                        )
-
-                    # q_int[j]: ∂f_j/∂q_int_j = G_d[j, 1+j] = 1/C_j
-                    for j in range(n):
-                        dfdtheta_val[2 * n + j, j] = G_d_mat[j, 1 + j]
+                    dfdtheta_val[_j_idx, _j_idx] = -f_val[:n]
+                    dfdtheta_val[n + _j_idx, _j_idx] = (g_ext / C_cap) * (T - T_out_k)
+                    dfdtheta_val[2 * n + _j_idx, _j_idx] = _Gd_diag
 
                     # log_alpha[k]: ∂f_{i_src}/∂log_alpha_k = heat_contrib of src k
                     for k_la, s_idx in enumerate(layout.identifiable_sources):
