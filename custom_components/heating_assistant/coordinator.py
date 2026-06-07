@@ -2865,10 +2865,25 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         if outdoor_temp is not None:
             # Solar gains (clear-sky / forecast model — no MPC involved).
+            # Use the smoothed / persisted cloud cover rather than the raw
+            # ``self.cloud_cover`` attribute.  That attribute is ``None`` until
+            # the first full MPC cycle publishes it, and the clear-sky model
+            # skips attenuation when cloud cover is ``None`` — so a fast UI
+            # refresh landing before that first cycle (the common case right
+            # after a restart, once the outdoor sensor comes online) would emit
+            # an unattenuated clear-sky spike.  Prefer the value the last full
+            # cycle published, then the EMA seeded from persistence by
+            # ``async_refresh_ui``/the full cycle, then a fresh live read.
+            cloud_cover = self.cloud_cover
+            if cloud_cover is None:
+                cloud_cover = self._cloud_cover_filtered
+            if cloud_cover is None:
+                cloud_cover = self._read_cloud_cover_now()
+            self.cloud_cover = cloud_cover
             try:
                 self.solar_gains = {
                     name: self._room_solar_gain(
-                        name, self.now_utc, self.cloud_cover, self.ghi_now
+                        name, self.now_utc, cloud_cover, self.ghi_now
                     )
                     for name in self.model.room_names
                 }
@@ -2890,6 +2905,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         scheduled MPC ticks.  The MPC and EKF advance strictly at the coordinator's
         ``update_interval``; this path never touches them.
         """
+        # Seed the cloud-cover EMA from persisted runtime state before the very
+        # first refresh so the fast path attenuates the clear-sky model from the
+        # start.  Without this, a fast refresh that runs before the first full
+        # MPC cycle (common right after a restart) has no cloud cover to apply
+        # and emits an unattenuated clear-sky solar-gain spike.
+        await self._ensure_runtime_state_loaded()
         try:
             self._refresh_live_state()
         except Exception:
