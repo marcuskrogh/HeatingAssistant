@@ -25,8 +25,8 @@ const SP_MIN = 5;
 const SP_MAX = 30;
 // Comfort offset = symmetric ±band half-width around the setpoint the controller
 // keeps the room inside.  Stepped on a 0.5 °C grid like the setpoint.
-const OFFSET_STEP = 0.5;
-const OFFSET_MIN = 0.5;
+const OFFSET_STEP = 0.1;
+const OFFSET_MIN = 0.1;
 const OFFSET_MAX = 5.0;
 const DEFAULT_OFFSET = 2.0;
 const COMMIT_DEBOUNCE_MS = 700;
