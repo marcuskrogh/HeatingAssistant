@@ -507,6 +507,14 @@ UI_REFRESH_INTERVAL = 60
 #: Number of update steps to keep in the rolling history buffer.
 #: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is exactly 120 hours of data.
 HISTORY_BUFFER_SIZE = 480
+#: Exponential-moving-average time constant [s] for smoothing the live cloud
+#: cover used by the solar model.  Clouds change gradually, so the instantaneous
+#: weather-entity reading is low-pass filtered to keep the solar attenuation
+#: continuous instead of jumping between cycles.
+CLOUD_SMOOTHING_TAU_S = 1800.0
+#: Throttle [s] for persisting smoothed runtime weather state (cloud cover) so
+#: it survives a restart and the first post-restart cycle does not spike.
+RUNTIME_STATE_SAVE_DELAY_S = 60.0
 #: Number of MPC solve-time samples to retain for rolling statistics.
 MPC_STATS_BUFFER_SIZE = 100
 #: Number of past parameter-estimation runs retained for the dashboard.

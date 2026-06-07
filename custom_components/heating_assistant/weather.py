@@ -15,10 +15,39 @@ without a fake coordinator.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def smooth_cloud_cover_step(
+    prev: Optional[float],
+    obs: Optional[float],
+    dt: float,
+    tau: float,
+) -> Optional[float]:
+    """One exponential-moving-average step for the live cloud-cover fraction.
+
+    Clouds change gradually, so the instantaneous weather reading is low-pass
+    filtered with a time constant ``tau`` (seconds), made dt-aware via
+    ``alpha = 1 - exp(-dt / tau)``.
+
+    * ``obs`` is clamped to ``[0, 1]``.
+    * The filter is *seeded* on the first valid observation (returns ``obs``),
+      so there is no startup transient.
+    * A missing observation (``obs is None``) holds the previous value, so a
+      briefly-unavailable weather entity never reverts the solar model to an
+      unattenuated state.
+    """
+    if obs is None:
+        return prev
+    obs = max(0.0, min(1.0, float(obs)))
+    if prev is None:
+        return obs
+    alpha = 1.0 - math.exp(-dt / tau) if tau > 0 else 1.0
+    return alpha * obs + (1.0 - alpha) * float(prev)
 
 
 # Representative cloud-cover fractions for HA's standardised weather
