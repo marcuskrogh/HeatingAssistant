@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
@@ -643,8 +644,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             stored_history = await store.async_load()
             if stored_history and isinstance(stored_history, list):
+                # Drop records older than the buffer's nominal time span so a
+                # previous session's stale (e.g. week-old) data cannot survive
+                # across a restart, linger at the front of the count-bounded
+                # deque, and pollute the identification diagnostics.
+                from .history_window import prune_stale_records
+
+                _now = getattr(coordinator, "now_utc", None)
+                _now_ts = _now.timestamp() if _now is not None else time.time()
                 coordinator._history_buffer.extend(
-                    stored_history[-HISTORY_BUFFER_SIZE:]
+                    prune_stale_records(
+                        stored_history[-HISTORY_BUFFER_SIZE:],
+                        _now_ts,
+                        HISTORY_BUFFER_SIZE * coordinator.dt,
+                    )
                 )
                 _LOGGER.debug(
                     "Restored %d history steps from persistent storage",

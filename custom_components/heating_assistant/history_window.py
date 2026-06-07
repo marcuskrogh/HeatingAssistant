@@ -3,35 +3,35 @@ History-window selection for the identification diagnostics.
 
 The rolling history buffer can contain gaps from controller restarts or brief
 data outages (Home Assistant reloads, network drop-outs, the integration being
-disabled for a while).  Because the thermal model is *continuous-time*, the EKF
-reconstruction and the open-loop simulation can both propagate across such a gap
-using the true elapsed time between samples — the gap itself carries no
-information and is not a problem to bridge.
+disabled for a while).  It is also *count-bounded* (``deque(maxlen=…)``), not
+time-bounded, so it can legitimately hold records from a previous operating
+session weeks ago next to today's data.
 
-What *was* a problem is how the recent window is selected.  Selecting purely by
-wall-clock time::
+The identification diagnostics (EKF reconstruction and open-loop simulation)
+operate on the most recent ``horizon`` of data.  The window is selected by
+**wall-clock time**: every record whose timestamp falls within ``horizon`` of
+the most recent record is included.  This is the behaviour the user controls
+directly via the horizon slider and has the properties we want:
 
-    window = [h for h in history if h["timestamp"] >= last_ts - horizon_seconds]
+* A short restart (a few minutes) does *not* truncate the window — all data on
+  both sides of the gap is within the horizon and is kept.  The continuous-time
+  model bridges the gap using the true elapsed time between samples.
+* The window can never reach back further than ``horizon`` of wall-clock time,
+  so a week-old previous session is never pulled in and the chart's time axis
+  always spans at most ``horizon`` (no "sporadic points over several weeks").
 
-lets a single restart gap consume most of the requested horizon: if the user
-asks for the last 6 h of data and a 4 h restart gap sits inside that window,
-only the handful of samples recorded *after* the restart survive the filter,
-even though plenty of usable data exists just before the gap.  The result is
-that reconstruction / open-loop simulation appear to ignore everything before
-the most recent restart.
+Earlier revisions tried to measure the horizon in "active sampled time" with a
+per-gap cap; that inadvertently let uniformly sparse data — or a single large
+gap — stretch the window across weeks, because every step was charged only a
+capped cost.  Wall-clock selection avoids that failure mode entirely.
 
-``select_recent_window`` fixes this by measuring the horizon in **active
-sampled time** instead of raw wall-clock time.  Walking backwards from the most
-recent record it accumulates the elapsed time between consecutive samples, but
-caps each interval at ``max_gap_factor * nominal_dt`` so a long restart gap
-costs at most one nominal step of the budget.  The window therefore spans
-roughly ``horizon_seconds`` of *real operation* regardless of how many restarts
-occurred within it — small sample-interval discrepancies and short outages no
-longer eat into the usable data.
+``split_contiguous_runs`` and ``prune_stale_records`` are companion helpers used
+by the open-loop diagnostic and the persistence-restore path respectively.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List
 
 #: An inter-sample interval larger than ``DEFAULT_MAX_GAP_FACTOR * nominal_dt``
@@ -41,55 +41,132 @@ from typing import Any, Dict, List
 DEFAULT_MAX_GAP_FACTOR = 1.5
 
 
+def _normalise(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return ``history`` sorted ascending by timestamp with invalid timestamps
+    dropped and exact-duplicate timestamps collapsed (keeping the last).
+
+    The buffer is normally already monotonic, so this is a defensive no-op in
+    the common case.  It protects the diagnostics from persistence quirks
+    (records restored out of order, duplicated, or carrying a missing/zero
+    timestamp) that would otherwise corrupt both the window selection and the
+    continuous-time integration.
+    """
+    valid = []
+    for rec in history:
+        ts = rec.get("timestamp")
+        try:
+            ts_f = float(ts)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(ts_f) or ts_f <= 0.0:
+            continue
+        valid.append((ts_f, rec))
+
+    valid.sort(key=lambda item: item[0])
+
+    deduped: List[Dict[str, Any]] = []
+    last_ts: float | None = None
+    for ts_f, rec in valid:
+        if last_ts is not None and ts_f == last_ts:
+            deduped[-1] = rec  # keep the most recent record for this timestamp
+        else:
+            deduped.append(rec)
+            last_ts = ts_f
+    return deduped
+
+
 def select_recent_window(
     history: List[Dict[str, Any]],
     horizon_seconds: float,
-    nominal_dt: float,
-    max_gap_factor: float = DEFAULT_MAX_GAP_FACTOR,
+    nominal_dt: float = 0.0,  # accepted for API compatibility; unused
+    max_gap_factor: float = DEFAULT_MAX_GAP_FACTOR,  # unused
 ) -> List[Dict[str, Any]]:
-    """Return the most recent slice of ``history`` covering ``horizon_seconds``
-    of active (sampled) time, bridging restart gaps for free.
+    """Return the records within ``horizon_seconds`` (wall-clock) of the most
+    recent record, normalised to ascending, de-duplicated timestamps.
 
     Parameters
     ----------
     history
-        History-buffer records, ordered oldest → newest, each carrying a
-        numeric ``timestamp`` (UNIX seconds).
+        History-buffer records, each carrying a numeric ``timestamp`` (UNIX
+        seconds).  Order is not trusted; it is normalised internally.
     horizon_seconds
-        Requested span of *active* data, in seconds.  ``<= 0`` returns the full
-        history.
-    nominal_dt
-        Nominal sampling interval [s].  Used only to size the gap cap.
-    max_gap_factor
-        Intervals longer than ``max_gap_factor * nominal_dt`` are capped at that
-        value when accumulating the budget, so a restart gap does not consume
-        the horizon.
+        Width of the window, in seconds, measured back from the latest record.
+        ``<= 0`` returns the full (normalised) history.
+    nominal_dt, max_gap_factor
+        Accepted for backward-compatibility with earlier call sites; ignored.
 
     Returns
     -------
     list
-        A contiguous tail of ``history`` (possibly the whole list).
+        The contiguous (in time) tail of the normalised history that falls
+        within the requested horizon.
     """
+    history = _normalise(history)
     if not history:
         return []
-    if horizon_seconds <= 0 or len(history) < 2:
-        return list(history)
+    if horizon_seconds <= 0:
+        return history
 
-    gap_cap = max(0.0, max_gap_factor * nominal_dt)
-    acc = 0.0
+    last_ts = float(history[-1]["timestamp"])
+    cutoff = last_ts - horizon_seconds
+    # history is sorted ascending; find the first record at/after the cutoff.
     start = 0
-    for k in range(len(history) - 1, 0, -1):
-        dt_step = (
-            float(history[k].get("timestamp", 0.0))
-            - float(history[k - 1].get("timestamp", 0.0))
-        )
-        if dt_step > 0.0:
-            # A restart gap (dt_step >> nominal_dt) is bridged at the cost of a
-            # single capped step rather than its full — possibly multi-hour —
-            # duration, so it does not exhaust the horizon budget.
-            acc += min(dt_step, gap_cap) if gap_cap > 0.0 else dt_step
-        if acc > horizon_seconds:
-            start = k
+    for k in range(len(history) - 1, -1, -1):
+        if float(history[k]["timestamp"]) < cutoff:
+            start = k + 1
             break
+    return history[start:]
 
-    return list(history[start:])
+
+def split_contiguous_runs(
+    history: List[Dict[str, Any]],
+    nominal_dt: float,
+    max_gap_factor: float = DEFAULT_MAX_GAP_FACTOR,
+) -> List[List[Dict[str, Any]]]:
+    """Split ``history`` into runs broken wherever the inter-sample interval
+    exceeds ``max_gap_factor * nominal_dt`` (or is non-monotonic).
+
+    Used by the open-loop diagnostic so a restart gap starts a fresh free-run
+    segment instead of integrating the model across the dead interval with
+    stale, held inputs (which produces a large spurious error spike).
+    """
+    history = _normalise(history)
+    if not history:
+        return []
+
+    gap = max(0.0, max_gap_factor * nominal_dt)
+    runs: List[List[Dict[str, Any]]] = [[history[0]]]
+    for prev, rec in zip(history, history[1:]):
+        dt_step = float(rec["timestamp"]) - float(prev["timestamp"])
+        if gap > 0.0 and 0.0 < dt_step <= gap:
+            runs[-1].append(rec)
+        else:
+            runs.append([rec])
+    return runs
+
+
+def prune_stale_records(
+    history: List[Dict[str, Any]],
+    now_ts: float,
+    max_age_seconds: float,
+) -> List[Dict[str, Any]]:
+    """Drop records older than ``max_age_seconds`` before ``now_ts``.
+
+    The history buffer is a count-bounded deque, so without this a previous
+    operating session's week-old records can survive across restarts and sit at
+    the front of the buffer next to today's data.  Pruning on restore keeps the
+    buffer time-bounded to its intended span and prevents the diagnostics from
+    ever seeing a stale, unrelated epoch.
+    """
+    if max_age_seconds <= 0:
+        return list(history)
+    cutoff = now_ts - max_age_seconds
+    kept = []
+    for rec in history:
+        try:
+            ts = float(rec.get("timestamp"))
+        except (TypeError, ValueError):
+            continue
+        if ts >= cutoff:
+            kept.append(rec)
+    return kept
