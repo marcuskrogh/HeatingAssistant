@@ -203,3 +203,41 @@ async def test_coordinator_falls_back_to_data_horizon_when_options_absent(monkey
     coord.__init__(hass, entry)
 
     assert coord._horizon == 75, f"Expected 75, got {coord._horizon}"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_builds_runtime_store_during_init(monkeypatch):
+    """Constructing the coordinator must not raise and must build the runtime store.
+
+    Regression test: ``_init_runtime_buffers`` runs *before* ``super().__init__``
+    (which is what assigns ``self.hass``) and previously referenced the bare
+    ``hass``/``entry`` names that only exist in ``__init__``'s scope, raising
+    ``NameError`` on every coordinator construction. It now receives ``hass`` as
+    an argument and reads the entry id from ``self._entry``.
+    """
+    import custom_components.heating_assistant.coordinator as coord_mod
+
+    entry = SimpleNamespace(
+        data={CONF_ROOMS: [], CONF_HEAT_SOURCES: []},
+        options={},
+        entry_id="entry-store-1",
+        title="Heating Assistant",
+    )
+
+    hass = SimpleNamespace()
+    hass.config = SimpleNamespace(latitude=55.0, longitude=10.0)
+
+    class _FakeController:
+        def __init__(self, *_a, **_kw):
+            pass
+
+    monkeypatch.setattr(coord_mod, "HeatingMPCController", _FakeController)
+
+    coord = coord_mod.HeatingAssistantCoordinator.__new__(
+        coord_mod.HeatingAssistantCoordinator
+    )
+    coord.__init__(hass, entry)
+
+    # The runtime store is built and keyed by the entry id.
+    assert coord._runtime_store is not None
+    assert "entry-store-1" in coord._runtime_store._key

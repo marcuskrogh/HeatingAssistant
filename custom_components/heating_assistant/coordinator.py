@@ -577,7 +577,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         self._init_room_state(rooms_cfg)
-        self._init_runtime_buffers()
+        self._init_runtime_buffers(hass)
 
         super().__init__(
             hass,
@@ -752,12 +752,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """
         return self.get_window_state(room_name) in ("open", "pending_closed")
 
-    def _init_runtime_buffers(self) -> None:
+    def _init_runtime_buffers(self, hass: HomeAssistant) -> None:
         """Initialise per-cycle and visualisation state.
 
         Everything here is updated each ``_async_update_data`` tick and read
         by sensor entities between ticks; the empty initial values are what
         the sensors see before the first cycle completes.
+
+        ``hass`` is passed in explicitly because this runs *before*
+        ``super().__init__`` (which is what assigns ``self.hass``), so the
+        runtime store has to be built from the argument rather than the
+        not-yet-set attribute.
         """
         # Latest control actions (source_name → fraction in [u_min, u_max]).
         # These are the actions actually commanded to the heaters: rooms under
@@ -785,7 +790,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._cloud_cover_filtered: Optional[float] = None
         self._runtime_state_loaded: bool = False
         self._runtime_store: Store = Store(
-            hass, version=1, key=f"{DOMAIN}_runtime_{entry.entry_id}"
+            hass, version=1, key=f"{DOMAIN}_runtime_{self._entry.entry_id}"
         )
         self.outdoor_temp: Optional[float] = None
         # Last valid outdoor temperature reading.  When outdoor_temp is
