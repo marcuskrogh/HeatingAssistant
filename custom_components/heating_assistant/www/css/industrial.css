@@ -567,6 +567,8 @@
 .chart-container {
   position: relative;
   padding: 20px;
+  min-width: 0;     /* Allow grid/flex child to shrink below content size */
+  overflow: hidden; /* Prevent canvas from expanding the container on resize */
 }
 
 .chart-container__title {

@@ -86,6 +86,7 @@ export class TimeSeriesChart {
     this._config = config;
     this._chart = null;
     this._canvas = null;
+    this._onResize = null;
   }
 
   async render(datasets, dynamicLimits) {
@@ -94,7 +95,7 @@ export class TimeSeriesChart {
     this._container.innerHTML = `
       <div class="chart-container card">
         <div class="chart-container__title">${this._config.title}</div>
-        <div style="position: relative; height: ${this._config.height || 200}px;">
+        <div style="position: relative; height: ${this._config.height || 200}px; width: 100%; overflow: hidden;">
           <canvas class="chart-container__canvas"></canvas>
         </div>
       </div>
@@ -110,6 +111,16 @@ export class TimeSeriesChart {
       options,
       plugins: [nowLinePlugin()],
     });
+
+    // Force Chart.js to recalculate size after any viewport resize (e.g. mobile
+    // orientation change back to portrait, where the internal ResizeObserver
+    // can get stuck because the canvas holds the old wider dimension).
+    this._onResize = () => {
+      requestAnimationFrame(() => {
+        if (this._chart) this._chart.resize();
+      });
+    };
+    window.addEventListener('resize', this._onResize);
   }
 
   update(datasets) {
@@ -122,6 +133,10 @@ export class TimeSeriesChart {
     if (this._chart) {
       this._chart.destroy();
       this._chart = null;
+    }
+    if (this._onResize) {
+      window.removeEventListener('resize', this._onResize);
+      this._onResize = null;
     }
   }
 
