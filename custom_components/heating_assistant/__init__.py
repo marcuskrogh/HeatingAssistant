@@ -1286,11 +1286,16 @@ def _register_services(hass: HomeAssistant) -> None:
 
         history = list(coordinator.history_buffer)
 
-        # Filter history to requested time horizon (timestamp-based).
+        # Filter history to the requested horizon measured in *active sampled
+        # time*, so a restart gap inside the window does not consume the budget
+        # and leave only post-restart data.  The continuous-time model bridges
+        # the gaps; small sample-interval discrepancies are irrelevant.
         if horizon_hours is not None and history:
-            last_ts = float(history[-1].get("timestamp", 0.0))
-            cutoff_ts = last_ts - float(horizon_hours) * 3600.0
-            history = [h for h in history if float(h.get("timestamp", 0.0)) >= cutoff_ts]
+            from .history_window import select_recent_window
+
+            history = select_recent_window(
+                history, float(horizon_hours) * 3600.0, coordinator.dt
+            )
 
         system = coordinator.controller._system
         room_names = coordinator.model.room_names
