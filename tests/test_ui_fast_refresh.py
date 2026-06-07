@@ -57,6 +57,7 @@ def _make_live_coord(
     coord.solar_gains = {}
     coord.heat_flows = {}
     coord.cloud_cover = None
+    coord._cloud_cover_filtered = None
     coord.ghi_now = None
     coord.outdoor_temp = None
     coord._last_valid_outdoor_temp = None
@@ -65,6 +66,8 @@ def _make_live_coord(
     coord._apply_schedule = MagicMock()
     coord._update_window_state_machine = MagicMock()
     coord._read_outdoor_temp = MagicMock(return_value=outdoor)
+    coord._read_cloud_cover_now = MagicMock(return_value=None)
+    coord._ensure_runtime_state_loaded = AsyncMock()
     coord._room_solar_gain = MagicMock(return_value=123.0)
 
     # The controller must NOT be touched by the fast path; make any access fail.
@@ -113,6 +116,62 @@ def test_refresh_live_state_persists_last_outdoor_when_unavailable():
     assert coord.outdoor_temp is None
     assert outdoor == pytest.approx(7.5)
     coord.model.compute_heat_flows.assert_called_once_with(7.5)
+
+
+def test_fast_refresh_uses_persisted_cloud_cover_not_unattenuated():
+    """Regression: the fast UI refresh must attenuate solar gain with the
+    smoothed/persisted cloud cover instead of emitting an unattenuated
+    clear-sky spike before the first full MPC cycle sets ``self.cloud_cover``.
+
+    Right after a restart the full cycle has not run yet, so ``self.cloud_cover``
+    is ``None``.  The fast UI refresh (every UI_REFRESH_INTERVAL seconds) used to
+    pass that ``None`` straight into the clear-sky model, which skips attenuation
+    and produces a solar-gain spike well above the real value.  It must instead
+    fall back to the EMA seeded from persistence.
+    """
+    coord = _make_live_coord(
+        temp_states={"sensor.lr": "20.0"},
+        temp_sensors={"living_room": ["sensor.lr"]},
+        outdoor=5.0,
+    )
+    # Post-restart state: full cycle hasn't published cloud_cover yet, but the
+    # EMA was seeded from the value persisted by the previous session.
+    coord.cloud_cover = None
+    coord._cloud_cover_filtered = 0.9  # heavy cloud cover persisted last session
+
+    captured: dict = {}
+
+    def _capture(name, now, cloud_cover, ghi):
+        captured["cloud_cover"] = cloud_cover
+        return 50.0
+
+    coord._room_solar_gain = _capture
+
+    coord._refresh_live_state()
+
+    # The persisted cloud cover drove the attenuation — NOT None.
+    assert captured["cloud_cover"] == pytest.approx(0.9)
+    # And it is published so subsequent refreshes stay consistent.
+    assert coord.cloud_cover == pytest.approx(0.9)
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_ui_seeds_runtime_state_before_refresh():
+    """The fast UI refresh must load persisted runtime state before refreshing.
+
+    Otherwise the very first post-restart refresh has no cloud-cover EMA to fall
+    back on and emits an unattenuated clear-sky solar-gain spike.
+    """
+    coord = _make_live_coord(
+        temp_states={"sensor.lr": "21.0"},
+        temp_sensors={"living_room": ["sensor.lr"]},
+        outdoor=5.0,
+    )
+    coord.async_update_listeners = MagicMock()
+
+    await coord.async_refresh_ui()
+
+    coord._ensure_runtime_state_loaded.assert_awaited_once()
 
 
 @pytest.mark.asyncio
