@@ -2013,16 +2013,16 @@
 
 .climate-card__body {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
+  gap: 16px;
 }
 
 /* ── Current temperature readout ── */
 .climate-card__current {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 4px;
 }
 
@@ -2266,15 +2266,6 @@
   font-family: var(--font-sans);
   letter-spacing: 0.1em;
   color: var(--accent);
-}
-
-@media (max-width: 480px) {
-  .climate-card__body {
-    justify-content: center;
-  }
-  .climate-card__current {
-    align-items: center;
-  }
 }
 
 /* ── Header right cluster: status badge + power toggle ── */
