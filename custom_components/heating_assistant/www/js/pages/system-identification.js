@@ -268,71 +268,85 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   divider.className = 'section-divider';
   container.appendChild(divider);
 
-  const simulationsCard = document.createElement('div');
-  simulationsCard.className = 'card tuning-section';
-  simulationsCard.innerHTML = `
+  const validationIntro = document.createElement('div');
+  validationIntro.className = 'card tuning-section';
+  validationIntro.innerHTML = `
     <div class="tuning-section__title">Model Validation</div>
     <p class="tuning-section__desc">
-      Run simulations using the parameter values above to evaluate model fit.
-      <strong>EKF Reconstruction</strong> uses a Kalman filter with &plusmn;2&sigma; uncertainty bounds.
-      <strong>Open-Loop Simulation</strong> tests the raw thermal model without state correction.
+      Run simulations using the parameter values above to evaluate model fit over the
+      selected horizon. <strong>EKF Reconstruction</strong> uses a Kalman filter with
+      &plusmn;2&sigma; uncertainty bounds. <strong>Open-Loop Simulation</strong> tests the
+      raw thermal model without state correction. Each section shows the temperature fit
+      together with the heating input and disturbances that drove it over the same horizon.
     </p>
-    <div class="tuning-actions">
-      <button class="btn btn--primary" id="btn-sysid">EKF Reconstruction</button>
-      <button class="btn btn--secondary" id="btn-open-loop">Open-Loop Simulation</button>
-      <span class="tuning-actions__status" id="sim-status"></span>
-    </div>
   `;
-  container.appendChild(simulationsCard);
+  container.appendChild(validationIntro);
 
-  // EKF results
-  const ekfResultsSection = document.createElement('div');
-  ekfResultsSection.className = 'tuning-section';
-  ekfResultsSection.innerHTML = `
-    <div class="tuning-section__title">EKF Reconstruction Results</div>
-    <div class="grid-kpi" id="ekf-kpis"></div>
-  `;
-  container.appendChild(ekfResultsSection);
+  // Each validation section is laid out top-to-bottom as:
+  //   button → fit KPIs → temperature plot → heating-input plot → disturbance plot
+  // so the action sits directly above the plots it produces.
+  function buildValidationSection({ title, btnId, btnClass, btnLabel, statusId, kpiId }) {
+    const section = document.createElement('div');
+    section.className = 'card tuning-section';
+    section.innerHTML = `
+      <div class="tuning-section__title">${title}</div>
+      <div class="tuning-actions">
+        <button class="btn ${btnClass}" id="${btnId}">${btnLabel}</button>
+        <span class="tuning-actions__status" id="${statusId}"></span>
+      </div>
+      <div class="grid-kpi" id="${kpiId}"></div>
+      <div class="tuning-chart" data-chart="temp"></div>
+      <div class="tuning-chart" data-chart="inputs"></div>
+      <div class="tuning-chart" data-chart="disturb"></div>
+    `;
+    container.appendChild(section);
+    return section;
+  }
 
-  const ekfKpiGrid = ekfResultsSection.querySelector('#ekf-kpis');
+  // ---- EKF Reconstruction section ----
+  const ekfSection = buildValidationSection({
+    title: 'EKF Reconstruction',
+    btnId: 'btn-sysid', btnClass: 'btn--primary', btnLabel: 'Run EKF Reconstruction',
+    statusId: 'ekf-status', kpiId: 'ekf-kpis',
+  });
+
+  const ekfKpiGrid = ekfSection.querySelector('#ekf-kpis');
   const kpiEkfRmse = createKpiCard({ value: '—', label: 'RMSE', unit: '' });
   const kpiEkfMae = createKpiCard({ value: '—', label: 'MAE', unit: '' });
   ekfKpiGrid.appendChild(kpiEkfRmse);
   ekfKpiGrid.appendChild(kpiEkfMae);
 
-  const ekfChartEl = document.createElement('div');
-  ekfChartEl.className = 'tuning-chart';
-  container.appendChild(ekfChartEl);
-
-  const ekfChart = new TimeSeriesChart(ekfChartEl, {
-    title: 'EKF RECONSTRUCTION',
-    yLabel: '°C',
-    height: 260,
+  const ekfChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="temp"]'), {
+    title: 'EKF RECONSTRUCTION', yLabel: '°C', height: 260,
+  });
+  const ekfInputsChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="inputs"]'), {
+    title: 'HEATING INPUT', yLabel: 'W', height: 180,
+  });
+  const ekfDisturbChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="disturb"]'), {
+    title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'W', height: 180,
   });
 
-  // Open-loop results
-  const olResultsSection = document.createElement('div');
-  olResultsSection.className = 'tuning-section';
-  olResultsSection.innerHTML = `
-    <div class="tuning-section__title">Open-Loop Simulation Results</div>
-    <div class="grid-kpi" id="ol-kpis"></div>
-  `;
-  container.appendChild(olResultsSection);
+  // ---- Open-Loop Simulation section ----
+  const olSection = buildValidationSection({
+    title: 'Open-Loop Simulation',
+    btnId: 'btn-open-loop', btnClass: 'btn--secondary', btnLabel: 'Run Open-Loop Simulation',
+    statusId: 'ol-status', kpiId: 'ol-kpis',
+  });
 
-  const olKpiGrid = olResultsSection.querySelector('#ol-kpis');
+  const olKpiGrid = olSection.querySelector('#ol-kpis');
   const kpiOlRmse = createKpiCard({ value: '—', label: 'RMSE', unit: '' });
   const kpiOlMae = createKpiCard({ value: '—', label: 'MAE', unit: '' });
   olKpiGrid.appendChild(kpiOlRmse);
   olKpiGrid.appendChild(kpiOlMae);
 
-  const olChartEl = document.createElement('div');
-  olChartEl.className = 'tuning-chart';
-  container.appendChild(olChartEl);
-
-  const olChart = new TimeSeriesChart(olChartEl, {
-    title: 'OPEN-LOOP SIMULATION',
-    yLabel: '°C',
-    height: 260,
+  const olChart = new TimeSeriesChart(olSection.querySelector('[data-chart="temp"]'), {
+    title: 'OPEN-LOOP SIMULATION', yLabel: '°C', height: 260,
+  });
+  const olInputsChart = new TimeSeriesChart(olSection.querySelector('[data-chart="inputs"]'), {
+    title: 'HEATING INPUT', yLabel: 'W', height: 180,
+  });
+  const olDisturbChart = new TimeSeriesChart(olSection.querySelector('[data-chart="disturb"]'), {
+    title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'W', height: 180,
   });
 
   // -----------------------------------------------------------------------
@@ -364,7 +378,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const btnSysid = container.querySelector('#btn-sysid');
   const btnOpenLoop = container.querySelector('#btn-open-loop');
   const actionStatusEl = container.querySelector('#action-status');
-  const simStatusEl = container.querySelector('#sim-status');
+  const ekfStatusEl = container.querySelector('#ekf-status');
+  const olStatusEl = container.querySelector('#ol-status');
 
   let latestState = state;
 
@@ -449,6 +464,79 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     updateKpiCard(kpiOlRmse, { value: attrs.open_loop_rmse != null ? formatNumber(attrs.open_loop_rmse, 3) + ' °C' : '—' });
     updateKpiCard(kpiOlMae, { value: attrs.open_loop_mae != null ? formatNumber(attrs.open_loop_mae, 3) + ' °C' : '—' });
     buildOlChart(olChart, attrs.simulation);
+  }
+
+  // Compute the [min, max] timestamp (ms) spanned by a simulation series so the
+  // input/disturbance plots can be locked to the same x-range as the fit plot.
+  function simTimeRange(simulation) {
+    if (!Array.isArray(simulation) || simulation.length === 0) return null;
+    let xMin = Infinity;
+    let xMax = -Infinity;
+    for (const s of simulation) {
+      const t = new Date(s.time).getTime();
+      if (isNaN(t)) continue;
+      if (t < xMin) xMin = t;
+      if (t > xMax) xMax = t;
+    }
+    if (!isFinite(xMin) || !isFinite(xMax)) return null;
+    return { xMin, xMax };
+  }
+
+  // Fetch the recorded heating input and disturbances for this room over the
+  // given horizon and render them below the corresponding fit plot.  These come
+  // straight from the recorder — the same source the buffer is rebuilt from —
+  // so they show exactly the signals that drove the reconstruction/open-loop.
+  async function renderAuxPlots(inputsChart, disturbChart, horizonHours, xRange) {
+    const powerEntity = room.entities?.['heating_power_measured'];
+    const solarEntity = room.entities?.['solar_gain_measured'];
+    const outdoorEntity = 'sensor.heating_assistant_outdoor_temperature_measured';
+    const ids = [powerEntity, solarEntity, outdoorEntity].filter(Boolean);
+    if (ids.length === 0) return;
+
+    const hours = horizonHours > 0 ? horizonHours : DEFAULTS.horizon_hours;
+    let hist = {};
+    try {
+      hist = await connection.getHistory(ids, hours);
+    } catch (err) {
+      return;
+    }
+
+    const powerPts = historyToDataPoints(hist[powerEntity] || []);
+    const solarPts = historyToDataPoints(hist[solarEntity] || []);
+    const outdoorPts = historyToDataPoints(hist[outdoorEntity] || []);
+    const xLimits = xRange || {};
+
+    inputsChart.render(
+      [makeDataset('Heating Power', powerPts, '#ffb74d', { borderWidth: 2, stepped: true })],
+      { ...xLimits },
+    );
+    disturbChart.render(
+      [
+        makeDataset('Outdoor Temp', outdoorPts, '#90a4ae', { borderWidth: 2, yAxisID: 'y' }),
+        makeDataset('Solar Gain', solarPts, '#fff176', { borderWidth: 2, yAxisID: 'y2' }),
+      ],
+      { ...xLimits },
+    );
+  }
+
+  function renderEkfAux() {
+    const attrs = latestState[sysidEntityId(roomSlug)]?.attributes || {};
+    const horizon = attrs.horizon_hours != null
+      ? Number(attrs.horizon_hours)
+      : parseFloat(horizonInput.value);
+    return renderAuxPlots(
+      ekfInputsChart, ekfDisturbChart, horizon, simTimeRange(attrs.simulation),
+    );
+  }
+
+  function renderOlAux() {
+    const attrs = latestState[openLoopEntityId(roomSlug)]?.attributes || {};
+    const horizon = attrs.horizon_hours != null
+      ? Number(attrs.horizon_hours)
+      : parseFloat(horizonInput.value);
+    return renderAuxPlots(
+      olInputsChart, olDisturbChart, horizon, simTimeRange(attrs.simulation),
+    );
   }
 
   function renderParamHistory(st) {
@@ -593,7 +681,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   // EKF Reconstruction: run with the current parameter field values.
   btnSysid.addEventListener('click', async () => {
-    setStatus(simStatusEl, 'Running EKF reconstruction…', 'running');
+    setStatus(ekfStatusEl, 'Running EKF reconstruction…', 'running');
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
@@ -605,9 +693,14 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         [`thermal_mass_${roomSlug}`]: parseFloat(thermalMassInput.value),
         [`r_external_${roomSlug}`]: parseFloat(rExternalInput.value),
       });
-      setStatus(simStatusEl, 'Complete.', '');
+      // Let the websocket state event with the fresh results arrive, then plot
+      // the temperature fit and the input/disturbance signals over its horizon.
+      await new Promise((res) => setTimeout(res, 800));
+      renderEkfResults(roomSlug, latestState);
+      await renderEkfAux();
+      setStatus(ekfStatusEl, 'Complete.', '');
     } catch (err) {
-      setStatus(simStatusEl, 'Error: ' + (err.message || err), 'error');
+      setStatus(ekfStatusEl, 'Error: ' + (err.message || err), 'error');
     }
     btnSysid.disabled = false;
     btnOpenLoop.disabled = false;
@@ -615,7 +708,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   // Open-Loop Simulation: run with the current horizon field value.
   btnOpenLoop.addEventListener('click', async () => {
-    setStatus(simStatusEl, 'Running open-loop simulation…', 'running');
+    setStatus(olStatusEl, 'Running open-loop simulation…', 'running');
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
@@ -624,9 +717,12 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         segment_length: 30,
         horizon_hours: parseFloat(horizonInput.value),
       });
-      setStatus(simStatusEl, 'Complete.', '');
+      await new Promise((res) => setTimeout(res, 800));
+      renderOlResults(roomSlug, latestState);
+      await renderOlAux();
+      setStatus(olStatusEl, 'Complete.', '');
     } catch (err) {
-      setStatus(simStatusEl, 'Error: ' + (err.message || err), 'error');
+      setStatus(olStatusEl, 'Error: ' + (err.message || err), 'error');
     }
     btnSysid.disabled = false;
     btnOpenLoop.disabled = false;
@@ -639,6 +735,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   renderEkfResults(roomSlug, state);
   renderOlResults(roomSlug, state);
   renderParamHistory(state);
+  // Populate the input/disturbance plots from existing results (if any) without
+  // blocking the initial render.
+  renderEkfAux();
+  renderOlAux();
 
   return {
     update(newState) {
@@ -659,7 +759,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     },
     destroy() {
       ekfChart.destroy();
+      ekfInputsChart.destroy();
+      ekfDisturbChart.destroy();
       olChart.destroy();
+      olInputsChart.destroy();
+      olDisturbChart.destroy();
     },
   };
 }

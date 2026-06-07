@@ -162,6 +162,9 @@ export class TimeSeriesChart {
       if (dynamicLimits.yMax !== undefined) opts.scales.y.max = dynamicLimits.yMax;
       if (dynamicLimits.y2Min !== undefined && opts.scales.y2) opts.scales.y2.min = dynamicLimits.y2Min;
       if (dynamicLimits.y2Max !== undefined && opts.scales.y2) opts.scales.y2.max = dynamicLimits.y2Max;
+      // Optional shared x-range so stacked plots line up on the same horizon.
+      if (dynamicLimits.xMin !== undefined) opts.scales.x.min = dynamicLimits.xMin;
+      if (dynamicLimits.xMax !== undefined) opts.scales.x.max = dynamicLimits.xMax;
     }
 
     return opts;
