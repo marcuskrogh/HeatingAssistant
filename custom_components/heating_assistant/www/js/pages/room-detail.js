@@ -1,4 +1,4 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints, forecastToDataPoints, loadChartJs } from '../components/time-series-chart.js';
+import { TimeSeriesChart, makeDataset, historyToDataPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs } from '../components/time-series-chart.js';
 import { createGauge, updateGauge } from '../components/gauge.js';
 import { createClimateCard } from '../components/climate-card.js';
 import { createCountdown } from '../components/countdown.js';
@@ -381,9 +381,9 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
 
   const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
   const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
-  const setpointForecast = forecastToDataPoints(forecastData, 'setpoint');
-  const constraintUpperForecast = forecastToDataPoints(forecastData, 'constraint_upper');
-  const constraintLowerForecast = forecastToDataPoints(forecastData, 'constraint_lower');
+  const setpointForecast = forecastToEnabledPoints(forecastData, 'setpoint');
+  const constraintUpperForecast = forecastToEnabledPoints(forecastData, 'constraint_upper');
+  const constraintLowerForecast = forecastToEnabledPoints(forecastData, 'constraint_lower');
   const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
   const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
   const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temp');
@@ -476,7 +476,7 @@ function buildTemperatureChart(
   if (combinedSetpoint.length > 0) {
     datasets.push(
       makeDataset('Setpoint', combinedSetpoint, '#e57373', {
-        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before',
+        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before', spanGaps: false,
       })
     );
   }
@@ -486,10 +486,12 @@ function buildTemperatureChart(
   // the TARGET — not the direction of the fill area. The upper constraint is
   // always below 'end' (chart top), so 'below' color applies; the lower
   // constraint is always above 'start' (chart bottom), so 'above' color applies.
+  // spanGaps: false ensures that null points (off/disabled periods) create breaks
+  // in the line and fill rather than bridging across them.
   if (combinedUpper.length > 0) {
     datasets.push(
       makeDataset('Constraint Upper', combinedUpper, 'transparent', {
-        borderWidth: 0, pointRadius: 0, stepped: 'before',
+        borderWidth: 0, pointRadius: 0, stepped: 'before', spanGaps: false,
         fill: { target: 'end', above: 'transparent', below: 'rgba(229,115,115,0.12)' },
       })
     );
@@ -497,7 +499,7 @@ function buildTemperatureChart(
   if (combinedLower.length > 0) {
     datasets.push(
       makeDataset('Constraint Lower', combinedLower, 'transparent', {
-        borderWidth: 0, pointRadius: 0, stepped: 'before',
+        borderWidth: 0, pointRadius: 0, stepped: 'before', spanGaps: false,
         fill: { target: 'start', above: 'rgba(229,115,115,0.12)', below: 'transparent' },
       })
     );
@@ -604,7 +606,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
     const tempForecast = forecastToDataPoints(forecastData, 'temperature');
     const tempLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
-    const setpointData = forecastToDataPoints(forecastData, 'setpoint');
+    const setpointData = forecastToEnabledPoints(forecastData, 'setpoint');
     const powerForecast = forecastToDataPoints(forecastData, 'heating_power');
     const solarForecast = forecastToDataPoints(forecastData, 'solar_gain');
     const outdoorForecast = forecastToDataPoints(forecastData, 'outdoor_temp');
@@ -617,8 +619,8 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
       if (ds[2]) ds[2].data = tempForecast;
       if (ds[3] && tempLinearised.length > 0) ds[3].data = tempLinearised;
 
-      const constraintUpperForecast = forecastToDataPoints(forecastData, 'constraint_upper');
-      const constraintLowerForecast = forecastToDataPoints(forecastData, 'constraint_lower');
+      const constraintUpperForecast = forecastToEnabledPoints(forecastData, 'constraint_upper');
+      const constraintLowerForecast = forecastToEnabledPoints(forecastData, 'constraint_lower');
 
       for (const [label, newForecast] of [
         ['Setpoint', setpointData],
