@@ -52,20 +52,15 @@
         "description": "Configure how Heating Assistant controls your home. Changes are saved when you pick **Save & close**.",
         "menu_options": {
           "global_settings": "General & sensor settings",
-          "mpc_tuning": "Control behaviour",
-          "manage_rooms": "Rooms, heaters & schedules",
+          "manage_rooms": "Rooms",
+          "manage_room_windows": "Windows",
+          "manage_room_heaters": "Heat sources",
           "save": "Save & close"
-        },
-        "menu_option_descriptions": {
-          "global_settings": "Outdoor sources, update cadence, and advanced state-estimation tuning.",
-          "mpc_tuning": "Balance comfort vs energy use and tune the predictive controller.",
-          "manage_rooms": "Add rooms, configure heaters, windows and time-of-day schedules.",
-          "save": "Apply all pending changes and exit."
         }
       },
       "global_settings": {
         "title": "General & sensor settings",
-        "description": "Outdoor sources and how often the controller re-plans. The fields lower down (model adaptation, window detection) are safe to leave at their defaults.",
+        "description": "Outdoor sources and how often the controller re-plans.",
         "data": {
           "outdoor_temp_entity": "Outdoor temperature sensor",
           "weather_entity": "Weather forecast",
@@ -73,28 +68,16 @@
           "price_entity": "Electricity price sensor",
           "price_net_tariff": "Net tariff (per kWh)",
           "price_spot_surcharge": "Spot price surcharge (per kWh)",
-          "update_interval": "Control interval (seconds)",
-          "sigma_w": "Model adaptation rate",
-          "sigma_v": "Sensor noise",
-          "sigma_b": "Sensor calibration drift",
-          "window_open_debounce": "Window open debounce (seconds)",
-          "window_open_close_settle": "Window close settle (seconds)",
-          "window_open_q_inflation": "Open-state uncertainty multiplier"
+          "update_interval": "Control interval (seconds)"
         },
         "data_description": {
           "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
           "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
           "solar_radiation_entity": "Optional. A sensor reporting the sun's solar irradiance (Global Horizontal Irradiance) in W/m² — e.g. Open-Meteo's shortwave_radiation, or a pyranometer — ideally with an hourly forecast in its attributes. When set, the forecast replaces the modelled clear-sky radiation in the solar-gain model (decomposed and transposed onto your windows by geometry); the clear-sky model stays as the automatic fallback. This is the sun's radiation, not solar-panel production.",
-          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating. Enable the price sensitivity slider in Control behaviour to activate.",
+          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating.",
           "price_net_tariff": "Fixed grid / network tariff to add to the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.20 DKK/kWh). Ensures the effective price seen by the controller is never below your actual cost of electricity.",
           "price_spot_surcharge": "Fixed spot price surcharge or electricity tax to add on top of the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.90 DKK/kWh for Danish elafgift). Together with the net tariff this floors the effective price at a realistic consumer value.",
-          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes.",
-          "sigma_w": "Advanced — how quickly the thermal model adapts to observed data. Higher values track changes faster but follow sensor noise more closely. Default 0.1 works for most homes.",
-          "sigma_v": "Advanced — expected indoor temperature sensor noise (K). Raise this if you have a noisy sensor; lower it for a precise one.",
-          "sigma_b": "Advanced — allowed rate of sensor calibration drift. Higher values forgive slow sensor offset over time.",
-          "window_open_debounce": "Advanced — how long a window must stay open before the controller responds. Prevents reacting to brief openings. Only matters when window sensors are configured for a room.",
-          "window_open_close_settle": "Advanced — how long a window must stay closed before the controller resumes normal control.",
-          "window_open_q_inflation": "Advanced — how much the controller distrusts the model while a window is open. Higher = adapts faster afterwards."
+          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes."
         }
       },
       "mpc_tuning": {
@@ -122,21 +105,23 @@
         }
       },
       "manage_rooms": {
-        "title": "Rooms, heaters & schedules",
-        "description": "Add rooms first. Each room can then have its own heaters, windows and time-of-day schedule.",
+        "title": "Manage rooms",
+        "description": "Add, edit, or remove rooms. Configure heaters and windows from the main menu.",
         "menu_options": {
-          "add_room": "Add a new room",
+          "add_room": "Add a room",
           "edit_room": "Edit a room",
-          "manage_room_windows": "Configure room windows",
-          "manage_room_heaters": "Configure heat sources",
-          "manage_room_schedule": "Manage schedule",
           "remove_room": "Remove a room",
-          "finish_rooms": "Back to main menu"
+          "finish_rooms": "Back"
         }
       },
       "add_room": {
         "title": "Add a room",
-        "description": "Tell Heating Assistant about a new room. The fields lower down (floor type, facade colour, thermal bridges, sky coupling) are optional refinements — leave them at the defaults if unsure.",
+        "description": "Tell Heating Assistant about a new room. Optional envelope refinements are in the collapsible **Advanced settings** section.",
+        "sections": {
+          "advanced_envelope": {
+            "name": "Advanced settings"
+          }
+        },
         "data": {
           "name": "Room name",
           "temp_sensors": "Indoor temperature sensors",
@@ -179,7 +164,12 @@
       },
       "room_detail": {
         "title": "Edit room: {name}",
-        "description": "Update sensors, sizing, and the comfort band for this room. Advanced envelope refinements are at the bottom.",
+        "description": "Update sensors, sizing, and the comfort band for this room.",
+        "sections": {
+          "advanced_envelope": {
+            "name": "Advanced settings"
+          }
+        },
         "data": {
           "name": "Room name",
           "temp_sensors": "Indoor temperature sensors",
@@ -298,7 +288,12 @@
       },
       "add_heater": {
         "title": "Add a heat source to {name}",
-        "description": "Configure a heater or heat pump. Performance details are optional and improve modelling accuracy.",
+        "description": "Configure a heater or heat pump. Performance details are in the collapsible **Performance details** section.",
+        "sections": {
+          "performance": {
+            "name": "Performance details"
+          }
+        },
         "data": {
           "name": "Display name",
           "type": "Type",
@@ -342,6 +337,11 @@
       "heater_detail": {
         "title": "Edit heat source: {name}",
         "description": "Update this heater's wiring and performance parameters.",
+        "sections": {
+          "performance": {
+            "name": "Performance details"
+          }
+        },
         "data": {
           "name": "Display name",
           "type": "Type",
