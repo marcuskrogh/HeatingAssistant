@@ -1616,15 +1616,6 @@
   margin-bottom: 2px;
 }
 
-/* Next upcoming period gets a subtle warning tint */
-.sched-row--next {
-  padding: 6px 10px;
-  background: rgba(245, 166, 35, 0.05);
-  border: 1px solid rgba(245, 166, 35, 0.2);
-  border-radius: var(--radius-sm);
-  margin-bottom: 2px;
-}
-
 .sched-row__now-badge {
   flex-shrink: 0;
   font-size: 9px;
@@ -1636,7 +1627,7 @@
   border-radius: 10px;
 }
 
-.sched-row__next-badge {
+.sched-index-card__next-label {
   flex-shrink: 0;
   font-size: 9px;
   font-weight: 700;
@@ -1645,6 +1636,7 @@
   background: rgba(245, 166, 35, 0.12);
   padding: 2px 7px;
   border-radius: 10px;
+  white-space: nowrap;
 }
 
 .sched-row__name {

@@ -21,10 +21,10 @@ const getScheduleDataForRoom = getRoomScheduleData;
 function makePeriodRow(p, isActive, isNext) {
   const { text: modeText, cls: modeCls } = periodModeDisplay(p);
   const row = document.createElement('div');
-  row.className = 'sched-row' + (isActive ? ' sched-row--active' : '') + (isNext ? ' sched-row--next' : '');
+  row.className = 'sched-row' + (isActive ? ' sched-row--active' : '');
   row.innerHTML = `
     ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
-    ${isNext ? '<span class="sched-row__next-badge">NEXT</span>' : ''}
+    ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
     <span class="sched-row__name">${p.name || 'Period'}</span>
     <span class="sched-row__time">${p.start}–${p.end}</span>
     <span class="sched-row__mode ${modeCls}">${modeText}</span>
