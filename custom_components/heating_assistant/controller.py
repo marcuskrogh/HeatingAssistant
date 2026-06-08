@@ -183,6 +183,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         identifiable_sources: Optional[List[int]] = None,
         theta: Optional[np.ndarray] = None,
         k_sigmoid: float = 5.0,
+        augment_gain: bool = False,
+        gain_kappa: float = 0.0,
+        gain_sigma: float = 0.0,
     ) -> None:
         self._model = model
         self._sources = sources
@@ -193,6 +196,23 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._augment_offsets = augment_offsets
         self._n_int_steps = n_int_steps
         self._k_sigmoid = k_sigmoid
+
+        # ── Online internal-gain estimation (augmented-state parameter) ──
+        # When ``augment_gain`` is True a per-room internal-gain *deviation*
+        # block ``Δg`` is appended to the state with a regularised
+        # Ornstein–Uhlenbeck process  dΔg = −κ·Δg·dt + σ_g·dw  (mean-reverting
+        # to zero, i.e. back to the configured nominal gain).  ``gain_kappa``
+        # is κ [1/s] and ``gain_sigma`` is σ_g [W/√s].  The deviation enters
+        # the temperature drift additively as  Δg_i / C_i.
+        #
+        # The *control* (linearisation) model is built with
+        # ``augment_gain=False`` and instead carries a fixed deviation in
+        # ``_fixed_gain_dev`` (set each cycle from the EKF estimate): this is
+        # the "fix the parameter at the current estimate and remove it from
+        # the state space" step for the linear MPC.
+        self._augment_gain = bool(augment_gain)
+        self._gain_kappa = float(gain_kappa)
+        self._gain_sigma = float(gain_sigma)
 
         # Store identifiable source indices and theta for parameter extraction
         self._identifiable_sources = identifiable_sources if identifiable_sources is not None else []
@@ -205,6 +225,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         n = len(self._room_list)
         self._n_rooms = n
         self._offset_state: np.ndarray = np.zeros(n, dtype=float)
+        # Per-room internal-gain deviation state buffer (round-tripped by the
+        # ``x`` property when no EKF cycle has run yet) and the fixed deviation
+        # used by the un-augmented control model.
+        self._n_gain: int = n if self._augment_gain else 0
+        self._gain_state: np.ndarray = np.zeros(n, dtype=float)
+        self._fixed_gain_dev: np.ndarray = np.zeros(n, dtype=float)
         # Per-room covariance scaling for process noise (Phase 3 W1).
         # Values are covariance multipliers; 1.0 means no inflation.
         self._room_q_scales: np.ndarray = np.ones(n, dtype=float)
@@ -216,6 +242,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # from the n-state ``HouseModel`` so they share a single source
         # of truth.
         self._C_cap = np.array(model._C, dtype=float)                # (n,)
+        self._inv_C_cap: np.ndarray = 1.0 / self._C_cap             # (n,) gain→drift map
         self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (n, n)
 
         # Continuous disturbance matrix G_d shape (n, 1+n):
@@ -316,6 +343,17 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # Offset block start index (avoids property dispatch in g/gm/hm/dfdx)
         self._offset_block_start: int = n + m
 
+        # Internal-gain block start index and total state dimension.  Layout:
+        #   [T (n), φ (m), b (n if augment_offsets), Δg (n if augment_gain)]
+        _base_nx = (2 * n + m) if augment_offsets else (n + m)
+        self._gain_block_start: int = _base_nx
+        self._nx: int = _base_nx + (n if self._augment_gain else 0)
+        # Gain-block diagonal indices for the OU drift Jacobian.
+        self._gain_diag_idx: np.ndarray = (
+            np.arange(self._gain_block_start, self._gain_block_start + n)
+            if self._augment_gain else np.zeros(0, dtype=int)
+        )
+
         # Per-source fixed lookups — replace per-call dict/cast overhead
         self._src_room_idx: np.ndarray = np.array(
             [self._room_idx[src.room] for src in self._sources], dtype=int
@@ -339,14 +377,13 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             self._identifiable_sources, dtype=int
         )
 
-        # Constant measurement/output Jacobian H = dhm/dx = dgm/dx
+        # Constant measurement/output Jacobian H = dhm/dx = dgm/dx.
+        # Width spans the full augmented state; the gain block (if present)
+        # contributes nothing to the measurement, so its columns stay zero.
         b_start = n + m
-        if not augment_offsets:
-            _H = np.zeros((n, n + m))
-            _H[:, :n] = np.eye(n)
-        else:
-            _H = np.zeros((n, 2 * n + m))
-            _H[:, :n] = np.eye(n)
+        _H = np.zeros((n, self._nx))
+        _H[:, :n] = np.eye(n)
+        if augment_offsets:
             _H[:, b_start:b_start + n] = np.eye(n)
         self._H_const: np.ndarray = _H
 
@@ -357,9 +394,6 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
         # Diagonal index array for in-place F-matrix update in dfdx
         self._diag_n_idx: np.ndarray = np.arange(n)
-
-        # Total state dimension (avoids nx property dispatch in g/gm/hm)
-        self._nx: int = 2 * n + m if augment_offsets else n + m
 
         # Per-source fast-path for linear (non-cooling) heat sources in f()
         # Sources with a precomputed '_gain' attr (ElectricHeater) can skip the
@@ -387,10 +421,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # * Physical block: ``n`` states (single temperature per room).
         # * Filter block: ``m`` states (emitter lags).
         # * With offset augmentation we append per-room measurement
-        #   biases, giving ``2n + m``.
-        n = self._n_rooms
-        m = self._n_filtered
-        return 2 * n + m if self._augment_offsets else n + m
+        #   biases (``+n``).
+        # * With internal-gain augmentation we append per-room gain
+        #   deviation states (``+n``).
+        return self._nx
 
     @property
     def nu(self) -> int:
@@ -441,24 +475,29 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self._sigma_matrix = self._build_sigma_matrix()
 
     def _build_sigma_matrix(self) -> np.ndarray:
-        """Build (or rebuild) the diffusion matrix from current Q scales."""
+        """Build (or rebuild) the diagonal diffusion matrix σ from current Q
+        scales.
+
+        Block-diagonal layout matching the state vector
+        ``[T (n), φ (m), b (n if augment_offsets), Δg (n if augment_gain)]``:
+
+        * physical block:   ``σ_w · √(q_scale)`` per room,
+        * filter block:     ``σ_w`` per filtered source,
+        * offset block:     ``σ_b`` per room (random-walk bias),
+        * gain block:       ``σ_g`` per room (OU internal-gain deviation).
+        """
         n = self._n_rooms
         m = self._n_filtered
         physical_std = np.sqrt(np.maximum(self._room_q_scales, 0.0))
-        if not self._augment_offsets:
-            diag = np.concatenate([
-                self._sigma_w * physical_std,
-                self._sigma_w * np.ones(m, dtype=float),
-            ])
-            return np.diag(diag)
-        sig = np.zeros((self._nx, self._nx))
-        diag_nm = np.concatenate([
+        diag_parts = [
             self._sigma_w * physical_std,
             self._sigma_w * np.ones(m, dtype=float),
-        ])
-        sig[:n + m, :n + m] = np.diag(diag_nm)
-        sig[n + m:, n + m:] = self._sigma_b * np.eye(n)
-        return sig
+        ]
+        if self._augment_offsets:
+            diag_parts.append(self._sigma_b * np.ones(n, dtype=float))
+        if self._augment_gain:
+            diag_parts.append(self._gain_sigma * np.ones(n, dtype=float))
+        return np.diag(np.concatenate(diag_parts))
 
     def _infiltration_delta_ua(
         self, outdoor_temp: float, room_temps: np.ndarray,
@@ -584,6 +623,18 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             delta_ua = self._infiltration_delta_ua(outdoor_temp, T_phys)
             dT_phys += (delta_ua / self._C_cap) * (outdoor_temp - T_phys)
 
+        # Online internal-gain deviation Δg [W] lands on the temperature node
+        # as Δg_i / C_i.  In the EKF (augmented) model it is read from the
+        # gain-state block; in the control model it is the frozen estimate
+        # held in ``_fixed_gain_dev``.  The two are mutually exclusive per
+        # instance, so adding both is safe (one is always zero).
+        if self._augment_gain:
+            g_state = x[self._gain_block_start: self._gain_block_start + n]
+            dT_phys += g_state * self._inv_C_cap
+            dg = -self._gain_kappa * g_state
+        else:
+            dT_phys += self._fixed_gain_dev * self._inv_C_cap
+
         # Phase 1 B2: filter-block drift  dφ/dt = (u_cmd - φ) / τ_em.
         if m > 0:
             phi = x[n: n + m]
@@ -591,9 +642,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         else:
             dphi = self._zeros_n_rooms[:0]
 
-        if not self._augment_offsets:
-            return np.concatenate([dT_phys, dphi])
-        return np.concatenate([dT_phys, dphi, self._zeros_n_rooms])
+        blocks = [dT_phys, dphi]
+        if self._augment_offsets:
+            blocks.append(self._zeros_n_rooms)
+        if self._augment_gain:
+            blocks.append(dg)
+        return np.concatenate(blocks)
 
     def sigma(
         self,
@@ -705,6 +759,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
           heat lands (air or slab depending on UFH).
         * filter→filter: diagonal ``-1/τ_em``.
         * offset block: zero drift, so its rows / columns are zero.
+        * gain→physical: diagonal ``1/C_i`` (Δg deviation onto the
+          temperature node); gain→gain: diagonal ``-κ`` (OU reversion).
 
         The cross-coupling ``∂Q_j/∂φ_j`` is the slope of the heat-
         source power function at the current effective fraction.  For
@@ -726,7 +782,6 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         else:
             F_eff = self._F
 
-        nx_unaug = n + m
         J = np.zeros((self._nx, self._nx))
         J[:n, :n] = F_eff
 
@@ -754,8 +809,16 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             # Filter-block diagonal: -1/τ_em (precomputed).
             J[self._filter_diag_idx, self._filter_diag_idx] = self._neg_inv_taus
 
-        if not self._augment_offsets:
-            return J[:nx_unaug, :nx_unaug]
+        # Internal-gain block:
+        #   gain→physical: ∂(dT_i)/∂Δg_i = 1/C_i  (cross-coupling that makes
+        #                  the gain observable through the temperature node),
+        #   gain→gain:     ∂(dΔg_i)/∂Δg_i = −κ    (OU mean-reversion).
+        if self._augment_gain:
+            J[self._diag_n_idx, self._gain_diag_idx] = self._inv_C_cap
+            J[self._gain_diag_idx, self._gain_diag_idx] = -self._gain_kappa
+
+        # ``J`` is allocated at the full state dimension ``self._nx`` (which
+        # already accounts for the active blocks), so it is returned as-is.
         return J
 
     def dhmdx(
@@ -907,9 +970,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """
         temps = [self._model.rooms[name].temperature for name in self._room_list]
         phi = self._filter_state.tolist() if self._n_filtered > 0 else []
-        if not self._augment_offsets:
-            return temps + phi
-        return temps + phi + self._offset_state.tolist()
+        out = temps + phi
+        if self._augment_offsets:
+            out = out + self._offset_state.tolist()
+        if self._augment_gain:
+            out = out + self._gain_state.tolist()
+        return out
 
     @x.setter
     def x(self, val: list[float]) -> None:
@@ -929,11 +995,48 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             else:
                 self._filter_state = np.zeros(m, dtype=float)
 
-        if self._augment_offsets and len(val) >= self.nx:
+        if self._augment_offsets and len(val) >= self._offset_block_start + n:
             b_start = self._offset_block_start
             self._offset_state = np.array(
                 val[b_start: b_start + n], dtype=float,
             )
+
+        if self._augment_gain and len(val) >= self._gain_block_start + n:
+            g_start = self._gain_block_start
+            self._gain_state = np.array(
+                val[g_start: g_start + n], dtype=float,
+            )
+
+    def set_fixed_gain_dev(self, gain_dev: np.ndarray) -> None:
+        """Fix the per-room internal-gain deviation [W] for the control model.
+
+        Used by the linearised MPC to *fix the estimated parameter at its
+        current value and remove it from the state space*: the un-augmented
+        control model evaluates its drift with this constant Δg added on the
+        temperature node (``Δg_i / C_i``), so the linearisation and the
+        equilibrium input ``u_eq`` reflect the online gain estimate without
+        carrying the extra state through the QP.
+        """
+        dev = np.asarray(gain_dev, dtype=float).ravel()
+        out = np.zeros(self._n_rooms, dtype=float)
+        k = min(self._n_rooms, dev.size)
+        out[:k] = dev[:k]
+        self._fixed_gain_dev = out
+
+    def gain_deviation_from_state(self, x: np.ndarray) -> np.ndarray:
+        """Extract the per-room internal-gain deviation [W] from a state vector.
+
+        Returns zeros when the model does not carry the gain block or the
+        supplied vector is too short.
+        """
+        n = self._n_rooms
+        if not self._augment_gain:
+            return np.zeros(n, dtype=float)
+        x = np.asarray(x, dtype=float).ravel()
+        g_start = self._gain_block_start
+        if x.size < g_start + n:
+            return np.zeros(n, dtype=float)
+        return x[g_start: g_start + n].copy()
 
     def initial_state_from_measurement(
         self,
@@ -1614,7 +1717,7 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
 
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
-        x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
+        x_hat = self._adopt_estimate(est_out[0])
 
         # Linearise at the equilibrium (x_ss = setpoint, u_ss = u_eq, d_ss = d_now)
         # so the Jacobians are accurate during transients.  _AbsoluteInputOCP adds
@@ -1740,10 +1843,28 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
 
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
-        x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
+        x_hat = self._adopt_estimate(est_out[0])
 
         self._d_prev = d_now.copy()
         return x_hat
+
+    def _adopt_estimate(self, x_hat_full: np.ndarray) -> np.ndarray:
+        """Adopt the (possibly augmented) EKF estimate for the control model.
+
+        The estimator may carry an internal-gain block that the un-augmented
+        control model does not.  This *fixes the estimated gain at its current
+        value and removes it from the state space*: the gain deviation is
+        pushed onto the control model via :meth:`HouseThermalSDE.set_fixed_gain_dev`
+        and the returned state is truncated to the control-model dimension so
+        the QP keeps its small, predictable size.
+        """
+        x_full = np.asarray(x_hat_full, dtype=float).ravel()
+        est_model = self._estimator._model
+        if getattr(est_model, "_augment_gain", False):
+            self._model.set_fixed_gain_dev(
+                est_model.gain_deviation_from_state(x_full)
+            )
+        return x_full[: self._model.nx]
 
 
 # ============================================================
@@ -1824,12 +1945,27 @@ class HeatingMPCController:
         solver_options: Optional[Dict[str, Any]] = None,
         use_analytic_derivatives: bool = True,
         energy_price_weight: float = 0.0,
+        gain_estimator_enabled: bool = False,
+        gain_reversion_time_hours: float = 24.0,
+        gain_stationary_std_watts: float = 200.0,
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
         self._dt = dt
         self._latitude = latitude
         self._longitude = longitude
+
+        # ── Online internal-gain estimation tuning ───────────────────────
+        # Map the two user-facing knobs (reversion time τ_g in hours, and the
+        # stationary deviation std s_∞ in W) onto the SI OU parameters used by
+        # the SDE model: κ = 1/τ_g [1/s] and σ_g = s_∞·√(2κ) [W/√s], so the
+        # stationary variance σ_g²/(2κ) equals s_∞².
+        self._gain_estimator_enabled: bool = bool(gain_estimator_enabled)
+        self._gain_reversion_time_hours: float = float(gain_reversion_time_hours)
+        self._gain_stationary_std_watts: float = float(gain_stationary_std_watts)
+        tau_g_s = max(1e-3, self._gain_reversion_time_hours * 3600.0)
+        gain_kappa = 1.0 / tau_g_s
+        gain_sigma = self._gain_stationary_std_watts * math.sqrt(2.0 * gain_kappa)
 
         # solver/derivative args accepted for API compat; QP backend always used
         self._solver_requested = "qp"
@@ -1854,14 +1990,19 @@ class HeatingMPCController:
         ekf_dt = measurement_dt if measurement_dt is not None else dt
 
         # ── Build SDE models ────────────────────────────────────────────
-        # Both use un-augmented state (augment_offsets=False) to keep the
-        # EKF/QP dimension small for predictable solve times.
+        # The EKF (estimation) model carries the online internal-gain block
+        # when the feature is enabled; the control (linearisation) model stays
+        # un-augmented and instead receives the *fixed* gain estimate each
+        # cycle.  Offsets stay disabled to keep the dimensions small.
         self._system = HouseThermalSDE(
             model, heat_sources, dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
             augment_offsets=False,
             n_int_steps=n_int_steps,
+            augment_gain=self._gain_estimator_enabled,
+            gain_kappa=gain_kappa,
+            gain_sigma=gain_sigma,
         )
         self._control_system = HouseThermalSDE(
             model, heat_sources, dt,
@@ -1869,6 +2010,7 @@ class HeatingMPCController:
             sigma_b=sigma_b,
             augment_offsets=False,
             n_int_steps=n_int_steps,
+            augment_gain=False,
         )
 
         n_x = self._system.nx
@@ -1880,6 +2022,14 @@ class HeatingMPCController:
         # ── EKF: initialise from current room temperatures ──────────────
         x0 = np.array(self._system.x)
         P0 = np.eye(n_x)  # initial state uncertainty [K^2]
+        # Seed the internal-gain block at its stationary variance s_∞² [W²] so
+        # the filter starts at the prior spread of the gain deviation rather
+        # than a tiny 1 W² that would make early adaptation sluggish.
+        if self._gain_estimator_enabled and self._system._augment_gain:
+            g_start = self._system._gain_block_start
+            gain_var = float(self._gain_stationary_std_watts ** 2)
+            for i in range(n_rooms):
+                P0[g_start + i, g_start + i] = max(gain_var, 1.0)
         self._ekf = _InnovationEKF(
             self._system, x0, P0, ekf_dt,
             n_steps=n_int_steps, scheme="implicit-euler",
@@ -1907,8 +2057,11 @@ class HeatingMPCController:
         # Input bounds from the SDE model
         u_min, u_max = self._control_system.u_bounds
 
-        # State reference: setpoints on the room-temperature block, zero elsewhere
-        x_ref = np.zeros(n_x)
+        # State reference: setpoints on the room-temperature block, zero
+        # elsewhere.  Sized to the *control* model (the MPC does not carry the
+        # EKF's internal-gain block), which may be smaller than ``n_x``.
+        n_x_ctrl = self._control_system.nx
+        x_ref = np.zeros(n_x_ctrl)
         x_ref[:n_rooms] = [model.rooms[name].setpoint for name in room_list]
 
         # ── MPC controller (forecast-aware variant) ──────────────────────
@@ -2053,6 +2206,40 @@ class HeatingMPCController:
         Always returns zero (un-augmented state — no offset states estimated).
         """
         return {name: 0.0 for name in self._system._room_list}
+
+    @property
+    def gain_estimation_enabled(self) -> bool:
+        """Whether online internal-gain estimation is active for this controller."""
+        return bool(self._gain_estimator_enabled and self._system._augment_gain)
+
+    @property
+    def estimated_internal_gain_deviation(self) -> Dict[str, float]:
+        """Per-room online estimate of the internal-gain *deviation* Δĝ [W].
+
+        This is the EKF-estimated departure from each room's configured nominal
+        internal gain.  Returns zeros when the feature is disabled.
+        """
+        room_list = self._system._room_list
+        if not self.gain_estimation_enabled:
+            return {name: 0.0 for name in room_list}
+        dev = self._system.gain_deviation_from_state(self._ekf.x_hat)
+        return {name: float(dev[i]) for i, name in enumerate(room_list)}
+
+    @property
+    def estimated_internal_gains(self) -> Dict[str, float]:
+        """Per-room total estimated internal heat gain [W].
+
+        Equals each room's configured nominal internal gain plus the online
+        estimated deviation Δĝ.  When estimation is disabled this is just the
+        configured nominal gain, so the sensor remains meaningful either way.
+        """
+        room_list = self._system._room_list
+        rooms = self._system._model.rooms
+        dev = self.estimated_internal_gain_deviation
+        return {
+            name: float(rooms[name].internal_gain) + dev[name]
+            for name in room_list
+        }
 
     @property
     def temperatures(self) -> Dict[str, float]:
@@ -2326,7 +2513,8 @@ class HeatingMPCController:
         ], dtype=float)
 
         # ── Update setpoint reference in MPC (setpoints may have changed) ──
-        n_x = self._system.nx
+        # Sized to the control model (no internal-gain block in the MPC).
+        n_x = self._control_system.nx
         x_ref_abs = np.zeros(n_x)
         x_ref_abs[:n_rooms] = [
             self._system._model.rooms[name].setpoint for name in room_list
@@ -2619,6 +2807,16 @@ class HeatingMPCController:
         x_curr = self._ekf.x_hat.copy()
         p = np.array([], dtype=float)
 
+        # Freeze the estimated internal-gain deviation at its current value
+        # across the prediction horizon, consistent with the MPC's
+        # certainty-equivalent "fix the parameter" assumption.  Without this
+        # the OU mean-reversion would let the gain decay toward zero over the
+        # rollout, diverging slightly from what the controller optimised for.
+        gain_frozen = None
+        if self._system._augment_gain:
+            g_start = self._system._gain_block_start
+            gain_frozen = x_curr[g_start: g_start + n_rooms].copy()
+
         N = len(outdoor_seq)
         for k in range(N):
             u_k = U_abs[k] if k < len(U_abs) else U_abs[-1]
@@ -2635,6 +2833,11 @@ class HeatingMPCController:
             x_next = implicit_euler_substeps(
                 rhs, jacobian, x_curr, self._dt, self._system._n_int_steps
             )
+
+            # Re-pin the frozen gain block so it does not OU-decay over the
+            # horizon (the MPC treats it as a constant parameter).
+            if gain_frozen is not None:
+                x_next[g_start: g_start + n_rooms] = gain_frozen
 
             # Extract room temperatures (first n_rooms states)
             temps_k = x_next[:n_rooms]

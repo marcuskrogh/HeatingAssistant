@@ -52,10 +52,25 @@
         "description": "Configure how Heating Assistant controls your home. Changes are saved when you pick **Save & close**.",
         "menu_options": {
           "global_settings": "General & sensor settings",
+          "advanced_tuning": "Advanced tuning (online estimation)",
           "manage_rooms": "Rooms",
           "manage_room_windows": "Windows",
           "manage_room_heaters": "Heat sources",
           "save": "Save & close"
+        }
+      },
+      "advanced_tuning": {
+        "title": "Advanced tuning – online internal-gain estimation",
+        "description": "Estimate each room's internal heat gain (people, appliances, lighting) online and feed it to the controller. The internal gain is promoted to a learned state with a regularised process that gently reverts to the configured nominal when observations are uninformative.",
+        "data": {
+          "gain_estimator_enabled": "Enable online internal-gain estimation",
+          "gain_reversion_time_hours": "Reversion time (hours)",
+          "gain_stationary_std_watts": "Stationary spread (W)"
+        },
+        "data_description": {
+          "gain_estimator_enabled": "When on, a Kalman estimator continuously learns each room's internal heat gain and the controller uses it as a fixed estimate when planning. When off, only the configured nominal gain is used.",
+          "gain_reversion_time_hours": "How quickly the learned gain relaxes back toward the configured nominal when there is nothing to learn from the data. Longer (e.g. 24–168 h) is steadier; shorter (e.g. 3–6 h) adapts faster to within-day changes. Default 24 h.",
+          "gain_stationary_std_watts": "The steady-state spread of the learned gain deviation. Larger values let the estimate track bigger swings in occupancy/appliances; smaller values keep it close to the nominal. Default 200 W."
         }
       },
       "global_settings": {

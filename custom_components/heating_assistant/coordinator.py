@@ -55,6 +55,9 @@ from .const import (
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
+    CONF_GAIN_ESTIMATOR_ENABLED,
+    CONF_GAIN_REVERSION_TIME_HOURS,
+    CONF_GAIN_STATIONARY_STD_WATTS,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -121,6 +124,9 @@ from .const import (
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
+    DEFAULT_GAIN_ESTIMATOR_ENABLED,
+    DEFAULT_GAIN_REVERSION_TIME_HOURS,
+    DEFAULT_GAIN_STATIONARY_STD_WATTS,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -384,6 +390,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_SIGMA_W,
         CONF_SIGMA_V,
         CONF_SIGMA_B,
+        CONF_GAIN_ESTIMATOR_ENABLED,
+        CONF_GAIN_REVERSION_TIME_HOURS,
+        CONF_GAIN_STATIONARY_STD_WATTS,
         CONF_WINDOW_OPEN_DEBOUNCE,
         CONF_WINDOW_OPEN_CLOSE_SETTLE,
         CONF_WINDOW_OPEN_Q_INFLATION,
@@ -454,6 +463,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._sigma_b: float = float(
             options.get(CONF_SIGMA_B, data.get(CONF_SIGMA_B, DEFAULT_SIGMA_B))
+        )
+        # Online internal-gain estimation (augmented-state parameter estimation)
+        self._gain_estimator_enabled: bool = bool(
+            _opt(CONF_GAIN_ESTIMATOR_ENABLED, DEFAULT_GAIN_ESTIMATOR_ENABLED)
+        )
+        self._gain_reversion_time_hours: float = float(
+            _opt(CONF_GAIN_REVERSION_TIME_HOURS, DEFAULT_GAIN_REVERSION_TIME_HOURS)
+        )
+        self._gain_stationary_std_watts: float = float(
+            _opt(CONF_GAIN_STATIONARY_STD_WATTS, DEFAULT_GAIN_STATIONARY_STD_WATTS)
         )
         self._window_open_debounce: float = float(
             options.get(
@@ -576,6 +595,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
+            gain_estimator_enabled=self._gain_estimator_enabled,
+            gain_reversion_time_hours=self._gain_reversion_time_hours,
+            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         self._init_room_state(rooms_cfg)
@@ -839,6 +861,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # when the MPC solver fails so sensor entities report ``unknown``.
         self.filtered_temperatures: Dict[str, float] = {}
 
+        # Per-room online internal-gain estimates [W] (nominal + Δĝ) after each
+        # compute(); empty until the first successful solve / when it fails.
+        self.estimated_internal_gains: Dict[str, float] = {}
+
         # Rooms that have received at least one valid temperature measurement
         # since the coordinator started.  Rooms absent from this set have
         # never had a sensor reading (e.g. HA entity still "unknown" during
@@ -1063,6 +1089,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
+            gain_estimator_enabled=self._gain_estimator_enabled,
+            gain_reversion_time_hours=self._gain_reversion_time_hours,
+            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
@@ -1153,6 +1182,25 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             rebuild_controller = True
         if CONF_SIGMA_B in pending:
             self._sigma_b = float(pending.get(CONF_SIGMA_B, self._sigma_b))
+            rebuild_controller = True
+        if CONF_GAIN_ESTIMATOR_ENABLED in pending:
+            self._gain_estimator_enabled = bool(
+                pending.get(CONF_GAIN_ESTIMATOR_ENABLED, self._gain_estimator_enabled)
+            )
+            rebuild_controller = True
+        if CONF_GAIN_REVERSION_TIME_HOURS in pending:
+            self._gain_reversion_time_hours = float(
+                pending.get(
+                    CONF_GAIN_REVERSION_TIME_HOURS, self._gain_reversion_time_hours,
+                )
+            )
+            rebuild_controller = True
+        if CONF_GAIN_STATIONARY_STD_WATTS in pending:
+            self._gain_stationary_std_watts = float(
+                pending.get(
+                    CONF_GAIN_STATIONARY_STD_WATTS, self._gain_stationary_std_watts,
+                )
+            )
             rebuild_controller = True
         if CONF_WINDOW_OPEN_DEBOUNCE in pending:
             self._window_open_debounce = float(
@@ -1421,6 +1469,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
+            gain_estimator_enabled=self._gain_estimator_enabled,
+            gain_reversion_time_hours=self._gain_reversion_time_hours,
+            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         self._estimation_timestamp = None
@@ -1522,6 +1573,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
+            gain_estimator_enabled=self._gain_estimator_enabled,
+            gain_reversion_time_hours=self._gain_reversion_time_hours,
+            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         # --- Build new active snapshot ---
@@ -1653,6 +1707,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
+            gain_estimator_enabled=self._gain_estimator_enabled,
+            gain_reversion_time_hours=self._gain_reversion_time_hours,
+            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         # Build the new active reflecting actual model state
@@ -1976,6 +2033,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
                 self.filtered_temperatures = dict(self.controller.filtered_temperatures)
+                # Online internal-gain estimates [W] per room (nominal + Δĝ).
+                self.estimated_internal_gains = dict(
+                    self.controller.estimated_internal_gains
+                )
                 # Rooms that have never had a valid reading expose "unknown"
                 # so the dashboard falls back to the raw sensor value.
                 for _r in rooms_not_ready:
@@ -2027,6 +2088,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.heating_schedule = []
                 self.solar_forecast = []
                 self.filtered_temperatures = {}
+                self.estimated_internal_gains = {}
                 kalman_innovation = None
 
             # Dispatch-layer W1 override: clamp all sources in open-window
@@ -3844,6 +3906,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
+            gain_estimator_enabled=self._gain_estimator_enabled,
+            gain_reversion_time_hours=self._gain_reversion_time_hours,
+            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         _LOGGER.info(

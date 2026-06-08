@@ -75,6 +75,7 @@ async def async_setup_entry(
         entities.append(TemperatureMeasuredSensor(coordinator, room_name))
         entities.append(TemperatureFilteredSensor(coordinator, room_name))
         entities.append(TemperatureOffsetSensor(coordinator, room_name))
+        entities.append(InternalGainEstimatedSensor(coordinator, room_name))
         entities.append(TemperatureForecastSensor(coordinator, room_name))
         entities.append(SetpointSensor(coordinator, room_name))
         entities.append(WindowStateSensor(coordinator, room_name))
@@ -263,6 +264,59 @@ class TemperatureOffsetSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEn
         if offset is None:
             return None
         return round(float(offset), 3)
+
+
+class InternalGainEstimatedSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
+    """Sensor reporting the online-estimated internal heat gain for a room [W].
+
+    The internal gain is promoted to a state in the CD-EKF and estimated online
+    via a regularised (Ornstein–Uhlenbeck) augmented-state process.  The state
+    is the total estimated gain (configured nominal + estimated deviation Δĝ);
+    the deviation and nominal are exposed as attributes.  Recorded in HA history
+    so the dashboard can plot how the learned gain evolves over time.
+    """
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_suggested_display_precision = 0
+    _attr_icon = "mdi:home-thermometer"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Internal Gain Estimated"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_internal_gain_estimated"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        gain = self._coordinator.estimated_internal_gains.get(self._room_name)
+        if gain is None:
+            return None
+        return round(float(gain), 1)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        room = self._coordinator.model.rooms.get(self._room_name)
+        nominal = float(room.internal_gain) if room is not None else 0.0
+        total = self._coordinator.estimated_internal_gains.get(self._room_name)
+        attrs: Dict[str, Any] = {
+            "nominal_gain_w": round(nominal, 1),
+            "estimation_enabled": bool(
+                getattr(self._coordinator.controller, "gain_estimation_enabled", False)
+            ),
+        }
+        if total is not None:
+            attrs["estimated_deviation_w"] = round(float(total) - nominal, 1)
+        return attrs
 
 
 # ---------------------------------------------------------------------------
