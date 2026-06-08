@@ -184,9 +184,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   actionsCard.innerHTML = `
     <div class="tuning-section__title">Actions</div>
     <p class="tuning-section__desc">
-      <strong>Run Auto-Identification</strong> runs ML estimation (dry run) and populates the fields below with the identified values — no changes are committed yet.
-      <strong>Apply Parameters</strong> writes the current field values to the active model.
-      <strong>Reset to Defaults</strong> fills all fields with factory defaults without committing.
+      Auto-Identification fills the fields below with estimates — nothing is applied until you click Apply Parameters.
     </p>
     <div class="tuning-actions">
       <button class="btn btn--accent tuning-actions__btn" id="btn-auto-identify">Run Auto-Identification</button>
@@ -273,11 +271,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   validationIntro.innerHTML = `
     <div class="tuning-section__title">Model Validation</div>
     <p class="tuning-section__desc">
-      Run simulations using the parameter values above to evaluate model fit over the
-      selected horizon. <strong>EKF Reconstruction</strong> uses a Kalman filter with
-      &plusmn;2&sigma; uncertainty bounds. <strong>Open-Loop Simulation</strong> tests the
-      raw thermal model without state correction. Each section shows the temperature fit
-      together with the heating input and disturbances that drove it over the same horizon.
+      Simulate the thermal model using the parameters and horizon configured above.
     </p>
   `;
   container.appendChild(validationIntro);
@@ -356,7 +350,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   historySection.className = 'card tuning-section';
   historySection.innerHTML = `
     <div class="tuning-section__title">Applied Model History</div>
-    <p class="tuning-section__desc" style="margin-bottom:12px">Up to 10 most recent parameter sets applied to this room. Click <strong>Revert</strong> to restore a previous set.</p>
+    <p class="tuning-section__desc" style="margin-bottom:12px">Previously applied parameter sets.</p>
     <div id="param-history-list"></div>
   `;
   container.appendChild(historySection);
@@ -632,11 +626,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       populateModelFromSysid(roomSlug, latestState);
       // Loaded values are pending review; protect them from state-sync resets.
       userEditing = true;
-      setStatus(
-        actionStatusEl,
-        'Identified parameters loaded — review above, then click “Apply Parameters” to commit.',
-        '',
-      );
+      setStatus(actionStatusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
     } catch (err) {
       setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
     }
@@ -662,7 +652,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       // Edits are now the applied parameters; resume syncing the form from
       // system state so it reflects the authoritative committed values.
       userEditing = false;
-      setStatus(actionStatusEl, 'Parameters applied and stored in history.', 'success');
+      setStatus(actionStatusEl, 'Applied.', 'success');
     } catch (err) {
       setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
     }
@@ -679,7 +669,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     horizonInput.value = DEFAULTS.horizon_hours;
     // Defaults are pending review; protect them from state-sync resets.
     userEditing = true;
-    setStatus(actionStatusEl, 'Default values loaded — click “Apply Parameters” to commit.', '');
+    setStatus(actionStatusEl, 'Defaults loaded.', '');
   });
 
   // EKF Reconstruction: run with the current parameter field values.
