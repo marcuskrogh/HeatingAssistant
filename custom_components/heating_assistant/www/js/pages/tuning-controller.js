@@ -57,6 +57,16 @@ function renderTuningIndex(container, connection, hass) {
   desc.textContent = 'Configure MPC controller and window detection parameters. Edit values below and click Apply Changes to send them to the system. Reset to Defaults fills the boxes with factory defaults without saving — you still need to click Apply Changes to commit them.';
   container.appendChild(desc);
 
+  // --- Unified action bar ---
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'tuning-actions';
+  actionsRow.innerHTML = `
+    <button class="btn btn--primary tuning-actions__btn" id="btn-apply-all">Apply Changes</button>
+    <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-all">Reset to Defaults</button>
+    <span class="tuning-actions__status" id="tuning-status"></span>
+  `;
+  container.appendChild(actionsRow);
+
   // --- MPC Parameter section ---
   const formSection = document.createElement('div');
   formSection.className = 'card tuning-section';
@@ -117,16 +127,6 @@ function renderTuningIndex(container, connection, hass) {
     windowGrid.appendChild(group);
     windowInputs[def.key] = group.querySelector('input');
   }
-
-  // --- Unified action bar ---
-  const actionsRow = document.createElement('div');
-  actionsRow.className = 'tuning-actions';
-  actionsRow.innerHTML = `
-    <button class="btn btn--accent tuning-actions__btn" id="btn-apply-all">Apply Changes</button>
-    <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-all">Reset to Defaults</button>
-    <span class="tuning-actions__status" id="tuning-status"></span>
-  `;
-  container.appendChild(actionsRow);
 
   const btnApply = container.querySelector('#btn-apply-all');
   const btnReset = container.querySelector('#btn-reset-all');
