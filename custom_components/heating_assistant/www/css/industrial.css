@@ -891,6 +891,47 @@
   align-items: start;
 }
 
+/* Inline enable/disable toggle used by the gain-estimation section. */
+.tuning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.tuning-toggle__label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.tuning-toggle__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.tuning-toggle__btn--on {
+  border-color: var(--good);
+  color: var(--good);
+  background: rgba(39, 174, 96, 0.1);
+}
+
+.tuning-toggle__btn--off {
+  border-color: var(--alarm);
+  color: var(--alarm);
+  background: rgba(231, 76, 60, 0.1);
+}
+
 .tuning-actions {
   display: flex;
   flex-wrap: wrap;

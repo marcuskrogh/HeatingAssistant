@@ -20,6 +20,9 @@ from custom_components.heating_assistant.const import (
     CONF_ROOM_NAME,
     CONF_TRACKING_WEIGHT,
     CONF_SIGMA_W,
+    CONF_GAIN_ESTIMATOR_ENABLED,
+    CONF_GAIN_REVERSION_TIME_HOURS,
+    CONF_GAIN_STATIONARY_STD_WATTS,
     DOMAIN,
 )
 
@@ -103,6 +106,31 @@ async def test_estimation_params_written_to_both_data_and_options(monkeypatch):
     call = update_calls[0]
     assert call["options"][CONF_SIGMA_W] == 0.5
     assert call["data"][CONF_SIGMA_W] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_gain_estimation_params_routed_and_persisted(monkeypatch):
+    """The internal-gain estimation knobs set from the Tuning UI must reach the
+    coordinator and persist to both stores (they are not silently dropped)."""
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    coordinator = _make_coordinator()
+    update_calls: list = []
+    hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
+
+    handlers = _capture_handlers(hass)
+    gain_updates = {
+        CONF_GAIN_ESTIMATOR_ENABLED: True,
+        CONF_GAIN_REVERSION_TIME_HOURS: 12.0,
+        CONF_GAIN_STATIONARY_STD_WATTS: 350.0,
+    }
+    await handlers["update_estimation_params"](SimpleNamespace(data=dict(gain_updates)))
+
+    assert len(update_calls) == 1
+    call = update_calls[0]
+    for key, value in gain_updates.items():
+        assert call["options"][key] == value
+        assert call["data"][key] == value
+    coordinator.apply_tuning_updates.assert_called_once_with(gain_updates)
 
 
 @pytest.mark.asyncio

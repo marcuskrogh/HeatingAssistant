@@ -121,6 +121,9 @@ from .const import (
     CONF_SCHEDULE_START,
     CONF_PERSISTED_SCHEDULES,
     CONF_SETPOINT,
+    CONF_GAIN_ESTIMATOR_ENABLED,
+    CONF_GAIN_REVERSION_TIME_HOURS,
+    CONF_GAIN_STATIONARY_STD_WATTS,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -176,6 +179,9 @@ from .const import (
     DEFAULT_MIN_POWER,
     DEFAULT_R_EXTERNAL,
     DEFAULT_SETPOINT,
+    DEFAULT_GAIN_ESTIMATOR_ENABLED,
+    DEFAULT_GAIN_REVERSION_TIME_HOURS,
+    DEFAULT_GAIN_STATIONARY_STD_WATTS,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -522,6 +528,9 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                 "window_open_debounce": int(getattr(c, "_window_open_debounce", DEFAULT_WINDOW_OPEN_DEBOUNCE)),
                 "window_open_close_settle": int(getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE)),
                 "window_open_q_inflation": float(getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION)),
+                "gain_estimator_enabled": bool(getattr(c, "_gain_estimator_enabled", DEFAULT_GAIN_ESTIMATOR_ENABLED)),
+                "gain_reversion_time_hours": float(getattr(c, "_gain_reversion_time_hours", DEFAULT_GAIN_REVERSION_TIME_HOURS)),
+                "gain_stationary_std_watts": float(getattr(c, "_gain_stationary_std_watts", DEFAULT_GAIN_STATIONARY_STD_WATTS)),
             }
             _LOGGER.debug("Heating Assistant: get_controller_config -> %s", config)
             connection.send_result(msg["id"], {"config": config})
@@ -1717,6 +1726,8 @@ def _register_services(hass: HomeAssistant) -> None:
         CONF_SIGMA_W, CONF_SIGMA_V, CONF_SIGMA_B,
         CONF_WINDOW_OPEN_DEBOUNCE, CONF_WINDOW_OPEN_CLOSE_SETTLE,
         CONF_WINDOW_OPEN_Q_INFLATION,
+        CONF_GAIN_ESTIMATOR_ENABLED, CONF_GAIN_REVERSION_TIME_HOURS,
+        CONF_GAIN_STATIONARY_STD_WATTS,
     }
 
     async def handle_update_controller_tuning(call: ServiceCall) -> None:
@@ -1828,6 +1839,13 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
                 vol.Optional(CONF_WINDOW_OPEN_Q_INFLATION): vol.All(
                     vol.Coerce(float), vol.Range(min=1.0, max=1000.0)
+                ),
+                vol.Optional(CONF_GAIN_ESTIMATOR_ENABLED): cv.boolean,
+                vol.Optional(CONF_GAIN_REVERSION_TIME_HOURS): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.1, max=168.0)
+                ),
+                vol.Optional(CONF_GAIN_STATIONARY_STD_WATTS): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=5000.0)
                 ),
             }
         ),

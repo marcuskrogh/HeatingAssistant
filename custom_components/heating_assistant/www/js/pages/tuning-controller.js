@@ -40,6 +40,21 @@ const WINDOW_DEFAULTS = {
   window_open_q_inflation: 10.0,
 };
 
+// Online internal-gain estimation (augmented-state parameter estimation).
+// These map onto the backend OU process: τ_g (reversion time) and s_∞
+// (stationary std) of each room's internal-gain deviation.
+const GAIN_DEFS = [
+  { key: 'gain_reversion_time_hours', label: 'Reversion Time τ', unit: 'h', hint: 'How slowly the estimate reverts to the configured nominal (0.1–168)', step: 0.5, min: 0.1, max: 168, parse: parseFloat },
+  { key: 'gain_stationary_std_watts', label: 'Stationary Spread s∞', unit: 'W', hint: 'How far the estimate may wander from the nominal (0–5000)', step: 10, min: 0, max: 5000, parse: parseFloat },
+];
+
+// Must match backend DEFAULT_GAIN_* constants in const.py
+const GAIN_DEFAULTS = {
+  gain_estimator_enabled: true,
+  gain_reversion_time_hours: 24.0,
+  gain_stationary_std_watts: 200.0,
+};
+
 export function renderControllerTuning(container, _rooms, _state, connection, hass) {
   return renderTuningIndex(container, connection, hass);
 }
@@ -128,6 +143,58 @@ function renderTuningIndex(container, connection, hass) {
     windowInputs[def.key] = group.querySelector('input');
   }
 
+  // --- Internal-Gain Estimation section ---
+  const gainSection = document.createElement('div');
+  gainSection.className = 'card tuning-section';
+
+  const gainTitle = document.createElement('div');
+  gainTitle.className = 'tuning-section__title';
+  gainTitle.textContent = 'Internal-Gain Estimation';
+  gainSection.appendChild(gainTitle);
+
+  const gainDesc = document.createElement('p');
+  gainDesc.className = 'tuning-section__desc';
+  gainDesc.textContent = "Online-estimate each room's internal heat gain (people, appliances, lighting) as an augmented filter state. When enabled, the controller learns a slowly-varying gain deviation from the configured nominal and feeds it forward. The two parameters shape how aggressively and how far the estimate is allowed to move.";
+  gainSection.appendChild(gainDesc);
+
+  // Enable / disable toggle.
+  const gainToggleRow = document.createElement('div');
+  gainToggleRow.className = 'tuning-toggle';
+  gainToggleRow.innerHTML = `
+    <span class="tuning-toggle__label">Estimation:</span>
+    <button type="button" class="tuning-toggle__btn" id="gain-toggle"></button>
+  `;
+  gainSection.appendChild(gainToggleRow);
+  const gainToggleBtn = gainToggleRow.querySelector('#gain-toggle');
+
+  let gainEnabled = GAIN_DEFAULTS.gain_estimator_enabled;
+  function renderGainToggle() {
+    gainToggleBtn.textContent = gainEnabled ? 'ENABLED' : 'DISABLED';
+    gainToggleBtn.className =
+      'tuning-toggle__btn ' +
+      (gainEnabled ? 'tuning-toggle__btn--on' : 'tuning-toggle__btn--off');
+  }
+  renderGainToggle();
+
+  const gainGrid = document.createElement('div');
+  gainGrid.className = 'tuning-params-grid';
+  gainSection.appendChild(gainGrid);
+  container.appendChild(gainSection);
+
+  const gainInputs = {};
+  for (const def of GAIN_DEFS) {
+    const group = document.createElement('div');
+    group.className = 'form-group';
+    group.innerHTML = `
+      <label class="form-label" for="gain-${def.key}">${def.label}</label>
+      <input class="form-input" type="number" id="gain-${def.key}"
+        step="${def.step}" min="${def.min}" max="${def.max}" value="">
+      <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
+    `;
+    gainGrid.appendChild(group);
+    gainInputs[def.key] = group.querySelector('input');
+  }
+
   const btnApply = container.querySelector('#btn-apply-all');
   const btnReset = container.querySelector('#btn-reset-all');
   const statusEl = container.querySelector('#tuning-status');
@@ -147,11 +214,22 @@ function renderTuningIndex(container, connection, hass) {
       const val = config[def.key];
       if (val !== undefined && val !== null) windowInputs[def.key].value = val;
     }
+    for (const def of GAIN_DEFS) {
+      const val = config[def.key];
+      if (val !== undefined && val !== null) gainInputs[def.key].value = val;
+    }
+    if (config.gain_estimator_enabled !== undefined && config.gain_estimator_enabled !== null) {
+      gainEnabled = Boolean(config.gain_estimator_enabled);
+      renderGainToggle();
+    }
   }
 
   function populateDefaults() {
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
+    for (const def of GAIN_DEFS) gainInputs[def.key].value = GAIN_DEFAULTS[def.key];
+    gainEnabled = GAIN_DEFAULTS.gain_estimator_enabled;
+    renderGainToggle();
   }
 
   // Return the most up-to-date hass object — connection._hass is updated on
@@ -198,8 +276,12 @@ function renderTuningIndex(container, connection, hass) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let destroyed = false;
 
-  // All user-editable parameter fields (MPC + window config).
-  const allParamInputs = [...Object.values(inputs), ...Object.values(windowInputs)];
+  // All user-editable parameter fields (MPC + window config + gain estimation).
+  const allParamInputs = [
+    ...Object.values(inputs),
+    ...Object.values(windowInputs),
+    ...Object.values(gainInputs),
+  ];
 
   // Tracks whether the user has begun a manual tuning process (i.e. changed any
   // parameter). Once true, the reactive update() callback stops overwriting the
@@ -209,6 +291,13 @@ function renderTuningIndex(container, connection, hass) {
   let userEditing = false;
   allParamInputs.forEach((inp) => {
     inp.addEventListener('input', () => { userEditing = true; });
+  });
+
+  // Toggling the gain estimator also counts as an edit and flips its state.
+  gainToggleBtn.addEventListener('click', () => {
+    gainEnabled = !gainEnabled;
+    renderGainToggle();
+    userEditing = true;
   });
 
   async function loadConfig() {
@@ -235,9 +324,11 @@ function renderTuningIndex(container, connection, hass) {
       for (const def of PARAM_DEFS) mpcData[def.key] = def.parse(inputs[def.key].value);
       await hass.callService('heating_assistant', 'update_controller_tuning', mpcData);
 
-      const windowData = {};
-      for (const def of WINDOW_DEFS) windowData[def.key] = def.parse(windowInputs[def.key].value);
-      await hass.callService('heating_assistant', 'update_estimation_params', windowData);
+      const estData = {};
+      for (const def of WINDOW_DEFS) estData[def.key] = def.parse(windowInputs[def.key].value);
+      for (const def of GAIN_DEFS) estData[def.key] = def.parse(gainInputs[def.key].value);
+      estData.gain_estimator_enabled = gainEnabled;
+      await hass.callService('heating_assistant', 'update_estimation_params', estData);
 
       applyConfig(await fromWebSocket()) || applyConfig(fromEntityState());
       // Edits are now the applied configuration; resume syncing from state.
