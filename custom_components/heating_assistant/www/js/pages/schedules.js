@@ -18,12 +18,13 @@ export function renderSchedules(container, rooms, state, connection, hass, slug)
 const getScheduleDataForRoom = getRoomScheduleData;
 
 /** Renders a single period summary row element. */
-function makePeriodRow(p, isActive) {
+function makePeriodRow(p, isActive, isNext) {
   const { text: modeText, cls: modeCls } = periodModeDisplay(p);
   const row = document.createElement('div');
-  row.className = 'sched-row' + (isActive ? ' sched-row--active' : '');
+  row.className = 'sched-row' + (isActive ? ' sched-row--active' : '') + (isNext ? ' sched-row--next' : '');
   row.innerHTML = `
     ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
+    ${isNext ? '<span class="sched-row__next-badge">NEXT</span>' : ''}
     <span class="sched-row__name">${p.name || 'Period'}</span>
     <span class="sched-row__time">${p.start}–${p.end}</span>
     <span class="sched-row__mode ${modeCls}">${modeText}</span>
@@ -64,8 +65,7 @@ function renderScheduleIndex(container, rooms, state, connection, hass) {
       const enabled = schedData?.enabled ?? true;
 
       const activePeriod = findActivePeriod(periods);
-      // All periods except the currently active one, for the summary list
-      const otherPeriods = periods.filter((p) => p !== activePeriod);
+      const nextPeriod = findNextPeriod(periods);
 
       const card = document.createElement('div');
       card.className = 'card card--clickable sched-index-card';
@@ -81,47 +81,21 @@ function renderScheduleIndex(container, rooms, state, connection, hass) {
       `;
       card.appendChild(cardHeader);
 
-      // ── Currently active period (or placeholder) ──────────────────────────
-      if (activePeriod) {
-        card.appendChild(makePeriodRow(activePeriod, true));
-      } else if (periods.length > 0) {
-        const noActive = document.createElement('div');
-        noActive.className = 'sched-index-card__no-active';
-
-        const nextPeriod = findNextPeriod(periods);
-        if (nextPeriod) {
-          const { text: modeText, cls: modeCls } = periodModeDisplay(nextPeriod);
-          noActive.innerHTML = `
-            <span class="sched-index-card__next-label">NEXT →</span>
-            <span class="sched-row__name">${nextPeriod.name || 'Period'}</span>
-            <span class="sched-row__time">${nextPeriod.start}–${nextPeriod.end}</span>
-            <span class="sched-row__mode ${modeCls}">${modeText}</span>
-          `;
-        } else {
-          noActive.textContent = 'No period active today';
-        }
-        card.appendChild(noActive);
-      } else {
+      // ── Period list ───────────────────────────────────────────────────────
+      if (periods.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'sched-index-card__empty';
         empty.textContent = 'No periods configured — click to add';
         card.appendChild(empty);
-      }
-
-      // ── Summary list of other periods (up to 3) ───────────────────────────
-      if (otherPeriods.length > 0) {
-        const sep = document.createElement('div');
-        sep.className = 'sched-index-card__sep';
-        card.appendChild(sep);
-
+      } else {
         const list = document.createElement('div');
         list.className = 'sched-index-card__list';
 
-        const preview = otherPeriods.slice(0, 3);
-        const overflow = otherPeriods.length - preview.length;
+        const preview = periods.slice(0, 4);
+        const overflow = periods.length - preview.length;
 
         for (const p of preview) {
-          list.appendChild(makePeriodRow(p, false));
+          list.appendChild(makePeriodRow(p, p === activePeriod, p === nextPeriod));
         }
 
         if (overflow > 0) {
