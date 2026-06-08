@@ -268,6 +268,22 @@ export function forecastToDataPoints(forecastArray, field) {
     .filter(Boolean);
 }
 
+/** Like forecastToDataPoints but preserves disabled steps as {x, y: null}.
+ *  Use for setpoint/constraint datasets so that off/schedule-off periods
+ *  appear as gaps rather than frost-protection values. Requires spanGaps:false
+ *  on the dataset so Chart.js renders the break. */
+export function forecastToEnabledPoints(forecastArray, field) {
+  if (!forecastArray || !Array.isArray(forecastArray)) return [];
+  return forecastArray.map((entry) => {
+    const time = new Date(entry.time).getTime();
+    if (entry.enabled === false) return { x: time, y: null };
+    const val = entry[field];
+    if (val === undefined || val === null) return { x: time, y: null };
+    const num = parseFloat(val);
+    return { x: time, y: isNaN(num) ? null : num };
+  });
+}
+
 export async function createSparkline(canvas, datasets) {
   await loadChartJs();
   return new window.Chart(canvas.getContext('2d'), {

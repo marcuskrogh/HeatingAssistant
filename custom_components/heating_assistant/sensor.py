@@ -304,6 +304,8 @@ class SetpointSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
         room = self._coordinator.model.rooms.get(self._room_name)
         if room is None:
             return None
+        if not self._coordinator.is_room_enabled(self._room_name):
+            return None
         return round(float(room.setpoint), 2)
 
     @property
@@ -374,6 +376,8 @@ class _ConstraintSensorBase(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
 
     @property
     def native_value(self) -> Optional[float]:
+        if not self._coordinator.is_room_enabled(self._room_name):
+            return None
         bound = _constraint_bound(
             self._coordinator, self._room_name, self._sign,
         )

@@ -31,6 +31,7 @@ def _make_coordinator_stub_for_trajectory() -> HeatingAssistantCoordinator:
     coord._base_setpoint = {"living_room": 21.0}
     coord._room_comfort_offset = {"living_room": 2.0}
     coord._schedule_enabled = {"living_room": True}
+    coord._room_enabled = {"living_room": True}
     coord._effective_setpoint = {
         "living_room": EffectiveControlParams(
             setpoint=21.0,
@@ -97,6 +98,8 @@ def test_control_trajectory_carries_forward_comfort_values_through_off_period() 
     assert traj.r_scales["living_room"].tolist() == pytest.approx(
         [0.7, 0.7, 0.7, 0.7, 0.7, 1.2, 1.2, 1.2]
     )
+    # Off-period steps disabled: 08:00-10:00 covers k=1..4 (07:30 + k*30min).
+    assert traj.enabled_steps["living_room"].tolist() == [True, False, False, False, False, True, True, True]
 
 
 def test_control_trajectory_uses_current_effective_values_when_schedule_suspended() -> None:
@@ -125,11 +128,13 @@ def test_setpoint_and_constraints_follow_schedule_projected_trajectory() -> None
         _horizon=4,
         dt=900.0,
         now_utc=datetime(2026, 1, 5, 7, 30),
+        is_room_enabled=lambda room_name: True,
         _control_trajectory=ControlTrajectory(
             setpoints={"living_room": np.array([21.0, 21.0, 23.0, 23.0])},
             comfort_offsets={"living_room": np.array([1.0, 1.0, 0.5, 0.5])},
             q_scales={"living_room": np.array([1.0, 1.0, 1.0, 1.0])},
             r_scales={"living_room": np.array([1.0, 1.0, 1.0, 1.0])},
+            enabled_steps={"living_room": np.ones(4, dtype=bool)},
         ),
     )
 
@@ -186,6 +191,7 @@ def test_controller_compute_passes_schedule_trajectory_to_mpc_step(monkeypatch) 
         comfort_offsets={"living_room": np.array([2.0, 1.5, 1.0])},
         q_scales={"living_room": np.array([1.0, 1.2, 1.4])},
         r_scales={"living_room": np.array([1.0, 0.8, 0.6])},
+        enabled_steps={"living_room": np.ones(3, dtype=bool)},
     )
 
     ctrl.compute(
@@ -207,7 +213,7 @@ async def test_update_cycle_projects_schedule_with_mpc_timestep() -> None:
 
     def _capture_trajectory(now_local, N, dt_seconds):
         captured["dt_seconds"] = dt_seconds
-        return ControlTrajectory(setpoints={}, comfort_offsets={}, q_scales={}, r_scales={})
+        return ControlTrajectory(setpoints={}, comfort_offsets={}, q_scales={}, r_scales={}, enabled_steps={})
 
     coord = SimpleNamespace(
         _apply_pending_runtime_reconfiguration=lambda: None,

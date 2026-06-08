@@ -195,6 +195,7 @@ class ControlTrajectory:
     comfort_offsets: Dict[str, "np.ndarray"]  # room → per-step corridor half-width [°C]
     q_scales: Dict[str, "np.ndarray"]         # room → per-step Q multiplier [–]
     r_scales: Dict[str, "np.ndarray"]         # room → per-step R multiplier [–]
+    enabled_steps: Dict[str, "np.ndarray"]    # room → per-step enabled flag [bool]
 
 
 def _coerce_interval_seconds(value: Any) -> float:
@@ -1233,6 +1234,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             room = self.model.rooms[room_name]
             step_sp = traj.setpoints.get(room_name) if traj is not None else None
             step_off = traj.comfort_offsets.get(room_name) if traj is not None else None
+            step_enabled = traj.enabled_steps.get(room_name) if traj is not None else None
             comfort_offset = float(getattr(room, "comfort_offset", 2.0))
 
             current_heating = sum(
@@ -1247,6 +1249,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 else round(room.temperature, 2)
             )
             now_sp = round(float(room.setpoint), 2)
+            now_enabled = self.is_room_enabled(room_name)
 
             forecast: List[Dict[str, Any]] = [{
                 "time": now.isoformat(),
@@ -1257,9 +1260,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     None if self.outdoor_temp is None
                     else round(self.outdoor_temp, 2)
                 ),
-                "setpoint": now_sp,
-                "constraint_upper": round(now_sp + comfort_offset, 2),
-                "constraint_lower": round(now_sp - comfort_offset, 2),
+                "setpoint": now_sp if now_enabled else None,
+                "constraint_upper": round(now_sp + comfort_offset, 2) if now_enabled else None,
+                "constraint_lower": round(now_sp - comfort_offset, 2) if now_enabled else None,
+                "enabled": now_enabled,
             }]
 
             trajectory: List[float] = []
@@ -1274,6 +1278,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     step_sp is not None and step_off is not None
                     and i < len(step_sp) and i < len(step_off)
                 )
+                have_enabled = (step_enabled is not None and i < len(step_enabled))
+                step_on = bool(step_enabled[i]) if have_enabled else now_enabled
                 s = (
                     round(float(step_sp[i]), 2) if have_traj
                     else round(float(room.setpoint), 2)
@@ -1281,9 +1287,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 o = float(step_off[i]) if have_traj else comfort_offset
                 entry: Dict[str, Any] = {
                     "time": step_time.isoformat(),
-                    "setpoint": s,
-                    "constraint_upper": round(s + o, 2),
-                    "constraint_lower": round(s - o, 2),
+                    "setpoint": s if step_on else None,
+                    "constraint_upper": round(s + o, 2) if step_on else None,
+                    "constraint_lower": round(s - o, 2) if step_on else None,
+                    "enabled": step_on,
                 }
                 if temp is not None:
                     temp_r = round(temp, 2)
@@ -3407,6 +3414,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             comfort_offsets={},
             q_scales={},
             r_scales={},
+            enabled_steps={},
         )
 
         for room_name in self.model.room_names:
@@ -3418,6 +3426,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             off_seq = np.empty(N, dtype=float)
             qw_seq = np.empty(N, dtype=float)
             rw_seq = np.empty(N, dtype=float)
+            enabled_seq = np.ones(N, dtype=bool)
 
             # Anchor: current effective params (already resolved by _apply_schedule)
             current = self._effective_setpoint.get(room_name)
@@ -3443,17 +3452,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         last_off = params.comfort_offset
                         last_qw = params.tracking_weight
                         last_rw = params.energy_weight
-                    # Off period (params is None): carry forward unchanged.
+                    else:
+                        # Off period: carry forward values but mark step as disabled.
+                        enabled_seq[k] = False
 
                 sp_seq[k] = last_sp
                 off_seq[k] = last_off
                 qw_seq[k] = last_qw
                 rw_seq[k] = last_rw
 
+            # Manual off (user toggle) disables all horizon steps.
+            if not self._room_enabled.get(room_name, True):
+                enabled_seq[:] = False
+
             traj.setpoints[room_name] = sp_seq
             traj.comfort_offsets[room_name] = off_seq
             traj.q_scales[room_name] = qw_seq
             traj.r_scales[room_name] = rw_seq
+            traj.enabled_steps[room_name] = enabled_seq
 
         return traj
 
