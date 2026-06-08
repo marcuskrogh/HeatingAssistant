@@ -235,6 +235,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
   function renderPeriodForms() {
     const defaults = getDefaults(state);
     const activePeriod = findActivePeriod(localPeriods);
+    const nextPeriod = findNextPeriod(localPeriods);
 
     periodsTitleEl.textContent = localPeriods.length > 0
       ? `PERIODS (${localPeriods.length})`
@@ -256,12 +257,14 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
     for (let i = 0; i < localPeriods.length; i++) {
       const p = localPeriods[i];
       const isActive = (p === activePeriod);
+      const isNext = (p === nextPeriod);
       const isExpanded = expandedSet.has(i);
       const { text: modeText, cls: modeCls } = periodModeDisplay(p);
 
       const card = document.createElement('div');
       card.className = 'card schedule-form__period' +
         (isActive ? ' schedule-form__period--active' : '') +
+        (isNext ? ' schedule-form__period--next' : '') +
         (isExpanded ? ' schedule-form__period--expanded' : '');
 
       // ── Collapsed header — always visible ──────────────────────────────────
@@ -269,6 +272,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
       cardHeader.className = 'schedule-form__period-header';
       cardHeader.innerHTML = `
         ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
+        ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
         <span class="schedule-form__period-name">${p.name || 'Period'}</span>
         <span class="schedule-form__period-time">${p.start || '—'}–${p.end || '—'}</span>
         <span class="sched-row__mode ${modeCls}">${modeText}</span>
