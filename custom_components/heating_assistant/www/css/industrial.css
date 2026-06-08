@@ -1463,6 +1463,9 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
 }
 
 .room-tile__sched-name {
@@ -1503,13 +1506,16 @@
   font-weight: 600;
 }
 
-/* Currently active period — tinted + accent border with a NOW badge, mirroring
-   the highlight used on the schedules page so the live period is unmistakable. */
+/* Active / next period get the same tint treatment as the schedules-page rows. */
 .room-tile__sched-row--active {
-  padding: 5px 8px;
   background: rgba(0, 212, 170, 0.06);
-  border: 1px solid rgba(0, 212, 170, 0.28);
-  border-radius: var(--radius-sm);
+  border-color: rgba(0, 212, 170, 0.28);
+  margin-bottom: 2px;
+}
+
+.room-tile__sched-row--next {
+  background: rgba(245, 166, 35, 0.05);
+  border-color: rgba(245, 166, 35, 0.2);
   margin-bottom: 2px;
 }
 
@@ -1520,6 +1526,17 @@
   letter-spacing: 0.1em;
   color: var(--accent);
   background: var(--accent-dim);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.room-tile__sched-next {
+  flex-shrink: 0;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--warning);
+  background: rgba(245, 166, 35, 0.12);
   padding: 2px 6px;
   border-radius: 10px;
 }
@@ -1604,17 +1621,23 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  padding: 3px 0;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
 }
 
-/* Active period gets a tinted background + accent border */
 .sched-row--active {
-  padding: 6px 10px;
   background: rgba(0, 212, 170, 0.06);
-  border: 1px solid rgba(0, 212, 170, 0.28);
-  border-radius: var(--radius-sm);
+  border-color: rgba(0, 212, 170, 0.28);
   margin-bottom: 2px;
 }
+
+.sched-row--next {
+  background: rgba(245, 166, 35, 0.05);
+  border-color: rgba(245, 166, 35, 0.2);
+  margin-bottom: 2px;
+}
+
 
 .sched-row__now-badge {
   flex-shrink: 0;

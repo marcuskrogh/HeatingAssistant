@@ -9,17 +9,15 @@
  * detail page.
  */
 
-import { findActivePeriod, findNextPeriod, periodModeDisplay } from '../schedule-utils.js';
+import { findActivePeriod, findNextPeriod } from '../schedule-utils.js';
 
 /** Builds the inner HTML for a single period summary row. */
 function periodRowHtml(p, isActive, isNext) {
-  const { text, cls } = periodModeDisplay(p);
-  return `<div class="sched-row${isActive ? ' sched-row--active' : ''}">
+  return `<div class="sched-row${isActive ? ' sched-row--active' : ''}${isNext ? ' sched-row--next' : ''}">
       ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
       ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
       <span class="sched-row__name">${p.name || 'Period'}</span>
       <span class="sched-row__time">${p.start}–${p.end}</span>
-      <span class="sched-row__mode ${cls}">${text}</span>
     </div>`;
 }
 

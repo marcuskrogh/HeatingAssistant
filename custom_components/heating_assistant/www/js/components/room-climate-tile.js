@@ -17,7 +17,7 @@
  */
 
 import { entityValue } from '../utils.js';
-import { findActivePeriod } from '../schedule-utils.js';
+import { findActivePeriod, findNextPeriod } from '../schedule-utils.js';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -88,7 +88,7 @@ function resolveBackendOff(st, room, activePeriod) {
   return false;
 }
 
-function buildScheduleHtml(schedData, activePeriod) {
+function buildScheduleHtml(schedData, activePeriod, nextPeriod) {
   const periods = schedData?.periods || [];
   if (periods.length === 0) return '';
 
@@ -98,27 +98,22 @@ function buildScheduleHtml(schedData, activePeriod) {
     : 'room-tile__sched-badge room-tile__sched-badge--on';
   const badgeText = schedEnabled === false ? 'INACTIVE' : 'ACTIVE';
 
-  const renderRow = (p, isActive) => {
-    const mode = p.mode === 'off'
-      ? `<span class="room-tile__sched-off">OFF</span>`
-      : `<span class="room-tile__sched-sp">${p.setpoint != null ? p.setpoint + '°' : 'COMFORT'}</span>`;
-    return `<div class="room-tile__sched-row${isActive ? ' room-tile__sched-row--active' : ''}">
+  const renderRow = (p, isActive, isNext) => {
+    const rowCls = 'room-tile__sched-row' +
+      (isActive ? ' room-tile__sched-row--active' : '') +
+      (isNext ? ' room-tile__sched-row--next' : '');
+    return `<div class="${rowCls}">
       ${isActive ? '<span class="room-tile__sched-now">NOW</span>' : ''}
+      ${isNext ? '<span class="room-tile__sched-next">NEXT</span>' : ''}
       <span class="room-tile__sched-name">${p.name || 'Period'}</span>
       <span class="room-tile__sched-time">${p.start}–${p.end}</span>
-      ${mode}
     </div>`;
   };
 
-  // Active period (if the schedule is enabled) is pinned to the top with a NOW
-  // badge, mirroring the schedules page.  Remaining periods follow as a preview.
-  const showActive = activePeriod && schedEnabled !== false;
-  const others = showActive ? periods.filter((p) => p !== activePeriod) : periods.slice();
-  const preview = others.slice(0, showActive ? 2 : 3);
-  const overflow = others.length - preview.length;
+  const preview = periods.slice(0, 3);
+  const overflow = periods.length - preview.length;
 
-  const activeHtml = showActive ? renderRow(activePeriod, true) : '';
-  const rows = preview.map((p) => renderRow(p, false)).join('');
+  const rows = preview.map((p) => renderRow(p, p === activePeriod, p === nextPeriod)).join('');
   const more = overflow > 0
     ? `<div class="room-tile__sched-more">+${overflow} more</div>`
     : '';
@@ -127,7 +122,7 @@ function buildScheduleHtml(schedData, activePeriod) {
       <span class="room-tile__sched-title">SCHEDULE</span>
       <span class="${badgeCls}">${badgeText}</span>
     </div>
-    ${activeHtml}${rows}${more}`;
+    ${rows}${more}`;
 }
 
 export function createRoomClimateTile(room, state, hass, scheduleData) {
@@ -324,8 +319,10 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     // Schedule section is always meaningful (it explains the off-schedule and
     // when heating resumes), so paint it regardless of the off-state.
     const schedData = getScheduleData(st, room);
-    const activePeriod = findActivePeriod(schedData?.periods || []);
-    const html = buildScheduleHtml(schedData, activePeriod);
+    const periods = schedData?.periods || [];
+    const activePeriod = findActivePeriod(periods);
+    const nextPeriod = findNextPeriod(periods);
+    const html = buildScheduleHtml(schedData, activePeriod, nextPeriod);
     if (html) {
       els.schedules.innerHTML = html;
       els.schedules.style.display = '';
