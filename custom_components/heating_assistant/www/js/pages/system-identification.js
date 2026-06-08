@@ -623,6 +623,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     try {
       await hass.callService('heating_assistant', 'estimate_parameters_ml', {
         apply_parameters: false,
+        horizon_hours: parseFloat(horizonInput.value),
       });
       // The coordinator updates sysid_results and fires async_update_listeners()
       // before the service call resolves.  Allow ~800 ms for the HA websocket
