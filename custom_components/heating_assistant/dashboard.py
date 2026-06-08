@@ -548,6 +548,45 @@ def _price_and_power_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]
     }
 
 
+def _internal_gain_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
+    """Online-estimated internal-gain chart.
+
+    Plots the per-room internal heat gain [W] that the CD-EKF estimates online
+    as an augmented state (regularised OU process).  Recorder history shows how
+    the learned gain tracks occupancy/appliance changes over time.
+    """
+    gain = _eid("sensor", room.name, "internal_gain_estimated")
+    return {
+        "type": "custom:apexcharts-card",
+        "header": {
+            "show": True,
+            "title": f"{room.name} – Estimated Internal Gain",
+            "show_states": True,
+        },
+        "graph_span": f"{int(spec.graph_span_hours)}h",
+        "span": {"start": "minute", "offset": f"-{int(spec.history_hours)}h"},
+        "now": {"show": True, "label": "", "color": "#424242"},
+        "yaxis": [
+            {"id": "power", "apex_config": {"title": {"text": "Internal Gain (W)"}}},
+        ],
+        "series": [
+            {
+                "entity": gain,
+                "name": "Estimated gain",
+                "yaxis_id": "power",
+                "type": "area",
+                "color": "#6A1B9A",
+                "opacity": 0.20,
+                "stroke_width": 2,
+                "curve": "smooth",
+                "float_precision": 0,
+                **_history_series_kwargs(),
+                "show": {"in_header": True},
+            },
+        ],
+    }
+
+
 def _disturbance_card(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
     """Outdoor temperature + solar gain chart – mirrors README §13.17.5."""
     outdoor_meas = _system_eid("sensor", "outdoor_temperature_measured")
@@ -1294,6 +1333,7 @@ def _room_view(room: RoomSpec, spec: DashboardSpec) -> Dict[str, Any]:
             "type": "grid",
             "cards": [
                 {"type": "heading", "heading": "Estimated parameters", "heading_style": "title"},
+                _internal_gain_card(room, spec),
                 _parameter_table_card(room),
             ],
         },

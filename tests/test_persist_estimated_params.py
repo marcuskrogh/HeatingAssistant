@@ -103,6 +103,9 @@ class _FakeCoordinator:
         self._sigma_v = 0.75
         self._sigma_b = 0.01
         self._energy_price_weight = 1.0
+        self._gain_estimator_enabled = True
+        self._gain_reversion_time_hours = 24.0
+        self._gain_stationary_std_watts = 200.0
         self._mpc_solver = "SLSQP"
         self._mpc_analytic_derivatives = True
         self._latitude = 0.0
