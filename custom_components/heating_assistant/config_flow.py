@@ -582,14 +582,50 @@ def _room_form_schema(
     solar_exposure_default: str = DEFAULT_SOLAR_EXPOSURE,
     solar_facing_default: str = "S",
 ) -> vol.Schema:
-    """Flat schema shared by the add-room and edit-room forms.
+    """Schema shared by the add-room and edit-room forms.
 
-    Advanced envelope refinements (floor type, facade colour, etc.) live
-    after the basics and have helper text rather than being hidden behind
-    a collapsed section — kept flat for cross-version robustness.
+    Basic envelope fields are shown at the top level; advanced refinements
+    (floor type, facade colour, thermal bridges, sky coupling, solar preset)
+    live inside a collapsed section.
     """
     sensors_list = _coerce_to_list(sensors_default)
     window_sensors_list = _coerce_to_list(window_sensors_default)
+
+    advanced_schema = vol.Schema(
+        {
+            vol.Optional(CONF_FLOOR_TYPE, default=floor_type_default): _dropdown(
+                FLOOR_TYPE_OPTIONS, translation_key="floor_type",
+            ),
+            vol.Optional(CONF_FACADE_COLOUR, default=facade_colour_default): _dropdown(
+                FACADE_COLOUR_OPTIONS, translation_key="facade_colour",
+            ),
+            vol.Optional(
+                CONF_FACADE_SOLAR_SHARE, default=float(facade_solar_share_default),
+            ): _number_slider(min_value=0.0, max_value=1.0, step=0.05),
+            vol.Optional(
+                CONF_THERMAL_BRIDGE_PSI_L, default=float(thermal_bridge_psi_l_default),
+            ): _number_box(min_value=0.0, max_value=50.0, step=0.1, unit="W/K"),
+            vol.Optional(
+                CONF_SKY_RADIATIVE_UA, default=float(sky_radiative_ua_default),
+            ): _number_box(min_value=0.0, max_value=100.0, step=0.5, unit="W/K"),
+            vol.Optional(
+                CONF_SOLAR_EXPOSURE, default=solar_exposure_default,
+            ): _dropdown(
+                [
+                    SOLAR_EXPOSURE_NONE,
+                    SOLAR_EXPOSURE_LOW,
+                    SOLAR_EXPOSURE_MEDIUM,
+                    SOLAR_EXPOSURE_HIGH,
+                ],
+                translation_key="solar_exposure",
+            ),
+            vol.Optional(
+                CONF_SOLAR_FACING, default=solar_facing_default,
+            ): _dropdown(
+                list(COMPASS_TO_DEGREES), translation_key="orientation",
+            ),
+        }
+    )
 
     return vol.Schema(
         {
@@ -615,41 +651,7 @@ def _room_form_schema(
             vol.Required(
                 CONF_COMFORT_OFFSET, default=float(comfort_offset_default),
             ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
-            # ── Advanced envelope refinements ──
-            vol.Optional(CONF_FLOOR_TYPE, default=floor_type_default): _dropdown(
-                FLOOR_TYPE_OPTIONS, translation_key="floor_type",
-            ),
-            vol.Optional(CONF_FACADE_COLOUR, default=facade_colour_default): _dropdown(
-                FACADE_COLOUR_OPTIONS, translation_key="facade_colour",
-            ),
-            vol.Optional(
-                CONF_FACADE_SOLAR_SHARE, default=float(facade_solar_share_default),
-            ): _number_slider(min_value=0.0, max_value=1.0, step=0.05),
-            vol.Optional(
-                CONF_THERMAL_BRIDGE_PSI_L, default=float(thermal_bridge_psi_l_default),
-            ): _number_box(min_value=0.0, max_value=50.0, step=0.1, unit="W/K"),
-            vol.Optional(
-                CONF_SKY_RADIATIVE_UA, default=float(sky_radiative_ua_default),
-            ): _number_box(min_value=0.0, max_value=100.0, step=0.5, unit="W/K"),
-            # Solar-exposure preset — the lightweight alternative to adding
-            # individual windows.  Used only when the room has no windows;
-            # otherwise the detailed window geometry takes precedence.
-            vol.Optional(
-                CONF_SOLAR_EXPOSURE, default=solar_exposure_default,
-            ): _dropdown(
-                [
-                    SOLAR_EXPOSURE_NONE,
-                    SOLAR_EXPOSURE_LOW,
-                    SOLAR_EXPOSURE_MEDIUM,
-                    SOLAR_EXPOSURE_HIGH,
-                ],
-                translation_key="solar_exposure",
-            ),
-            vol.Optional(
-                CONF_SOLAR_FACING, default=solar_facing_default,
-            ): _dropdown(
-                list(COMPASS_TO_DEGREES), translation_key="orientation",
-            ),
+            SECTION_ADV_ENVELOPE: _section(advanced_schema, collapsed=True),
         }
     )
 
@@ -695,7 +697,11 @@ def _heater_form_schema(
     cooling_cop_default: float = DEFAULT_COOLING_COP,
     cooling_efficiency_default: float = DEFAULT_COOLING_EFFICIENCY,
 ) -> vol.Schema:
-    """Flat schema for adding/editing a heat source (heater)."""
+    """Schema for adding/editing a heat source (heater).
+
+    Essential identity and wiring fields are at the top level; performance
+    details live inside a collapsed section.
+    """
     schema_dict: Dict[Any, Any] = {
         vol.Required(CONF_SOURCE_NAME, default=name_default): TextSelector(
             TextSelectorConfig(type=TextSelectorType.TEXT)
@@ -718,8 +724,8 @@ def _heater_form_schema(
     else:
         schema_dict[vol.Required(CONF_SOURCE_HEATER_ENTITY)] = _entity_selector_optional("switch")
 
-    # ── Performance details ──
-    schema_dict.update(
+    # ── Performance details (collapsed advanced section) ──
+    perf_schema = vol.Schema(
         {
             vol.Optional(
                 CONF_SOURCE_EFFICIENCY, default=float(efficiency_default),
@@ -740,10 +746,6 @@ def _heater_form_schema(
                 [SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL],
                 translation_key="hvac_mode",
             ),
-            # Heat-pump heating/cooling capacity is asymmetric: the rated thermal
-            # max_power drives heating, while cooling is derived from the rated
-            # electrical input × cooling COP (EER).  These knobs let the UI
-            # configure that asymmetry (matching the YAML schema).
             vol.Optional(
                 CONF_SOURCE_HEATING_EFFICIENCY, default=float(heating_efficiency_default),
             ): _number_slider(min_value=0.1, max_value=1.0, step=0.05),
@@ -759,6 +761,7 @@ def _heater_form_schema(
             ): _number_box(min_value=0.0, max_value=600.0, step=5.0, unit="s"),
         }
     )
+    schema_dict[SECTION_PERFORMANCE] = _section(perf_schema, collapsed=True)
 
     return vol.Schema(schema_dict)
 
@@ -812,7 +815,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_menu(
             step_id="init",
-            menu_options=["global_settings", "manage_rooms", "save"],
+            menu_options=["global_settings", "manage_rooms", "manage_room_windows", "manage_room_heaters", "save"],
         )
 
     # ------------------------------------------------------------------
@@ -922,12 +925,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
         """Room management menu."""
         menu_options: List[str] = ["add_room"]
         if self._rooms:
-            menu_options += [
-                "edit_room",
-                "manage_room_windows",
-                "manage_room_heaters",
-                "remove_room",
-            ]
+            menu_options += ["edit_room", "remove_room"]
         menu_options.append("finish_rooms")
         return self.async_show_menu(step_id="manage_rooms", menu_options=menu_options)
 
@@ -1293,8 +1291,8 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     async def async_step_finish_windows(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Return to the rooms menu from the windows sub-flow."""
-        return await self.async_step_manage_rooms()
+        """Return to the main menu from the windows sub-flow."""
+        return await self.async_step_init()
 
     # ------------------------------------------------------------------
     # Heater management
@@ -1480,6 +1478,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
     async def async_step_finish_heaters(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Return to the rooms menu from the heaters sub-flow."""
-        return await self.async_step_manage_rooms()
+        """Return to the main menu from the heaters sub-flow."""
+        return await self.async_step_init()
 
