@@ -65,7 +65,23 @@ _LOGGER = logging.getLogger(__name__)
 #: Minimum number of history steps before attempting estimation.
 #: 60 steps ≈ 1 hour at the default 60 s sampling interval — the
 #: minimum needed to see meaningful thermal dynamics.
+#: NOTE: This constant was calibrated for 60 s sampling.  At the default
+#: 900 s sampling interval the effective bar is 15 hours, which exceeds
+#: any realistic identification window.  Instance methods therefore use
+#: ``self._min_history_steps`` (computed from ``dt`` in the constructor)
+#: instead of this module-level constant.  It is kept for backward
+#: compatibility with external importers (e.g. test suites).
 MIN_HISTORY_STEPS = 60
+
+#: Minimum wall-clock time [s] of data required before attempting estimation.
+#: Corresponds to ≈ 1 hour — enough to observe meaningful thermal dynamics
+#: for rooms with time constants of 2–6 hours.
+_MIN_HISTORY_TIME_S: float = 3600.0
+
+#: Minimum wall-clock time [s] for a contiguous simulation window to be used
+#: in the open-loop MSE objective.  Short windows cannot constrain slow
+#: parameters (R_ext, q_int); 20 minutes is a practical lower bound.
+_MIN_SEGMENT_TIME_S: float = 1200.0
 
 #: Log-space parameter bounds (hard limits).
 _LOG_MASS_LO = math.log(1e4)    # ~10 kJ/K
@@ -111,12 +127,13 @@ def _check_identifiable_connections(
     room_names: List[str],
     connections: List[Tuple[int, int]],
     min_std: float = _MIN_TEMP_DIFF_STD,
+    min_history_steps: int = MIN_HISTORY_STEPS,
 ) -> List[Tuple[int, int]]:
     """
     Return the subset of room-index pairs (i, j) for which the inter-room
     temperature difference has sufficient variance for R_ij to be identifiable.
     """
-    if len(history) < MIN_HISTORY_STEPS:
+    if len(history) < min_history_steps:
         return []
 
     identifiable = []
@@ -126,7 +143,7 @@ def _check_identifiable_connections(
             y = record.get("y", [])
             if i < len(y) and j < len(y):
                 diffs.append(float(y[i]) - float(y[j]))
-        if len(diffs) >= MIN_HISTORY_STEPS and float(np.std(diffs)) > min_std:
+        if len(diffs) >= min_history_steps and float(np.std(diffs)) > min_std:
             identifiable.append((i, j))
     return identifiable
 
@@ -135,12 +152,13 @@ def _check_identifiable_sources(
     history: List[Dict[str, Any]],
     n_sources: int,
     min_std: float = _MIN_HEATER_USAGE_STD,
+    min_history_steps: int = MIN_HISTORY_STEPS,
 ) -> List[int]:
     """
     Return the indices of heat sources whose duty-cycle ``u`` shows enough
     variation for the power-scale parameter α_s to be identifiable.
     """
-    if len(history) < MIN_HISTORY_STEPS:
+    if len(history) < min_history_steps:
         return []
 
     identifiable = []
@@ -150,7 +168,7 @@ def _check_identifiable_sources(
             u = record.get("u", [])
             if s < len(u):
                 u_vals.append(float(u[s]))
-        if len(u_vals) >= MIN_HISTORY_STEPS and float(np.std(u_vals)) > min_std:
+        if len(u_vals) >= min_history_steps and float(np.std(u_vals)) > min_std:
             identifiable.append(s)
     return identifiable
 
@@ -276,6 +294,20 @@ class KalmanMLEstimator:
         # (= 12 h at the 900 s sampling interval).
         self._max_window_steps = int(max(20, max_window_steps))
 
+        # Compute dt-aware step thresholds so the estimator works correctly
+        # at any sampling interval, not only at the 60 s interval for which
+        # the module-level MIN_HISTORY_STEPS = 60 was calibrated.
+        #
+        # At the default 900 s/step (15-min MPC cycle):
+        #   _min_history_steps = max(10, ceil(3600 / 900)) = max(10, 4) = 10 steps
+        #   _min_segment_steps = max(4,  ceil(1200 / 900)) = max(4,  2) = 4  steps
+        #
+        # At 60 s/step these recover the original constants:
+        #   _min_history_steps = max(10, ceil(3600 / 60)) = 60 (unchanged)
+        #   _min_segment_steps = max(4,  ceil(1200 / 60)) = 20 (unchanged)
+        self._min_history_steps: int = max(10, int(math.ceil(_MIN_HISTORY_TIME_S / dt)))
+        self._min_segment_steps: int = max(4, int(math.ceil(_MIN_SEGMENT_TIME_S / dt)))
+
         self._room_names: List[str] = [r.name for r in rooms]
         self._n = len(rooms)
         self._n_u = len(sources)
@@ -326,7 +358,7 @@ class KalmanMLEstimator:
         Uses CDParameterEstimator with the fully nonlinear continuous-discrete
         approach via CD-EKF.
         """
-        if len(history) < MIN_HISTORY_STEPS:
+        if len(history) < self._min_history_steps:
             return None
 
         # Build a minimal layout with no identifiable sources/pairs for the prior evaluation
@@ -409,7 +441,7 @@ class KalmanMLEstimator:
             ``log_likelihood`` (2-D list, ``None`` on per-cell failures),
             and the ``center`` values.
         """
-        if len(history) < MIN_HISTORY_STEPS:
+        if len(history) < self._min_history_steps:
             return None
         if room_name not in self._room_names:
             return None
@@ -504,7 +536,7 @@ class KalmanMLEstimator:
             for r in self._rooms
         }
 
-        if n_steps < MIN_HISTORY_STEPS:
+        if n_steps < self._min_history_steps:
             return {
                 "success": False,
                 "estimated_params": {
@@ -532,17 +564,19 @@ class KalmanMLEstimator:
                 "log_likelihood": None,
                 "message": (
                     f"Insufficient data: {n_steps} steps available, "
-                    f"need ≥ {MIN_HISTORY_STEPS}.  Keep the system running "
+                    f"need ≥ {self._min_history_steps}.  Keep the system running "
                     "and try again when more observations have been collected."
                 ),
             }
 
         # ── Identifiability gates ───────────────────────────────────────────
         identifiable_pairs = _check_identifiable_connections(
-            history, self._room_names, self._connection_pairs
+            history, self._room_names, self._connection_pairs,
+            min_history_steps=self._min_history_steps,
         )
         identifiable_sources = _check_identifiable_sources(
-            history, self._n_u
+            history, self._n_u,
+            min_history_steps=self._min_history_steps,
         )
 
         layout = _ThetaLayout(
@@ -606,6 +640,7 @@ class KalmanMLEstimator:
                 mse, g_mse = self._simulation_mse_and_grad(
                     theta, layout, std_history, nominal_dt=self._dt,
                     max_window_steps=self._max_window_steps,
+                    min_segment_steps=self._min_segment_steps,
                 )
                 reg = _regularization_fn(theta)
                 reg_grad = self._compute_regularization_gradient(
@@ -817,7 +852,7 @@ class KalmanMLEstimator:
         inter-room term, explicit-Euler derivative) is acceptable.
         """
         n = self._n
-        if len(std_history) < MIN_HISTORY_STEPS:
+        if len(std_history) < self._min_history_steps:
             return None
         dt_nom = float(nominal_dt) if nominal_dt else float(self._dt)
 
@@ -880,7 +915,7 @@ class KalmanMLEstimator:
         for i in range(n):
             A = np.asarray(rows[i], dtype=float)
             b = np.asarray(targets[i], dtype=float)
-            if A.shape[0] < max(MIN_HISTORY_STEPS // 2, 10):
+            if A.shape[0] < max(self._min_history_steps // 2, 5):
                 continue
             # Require the regressors to actually vary, else the fit is
             # ill-posed (e.g. constant temperature / no excitation).
