@@ -637,6 +637,22 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+  /* Make .shell the scroll container so position:sticky inside it is reliable.
+     Without this, the scroll container is an ancestor in HA's light DOM and
+     sticky has no reliable reference point inside the shadow DOM. */
+  .shell {
+    height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Stick the HA top bar (sidebar burger button) to the top of .shell */
+  #top-bar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
   .content {
     padding: 16px;
   }
@@ -649,15 +665,9 @@
     grid-template-columns: 1fr;
   }
 
-  /* Stick the HA top bar (sidebar burger button) to the viewport top on mobile */
-  #top-bar {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  /* Mobile navigation */
+  /* Mobile navigation — not sticky */
   .panel-nav {
+    position: relative;
     flex-wrap: wrap;
     padding: 0 12px;
     gap: 0;
