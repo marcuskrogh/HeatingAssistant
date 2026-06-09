@@ -41,19 +41,36 @@ const WINDOW_DEFAULTS = {
 };
 
 // Online internal-gain estimation (augmented-state parameter estimation).
-// These map onto the backend OU process: τ_g (reversion time) and s_∞
-// (stationary std) of each room's internal-gain deviation.
+// Exposed as the original OU parameters: κ (mean-reversion rate) and σ_g
+// (diffusion coefficient) of the per-room internal-gain deviation SDE
+//     dΔg = −κ·Δg·dt + σ_g·dW
+// The backend stores the reparametrised form (τ_g [h], s_∞ [W]); conversion
+// is applied on read and write so the backend API is unchanged.
 const GAIN_DEFS = [
-  { key: 'gain_reversion_time_hours', label: 'Reversion Time τ', unit: 'h', hint: 'How slowly the estimate reverts to the configured nominal (0.1–168)', step: 0.5, min: 0.1, max: 168, parse: parseFloat },
-  { key: 'gain_stationary_std_watts', label: 'Stationary Spread s∞', unit: 'W', hint: 'How far the estimate may wander from the nominal (0–5000)', step: 10, min: 0, max: 5000, parse: parseFloat },
+  { key: 'gain_kappa_per_hour', label: 'Reversion Rate κ', unit: '1/h', hint: 'OU mean-reversion rate; κ = 1/τ (e.g. 0.042 ≈ 24 h time constant)', step: 0.001, min: 0.006, max: 10, parse: parseFloat },
+  { key: 'gain_sigma_watts_per_sqrth', label: 'Diffusion σ_g', unit: 'W/√h', hint: 'OU noise intensity (σ_g = s∞·√(2κ)); controls how fast the estimate may change', step: 0.1, min: 0, max: 5000, parse: parseFloat },
 ];
 
-// Must match backend DEFAULT_GAIN_* constants in const.py
+// Defaults in UI units (κ [1/h], σ_g [W/√h]) derived from backend defaults:
+//   τ_g = 24 h → κ = 1/24 ≈ 0.04167 1/h
+//   s_∞ = 200 W → σ_g = 200·√(2/24) ≈ 57.74 W/√h
 const GAIN_DEFAULTS = {
   gain_estimator_enabled: true,
-  gain_reversion_time_hours: 24.0,
-  gain_stationary_std_watts: 200.0,
+  gain_kappa_per_hour: 1.0 / 24.0,
+  gain_sigma_watts_per_sqrth: 200.0 * Math.sqrt(2.0 / 24.0),
 };
+
+// Convert backend storage units (τ_g [h], s_∞ [W]) → UI units (κ [1/h], σ_g [W/√h]).
+function gainBackendToUI(tau_h, s_inf) {
+  const kappa_h = 1.0 / tau_h;
+  return { kappa_h, sigma: s_inf * Math.sqrt(2.0 * kappa_h) };
+}
+
+// Convert UI units (κ [1/h], σ_g [W/√h]) → backend storage units (τ_g [h], s_∞ [W]).
+function gainUIToBackend(kappa_h, sigma) {
+  const tau_h = 1.0 / kappa_h;
+  return { tau_h, s_inf: sigma / Math.sqrt(2.0 * kappa_h) };
+}
 
 export function renderControllerTuning(container, _rooms, _state, connection, hass) {
   return renderTuningIndex(container, connection, hass);
@@ -214,9 +231,14 @@ function renderTuningIndex(container, connection, hass) {
       const val = config[def.key];
       if (val !== undefined && val !== null) windowInputs[def.key].value = val;
     }
-    for (const def of GAIN_DEFS) {
-      const val = config[def.key];
-      if (val !== undefined && val !== null) gainInputs[def.key].value = val;
+    const tau_h = config.gain_reversion_time_hours;
+    const s_inf = config.gain_stationary_std_watts;
+    if (tau_h != null && s_inf != null) {
+      const { kappa_h, sigma } = gainBackendToUI(tau_h, s_inf);
+      gainInputs['gain_kappa_per_hour'].value = kappa_h;
+      gainInputs['gain_sigma_watts_per_sqrth'].value = sigma;
+    } else if (tau_h != null) {
+      gainInputs['gain_kappa_per_hour'].value = 1.0 / tau_h;
     }
     if (config.gain_estimator_enabled !== undefined && config.gain_estimator_enabled !== null) {
       gainEnabled = Boolean(config.gain_estimator_enabled);
@@ -227,7 +249,8 @@ function renderTuningIndex(container, connection, hass) {
   function populateDefaults() {
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
-    for (const def of GAIN_DEFS) gainInputs[def.key].value = GAIN_DEFAULTS[def.key];
+    gainInputs['gain_kappa_per_hour'].value = GAIN_DEFAULTS.gain_kappa_per_hour;
+    gainInputs['gain_sigma_watts_per_sqrth'].value = GAIN_DEFAULTS.gain_sigma_watts_per_sqrth;
     gainEnabled = GAIN_DEFAULTS.gain_estimator_enabled;
     renderGainToggle();
   }
@@ -326,7 +349,11 @@ function renderTuningIndex(container, connection, hass) {
 
       const estData = {};
       for (const def of WINDOW_DEFS) estData[def.key] = def.parse(windowInputs[def.key].value);
-      for (const def of GAIN_DEFS) estData[def.key] = def.parse(gainInputs[def.key].value);
+      const kappa_h = parseFloat(gainInputs['gain_kappa_per_hour'].value);
+      const sigma = parseFloat(gainInputs['gain_sigma_watts_per_sqrth'].value);
+      const { tau_h, s_inf } = gainUIToBackend(kappa_h, sigma);
+      estData.gain_reversion_time_hours = tau_h;
+      estData.gain_stationary_std_watts = s_inf;
       estData.gain_estimator_enabled = gainEnabled;
       await hass.callService('heating_assistant', 'update_estimation_params', estData);
 
