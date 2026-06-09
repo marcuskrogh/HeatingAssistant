@@ -649,6 +649,13 @@
     grid-template-columns: 1fr;
   }
 
+  /* Stick the header (HA top bar + panel nav) to the top of the viewport */
+  .shell-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
   /* Mobile navigation */
   .panel-nav {
     flex-wrap: wrap;
