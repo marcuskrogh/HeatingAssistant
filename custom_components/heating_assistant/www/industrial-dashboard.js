@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '46';
+  return '49';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -36,7 +36,6 @@ class HaIndustrialPanel extends HTMLElement {
     this._rooms = [];
     this._state = {};
     this._initialized = false;
-    this._unsubscribe = null;
     // The backend starts STOPPED after every (re)start; the user must press
     // START to engage the controller.  Reflect that default until the real
     // system_enabled attribute syncs in from the coordinator.
@@ -121,10 +120,6 @@ class HaIndustrialPanel extends HTMLElement {
         schedules: (slug) => renderSchedules(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
       });
 
-      this._unsubscribe = await this._connection.subscribe((event) => {
-        this._onStateChanged(event);
-      });
-
       this._router.start();
       this._updateActiveNav();
       this._syncSystemRunning();
@@ -159,20 +154,6 @@ class HaIndustrialPanel extends HTMLElement {
       }
     }
     if (changed) this._router.update(this._state);
-  }
-
-  _onStateChanged(event) {
-    const entityId = event.data?.entity_id;
-    if (!entityId || !entityId.startsWith('sensor.heating_assistant_')) return;
-
-    const newState = event.data.new_state;
-    if (newState) {
-      this._state[entityId] = newState;
-      if (this._router) this._router.update(this._state);
-      if (entityId === 'sensor.heating_assistant_system_summary') {
-        this._syncSystemRunning();
-      }
-    }
   }
 
   _syncSystemRunning() {
@@ -332,10 +313,6 @@ class HaIndustrialPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
-    if (this._unsubscribe) {
-      this._unsubscribe();
-      this._unsubscribe = null;
-    }
     if (this._router) {
       this._router.destroy();
     }
