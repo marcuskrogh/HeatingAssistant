@@ -83,56 +83,70 @@ class HaIndustrialPanel extends HTMLElement {
   async _boot() {
     this._renderShell();
 
-    const [
-      { HaConnection },
-      { Router },
-      { discoverRooms },
-      { renderOverview },
-      { renderRoomDetail },
-      { renderSystemIdentification },
-      { renderControllerTuning },
-      { renderSchedules },
-    ] = await Promise.all([
-      import(`${BASE_PATH}/js/ha-connection.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/router.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/discovery.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/pages/overview.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/pages/room-detail.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/pages/system-identification.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/pages/tuning-controller.js?v=${PANEL_VERSION}`),
-      import(`${BASE_PATH}/js/pages/schedules.js?v=${PANEL_VERSION}`),
-    ]);
+    try {
+      const [
+        { HaConnection },
+        { Router },
+        { discoverRooms },
+        { renderOverview },
+        { renderRoomDetail },
+        { renderSystemIdentification },
+        { renderControllerTuning },
+        { renderSchedules },
+      ] = await Promise.all([
+        import(`${BASE_PATH}/js/ha-connection.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/router.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/discovery.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/overview.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/room-detail.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/system-identification.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/tuning-controller.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/schedules.js?v=${PANEL_VERSION}`),
+      ]);
 
-    this._connection = new HaConnection(this._hass);
+      this._connection = new HaConnection(this._hass);
 
-    // Read state from the LATEST hass (may have been updated via set hass()
-    // while modules were loading) rather than the stored connection snapshot.
-    const latestStates = this._hass.states;
-    this._state = { ...latestStates };
-    this._rooms = discoverRooms(this._state);
+      // Read state from the LATEST hass (may have been updated via set hass()
+      // while modules were loading) rather than the stored connection snapshot.
+      const latestStates = this._hass.states;
+      this._state = { ...latestStates };
+      this._rooms = discoverRooms(this._state);
 
-    const contentEl = this.shadowRoot.getElementById('content');
-    this._router = new Router(contentEl, {
-      overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection, this._hass),
-      room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
-      identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
-      tuning: (slug) => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
-      schedules: (slug) => renderSchedules(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
-    });
+      const contentEl = this.shadowRoot.getElementById('content');
+      this._router = new Router(contentEl, {
+        overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection, this._hass),
+        room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
+        identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+        tuning: (slug) => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+        schedules: (slug) => renderSchedules(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+      });
 
-    this._unsubscribe = await this._connection.subscribe((event) => {
-      this._onStateChanged(event);
-    });
+      this._unsubscribe = await this._connection.subscribe((event) => {
+        this._onStateChanged(event);
+      });
 
-    this._router.start();
-    this._updateActiveNav();
-    this._syncSystemRunning();
+      this._router.start();
+      this._updateActiveNav();
+      this._syncSystemRunning();
 
-    // After the router renders the initial page, sync with the very latest
-    // hass.states to pick up any changes that arrived during boot.  This
-    // closes the window between the state snapshot above and subscription
-    // activation where state_changed events could be missed.
-    this._syncLatestState();
+      // After the router renders the initial page, sync with the very latest
+      // hass.states to pick up any changes that arrived during boot.  This
+      // closes the window between the state snapshot above and subscription
+      // activation where state_changed events could be missed.
+      this._syncLatestState();
+    } catch (err) {
+      // Surface the error in the panel instead of leaving the user on the
+      // frozen "INITIALIZING..." placeholder forever.
+      const contentEl = this.shadowRoot.getElementById('content');
+      if (contentEl) {
+        contentEl.innerHTML = `
+          <div class="loading" style="color:#e57373;">
+            LOAD ERROR — ${err?.message || err}<br>
+            <small style="opacity:0.6;">Check the browser console and HA logs for details.</small>
+          </div>`;
+      }
+      console.error('[heating-assistant] Boot failed:', err);
+    }
   }
 
   _syncLatestState() {
