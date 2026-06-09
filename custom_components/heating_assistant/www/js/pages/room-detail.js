@@ -417,7 +417,6 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const setpointHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[setpointEntity])));
   const constraintUpperHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity])));
   const constraintLowerHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity])));
->>>>>>> d70089b (Fix stepped fill not rendering for sparse historical comfort data)
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
   const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
