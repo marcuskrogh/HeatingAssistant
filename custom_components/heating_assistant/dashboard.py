@@ -23,6 +23,8 @@ charts use it. Optional community cards are not generated in this revision.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -90,22 +92,17 @@ class DashboardSpec:
 def slugify(value: str) -> str:
     """Slugify a string the same way Home Assistant does for entity IDs.
 
-    Lowercases, replaces any run of non-alphanumeric characters with a
-    single underscore, and strips leading/trailing underscores. This matches
-    the slug HA derives from ``_attr_name`` for the integration's entities.
+    Lowercases, applies NFKD Unicode normalisation, strips non-ASCII bytes,
+    removes punctuation (e.g. apostrophes), and collapses runs of
+    whitespace/hyphens to underscores.  This matches the slug HA derives from
+    ``_attr_name`` for the integration's entities: "Erik's Room" → "eriks_room"
+    rather than "erik_s_room".
     """
-    out: List[str] = []
-    prev_us = True
-    for ch in value.lower():
-        if ch.isalnum():
-            out.append(ch)
-            prev_us = False
-        else:
-            if not prev_us:
-                out.append("_")
-                prev_us = True
-    slug = "".join(out).strip("_")
-    return slug or "_"
+    text = unicodedata.normalize("NFKD", value.lower())
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[-\s]+", "_", text).strip("_")
+    return text or "_"
 
 
 def _climate_eid(room_name: str) -> str:
