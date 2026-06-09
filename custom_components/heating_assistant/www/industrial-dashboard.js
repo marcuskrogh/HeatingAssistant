@@ -175,7 +175,6 @@ class HaIndustrialPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css?v=${PANEL_VERSION}">
       <div class="shell">
-        <header class="shell-header">
         <div id="top-bar"></div>
         <nav class="panel-nav" id="panel-nav">
           <div class="panel-nav__brand">
@@ -209,7 +208,6 @@ class HaIndustrialPanel extends HTMLElement {
             <a class="panel-nav__link" href="#tuning">TUNING</a>
           </div>
         </nav>
-        </header>
         <main id="content" class="content">
           <div class="loading">INITIALIZING...</div>
         </main>

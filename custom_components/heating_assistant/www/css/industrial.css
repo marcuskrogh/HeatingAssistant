@@ -649,15 +649,12 @@
     grid-template-columns: 1fr;
   }
 
-  /* Stick the header (HA top bar + panel nav) to the top of the viewport */
-  .shell-header {
+  /* Mobile navigation — sticky so the panel nav persists at the top while scrolling */
+  .panel-nav {
     position: sticky;
     top: 0;
     z-index: 100;
-  }
-
-  /* Mobile navigation */
-  .panel-nav {
+    background: var(--bg-card);
     flex-wrap: wrap;
     padding: 0 12px;
     gap: 0;
