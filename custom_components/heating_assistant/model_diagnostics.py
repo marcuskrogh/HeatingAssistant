@@ -214,11 +214,13 @@ def compute_model_fit_metrics(
     # Lag-1 autocorrelation of residuals (test for whiteness)
     # Ideal: close to zero (uncorrelated errors = model captures dynamics)
     autocorr_lag1 = None
-    if n > 1:
-        try:
-            autocorr_lag1 = float(np.corrcoef(residuals[:-1], residuals[1:])[0, 1])
-        except Exception:
-            pass
+    if n > 2:
+        r0, r1 = residuals[:-1], residuals[1:]
+        if np.std(r0) > 0 and np.std(r1) > 0:
+            try:
+                autocorr_lag1 = float(np.corrcoef(r0, r1)[0, 1])
+            except Exception:
+                pass
 
     return ModelFitMetrics(
         room_name=room_name,
