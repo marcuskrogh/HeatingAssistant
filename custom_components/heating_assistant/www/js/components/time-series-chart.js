@@ -87,6 +87,7 @@ export class TimeSeriesChart {
     this._chart = null;
     this._canvas = null;
     this._onResize = null;
+    this._onOrientationChange = null;
   }
 
   async render(datasets, dynamicLimits) {
@@ -112,15 +113,38 @@ export class TimeSeriesChart {
       plugins: [nowLinePlugin()],
     });
 
-    // Force Chart.js to recalculate size after any viewport resize (e.g. mobile
-    // orientation change back to portrait, where the internal ResizeObserver
-    // can get stuck because the canvas holds the old wider dimension).
+    // Force Chart.js to recalculate size after any viewport resize. Clearing the
+    // canvas's inline pixel dimensions first lets the parent container report its
+    // true current width rather than being constrained by the previous render size
+    // (critical when shrinking — e.g. landscape back to portrait).
     this._onResize = () => {
+      if (this._canvas) {
+        this._canvas.style.width = '';
+        this._canvas.style.height = '';
+      }
       requestAnimationFrame(() => {
         if (this._chart) this._chart.resize();
       });
     };
+
+    // Mobile browsers fire orientationchange before the viewport geometry has
+    // fully settled, so the subsequent resize event may still read stale layout
+    // dimensions. Handle it separately with a double RAF so both the DOM reflow
+    // and the CSS recalculation complete before Chart.js measures the new size.
+    this._onOrientationChange = () => {
+      if (this._canvas) {
+        this._canvas.style.width = '';
+        this._canvas.style.height = '';
+      }
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (this._chart) this._chart.resize();
+        });
+      });
+    };
+
     window.addEventListener('resize', this._onResize);
+    window.addEventListener('orientationchange', this._onOrientationChange);
   }
 
   update(datasets) {
@@ -137,6 +161,10 @@ export class TimeSeriesChart {
     if (this._onResize) {
       window.removeEventListener('resize', this._onResize);
       this._onResize = null;
+    }
+    if (this._onOrientationChange) {
+      window.removeEventListener('orientationchange', this._onOrientationChange);
+      this._onOrientationChange = null;
     }
   }
 
