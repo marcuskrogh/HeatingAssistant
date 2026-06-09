@@ -1746,36 +1746,16 @@ def _register_services(hass: HomeAssistant) -> None:
         handle_update_controller_tuning,
         schema=vol.Schema(
             {
-                vol.Optional(CONF_TRACKING_WEIGHT): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
-                ),
-                vol.Optional(CONF_ENERGY_WEIGHT): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
-                ),
-                vol.Optional(CONF_ENERGY_PRICE_WEIGHT): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10000.0)
-                ),
-                vol.Optional(CONF_SMOOTHING_WEIGHT): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
-                ),
-                vol.Optional(CONF_SOFT_CONSTRAINT_WEIGHT): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10000.0)
-                ),
-                vol.Optional(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=1000000.0)
-                ),
-                vol.Optional(CONF_TERMINAL_WEIGHT): vol.All(
-                    vol.Coerce(float), vol.Range(min=1.0, max=10000.0)
-                ),
-                vol.Optional(CONF_HORIZON): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=480)
-                ),
-                vol.Optional(CONF_UPDATE_INTERVAL): vol.All(
-                    vol.Coerce(int), vol.Range(min=60, max=3600)
-                ),
-                vol.Optional(CONF_COMFORT_OFFSET): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.1, max=5.0)
-                ),
+                vol.Optional(CONF_TRACKING_WEIGHT): vol.Coerce(float),
+                vol.Optional(CONF_ENERGY_WEIGHT): vol.Coerce(float),
+                vol.Optional(CONF_ENERGY_PRICE_WEIGHT): vol.Coerce(float),
+                vol.Optional(CONF_SMOOTHING_WEIGHT): vol.Coerce(float),
+                vol.Optional(CONF_SOFT_CONSTRAINT_WEIGHT): vol.Coerce(float),
+                vol.Optional(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT): vol.Coerce(float),
+                vol.Optional(CONF_TERMINAL_WEIGHT): vol.Coerce(float),
+                vol.Optional(CONF_HORIZON): vol.Coerce(int),
+                vol.Optional(CONF_UPDATE_INTERVAL): vol.Coerce(int),
+                vol.Optional(CONF_COMFORT_OFFSET): vol.Coerce(float),
             }
         ),
     )
@@ -1822,31 +1802,15 @@ def _register_services(hass: HomeAssistant) -> None:
         handle_update_estimation_params,
         schema=vol.Schema(
             {
-                vol.Optional(CONF_SIGMA_W): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
-                ),
-                vol.Optional(CONF_SIGMA_V): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
-                ),
-                vol.Optional(CONF_SIGMA_B): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-8, max=1.0)
-                ),
-                vol.Optional(CONF_WINDOW_OPEN_DEBOUNCE): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=3600)
-                ),
-                vol.Optional(CONF_WINDOW_OPEN_CLOSE_SETTLE): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=3600)
-                ),
-                vol.Optional(CONF_WINDOW_OPEN_Q_INFLATION): vol.All(
-                    vol.Coerce(float), vol.Range(min=1.0, max=1000.0)
-                ),
+                vol.Optional(CONF_SIGMA_W): vol.Coerce(float),
+                vol.Optional(CONF_SIGMA_V): vol.Coerce(float),
+                vol.Optional(CONF_SIGMA_B): vol.Coerce(float),
+                vol.Optional(CONF_WINDOW_OPEN_DEBOUNCE): vol.Coerce(int),
+                vol.Optional(CONF_WINDOW_OPEN_CLOSE_SETTLE): vol.Coerce(int),
+                vol.Optional(CONF_WINDOW_OPEN_Q_INFLATION): vol.Coerce(float),
                 vol.Optional(CONF_GAIN_ESTIMATOR_ENABLED): cv.boolean,
-                vol.Optional(CONF_GAIN_REVERSION_TIME_HOURS): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.1, max=168.0)
-                ),
-                vol.Optional(CONF_GAIN_STATIONARY_STD_WATTS): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=5000.0)
-                ),
+                vol.Optional(CONF_GAIN_REVERSION_TIME_HOURS): vol.Coerce(float),
+                vol.Optional(CONF_GAIN_STATIONARY_STD_WATTS): vol.Coerce(float),
             }
         ),
     )

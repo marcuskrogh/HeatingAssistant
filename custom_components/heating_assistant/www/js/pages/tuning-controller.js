@@ -47,8 +47,8 @@ const WINDOW_DEFAULTS = {
 // The backend stores the reparametrised form (τ_g [h], s_∞ [W]); conversion
 // is applied on read and write so the backend API is unchanged.
 const GAIN_DEFS = [
-  { key: 'gain_kappa_per_hour', label: 'Reversion Rate κ', unit: '1/h', hint: 'OU mean-reversion rate; κ = 1/τ (e.g. 0.042 ≈ 24 h time constant)', step: 0.001, min: 0.006, max: 10, parse: parseFloat },
-  { key: 'gain_sigma_watts_per_sqrth', label: 'Diffusion σ_g', unit: 'W/√h', hint: 'OU noise intensity (σ_g = s∞·√(2κ)); controls how fast the estimate may change', step: 0.1, min: 0, max: 5000, parse: parseFloat },
+  { key: 'gain_kappa_per_hour', label: 'Reversion Rate κ', unit: '1/h', hint: 'OU mean-reversion rate; κ = 1/τ (e.g. 0.042 ≈ 24 h time constant)', step: 0.001, parse: parseFloat },
+  { key: 'gain_sigma_watts_per_sqrth', label: 'Diffusion σ_g', unit: 'W/√h', hint: 'OU noise intensity (σ_g = s∞·√(2κ)); controls how fast the estimate may change', step: 0.1, parse: parseFloat },
 ];
 
 // Defaults in UI units (κ [1/h], σ_g [W/√h]) derived from backend defaults:
