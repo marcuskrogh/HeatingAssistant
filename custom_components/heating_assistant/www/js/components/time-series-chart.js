@@ -268,6 +268,20 @@ export function forecastToDataPoints(forecastArray, field) {
     .filter(Boolean);
 }
 
+/** Like historyToDataPoints but preserves unavailable/unknown entries as
+ *  {x, y: null}. Use for setpoint/constraint history so that off-periods
+ *  (where the sensor returns unavailable) appear as gaps rather than a
+ *  bridged line. Requires spanGaps:false on the dataset. */
+export function historyToEnabledPoints(historyArray) {
+  if (!historyArray || !Array.isArray(historyArray)) return [];
+  return historyArray.map((entry) => {
+    const raw = entry.s !== undefined ? entry.s : entry.state;
+    const time = new Date(entry.lu ? entry.lu * 1000 : entry.last_updated || entry.last_changed);
+    const val = parseFloat(raw);
+    return { x: time.getTime(), y: isNaN(val) ? null : val };
+  });
+}
+
 /** Like forecastToDataPoints but preserves disabled steps as {x, y: null}.
  *  Use for setpoint/constraint datasets so that off/schedule-off periods
  *  appear as gaps rather than frost-protection values. Requires spanGaps:false

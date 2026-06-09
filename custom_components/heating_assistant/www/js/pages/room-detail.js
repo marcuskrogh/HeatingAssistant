@@ -1,4 +1,4 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs } from '../components/time-series-chart.js';
+import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs } from '../components/time-series-chart.js';
 import { createGauge, updateGauge } from '../components/gauge.js';
 import { createClimateCard } from '../components/climate-card.js';
 import { createCountdown } from '../components/countdown.js';
@@ -383,9 +383,9 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
 
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
   const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
-  const setpointHistory = historyToDataPoints(history[setpointEntity]);
-  const constraintUpperHistory = historyToDataPoints(history[constraintUpperEntity]);
-  const constraintLowerHistory = historyToDataPoints(history[constraintLowerEntity]);
+  const setpointHistory = historyToEnabledPoints(history[setpointEntity]);
+  const constraintUpperHistory = historyToEnabledPoints(history[constraintUpperEntity]);
+  const constraintLowerHistory = historyToEnabledPoints(history[constraintLowerEntity]);
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
   const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
