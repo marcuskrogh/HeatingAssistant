@@ -1,16 +1,16 @@
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
 const PARAM_DEFS = [
-  { key: 'update_interval', label: 'Sample Interval', unit: 's', hint: 'Re-planning cadence (60–3600)', step: 30, min: 60, max: 3600, parse: parseInt },
-  { key: 'comfort_offset', label: 'Comfort Offset', unit: '°C', hint: 'Symmetric band around setpoint', step: 0.1, min: 0.1, max: 5.0, parse: parseFloat },
-  { key: 'horizon', label: 'Prediction Horizon', unit: 'steps', hint: 'Control intervals planned ahead', step: 1, min: 1, max: 480, parse: parseInt },
-  { key: 'tracking_weight', label: 'Tracking Weight', unit: '', hint: 'Setpoint tracking strength (0 = band only)', step: 0.1, min: 0, max: 10, parse: parseFloat },
-  { key: 'energy_weight', label: 'Energy Weight', unit: '', hint: 'Energy-use penalty', step: 0.01, min: 0, max: 10, parse: parseFloat },
-  { key: 'energy_price_weight', label: 'Price Sensitivity', unit: '', hint: 'Electricity price cost scaling', step: 0.1, min: 0, max: 10000, parse: parseFloat },
-  { key: 'smoothing_weight', label: 'Output Smoothing', unit: '', hint: 'Penalises rapid output changes', step: 0.05, min: 0, max: 10, parse: parseFloat },
-  { key: 'soft_constraint_weight', label: 'Comfort Band Penalty (quadratic)', unit: '', hint: 'Quadratic penalty for leaving comfort zone', step: 1, min: 0, max: 10000, parse: parseFloat },
-  { key: 'soft_constraint_linear_weight', label: 'Comfort Band Penalty (linear)', unit: '', hint: 'Linear penalty for comfort-band violations (0 = disabled)', step: 1, min: 0, max: 1000000, parse: parseFloat },
-  { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, min: 1, max: 10000, parse: parseFloat },
+  { key: 'update_interval', label: 'Sample Interval', unit: 's', hint: 'Re-planning cadence', step: 30, parse: parseInt },
+  { key: 'comfort_offset', label: 'Comfort Offset', unit: '°C', hint: 'Symmetric band around setpoint', step: 0.1, parse: parseFloat },
+  { key: 'horizon', label: 'Prediction Horizon', unit: 'steps', hint: 'Control intervals planned ahead', step: 1, parse: parseInt },
+  { key: 'tracking_weight', label: 'Tracking Weight', unit: '', hint: 'Setpoint tracking strength (0 = band only)', step: 0.1, parse: parseFloat },
+  { key: 'energy_weight', label: 'Energy Weight', unit: '', hint: 'Energy-use penalty', step: 0.01, parse: parseFloat },
+  { key: 'energy_price_weight', label: 'Price Sensitivity', unit: '', hint: 'Electricity price cost scaling', step: 0.1, parse: parseFloat },
+  { key: 'smoothing_weight', label: 'Output Smoothing', unit: '', hint: 'Penalises rapid output changes', step: 0.05, parse: parseFloat },
+  { key: 'soft_constraint_weight', label: 'Comfort Band Penalty (quadratic)', unit: '', hint: 'Quadratic penalty for leaving comfort zone', step: 1, parse: parseFloat },
+  { key: 'soft_constraint_linear_weight', label: 'Comfort Band Penalty (linear)', unit: '', hint: 'Linear penalty for comfort-band violations (0 = disabled)', step: 1, parse: parseFloat },
+  { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, parse: parseFloat },
 ];
 
 // Must match backend DEFAULT_* constants in const.py
@@ -28,9 +28,9 @@ const DEFAULTS = {
 };
 
 const WINDOW_DEFS = [
-  { key: 'window_open_debounce', label: 'Window Open Debounce', unit: 's', hint: 'Debounce before confirming window open (0–3600)', step: 10, min: 0, max: 3600, parse: parseInt },
-  { key: 'window_open_close_settle', label: 'Window Close Settle', unit: 's', hint: 'Settle time after window closes before resuming (0–3600)', step: 10, min: 0, max: 3600, parse: parseInt },
-  { key: 'window_open_q_inflation', label: 'Uncertainty Multiplier', unit: '×', hint: 'Covariance inflation when window is open (1–1000)', step: 1, min: 1, max: 1000, parse: parseFloat },
+  { key: 'window_open_debounce', label: 'Window Open Debounce', unit: 's', hint: 'Debounce before confirming window open', step: 10, parse: parseInt },
+  { key: 'window_open_close_settle', label: 'Window Close Settle', unit: 's', hint: 'Settle time after window closes before resuming', step: 10, parse: parseInt },
+  { key: 'window_open_q_inflation', label: 'Uncertainty Multiplier', unit: '×', hint: 'Covariance inflation when window is open', step: 1, parse: parseFloat },
 ];
 
 // Must match backend DEFAULT_WINDOW_* constants in const.py
@@ -78,7 +78,7 @@ function renderTuningIndex(container, connection, hass) {
     group.innerHTML = `
       <label class="form-label" for="ctrl-${def.key}">${def.label}</label>
       <input class="form-input" type="number" id="ctrl-${def.key}"
-        step="${def.step}" min="${def.min}" max="${def.max}" value="">
+        step="${def.step}" value="">
       <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
     `;
     grid.appendChild(group);
@@ -111,7 +111,7 @@ function renderTuningIndex(container, connection, hass) {
     group.innerHTML = `
       <label class="form-label" for="win-${def.key}">${def.label}</label>
       <input class="form-input" type="number" id="win-${def.key}"
-        step="${def.step}" min="${def.min}" max="${def.max}" value="">
+        step="${def.step}" value="">
       <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
     `;
     windowGrid.appendChild(group);
