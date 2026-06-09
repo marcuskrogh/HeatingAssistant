@@ -385,12 +385,9 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   lastRunTs.value = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
 
   // HA's history_during_period returns the initial boundary state with its
-  // original lu (last_updated) timestamp, which may be far before the window
-  // start for slowly-changing sensors (setpoint, constraints). Chart.js with
-  // spanGaps:false does not correctly render fills for segments that begin
-  // off-screen, causing the initial on-period to show no comfort region. Clamp
-  // the first point of each enabled-history array to the window start so that
-  // all points are within the visible chart area.
+  // original lu (last_updated) timestamp, which may predate the chart window by
+  // days for slowly-changing sensors like setpoint/constraints. Clamp it to the
+  // window start so the x-axis is not distorted.
   function clampFirstToWindow(pts) {
     if (pts.length > 0 && pts[0].x < windowStart) {
       pts[0] = { ...pts[0], x: windowStart };
@@ -398,11 +395,29 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     return pts;
   }
 
+  // Chart.js stepped:'before' + spanGaps:false draws each step toward the NEXT
+  // VALID point — not toward the next null. When the history has only one valid
+  // entry before an off-period null (common for sensors that rarely change), the
+  // segment has a single point and produces zero-width fill. Insert a synthetic
+  // closing point at (null.x − 1 ms) with the same y so every valid run has at
+  // least two points, matching the dense-point behaviour of the forecast data.
+  function closeStepSegments(pts) {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      out.push(pts[i]);
+      if (pts[i].y !== null && i + 1 < pts.length && pts[i + 1].y === null) {
+        out.push({ x: pts[i + 1].x - 1, y: pts[i].y });
+      }
+    }
+    return out;
+  }
+
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
   const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
-  const setpointHistory = clampFirstToWindow(historyToEnabledPoints(history[setpointEntity]));
-  const constraintUpperHistory = clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity]));
-  const constraintLowerHistory = clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity]));
+  const setpointHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[setpointEntity])));
+  const constraintUpperHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity])));
+  const constraintLowerHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity])));
+>>>>>>> d70089b (Fix stepped fill not rendering for sparse historical comfort data)
   const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
   const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
