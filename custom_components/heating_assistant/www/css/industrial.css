@@ -649,12 +649,15 @@
     grid-template-columns: 1fr;
   }
 
-  /* Mobile navigation — sticky so the panel nav persists at the top while scrolling */
-  .panel-nav {
+  /* Stick the HA top bar (sidebar burger button) to the viewport top on mobile */
+  #top-bar {
     position: sticky;
     top: 0;
     z-index: 100;
-    background: var(--bg-card);
+  }
+
+  /* Mobile navigation */
+  .panel-nav {
     flex-wrap: wrap;
     padding: 0 12px;
     gap: 0;
