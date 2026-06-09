@@ -268,18 +268,33 @@ export function forecastToDataPoints(forecastArray, field) {
     .filter(Boolean);
 }
 
-/** Like historyToDataPoints but preserves unavailable/unknown entries as
- *  {x, y: null}. Use for setpoint/constraint history so that off-periods
- *  (where the sensor returns unavailable) appear as gaps rather than a
- *  bridged line. Requires spanGaps:false on the dataset. */
+/** Like historyToDataPoints but produces gaps for unavailable/unknown entries.
+ *  Use for setpoint/constraint history so that off-periods appear as gaps
+ *  rather than a bridged line. Requires spanGaps:false on the dataset.
+ *
+ *  With stepped:'before' and spanGaps:false, Chart.js only draws a segment
+ *  between consecutive point pairs inside the same run. A single isolated
+ *  point draws nothing. To ensure the pre-gap segment is visible, a cap
+ *  point carrying the last valid y is inserted at the transition timestamp,
+ *  then a null 1 ms later opens the gap. */
 export function historyToEnabledPoints(historyArray) {
   if (!historyArray || !Array.isArray(historyArray)) return [];
-  return historyArray.map((entry) => {
+  const result = [];
+  let lastValidY = null;
+  for (const entry of historyArray) {
     const raw = entry.s !== undefined ? entry.s : entry.state;
-    const time = new Date(entry.lu ? entry.lu * 1000 : entry.last_updated || entry.last_changed);
+    const time = new Date(entry.lu ? entry.lu * 1000 : entry.last_updated || entry.last_changed).getTime();
     const val = parseFloat(raw);
-    return { x: time.getTime(), y: isNaN(val) ? null : val };
-  });
+    if (isNaN(val)) {
+      if (lastValidY !== null) result.push({ x: time, y: lastValidY });
+      result.push({ x: time + 1, y: null });
+      lastValidY = null;
+    } else {
+      result.push({ x: time, y: val });
+      lastValidY = val;
+    }
+  }
+  return result;
 }
 
 /** Like forecastToDataPoints but preserves disabled steps as {x, y: null}.
