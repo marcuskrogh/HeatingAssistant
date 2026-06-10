@@ -2704,9 +2704,6 @@ class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
             "window_open_debounce": c._window_open_debounce,
             "window_open_close_settle": c._window_open_close_settle,
             "window_open_q_inflation": c._window_open_q_inflation,
-            "gain_estimator_enabled": bool(getattr(c, "_gain_estimator_enabled", False)),
-            "gain_reversion_time_hours": float(getattr(c, "_gain_reversion_time_hours", 24.0)),
-            "gain_stationary_std_watts": float(getattr(c, "_gain_stationary_std_watts", 200.0)),
             # Heater power-scale factors — identified vs applied
             "identified_heater_scales": dict(
                 getattr(c, "_last_identified_heater_scales", {})

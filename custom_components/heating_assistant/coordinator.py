@@ -63,9 +63,6 @@ from .const import (
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
-    CONF_GAIN_ESTIMATOR_ENABLED,
-    CONF_GAIN_REVERSION_TIME_HOURS,
-    CONF_GAIN_STATIONARY_STD_WATTS,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
@@ -132,9 +129,6 @@ from .const import (
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
-    DEFAULT_GAIN_ESTIMATOR_ENABLED,
-    DEFAULT_GAIN_REVERSION_TIME_HOURS,
-    DEFAULT_GAIN_STATIONARY_STD_WATTS,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -415,9 +409,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_SIGMA_W,
         CONF_SIGMA_V,
         CONF_SIGMA_B,
-        CONF_GAIN_ESTIMATOR_ENABLED,
-        CONF_GAIN_REVERSION_TIME_HOURS,
-        CONF_GAIN_STATIONARY_STD_WATTS,
         CONF_WINDOW_OPEN_DEBOUNCE,
         CONF_WINDOW_OPEN_CLOSE_SETTLE,
         CONF_WINDOW_OPEN_Q_INFLATION,
@@ -505,16 +496,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # (populated regardless of whether apply_params was True).  Keyed by
         # source name; value is the raw scale factor (dimensionless, 1.0 = 100%).
         self._last_identified_heater_scales: Dict[str, float] = {}
-        # Online internal-gain estimation (augmented-state parameter estimation)
-        self._gain_estimator_enabled: bool = bool(
-            _opt(CONF_GAIN_ESTIMATOR_ENABLED, DEFAULT_GAIN_ESTIMATOR_ENABLED)
-        )
-        self._gain_reversion_time_hours: float = float(
-            _opt(CONF_GAIN_REVERSION_TIME_HOURS, DEFAULT_GAIN_REVERSION_TIME_HOURS)
-        )
-        self._gain_stationary_std_watts: float = float(
-            _opt(CONF_GAIN_STATIONARY_STD_WATTS, DEFAULT_GAIN_STATIONARY_STD_WATTS)
-        )
         self._window_open_debounce: float = float(
             options.get(
                 CONF_WINDOW_OPEN_DEBOUNCE,
@@ -637,9 +618,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            gain_estimator_enabled=self._gain_estimator_enabled,
-            gain_reversion_time_hours=self._gain_reversion_time_hours,
-            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         self._init_room_state(rooms_cfg)
@@ -1145,9 +1123,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            gain_estimator_enabled=self._gain_estimator_enabled,
-            gain_reversion_time_hours=self._gain_reversion_time_hours,
-            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
@@ -1238,25 +1213,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             rebuild_controller = True
         if CONF_SIGMA_B in pending:
             self._sigma_b = float(pending.get(CONF_SIGMA_B, self._sigma_b))
-            rebuild_controller = True
-        if CONF_GAIN_ESTIMATOR_ENABLED in pending:
-            self._gain_estimator_enabled = bool(
-                pending.get(CONF_GAIN_ESTIMATOR_ENABLED, self._gain_estimator_enabled)
-            )
-            rebuild_controller = True
-        if CONF_GAIN_REVERSION_TIME_HOURS in pending:
-            self._gain_reversion_time_hours = float(
-                pending.get(
-                    CONF_GAIN_REVERSION_TIME_HOURS, self._gain_reversion_time_hours,
-                )
-            )
-            rebuild_controller = True
-        if CONF_GAIN_STATIONARY_STD_WATTS in pending:
-            self._gain_stationary_std_watts = float(
-                pending.get(
-                    CONF_GAIN_STATIONARY_STD_WATTS, self._gain_stationary_std_watts,
-                )
-            )
             rebuild_controller = True
         if CONF_IDENTIFICATION_HORIZON_HOURS in pending:
             self._identification_horizon_hours = float(
@@ -1530,9 +1486,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            gain_estimator_enabled=self._gain_estimator_enabled,
-            gain_reversion_time_hours=self._gain_reversion_time_hours,
-            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         self._estimation_timestamp = None
@@ -1598,9 +1551,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            gain_estimator_enabled=self._gain_estimator_enabled,
-            gain_reversion_time_hours=self._gain_reversion_time_hours,
-            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         # Persist the updated power scales in the estimated-params snapshot so
@@ -1700,9 +1650,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            gain_estimator_enabled=self._gain_estimator_enabled,
-            gain_reversion_time_hours=self._gain_reversion_time_hours,
-            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         # --- Build new active snapshot ---
@@ -1835,9 +1782,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            gain_estimator_enabled=self._gain_estimator_enabled,
-            gain_reversion_time_hours=self._gain_reversion_time_hours,
-            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         # Build the new active reflecting actual model state
@@ -4113,9 +4057,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_v=self._sigma_v,
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
-            gain_estimator_enabled=self._gain_estimator_enabled,
-            gain_reversion_time_hours=self._gain_reversion_time_hours,
-            gain_stationary_std_watts=self._gain_stationary_std_watts,
         )
 
         _LOGGER.info(

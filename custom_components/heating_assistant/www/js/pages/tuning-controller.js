@@ -40,38 +40,6 @@ const WINDOW_DEFAULTS = {
   window_open_q_inflation: 10.0,
 };
 
-// Online internal-gain estimation (augmented-state parameter estimation).
-// Exposed as the original OU parameters: κ (mean-reversion rate) and σ_g
-// (diffusion coefficient) of the per-room internal-gain deviation SDE
-//     dΔg = −κ·Δg·dt + σ_g·dW
-// The backend stores the reparametrised form (τ_g [h], s_∞ [W]); conversion
-// is applied on read and write so the backend API is unchanged.
-const GAIN_DEFS = [
-  { key: 'gain_kappa_per_hour', label: 'Reversion Rate κ', unit: '1/h', hint: 'OU mean-reversion rate; κ = 1/τ (e.g. 0.042 ≈ 24 h time constant)', step: 0.001, parse: parseFloat },
-  { key: 'gain_sigma_watts_per_sqrth', label: 'Diffusion σ_g', unit: 'W/√h', hint: 'OU noise intensity (σ_g = s∞·√(2κ)); controls how fast the estimate may change', step: 0.1, parse: parseFloat },
-];
-
-// Defaults in UI units (κ [1/h], σ_g [W/√h]) derived from backend defaults:
-//   τ_g = 24 h → κ = 1/24 ≈ 0.04167 1/h
-//   s_∞ = 200 W → σ_g = 200·√(2/24) ≈ 57.74 W/√h
-const GAIN_DEFAULTS = {
-  gain_estimator_enabled: true,
-  gain_kappa_per_hour: 1.0 / 24.0,
-  gain_sigma_watts_per_sqrth: 200.0 * Math.sqrt(2.0 / 24.0),
-};
-
-// Convert backend storage units (τ_g [h], s_∞ [W]) → UI units (κ [1/h], σ_g [W/√h]).
-function gainBackendToUI(tau_h, s_inf) {
-  const kappa_h = 1.0 / tau_h;
-  return { kappa_h, sigma: s_inf * Math.sqrt(2.0 * kappa_h) };
-}
-
-// Convert UI units (κ [1/h], σ_g [W/√h]) → backend storage units (τ_g [h], s_∞ [W]).
-function gainUIToBackend(kappa_h, sigma) {
-  const tau_h = 1.0 / kappa_h;
-  return { tau_h, s_inf: sigma / Math.sqrt(2.0 * kappa_h) };
-}
-
 export function renderControllerTuning(container, _rooms, _state, connection, hass) {
   return renderTuningIndex(container, connection, hass);
 }
@@ -160,58 +128,6 @@ function renderTuningIndex(container, connection, hass) {
     windowInputs[def.key] = group.querySelector('input');
   }
 
-  // --- Internal-Gain Estimation section ---
-  const gainSection = document.createElement('div');
-  gainSection.className = 'card tuning-section';
-
-  const gainTitle = document.createElement('div');
-  gainTitle.className = 'tuning-section__title';
-  gainTitle.textContent = 'Internal-Gain Estimation';
-  gainSection.appendChild(gainTitle);
-
-  const gainDesc = document.createElement('p');
-  gainDesc.className = 'tuning-section__desc';
-  gainDesc.textContent = "Online-estimate each room's internal heat gain (people, appliances, lighting) as an augmented filter state. When enabled, the controller learns a slowly-varying gain deviation from the configured nominal and feeds it forward. The two parameters shape how aggressively and how far the estimate is allowed to move.";
-  gainSection.appendChild(gainDesc);
-
-  // Enable / disable toggle.
-  const gainToggleRow = document.createElement('div');
-  gainToggleRow.className = 'tuning-toggle';
-  gainToggleRow.innerHTML = `
-    <span class="tuning-toggle__label">Estimation:</span>
-    <button type="button" class="tuning-toggle__btn" id="gain-toggle"></button>
-  `;
-  gainSection.appendChild(gainToggleRow);
-  const gainToggleBtn = gainToggleRow.querySelector('#gain-toggle');
-
-  let gainEnabled = GAIN_DEFAULTS.gain_estimator_enabled;
-  function renderGainToggle() {
-    gainToggleBtn.textContent = gainEnabled ? 'ENABLED' : 'DISABLED';
-    gainToggleBtn.className =
-      'tuning-toggle__btn ' +
-      (gainEnabled ? 'tuning-toggle__btn--on' : 'tuning-toggle__btn--off');
-  }
-  renderGainToggle();
-
-  const gainGrid = document.createElement('div');
-  gainGrid.className = 'tuning-params-grid';
-  gainSection.appendChild(gainGrid);
-  container.appendChild(gainSection);
-
-  const gainInputs = {};
-  for (const def of GAIN_DEFS) {
-    const group = document.createElement('div');
-    group.className = 'form-group';
-    group.innerHTML = `
-      <label class="form-label" for="gain-${def.key}">${def.label}</label>
-      <input class="form-input" type="number" id="gain-${def.key}"
-        step="${def.step}" min="${def.min}" max="${def.max}" value="">
-      <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
-    `;
-    gainGrid.appendChild(group);
-    gainInputs[def.key] = group.querySelector('input');
-  }
-
   const btnApply = container.querySelector('#btn-apply-all');
   const btnReset = container.querySelector('#btn-reset-all');
   const statusEl = container.querySelector('#tuning-status');
@@ -231,28 +147,11 @@ function renderTuningIndex(container, connection, hass) {
       const val = config[def.key];
       if (val !== undefined && val !== null) windowInputs[def.key].value = val;
     }
-    const tau_h = config.gain_reversion_time_hours;
-    const s_inf = config.gain_stationary_std_watts;
-    if (tau_h != null && s_inf != null) {
-      const { kappa_h, sigma } = gainBackendToUI(tau_h, s_inf);
-      gainInputs['gain_kappa_per_hour'].value = kappa_h;
-      gainInputs['gain_sigma_watts_per_sqrth'].value = sigma;
-    } else if (tau_h != null) {
-      gainInputs['gain_kappa_per_hour'].value = 1.0 / tau_h;
-    }
-    if (config.gain_estimator_enabled !== undefined && config.gain_estimator_enabled !== null) {
-      gainEnabled = Boolean(config.gain_estimator_enabled);
-      renderGainToggle();
-    }
   }
 
   function populateDefaults() {
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
-    gainInputs['gain_kappa_per_hour'].value = GAIN_DEFAULTS.gain_kappa_per_hour;
-    gainInputs['gain_sigma_watts_per_sqrth'].value = GAIN_DEFAULTS.gain_sigma_watts_per_sqrth;
-    gainEnabled = GAIN_DEFAULTS.gain_estimator_enabled;
-    renderGainToggle();
   }
 
   // Return the most up-to-date hass object — connection._hass is updated on
@@ -299,11 +198,10 @@ function renderTuningIndex(container, connection, hass) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let destroyed = false;
 
-  // All user-editable parameter fields (MPC + window config + gain estimation).
+  // All user-editable parameter fields (MPC + window config).
   const allParamInputs = [
     ...Object.values(inputs),
     ...Object.values(windowInputs),
-    ...Object.values(gainInputs),
   ];
 
   // Tracks whether the user has begun a manual tuning process (i.e. changed any
@@ -314,13 +212,6 @@ function renderTuningIndex(container, connection, hass) {
   let userEditing = false;
   allParamInputs.forEach((inp) => {
     inp.addEventListener('input', () => { userEditing = true; });
-  });
-
-  // Toggling the gain estimator also counts as an edit and flips its state.
-  gainToggleBtn.addEventListener('click', () => {
-    gainEnabled = !gainEnabled;
-    renderGainToggle();
-    userEditing = true;
   });
 
   async function loadConfig() {
@@ -349,12 +240,6 @@ function renderTuningIndex(container, connection, hass) {
 
       const estData = {};
       for (const def of WINDOW_DEFS) estData[def.key] = def.parse(windowInputs[def.key].value);
-      const kappa_h = parseFloat(gainInputs['gain_kappa_per_hour'].value);
-      const sigma = parseFloat(gainInputs['gain_sigma_watts_per_sqrth'].value);
-      const { tau_h, s_inf } = gainUIToBackend(kappa_h, sigma);
-      estData.gain_reversion_time_hours = tau_h;
-      estData.gain_stationary_std_watts = s_inf;
-      estData.gain_estimator_enabled = gainEnabled;
       await hass.callService('heating_assistant', 'update_estimation_params', estData);
 
       applyConfig(await fromWebSocket()) || applyConfig(fromEntityState());

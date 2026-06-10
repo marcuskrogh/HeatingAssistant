@@ -436,17 +436,6 @@ CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # kept for backwards
 CONF_SIGMA_W = "sigma_w"                          # EKF/process model process-noise std dev [K/√s]
 CONF_SIGMA_V = "sigma_v"                          # EKF measurement-noise std dev [K]
 CONF_SIGMA_B = "sigma_b"                          # EKF offset-state process-noise std dev [K/√s]
-# ── Online internal-gain estimation (augmented-state parameter estimation) ──
-# The per-room internal heat gain is promoted to an estimated state with a
-# regularised (Ornstein–Uhlenbeck) diffusion process
-#     dΔg = −κ·Δg·dt + σ_g·dw,   κ = 1/τ_g,   σ_g = s_∞·√(2/τ_g)
-# so the deviation from the configured nominal gain mean-reverts to zero with
-# time constant τ_g and a stationary standard deviation s_∞.  The estimate is
-# fixed at the current value and removed from the state space for the linear
-# MPC each cycle (certainty-equivalent control).
-CONF_GAIN_ESTIMATOR_ENABLED = "gain_estimator_enabled"            # bool: enable online internal-gain estimation
-CONF_GAIN_REVERSION_TIME_HOURS = "gain_reversion_time_hours"      # OU mean-reversion time constant τ_g [hours]
-CONF_GAIN_STATIONARY_STD_WATTS = "gain_stationary_std_watts"      # OU stationary std dev s_∞ of the gain deviation [W]
 CONF_WINDOW_OPEN_DEBOUNCE = "window_open_debounce"            # seconds sensor must stay on before entering open-state
 CONF_WINDOW_OPEN_CLOSE_SETTLE = "window_open_close_settle"    # seconds sensors must stay off before leaving open-state
 CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multiplier for EKF process noise while room is open
@@ -490,16 +479,6 @@ DEFAULT_MPC_ANALYTIC_DERIVATIVES = True  # always True; kept for backwards compa
 DEFAULT_SIGMA_W = 0.1
 DEFAULT_SIGMA_V = 0.5
 DEFAULT_SIGMA_B = 0.002
-# Online internal-gain estimation defaults.  τ_g = 24 h tracks within-day
-# occupancy-scale changes while reverting safely overnight when uninformative;
-# s_∞ = 200 W allows occupancy-scale deviations (people/appliances/lighting)
-# from the configured nominal.  Derived σ_g = 200·√(2/86400) ≈ 0.96 W/√s.
-# The 24 h timescale is far slower than the thermal dynamics (minutes), which
-# justifies freezing the estimate over the MPC horizon.  Enabled by default
-# with conservative tuning; expose the two knobs in the advanced tuning tab.
-DEFAULT_GAIN_ESTIMATOR_ENABLED = True
-DEFAULT_GAIN_REVERSION_TIME_HOURS = 24.0
-DEFAULT_GAIN_STATIONARY_STD_WATTS = 200.0
 DEFAULT_WINDOW_OPEN_DEBOUNCE = 60
 DEFAULT_WINDOW_OPEN_CLOSE_SETTLE = 30
 DEFAULT_WINDOW_OPEN_Q_INFLATION = 10.0
