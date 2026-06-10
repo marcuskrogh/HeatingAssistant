@@ -107,6 +107,27 @@ _MIN_TEMP_DIFF_STD = 0.3   # °C
 #: Minimum std of source duty-cycle for α_s identifiability.
 _MIN_HEATER_USAGE_STD = 0.05
 
+#: Minimum std of a room's recorded solar gain [W] for the per-room solar
+#: scale s_i to be identifiable.  A room with no windows / aperture (or a
+#: window covering only the night hours) carries no solar information.
+_MIN_SOLAR_STD = 30.0
+
+#: Log-space bounds for the per-room solar-gain scale s_i.
+_LOG_SOLAR_LO = math.log(0.2)   # heavy unmodelled shading
+_LOG_SOLAR_HI = math.log(3.0)   # preset badly underestimates the aperture
+
+#: Linear-space bounds for the 2R2C envelope split fractions.  Kept inside
+#: the hard clips in ``thermal_model.Room`` so the estimator can never
+#: construct a degenerate room.
+_C_AIR_LO, _C_AIR_HI = 0.02, 0.60
+_R_AW_LO, _R_AW_HI = 0.02, 0.90
+
+#: Prior standard deviation for the split fractions (linear space).  The
+#: splits are deliberately held on a tight leash: they are only weakly
+#: identified, and the typology defaults are decent.  The data must carry
+#: real multi-hour excitation to move them.
+_SPLIT_PRIOR_STD = 0.1
+
 #: Number of random restarts in multistart Nelder–Mead.
 _N_RESTARTS = 3
 
@@ -173,6 +194,51 @@ def _check_identifiable_sources(
     return identifiable
 
 
+def _check_identifiable_solar(
+    history: List[Dict[str, Any]],
+    room_names: List[str],
+    min_std: float = _MIN_SOLAR_STD,
+    min_history_steps: int = MIN_HISTORY_STEPS,
+) -> List[int]:
+    """
+    Return the room indices whose recorded solar-gain disturbance varies
+    enough for the per-room solar scale ``s_i`` to be identifiable.
+    """
+    if len(history) < min_history_steps:
+        return []
+
+    identifiable = []
+    for i, name in enumerate(room_names):
+        gains = [
+            float(record.get("d_solar", {}).get(name, 0.0))
+            for record in history
+        ]
+        if len(gains) >= min_history_steps and float(np.std(gains)) > min_std:
+            identifiable.append(i)
+    return identifiable
+
+
+def _identifiable_split_rooms(
+    identifiable_sources: List[int],
+    sources: List[Any],
+    room_names: List[str],
+) -> List[int]:
+    """
+    Return the room indices whose 2R2C split fractions are identifiable.
+
+    The fast/slow split is only visible through heater step responses, so a
+    room qualifies when at least one of its own heat sources passed the
+    duty-cycle excitation gate.  Passive rooms keep their typology defaults.
+    """
+    rooms_with_excited_source = {
+        getattr(sources[s], "room", None) for s in identifiable_sources
+    }
+    return [
+        i for i, name in enumerate(room_names)
+        if name in rooms_with_excited_source
+    ]
+
+
 # ── Main estimator class ─────────────────────────────────────────────────────
 
 
@@ -184,7 +250,15 @@ class _ThetaLayout:
           log_r_ext_1..n
           q_int_1..n
           log_alpha_{s_k} for s_k in identifiable_sources
-          log_r_ij_{p_k} for p_k in identifiable_pairs ]
+          log_r_ij_{p_k} for p_k in identifiable_pairs
+          log_solar_{i_k} for i_k in identifiable_solar
+          c_air_{i_k}    for i_k in identifiable_splits   (linear space)
+          r_aw_{i_k}     for i_k in identifiable_splits   (linear space) ]
+
+    The first three blocks always exist (one entry per room); the gated
+    blocks are present only for the rooms / sources / pairs that passed
+    their identifiability gates, so an old 3n-element θ remains a valid
+    layout with all gates closed.
     """
 
     def __init__(
@@ -192,10 +266,14 @@ class _ThetaLayout:
         n_rooms: int,
         identifiable_sources: List[int],
         identifiable_pairs: List[Tuple[int, int]],
+        identifiable_solar: Optional[List[int]] = None,
+        identifiable_splits: Optional[List[int]] = None,
     ) -> None:
         self.n_rooms = n_rooms
         self.identifiable_sources = list(identifiable_sources)
         self.identifiable_pairs = list(identifiable_pairs)
+        self.identifiable_solar = list(identifiable_solar or [])
+        self.identifiable_splits = list(identifiable_splits or [])
 
         n = n_rooms
         self.idx_log_mass = (0, n)
@@ -206,8 +284,14 @@ class _ThetaLayout:
         self.idx_log_alpha = (off, off + len(identifiable_sources))
         off = self.idx_log_alpha[1]
         self.idx_log_r_ij = (off, off + len(identifiable_pairs))
+        off = self.idx_log_r_ij[1]
+        self.idx_log_solar = (off, off + len(self.identifiable_solar))
+        off = self.idx_log_solar[1]
+        self.idx_c_air = (off, off + len(self.identifiable_splits))
+        off = self.idx_c_air[1]
+        self.idx_r_aw = (off, off + len(self.identifiable_splits))
 
-        self.size = self.idx_log_r_ij[1]
+        self.size = self.idx_r_aw[1]
 
     def unpack(self, theta: np.ndarray):
         a, b = self.idx_log_mass
@@ -220,7 +304,16 @@ class _ThetaLayout:
         log_alpha = theta[a:b]
         a, b = self.idx_log_r_ij
         log_r_ij = theta[a:b]
-        return log_mass, log_r, q_int, log_alpha, log_r_ij
+        a, b = self.idx_log_solar
+        log_solar = theta[a:b]
+        a, b = self.idx_c_air
+        c_air = theta[a:b]
+        a, b = self.idx_r_aw
+        r_aw = theta[a:b]
+        return (
+            log_mass, log_r, q_int, log_alpha, log_r_ij,
+            log_solar, c_air, r_aw,
+        )
 
 
 class KalmanMLEstimator:
@@ -327,6 +420,19 @@ class KalmanMLEstimator:
         self._log_alpha_prior_full = np.array([
             math.log(max(getattr(s, "power_scale", 1.0), 1e-3))
             for s in sources
+        ])
+        # Solar-scale prior: configured/previously-identified value
+        # (default 1.0 → log = 0).
+        self._log_solar_prior_full = np.array([
+            math.log(max(float(getattr(r, "solar_scale", 1.0)), 1e-3))
+            for r in rooms
+        ])
+        # 2R2C split priors: configured/typology values.
+        self._c_air_prior_full = np.array([
+            float(getattr(r, "c_air_fraction", 0.05)) for r in rooms
+        ])
+        self._r_aw_prior_full = np.array([
+            float(getattr(r, "r_aw_fraction", 0.05)) for r in rooms
         ])
 
         # Build unique inter-room connection pairs (i, j) with i < j.
@@ -578,11 +684,20 @@ class KalmanMLEstimator:
             history, self._n_u,
             min_history_steps=self._min_history_steps,
         )
+        identifiable_solar = _check_identifiable_solar(
+            history, self._room_names,
+            min_history_steps=self._min_history_steps,
+        )
+        identifiable_splits = _identifiable_split_rooms(
+            identifiable_sources, self._sources, self._room_names,
+        )
 
         layout = _ThetaLayout(
             n_rooms=self._n,
             identifiable_sources=identifiable_sources,
             identifiable_pairs=identifiable_pairs,
+            identifiable_solar=identifiable_solar,
+            identifiable_splits=identifiable_splits,
         )
 
         # ── Build initial point and priors for the joint vector ────────────
@@ -593,12 +708,24 @@ class KalmanMLEstimator:
             self._connection_r_priors[self._connection_pairs.index(p)]
             for p in identifiable_pairs
         ])
+        log_solar_prior = np.array([
+            self._log_solar_prior_full[i] for i in identifiable_solar
+        ])
+        c_air_prior = np.array([
+            self._c_air_prior_full[i] for i in identifiable_splits
+        ])
+        r_aw_prior = np.array([
+            self._r_aw_prior_full[i] for i in identifiable_splits
+        ])
         theta_prior = np.concatenate([
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
             log_alpha_prior,
             log_r_ij_prior,
+            log_solar_prior,
+            c_air_prior,
+            r_aw_prior,
         ])
 
         # ── Build per-parameter bounds ─────────────────────────────────────
@@ -609,6 +736,9 @@ class KalmanMLEstimator:
             + [(_Q_INT_LO, _Q_INT_HI)] * n
             + [(_LOG_ALPHA_LO, _LOG_ALPHA_HI)] * len(identifiable_sources)
             + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
+            + [(_LOG_SOLAR_LO, _LOG_SOLAR_HI)] * len(identifiable_solar)
+            + [(_C_AIR_LO, _C_AIR_HI)] * len(identifiable_splits)
+            + [(_R_AW_LO, _R_AW_HI)] * len(identifiable_splits)
         )
 
         # ── Convert history (carries timestamps for gap detection) ────────
@@ -616,11 +746,7 @@ class KalmanMLEstimator:
 
         # ── Build regularisation function ──────────────────────────────────
         def _regularization_fn(theta: np.ndarray) -> float:
-            lm, lr, qi, la, lrij = layout.unpack(theta)
-            return self._compute_regularization(
-                lm, lr, qi, la, lrij, layout.identifiable_pairs,
-                layout.identifiable_sources,
-            )
+            return self._compute_regularization_theta(theta, layout)
 
         # ── IPOPT optimisation with analytical gradients ──────────────────────
         # Objective: multi-step open-loop simulation MSE (see
@@ -722,12 +848,16 @@ class KalmanMLEstimator:
             _LOGGER.debug("Optimiser failed: %s", exc)
 
         # ── Unpack and clip the best solution ──────────────────────────────
-        log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(best_theta)
+        (log_mass, log_r, q_int, log_alpha, log_r_ij,
+         log_solar, c_air, r_aw) = layout.unpack(best_theta)
         log_mass = np.clip(log_mass, _LOG_MASS_LO, _LOG_MASS_HI)
         log_r = np.clip(log_r, _LOG_R_LO, _LOG_R_HI)
         q_int = np.clip(q_int, _Q_INT_LO, _Q_INT_HI)
         log_alpha = np.clip(log_alpha, _LOG_ALPHA_LO, _LOG_ALPHA_HI)
         log_r_ij = np.clip(log_r_ij, _LOG_R_IJ_LO, _LOG_R_IJ_HI)
+        log_solar = np.clip(log_solar, _LOG_SOLAR_LO, _LOG_SOLAR_HI)
+        c_air = np.clip(c_air, _C_AIR_LO, _C_AIR_HI)
+        r_aw = np.clip(r_aw, _R_AW_LO, _R_AW_HI)
 
         # Build result dict ------------------------------------------------
         estimated_params: Dict[str, Dict[str, Any]] = {}
@@ -755,6 +885,29 @@ class KalmanMLEstimator:
             estimated_r_ij[key] = round(float(math.exp(log_r_ij[k])), 6)
             identifiable_names.append(key)
 
+        # Per-room solar scales / envelope splits: identified value for
+        # gated rooms, configured value otherwise.
+        estimated_solar_scales: Dict[str, float] = {
+            self._room_names[i]: float(math.exp(self._log_solar_prior_full[i]))
+            for i in range(self._n)
+        }
+        for k, i in enumerate(identifiable_solar):
+            estimated_solar_scales[self._room_names[i]] = round(
+                float(math.exp(log_solar[k])), 4
+            )
+        estimated_splits: Dict[str, Dict[str, float]] = {
+            self._room_names[i]: {
+                "c_air_fraction": float(self._c_air_prior_full[i]),
+                "r_aw_fraction": float(self._r_aw_prior_full[i]),
+            }
+            for i in range(self._n)
+        }
+        for k, i in enumerate(identifiable_splits):
+            estimated_splits[self._room_names[i]] = {
+                "c_air_fraction": round(float(c_air[k]), 4),
+                "r_aw_fraction": round(float(r_aw[k]), 4),
+            }
+
         # Report negative normalised MSE (higher → better fit).
         # Stored in the same "log_likelihood" field for dashboard compatibility;
         # the value is -MSE/room/step (not a true log-likelihood).
@@ -762,10 +915,7 @@ class KalmanMLEstimator:
             if not np.isfinite(best_f):
                 log_ll_val: Optional[float] = None
             else:
-                reg = self._compute_regularization(
-                    log_mass, log_r, q_int, log_alpha, log_r_ij,
-                    identifiable_pairs, identifiable_sources,
-                )
+                reg = self._compute_regularization_theta(best_theta, layout)
                 log_ll_val = round(float(-(best_f - reg)), 6)
         except Exception:
             log_ll_val = None
@@ -793,6 +943,19 @@ class KalmanMLEstimator:
                 f"Inter-room R estimated for {len(identifiable_pairs)} "
                 "connection(s)."
             )
+        if identifiable_solar:
+            msg_parts.append(
+                f"Solar scale estimated for {len(identifiable_solar)} room(s)."
+            )
+        else:
+            msg_parts.append(
+                "Solar scale not identifiable — no room saw enough solar "
+                "variation during the window."
+            )
+        if identifiable_splits:
+            msg_parts.append(
+                f"Envelope split estimated for {len(identifiable_splits)} room(s)."
+            )
 
         identifiable_source_names = [
             self._sources[s].name for s in identifiable_sources
@@ -809,8 +972,16 @@ class KalmanMLEstimator:
             "estimated_internal_gains": estimated_internal_gains,
             "estimated_heater_scales": estimated_heater_scales,
             "estimated_inter_room_r": estimated_r_ij,
+            "estimated_solar_scales": estimated_solar_scales,
+            "estimated_envelope_splits": estimated_splits,
             "identifiable_connections": identifiable_names,
             "identifiable_sources": identifiable_source_names,
+            "identifiable_solar_rooms": [
+                self._room_names[i] for i in identifiable_solar
+            ],
+            "identifiable_split_rooms": [
+                self._room_names[i] for i in identifiable_splits
+            ],
             "stage2_converged": best_converged,
             "n_steps": n_steps,
             "log_likelihood": log_ll_val,
@@ -942,6 +1113,223 @@ class KalmanMLEstimator:
             return None
         return np.clip(theta, lb, ub)
 
+    def _theta_model_quantities(
+        self,
+        layout: "_ThetaLayout",
+        theta: np.ndarray,
+    ) -> Dict[str, np.ndarray]:
+        """Per-room physical quantities implied by θ, for the sensitivity pass.
+
+        Mirrors the parametrisation in :meth:`Room.conductances` /
+        :meth:`_build_rooms_from_theta`: total mass and UA from the
+        log-space θ entries, split fractions and solar scales from the
+        gated θ entries (configured values for ungated rooms).
+        """
+        from .const import (  # noqa: PLC0415
+            MAX_INFILTRATION_FRACTION,
+            SOLAR_WALL_FRACTION,
+        )
+        (log_mass, log_r, _q_int, log_alpha, log_r_ij,
+         log_solar, c_air, r_aw) = layout.unpack(theta)
+        n = self._n
+
+        C_tot = np.exp(log_mass)
+        ua = np.exp(-log_r)
+
+        fc = self._c_air_prior_full.copy()
+        rf = self._r_aw_prior_full.copy()
+        for k, i in enumerate(layout.identifiable_splits):
+            fc[i] = float(np.clip(c_air[k], _C_AIR_LO, _C_AIR_HI))
+            rf[i] = float(np.clip(r_aw[k], _R_AW_LO, _R_AW_HI))
+        s = np.exp(self._log_solar_prior_full).copy()
+        for k, i in enumerate(layout.identifiable_solar):
+            s[i] = math.exp(float(np.clip(log_solar[k], _LOG_SOLAR_LO, _LOG_SOLAR_HI)))
+
+        f_inf = np.array([
+            float(np.clip(getattr(r, "infiltration_fraction", 0.0),
+                          0.0, MAX_INFILTRATION_FRACTION))
+            for r in self._rooms
+        ])
+        facade = np.array([
+            float(getattr(r, "facade_solar_share", 0.0))
+            * float(getattr(r, "facade_absorptance", 0.0))
+            for r in self._rooms
+        ])
+
+        C_a = fc * C_tot
+        C_w = (1.0 - fc) * C_tot
+        g_inf = f_inf * ua
+        g_cond = (1.0 - f_inf) * ua
+        g_aw = g_cond / rf
+        g_we = g_cond / (1.0 - rf)
+
+        heater_scales = np.ones(self._n_u)
+        for k_la, s_idx in enumerate(layout.identifiable_sources):
+            heater_scales[s_idx] = float(np.exp(log_alpha[k_la]))
+        g_ij_vec = np.exp(-log_r_ij) if len(log_r_ij) else np.array([])
+
+        return {
+            "C_a": C_a, "C_w": C_w, "fc": fc, "rf": rf, "s": s,
+            "g_inf": g_inf, "g_aw": g_aw, "g_we": g_we,
+            "facade": facade, "wall_frac": float(SOLAR_WALL_FRACTION),
+            "heater_scales": heater_scales, "g_ij": g_ij_vec,
+        }
+
+    def _dfdtheta_step(
+        self,
+        q: Dict[str, np.ndarray],
+        layout: "_ThetaLayout",
+        model: HouseThermalSystem,
+        f_val: np.ndarray,
+        x: np.ndarray,
+        u_k: np.ndarray,
+        d_k: np.ndarray,
+        ntheta: int,
+        nx: int,
+    ) -> np.ndarray:
+        """``∂f/∂θ`` at fixed state, shape (ntheta, nx), for the 2R2C drift.
+
+        Only the physical rows (air 0…n−1, wall n…2n−1) are non-zero; the
+        emitter-filter drift carries no θ-dependence.  Two parameter
+        families use the exact whole-row scaling shortcut (every term of a
+        room's drift row is proportional to 1/C):
+
+        * ``log_mass_i`` scales both of room i's rows by −1, and
+        * ``c_air_i`` scales the air row by −1/fc and the wall row by
+          +1/(1−fc).
+
+        The remaining families are written out from the conductance
+        structure.  The wind overlay is inactive during estimation, and
+        sky/bridge conductances (default 0) are treated as
+        r-independent.
+        """
+        n = self._n
+        T_a = x[:n]
+        T_w = x[n: 2 * n]
+        T_out = float(d_k[0])
+        d_sol = np.array([
+            float(d_k[1 + i]) if 1 + i < len(d_k) else 0.0 for i in range(n)
+        ])
+        C_a, C_w = q["C_a"], q["C_w"]
+        g_inf, g_aw, g_we = q["g_inf"], q["g_aw"], q["g_we"]
+        fc, rf, s = q["fc"], q["rf"], q["s"]
+        w = q["wall_frac"]
+        facade = q["facade"]
+
+        D = np.zeros((ntheta, nx))
+        j_idx = np.arange(n)
+
+        # log_mass: rows scale with 1/C_tot → −f per row.
+        D[j_idx, j_idx] = -f_val[:n]
+        D[j_idx, n + j_idx] = -f_val[n: 2 * n]
+
+        # log_r: all three conductances scale with 1/r_ext.
+        D[n + j_idx, j_idx] = -(
+            (g_aw / C_a) * (T_w - T_a) + (g_inf / C_a) * (T_out - T_a)
+        )
+        D[n + j_idx, n + j_idx] = -(
+            (g_aw / C_w) * (T_a - T_w) + (g_we / C_w) * (T_out - T_w)
+        )
+
+        # q_int: direct heat on the air node.
+        D[2 * n + j_idx, j_idx] = 1.0 / C_a
+
+        # Heater scales α (air node).
+        for k_la, s_idx in enumerate(layout.identifiable_sources):
+            src = self._sources[s_idx]
+            i_src = model._room_idx[src.room]
+            u_s = float(u_k[s_idx]) if s_idx < len(u_k) else 0.0
+            u_scaled_s = q["heater_scales"][s_idx] * u_s
+            a0, _ = layout.idx_log_alpha
+            D[a0 + k_la, i_src] = (
+                src.thermal_power(max(0.0, u_scaled_s), T_out) / C_a[i_src]
+            )
+
+        # Inter-room resistances (wall-to-wall).
+        r0, _ = layout.idx_log_r_ij
+        for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+            g_ij = float(q["g_ij"][k_rij])
+            D[r0 + k_rij, n + pi] = (g_ij / C_w[pi]) * (T_w[pi] - T_w[pj])
+            D[r0 + k_rij, n + pj] = (g_ij / C_w[pj]) * (T_w[pj] - T_w[pi])
+
+        # Solar scales (split between air and wall like G_d).
+        s0, _ = layout.idx_log_solar
+        for k_s, i in enumerate(layout.identifiable_solar):
+            D[s0 + k_s, i] = (1.0 - w) * s[i] * d_sol[i] / C_a[i]
+            D[s0 + k_s, n + i] = (w + facade[i]) * s[i] * d_sol[i] / C_w[i]
+
+        # Envelope splits.
+        ca0, _ = layout.idx_c_air
+        ra0, _ = layout.idx_r_aw
+        for k_sp, i in enumerate(layout.identifiable_splits):
+            # c_air: air row ∝ 1/fc, wall row ∝ 1/(1−fc).
+            D[ca0 + k_sp, i] = -f_val[i] / fc[i]
+            D[ca0 + k_sp, n + i] = f_val[n + i] / (1.0 - fc[i])
+            # r_aw: ∂g_aw/∂rf = −g_aw/rf, ∂g_we/∂rf = +g_we/(1−rf).
+            D[ra0 + k_sp, i] = -(g_aw[i] / (rf[i] * C_a[i])) * (T_w[i] - T_a[i])
+            D[ra0 + k_sp, n + i] = (
+                -(g_aw[i] / (rf[i] * C_w[i])) * (T_a[i] - T_w[i])
+                + (g_we[i] / ((1.0 - rf[i]) * C_w[i])) * (T_out - T_w[i])
+            )
+        return D
+
+    def _dFdtheta_const(
+        self,
+        q: Dict[str, np.ndarray],
+        layout: "_ThetaLayout",
+        model: HouseThermalSystem,
+        ntheta: int,
+        nx: int,
+    ) -> np.ndarray:
+        """``∂(∂f/∂x)/∂θ``, shape (ntheta, nx, nx), for the 2R2C drift.
+
+        Used by the EKF-likelihood sensitivity pass to propagate ∂P/∂θ.
+        Only the physical 2n × 2n block carries θ-dependence (the
+        filter-column coupling through the heater scales is neglected,
+        as in the previous 1R1C implementation).
+        """
+        n = self._n
+        C_a, C_w = q["C_a"], q["C_w"]
+        g_inf, g_aw, g_we = q["g_inf"], q["g_aw"], q["g_we"]
+        fc, rf = q["fc"], q["rf"]
+        F_phys = model._F  # (2n, 2n), already divided by C
+
+        D = np.zeros((ntheta, nx, nx))
+        for j in range(n):
+            # log_mass: both of room j's rows scale with 1/C_tot.
+            D[j, j, :2 * n] = -F_phys[j, :]
+            D[j, n + j, :2 * n] = -F_phys[n + j, :]
+            # log_r: g_inf, g_aw, g_we all scale with 1/r_ext.
+            D[n + j, j, j] = (g_inf[j] + g_aw[j]) / C_a[j]
+            D[n + j, j, n + j] = -g_aw[j] / C_a[j]
+            D[n + j, n + j, j] = -g_aw[j] / C_w[j]
+            D[n + j, n + j, n + j] = (g_aw[j] + g_we[j]) / C_w[j]
+
+        r0, _ = layout.idx_log_r_ij
+        for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
+            g_ij = float(q["g_ij"][k_rij])
+            t = r0 + k_rij
+            D[t, n + pi, n + pi] = g_ij / C_w[pi]
+            D[t, n + pj, n + pj] = g_ij / C_w[pj]
+            D[t, n + pi, n + pj] = -g_ij / C_w[pi]
+            D[t, n + pj, n + pi] = -g_ij / C_w[pj]
+
+        ca0, _ = layout.idx_c_air
+        ra0, _ = layout.idx_r_aw
+        for k_sp, i in enumerate(layout.identifiable_splits):
+            t = ca0 + k_sp
+            D[t, i, :2 * n] = -F_phys[i, :] / fc[i]
+            D[t, n + i, :2 * n] = F_phys[n + i, :] / (1.0 - fc[i])
+            t = ra0 + k_sp
+            D[t, i, i] = g_aw[i] / (rf[i] * C_a[i])
+            D[t, i, n + i] = -g_aw[i] / (rf[i] * C_a[i])
+            D[t, n + i, i] = -g_aw[i] / (rf[i] * C_w[i])
+            D[t, n + i, n + i] = (
+                g_aw[i] / (rf[i] * C_w[i])
+                - g_we[i] / ((1.0 - rf[i]) * C_w[i])
+            )
+        return D
+
     def _simulation_mse_and_grad(
         self,
         theta: np.ndarray,
@@ -967,7 +1355,7 @@ class KalmanMLEstimator:
         Gradient is computed via a forward-sensitivity pass propagating
         ``sx = ∂x/∂θ`` alongside the state.  This is strictly simpler than
         the EKF sensitivity pass because there is no Kalman update step —
-        the sensitivity resets to zero at every segment boundary rather than
+        the sensitivity resets at every window boundary rather than
         accumulating across the full dataset.
 
         Returns
@@ -994,42 +1382,8 @@ class KalmanMLEstimator:
         nx = int(model.nx)
         n_sub = 1
 
-        _skip_analytic_grad = (model._F.shape[0] > n)
-
-        log_mass, log_r, _q_int, log_alpha, log_r_ij_vec = layout.unpack(theta)
-        C_cap = np.exp(log_mass)
-        g_ext = np.exp(-log_r)
-
-        heater_scales = np.ones(self._n_u)
-        for k_la, s_idx in enumerate(layout.identifiable_sources):
-            heater_scales[s_idx] = float(np.exp(log_alpha[k_la]))
-
-        g_ij_vec = np.exp(-log_r_ij_vec) if len(log_r_ij_vec) else np.array([])
-
-        F_n = model._F
-        G_d_mat = model._G_d
-        n_alpha = len(layout.identifiable_sources)
-
+        quants = self._theta_model_quantities(layout, theta)
         _p0 = model.params
-
-        # Precompute index arrays and constant diagonal for dfdtheta.
-        _j_idx = np.arange(n)
-        _Gd_diag = G_d_mat[_j_idx, 1 + _j_idx]  # ∂f_j/∂q_int_j = 1/C_j
-
-        # Precompute dFdtheta (constant — independent of state/input)
-        dFdtheta = np.zeros((ntheta, nx, nx))
-        if not _skip_analytic_grad:
-            for j in range(n):
-                dFdtheta[j, j, :n] = -F_n[j, :]
-            for j in range(n):
-                dFdtheta[n + j, j, j] = g_ext[j] / C_cap[j]
-            for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
-                g_ij = float(g_ij_vec[k_rij])
-                t_idx = 3 * n + n_alpha + k_rij
-                dFdtheta[t_idx, pi, pi] = g_ij / C_cap[pi]
-                dFdtheta[t_idx, pj, pj] = g_ij / C_cap[pj]
-                dFdtheta[t_idx, pi, pj] = -g_ij / C_cap[pi]
-                dFdtheta[t_idx, pj, pi] = -g_ij / C_cap[pj]
 
         # ── Segment history at timestamp gaps ────────────────────────────
         N = len(std_history)
@@ -1045,6 +1399,8 @@ class KalmanMLEstimator:
         total_sse = 0.0
         total_grad = np.zeros(ntheta)
         n_steps_used = 0
+
+        ra0, _ = layout.idx_r_aw
 
         for seg_i in range(len(seg_starts) - 1):
             seg_begin = seg_starts[seg_i]
@@ -1066,19 +1422,26 @@ class KalmanMLEstimator:
                 win = seg[win_start:win_end]
 
                 # Initialise from first measurement of this window, starting
-                # the free-run at the *same* state the data is in: room temps
-                # from the measurement and emitter-lag states warm-started to
-                # the commanded fraction (steady state of the lag filter).
-                # This mirrors the open-loop diagnostic and the live EKF, so
-                # the parameters we identify reflect the trajectory the user
-                # actually sees.  The warm-start carries no θ-dependence, so
-                # the per-window sensitivity correctly resets to zero.
+                # the free-run at the *same* state the data is in: air temps
+                # from the measurement, wall states at the steady-state value
+                # implied by (T_a, T_out), and emitter-lag states warm-started
+                # to the commanded fraction.  This mirrors the open-loop
+                # diagnostic and the live EKF.
                 ym0 = np.asarray(win[0]["ym"], dtype=float)
                 u0 = np.asarray(win[0].get("u", []), dtype=float)
+                d0 = np.asarray(win[0].get("d", []), dtype=float)
                 x = np.asarray(
-                    model.initial_state_from_measurement(ym0, u0), dtype=float
+                    model.initial_state_from_measurement(ym0, u0, d0),
+                    dtype=float,
                 )
                 sx = np.zeros((ntheta, nx))  # ∂x/∂θ — reset per window
+                # The wall warm start T_w0 = (1−rf)·T_a + rf·T_out depends
+                # on the identified r_aw fraction (sky/bridge neglected):
+                # ∂T_w0/∂rf = T_out − T_a.
+                if len(d0) > 0 and len(layout.identifiable_splits):
+                    T_out0 = float(d0[0])
+                    for k_sp, i in enumerate(layout.identifiable_splits):
+                        sx[ra0 + k_sp, n + i] = T_out0 - float(x[i])
 
                 for step in range(len(win) - 1):
                     rec_k = win[step]
@@ -1100,11 +1463,9 @@ class KalmanMLEstimator:
                     else:
                         actual_dt = nominal_dt
                     h_sub = actual_dt / n_sub
-                    T_out_k = float(d_k[0])
 
                     valid = True
                     for _ in range(n_sub):
-                        T = x[:n]
                         try:
                             f_val = model.f(x, u_k, d_k, _p0, 0.0)
                             F_full = model.dfdx(x, u_k, d_k, _p0, 0.0)
@@ -1112,30 +1473,10 @@ class KalmanMLEstimator:
                             valid = False
                             break
 
-                        dfdtheta_val = np.zeros((ntheta, nx))
-                        if not _skip_analytic_grad:
-                            dfdtheta_val[_j_idx, _j_idx] = -f_val[:n]
-                            dfdtheta_val[n + _j_idx, _j_idx] = (g_ext / C_cap) * (T - T_out_k)
-                            dfdtheta_val[2 * n + _j_idx, _j_idx] = _Gd_diag
-                            for k_la, s_idx in enumerate(layout.identifiable_sources):
-                                src = self._sources[s_idx]
-                                i_src = model._room_idx[src.room]
-                                u_s = float(u_k[s_idx]) if s_idx < len(u_k) else 0.0
-                                u_scaled_s = heater_scales[s_idx] * u_s
-                                heat_c = (
-                                    src.thermal_power(max(0.0, u_scaled_s), T_out_k)
-                                    / C_cap[i_src]
-                                )
-                                dfdtheta_val[3 * n + k_la, i_src] = heat_c
-                            for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
-                                g_ij = float(g_ij_vec[k_rij])
-                                t_idx = 3 * n + n_alpha + k_rij
-                                dfdtheta_val[t_idx, pi] = (
-                                    (g_ij / C_cap[pi]) * (T[pi] - T[pj])
-                                )
-                                dfdtheta_val[t_idx, pj] = (
-                                    (g_ij / C_cap[pj]) * (T[pj] - T[pi])
-                                )
+                        dfdtheta_val = self._dfdtheta_step(
+                            quants, layout, model, f_val, x, u_k, d_k,
+                            ntheta, nx,
+                        )
 
                         # Euler step for state and sensitivity
                         sx = sx + h_sub * (sx @ F_full.T + dfdtheta_val)
@@ -1152,8 +1493,7 @@ class KalmanMLEstimator:
                     residual = ym_next - x[:n]  # shape (n,)
                     total_sse += float(np.dot(residual, residual))
                     # ∂||residual||²/∂θ_i = -2 * sx[i, :n] · residual
-                    if not _skip_analytic_grad:
-                        total_grad -= 2.0 * (sx[:, :n] @ residual)
+                    total_grad -= 2.0 * (sx[:, :n] @ residual)
                     n_steps_used += 1
 
         if n_steps_used == 0:
@@ -1223,63 +1563,14 @@ class KalmanMLEstimator:
             return _SENTINEL, _zero_grad.copy()
 
         n = self._n
-        nx = int(model.nx)     # n for 1R1C (no augmented offset states)
+        nx = int(model.nx)     # 2n + m for 2R2C (no augmented offset states)
         n_sub = 1
         h_sub = self._dt / n_sub
 
-        # Analytical gradient is valid when the drift Jacobian _F has the
-        # expected (n, n) shape for the 1R1C model.  If the model ever
-        # reverts to a larger state (e.g. 2R2C), the sensitivity writes
-        # below would broadcast incorrectly, so we gate on shape equality.
-        _skip_analytic_grad = (model._F.shape[0] > n)
-
-        # ── Unpack theta ────────────────────────────────────────────────────
-        log_mass, log_r, q_int, log_alpha, log_r_ij_vec = layout.unpack(theta)
-        C_cap = np.exp(log_mass)          # (n,) thermal masses
-        g_ext = np.exp(-log_r)            # (n,) external conductances 1/R_ext
-
-        # Per-source heater scales
-        heater_scales = np.ones(self._n_u)
-        for k_la, s_idx in enumerate(layout.identifiable_sources):
-            heater_scales[s_idx] = float(np.exp(log_alpha[k_la]))
-
-        # Per-pair inter-room conductances
-        g_ij_vec = (np.exp(-log_r_ij_vec)
-                    if len(log_r_ij_vec) else np.array([]))  # 1/R_ij
-
-        # Structural matrices baked into this model instance
-        F_n = model._F       # (n, n) room-temperature block of drift Jacobian
-        G_d_mat = model._G_d  # (n, 1+n) disturbance gain matrix
-
-        n_alpha = len(layout.identifiable_sources)
-        n_pairs = len(layout.identifiable_pairs)
-
-        # Precompute index arrays and constant diagonal for dfdtheta.
-        _j_idx = np.arange(n)
-        _Gd_diag = G_d_mat[_j_idx, 1 + _j_idx]  # ∂f_j/∂q_int_j = 1/C_j
+        quants = self._theta_model_quantities(layout, theta)
 
         # ── Precompute dFdtheta (constant – doesn't depend on x/u/d) ───────
-        dFdtheta = np.zeros((ntheta, nx, nx))
-
-        if not _skip_analytic_grad:
-            # log_mass[j]  → (∂F_n/∂log_mass_j)[j, :] = −F_n[j, :]
-            for j in range(n):
-                dFdtheta[j, j, :n] = -F_n[j, :]
-
-            # log_r[j]  → (∂F_n/∂log_r_j)[j, j] = g_ext[j] / C_cap[j]
-            for j in range(n):
-                dFdtheta[n + j, j, j] = g_ext[j] / C_cap[j]
-
-            # q_int[j], log_alpha[k] → dFdtheta = 0  (already zero)
-
-            # log_r_ij[k] for pair (pi, pj):
-            for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
-                g_ij = float(g_ij_vec[k_rij])
-                t_idx = 3 * n + n_alpha + k_rij
-                dFdtheta[t_idx, pi, pi] = g_ij / C_cap[pi]
-                dFdtheta[t_idx, pj, pj] = g_ij / C_cap[pj]
-                dFdtheta[t_idx, pi, pj] = -g_ij / C_cap[pi]
-                dFdtheta[t_idx, pj, pi] = -g_ij / C_cap[pj]
+        dFdtheta = self._dFdtheta_const(quants, layout, model, ntheta, nx)
 
         # ── Measurement Jacobian H (constant for this model) ────────────────
         _u0 = np.zeros(model.nu)
@@ -1308,12 +1599,8 @@ class KalmanMLEstimator:
             except (KeyError, TypeError, ValueError):
                 return _SENTINEL, _zero_grad.copy()
 
-            T_out_k = float(d_k[0])
-
             # ── Euler prediction sub-steps ───────────────────────────────────
             for _ in range(n_sub):
-                T = x[:n]
-
                 try:
                     f_val = model.f(x, u_k, d_k, _p0, 0.0)        # (nx,)
                     F_full = model.dfdx(x, u_k, d_k, _p0, 0.0)    # (nx, nx)
@@ -1321,39 +1608,9 @@ class KalmanMLEstimator:
                 except Exception:
                     return _SENTINEL, _zero_grad.copy()
 
-                # ── Compute dfdtheta (state-dependent) ─────────────────────
-                # Shape (ntheta, nx).  Disabled under 2R2C (Phase 1 A1) for
-                # the same reasons as dFdtheta above; Phase 4 will restore
-                # analytic gradients.
-                dfdtheta_val = np.zeros((ntheta, nx))
-
-                if not _skip_analytic_grad:
-                    dfdtheta_val[_j_idx, _j_idx] = -f_val[:n]
-                    dfdtheta_val[n + _j_idx, _j_idx] = (g_ext / C_cap) * (T - T_out_k)
-                    dfdtheta_val[2 * n + _j_idx, _j_idx] = _Gd_diag
-
-                    # log_alpha[k]: ∂f_{i_src}/∂log_alpha_k = heat_contrib of src k
-                    for k_la, s_idx in enumerate(layout.identifiable_sources):
-                        src = self._sources[s_idx]
-                        i_src = model._room_idx[src.room]
-                        u_s = float(u_k[s_idx]) if s_idx < len(u_k) else 0.0
-                        u_scaled_s = heater_scales[s_idx] * u_s
-                        heat_c = (
-                            src.thermal_power(max(0.0, u_scaled_s), T_out_k)
-                            / C_cap[i_src]
-                        )
-                        dfdtheta_val[3 * n + k_la, i_src] = heat_c
-
-                    # log_r_ij[k]: ∂f_{pi}/∂log_r_ij_k = (g_ij/C_pi)(T_pi−T_pj)
-                    for k_rij, (pi, pj) in enumerate(layout.identifiable_pairs):
-                        g_ij = float(g_ij_vec[k_rij])
-                        t_idx = 3 * n + n_alpha + k_rij
-                        dfdtheta_val[t_idx, pi] = (g_ij / C_cap[pi]) * (
-                            T[pi] - T[pj]
-                        )
-                        dfdtheta_val[t_idx, pj] = (g_ij / C_cap[pj]) * (
-                            T[pj] - T[pi]
-                        )
+                dfdtheta_val = self._dfdtheta_step(
+                    quants, layout, model, f_val, x, u_k, d_k, ntheta, nx,
+                )
 
                 # ── Propagate state and covariance (Euler) ──────────────────
                 P_dot = F_full @ P + P @ F_full.T + G_sig @ G_sig.T
@@ -1464,9 +1721,10 @@ class KalmanMLEstimator:
     ) -> np.ndarray:
         """
         Return ∂reg/∂θ where reg(θ) is the Gaussian regularisation term
-        from :meth:`_compute_regularization`.
+        from :meth:`_compute_regularization_theta`.
         """
-        log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(theta)
+        (log_mass, log_r, q_int, log_alpha, log_r_ij,
+         log_solar, c_air, r_aw) = layout.unpack(theta)
         lam = self._regularization
         grad = np.zeros_like(theta)
 
@@ -1494,7 +1752,98 @@ class KalmanMLEstimator:
             ])
             grad[a:b] = 2.0 * lam * (log_r_ij - r_priors)
 
+        a, b = layout.idx_log_solar
+        if a < b:
+            s_prior = np.array([
+                self._log_solar_prior_full[i] for i in layout.identifiable_solar
+            ])
+            grad[a:b] = 2.0 * lam * (log_solar - s_prior)
+
+        a, b = layout.idx_c_air
+        if a < b:
+            ca_prior = np.array([
+                self._c_air_prior_full[i] for i in layout.identifiable_splits
+            ])
+            grad[a:b] = 2.0 * lam * (c_air - ca_prior) / (_SPLIT_PRIOR_STD ** 2)
+
+        a, b = layout.idx_r_aw
+        if a < b:
+            ra_prior = np.array([
+                self._r_aw_prior_full[i] for i in layout.identifiable_splits
+            ])
+            grad[a:b] = 2.0 * lam * (r_aw - ra_prior) / (_SPLIT_PRIOR_STD ** 2)
+
         return grad
+
+    def _build_rooms_from_theta(
+        self,
+        layout: _ThetaLayout,
+        log_mass: np.ndarray,
+        log_r: np.ndarray,
+        log_r_ij_map: Optional[Dict[Tuple[int, int], float]],
+        log_solar: Optional[np.ndarray] = None,
+        c_air: Optional[np.ndarray] = None,
+        r_aw: Optional[np.ndarray] = None,
+    ) -> List[Room]:
+        """Construct Room objects with θ-dependent parameters baked in.
+
+        Gated parameters (inter-room R, solar scale, envelope splits) take
+        their θ values for the identified rooms/pairs and the configured
+        values elsewhere.  ``internal_gain`` stays 0 — q_int is applied
+        through the θ parameter vector in ``HouseThermalSDE.f``.
+        """
+        room_idx = {r.name: k for k, r in enumerate(self._rooms)}
+
+        solar_scales = np.exp(self._log_solar_prior_full).copy()
+        if log_solar is not None and len(log_solar):
+            for k, i in enumerate(layout.identifiable_solar):
+                solar_scales[i] = math.exp(float(np.clip(
+                    log_solar[k], _LOG_SOLAR_LO, _LOG_SOLAR_HI,
+                )))
+        c_air_full = self._c_air_prior_full.copy()
+        r_aw_full = self._r_aw_prior_full.copy()
+        if c_air is not None and len(c_air):
+            for k, i in enumerate(layout.identifiable_splits):
+                c_air_full[i] = float(np.clip(c_air[k], _C_AIR_LO, _C_AIR_HI))
+                r_aw_full[i] = float(np.clip(r_aw[k], _R_AW_LO, _R_AW_HI))
+
+        new_rooms = []
+        for i, r in enumerate(self._rooms):
+            new_conns = copy.deepcopy(r.connections)
+            if log_r_ij_map:
+                for conn in new_conns:
+                    j = room_idx.get(conn.connected_room)
+                    if j is not None:
+                        pair = (min(i, j), max(i, j))
+                        if pair in log_r_ij_map:
+                            conn.r_value = float(math.exp(
+                                float(np.clip(
+                                    log_r_ij_map[pair],
+                                    _LOG_R_IJ_LO, _LOG_R_IJ_HI,
+                                ))
+                            ))
+            new_rooms.append(Room(
+                name=r.name,
+                thermal_mass=float(math.exp(log_mass[i])),
+                r_external=float(math.exp(log_r[i])),
+                connections=new_conns,
+                windows=r.windows,
+                temperature=r.temperature,
+                setpoint=r.setpoint,
+                # Internal gain is applied via the θ parameter vector during
+                # the forward pass; keep the rebuilt model neutral.
+                internal_gain=0.0,
+                solar_scale=float(solar_scales[i]),
+                c_air_fraction=float(c_air_full[i]),
+                r_aw_fraction=float(r_aw_full[i]),
+                # Configured typology presets — not identified.
+                infiltration_fraction=r.infiltration_fraction,
+                sky_radiative_ua=r.sky_radiative_ua,
+                facade_absorptance=r.facade_absorptance,
+                facade_solar_share=r.facade_solar_share,
+                thermal_bridge_psi_l=r.thermal_bridge_psi_l,
+            ))
+        return new_rooms
 
     def _build_system(
         self,
@@ -1506,52 +1855,15 @@ class KalmanMLEstimator:
 
         Internal-gain and heater-scale parameters are *not* baked into the
         rebuilt system; they are applied externally during the Kalman
-        forward pass.  This keeps the discretised matrices identical
-        between candidate parameter sets that share (C, R_ext, R_ij).
+        forward pass.  Solar scales and envelope splits stay at their
+        configured values (this entry point predates those parameters and
+        is kept for callers that only vary C / R / R_ij).
         """
         try:
-            room_idx = {r.name: k for k, r in enumerate(self._rooms)}
-            new_rooms = []
-            for i, r in enumerate(self._rooms):
-                new_conns = copy.deepcopy(r.connections)
-                if log_r_ij:
-                    for conn in new_conns:
-                        j = room_idx.get(conn.connected_room)
-                        if j is not None:
-                            pair = (min(i, j), max(i, j))
-                            if pair in log_r_ij:
-                                conn.r_value = float(math.exp(
-                                    float(np.clip(
-                                        log_r_ij[pair],
-                                        _LOG_R_IJ_LO, _LOG_R_IJ_HI,
-                                    ))
-                                ))
-                new_rooms.append(Room(
-                    name=r.name,
-                    thermal_mass=float(math.exp(log_masses[i])),
-                    r_external=float(math.exp(log_rs[i])),
-                    connections=new_conns,
-                    windows=r.windows,
-                    temperature=r.temperature,
-                    setpoint=r.setpoint,
-                    # Internal gain is applied as an extra disturbance during
-                    # the Kalman pass; keep the rebuilt model neutral.
-                    internal_gain=0.0,
-                    # Phase 1 C1: preserve the configured infiltration share
-                    # so the rebuilt model's leakage-area derivation uses
-                    # the same typology as the original.  Not identified
-                    # in the current ML estimator — the fraction is a
-                    # configured preset.
-                    infiltration_fraction=r.infiltration_fraction,
-                    # Phase 1 C3 / C4 / C5 — finishing-pass envelope
-                    # corrections.  Carried as configured typology
-                    # presets (not identified in the v1 estimator; the
-                    # Phase 4 system-ID rework will revisit this).
-                    sky_radiative_ua=r.sky_radiative_ua,
-                    facade_absorptance=r.facade_absorptance,
-                    facade_solar_share=r.facade_solar_share,
-                    thermal_bridge_psi_l=r.thermal_bridge_psi_l,
-                ))
+            layout = _ThetaLayout(self._n, [], [])
+            new_rooms = self._build_rooms_from_theta(
+                layout, log_masses, log_rs, log_r_ij,
+            )
             model = HouseModel(new_rooms)
             return HouseThermalSystem(model, self._sources, self._dt)
         except Exception as exc:
@@ -1564,15 +1876,16 @@ class KalmanMLEstimator:
         theta: np.ndarray,
     ) -> Optional[HouseThermalSystem]:
         """
-        Build a parametric HouseThermalSDE from theta for CD-EKF estimation.
+        Build a parametric HouseThermalSDE from theta for estimation.
 
-        Unpacks theta to get thermal parameters, heater scales, and internal gains,
-        then constructs a HouseThermalSDE with these values.
+        All structural parameters (C, R_ext, R_ij, solar scale, envelope
+        splits) are baked into the model matrices; q_int and the heater
+        scales remain in θ and are applied inside ``HouseThermalSDE.f``.
         """
         try:
-            log_mass, log_r, q_int, log_alpha, log_r_ij = layout.unpack(theta)
+            (log_mass, log_r, _q_int, _log_alpha, log_r_ij,
+             log_solar, c_air, r_aw) = layout.unpack(theta)
 
-            # Build inter-room resistance map
             log_r_ij_map: Optional[Dict[Tuple[int, int], float]] = None
             if len(log_r_ij):
                 log_r_ij_map = {
@@ -1580,54 +1893,10 @@ class KalmanMLEstimator:
                     for k, pair in enumerate(layout.identifiable_pairs)
                 }
 
-            # Build the underlying system with theta-dependent thermal parameters
-            system = self._build_system(log_mass, log_r, log_r_ij_map)
-            if system is None:
-                return None
-
-            # Construct heater scales vector (alpha)
-            heater_scales = np.ones(self._n_u)
-            for k, s_idx in enumerate(layout.identifiable_sources):
-                heater_scales[s_idx] = float(math.exp(log_alpha[k]))
-
-            # Create a new parametric instance with heater_scales and internal_gains
-            # We need to rebuild to pass the params, heater_scales, and internal_gains
-            room_idx = {r.name: k for k, r in enumerate(self._rooms)}
-            new_rooms = []
-            for i, r in enumerate(self._rooms):
-                new_conns = copy.deepcopy(r.connections)
-                if log_r_ij_map:
-                    for conn in new_conns:
-                        j = room_idx.get(conn.connected_room)
-                        if j is not None:
-                            pair = (min(i, j), max(i, j))
-                            if pair in log_r_ij_map:
-                                conn.r_value = float(math.exp(
-                                    float(np.clip(
-                                        log_r_ij_map[pair],
-                                        _LOG_R_IJ_LO, _LOG_R_IJ_HI,
-                                    ))
-                                ))
-                new_rooms.append(Room(
-                    name=r.name,
-                    thermal_mass=float(math.exp(log_mass[i])),
-                    r_external=float(math.exp(log_r[i])),
-                    connections=new_conns,
-                    windows=r.windows,
-                    temperature=r.temperature,
-                    setpoint=r.setpoint,
-                    internal_gain=0.0,  # Applied via theta parameter in f()
-                    # Preserve Phase 1 C1 typology fields — not identified in v1.
-                    infiltration_fraction=r.infiltration_fraction,
-                    # Phase 1 C3 / C4 / C5 — finishing-pass envelope
-                    # corrections.  Carried as configured typology
-                    # presets (not identified in the v1 estimator; the
-                    # Phase 4 system-ID rework will revisit this).
-                    sky_radiative_ua=r.sky_radiative_ua,
-                    facade_absorptance=r.facade_absorptance,
-                    facade_solar_share=r.facade_solar_share,
-                    thermal_bridge_psi_l=r.thermal_bridge_psi_l,
-                ))
+            new_rooms = self._build_rooms_from_theta(
+                layout, log_mass, log_r, log_r_ij_map,
+                log_solar=log_solar, c_air=c_air, r_aw=r_aw,
+            )
             model = HouseModel(new_rooms)
             return HouseThermalSystem(
                 model, self._sources, self._dt,
@@ -1642,29 +1911,6 @@ class KalmanMLEstimator:
             _LOGGER.debug("Failed to build parametric system: %s", exc, exc_info=True)
             return None
 
-    def _make_d_np(
-        self,
-        system: HouseThermalSystem,
-        d_outdoor: float,
-        d_solar: Dict[str, float],
-        q_int: Optional[np.ndarray] = None,
-    ) -> np.ndarray:
-        """Build a numpy disturbance vector [T_out, Q_sol_1+Q_int_1, …].
-
-        Solar gain and (optional) per-room ``q_int`` are folded into the
-        same disturbance slot — they map through the same column of E_d.
-        """
-        p = system.n_d
-        d = np.zeros(p)
-        d[0] = d_outdoor
-        for name, gain in d_solar.items():
-            if name in system._room_idx:
-                d[1 + system._room_idx[name]] = gain
-        if q_int is not None:
-            for i in range(self._n):
-                d[1 + i] += float(q_int[i])
-        return d
-
     def _convert_history_std(
         self,
         history: List[Dict[str, Any]],
@@ -1676,9 +1922,10 @@ class KalmanMLEstimator:
         for discrete-time estimator, or ``{"ym": ndarray, "u": ndarray, "d": ndarray}``
         for continuous-discrete estimator.
 
-        where ``d = [T_out, solar_1, …, solar_n]`` (raw, without q_int).
-        The q_int contribution is absorbed by the parametric model through
-        the ``internal_gains`` parameter in HouseThermalSDE.
+        where ``d = [T_out, solar_1 … solar_n, q_air_1 … q_air_n]`` with the
+        recorded (raw, unscaled) solar gains in slots 1…n and zeros in the
+        air-heat slots — the q_int contribution is applied parametrically
+        through θ inside ``HouseThermalSDE.f``.
 
         Parameters
         ----------
@@ -1699,7 +1946,7 @@ class KalmanMLEstimator:
             for k, val in enumerate(record.get("u", [])):
                 if k < n_u:
                     u[k] = float(val)
-            d = np.zeros(1 + n)
+            d = np.zeros(1 + 2 * n)
             d[0] = float(record["d_outdoor"])
             for name, gain in record.get("d_solar", {}).items():
                 if name in room_idx:
@@ -1760,6 +2007,43 @@ class KalmanMLEstimator:
             )
         return reg
 
+    def _compute_regularization_theta(
+        self,
+        theta: np.ndarray,
+        layout: "_ThetaLayout",
+    ) -> float:
+        """Gaussian regularisation toward priors for the full θ vector.
+
+        Wraps :meth:`_compute_regularization` (the always-present blocks)
+        and adds the gated blocks: unit-scale priors for the log solar
+        scale, and tight ``_SPLIT_PRIOR_STD`` priors for the linear-space
+        envelope split fractions.
+        """
+        (log_mass, log_r, q_int, log_alpha, log_r_ij,
+         log_solar, c_air, r_aw) = layout.unpack(theta)
+        reg = self._compute_regularization(
+            log_mass, log_r, q_int, log_alpha, log_r_ij,
+            layout.identifiable_pairs, layout.identifiable_sources,
+        )
+        lam = self._regularization
+        if len(log_solar):
+            prior = np.array([
+                self._log_solar_prior_full[i] for i in layout.identifiable_solar
+            ])
+            reg += lam * float(np.sum((log_solar - prior) ** 2))
+        if len(c_air):
+            ca_prior = np.array([
+                self._c_air_prior_full[i] for i in layout.identifiable_splits
+            ])
+            ra_prior = np.array([
+                self._r_aw_prior_full[i] for i in layout.identifiable_splits
+            ])
+            reg += lam * float(
+                np.sum((c_air - ca_prior) ** 2)
+                + np.sum((r_aw - ra_prior) ** 2)
+            ) / (_SPLIT_PRIOR_STD ** 2)
+        return reg
+
     def _initial_state_and_covariance(
         self,
         system: HouseThermalSystem,
@@ -1773,15 +2057,15 @@ class KalmanMLEstimator:
         n_copy = min(nym, len(first_measurement), nx)
         x0[:n_copy] = np.array(first_measurement[:n_copy], dtype=float)
 
+        # Wall block warm-starts at the air temperature; the emitter-lag
+        # block (and any further augmentation) stays at zero.
         if nx >= 2 * n and n_copy >= n:
-            x0[n: 2 * n] = x0[:n]          # warm-start latent block ← air
-        if nx >= 3 * n and n_copy >= n:
-            x0[2 * n: 3 * n] = x0[:n]      # warm-start second latent block ← air
+            x0[n: 2 * n] = x0[:n]
 
         P0 = np.eye(nx, dtype=float) * self._R_var * 10.0
         if nx > nym:
-            # Augmented latent states (e.g. temperature offsets) are not
-            # directly observed at startup, so start them with higher
-            # uncertainty than measured temperature components.
+            # Latent states (wall nodes, emitter lags) are not directly
+            # observed at startup, so start them with higher uncertainty
+            # than the measured temperature components.
             P0[nym:, nym:] *= 4.0
         return x0, P0

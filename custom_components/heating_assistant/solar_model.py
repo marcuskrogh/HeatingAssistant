@@ -236,21 +236,37 @@ def transpose_to_surface(
     azimuth_deg: float,
     surface_tilt: float,
     surface_azimuth: float,
+    albedo: float = 0.2,
 ) -> float:
     """
     Plane-of-array irradiance [W/m²] on a surface from (DNI, DHI).
 
-    The shared **window-coupling** primitive: beam follows the cosine of the
-    incidence angle, diffuse follows the isotropic sky-view factor.  Identical
+    The shared **window-coupling** primitive — three components, identical
     for both intensity sources (clear-sky fallback and forecast), so the
-    geometry lives in exactly one place.
+    geometry lives in exactly one place:
+
+    * **beam** — cosine of the incidence angle, reduced by an
+      incidence-angle modifier (:func:`incidence_angle_modifier`) so that
+      grazing-incidence transmission losses are not over-counted;
+    * **sky diffuse** — isotropic sky-view factor ``(1 + cos β)/2``;
+    * **ground-reflected** — isotropic ground term
+      ``ρ · GHI · (1 − cos β)/2`` where ``GHI = DNI·sin(h) + DHI``.  For a
+      vertical window this is ``ρ · GHI / 2`` — with snow on the ground
+      (``ρ ≈ 0.7``) a dominant winter component at high latitudes.
+
+    ``albedo`` is the ground reflectance ρ ∈ [0, 1] (grass ≈ 0.2,
+    fresh snow ≈ 0.8).
     """
     if altitude <= 0.0:
         return 0.0
     theta = angle_of_incidence(altitude, azimuth_deg, surface_tilt, surface_azimuth)
-    direct = max(0.0, dni * math.cos(theta))
-    diffuse = dhi * (1.0 + math.cos(math.radians(surface_tilt))) / 2.0
-    return direct + diffuse
+    iam = incidence_angle_modifier(theta)
+    direct = max(0.0, dni * math.cos(theta) * iam)
+    tilt_r = math.radians(surface_tilt)
+    diffuse = dhi * (1.0 + math.cos(tilt_r)) / 2.0
+    ghi = max(0.0, dni * math.sin(altitude) + dhi)
+    ground = max(0.0, min(1.0, albedo)) * ghi * (1.0 - math.cos(tilt_r)) / 2.0
+    return direct + diffuse + ground
 
 
 def _intensity_dni_dhi(
@@ -263,19 +279,31 @@ def _intensity_dni_dhi(
 
     Precedence: a forecast ``ghi`` (decomposed via Erbs — geometry only) takes
     priority; otherwise the clear-sky model attenuated by the optional
-    Kasten–Czeplak cloud factor (the fallback).  The cloud factor is applied to
-    both components, which — being linear — is equivalent to attenuating the
-    transposed POA, so the fallback path is numerically unchanged.
+    Kasten–Czeplak cloud factor.
+
+    Every source supplies only a **GHI magnitude**; the beam/diffuse split
+    is always done by the same Erbs correlation (:func:`ghi_to_dni_dhi`):
+
+    * forecast ``ghi`` — used verbatim;
+    * cloudy fallback — clear-sky GHI × Kasten–Czeplak factor;
+    * clear fallback — clear-sky GHI.
+
+    One decomposition everywhere means the paths agree at their seams
+    (``cloud_cover = 0`` equals "no cloud data" exactly), the total
+    horizontal irradiance follows the Kasten–Czeplak factor exactly, and
+    the beam share collapses with increasing cloud (low clearness index →
+    mostly diffuse) — the physically correct behaviour for directional
+    gains through oriented windows.
     """
     if ghi is not None:
         return ghi_to_dni_dhi(ghi, altitude, n)
-    dni = clear_sky_dni(altitude, n)
-    dhi = clear_sky_dhi(altitude, dni)
+    if altitude <= 0.0:
+        return 0.0, 0.0
+    dni_cs = clear_sky_dni(altitude, n)
+    ghi_eff = max(0.0, dni_cs * math.sin(altitude) + clear_sky_dhi(altitude, dni_cs))
     if cloud_cover is not None:
-        f = cloud_attenuation_factor(cloud_cover)
-        dni *= f
-        dhi *= f
-    return dni, dhi
+        ghi_eff *= cloud_attenuation_factor(cloud_cover)
+    return ghi_to_dni_dhi(ghi_eff, altitude, n)
 
 
 def clear_sky_dhi(altitude: float, dni: float) -> float:
@@ -327,8 +355,7 @@ def clear_sky_plane_poa(
         return 0.0
 
     n = _day_of_year(dt)
-    dni = clear_sky_dni(altitude, n)
-    dhi = clear_sky_dhi(altitude, dni)
+    dni, dhi = _intensity_dni_dhi(altitude, n, None, None)
     return transpose_to_surface(
         dni, dhi, altitude, azimuth_deg, surface_tilt, surface_azimuth
     )
@@ -421,6 +448,25 @@ def angle_of_incidence(
 # Simple solar heat gain coefficient (SHGC) – assume 0.6 for clear double glazing
 DEFAULT_SHGC = 0.6
 
+#: ASHRAE incidence-angle-modifier coefficient for double glazing.  The SHGC
+#: is quoted at normal incidence; transmittance falls off at grazing angles.
+IAM_B0 = 0.1
+
+
+def incidence_angle_modifier(theta: float, b0: float = IAM_B0) -> float:
+    """
+    ASHRAE incidence-angle modifier  ``IAM = 1 − b₀ (1/cos θ − 1)``.
+
+    Reduces the normal-incidence SHGC at oblique beam incidence (θ in
+    radians, 0 = normal).  Clamped to [0, 1]; returns 0 at θ ≥ 90° where the
+    expression diverges.  ``b₀ ≈ 0.1`` is a reasonable value for clear double
+    glazing.
+    """
+    cos_theta = math.cos(theta)
+    if cos_theta <= 1e-6:
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - b0 * (1.0 / cos_theta - 1.0)))
+
 
 def cloud_attenuation_factor(cloud_cover: float) -> float:
     """
@@ -450,6 +496,7 @@ def window_solar_gain(
     shgc: float = DEFAULT_SHGC,
     cloud_cover: float | None = None,
     ghi: float | None = None,
+    albedo: float = 0.2,
 ) -> float:
     """
     Compute the solar heat gain through a single window [W].
@@ -485,7 +532,8 @@ def window_solar_gain(
     n = _day_of_year(dt)
     dni, dhi = _intensity_dni_dhi(altitude, n, cloud_cover, ghi)
     poa = transpose_to_surface(
-        dni, dhi, altitude, azimuth_deg, window.tilt, window.orientation
+        dni, dhi, altitude, azimuth_deg, window.tilt, window.orientation,
+        albedo=albedo,
     )
     return shgc * window.area * poa
 
@@ -498,6 +546,7 @@ def room_solar_gains(
     shgc: float = DEFAULT_SHGC,
     cloud_cover: float | None = None,
     ghi: float | None = None,
+    albedo: float = 0.2,
 ) -> float:
     """
     Total solar heat gain for a room [W] as the sum over all its windows.
@@ -507,7 +556,9 @@ def room_solar_gains(
     clear-sky model attenuated by the optional cloud factor is used.
     """
     return sum(
-        window_solar_gain(w, dt, latitude, longitude, shgc, cloud_cover, ghi)
+        window_solar_gain(
+            w, dt, latitude, longitude, shgc, cloud_cover, ghi, albedo,
+        )
         for w in windows
     )
 
@@ -521,6 +572,7 @@ def room_solar_gains_from_exposure(
     cloud_cover: float | None = None,
     ghi: float | None = None,
     tilt: float = 90.0,
+    albedo: float = 0.2,
 ) -> float:
     """
     Solar heat gain [W] for a room described by a single effective aperture.
@@ -547,5 +599,7 @@ def room_solar_gains_from_exposure(
         return 0.0
     n = _day_of_year(dt)
     dni, dhi = _intensity_dni_dhi(altitude, n, cloud_cover, ghi)
-    poa = transpose_to_surface(dni, dhi, altitude, azimuth_deg, tilt, facing)
+    poa = transpose_to_surface(
+        dni, dhi, altitude, azimuth_deg, tilt, facing, albedo=albedo,
+    )
     return aperture * poa

@@ -1,15 +1,16 @@
 """
-1R1C thermal model — basic behavioural tests.
+2R2C thermal model — basic behavioural tests.
 
-These tests verify the single-temperature-node (1R1C) model behaviour:
+These tests verify the two-temperature-node (2R2C) model behaviour:
 
-  * State dimension is n (one float per room).
-  * Heat input raises the single temperature.
+  * State dimension is 2n (air block + wall block, one pair per room).
+  * _A is (2n, 2n), _C is (2n,), _B_ext is (2n,).
+  * Heat input raises the air temperature.
   * Outdoor loss cools the room.
-  * Inter-room connections route through the single temperature.
-  * Steady-state: T_inf = T_out + Q * R_ext.
-  * ``predict()`` saves and restores state.
-  * Single eigenvalue (stable, negative).
+  * Inter-room connections route through the WALL block (A[n+i, n+j]).
+  * Steady-state: T_air_ss = T_out + Q * R_ext (invariant preserved from 1R1C).
+  * ``predict()`` saves and restores BOTH air and wall node states.
+  * Per-room 2x2 sub-system has two eigenvalues, both real and negative.
   * Backward compat ``Room(temperature=X)`` still works.
 """
 
@@ -79,27 +80,43 @@ def test_room_temperature_attribute_is_plain_float() -> None:
 
 
 def test_house_model_state_dimension_is_n() -> None:
-    """1R1C: state vector has length n (one per room)."""
+    """2R2C: state vector has length 2n (air block + wall block per room)."""
     rooms = [
         Room(name="a", thermal_mass=5e6, r_external=0.05),
         Room(name="b", thermal_mass=3e6, r_external=0.08),
     ]
     model = HouseModel(rooms)
-    assert model._C.shape == (2,)
-    assert model._A.shape == (2, 2)
-    assert model._B_ext.shape == (2,)
+    n = len(rooms)
+    assert model._C.shape == (2 * n,)
+    assert model._A.shape == (2 * n, 2 * n)
+    assert model._B_ext.shape == (2 * n,)
 
 
 def test_eigenvalue_is_stable_and_negative() -> None:
-    """The 1R1C system has a single eigenvalue that is stable (negative).
-    For a single room F = -1/(C * R_ext)."""
+    """The 2R2C per-room sub-system has two eigenvalues, both real and negative.
+
+    For a single room the 2×2 air/wall sub-matrix has eigenvalues:
+        λ₁ = fast (large magnitude, dominated by air↔wall coupling)
+        λ₂ = slow (small magnitude, dominated by wall↔outdoor conduction)
+    Both must be real and strictly negative for stability.
+    """
     model = _make_single_room(thermal_mass=5e6, r_external=0.05)
+    n = model.n  # n=1
     inv_C = 1.0 / model._C
     F = model._A * inv_C[:, np.newaxis]
-    eigs = np.linalg.eigvals(F).real
-    # Only one eigenvalue for a single room.
-    assert len(eigs) == 1
-    assert eigs[0] < 0.0
+    # Extract the 2×2 per-room sub-matrix (rows/cols [0, n])
+    sub = F[np.ix_([0, n], [0, n])]
+    eigs = np.linalg.eigvals(sub)
+    # Both eigenvalues must be real and negative (2R2C is stable)
+    assert len(eigs) == 2
+    assert np.all(eigs.real < 0.0), f"Expected negative eigenvalues, got {eigs}"
+    assert np.all(np.abs(eigs.imag) < 1e-10), f"Expected real eigenvalues, got {eigs}"
+    # Fast/slow separation: the air node is lighter so one eigenvalue is
+    # significantly faster (larger magnitude) than the other.
+    sorted_eigs = np.sort(np.abs(eigs.real))
+    assert sorted_eigs[1] > 2 * sorted_eigs[0], (
+        f"Expected clear fast/slow separation: {sorted_eigs}"
+    )
 
 
 def test_heat_input_raises_temperature() -> None:
@@ -132,8 +149,10 @@ def test_outdoor_loss_cools_room() -> None:
 
 
 def test_inter_room_connection_on_single_temperature() -> None:
-    """In 1R1C inter-room couplings appear on the temperature diagonal.
-    The A matrix should have non-zero off-diagonal entries for connected rooms."""
+    """In 2R2C inter-room couplings appear on the WALL block (rows/cols n..2n).
+    For n=2 rooms, the wall-block off-diagonal entries A[n+0, n+1] and
+    A[n+1, n+0] carry the inter-room conductance; air-block off-diagonals
+    A[0,1] and A[1,0] must be zero (no direct air-to-air coupling)."""
     rooms = [
         Room(
             name="a", thermal_mass=5e6, r_external=0.05,
@@ -147,10 +166,14 @@ def test_inter_room_connection_on_single_temperature() -> None:
         ),
     ]
     model = HouseModel(rooms)
+    n = len(rooms)  # n = 2
     A = model._A
-    # Off-diagonal entries carry the inter-room conductance.
-    assert A[0, 1] > 0.0
-    assert A[1, 0] > 0.0
+    # Wall-block off-diagonal entries carry the inter-room conductance.
+    assert A[n + 0, n + 1] > 0.0, f"A[n+0, n+1] = {A[n+0, n+1]} should be > 0"
+    assert A[n + 1, n + 0] > 0.0, f"A[n+1, n+0] = {A[n+1, n+0]} should be > 0"
+    # Air-block off-diagonals must be zero (no direct air-to-air coupling).
+    assert A[0, 1] == 0.0, f"A[0,1] = {A[0,1]} should be 0 (no direct air coupling)"
+    assert A[1, 0] == 0.0, f"A[1,0] = {A[1,0]} should be 0 (no direct air coupling)"
 
 
 def test_heat_flows_through_inter_room_connection() -> None:

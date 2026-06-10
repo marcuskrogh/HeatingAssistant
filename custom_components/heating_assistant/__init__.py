@@ -1367,6 +1367,30 @@ def _register_services(hass: HomeAssistant) -> None:
             if "error" not in result:
                 per_room = result.get("per_room", {})
 
+                # Multi-horizon open-loop RMSE: re-run the simulation at
+                # ~4 h / 12 h / 24 h segment lengths so the diagnostic shows
+                # how prediction error grows with horizon — the quantity
+                # that matters for price-driven anticipatory heating, where
+                # the plan spans many hours.  Each run reuses the same
+                # history and model; only the segment slicing differs.
+                rmse_by_horizon: Dict[str, Dict[str, Any]] = {
+                    name: {} for name in room_names
+                }
+                for hours in (4, 12, 24):
+                    steps = max(2, int(round(hours * 3600.0 / coordinator.dt)))
+                    res_h = await hass.async_add_executor_job(
+                        compute_open_loop_predictions,
+                        history, system, room_names, n_rooms,
+                        coordinator.dt, steps,
+                    )
+                    if "error" in res_h:
+                        continue
+                    for name, room_res in res_h.get("per_room", {}).items():
+                        rmse_by_horizon[name][f"{hours}h"] = room_res.get("rmse")
+                for name in room_names:
+                    if name in per_room:
+                        per_room[name]["rmse_by_horizon"] = rmse_by_horizon[name]
+
                 # Write per-room results to coordinator cache so that
                 # OpenLoopRMSESensor entities can read them without any
                 # blocking computation on the event loop.

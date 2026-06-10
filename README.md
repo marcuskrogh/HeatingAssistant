@@ -338,46 +338,69 @@ Inside HeatingMPCController.compute():
 
 ## 3. Physics and Mathematical Models
 
-### 3.1 Lumped RC thermal model (1R1C)
+### 3.1 Lumped RC thermal model (2R2C)
 
-Each room is treated as a **single-node** lumped-parameter thermal circuit:
+Each room is treated as a **two-node** lumped-parameter thermal circuit:
 
-- One thermal node $T_i$ per room representing the combined air + interior mass temperature.
-- One thermal resistance $R_{i,\text{ext}}$ coupling the room to the outdoor air.
-- Optional inter-room thermal resistances $R_{ij}$ coupling adjacent rooms.
+- A fast **air node** $T_{a,i}$ — room air plus light furnishings.  This is the temperature you measure, perceive, and set.
+- A slow **wall node** $T_{w,i}$ — walls, floor, ceiling and heavy furniture.  Never measured directly; the state estimator reconstructs it (§4.2).
+- An internal coupling resistance $R_{aw,i}$ between the two nodes.
+- A conduction resistance $R_{we,i}$ from the wall to the outdoor air, plus a direct air↔outdoor **infiltration** conductance $g_{\text{inf},i}$ (air exchange does not pass through the wall mass).
+- Optional inter-room resistances $R_{ij}$ coupling adjacent rooms **wall-to-wall**.
 
 The continuous-time energy balance per room is:
 
-$$C_i \cdot \frac{dT_i}{dt} = Q_{\text{heater},i} + Q_{\text{solar},i} + \frac{T_{\text{outdoor}} - T_i}{R_{i,\text{ext}}} + \sum_{j \in \text{adj}(i)} \frac{T_j - T_i}{R_{ij}}$$
+$$C_{a,i} \cdot \frac{dT_{a,i}}{dt} = Q_{\text{heater},i} + Q_{\text{int},i} + (1 - w_s)\, s_i\, Q_{\text{solar},i} + \frac{T_{w,i} - T_{a,i}}{R_{aw,i}} + g_{\text{inf},i} \,(T_{\text{outdoor}} - T_{a,i})$$
+
+$$C_{w,i} \cdot \frac{dT_{w,i}}{dt} = \frac{T_{a,i} - T_{w,i}}{R_{aw,i}} + \frac{T_{\text{outdoor}} - T_{w,i}}{R_{we,i}} + w_s\, s_i\, Q_{\text{solar},i} + \sum_{j \in \text{adj}(i)} \frac{T_{w,j} - T_{w,i}}{R_{ij}}$$
+
+**Why two nodes.**  A single node has a single time constant, but real rooms respond on two: a fast air response (½–1½ h) and a slow envelope response (5–30 h).  That second mode is precisely what price-driven anticipatory heating exploits — pre-heating during cheap hours stores energy in the walls and releases it later — so a model that cannot represent storage-then-release systematically mispredicts the multi-hour trajectories the optimiser plans over.
+
+**How the user-facing parameters keep their old meaning.**  You still configure (and the estimator still identifies) a single total `thermal_mass` $C_i$ and total `r_external` $R_{i,\text{ext}}$ per room.  Two bounded **split fractions** derive the node-level quantities:
+
+| Derived quantity | Formula | Source |
+|------------------|---------|--------|
+| $C_{a,i}$ | `c_air_fraction` · $C_i$ | split fraction (default 0.05; identified when the data allow) |
+| $C_{w,i}$ | $(1 - $`c_air_fraction`$)$ · $C_i$ | — |
+| $g_{\text{inf},i}$ | `infiltration_fraction` $/ R_{i,\text{ext}}$ | envelope-tightness preset (wind-modulated at runtime, §3.1b) |
+| $g_{\text{cond},i}$ | $(1 - $`infiltration_fraction`$) / R_{i,\text{ext}}$ | the conductive remainder |
+| $R_{aw,i}$ | `r_aw_fraction` $/\, g_{\text{cond},i}$ | split fraction (default 0.05; identified when the data allow) |
+| $R_{we,i}$ | $(1 - $`r_aw_fraction`$) /\, g_{\text{cond},i}$ | — |
+
+By construction $g_{\text{inf}} + (R_{aw} + R_{we})^{-1} = 1/R_{\text{ext}}$, so at steady state the air node settles at exactly $T_{\text{outdoor}} + Q \cdot R_{\text{ext}}$ — identical to the previous single-node model.  In the limit `r_aw_fraction` → 0 the two nodes lock together and the model degenerates to the old 1R1C with $(C, R_{\text{ext}})$.  Existing configurations and previously identified parameters therefore carry over unchanged.
 
 **Symbol table**
 
 | Symbol | Unit | Meaning |
 |--------|------|---------|
-| $C_i$ | J/K | Thermal mass of room $i$ (user input `thermal_mass`).  Represents combined air, furniture, interior walls, and a fraction of external wall mass. |
-| $T_i$ | °C | Room temperature (state variable). |
-| $T_{\text{outdoor}}$ | °C | Outdoor air temperature. |
-| $R_{i,\text{ext}}$ | K/W | Thermal resistance from room to outdoor (user input `r_external`).  Bundles all paths: walls, roof, ground, infiltration. |
-| $R_{ij}$ | K/W | Inter-room thermal resistance between rooms $i$ and $j$ (user input `r_value` on connections). |
-| $Q_{\text{heater},i}$ | W | Total thermal power input from all heat sources assigned to room $i$. |
-| $Q_{\text{solar},i}$ | W | Solar heat gain through all windows in room $i$. |
+| $C_i$ | J/K | Total thermal mass of room $i$ (user input `thermal_mass`). |
+| $T_{a,i}$, $T_{w,i}$ | °C | Air-node and wall-node temperatures (state variables; only $T_{a,i}$ is measured). |
+| $R_{i,\text{ext}}$ | K/W | Total steady-state resistance to outdoors (user input `r_external`). |
+| $R_{ij}$ | K/W | Inter-room (wall-to-wall) resistance (user input `r_value` on connections). |
+| $Q_{\text{heater},i}$ | W | Heat-source power — lands on the **air** node. |
+| $Q_{\text{int},i}$ | W | Identified internal heat gain — air node. |
+| $Q_{\text{solar},i}$ | W | Modelled solar gain (§3.4), split between the nodes. |
+| $s_i$ | – | Per-room **solar scale**, identified from data (default 1; §3.4 Step 6). |
+| $w_s$ | – | `SOLAR_WALL_FRACTION` = 0.5 — the share of transmitted solar absorbed by floor/wall surfaces rather than the air.  Fixed, not identified (nearly collinear with the split fractions). |
 
-The model captures the dominant thermal dynamics for residential MPC: single-room time constants typically span 2–20 hours, which aligns well with 15-minute control intervals and 90-minute prediction horizons.
+Three optional envelope corrections attach to the **wall** node: a linearised long-wave radiative conductance to the sky (`sky_radiative_ua`, with a constant cooling drift $-\text{UA}_{\text{sky}} \cdot \Delta T_{\text{sky}}$ attenuated by the live cloud cover), the sol-air facade share (`facade_absorptance` · `facade_solar_share` of the solar gain), and a thermal-bridge correction (`thermal_bridge_psi_l`).  All default to off.
+
+**Observability.**  The wall node is reconstructed by the EKF from the air measurement alone.  Two diagnostics watch the health of that reconstruction: the per-room *wall-temperature* sensor exposes the EKF posterior std (should contract after start-up and stay bounded) and an *observability* metric — the conditioning of the room's observability Gramian (1 = ideal, ≈ 0 = the wall is practically invisible).  Rooms whose split fractions cannot be identified simply keep their typology defaults; the identification gates and tight priors (§14) prevent the estimator from chasing parameters the data cannot constrain — the failure mode that sank the first 2R2C attempt.
 
 ### 3.2 State-space matrix form
 
-For a house with *n* rooms, the 1R1C network assembles into a compact matrix form once at startup.  The physical state vector is $\mathbf{x} = [T_1, \ldots, T_n]$ of length $n$:
+For a house with *n* rooms, the 2R2C network assembles into a compact matrix form once at startup.  The physical state vector stacks the air block first, then the wall block: $\mathbf{x} = [T_{a,1}, \ldots, T_{a,n},\; T_{w,1}, \ldots, T_{w,n}]$ of length $2n$:
 
 $$\mathbf{C} \cdot \frac{d\mathbf{x}}{dt} = \mathbf{A} \cdot \mathbf{x} + \mathbf{B}_{\text{ext}} \cdot T_{\text{outdoor}} + \mathbf{Q}(t)$$
 
 where:
 
-- $\mathbf{C}$ is an $n$-vector of capacitances: $[C_1, \ldots, C_n]$.
-- $\mathbf{A}$ is an $n \times n$ matrix.  The diagonal elements are $A_{ii} = -(1/R_{i,\text{ext}} + \sum_j 1/R_{ij})$ (sum of all conductances leaving room $i$).  Off-diagonal elements are $A_{ij} = +1/R_{ij}$ for connected rooms.
-- $\mathbf{B}_{\text{ext}}$ is an $n$-vector with $1/R_{i,\text{ext}}$ for each room — the outdoor temperature drives each room through its external resistance.
-- $\mathbf{Q}(t)$ is the $n$-vector of disturbances: solar gain + heater output for each room.
+- $\mathbf{C}$ is a $2n$-vector of capacitances: $[C_{a,1}, \ldots, C_{a,n}, C_{w,1}, \ldots, C_{w,n}]$.
+- $\mathbf{A}$ is a $2n \times 2n$ conductance matrix.  Air row $i$: diagonal $-(g_{\text{inf},i} + 1/R_{aw,i})$ and coupling $+1/R_{aw,i}$ to its own wall column.  Wall row $n{+}i$: coupling $+1/R_{aw,i}$ to its air column, diagonal $-(1/R_{aw,i} + 1/R_{we,i} + \text{UA}_{\text{sky},i} + \Psi L_i + \sum_j 1/R_{ij})$, and $+1/R_{ij}$ to connected rooms' wall columns.
+- $\mathbf{B}_{\text{ext}}$ is a $2n$-vector: $g_{\text{inf},i}$ on the air rows, $1/R_{we,i} + \text{UA}_{\text{sky},i} + \Psi L_i$ on the wall rows.
+- $\mathbf{Q}(t)$ is the $2n$-vector of heat inputs: heater + internal gains + the air share of solar on the air rows; the wall share of solar (plus the sol-air facade term) on the wall rows.
 
-This representation makes each `step()` call a single $n \times n$ linear solve — fast even for large houses, and exploits the implicit-Euler L-stability described in §3.3.
+Keeping the measured air block in positions $0\ldots n{-}1$ means the measurement model stays the identity on the leading block, and everything downstream (EKF update, comfort constraints, dashboards) keeps addressing rooms by the same indices as before.  Each `step()` call remains a single $2n \times 2n$ linear solve — the per-room eigenvalue pair (one fast, one slow, stiffness ratio $10^2$–$10^4$) is exactly the regime the implicit-Euler integrator in §3.3 was adopted for.
 
 ### 3.3 Continuous-discrete integration
 
@@ -395,7 +418,7 @@ $$R(\mathbf{x}_{k+1}) = \mathbf{x}_{k+1} - \mathbf{x}_k - h\,\mathbf{f}(\mathbf{
 
 with Jacobian $\mathbf{I} - h\,\partial \mathbf{f}/\partial \mathbf{x}$.  For the residential thermal model the drift is affine in the state (heat-pump COP varies with the *disturbance* $T_{\text{out}}$, not with the state itself), so the residual is linear in $\mathbf{x}_{k+1}$ and Newton converges in a single iteration — i.e. one $n \times n$ linear solve per sub-step.
 
-**Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.  This prepares the integration for future multi-node models (2R2C, slab) where eigenvalue spreads of $10^3$–$10^4$ would make explicit Euler conditionally stable at best.
+**Why implicit Euler.**  The scheme is **L-stable**: it stays accurate on the slow modes regardless of step size and damps fast modes correctly.  The first-order accuracy is acceptable for control purposes — we care about stability and the slow modes, not third-decimal-place fidelity.  This matters concretely for the 2R2C model: the per-room fast/slow eigenvalue spread of $10^2$–$10^4$ would make explicit Euler conditionally stable at best, while the implicit scheme integrates it at the full 15-minute step.
 
 The CD-EKF propagates both the mean state and the error covariance matrix using the same scheme.  In the implementation, the EKF reuses `mbc`'s native `scheme="implicit-euler"` mode (Newton iteration on the mean ODE; covariance propagated by the one-step sensitivity matrix $\Phi = (I - h\,A_{n+1})^{-1}$).  The `HouseModel.step()` / `HouseModel.predict()` methods, the controller's visualisation prediction loop, and the open-loop diagnostic simulator all share a single integration helper (`custom_components/heating_assistant/integrator.py`) so the integration scheme is uniform across the codebase.
 
@@ -445,13 +468,13 @@ $$\tau_b = 0.56 \cdot \left(e^{-0.65 \cdot am} + e^{-0.095 \cdot am}\right)$$
 
 $$\text{DNI} = G_{on} \cdot \tau_b \quad [\text{W/m}^2]$$
 
-#### Step 3 — Diffuse Horizontal Irradiance (DHI)
+#### Step 3 — Beam/diffuse split (Erbs correlation, all paths)
 
-A simplified isotropic model:
+Every intensity source — clear sky, cloud-attenuated, or forecast — supplies only a **GHI magnitude**; the split into beam (DNI) and diffuse (DHI) is always done by the same **Erbs correlation** (Erbs, Klein & Duffie 1982).  The diffuse fraction follows from the clearness index $K_t = \text{GHI} / (G_{on} \sin \alpha)$:
 
-$$\text{GHI} = \text{DNI} \cdot \sin \alpha$$
+$$\text{DHI} = f_{\text{Erbs}}(K_t) \cdot \text{GHI}, \qquad \text{DNI} = \frac{\text{GHI} - \text{DHI}}{\sin \alpha}$$
 
-$$\text{DHI} = 0.1 \cdot \text{GHI} \quad [\text{W/m}^2]$$
+Under a clear sky ($K_t \approx 0.7$) roughly 20 % of the radiation is diffuse; fully overcast ($K_t \lesssim 0.2$) essentially all of it is.  Using one decomposition everywhere means the clear, cloudy, and forecast paths agree exactly at their seams (e.g. ``cloud_cover = 0`` is identical to "no cloud data") and the beam correctly collapses faster than the diffuse as cloud builds — which is what an *oriented* window experiences.
 
 #### Step 4 — Angle of incidence on the window
 
@@ -463,21 +486,33 @@ where $\beta$ is the surface tilt from horizontal (90° = vertical) and $\gamma$
 
 #### Step 5 — Irradiance on the window
 
-$$I_{\text{direct}} = \max(0,\; \text{DNI} \cdot \cos \theta)$$
+Three components:
+
+$$I_{\text{direct}} = \max(0,\; \text{DNI} \cdot \cos \theta \cdot \text{IAM}(\theta))$$
 
 $$I_{\text{diffuse}} = \text{DHI} \cdot \frac{1 + \cos \beta}{2} \quad \text{(Liu and Jordan isotropic sky model)}$$
 
-$$I_{\text{window}} = I_{\text{direct}} + I_{\text{diffuse}} \quad [\text{W/m}^2]$$
+$$I_{\text{ground}} = \rho \cdot \text{GHI} \cdot \frac{1 - \cos \beta}{2} \quad \text{(isotropic ground reflection)}$$
+
+$$I_{\text{window}} = I_{\text{direct}} + I_{\text{diffuse}} + I_{\text{ground}} \quad [\text{W/m}^2]$$
+
+The **incidence-angle modifier** $\text{IAM}(\theta) = \max(0,\, 1 - b_0 (1/\cos\theta - 1))$ with $b_0 = 0.1$ accounts for the sharp drop in glazing transmittance at grazing beam incidence (the constant SHGC is quoted at normal incidence).
+
+The **ground-reflected** term uses the site-level albedo $\rho$ (`ground_albedo`, default 0.2 for grass/soil).  For a vertical window it equals $\rho \cdot \text{GHI}/2$ — with snow on the ground ($\rho \approx 0.7$–$0.8$) a dominant winter component at high latitudes, which is exactly the heating season.  Set the albedo higher for sites with persistent winter snow cover.
 
 #### Step 6 — Solar heat gain
 
 $$Q_{\text{solar}} = \text{SHGC} \cdot \text{area} \cdot I_{\text{window}} \quad [\text{W}]$$
 
-The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear double glazing).  This constant is defined in `solar_model.py` as `DEFAULT_SHGC` and can be changed at the module level if your windows have a different specification.
+The **Solar Heat Gain Coefficient** SHGC = 0.6 is the default (typical clear double glazing).  This constant is defined in `solar_model.py` as `DEFAULT_SHGC`.
+
+**The magnitude is calibrated from data, not trusted.**  The configured windows (or exposure preset) only set the *prior* solar aperture.  The parameter estimator identifies a per-room multiplicative **solar scale** $s_i$ on top of it (§14) — shading, curtains, trees, dirt, frame fraction and preset error all land in $s_i$.  The pipeline above always reports the *unscaled* gain (that is also what gets recorded in the history buffer, so re-estimating the scale later stays meaningful); the scale is applied in exactly one place, inside the model dynamics.  A converged $s_i$ far from 1 is itself useful feedback: your window list or preset is off by that factor.
+
+Inside the thermal model the (scaled) gain splits between the two room nodes: $(1 - w_s)$ to the air and $w_s$ = 0.5 to the wall/mass — transmitted shortwave is mostly absorbed by floor and wall surfaces, which is part of why solar warmth lingers after the sun moves off the facade.
 
 #### Cloud cover correction
 
-When a `weather_entity` is configured, cloud cover is extracted from the weather forecast (as an explicit field or mapped from the weather condition string, e.g. `sunny` → 0.0, `cloudy` → 0.85).  The solar gain is scaled by `(1 − cloud_fraction)` to account for reduced irradiance under overcast skies.
+When a `weather_entity` is configured, cloud cover is extracted from the weather forecast (as an explicit field or mapped from the weather condition string, e.g. `sunny` → 0.0, `cloudy` → 0.85).  The clear-sky **GHI** is attenuated by the Kasten–Czeplak factor $1 - 0.75\,c^{3.4}$ and the attenuated GHI is re-decomposed through the Erbs correlation (Step 3) — so the *total* horizontal radiation follows the classic single-factor model exactly, while the beam/diffuse balance shifts toward diffuse as cloud builds.
 
 #### Step 9 — Optional: drive the intensity from a solar-radiation forecast
 
@@ -707,10 +742,14 @@ The smoothing cost $\mathbf{S}$ penalises *changes* in the control input from on
 
 The controller builds a disturbance forecast matrix $\mathbf{D} \in \mathbb{R}^{N \times n_d}$ before solving the QP:
 
+The disturbance vector has the layout $\mathbf{d} = [T_{\text{out}},\, q_{\text{solar},1..n},\, q_{\text{air},1..n}]$: the (unscaled) modelled solar gain per room, and a direct air-node heat channel carrying the identified internal gain plus the decaying online gain deviation.
+
 | Disturbance | Forecast method |
 |-------------|----------------|
 | **Outdoor temperature** | If a `weather_entity` is configured (e.g. the Met.no integration), the controller uses the weather forecast temperatures interpolated to each horizon step.  Otherwise, it falls back to persistence: the current measured value is held constant for all horizon steps.  Configure `outdoor_temp_entity` for the current measurement and `weather_entity` for the forecast. |
 | **Solar gains** | The solar position model is evaluated at times `now + (k+1)·update_interval` for each horizon step `k = 0, …, N−1`, matching the end of each prediction interval.  This uses the deterministic orbital equations and produces an accurate prediction of how solar irradiance through each window will evolve over the next `N·update_interval` seconds.  The same time convention is used for the outdoor temperature forecast so that both disturbance components are evaluated consistently. |
+| **Wind speed** | When the weather forecast exposes `wind_speed`, the per-step values drive the Sherman–Grimsrud infiltration overlay in the nonlinear prediction rollout, and the QP linearisation uses the horizon-mean wind (the wind enters through a conductance, which the linearised model freezes).  Without a forecast the current wind is held over the horizon. |
+| **Online gain deviation** | The EKF's estimated internal-gain deviation $\Delta \hat g$ is an Ornstein–Uhlenbeck state that mean-reverts with rate $\kappa$.  Over the horizon the air-heat channel carries the decaying value $\Delta \hat g \, e^{-\kappa k \Delta t}$ instead of freezing it — a transient unmodelled gain (sun through an unmodelled window, an oven) no longer biases the tail of a 12–24 h plan. |
 
 ### 4.5 Control cycle
 
@@ -1221,6 +1260,7 @@ heating_assistant:
 | `weather_entity` | string | No | — | Entity ID of a HA weather entity (e.g. `weather.forecast_home`) providing temperature forecasts.  When set, the controller uses the weather forecast for outdoor temperature predictions over the MPC horizon instead of assuming the current value is constant.  Works with any HA weather integration that exposes a `forecast` attribute (Met.no, OpenWeatherMap, AccuWeather, etc.). |
 | `latitude` | float | No | HA / wizard setting | Site latitude [°].  Overrides the wizard value. |
 | `longitude` | float | No | HA / wizard setting | Site longitude [°].  Overrides the wizard value. |
+| `ground_albedo` | float | No | `0.2` | Site-level ground reflectance for the ground-reflected solar component (§3.4 Step 5).  Grass/soil ≈ 0.2; raise toward 0.7–0.8 for sites with persistent winter snow cover. |
 | `update_interval` | int | No | `900` | Control time step [s]: sets the OCP ZOH duration, the EKF measurement step, and how often the coordinator re-solves.  Range 60–3600. |
 | `horizon` | int | No | `100` | MPC prediction horizon [steps].  Range 1–200. |
 | `energy_weight` | float | No | `0.01` | Weight on the input cost ‖**u**‖² in the MPC objective.  Higher values make the controller more conservative about running heaters, reducing overshoot at the expense of slightly slower heating.  Typical range: `0.001`–`0.5`.  See [Section 14.5](#145-mpc-regulator-tuning). |
@@ -1272,6 +1312,9 @@ rooms:
 | `window_sensors` | list of strings | No | `[]` | Optional list of `binary_sensor.*` entity IDs (windows/doors). The room enters override `open` when any listed sensor stays `on` for `window_open_debounce`; while open, room heat-source commands are clamped to zero and the EKF process-noise covariance is inflated. |
 | `connections` | list | No | `[]` | List of thermal connections to adjacent rooms. |
 | `windows` | list | No | `[]` | List of window definitions for solar gain calculation. |
+| `c_air_fraction` | float | No | `0.05` | Share of `thermal_mass` attributed to the fast **air node** of the 2R2C model (§3.1).  The remainder is the wall/mass node.  Refined per room by the parameter estimator when its heat sources show enough excitation; leave at the default otherwise. |
+| `r_aw_fraction` | float | No | `0.05` | Share of the conductive envelope path attributed to the internal air↔wall resistance $R_{aw}$ (§3.1).  Also refined by the estimator when identifiable. |
+| `solar_scale` | float | No | `1.0` | Multiplicative correction on the room's modelled solar gain.  Normally you never set this by hand — the parameter estimator identifies it from data (shading, curtains, preset error all land here).  Persisted with the other estimated parameters. |
 | `schedule` | list | No | `[]` | Optional comfort schedule — a list of time-of-day periods that override the room's setpoint or switch its heat sources off (sleep / setback / away).  See [Section 10.6](#106-comfort-schedule-block-schedule). |
 
 ### 10.3 Connection block (`connections`)
@@ -2459,6 +2502,8 @@ data:
 - **Estimated parameters** for each room: `thermal_mass`, `r_external`, `internal_gain`
 - **Estimated heater scales** for sources whose duty-cycle varied enough during the window
 - **Estimated inter-room resistances** for connections with sufficient temperature-difference variation
+- **Estimated solar scales** for rooms whose recorded solar gain varied enough during the window (gate: std ≥ 30 W) — corrects the configured window/preset aperture for shading, curtains, and preset error
+- **Estimated envelope splits** (`c_air_fraction`, `r_aw_fraction` of the 2R2C model) for rooms with an excited heat source — these are held on a tight prior leash and only move when the data carry real fast/slow excitation
 - **Log-likelihood** of the optimized model (higher is better; compare before/after to assess improvement)
 - **Convergence status** and identifiability diagnostics
 
@@ -3902,12 +3947,12 @@ This is the surface we build on.  Every later phase is described as a
 
 | Layer | Today |
 |-------|-------|
-| **Plant model** | One thermal node per room ($1R1C$ per room) with inter-room conductances $1/R_{ij}$ and outdoor conductance $1/R_{i,\text{ext}}$; clear-sky solar gain through each window; Carnot-corrected heat-pump COP |
+| **Plant model** | Two thermal nodes per room ($2R2C$: fast air + slow wall) with wall-to-wall inter-room conductances and split infiltration/conduction outdoor coupling; Erbs-decomposed solar gain (clear-sky/cloud/forecast) with identified per-room scale; Carnot-corrected heat-pump COP |
 | **Disturbances** | Outdoor temperature (HA weather forecast, interpolated to horizon); solar irradiance from latitude/longitude clear-sky pipeline |
 | **State estimator** | Continuous-discrete EKF; implicit-Euler sub-stepped covariance propagation; per-room scalar measurement update |
 | **Optimal-control problem** | Receding-horizon linearized MPC over continuous $u\in[0,1]$ minimising tracking + energy + Δu smoothing + soft-constraint slack; zero-order hold; horizon $N$ steps × $\Delta t$ (default 6 × 15 min) |
 | **Solver** | CVXOPT (batch convex QP after linearization); analytic Jacobians for `f` and `h` |
-| **System ID** | Offline maximum-likelihood (CD-EKF prediction-error decomposition) over the rolling history buffer; identifies $C_i$, $R_{i,\text{ext}}$, internal gain, heater scale, inter-room R |
+| **System ID** | Offline maximum-likelihood (multi-step open-loop objective with analytic forward sensitivities) over the rolling history buffer; identifies $C_i$, $R_{i,\text{ext}}$, internal gain, heater scale, inter-room R, per-room solar scale, and the 2R2C envelope splits (gated) |
 | **Constraints** | Box on $u$; soft slack on temperature corridors; Schmitt-trigger hysteresis on cooling mode |
 | **Cycle time** | ~5 s for a 5-room / 6-step horizon on a small NUC |
 

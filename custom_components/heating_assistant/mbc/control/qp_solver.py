@@ -157,8 +157,23 @@ class HighsQPBackend:
         m = A_csc.shape[0]
 
         inf = highspy.kHighsInf
-        lb = np.where(np.isneginf(lb), -inf, lb)
-        ub = np.where(np.isposinf(ub), inf, ub)
+
+        # HiGHS's active-set QP solver (observed up to 1.14) can return
+        # "Solve error" on otherwise well-posed convex QPs when columns are
+        # unbounded (e.g. soft-constraint slack variables with ub = +inf).
+        # Replace infinite *column* bounds with a huge finite box when a
+        # Hessian is present — far beyond any physically meaningful value,
+        # so the optimum is unchanged.  LPs keep true infinities.
+        _has_hessian = (
+            P.nnz > 0 if sp.issparse(P) else bool(np.any(P))
+        )
+        _qp_box = 1e10
+        if _has_hessian:
+            lb = np.where(np.isneginf(lb), -_qp_box, lb)
+            ub = np.where(np.isposinf(ub), _qp_box, ub)
+        else:
+            lb = np.where(np.isneginf(lb), -inf, lb)
+            ub = np.where(np.isposinf(ub), inf, ub)
         row_lower = np.where(np.isneginf(row_lower), -inf, row_lower)
         row_upper = np.where(np.isposinf(row_upper), inf, row_upper)
 

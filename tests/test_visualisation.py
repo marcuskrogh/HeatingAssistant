@@ -80,11 +80,27 @@ class TestComputeHeatFlows:
         assert flows["bedroom"]["external_loss"] > 0
 
     def test_external_loss_correct_value(self):
-        """External loss should be (T_room - T_out) / R_ext."""
+        """External loss is the instantaneous air-infiltration plus
+        wall-conduction flow.  With the wall initialised at the air
+        temperature it exceeds the steady-state value slightly (the wall
+        is warmer than its equilibrium); once the wall settles to its
+        steady state the total reduces exactly to (T_a − T_out)/R_ext."""
         model = make_single_room_model()
+        room = model.rooms["studio"]
         flows = model.compute_heat_flows(outdoor_temp=5.0)
-        expected = (15.0 - 5.0) / 0.05  # 200 W
-        assert flows["studio"]["external_loss"] == pytest.approx(expected, rel=1e-6)
+        g_inf, _g_aw, g_we = room.conductances()
+        expected_inst = g_inf * (15.0 - 5.0) + g_we * (15.0 - 5.0)
+        assert flows["studio"]["external_loss"] == pytest.approx(
+            expected_inst, rel=1e-3
+        )
+        # Steady-state invariant: with the wall at its equilibrium value the
+        # total external loss equals the 1R1C expression exactly.
+        rho = _g_aw / (_g_aw + g_we)
+        room.wall_temperature = rho * 15.0 + (1.0 - rho) * 5.0
+        flows_ss = model.compute_heat_flows(outdoor_temp=5.0)
+        assert flows_ss["studio"]["external_loss"] == pytest.approx(
+            (15.0 - 5.0) / 0.05, rel=1e-3
+        )
 
     def test_inter_room_flow_direction(self):
         """Heat should flow from warmer to cooler room."""

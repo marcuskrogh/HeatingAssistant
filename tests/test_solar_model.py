@@ -168,7 +168,27 @@ class TestCloudAttenuation:
         w = Window(area=2.0, orientation=180.0, tilt=90.0)
         clear = window_solar_gain(w, dt, LATITUDE, LONGITUDE)
         overcast = window_solar_gain(w, dt, LATITUDE, LONGITUDE, cloud_cover=1.0)
-        assert overcast == pytest.approx(0.25 * clear, rel=1e-9)
+        # Cloud attenuation is component-aware: the total (horizontal) GHI
+        # drops to 25 % (Kasten-Czeplak) and the *beam* essentially
+        # vanishes, while the diffuse share grows.  A vertical window keeps
+        # collecting diffuse from half the sky plus the ground, so its POA
+        # does not scale with the GHI factor — assert the real invariants:
+        # attenuation and a collapsed beam.
+        assert 0.0 < overcast < clear
+        from custom_components.heating_assistant.solar_model import (
+            _day_of_year, _intensity_dni_dhi, solar_angles,
+        )
+        alt, _az = solar_angles(dt, LATITUDE, LONGITUDE)
+        n_day = _day_of_year(dt)
+        dni_clear, dhi_clear = _intensity_dni_dhi(alt, n_day, None, None)
+        dni_oc, dhi_oc = _intensity_dni_dhi(alt, n_day, 1.0, None)
+        assert dni_oc < 0.05 * dni_clear           # beam collapses
+        assert dhi_oc > dhi_clear                  # diffuse share grows
+        # Total horizontal GHI follows the Kasten-Czeplak factor exactly.
+        import math as _math
+        ghi_clear = dni_clear * _math.sin(alt) + dhi_clear
+        ghi_oc = dni_oc * _math.sin(alt) + dhi_oc
+        assert ghi_oc == pytest.approx(0.25 * ghi_clear, rel=1e-9)
 
     def test_window_gain_zero_at_night_regardless_of_cloud(self):
         dt = datetime(2024, 6, 21, 1, 0, 0, tzinfo=timezone.utc)
@@ -183,7 +203,10 @@ class TestCloudAttenuation:
         ]
         clear = room_solar_gains(windows, dt, LATITUDE, LONGITUDE)
         overcast = room_solar_gains(windows, dt, LATITUDE, LONGITUDE, cloud_cover=1.0)
-        assert overcast == pytest.approx(0.25 * clear, rel=1e-9)
+        # Attenuated, monotonic in cloud cover, never negative.
+        assert 0.0 < overcast < clear
+        half = room_solar_gains(windows, dt, LATITUDE, LONGITUDE, cloud_cover=0.5)
+        assert overcast < half < clear
 
 
 # Midday in summer, sun well above the horizon for the tests below.
@@ -260,8 +283,10 @@ class TestGhiPrecedence:
         low = window_solar_gain(win, NOON, LATITUDE, LONGITUDE, ghi=200.0)
         high = window_solar_gain(win, NOON, LATITUDE, LONGITUDE, ghi=800.0)
         assert 0.0 < low < high
-        # 4× the GHI → 4× the gain on a horizontal surface.
-        assert high == pytest.approx(4.0 * low, rel=1e-9)
+        # ~4× the GHI → ~4× the gain on a horizontal surface.  Not exact:
+        # the incidence-angle modifier weights the (GHI-dependent) beam
+        # share, introducing a small sub-proportionality.
+        assert high == pytest.approx(4.0 * low, rel=0.05)
 
     def test_ghi_none_keeps_cloud_path(self):
         win = Window(area=2.0, orientation=180.0, tilt=90.0)
@@ -269,7 +294,9 @@ class TestGhiPrecedence:
             win, NOON, LATITUDE, LONGITUDE, cloud_cover=1.0, ghi=None
         )
         clear = window_solar_gain(win, NOON, LATITUDE, LONGITUDE)
-        assert with_cloud == pytest.approx(0.25 * clear, rel=1e-9)
+        # ghi=None must fall back to the cloud-attenuated clear-sky path
+        # (attenuated; not the unattenuated clear value).
+        assert 0.0 < with_cloud < clear
 
 
 class TestExposureGain:

@@ -70,18 +70,19 @@ def test_gain_augmentation_grows_state_dimension():
         model, sources, dt=900.0, augment_offsets=False,
         augment_gain=True, gain_kappa=kappa, gain_sigma=sigma,
     )
-    # Two rooms, no emitter filters → base nx = 2, augmented nx = 4.
-    assert base.nx == 2
-    assert aug.nx == 4
-    assert aug._gain_block_start == 2
+    # Two rooms × two nodes, no emitter filters → base nx = 4 (2R2C),
+    # augmented nx = 6 (gain block appended).
+    assert base.nx == 4
+    assert aug.nx == 6
+    assert aug._gain_block_start == 4
     # Diffusion matrix carries σ_g on the gain block diagonal.
     sig = aug.sigma(np.zeros(aug.nx), np.zeros(aug.nu), np.zeros(aug.nd), np.array([]), 0.0)
-    assert sig.shape == (4, 4)
-    assert np.isclose(sig[2, 2], sigma)
-    assert np.isclose(sig[3, 3], sigma)
-    # Measurement Jacobian leaves the gain columns at zero.
+    assert sig.shape == (6, 6)
+    assert np.isclose(sig[4, 4], sigma)
+    assert np.isclose(sig[5, 5], sigma)
+    # Measurement Jacobian sees the air block only; wall/gain columns zero.
     H = aug.dhmdx(np.zeros(aug.nx), np.zeros(aug.nu), np.zeros(aug.nd), np.array([]), 0.0)
-    assert H.shape == (2, 4)
+    assert H.shape == (2, 6)
     assert np.allclose(H[:, 2:], 0.0)
 
 
@@ -97,7 +98,7 @@ def test_gain_state_enters_temperature_drift():
     p = np.array([])
 
     x0 = np.zeros(aug.nx)
-    x0[:2] = [21.0, 20.0]
+    x0[:4] = [21.0, 20.0, 21.0, 20.0]   # [T_a, T_w] per room
     f0 = aug.f(x0, u, d, p, 0.0)
 
     # Add +1000 W internal gain to the living room state.
@@ -105,10 +106,10 @@ def test_gain_state_enters_temperature_drift():
     x1[aug._gain_block_start] = 1000.0
     f1 = aug.f(x1, u, d, p, 0.0)
 
-    C_living = model.rooms["living_room"].thermal_mass
-    # Living-room temperature drift increases by gain / C.
-    assert np.isclose(f1[0] - f0[0], 1000.0 / C_living, rtol=1e-6)
-    # The bedroom node is unaffected.
+    # The gain lands on the AIR node: drift increases by gain / C_air.
+    C_air_living = model.rooms["living_room"].c_air
+    assert np.isclose(f1[0] - f0[0], 1000.0 / C_air_living, rtol=1e-6)
+    # The bedroom air node is unaffected.
     assert np.isclose(f1[1], f0[1])
     # OU drift of the gain state itself: dΔg = -κ Δg.
     assert np.isclose(f1[aug._gain_block_start], -kappa * 1000.0, rtol=1e-9)
@@ -124,7 +125,8 @@ def test_gain_dfdx_matches_finite_difference():
     u = np.array([0.3, 0.2])
     d = aug.disturbance_vector(2.0, {"living_room": 50.0, "bedroom": 0.0})
     p = np.array([])
-    x = np.array([20.5, 19.5, 150.0, -80.0])
+    # [T_a (2), T_w (2), Δg (2)]
+    x = np.array([20.5, 19.5, 20.0, 19.0, 150.0, -80.0])
 
     J = aug.dfdx(x, u, d, p, 0.0)
     eps = 1e-4
@@ -142,14 +144,14 @@ def test_fixed_gain_dev_enters_control_model_drift():
     u = np.zeros(ctrl.nu)
     d = ctrl.disturbance_vector(5.0, {"living_room": 0.0, "bedroom": 0.0})
     p = np.array([])
-    x = np.array([21.0, 20.0])
+    x = np.array([21.0, 20.0, 21.0, 20.0])   # [T_a (2), T_w (2)]
 
     f0 = ctrl.f(x, u, d, p, 0.0)
     ctrl.set_fixed_gain_dev(np.array([1000.0, 0.0]))
     f1 = ctrl.f(x, u, d, p, 0.0)
 
-    C_living = model.rooms["living_room"].thermal_mass
-    assert np.isclose(f1[0] - f0[0], 1000.0 / C_living, rtol=1e-6)
+    C_air_living = model.rooms["living_room"].c_air
+    assert np.isclose(f1[0] - f0[0], 1000.0 / C_air_living, rtol=1e-6)
     assert np.isclose(f1[1], f0[1])
 
 
@@ -237,7 +239,9 @@ def test_estimator_recovers_unmodelled_heat_load():
     dt = 900.0
     now = datetime(2024, 1, 15, 0, 0, tzinfo=timezone.utc)
 
-    x_plant = np.array([21.0, 20.0])  # start near setpoint (regulated plant)
+    # [T_a (2), T_w (2)] — start near setpoint (regulated plant), walls
+    # in equilibrium with the air.
+    x_plant = np.array([21.0, 20.0, 21.0, 20.0])
     outdoor = 5.0
 
     for _ in range(160):
