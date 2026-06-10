@@ -2632,6 +2632,13 @@ class SysIdSimulationSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
             "simulation": formatted,
             "thermal_mass": room_data.get("thermal_mass"),
             "r_external": room_data.get("r_external"),
+            # Full identified parameter set surfaced after an ML dry-run so the
+            # room-level identification page can review/apply every parameter.
+            "internal_gain": room_data.get("internal_gain"),
+            "solar_scale": room_data.get("solar_scale"),
+            "c_air_fraction": room_data.get("c_air_fraction"),
+            "r_aw_fraction": room_data.get("r_aw_fraction"),
+            "heater_scales": room_data.get("heater_scales"),
             "sigma_w": room_data.get("sigma_w"),
             "sigma_v": room_data.get("sigma_v"),
             "rmse": room_data.get("rmse"),

@@ -354,6 +354,57 @@ def test_store_identified_parameters_snapshot_survives_restart():
     assert fresh.model.rooms["lr"].r_external == pytest.approx(0.025)
 
 
+def test_store_identified_parameters_applies_full_parameter_set():
+    """The room page applies every identified parameter — not just C / R_ext —
+    including the heater power scale, and they survive a restart."""
+    import custom_components.heating_assistant.coordinator as coord_mod
+    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+
+    room = _make_room("lr", 5e6, 0.05)
+    src = _make_source("hp", power_scale=1.0, room="lr")
+    coordinator = _FakeCoordinator([room], [src])
+
+    mock_controller = MagicMock()
+    with patch(
+        "custom_components.heating_assistant.coordinator.HeatingMPCController",
+        return_value=mock_controller,
+    ):
+        coord_mod.HeatingAssistantCoordinator.store_identified_parameters(
+            coordinator, "lr", 2.5e6, 0.025, source="manual",
+            internal_gain=180.0, solar_scale=1.3,
+            c_air_fraction=0.08, r_aw_fraction=0.12,
+            heater_scales={"hp": 0.75},
+        )
+
+    # Applied to the live model / sources.
+    assert coordinator.model.rooms["lr"].internal_gain == pytest.approx(180.0)
+    assert coordinator.model.rooms["lr"].solar_scale == pytest.approx(1.3)
+    assert coordinator.model.rooms["lr"].c_air_fraction == pytest.approx(0.08)
+    assert coordinator.model.rooms["lr"].r_aw_fraction == pytest.approx(0.12)
+    assert coordinator.heat_sources[0].power_scale == pytest.approx(0.75)
+
+    # Persisted in the snapshot, including the heater power scale.
+    snapshot = coordinator._real_entry.data[CONF_ESTIMATED_PARAMS]
+    assert snapshot["rooms"]["lr"]["internal_gain"] == pytest.approx(180.0)
+    assert snapshot["rooms"]["lr"]["solar_scale"] == pytest.approx(1.3)
+    assert snapshot["rooms"]["lr"]["c_air_fraction"] == pytest.approx(0.08)
+    assert snapshot["rooms"]["lr"]["r_aw_fraction"] == pytest.approx(0.12)
+    assert snapshot["sources"]["hp"]["power_scale"] == pytest.approx(0.75)
+
+    # Restart: a fresh model at defaults restores the full set.
+    fresh_room = _make_room("lr", 5e6, 0.05)
+    fresh_src = _make_source("hp", power_scale=1.0, room="lr")
+    fresh = _FakeCoordinator([fresh_room], [fresh_src])
+    coord_mod.HeatingAssistantCoordinator._restore_estimated_parameters(
+        fresh, snapshot
+    )
+    assert fresh.model.rooms["lr"].internal_gain == pytest.approx(180.0)
+    assert fresh.model.rooms["lr"].solar_scale == pytest.approx(1.3)
+    assert fresh.model.rooms["lr"].c_air_fraction == pytest.approx(0.08)
+    assert fresh.model.rooms["lr"].r_aw_fraction == pytest.approx(0.12)
+    assert fresh.heat_sources[0].power_scale == pytest.approx(0.75)
+
+
 def test_restore_estimated_parameters_handles_legacy_nested_only():
     """A legacy nested-only snapshot (no flat mirror) must still restore."""
     import custom_components.heating_assistant.coordinator as coord_mod
