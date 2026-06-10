@@ -1258,17 +1258,47 @@ def _register_services(hass: HomeAssistant) -> None:
                 if horizon_hours is not None
                 else None
             )
+            internal_gains = result.get("estimated_internal_gains", {})
+            solar_scales = result.get("estimated_solar_scales", {})
+            envelope_splits = result.get("estimated_envelope_splits", {})
+            heater_scales = result.get("estimated_heater_scales", {})
+
+            # Map each room to the identified scales of the heaters in it so the
+            # per-room identification page can list them like any other param.
+            sources_by_room: Dict[str, Dict[str, float]] = {}
+            for src in coordinator.heat_sources:
+                room = getattr(src, "room", None)
+                if room is None or src.name not in heater_scales:
+                    continue
+                sources_by_room.setdefault(room, {})[src.name] = float(
+                    heater_scales[src.name]
+                )
+
             for room_name, params in result.get("estimated_params", {}).items():
                 existing = coordinator.sysid_results.get(room_name, {})
                 existing["thermal_mass"] = params.get("thermal_mass")
                 existing["r_external"] = params.get("r_external")
+                # Surface the full identified parameter set so the room-level
+                # identification page can review and apply every parameter
+                # (not just C / R_ext) in one place.
+                if room_name in internal_gains:
+                    existing["internal_gain"] = internal_gains[room_name]
+                if room_name in solar_scales:
+                    existing["solar_scale"] = solar_scales[room_name]
+                if room_name in envelope_splits:
+                    splits = envelope_splits[room_name]
+                    if "c_air_fraction" in splits:
+                        existing["c_air_fraction"] = splits["c_air_fraction"]
+                    if "r_aw_fraction" in splits:
+                        existing["r_aw_fraction"] = splits["r_aw_fraction"]
+                if room_name in sources_by_room:
+                    existing["heater_scales"] = sources_by_room[room_name]
                 if horizon_steps is not None:
                     existing["horizon_steps"] = horizon_steps
                 coordinator.sysid_results[room_name] = existing
 
-            # Cache identified heater scales on the coordinator so the frontend
-            # can read them via the config sensor and optionally apply them later.
-            heater_scales = result.get("estimated_heater_scales", {})
+            # Cache identified heater scales on the coordinator so the system-wide
+            # config sensor keeps exposing them too.
             coordinator._last_identified_heater_scales = dict(heater_scales)
 
             coordinator.async_update_listeners()
@@ -1995,8 +2025,14 @@ def _register_services(hass: HomeAssistant) -> None:
         r_external: float = call.data["r_external"]
         source: str = call.data.get("source", "manual")
         rmse: Optional[float] = call.data.get("rmse")
+        heater_scales = call.data.get("heater_scales")
         coordinator.store_identified_parameters(
-            room_name, thermal_mass, r_external, source=source, rmse=rmse
+            room_name, thermal_mass, r_external, source=source, rmse=rmse,
+            internal_gain=call.data.get("internal_gain"),
+            solar_scale=call.data.get("solar_scale"),
+            c_air_fraction=call.data.get("c_air_fraction"),
+            r_aw_fraction=call.data.get("r_aw_fraction"),
+            heater_scales=dict(heater_scales) if heater_scales else None,
         )
         coordinator.async_update_listeners()
 
@@ -2015,6 +2051,18 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
                 vol.Optional("source", default="manual"): vol.In(["ml", "manual"]),
                 vol.Optional("rmse"): vol.Coerce(float),
+                vol.Optional("internal_gain"): vol.Coerce(float),
+                vol.Optional("solar_scale"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0)
+                ),
+                vol.Optional("c_air_fraction"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                ),
+                vol.Optional("r_aw_fraction"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                ),
+                # Per-source heater power scales {source_name: scale}.
+                vol.Optional("heater_scales"): {cv.string: vol.Coerce(float)},
             }
         ),
     )

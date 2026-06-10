@@ -1576,14 +1576,25 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         r_external: float,
         source: str = "manual",
         rmse: Optional[float] = None,
+        internal_gain: Optional[float] = None,
+        solar_scale: Optional[float] = None,
+        c_air_fraction: Optional[float] = None,
+        r_aw_fraction: Optional[float] = None,
+        heater_scales: Optional[Dict[str, float]] = None,
     ) -> None:
         """Store and apply identified parameters with history tracking.
+
+        Applies the full set of per-room thermal-model parameters — not just
+        ``thermal_mass`` / ``r_external`` but also the internal gain, solar
+        scale and 2R2C envelope split fractions — plus the per-source heater
+        power scales.  Each optional argument is applied only when provided so
+        callers can update a subset.
 
         1. Get current active params as a history entry.
         2. Push current active to history list (prepend).
         3. Cap history at 10 entries.
         4. Set new params as active.
-        5. Apply to the model (update room thermal_mass and r_external).
+        5. Apply to the model (room parameters + heater scales).
         6. Persist via ``async_update_entry``.
         7. Rebuild MPC controller.
         """
@@ -1622,6 +1633,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         room = self.model.rooms[room_name]
         room.thermal_mass = float(thermal_mass)
         room.r_external = float(r_external)
+        if internal_gain is not None:
+            room.internal_gain = float(internal_gain)
+        if solar_scale is not None:
+            room.solar_scale = float(solar_scale)
+        if c_air_fraction is not None:
+            room.c_air_fraction = float(c_air_fraction)
+        if r_aw_fraction is not None:
+            room.r_aw_fraction = float(r_aw_fraction)
+
+        # Apply per-source heater power scales (only sources that were supplied).
+        if heater_scales:
+            for src in self.heat_sources:
+                if src.name in heater_scales:
+                    src.power_scale = float(heater_scales[src.name])
 
         self.model.rebuild_derived_parameters()
         (
@@ -1653,12 +1678,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         # --- Build new active snapshot ---
+        # Persist the full per-room parameter set (not just C / R_ext) so the
+        # restart-time restore re-applies the identified envelope split, solar
+        # scale and internal gain rather than reverting them to defaults.
         new_active: Dict[str, Any] = {
             "rooms": {
                 name: {
                     "thermal_mass": r.thermal_mass,
                     "r_external": r.r_external,
                     "internal_gain": float(getattr(r, "internal_gain", 0.0)),
+                    "solar_scale": float(getattr(r, "solar_scale", 1.0)),
+                    "c_air_fraction": float(getattr(r, "c_air_fraction", 0.05)),
+                    "r_aw_fraction": float(getattr(r, "r_aw_fraction", 0.05)),
                 }
                 for name, r in self.model.rooms.items()
             },

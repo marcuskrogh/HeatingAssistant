@@ -676,6 +676,62 @@ store_identified_parameters:
           max: 100
           step: 0.001
           unit_of_measurement: "K"
+    internal_gain:
+      name: Internal gain
+      description: Identified constant internal heat gain for the room [W].
+      required: false
+      example: 150
+      selector:
+        number:
+          min: -2000
+          max: 5000
+          step: 1
+          unit_of_measurement: "W"
+    solar_scale:
+      name: Solar scale
+      description: >
+        Identified multiplier on the room's modelled solar gain (1.0 = model
+        value).
+      required: false
+      example: 1.0
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.01
+    c_air_fraction:
+      name: Air-node mass fraction
+      description: >
+        Share of the room's thermal mass attributed to the fast air node in
+        the 2R2C envelope model (0–1).
+      required: false
+      example: 0.05
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.001
+    r_aw_fraction:
+      name: Air-wall resistance fraction
+      description: >
+        Share of the conductive path attributed to the internal air↔wall film
+        resistance in the 2R2C envelope model (0–1).
+      required: false
+      example: 0.05
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.001
+    heater_scales:
+      name: Heater power scales
+      description: >
+        Identified per-source heater power scales as a mapping of source name
+        to scale factor (1.0 = rated power), e.g. {"living_room_heater": 0.85}.
+      required: false
+      example: '{"living_room_heater": 0.85}'
+      selector:
+        object:
 
 revert_parameters:
   name: Revert parameters
