@@ -74,6 +74,7 @@ async def async_setup_entry(
     for room_name in coordinator.model.room_names:
         entities.append(TemperatureMeasuredSensor(coordinator, room_name))
         entities.append(TemperatureFilteredSensor(coordinator, room_name))
+        entities.append(WallTemperatureSensor(coordinator, room_name))
         entities.append(TemperatureOffsetSensor(coordinator, room_name))
         entities.append(InternalGainEstimatedSensor(coordinator, room_name))
         entities.append(TemperatureForecastSensor(coordinator, room_name))
@@ -229,6 +230,71 @@ class TemperatureFilteredSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
         return {
             "thermal_mass": room.thermal_mass,
             "r_external": room.r_external,
+        }
+
+
+class WallTemperatureSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor for the EKF-reconstructed wall/mass-node temperature.
+
+    The 2R2C wall node is never measured — the filter reconstructs it from
+    the air-temperature dynamics.  The state is the wall estimate [°C]; the
+    attributes carry the observability health signals:
+
+    * ``posterior_std`` — EKF posterior std of the wall state [°C].  Should
+      contract after start-up and stay bounded; a non-contracting value
+      means the wall state is drifting unobserved.
+    * ``observability`` — conditioning of the wall-state reconstruction
+      (``model_diagnostics.wall_state_observability``; 1 = ideal, ~0 =
+      practically unobservable).
+    * the room's identified envelope split and solar scale, so the model
+      parameters relevant to the wall node are visible in one place.
+    """
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_suggested_display_precision = 1
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: HeatingAssistantCoordinator,
+        room_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._room_name = room_name
+        self._coordinator = coordinator
+        self._attr_name = (
+            f"Heating Assistant – {room_name} – Wall Temperature"
+        )
+        self._attr_unique_id = f"{DOMAIN}_{room_name}_wall_temperature"
+
+    @property
+    def native_value(self) -> Optional[float]:
+        temp = getattr(self._coordinator, "wall_temperatures", {}).get(
+            self._room_name
+        )
+        if temp is None:
+            return None
+        return round(float(temp), 2)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        room = self._coordinator.model.rooms[self._room_name]
+        std = getattr(self._coordinator, "wall_temperature_stds", {}).get(
+            self._room_name
+        )
+        try:
+            from .model_diagnostics import wall_state_observability
+            obs = wall_state_observability(room, dt=self._coordinator.dt)
+        except Exception:
+            obs = None
+        return {
+            "posterior_std": round(float(std), 3) if std is not None else None,
+            "observability": round(float(obs), 4) if obs is not None else None,
+            "c_air_fraction": round(float(room.c_air_fraction), 4),
+            "r_aw_fraction": round(float(room.r_aw_fraction), 4),
+            "solar_scale": round(float(room.solar_scale), 4),
         }
 
 
@@ -1774,6 +1840,10 @@ class OpenLoopRMSESensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity)
         attrs: dict = {
             "open_loop_rmse": room_data.get("rmse"),
             "open_loop_mae": room_data.get("mae"),
+            # RMSE at ~4 h / 12 h / 24 h open-loop horizons — how the
+            # prediction error grows with lookahead, which is what matters
+            # for price-driven anticipatory heating.
+            "rmse_by_horizon": room_data.get("rmse_by_horizon"),
             "simulation": formatted_sim,
         }
         if "error" in room_data:

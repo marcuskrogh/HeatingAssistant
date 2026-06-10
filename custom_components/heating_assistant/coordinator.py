@@ -48,8 +48,16 @@ from .const import (
     CONF_SOLAR_RADIATION_ENTITY,
     CONF_SOLAR_EXPOSURE,
     CONF_SOLAR_FACING,
+    CONF_SOLAR_SCALE,
+    CONF_C_AIR_FRACTION,
+    CONF_R_AW_FRACTION,
+    CONF_GROUND_ALBEDO,
     DEFAULT_SOLAR_EXPOSURE,
     DEFAULT_SOLAR_FACING,
+    DEFAULT_SOLAR_SCALE,
+    DEFAULT_C_AIR_FRACTION,
+    DEFAULT_R_AW_FRACTION,
+    DEFAULT_GROUND_ALBEDO,
     SOLAR_EXPOSURE_TO_APERTURE,
     CONF_ROOMS,
     CONF_SMOOTHING_WEIGHT,
@@ -295,6 +303,17 @@ def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
                     SOLAR_EXPOSURE_TO_APERTURE[DEFAULT_SOLAR_EXPOSURE],
                 ),
                 solar_facing=rc.get(CONF_SOLAR_FACING, DEFAULT_SOLAR_FACING),
+                # Identified multiplicative correction on the modelled
+                # solar gain (refined by the parameter estimator).
+                solar_scale=rc.get(CONF_SOLAR_SCALE, DEFAULT_SOLAR_SCALE),
+                # 2R2C envelope split fractions (typology defaults; the
+                # parameter estimator refines them when identifiable).
+                c_air_fraction=rc.get(
+                    CONF_C_AIR_FRACTION, DEFAULT_C_AIR_FRACTION,
+                ),
+                r_aw_fraction=rc.get(
+                    CONF_R_AW_FRACTION, DEFAULT_R_AW_FRACTION,
+                ),
             )
         )
     return HouseModel(rooms)
@@ -364,6 +383,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     distributes results to the climate and sensor platforms.
     """
 
+    #: Class-level default so partially-constructed instances (tests,
+    #: legacy persistence paths) always have a ground albedo.
+    _ground_albedo: float = DEFAULT_GROUND_ALBEDO
+
     _RELOAD_REQUIRED_CONFIG_KEYS: Set[str] = {
         CONF_ROOMS,
         CONF_HEAT_SOURCES,
@@ -412,6 +435,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._outdoor_entity: Optional[str] = options.get(CONF_OUTDOOR_TEMP_ENTITY) or data.get(CONF_OUTDOOR_TEMP_ENTITY)
         self._weather_entity: Optional[str] = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY)
         self._solar_radiation_entity: Optional[str] = options.get(CONF_SOLAR_RADIATION_ENTITY) or data.get(CONF_SOLAR_RADIATION_ENTITY)
+        # Site-level ground reflectance for the ground-reflected irradiance
+        # term (grass ~0.2, snow ~0.7-0.8).
+        self._ground_albedo: float = float(
+            options.get(CONF_GROUND_ALBEDO,
+                        data.get(CONF_GROUND_ALBEDO, DEFAULT_GROUND_ALBEDO))
+        )
         self._price_entity: Optional[str] = options.get(CONF_PRICE_ENTITY) or data.get(CONF_PRICE_ENTITY)
         self._price_net_tariff: float = float(
             options.get(CONF_PRICE_NET_TARIFF, data.get(CONF_PRICE_NET_TARIFF, DEFAULT_PRICE_NET_TARIFF))
@@ -585,6 +614,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
             tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
@@ -861,6 +891,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # when the MPC solver fails so sensor entities report ``unknown``.
         self.filtered_temperatures: Dict[str, float] = {}
 
+        # Per-room EKF-reconstructed wall/mass-node temperatures [°C] and
+        # their posterior stds [°C] — the 2R2C observability health signal
+        # (the wall node is not measured, so a non-contracting std flags an
+        # observability problem).
+        self.wall_temperatures: Dict[str, float] = {}
+        self.wall_temperature_stds: Dict[str, float] = {}
+
         # Per-room online internal-gain estimates [W] (nominal + Δĝ) after each
         # compute(); empty until the first successful solve / when it fails.
         self.estimated_internal_gains: Dict[str, float] = {}
@@ -1024,6 +1061,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 room.r_external = float(params["r_external"])
             if "internal_gain" in params:
                 room.internal_gain = float(params["internal_gain"])
+            if "solar_scale" in params:
+                room.solar_scale = float(params["solar_scale"])
+            if "c_air_fraction" in params:
+                room.c_air_fraction = float(params["c_air_fraction"])
+            if "r_aw_fraction" in params:
+                room.r_aw_fraction = float(params["r_aw_fraction"])
 
         for src_name, src_params in snapshot.get("sources", {}).items():
             for src in self.heat_sources:
@@ -1079,6 +1122,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
             tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
@@ -1459,6 +1503,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
             tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
@@ -1563,6 +1608,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
             tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
@@ -1697,6 +1743,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
             tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
@@ -1925,17 +1972,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             ghi_now, ghi_forecast = self._read_ghi(self.now_utc)
 
             # 2d. Read current wind speed for the Sherman–Grimsrud
-            #     infiltration overlay (Phase 1 C1).  When the weather
-            #     entity does not expose ``wind_speed`` this returns
-            #     ``None`` and the controller's external conductance
-            #     falls back to its typical-conditions baseline.  Held
-            #     constant over the OCP horizon and the EKF sub-steps in
-            #     this cycle (a horizon-time-varying wind forecast is a
-            #     Phase 5 follow-up).
+            #     infiltration overlay.  When the weather entity does not
+            #     expose ``wind_speed`` this returns ``None`` and the
+            #     controller's external conductance falls back to its
+            #     typical-conditions baseline.  The wind *forecast* (when
+            #     the weather entity provides one) is also parsed and
+            #     handed to the controller: the QP linearisation uses its
+            #     horizon mean and the prediction rollout the per-step
+            #     values.
             wind_speed_now = self._read_wind_speed_now()
             self.wind_speed = wind_speed_now
             if hasattr(self.controller, "set_wind_speed"):
                 self.controller.set_wind_speed(wind_speed_now)
+            wind_forecast = await self._async_read_wind_forecast(wind_speed_now)
+            # Attenuate the (optional) sky radiative cooling drift by the
+            # current cloud cover — clear nights cool harder than overcast.
+            if hasattr(self.controller, "set_cloud_cover"):
+                self.controller.set_cloud_cover(cloud_cover_now)
+            self.model.set_cloud_cover(cloud_cover_now)
             if hasattr(self.controller, "set_room_process_noise_covariance_scales"):
                 q_scale = {
                     room_name: (
@@ -2016,6 +2070,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     cloud_cover_now=cloud_cover_now,
                     ghi_forecast=ghi_forecast,
                     ghi_now=ghi_now,
+                    wind_forecast=wind_forecast,
                     disabled_sources=disabled_src_names or None,
                     control_trajectory=control_traj,
                     price_forecast=self.price_forecast,
@@ -2033,6 +2088,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.solar_forecast = self.controller.solar_forecast
                 self.heating_schedule = self.controller.heating_schedule
                 self.filtered_temperatures = dict(self.controller.filtered_temperatures)
+                # EKF-reconstructed wall/mass-node temperatures and their
+                # posterior stds — the 2R2C observability health signals.
+                self.wall_temperatures = dict(
+                    getattr(self.controller, "wall_temperatures", {}) or {}
+                )
+                self.wall_temperature_stds = dict(
+                    getattr(self.controller, "wall_temperature_stds", {}) or {}
+                )
                 # Online internal-gain estimates [W] per room (nominal + Δĝ).
                 self.estimated_internal_gains = dict(
                     self.controller.estimated_internal_gains
@@ -2493,6 +2556,29 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             current_cloud_cover=cloud_cover_now,
         )
 
+    async def _async_read_wind_forecast(
+        self, wind_speed_now: Optional[float] = None
+    ) -> Optional[List[float]]:
+        """Read the wind-speed forecast [m/s] from the weather entity.
+
+        ``wind_speed_now`` (already in m/s) anchors the interpolation at
+        k = 0.  Returns ``None`` when the forecast carries no usable
+        ``wind_speed`` field — the controller then holds the current wind
+        over the horizon, exactly the previous behaviour.
+        """
+        forecast_data = await self._async_get_forecast_entries()
+        if not forecast_data:
+            return None
+        unit = None
+        if self._weather_entity:
+            state = self.hass.states.get(self._weather_entity)
+            if state is not None:
+                unit = state.attributes.get("wind_speed_unit")
+        return _weather.parse_wind_forecast(
+            forecast_data, self._horizon, self.dt,
+            now=self.now_utc, current_wind=wind_speed_now, unit=unit,
+        )
+
     async def _async_get_forecast_entries(self) -> Optional[list]:
         """Fetch raw forecast entries from the configured weather entity and
         record success / failure on the coordinator for the diagnostic
@@ -2770,12 +2856,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if room.windows:
             return room_solar_gains(
                 room.windows, now, self._latitude, self._longitude,
-                cloud_cover=cloud_cover, ghi=ghi,
+                cloud_cover=cloud_cover, ghi=ghi, albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
             )
         return room_solar_gains_from_exposure(
             room.solar_exposure_aperture, room.solar_facing,
             now, self._latitude, self._longitude,
-            cloud_cover=cloud_cover, ghi=ghi,
+            cloud_cover=cloud_cover, ghi=ghi, albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
         )
 
     def _resolve_display_cloud_cover(self) -> Optional[float]:
@@ -3760,6 +3846,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 result.get("estimated_inter_room_r", {}),
                 estimated_internal_gains=result.get("estimated_internal_gains", {}),
                 estimated_heater_scales=result.get("estimated_heater_scales", {}),
+                estimated_solar_scales=result.get("estimated_solar_scales", {}),
+                estimated_envelope_splits=result.get(
+                    "estimated_envelope_splits", {}
+                ),
                 log_likelihood=result.get("log_likelihood"),
             )
 
@@ -3831,6 +3921,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimated_inter_room_r: Optional[Dict[str, float]] = None,
         estimated_internal_gains: Optional[Dict[str, float]] = None,
         estimated_heater_scales: Optional[Dict[str, float]] = None,
+        estimated_solar_scales: Optional[Dict[str, float]] = None,
+        estimated_envelope_splits: Optional[Dict[str, Dict[str, float]]] = None,
         log_likelihood: Optional[float] = None,
     ) -> None:
         """
@@ -3850,6 +3942,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             room.r_external = float(params["r_external"])
             if estimated_internal_gains and room_name in estimated_internal_gains:
                 room.internal_gain = float(estimated_internal_gains[room_name])
+            if estimated_solar_scales and room_name in estimated_solar_scales:
+                room.solar_scale = float(estimated_solar_scales[room_name])
+            if estimated_envelope_splits and room_name in estimated_envelope_splits:
+                splits = estimated_envelope_splits[room_name]
+                if "c_air_fraction" in splits:
+                    room.c_air_fraction = float(splits["c_air_fraction"])
+                if "r_aw_fraction" in splits:
+                    room.r_aw_fraction = float(splits["r_aw_fraction"])
 
         # Apply per-source heater power-scale factors.
         if estimated_heater_scales:
@@ -3896,6 +3996,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             measurement_dt=self.dt,
             latitude=self._latitude,
             longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
             tracking_weight=self._tracking_weight,
             energy_weight=self._energy_weight,
             smoothing_weight=self._smoothing_weight,
@@ -3932,6 +4033,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     "r_external": self.model.rooms[name].r_external,
                     "internal_gain": float(
                         getattr(self.model.rooms[name], "internal_gain", 0.0)
+                    ),
+                    "solar_scale": float(
+                        getattr(self.model.rooms[name], "solar_scale", 1.0)
+                    ),
+                    "c_air_fraction": float(
+                        getattr(self.model.rooms[name], "c_air_fraction", 0.05)
+                    ),
+                    "r_aw_fraction": float(
+                        getattr(self.model.rooms[name], "r_aw_fraction", 0.05)
                     ),
                 }
                 for name in self.model.room_names

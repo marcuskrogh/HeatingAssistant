@@ -343,6 +343,57 @@ def read_outdoor_temp(
     return None
 
 
+def wind_unit_factor(unit: Optional[str]) -> float:
+    """Multiplier converting a wind speed in ``unit`` to m/s.
+
+    Unrecognised / missing units fall back to 1.0 (HA's internal canonical
+    unit is m/s).
+    """
+    unit = (unit or "m/s").lower()
+    if unit in ("m/s", "ms", "meter/second", "meter_per_second"):
+        return 1.0
+    if unit in ("km/h", "kph", "kilometer/hour", "kilometre/hour"):
+        return 1.0 / 3.6
+    if unit in ("mph", "mi/h", "mile/hour"):
+        return 0.44704
+    if unit in ("ft/s", "fps", "foot/second", "feet/second"):
+        return 0.3048
+    if unit in ("kn", "kt", "knot", "knots"):
+        return 0.514444
+    return 1.0
+
+
+def parse_wind_forecast(
+    forecast_data: Optional[List[Dict[str, Any]]],
+    horizon: int,
+    dt: float,
+    now: Optional[Any] = None,
+    current_wind: Optional[float] = None,
+    unit: Optional[str] = None,
+) -> Optional[List[float]]:
+    """Wind-speed forecast [m/s] interpolated to the MPC horizon steps.
+
+    Parses the ``wind_speed`` field of the weather entity's forecast
+    entries and converts to m/s using ``unit`` (the entity's
+    ``wind_speed_unit`` attribute).  ``current_wind`` (already in m/s)
+    anchors the k = 0 end of the interpolation.  Returns ``None`` when no
+    usable entries exist — the controller then holds the current wind.
+    """
+    factor = wind_unit_factor(unit)
+    current_raw = (
+        None if current_wind is None or factor == 0.0
+        else current_wind / factor
+    )
+    series = parse_forecast_field(
+        forecast_data, horizon, dt,
+        field="wind_speed", coerce=coerce_float,
+        now=now, current_value=current_raw,
+    )
+    if series is None:
+        return None
+    return [max(0.0, float(v) * factor) for v in series]
+
+
 def read_wind_speed_now(hass: Any, weather_entity: Optional[str]) -> Optional[float]:
     """Return the current outdoor wind speed [m/s] or ``None``.
 
@@ -369,26 +420,7 @@ def read_wind_speed_now(hass: Any, weather_entity: Optional[str]) -> Optional[fl
     # ``wind_speed_unit`` attribute is exposed by integrations such as
     # Met.no, OpenWeatherMap and Tomorrow.io; older entities may omit it,
     # in which case we assume m/s (HA's internal canonical unit).
-    unit = (state.attributes.get("wind_speed_unit") or "m/s").lower()
-    if unit in ("m/s", "ms", "meter/second", "meter_per_second"):
-        factor = 1.0
-    elif unit in ("km/h", "kph", "kilometer/hour", "kilometre/hour"):
-        factor = 1.0 / 3.6
-    elif unit in ("mph", "mi/h", "mile/hour"):
-        factor = 0.44704
-    elif unit in ("ft/s", "fps", "foot/second", "feet/second"):
-        factor = 0.3048
-    elif unit in ("kn", "kt", "knot", "knots"):
-        factor = 0.514444
-    else:
-        # Unrecognised unit — silently fall back to assuming m/s rather
-        # than risking a 3-orders-of-magnitude error.  Logged so that
-        # surprising unit conventions surface in diagnostics.
-        _LOGGER.debug(
-            "Unrecognised wind_speed_unit %r on %s; assuming m/s",
-            unit, weather_entity,
-        )
-        factor = 1.0
+    factor = wind_unit_factor(state.attributes.get("wind_speed_unit"))
     return max(0.0, val * factor)
 
 

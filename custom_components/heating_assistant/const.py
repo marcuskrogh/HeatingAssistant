@@ -67,6 +67,29 @@ CONF_WINDOW_TILT = "tilt"             # degrees from horizontal (90 = vertical)
 # takes precedence whenever any window is configured.
 CONF_SOLAR_EXPOSURE = "solar_exposure"  # "none" | "low" | "medium" | "high"
 CONF_SOLAR_FACING = "solar_facing"      # degrees clockwise from North (default South=180)
+CONF_SOLAR_SCALE = "solar_scale"        # dimensionless multiplier on the room's modelled solar gain (identified from data)
+
+#: Default per-room solar-gain scale.  The configured windows / exposure
+#: preset give the *prior* solar aperture; the parameter estimator refines a
+#: multiplicative scale on top of it (shading, curtains, dirt, frame
+#: fraction, preset error all land here).  1.0 = trust the configured
+#: geometry as-is.
+DEFAULT_SOLAR_SCALE = 1.0
+
+#: Site-level ground reflectance (albedo) used for the ground-reflected
+#: irradiance on tilted/vertical surfaces.  Grass/soil ≈ 0.2; fresh snow
+#: ≈ 0.8.  A site-level scalar is sufficient — per-window albedo is far
+#: below the noise floor of the rest of the solar pipeline.
+CONF_GROUND_ALBEDO = "ground_albedo"
+DEFAULT_GROUND_ALBEDO = 0.2
+
+#: Fraction of a room's window solar gain deposited on the wall/mass node
+#: (the remainder heats the air node directly).  Transmitted shortwave
+#: radiation is mostly absorbed by floor and wall surfaces, not the air;
+#: an even split is a robust engineering default and is deliberately NOT
+#: identified from data (it is nearly collinear with the envelope split
+#: parameters).
+SOLAR_WALL_FRACTION = 0.5
 
 # Heat source configuration keys
 CONF_SOURCE_NAME = "name"

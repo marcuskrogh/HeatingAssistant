@@ -773,17 +773,20 @@ def compute_open_loop_predictions(
             return np.asarray(
                 system.disturbance_vector(outdoor, d_solar), dtype=float
             )
-        # Fallback: replicate the disturbance layout, including the
-        # per-room internal heat gain folded into the solar slot.
+        # Fallback: replicate the disturbance layout
+        # d = [T_out, q_solar (n), q_air (n)] — solar gains in slots 1…n,
+        # the per-room internal heat gain in the air-heat slots 1+n…2n.
         p = system.nd
+        n_rooms = len(system._room_idx)
         d = np.zeros(p)
         d[0] = outdoor
         for name, idx in system._room_idx.items():
-            gain = float(d_solar.get(name, 0.0))
+            d[1 + idx] = float(d_solar.get(name, 0.0))
             room_obj = _rooms.get(name)
-            if room_obj is not None:
-                gain += float(getattr(room_obj, "internal_gain", 0.0))
-            d[1 + idx] = gain
+            if room_obj is not None and 1 + n_rooms + idx < p:
+                d[1 + n_rooms + idx] = float(
+                    getattr(room_obj, "internal_gain", 0.0)
+                )
         return d
 
     per_room_preds: Dict[str, List[float]] = {name: [] for name in room_names}
@@ -827,19 +830,24 @@ def compute_open_loop_predictions(
 
         # Robust initial state: start the open-loop free-run at the *same*
         # state the data is in.  ``initial_state_from_measurement`` sets the
-        # room temperatures from the measurement (so hm(x0) == y0 with the
-        # offset block zeroed) and warm-starts the emitter-lag states to the
+        # air temperatures from the measurement (so hm(x0) == y0 with the
+        # offset block zeroed), seeds the wall nodes from the (T_a, T_out)
+        # steady state, and warm-starts the emitter-lag states to the
         # commanded fraction, avoiding a spurious cold-emitter transient at
         # the start of every segment.  Fall back to the legacy room-only
         # initialisation for system objects that don't provide the helper.
+        d_prev = _make_d(seg[0])
         init_fn = getattr(system, "initial_state_from_measurement", None)
         if callable(init_fn):
-            x = np.asarray(init_fn(np.asarray(y0[:n], dtype=float), u_prev),
-                           dtype=float)
+            y0_arr = np.asarray(y0[:n], dtype=float)
+            try:
+                x = np.asarray(init_fn(y0_arr, u_prev, d_prev), dtype=float)
+            except TypeError:
+                # Older system objects accept (y, u) only.
+                x = np.asarray(init_fn(y0_arr, u_prev), dtype=float)
         else:
             x = np.zeros(nx, dtype=float)
             x[:n] = np.array(y0[:n], dtype=float)
-        d_prev = _make_d(seg[0])
 
         # Anchor point: record the t=0 initial state so the chart shows the
         # simulation starting exactly at the measurement.  predicted == measured
@@ -957,6 +965,69 @@ def compute_open_loop_predictions(
         "n_segments": n_segments,
         "segment_length": segment_length,
     }
+
+
+def wall_state_observability(
+    room: Any,
+    dt: float = 900.0,
+    horizon_steps: int = 96,
+) -> Optional[float]:
+    """Conditioning of the wall-state reconstruction for one 2R2C room.
+
+    The wall node ``T_w`` is never measured — the EKF reconstructs it from
+    the air-temperature dynamics.  This metric quantifies how well-posed
+    that reconstruction is: it is the square root of the eigenvalue ratio
+
+        sqrt( λ_min(W_o) / λ_max(W_o) )  ∈ (0, 1]
+
+    of the discrete observability Gramian ``W_o = Σ_k (A_dᵀ)^k Cᵀ C A_d^k``
+    of the room-local 2-state subsystem ([T_a, T_w], measurement [1, 0]),
+    accumulated over ``horizon_steps`` steps of ``dt`` seconds (default
+    24 h at 15-min steps — long enough to excite the slow mode).
+
+    Interpretation: values near 1 mean both states are observed almost
+    equally well; values near 0 mean the wall state is practically
+    invisible from the air measurement (estimation of the envelope split
+    will not converge).  Rule of thumb: > 0.05 healthy, 0.01–0.05
+    marginal, < 0.01 poor.
+
+    Inter-room couplings are neglected (they would only add information),
+    so this is a conservative per-room bound.  Returns ``None`` when the
+    room does not expose the 2R2C conductance split.
+    """
+    try:
+        g_inf, g_aw, g_we = room.conductances()
+        g_wout = (
+            g_we
+            + float(getattr(room, "sky_radiative_ua", 0.0))
+            + float(getattr(room, "thermal_bridge_psi_l", 0.0))
+        )
+        c_a = float(room.c_air)
+        c_w = float(room.c_wall)
+    except Exception:
+        return None
+    if c_a <= 0.0 or c_w <= 0.0:
+        return None
+
+    A = np.array([
+        [-(g_inf + g_aw) / c_a, g_aw / c_a],
+        [g_aw / c_w, -(g_aw + g_wout) / c_w],
+    ])
+    # Exact ZOH discretisation of the 2×2 system.
+    from scipy.linalg import expm  # noqa: PLC0415
+    Ad = expm(A * float(dt))
+
+    C_meas = np.array([[1.0, 0.0]])
+    W = np.zeros((2, 2))
+    Ak = np.eye(2)
+    for _ in range(max(2, int(horizon_steps))):
+        W += Ak.T @ (C_meas.T @ C_meas) @ Ak
+        Ak = Ad @ Ak
+
+    eig = np.linalg.eigvalsh(W)
+    if eig[-1] <= 0.0:
+        return 0.0
+    return float(np.sqrt(max(0.0, eig[0]) / eig[-1]))
 
 
 def compute_autocorrelation_function(

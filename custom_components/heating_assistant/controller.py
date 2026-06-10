@@ -106,6 +106,7 @@ from .const import (
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
+    SOLAR_WALL_FRACTION,
 )
 from .integrator import implicit_euler_substeps
 from .thermal_model import _SG_FACTOR_TYPICAL
@@ -224,6 +225,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         }
         n = len(self._room_list)
         self._n_rooms = n
+        self._nx_phys = 2 * n   # 2R2C: [T_a (n), T_w (n)]
         self._offset_state: np.ndarray = np.zeros(n, dtype=float)
         # Per-room internal-gain deviation state buffer (round-tripped by the
         # ``x`` property when no EKF cycle has run yet) and the fixed deviation
@@ -235,69 +237,70 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # Values are covariance multipliers; 1.0 means no inflation.
         self._room_q_scales: np.ndarray = np.ones(n, dtype=float)
 
-        # 1R1C state layout: ``x_phys = [T (n)]`` with ``nx_phys = n``.
-        # When ``augment_offsets=True`` an additional block of per-room
-        # measurement-bias states is appended, giving ``nx = 2n``.
+        # 2R2C state layout: ``x_phys = [T_a (n), T_w (n)]`` with
+        # ``nx_phys = 2n`` — air block first so the measured/controlled
+        # temperatures stay at ``x[:n]`` exactly as before.
         # Capacitance, drift, and disturbance matrices are all derived
-        # from the n-state ``HouseModel`` so they share a single source
+        # from the 2n-state ``HouseModel`` so they share a single source
         # of truth.
-        self._C_cap = np.array(model._C, dtype=float)                # (n,)
-        self._inv_C_cap: np.ndarray = 1.0 / self._C_cap             # (n,) gain→drift map
-        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (n, n)
+        self._C_cap = np.array(model._C, dtype=float)                # (2n,) [C_a, C_w]
+        self._inv_C_cap: np.ndarray = 1.0 / self._C_cap             # (2n,)
+        self._F: np.ndarray = model._A / self._C_cap[:, np.newaxis]  # (2n, 2n)
 
-        # Continuous disturbance matrix G_d shape (n, 1+n):
-        # column 0: outdoor temperature coupling on all rows via B_ext.
-        # columns 1..n: per-room solar + identified internal gain on
-        # the single temperature node.
-        # Phase 1 C4 sol-air: the facade sol-air fraction is ADDED to
-        # G_d[i, 1+i] (same node as the direct solar gain).
-        self._G_d: np.ndarray = np.zeros((n, 1 + n))
-        self._G_d[:, 0] = model._B_ext / self._C_cap
+        # Continuous disturbance matrix G_d shape (2n, 1 + 2n):
+        # column 0:        outdoor temperature coupling via B_ext (both blocks);
+        # columns 1..n:    per-room solar gain, scaled by the identified
+        #                  ``solar_scale`` and split between the air node
+        #                  (1 − SOLAR_WALL_FRACTION) and the wall node
+        #                  (SOLAR_WALL_FRACTION + sol-air facade share);
+        # columns 1+n..2n: per-room direct air-node heat [W] — identified
+        #                  internal gain q_int and, over the control horizon,
+        #                  the decaying online gain deviation Δg.
+        self._G_d: np.ndarray = np.zeros((2 * n, 1 + 2 * n))
+        self._G_d[:, 0] = model._B_ext * self._inv_C_cap
         for i in range(n):
-            # Direct window-solar gain lands on the single temperature node.
-            facade_share = float(
-                model.rooms[self._room_list[i]].facade_solar_share
-            )
-            facade_alpha = float(
-                model.rooms[self._room_list[i]].facade_absorptance
-            )
-            # Base solar channel: 1/C_i (direct window gain)
-            # Plus sol-air share: facade_share * facade_alpha / C_i
-            total_solar_gain = 1.0 / self._C_cap[i]
-            if facade_share > 0.0 and facade_alpha > 0.0:
-                total_solar_gain += facade_share * facade_alpha / self._C_cap[i]
-            self._G_d[i, 1 + i] = total_solar_gain
+            room = model.rooms[self._room_list[i]]
+            s_i = float(room.solar_scale)
+            wall_frac = SOLAR_WALL_FRACTION
+            facade = float(room.facade_solar_share) * float(room.facade_absorptance)
+            self._G_d[i, 1 + i] = (1.0 - wall_frac) * s_i * self._inv_C_cap[i]
+            self._G_d[n + i, 1 + i] = (wall_frac + facade) * s_i * self._inv_C_cap[n + i]
+            # Air-node heat channel (q_int / Δg): air row only.
+            self._G_d[i, 1 + n + i] = self._inv_C_cap[i]
 
-        # Phase 1 C3 sky cooling-drift bias.  Mirrors the
-        # HouseModel-side constant (–sky_ua · ΔT_sky / C_i per room).
-        # Added directly to the drift in ``f`` so the EKF/OCP see the
-        # clear-night cooling effect; doesn't enter ``dfdx``.
-        self._sky_offset_phys = np.array(model._B_sky_offset, dtype=float)
+        # Sky cooling-drift bias (wall rows).  Mirrors the HouseModel-side
+        # constant (–sky_ua · ΔT_sky / C_w per room), attenuated at runtime
+        # by the cloud clear-sky fraction.  Added directly to the drift in
+        # ``f``; doesn't enter ``dfdx``.
+        self._sky_offset_phys = np.array(model._B_sky_offset, dtype=float)  # (2n,)
+        self._sky_clear_fraction: float = 1.0
 
-        # Sherman–Grimsrud per-room effective leakage area [m²].
-        # Mirrors HouseModel._leakage_area; cached here so the controller
-        # is self-contained even when used outside the live coordinator.
-        self._leakage_area = np.array(
-            [
-                max(0.0, model.rooms[name].infiltration_fraction)
-                * (1.0 / model.rooms[name].r_external)
-                / (AIR_RHO_CP * _SG_FACTOR_TYPICAL)
-                for name in self._room_list
-            ],
-            dtype=float,
-        )
+        # Sherman–Grimsrud per-room effective leakage area [m²] for the
+        # air-node infiltration overlay; single source of truth in HouseModel.
+        self._leakage_area = np.array(model._leakage_area, dtype=float)
 
-        # Phase 1 B2: per-source first-order emitter filter (pragmatic).
+        # Wall-node equilibrium mixing ratio: at steady state (no solar,
+        # no inter-room flow) the wall sits at
+        #     T_w = ρ·T_a + (1 − ρ)·T_out,   ρ = g_aw / (g_aw + g_wout).
+        # Used to seed wall states for open-loop starts and the QP
+        # linearisation point.
+        _ratios = []
+        for name in self._room_list:
+            room = model.rooms[name]
+            _g_inf, g_aw, g_we = room.conductances()
+            g_wout = g_we + float(room.sky_radiative_ua) + float(room.thermal_bridge_psi_l)
+            _ratios.append(g_aw / (g_aw + g_wout))
+        self._wall_eq_ratio: np.ndarray = np.array(_ratios, dtype=float)
+
+        # Per-source first-order emitter filter (B2).
         # Each source with ``emitter_time_constant > 0`` gets a filter
         # state ``φ_j`` that lags the commanded fraction ``u_j`` with
         # time constant ``τ_em,j``.  The state-vector layout becomes
         #
-        #     [T_a (n), T_w (n), T_s (n), φ (m), b (n)]
+        #     [T_a (n), T_w (n), φ (m), b (n), Δg (n)]
         #
-        # where ``m`` is the number of filtered sources.  When
-        # ``m = 0`` (all sources τ_em = 0, e.g. pure-electric setups)
-        # the state vector is identical to the pre-B2 layout, so
-        # nothing changes for those configurations.
+        # where ``m`` is the number of filtered sources and the b / Δg
+        # blocks are optional (``augment_offsets`` / ``augment_gain``).
         #
         # ``_filtered_source_indices[k]`` is the global source index
         # of the k-th filtered source, and ``_filter_idx_for_source[j]``
@@ -339,13 +342,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # ── Precomputed quantities for hot-path functions ─────────────────
 
         m = self._n_filtered
+        nx_phys = self._nx_phys
 
         # Offset block start index (avoids property dispatch in g/gm/hm/dfdx)
-        self._offset_block_start: int = n + m
+        self._offset_block_start: int = nx_phys + m
 
         # Internal-gain block start index and total state dimension.  Layout:
-        #   [T (n), φ (m), b (n if augment_offsets), Δg (n if augment_gain)]
-        _base_nx = (2 * n + m) if augment_offsets else (n + m)
+        #   [T_a (n), T_w (n), φ (m), b (n if augment_offsets), Δg (n if augment_gain)]
+        _base_nx = (nx_phys + n + m) if augment_offsets else (nx_phys + m)
         self._gain_block_start: int = _base_nx
         self._nx: int = _base_nx + (n if self._augment_gain else 0)
         # Gain-block diagonal indices for the OU drift Jacobian.
@@ -354,7 +358,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             if self._augment_gain else np.zeros(0, dtype=int)
         )
 
-        # Per-source fixed lookups — replace per-call dict/cast overhead
+        # Per-source fixed lookups — replace per-call dict/cast overhead.
+        # Heat sources land on the air node, so the source rows are < n and
+        # ``_src_C_cap`` picks up the air capacitances.
         self._src_room_idx: np.ndarray = np.array(
             [self._room_idx[src.room] for src in self._sources], dtype=int
         )
@@ -365,7 +371,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         if m > 0:
             self._neg_inv_taus: np.ndarray = -1.0 / self._emitter_taus
             self._inv_emitter_taus: np.ndarray = 1.0 / self._emitter_taus
-            self._filter_diag_idx: np.ndarray = np.arange(n, n + m)
+            self._filter_diag_idx: np.ndarray = np.arange(nx_phys, nx_phys + m)
         else:
             self._neg_inv_taus = np.zeros(0)
             self._inv_emitter_taus = np.zeros(0)
@@ -378,9 +384,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         )
 
         # Constant measurement/output Jacobian H = dhm/dx = dgm/dx.
-        # Width spans the full augmented state; the gain block (if present)
-        # contributes nothing to the measurement, so its columns stay zero.
-        b_start = n + m
+        # Only the air block is measured; the wall, filter, and gain blocks
+        # contribute nothing, so their columns stay zero.
+        b_start = self._offset_block_start
         _H = np.zeros((n, self._nx))
         _H[:, :n] = np.eye(n)
         if augment_offsets:
@@ -417,8 +423,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def nx(self) -> int:
-        # 1R1C state layout:
-        # * Physical block: ``n`` states (single temperature per room).
+        # 2R2C state layout:
+        # * Physical block: ``2n`` states (air + wall node per room).
         # * Filter block: ``m`` states (emitter lags).
         # * With offset augmentation we append per-room measurement
         #   biases (``+n``).
@@ -432,7 +438,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
     @property
     def nd(self) -> int:
-        return 1 + len(self._room_list)
+        # d = [T_out, q_solar (n), q_air (n)]: solar gains in slots 1..n,
+        # direct air-node heat (internal gain, decayed Δg) in slots n+1..2n.
+        return 1 + 2 * len(self._room_list)
 
     @property
     def nw(self) -> int:
@@ -449,8 +457,21 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             self._wind_speed = float(max(0.0, wind_speed))
 
     def set_ground_temp(self, ground_temp: float) -> None:
-        """Accepted for API compatibility; no-op in 1R1C (no slab node)."""
+        """Accepted for API compatibility; no-op (no slab node)."""
         pass
+
+    def set_cloud_cover(self, cloud_cover: Optional[float]) -> None:
+        """Attenuate the sky cooling drift by the current cloud cover.
+
+        Mirrors :meth:`HouseModel.set_cloud_cover`: the long-wave sky
+        depression collapses under an overcast sky, so the constant drift
+        is scaled by ``1 − cloud_cover``.  ``None`` keeps the previous value.
+        """
+        if cloud_cover is None:
+            return
+        self._sky_clear_fraction = float(
+            min(1.0, max(0.0, 1.0 - cloud_cover))
+        )
 
     def set_room_process_noise_covariance_scales(
         self, scales_by_room: Dict[str, float],
@@ -458,7 +479,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """Update per-room process-noise covariance multipliers.
 
         ``scales_by_room[room]`` scales Q for that room's physical states
-        (air/wall/slab). Values <= 0 are ignored.
+        (air and wall nodes). Values <= 0 are ignored.
         """
         scales = np.ones(self._n_rooms, dtype=float)
         for room_name, value in scales_by_room.items():
@@ -479,9 +500,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         scales.
 
         Block-diagonal layout matching the state vector
-        ``[T (n), φ (m), b (n if augment_offsets), Δg (n if augment_gain)]``:
+        ``[T_a (n), T_w (n), φ (m), b (n if augment_offsets), Δg (n if augment_gain)]``:
 
-        * physical block:   ``σ_w · √(q_scale)`` per room,
+        * physical blocks:  ``σ_w · √(q_scale)`` per room, applied to both
+          the air and the wall node of the room,
         * filter block:     ``σ_w`` per filtered source,
         * offset block:     ``σ_b`` per room (random-walk bias),
         * gain block:       ``σ_g`` per room (OU internal-gain deviation).
@@ -490,7 +512,8 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         m = self._n_filtered
         physical_std = np.sqrt(np.maximum(self._room_q_scales, 0.0))
         diag_parts = [
-            self._sigma_w * physical_std,
+            self._sigma_w * physical_std,          # air block
+            self._sigma_w * physical_std,          # wall block
             self._sigma_w * np.ones(m, dtype=float),
         ]
         if self._augment_offsets:
@@ -552,13 +575,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         t: float,
     ) -> np.ndarray:
         """
-        Drift for the 1R1C state ``x = [T (n)]`` (un-augmented)
-        or ``x = [T (n), b (n)]`` (augmented).
+        Drift for the 2R2C state ``x = [T_a (n), T_w (n), φ (m), b?, Δg?]``.
 
-        Heat-source power and the Sherman–Grimsrud infiltration overlay
-        both land on the single temperature node.  The measurement-offset
-        block ``b`` has zero drift — it's a slowly-varying random-walk
-        bias state.
+        Heat-source power, internal gains, and the Sherman–Grimsrud
+        infiltration overlay land on the **air** node; conduction, sky
+        radiative cooling, thermal bridges, the sol-air facade share and
+        inter-room coupling act on the **wall** node; solar gain splits
+        between the two via ``G_d``.  The measurement-offset block ``b``
+        has zero drift — it's a slowly-varying random-walk bias state.
 
         Heat-source dispatch:
 
@@ -569,20 +593,24 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
         Parameter vector ``p`` (or ``self._theta`` when ``p`` is empty)
         layout: ``theta = [log_mass(n), log_r(n), q_int(n), log_alpha(*),
-        log_r_ij(*)]``.  ``q_int`` is folded into the disturbance channel;
-        ``log_alpha`` scales each source's commanded power.
+        log_r_ij(*), …]``.  ``q_int`` is folded into the air-node heat
+        channel of the disturbance vector (slots ``1+n … 2n``);
+        ``log_alpha`` scales each source's commanded power.  Parameters
+        beyond the heater scales (inter-room R, solar scale, envelope
+        splits) are baked into the model matrices at construction.
         """
         outdoor_temp = float(d[0])
         n = self._n_rooms
-        T_phys = x[:n]
+        nx_phys = self._nx_phys
+        T_phys = x[:nx_phys]
 
         theta = p if len(p) > 0 else self._theta
 
-        # Extract internal gains and heater scales from parameter vector
+        # Extract internal gains and heater scales from parameter vector.
         if len(theta) >= 3 * n:
             q_int = theta[2 * n: 3 * n]
             d_augmented = d.copy()
-            d_augmented[1: 1 + n] += q_int
+            d_augmented[1 + n: 1 + 2 * n] += q_int
             heater_scales = self._get_heater_scales(theta)
             u_scaled = u if heater_scales is None else heater_scales * u
         else:
@@ -590,15 +618,15 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             u_scaled = u
             d_augmented = d
 
-        # Heat-source contribution (1R1C: all sources reach the single node).
-        # Phase 1 B2: filtered sources use filter state φ_j as effective fraction.
+        # Heat-source contribution — all sources reach the air node.
+        # Filtered sources use filter state φ_j as effective fraction.
         m = self._n_filtered
-        heat_contrib = np.zeros(n)
+        heat_contrib = np.zeros(nx_phys)
 
         for j, src in enumerate(self._sources):
             k_filter = self._filter_idx_for_source[j]
             if k_filter >= 0:
-                eff_u = (heater_scales[j] if heater_scales is not None else 1.0) * x[n + k_filter]
+                eff_u = (heater_scales[j] if heater_scales is not None else 1.0) * x[nx_phys + k_filter]
             else:
                 eff_u = u_scaled[j]
             if self._src_can_cool[j]:
@@ -610,34 +638,35 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                 p_w = src.thermal_power(max(0.0, eff_u), outdoor_temp)
                 heat_contrib[self._src_room_idx[j]] += p_w / self._src_C_cap[j]
 
-        # Physical 1R1C drift on T.
+        # Physical 2R2C drift on [T_a, T_w].
         dT_phys = (
             self._F @ T_phys
             + heat_contrib
             + self._G_d @ d_augmented
-            + self._sky_offset_phys
+            + self._sky_offset_phys * self._sky_clear_fraction
         )
 
-        # Sherman–Grimsrud wind-driven infiltration overlay (skip when not configured).
+        # Sherman–Grimsrud wind-driven infiltration overlay on the air rows
+        # (skip when not configured).
         if self._wind_speed is not None:
-            delta_ua = self._infiltration_delta_ua(outdoor_temp, T_phys)
-            dT_phys += (delta_ua / self._C_cap) * (outdoor_temp - T_phys)
+            delta_ua = self._infiltration_delta_ua(outdoor_temp, T_phys[:n])
+            dT_phys[:n] += (delta_ua * self._inv_C_cap[:n]) * (outdoor_temp - T_phys[:n])
 
-        # Online internal-gain deviation Δg [W] lands on the temperature node
-        # as Δg_i / C_i.  In the EKF (augmented) model it is read from the
+        # Online internal-gain deviation Δg [W] lands on the air node as
+        # Δg_i / C_a,i.  In the EKF (augmented) model it is read from the
         # gain-state block; in the control model it is the frozen estimate
         # held in ``_fixed_gain_dev``.  The two are mutually exclusive per
         # instance, so adding both is safe (one is always zero).
         if self._augment_gain:
             g_state = x[self._gain_block_start: self._gain_block_start + n]
-            dT_phys += g_state * self._inv_C_cap
+            dT_phys[:n] += g_state * self._inv_C_cap[:n]
             dg = -self._gain_kappa * g_state
         else:
-            dT_phys += self._fixed_gain_dev * self._inv_C_cap
+            dT_phys[:n] += self._fixed_gain_dev * self._inv_C_cap[:n]
 
-        # Phase 1 B2: filter-block drift  dφ/dt = (u_cmd - φ) / τ_em.
+        # Filter-block drift  dφ/dt = (u_cmd - φ) / τ_em.
         if m > 0:
-            phi = x[n: n + m]
+            phi = x[nx_phys: nx_phys + m]
             dphi = (u[self._filtered_source_indices] - phi) / self._emitter_taus
         else:
             dphi = self._zeros_n_rooms[:0]
@@ -746,21 +775,20 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         t: float,
     ) -> np.ndarray:
         """``∂f/∂x`` for the augmented state
-        ``[T (n), φ (m), b (n)]``.
+        ``[T_a (n), T_w (n), φ (m), b (n)?, Δg (n)?]``.
 
         Block structure (rows in same order as state):
 
-        * physical n × n block: ``self._F`` (from HouseModel),
-          augmented on the diagonal by the Sherman–Grimsrud
+        * physical 2n × 2n block: ``self._F`` (from HouseModel),
+          augmented on the air-node diagonal by the Sherman–Grimsrud
           overlay (linearly-implicit treatment, frozen at the current
           state).
         * filter→physical: each filtered source contributes
-          ``∂Q_j/∂φ_j / C_target,i`` to the cell where its room's
-          heat lands (air or slab depending on UFH).
+          ``∂Q_j/∂φ_j / C_a,i`` to its room's air-node row.
         * filter→filter: diagonal ``-1/τ_em``.
         * offset block: zero drift, so its rows / columns are zero.
-        * gain→physical: diagonal ``1/C_i`` (Δg deviation onto the
-          temperature node); gain→gain: diagonal ``-κ`` (OU reversion).
+        * gain→physical: diagonal ``1/C_a,i`` (Δg deviation onto the
+          air node); gain→gain: diagonal ``-κ`` (OU reversion).
 
         The cross-coupling ``∂Q_j/∂φ_j`` is the slope of the heat-
         source power function at the current effective fraction.  For
@@ -773,17 +801,17 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """
         n = self._n_rooms
         m = self._n_filtered
-        T_phys = x[:n]
+        nx_phys = self._nx_phys
         outdoor_temp = float(d[0])
         if self._wind_speed is not None:
-            delta_ua = self._infiltration_delta_ua(outdoor_temp, T_phys)
+            delta_ua = self._infiltration_delta_ua(outdoor_temp, x[:n])
             F_eff = self._F.copy()
-            F_eff[self._diag_n_idx, self._diag_n_idx] -= delta_ua / self._C_cap
+            F_eff[self._diag_n_idx, self._diag_n_idx] -= delta_ua * self._inv_C_cap[:n]
         else:
             F_eff = self._F
 
         J = np.zeros((self._nx, self._nx))
-        J[:n, :n] = F_eff
+        J[:nx_phys, :nx_phys] = F_eff
 
         if m > 0:
             theta = p if len(p) > 0 else self._theta
@@ -792,7 +820,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             eps = 1e-6
             for k, j in enumerate(self._filtered_source_indices):
                 src = self._sources[j]
-                phi_j = x[n + k]
+                phi_j = x[nx_phys + k]
                 scale_j = heater_scale_factors[j] if heater_scale_factors is not None else 1.0
                 eff_plus = scale_j * (phi_j + eps)
                 eff_minus = scale_j * (phi_j - eps)
@@ -804,17 +832,17 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                     p_minus = src.thermal_power(max(0.0, eff_minus), outdoor_temp)
                 dpdphi = (p_plus - p_minus) / (2.0 * eps)
                 i_room = self._src_room_idx[j]
-                J[i_room, n + k] += dpdphi / self._C_cap[i_room]
+                J[i_room, nx_phys + k] += dpdphi / self._C_cap[i_room]
 
             # Filter-block diagonal: -1/τ_em (precomputed).
             J[self._filter_diag_idx, self._filter_diag_idx] = self._neg_inv_taus
 
         # Internal-gain block:
-        #   gain→physical: ∂(dT_i)/∂Δg_i = 1/C_i  (cross-coupling that makes
-        #                  the gain observable through the temperature node),
+        #   gain→physical: ∂(dT_a,i)/∂Δg_i = 1/C_a,i  (cross-coupling that
+        #                  makes the gain observable through the air node),
         #   gain→gain:     ∂(dΔg_i)/∂Δg_i = −κ    (OU mean-reversion).
         if self._augment_gain:
-            J[self._diag_n_idx, self._gain_diag_idx] = self._inv_C_cap
+            J[self._diag_n_idx, self._gain_diag_idx] = self._inv_C_cap[:n]
             J[self._gain_diag_idx, self._gain_diag_idx] = -self._gain_kappa
 
         # ``J`` is allocated at the full state dimension ``self._nx`` (which
@@ -923,10 +951,10 @@ class HouseThermalSDE(ContinuousDiscreteModel):
 
         For **filtered** sources (emitter lag τ > 0)::
 
-            ∂f[3n+k_filter] / ∂u_j = 1 / τ_em[k_filter]
+            ∂f[nx_phys + k_filter] / ∂u_j = 1 / τ_em[k_filter]
         """
         outdoor_temp = float(d[0])
-        n = self._n_rooms
+        nx_phys = self._nx_phys
         theta = p if len(p) > 0 else self._theta
         heater_scale_factors = self._get_heater_scales(theta)
 
@@ -936,7 +964,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             k_filter = self._filter_idx_for_source[j]
             if k_filter >= 0:
                 # Filtered source: dφ_k/dt = (u_j − φ_k)/τ_k  →  ∂/∂u_j = 1/τ_k
-                J[n + k_filter, j] = self._inv_emitter_taus[k_filter]
+                J[nx_phys + k_filter, j] = self._inv_emitter_taus[k_filter]
             else:
                 scale = heater_scale_factors[j] if heater_scale_factors is not None else 1.0
                 eff_u = u[j] * scale
@@ -963,14 +991,18 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     def x(self) -> list[float]:
         """Current state vector as a list of floats.
 
-        Layout (1R1C + B2): un-augmented ``[T (n), φ (m)]``; augmented
-        adds a ``b (n)`` block at the end.  ``m`` is the number of
-        filtered heat sources (``self._n_filtered``).  ``φ`` is
-        initialised from the filter cache (zero on cold start).
+        Layout: un-augmented ``[T_a (n), T_w (n), φ (m)]``; augmented
+        adds ``b (n)`` and/or ``Δg (n)`` blocks at the end.  ``m`` is the
+        number of filtered heat sources (``self._n_filtered``).  ``φ`` is
+        initialised from the filter cache (zero on cold start); the wall
+        block round-trips through ``Room.wall_temperature``.
         """
         temps = [self._model.rooms[name].temperature for name in self._room_list]
+        walls = [
+            self._model.rooms[name].wall_temperature for name in self._room_list
+        ]
         phi = self._filter_state.tolist() if self._n_filtered > 0 else []
-        out = temps + phi
+        out = temps + walls + phi
         if self._augment_offsets:
             out = out + self._offset_state.tolist()
         if self._augment_gain:
@@ -981,16 +1013,25 @@ class HouseThermalSDE(ContinuousDiscreteModel):
     def x(self, val: list[float]) -> None:
         n = self._n_rooms
         m = self._n_filtered
+        nx_phys = self._nx_phys
         if len(val) < n:
             raise ValueError(f"Expected at least {n} state values, got {len(val)}")
 
         for i, name in enumerate(self._room_list):
             self._model.rooms[name].temperature = float(val[i])
 
+        if len(val) >= nx_phys:
+            for i, name in enumerate(self._room_list):
+                self._model.rooms[name].wall_temperature = float(val[n + i])
+        else:
+            # Short (air-only) vector: walls follow the air node.
+            for i, name in enumerate(self._room_list):
+                self._model.rooms[name].wall_temperature = float(val[i])
+
         if m > 0:
-            if len(val) >= n + m:
+            if len(val) >= nx_phys + m:
                 self._filter_state = np.array(
-                    val[n: n + m], dtype=float,
+                    val[nx_phys: nx_phys + m], dtype=float,
                 )
             else:
                 self._filter_state = np.zeros(m, dtype=float)
@@ -1038,10 +1079,26 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             return np.zeros(n, dtype=float)
         return x[g_start: g_start + n].copy()
 
+    def wall_equilibrium(
+        self,
+        t_air: np.ndarray,
+        t_out: float,
+    ) -> np.ndarray:
+        """Steady-state wall temperatures for given air and outdoor temps.
+
+        ``T_w = ρ·T_a + (1 − ρ)·T_out`` with the per-room conductance
+        ratio ``ρ = g_aw / (g_aw + g_wout)`` (solar and inter-room flows
+        neglected).  Used to seed wall states for open-loop simulation
+        starts and the QP linearisation point.
+        """
+        t_air = np.asarray(t_air, dtype=float).ravel()
+        return self._wall_eq_ratio * t_air + (1.0 - self._wall_eq_ratio) * float(t_out)
+
     def initial_state_from_measurement(
         self,
         y: np.ndarray,
         u: Optional[np.ndarray] = None,
+        d: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Build a full state vector that is consistent with a measurement.
 
@@ -1049,10 +1106,14 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         (free-run) simulation or filter from a recorded data point so that
         the model **starts at the same state the data is in**:
 
-        * room-temperature block ``T`` ← measured temperatures ``y`` so that
-          ``hm(x0) == y`` exactly (the offset block ``b`` is zeroed, so the
-          predicted output equals the measured temperature with no initial
-          innovation);
+        * air-temperature block ``T_a`` ← measured temperatures ``y`` so
+          that ``hm(x0) == y`` exactly (the offset block ``b`` is zeroed,
+          so the predicted output equals the measured temperature with no
+          initial innovation);
+        * wall block ``T_w`` ← steady-state value implied by the air and
+          outdoor temperatures (:meth:`wall_equilibrium`).  When no
+          disturbance vector is supplied the wall starts at the air
+          temperature;
         * emitter-lag block ``φ`` ← warm-started to the commanded fraction
           ``u`` of each filtered source (the steady state of the first-order
           emitter filter ``dφ/dt = (u − φ)/τ``).  Cold-starting ``φ`` at zero
@@ -1069,6 +1130,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         u : array-like, optional
             Commanded control fractions for each source.  When omitted the
             emitter-lag states start at zero (cold).
+        d : array-like, optional
+            Disturbance vector; only ``d[0]`` (outdoor temperature) is used,
+            for the wall-node steady-state warm start.
 
         Returns
         -------
@@ -1077,17 +1141,29 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         """
         n = self._n_rooms
         m = self._n_filtered
+        nx_phys = self._nx_phys
         x = np.zeros(self._nx, dtype=float)
 
         y_arr = np.asarray(y, dtype=float).ravel()
         n_copy = min(n, y_arr.size)
         x[:n_copy] = y_arr[:n_copy]
 
+        # Wall warm start: steady state given (T_a, T_out), else T_a.
+        t_out: Optional[float] = None
+        if d is not None:
+            d_arr = np.asarray(d, dtype=float).ravel()
+            if d_arr.size > 0 and np.isfinite(d_arr[0]):
+                t_out = float(d_arr[0])
+        if t_out is None:
+            x[n: 2 * n] = x[:n]
+        else:
+            x[n: 2 * n] = self.wall_equilibrium(x[:n], t_out)
+
         if m > 0 and u is not None:
             u_arr = np.asarray(u, dtype=float).ravel()
             for k, src_idx in enumerate(self._filtered_source_indices):
                 if src_idx < u_arr.size:
-                    x[n + k] = float(u_arr[src_idx])
+                    x[nx_phys + k] = float(u_arr[src_idx])
 
         # Offset block (if augmented) intentionally left at zero so that
         # hm(x0) == y exactly.
@@ -1141,22 +1217,25 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         self,
         outdoor_temp: float,
         solar_gains: Dict[str, float],
+        air_gains: Optional[Dict[str, float]] = None,
     ) -> np.ndarray:
         """
-        Pack outdoor temperature and per-room gains into d ∈ ℝᵖ.
+        Pack the disturbances into ``d = [T_out, q_solar (n), q_air (n)]``.
 
-        ``Room.internal_gain`` is folded into the same disturbance slot as
-        solar gain — both are constant heat injections [W] mapped through
-        the same column of G_d, so the EKF/OCP cannot tell them apart and
-        does not need to.
+        ``solar_gains`` are the *unscaled* modelled solar gains [W] — the
+        identified per-room ``solar_scale`` and the air/wall split are
+        applied by ``G_d``.  The air-heat channel carries
+        ``Room.internal_gain`` plus any caller-supplied per-room extra
+        (e.g. the decaying online gain deviation over the control horizon);
+        it lands on the air node only.
         """
+        n = self._n_rooms
         d = np.zeros(self.nd)
         d[0] = outdoor_temp
         for i, name in enumerate(self._room_list):
-            slot = 1 + i
-            gain = float(solar_gains.get(name, 0.0))
-            gain += float(self._model.rooms[name].internal_gain)
-            d[slot] = gain
+            d[1 + i] = float(solar_gains.get(name, 0.0))
+            extra = float(air_gains.get(name, 0.0)) if air_gains else 0.0
+            d[1 + n + i] = float(self._model.rooms[name].internal_gain) + extra
         return d
 
     @property
@@ -1725,13 +1804,18 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         # ‖u_dev + u_ss‖²_R = ‖u_abs‖²_R instead of ‖u_dev‖²_R (which would
         # drive u_abs → u_ss, not zero).  With Q = 0 this gives pure zone control.
         n = self._model._n_rooms
-        x_ss = self._x_ref_abs.copy()          # setpoint temperatures
+        nx_phys = self._model._nx_phys
+        x_ss = self._x_ref_abs.copy()          # setpoint air temperatures
+        # Wall nodes at their steady-state values for the setpoint air
+        # temperatures and current outdoor temperature — linearising around
+        # an inconsistent wall state would mis-scale u_eq and the Jacobians.
+        x_ss[n:nx_phys] = self._model.wall_equilibrium(x_ss[:n], float(d_now[0]))
         u_ss = self._model.compute_u_eq(x_ss, d_now, p_, t)
         # At equilibrium each filtered source's lag state equals u_eq[j].
         for j in range(self._model.nu):
             k_f = self._model._filter_idx_for_source[j]
             if k_f >= 0:
-                x_ss[n + k_f] = u_ss[j]
+                x_ss[nx_phys + k_f] = u_ss[j]
         d_ss = d_now.copy()
 
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
@@ -1931,6 +2015,7 @@ class HeatingMPCController:
         measurement_dt: Optional[float] = None,
         latitude: float = 55.0,
         longitude: float = 12.0,
+        albedo: float = 0.2,
         tracking_weight: float = DEFAULT_SETPOINT_PULL_WEIGHT,
         energy_weight: float = 0.01,
         smoothing_weight: float = 0.1,
@@ -1954,6 +2039,7 @@ class HeatingMPCController:
         self._dt = dt
         self._latitude = latitude
         self._longitude = longitude
+        self._albedo = float(albedo)
 
         # ── Online internal-gain estimation tuning ───────────────────────
         # Map the two user-facing knobs (reversion time τ_g in hours, and the
@@ -2022,6 +2108,11 @@ class HeatingMPCController:
         # ── EKF: initialise from current room temperatures ──────────────
         x0 = np.array(self._system.x)
         P0 = np.eye(n_x)  # initial state uncertainty [K^2]
+        # The wall states are not measured and start at the air temperature;
+        # give them a larger initial variance so the filter knows they are a
+        # guess and lets the dynamics pull them to a consistent value.
+        for i in range(n_rooms):
+            P0[n_rooms + i, n_rooms + i] = 4.0
         # Seed the internal-gain block at its stationary variance s_∞² [W²] so
         # the filter starts at the prior spread of the gain deviation rather
         # than a tiny 1 W² that would make early adaptation sluggish.
@@ -2168,6 +2259,15 @@ class HeatingMPCController:
         self._system.set_wind_speed(wind_speed)
         self._control_system.set_wind_speed(wind_speed)
 
+    def set_cloud_cover(self, cloud_cover: Optional[float]) -> None:
+        """Attenuate the sky cooling drift by the current cloud cover.
+
+        Pushed to both the EKF system and the control system.  Only
+        effective for rooms with ``sky_radiative_ua > 0``.
+        """
+        self._system.set_cloud_cover(cloud_cover)
+        self._control_system.set_cloud_cover(cloud_cover)
+
     def set_room_process_noise_covariance_scales(
         self, scales_by_room: Dict[str, float],
     ) -> None:
@@ -2248,12 +2348,39 @@ class HeatingMPCController:
 
     @property
     def wall_temperatures(self) -> Dict[str, float]:
-        """Per-room temperatures (same as air in 1R1C — no separate wall node)."""
-        return self.temperatures
+        """Per-room EKF-reconstructed wall/mass-node temperatures."""
+        x_hat = self._ekf.x_hat
+        room_list = self._system._room_list
+        n = self._system._n_rooms
+        if len(x_hat) < 2 * n:
+            return self.temperatures
+        return {
+            name: float(x_hat[n + i]) for i, name in enumerate(room_list)
+        }
+
+    @property
+    def wall_temperature_stds(self) -> Dict[str, float]:
+        """Per-room posterior std [°C] of the EKF wall-state estimate.
+
+        The wall node is not measured, so this is the direct observability
+        health signal: it should contract after start-up and stay bounded.
+        """
+        room_list = self._system._room_list
+        n = self._system._n_rooms
+        try:
+            P = np.asarray(self._ekf.P, dtype=float)
+        except Exception:
+            return {name: float("nan") for name in room_list}
+        if P.shape[0] < 2 * n:
+            return {name: float("nan") for name in room_list}
+        return {
+            name: float(np.sqrt(max(0.0, P[n + i, n + i])))
+            for i, name in enumerate(room_list)
+        }
 
     @property
     def slab_temperatures(self) -> Dict[str, float]:
-        """Per-room temperatures (same as air in 1R1C — no separate slab node)."""
+        """Per-room temperatures (no slab node — alias for the air node)."""
         return self.temperatures
 
     @property
@@ -2351,8 +2478,10 @@ class HeatingMPCController:
         system: HouseThermalSDE,
         x: np.ndarray,
     ) -> np.ndarray:
-        """Return the single-node temperatures (1R1C has no wall block)."""
+        """Return the wall-node block ``x[n:2n]`` (air block if too short)."""
         n = system.nym
+        if len(x) >= 2 * n:
+            return x[n: 2 * n].copy()
         if len(x) < n:
             return np.zeros(n)
         return x[:n].copy()
@@ -2362,7 +2491,7 @@ class HeatingMPCController:
         system: HouseThermalSDE,
         x: np.ndarray,
     ) -> np.ndarray:
-        """Return the single-node temperatures (1R1C has no slab block)."""
+        """Return the air-node temperatures (no slab block)."""
         n = system.nym
         if len(x) < n:
             return np.zeros(n)
@@ -2380,6 +2509,7 @@ class HeatingMPCController:
         cloud_cover_now: Optional[float] = None,
         ghi_forecast: Optional[List[Optional[float]]] = None,
         ghi_now: Optional[float] = None,
+        wind_forecast: Optional[List[float]] = None,
         disabled_sources: Optional[Set[str]] = None,
         control_trajectory: Optional[Any] = None,
         price_forecast: Optional[List[float]] = None,
@@ -2420,6 +2550,12 @@ class HeatingMPCController:
         ghi_now : float, optional
             Current GHI [W/m²].  Used for the k=0 entry / current gains when
             ``solar_gains`` was not pre-computed.
+        wind_forecast : list of float, optional
+            Wind speed [m/s] per horizon step.  The QP linearisation uses
+            the horizon mean (the wind enters through the conductance, not
+            the disturbance vector); the nonlinear prediction rollout
+            applies the per-step values.  ``None`` keeps the current wind
+            for the whole horizon.
         disabled_sources : set of str, optional
             Names of heat sources whose rooms are currently off (schedule off,
             user toggle, or window override).  Their QP outputs are zeroed
@@ -2511,6 +2647,35 @@ class HeatingMPCController:
             self._control_system.disturbance_vector(outdoor_seq[k], solar_seq[k])
             for k in range(N)
         ], dtype=float)
+
+        # Decay the online internal-gain deviation over the horizon.  The
+        # control model carries the current Δg as a constant
+        # (``_fixed_gain_dev``); the OU model says it mean-reverts with κ,
+        # so the air-heat disturbance channel gets the *decrement*
+        # Δg·(e^{−κ·kΔt} − 1) per step — zero at k = 0 (consistent with the
+        # linearisation point) and → −Δg at the far end of the horizon.
+        # Without this, a transient unmodelled gain (sun through an
+        # unmodelled window, an oven) would bias the whole plan.
+        gain_kappa = float(getattr(self._system, "_gain_kappa", 0.0) or 0.0)
+        if self.gain_estimation_enabled and gain_kappa > 0.0:
+            dev = np.asarray(self._control_system._fixed_gain_dev, dtype=float)
+            if np.any(dev != 0.0):
+                for k in range(N):
+                    decay = math.exp(-gain_kappa * k * self._dt) - 1.0
+                    D_forecast[k, 1 + n_rooms: 1 + 2 * n_rooms] += dev * decay
+
+        # Horizon-mean wind for the QP linearisation (wind enters through
+        # the infiltration conductance, which the linearised model freezes).
+        wind_seq: Optional[List[float]] = None
+        if wind_forecast:
+            wind_seq = [
+                float(wind_forecast[k]) if k < len(wind_forecast)
+                else float(wind_forecast[-1])
+                for k in range(N)
+            ]
+            finite = [w for w in wind_seq if np.isfinite(w)]
+            if finite:
+                self._control_system.set_wind_speed(float(np.mean(finite)))
 
         # ── Update setpoint reference in MPC (setpoints may have changed) ──
         # Sized to the control model (no internal-gain block in the MPC).
@@ -2630,7 +2795,8 @@ class HeatingMPCController:
 
         # ── Build predicted trajectory using nonlinear model simulation ────
         self._predictions = self._compute_nonlinear_predictions(
-            U_abs, outdoor_seq, solar_seq, room_list, n_rooms
+            U_abs, outdoor_seq, solar_seq, room_list, n_rooms,
+            wind_seq=wind_seq,
         )
         self._linearised_predictions = self._extract_linearised_predictions(
             X_abs, room_list, n_rooms
@@ -2693,6 +2859,7 @@ class HeatingMPCController:
                 self._longitude,
                 cloud_cover=cloud_cover,
                 ghi=ghi,
+                albedo=self._albedo,
             )
         return room_solar_gains_from_exposure(
             room.solar_exposure_aperture,
@@ -2702,6 +2869,7 @@ class HeatingMPCController:
             self._longitude,
             cloud_cover=cloud_cover,
             ghi=ghi,
+            albedo=self._albedo,
         )
 
     def _forecast_solar(
@@ -2777,12 +2945,16 @@ class HeatingMPCController:
         solar_seq: List[Dict[str, float]],
         room_list: List[str],
         n_rooms: int,
+        wind_seq: Optional[List[float]] = None,
     ) -> List[Dict[str, float]]:
         """Compute nonlinear model predictions using the optimal control sequence.
 
         Simulates the nonlinear thermal model forward over the horizon using the
         optimal control inputs from the MPC and the forecasted disturbances
-        (outdoor temperature and solar gains).
+        (outdoor temperature, solar gains, and — when available — per-step
+        wind speed).  The online internal-gain deviation decays with its OU
+        rate κ over the rollout, matching the decrement the QP saw in its
+        disturbance forecast.
 
         Parameters
         ----------
@@ -2797,6 +2969,8 @@ class HeatingMPCController:
             Names of the rooms.
         n_rooms : int
             Number of rooms.
+        wind_seq : list of float, optional
+            Wind speed [m/s] per horizon step for the infiltration overlay.
 
         Returns
         -------
@@ -2807,44 +2981,51 @@ class HeatingMPCController:
         x_curr = self._ekf.x_hat.copy()
         p = np.array([], dtype=float)
 
-        # Freeze the estimated internal-gain deviation at its current value
-        # across the prediction horizon, consistent with the MPC's
-        # certainty-equivalent "fix the parameter" assumption.  Without this
-        # the OU mean-reversion would let the gain decay toward zero over the
-        # rollout, diverging slightly from what the controller optimised for.
-        gain_frozen = None
+        # Pin the estimated internal-gain deviation at its OU-decayed value
+        # per step (κ = 0 reproduces the old frozen behaviour exactly).
+        gain_now = None
+        g_start = 0
         if self._system._augment_gain:
             g_start = self._system._gain_block_start
-            gain_frozen = x_curr[g_start: g_start + n_rooms].copy()
+            gain_now = x_curr[g_start: g_start + n_rooms].copy()
+        gain_kappa = float(getattr(self._system, "_gain_kappa", 0.0) or 0.0)
+
+        wind_restore = self._system._wind_speed
 
         N = len(outdoor_seq)
-        for k in range(N):
-            u_k = U_abs[k] if k < len(U_abs) else U_abs[-1]
-            outdoor_temp = outdoor_seq[k]
-            solar_gains = solar_seq[k] if k < len(solar_seq) else solar_seq[-1]
+        try:
+            for k in range(N):
+                u_k = U_abs[k] if k < len(U_abs) else U_abs[-1]
+                outdoor_temp = outdoor_seq[k]
+                solar_gains = solar_seq[k] if k < len(solar_seq) else solar_seq[-1]
+                if wind_seq is not None and k < len(wind_seq):
+                    self._system.set_wind_speed(wind_seq[k])
 
-            d_k = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
+                d_k = self._control_system.disturbance_vector(outdoor_temp, solar_gains)
 
-            # Simulate one step forward using the nonlinear model
-            # Use default arguments to capture current values in closures
-            rhs = lambda x, u=u_k, d=d_k: self._system.f(x, u, d, p, 0.0)
-            jacobian = lambda x, u=u_k, d=d_k: self._system.dfdx(x, u, d, p, 0.0)
+                # Simulate one step forward using the nonlinear model
+                # Use default arguments to capture current values in closures
+                rhs = lambda x, u=u_k, d=d_k: self._system.f(x, u, d, p, 0.0)
+                jacobian = lambda x, u=u_k, d=d_k: self._system.dfdx(x, u, d, p, 0.0)
 
-            x_next = implicit_euler_substeps(
-                rhs, jacobian, x_curr, self._dt, self._system._n_int_steps
-            )
+                x_next = implicit_euler_substeps(
+                    rhs, jacobian, x_curr, self._dt, self._system._n_int_steps
+                )
 
-            # Re-pin the frozen gain block so it does not OU-decay over the
-            # horizon (the MPC treats it as a constant parameter).
-            if gain_frozen is not None:
-                x_next[g_start: g_start + n_rooms] = gain_frozen
+                # Pin the gain block to its decayed value so the rollout
+                # matches the QP's certainty-equivalent assumption.
+                if gain_now is not None:
+                    decay = math.exp(-gain_kappa * (k + 1) * self._dt) if gain_kappa > 0.0 else 1.0
+                    x_next[g_start: g_start + n_rooms] = gain_now * decay
 
-            # Extract room temperatures (first n_rooms states)
-            temps_k = x_next[:n_rooms]
-            predictions.append(
-                {name: float(temps_k[i]) for i, name in enumerate(room_list)}
-            )
+                # Extract room temperatures (first n_rooms states)
+                temps_k = x_next[:n_rooms]
+                predictions.append(
+                    {name: float(temps_k[i]) for i, name in enumerate(room_list)}
+                )
 
-            x_curr = x_next
+                x_curr = x_next
+        finally:
+            self._system.set_wind_speed(wind_restore)
 
         return predictions

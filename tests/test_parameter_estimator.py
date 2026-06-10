@@ -477,10 +477,16 @@ class TestObjectiveScaling:
         estimator = KalmanMLEstimator(rooms, sources, dt=60.0, regularization=0.0)
 
         # A model whose parameters differ from the data-generating ones, so
-        # the open-loop residuals are non-trivial.
-        true_rooms = [_make_single_room(thermal_mass=3_000_000.0, r_external=0.08)]
-        hist_short = _generate_history(true_rooms, sources, n_steps=120, seed=1)
-        hist_long = _generate_history(true_rooms, sources, n_steps=240, seed=1)
+        # the open-loop residuals are non-trivial.  Each history gets its own
+        # fresh room objects: _generate_history mutates the rooms' (air and
+        # wall) temperature state, so reusing them would make the long
+        # history start from the short one's end state instead of being a
+        # superset of it.
+        def _true_rooms():
+            return [_make_single_room(thermal_mass=3_000_000.0, r_external=0.08)]
+
+        hist_short = _generate_history(_true_rooms(), sources, n_steps=120, seed=1)
+        hist_long = _generate_history(_true_rooms(), sources, n_steps=240, seed=1)
 
         layout = _ThetaLayout(n_rooms=1, identifiable_sources=[],
                               identifiable_pairs=[])

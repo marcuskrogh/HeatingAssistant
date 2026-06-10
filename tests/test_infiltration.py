@@ -399,9 +399,9 @@ def test_controller_f_responds_to_wind() -> None:
         model, [src], dt=900.0, augment_offsets=False,
     )
 
-    x = np.array([20.0, 20.0, 20.0])  # [T_a, T_w, T_s] for 2R2C+slab single-room SDE
+    x = np.array([20.0, 20.0])  # [T_a, T_w] for the single-room 2R2C SDE
     u = np.zeros(1)
-    d = np.array([0.0, 0.0])  # outdoor=0 ⇒ |ΔT| = 20 K
+    d = np.array([0.0, 0.0, 0.0])  # [T_out, q_solar, q_air]; outdoor=0 ⇒ |ΔT| = 20 K
     p = np.array([])
 
     sde.set_wind_speed(SHERMAN_GRIMSRUD_V_TYPICAL)  # baseline

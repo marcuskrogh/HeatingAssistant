@@ -338,6 +338,41 @@ compatibility, so the config-schema groundwork exists).  Bump the persisted
   total).  These, not global RMSE, are the success criteria for Phases A–C.
 * Fix the stale 60 s-sampling wording in `MODEL_FIT_GUIDE.md`.
 
+## 5. Implementation status (this branch)
+
+All four phases are implemented, with the simplifications requested in
+review (keep the model simple and clear; **no slab node** — a slab may
+return later if underfloor heating with significant lag is introduced):
+
+| Item | Status | Notes |
+|---|---|---|
+| A1 per-room solar scale in θ | ✅ | Gated on solar excitation (std ≥ 30 W); analytic gradient; persisted; FD-verified |
+| A2 ground-reflected irradiance | ✅ | Site-level `ground_albedo` (default 0.2) |
+| A3 incidence-angle modifier | ✅ | ASHRAE form, b₀ = 0.1, beam term only |
+| A4 unified cloud fallback | ✅ | All intensity sources supply a GHI; the Erbs correlation does the split everywhere — exact continuity at zero cloud, exact Kasten–Czeplak GHI factor, beam collapses under cloud |
+| B1 per-step wind over the horizon | ✅ | Forecast parsed from the weather entity; per-step in the prediction rollout, horizon-mean in the QP linearisation |
+| B2 Δg decay over the horizon | ✅ | OU decay in both the QP disturbance forecast (as a decrement from the linearisation point) and the rollout |
+| B3 cloud-scaled ΔT_sky | ✅ | `set_cloud_cover` on model and SDE; only active when `sky_radiative_ua > 0` |
+| C 2R2C (air + wall per room) | ✅ | Two nodes, no slab.  Splits parametrised as bounded fractions of the unchanged user-facing (C, R_ext) so steady state and existing configs are preserved exactly; collapse limit ≡ 1R1C |
+| C1 reparametrisation | ✅ simplified | Instead of the (UA_tot, C_tot, τ_fast, …) coordinate change, θ keeps the legacy (log C, log R, q_int, α, R_ij) blocks unchanged and appends bounded split fractions with tight priors (σ = 0.1) — same identifiability protection, far less machinery |
+| C2 per-room gating + fallback | ✅ simplified | Splits enter θ only for rooms with an excited heat source; ungated rooms keep typology defaults (= the 1R1C-equivalent behaviour).  Fallback is by prior shrinkage rather than a dual-fit comparison |
+| C3 observability diagnostics | ✅ | Per-room wall-temperature sensor (EKF estimate) with `posterior_std` and `observability` (Gramian conditioning) attributes; honest (4 K²) initial wall variance in the EKF |
+| C3 optional T_w sensor | ⏸ deferred | Highest-value mitigation if reconstruction proves weak in practice; the measurement-mask plumbing in the CD-EKF already supports it |
+| C5 migration | ✅ | Wall states initialise at their (T_a, T_out) equilibrium; persisted snapshots gain `solar_scale` / split keys; old snapshots load unchanged |
+| D multi-horizon open-loop RMSE | ✅ | `run_open_loop_simulation` reports `rmse_by_horizon` at ~4/12/24 h; surfaced on the Open-Loop RMSE sensor |
+| D preheat-segmented KPIs (comfort debt, price regret) | ⏸ deferred | Needs price-series bookkeeping; follow-up once a few weeks of 2R2C operation exist to baseline against |
+
+Two pre-existing defects were found and fixed along the way:
+
+* the estimator's analytic-gradient pass silently degraded to a **zero
+  gradient** whenever the model state grew beyond n (the
+  `_skip_analytic_grad` gate) — very plausibly the mechanism that made the
+  first 2R2C attempt unidentifiable; the sensitivities are now exact for
+  the full 2R2C θ (verified against finite differences to ~10⁻⁶), and
+* HiGHS's QP solver (≤ 1.14) returns "Solve error" on well-posed QPs with
+  unbounded slack columns; the backend now boxes slack variables at 1e10,
+  which fixed an MPC fallback-to-zero on large comfort violations.
+
 ### Explicitly out of scope (and why)
 
 * **3-state air/wall/slab for every room** — that is the shape of the

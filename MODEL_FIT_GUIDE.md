@@ -309,11 +309,12 @@ accumulate over the window, exposing genuine model drift.
 ```yaml
 service: heating_assistant.run_open_loop_simulation
 data:
-  segment_length: 30  # 30 steps = 30 min at 60 s/step
+  segment_length: 30  # 30 steps = 7.5 h at the default 900 s/step (30 min at 60 s/step)
 ```
 
 **Interpreting results:**
 - Open-loop RMSE < 0.2°C over 30 steps → excellent model
+- The service also reports `rmse_by_horizon` at ~4 h / 12 h / 24 h open-loop horizons — the error growth with lookahead is what matters for price-driven anticipatory heating
 - Open-loop RMSE 0.2–0.5°C → acceptable; consider re-estimating parameters
 - Open-loop RMSE > 0.5°C → poor model; re-run `estimate_parameters_ml`
 
@@ -377,7 +378,7 @@ for several steps and see how far the free-run prediction drifts from reality.
 
 ### Interpretation guide
 
-| Open-loop RMSE (30 steps = 30 min) | Interpretation |
+| Open-loop RMSE (30 steps; 7.5 h at the default 900 s step) | Interpretation |
 |------------------------------------|----------------|
 | < 0.2°C | Excellent — model accurately predicts temperature evolution |
 | 0.2–0.5°C | Acceptable — minor model uncertainty |
