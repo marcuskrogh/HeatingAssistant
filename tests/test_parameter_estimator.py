@@ -406,18 +406,25 @@ class TestJointInternalGainAndHeaterScale:
             f"recovered Q_int={recovered} W, expected ≈ {true_gain} W"
         )
 
-    def test_heater_scale_is_identifiable_when_excited(self):
-        """When heaters vary, α should be flagged identifiable."""
+    def test_heater_scale_always_estimated_when_excited(self):
+        """The heater scale is always part of the joint estimate."""
         rooms = [_make_single_room()]
         sources = _make_sources(rooms)
         estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
         history = _generate_history_with_extras(rooms, sources, n_steps=120)
         result = estimator.estimate(history)
         assert result["success"]
+        # α is treated like every other parameter: always present, never gated.
         assert "living_room_heater" in result["identifiable_sources"]
+        assert "living_room_heater" in result["estimated_heater_scales"]
 
-    def test_heater_scale_not_identifiable_when_constant(self):
-        """Constant duty cycle → α not identifiable."""
+    def test_heater_scale_stays_near_unit_when_constant(self):
+        """Constant duty cycle → α is still estimated but stays near 1.0.
+
+        With no duty-cycle excitation the scale trades off with the internal
+        gain, so the light prior keeps it close to the unit starting value
+        rather than dropping it from the parameter vector entirely.
+        """
         rooms = [_make_single_room()]
         sources = _make_sources(rooms)
         estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
@@ -427,7 +434,11 @@ class TestJointInternalGainAndHeaterScale:
         )
         result = estimator.estimate(history)
         assert result["success"]
-        assert result["identifiable_sources"] == []
+        # α is always estimated now (never gated out)…
+        assert "living_room_heater" in result["identifiable_sources"]
+        # …but with no excitation it remains close to the unit prior.
+        scale = result["estimated_heater_scales"]["living_room_heater"]
+        assert 0.5 < scale < 2.0, f"scale drifted without excitation: {scale}"
 
     def test_joint_fit_improves_over_no_internal_gain(self):
         """If true model has 800 W internal gain, joint fit should achieve

@@ -623,6 +623,8 @@ async def test_async_estimate_ml_passes_internal_gains_and_heater_scales():
         estimated_inter_room_r=None,
         estimated_internal_gains=None,
         estimated_heater_scales=None,
+        estimated_solar_scales=None,
+        estimated_envelope_splits=None,
         log_likelihood=None,
     ):
         captured["internal_gains"] = estimated_internal_gains
