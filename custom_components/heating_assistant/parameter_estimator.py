@@ -19,9 +19,11 @@ where νₖ = yₖ − A x̂ₖ₋₁ − B (α ⊙ u_{k-1}) − E (d_{k-1} + Q_
 The Kalman filter is evaluated forward through the accumulated data history
 for each candidate parameter set.  All positive parameters are log-transformed
 to guarantee positivity and improve numerical conditioning; the unbounded
-internal-gain parameters Q_int are kept in linear space.  A Gaussian
-regularisation term shrinks each parameter toward its prior (the configured
-value or zero) when data quality is poor.
+internal-gain parameters Q_int are kept in linear space.  A deliberately
+light Gaussian regularisation term shrinks each parameter toward its prior
+(the configured value or zero) only in the directions the data cannot
+constrain; it is kept weak so the configured data window — not the prior —
+drives the estimate.
 
 Identifiability gates
 ---------------------
@@ -359,9 +361,15 @@ class KalmanMLEstimator:
         Weight of the Gaussian prior shrinking the solution toward the
         current configured values (and toward zero for ``q_int`` /
         unit-scale α).  Set to 0.0 to disable.  The default is deliberately
-        light (0.1) so the data — not the configured prior — drives the
-        estimate: a heavier prior pins every parameter near its starting
-        value and makes the result look unresponsive to the data.
+        very light (0.01) so the data — not the configured prior — drives
+        the estimate.  The identification window is typically short (the
+        configured data horizon, e.g. 6 h ≈ 24 steps at 900 s), so the
+        summed data-misfit term is modest in magnitude; a heavier prior
+        then pins every parameter near its starting value and makes the
+        result look unresponsive to the data even under strong heater
+        excitation.  The prior is kept just large enough to stabilise the
+        directions the data genuinely cannot constrain (unexcited rooms /
+        sources) without out-voting the directions it can.
     """
 
     def __init__(
@@ -371,7 +379,7 @@ class KalmanMLEstimator:
         dt: float,
         Q_var: float = 0.01,
         R_var: float = 0.25,
-        regularization: float = 0.1,
+        regularization: float = 0.01,
         max_window_steps: int = 48,
     ) -> None:
         self._rooms = rooms
