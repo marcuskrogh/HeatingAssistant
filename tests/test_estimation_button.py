@@ -25,9 +25,10 @@ async def test_estimate_parameters_ml_passes_float_dt():
     captured: dict = {}
 
     class _FakeEstimator:
-        def __init__(self, *, rooms, sources, dt):
+        def __init__(self, *, rooms, sources, dt, max_window_steps=None):
             captured["dt"] = dt
             captured["dt_type"] = type(dt)
+            captured["max_window_steps"] = max_window_steps
 
         def estimate(self, history):
             return {"success": False}
@@ -69,9 +70,10 @@ async def test_estimate_parameters_ml_accepts_timedelta_update_interval():
     captured: dict = {}
 
     class _FakeEstimator:
-        def __init__(self, *, rooms, sources, dt):
+        def __init__(self, *, rooms, sources, dt, max_window_steps=None):
             captured["dt"] = dt
             captured["dt_type"] = type(dt)
+            captured["max_window_steps"] = max_window_steps
 
         def estimate(self, history):
             return {"success": False}

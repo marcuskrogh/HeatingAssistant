@@ -3902,19 +3902,50 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         dict – the result dict from :class:`~.parameter_estimator.KalmanMLEstimator`.
         """
         from .parameter_estimator import KalmanMLEstimator
+        from .history_window import select_recent_window
+
+        dt = _coerce_interval_seconds(self._update_interval_s)
+
+        # Resolve the identification window.  When the caller does not pass an
+        # explicit horizon (e.g. the Estimate-Parameters button) fall back to
+        # the configured identification horizon rather than the entire rolling
+        # buffer: identification must only ever see the configured data
+        # horizon, never a multi-day backlog that no longer reflects the
+        # current operating regime.
+        eff_horizon_hours = (
+            float(horizon_hours)
+            if horizon_hours is not None
+            else float(getattr(
+                self, "_identification_horizon_hours",
+                DEFAULT_IDENTIFICATION_HORIZON_HOURS,
+            ))
+        )
+
+        history = list(self._history_buffer)
+        if eff_horizon_hours > 0 and history:
+            history = select_recent_window(
+                history, eff_horizon_hours * 3600.0
+            )
+
+        # Tie the open-loop identification window to the configured horizon so
+        # the parameters are fit over exactly the identification window the
+        # user selected (split only at genuine data gaps), instead of the
+        # fixed internal 12 h sub-window the estimator otherwise uses.  This is
+        # the same span the open-loop validation plot covers, so identification
+        # and the displayed fit agree — and the estimate actually responds to
+        # the horizon setting and to fresh data.
+        horizon_steps = (
+            max(1, int(round(eff_horizon_hours * 3600.0 / dt)))
+            if eff_horizon_hours > 0
+            else max(1, len(history))
+        )
 
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
-            dt=_coerce_interval_seconds(self._update_interval_s),  # must match history buffer sampling interval, not MPC horizon
+            dt=dt,  # must match history buffer sampling interval, not MPC horizon
+            max_window_steps=horizon_steps,
         )
-
-        history = list(self._history_buffer)
-        if horizon_hours is not None and history:
-            from .history_window import select_recent_window
-            history = select_recent_window(
-                history, float(horizon_hours) * 3600.0
-            )
 
         # Optimisation may take a few seconds; run in a thread executor.
         result: Dict[str, Any] = await self.hass.async_add_executor_job(
