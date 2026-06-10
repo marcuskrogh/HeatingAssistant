@@ -184,11 +184,12 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   actionsCard.innerHTML = `
     <div class="tuning-section__title">Actions</div>
     <p class="tuning-section__desc">
-      Auto-Identification fills the fields below with estimates — nothing is applied until you click Apply Parameters.
+      Auto-Identification fills the fields below with estimates — nothing is applied until you click Apply Parameters or Apply Heater Scales.
     </p>
     <div class="tuning-actions">
       <button class="btn btn--accent tuning-actions__btn" id="btn-auto-identify">Run Auto-Identification</button>
       <button class="btn btn--primary tuning-actions__btn" id="btn-apply-params">Apply Parameters</button>
+      <button class="btn btn--secondary tuning-actions__btn" id="btn-apply-heater-scales" disabled title="Run Auto-Identification first to identify heater scales">Apply Heater Scales</button>
       <button class="btn btn--ghost tuning-actions__btn" id="btn-reset-defaults">Reset to Defaults</button>
       <span class="tuning-actions__status" id="action-status"></span>
     </div>
@@ -245,7 +246,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       </div>
     </div>
 
-    <div class="params-subsection params-subsection--last">
+    <div class="params-subsection">
       <div class="params-subsection__title">Identification Window</div>
       <div class="tuning-params-grid">
         <div class="form-group">
@@ -255,6 +256,15 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
           <span class="form-hint">hours &mdash; history window used for simulation and validation</span>
         </div>
       </div>
+    </div>
+
+    <div class="params-subsection params-subsection--last" id="heater-scales-subsection">
+      <div class="params-subsection__title">Heater Power Scales</div>
+      <p class="form-hint" style="margin-bottom:8px">
+        Identified by Auto-Identification &mdash; applied separately from thermal model parameters.
+        A scale &lt; 1 means the heater delivers less heat than its rated power suggests.
+      </p>
+      <div id="heater-scales-list"></div>
     </div>
   `;
   container.appendChild(paramsCard);
@@ -368,6 +378,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const horizonInput = container.querySelector('#param-horizon');
   const btnAutoIdentify = container.querySelector('#btn-auto-identify');
   const btnApplyParams = container.querySelector('#btn-apply-params');
+  const btnApplyHeaterScales = container.querySelector('#btn-apply-heater-scales');
   const btnResetDefaults = container.querySelector('#btn-reset-defaults');
   const btnSysid = container.querySelector('#btn-sysid');
   const btnOpenLoop = container.querySelector('#btn-open-loop');
@@ -438,6 +449,78 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
       if (sysidAttrs?.horizon_hours != null) horizonInput.value = sysidAttrs.horizon_hours;
     }
+
+    renderHeaterScales(st);
+  }
+
+  // Render the heater scales subsection from config sensor attributes.
+  // Shows current applied scale vs identified scale for each source in this room.
+  function renderHeaterScales(st) {
+    const listEl = container.querySelector('#heater-scales-list');
+    if (!listEl) return;
+
+    const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
+    const currentScales = configAttrs.current_heater_scales || {};
+    const identifiedScales = configAttrs.identified_heater_scales || {};
+
+    // Filter to sources that serve this room (by room_slug).
+    const roomSources = Object.entries(currentScales).filter(
+      ([, info]) => info.room_slug === roomSlug
+    );
+
+    if (roomSources.length === 0) {
+      listEl.innerHTML = '<span class="form-hint">No heaters configured for this room.</span>';
+      if (btnApplyHeaterScales) btnApplyHeaterScales.disabled = true;
+      return;
+    }
+
+    const hasIdentified = roomSources.some(([name]) => name in identifiedScales);
+
+    // Enable the Apply Heater Scales button only when identified scales exist.
+    if (btnApplyHeaterScales) {
+      btnApplyHeaterScales.disabled = !hasIdentified;
+      btnApplyHeaterScales.title = hasIdentified
+        ? 'Apply the identified heater power scales to the live model'
+        : 'Run Auto-Identification first to identify heater scales';
+    }
+
+    let html = '<table class="heater-scales-table"><thead><tr>'
+      + '<th>Source</th><th>Applied Scale</th>';
+    if (hasIdentified) html += '<th>Identified Scale</th><th>Change</th>';
+    html += '</tr></thead><tbody>';
+
+    for (const [srcName, info] of roomSources) {
+      const current = info.power_scale ?? 1.0;
+      const identified = identifiedScales[srcName];
+      const currentPct = (current * 100).toFixed(1) + '%';
+
+      let identifiedCell = '<td>—</td><td></td>';
+      if (identified != null && hasIdentified) {
+        const identPct = (identified * 100).toFixed(1) + '%';
+        const delta = ((identified - current) / Math.max(current, 0.001)) * 100;
+        const deltaStr = (delta >= 0 ? '+' : '') + delta.toFixed(1) + '%';
+        const deltaClass = Math.abs(delta) < 5
+          ? 'heater-scale__delta--neutral'
+          : delta < 0
+          ? 'heater-scale__delta--lower'
+          : 'heater-scale__delta--higher';
+        identifiedCell = `<td><strong>${identPct}</strong></td>`
+          + `<td><span class="heater-scale__delta ${deltaClass}">${deltaStr}</span></td>`;
+      } else if (hasIdentified) {
+        identifiedCell = '<td>—</td><td></td>';
+      }
+
+      html += `<tr><td>${srcName}</td><td>${currentPct}</td>${hasIdentified ? identifiedCell : ''}</tr>`;
+    }
+
+    html += '</tbody></table>';
+
+    if (hasIdentified) {
+      html += '<p class="form-hint" style="margin-top:6px">'
+        + 'Click <em>Apply Heater Scales</em> in the Actions panel to apply the identified scales.</p>';
+    }
+
+    listEl.innerHTML = html;
   }
 
   // After an ML dry-run the coordinator writes identified C and R into
@@ -629,9 +712,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       // state event to arrive and update latestState via the update() callback.
       await new Promise((res) => setTimeout(res, 800));
       populateModelFromSysid(roomSlug, latestState);
+      // Render heater scales now that identified scales are available.
+      renderHeaterScales(latestState);
       // Loaded values are pending review; protect them from state-sync resets.
       userEditing = true;
-      setStatus(actionStatusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
+      setStatus(actionStatusEl, 'Loaded — review the fields below, then click Apply Parameters or Apply Heater Scales.', '');
     } catch (err) {
       setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
     }
@@ -663,6 +748,19 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
     }
     btnApplyParams.disabled = false;
+  });
+
+  // Apply Heater Scales: apply the identified heater power scales to the live model.
+  btnApplyHeaterScales.addEventListener('click', async () => {
+    setStatus(actionStatusEl, 'Applying heater scales…', 'running');
+    btnApplyHeaterScales.disabled = true;
+    try {
+      await hass.callService('heating_assistant', 'apply_heater_scales', {});
+      setStatus(actionStatusEl, 'Heater scales applied.', 'success');
+    } catch (err) {
+      setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
+    }
+    btnApplyHeaterScales.disabled = false;
   });
 
   // Reset to Defaults: fill all fields with factory defaults, no service call.
@@ -757,6 +855,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const focused = (rootNode instanceof ShadowRoot ? rootNode : document).activeElement;
       if (!userEditing && !paramInputs.some((inp) => inp === focused)) {
         populateFromState(roomSlug, newState);
+      } else {
+        // Always refresh heater scales even when the user is editing other
+        // fields — the identified scales panel is read-only and should update
+        // as soon as an estimation result arrives.
+        renderHeaterScales(newState);
       }
       renderEkfResults(roomSlug, newState);
       renderOlResults(roomSlug, newState);

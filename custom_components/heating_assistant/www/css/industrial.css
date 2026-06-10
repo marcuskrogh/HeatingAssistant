@@ -1015,6 +1015,60 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Heater scales table in the identification detail view */
+.heater-scales-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.heater-scales-table th,
+.heater-scales-table td {
+  text-align: left;
+  padding: 5px 10px 5px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.heater-scales-table th {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.heater-scales-table td:first-child {
+  color: var(--text-primary);
+}
+
+.heater-scales-table td strong {
+  color: var(--text-primary);
+}
+
+.heater-scale__delta {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.heater-scale__delta--neutral {
+  background: color-mix(in srgb, var(--text-dim) 15%, transparent);
+  color: var(--text-secondary);
+}
+
+.heater-scale__delta--lower {
+  background: color-mix(in srgb, var(--alarm) 18%, transparent);
+  color: var(--alarm);
+}
+
+.heater-scale__delta--higher {
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+}
+
 /* Visual separator between the parameters section and the simulations section */
 .section-divider {
   border: none;
