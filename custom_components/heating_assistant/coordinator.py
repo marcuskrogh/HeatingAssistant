@@ -3927,24 +3927,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 history, eff_horizon_hours * 3600.0
             )
 
-        # Tie the open-loop identification window to the configured horizon so
-        # the parameters are fit over exactly the identification window the
-        # user selected (split only at genuine data gaps), instead of the
-        # fixed internal 12 h sub-window the estimator otherwise uses.  This is
-        # the same span the open-loop validation plot covers, so identification
-        # and the displayed fit agree — and the estimate actually responds to
-        # the horizon setting and to fresh data.
-        horizon_steps = (
-            max(1, int(round(eff_horizon_hours * 3600.0 / dt)))
-            if eff_horizon_hours > 0
-            else max(1, len(history))
-        )
-
+        # NOTE: the configured horizon controls only *which* data is used (the
+        # most recent ``eff_horizon_hours`` of history, sliced above).  It does
+        # NOT set the open-loop simulation window length: the estimator splits
+        # the data into short fixed-length open-loop windows internally, because
+        # a single multi-hour free-run of the thermal model is numerically
+        # ill-conditioned and the optimiser lands in degenerate basins (mass
+        # and resistance off by orders of magnitude, scales pinned to bounds).
+        # The short-window default is therefore left to the estimator.
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
             sources=self.heat_sources,
             dt=dt,  # must match history buffer sampling interval, not MPC horizon
-            max_window_steps=horizon_steps,
         )
 
         # Optimisation may take a few seconds; run in a thread executor.

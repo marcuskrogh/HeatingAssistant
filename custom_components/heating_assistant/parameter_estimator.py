@@ -358,7 +358,10 @@ class KalmanMLEstimator:
     regularization : float
         Weight of the Gaussian prior shrinking the solution toward the
         current configured values (and toward zero for ``q_int`` /
-        unit-scale α).  Set to 0.0 to disable.
+        unit-scale α).  Set to 0.0 to disable.  The default is deliberately
+        light (0.1) so the data — not the configured prior — drives the
+        estimate: a heavier prior pins every parameter near its starting
+        value and makes the result look unresponsive to the data.
     """
 
     def __init__(
@@ -368,7 +371,7 @@ class KalmanMLEstimator:
         dt: float,
         Q_var: float = 0.01,
         R_var: float = 0.25,
-        regularization: float = 1.0,
+        regularization: float = 0.1,
         max_window_steps: int = 48,
     ) -> None:
         self._rooms = rooms
@@ -680,7 +683,18 @@ class KalmanMLEstimator:
             history, self._room_names, self._connection_pairs,
             min_history_steps=self._min_history_steps,
         )
-        identifiable_sources = _check_identifiable_sources(
+        # Heater power-scale α is treated like every other parameter (thermal
+        # mass, R_ext, internal gain): it is *always* part of the joint vector
+        # rather than being switched on/off by an excitation gate.  A source
+        # that never runs contributes no heat, so ∂f/∂α ≡ 0 for it and the
+        # optimiser leaves its scale at the unit prior — i.e. unexcited sources
+        # self-regularise without a special gate, while any source that does
+        # vary gets its scale identified from the data.
+        identifiable_sources = list(range(self._n_u))
+        # The duty-cycle excitation check is still used to decide which rooms'
+        # 2R2C envelope splits are identifiable (those need a heater step to be
+        # seen), so it is computed separately from the always-on α block.
+        excited_sources = _check_identifiable_sources(
             history, self._n_u,
             min_history_steps=self._min_history_steps,
         )
@@ -689,7 +703,7 @@ class KalmanMLEstimator:
             min_history_steps=self._min_history_steps,
         )
         identifiable_splits = _identifiable_split_rooms(
-            identifiable_sources, self._sources, self._room_names,
+            excited_sources, self._sources, self._room_names,
         )
 
         layout = _ThetaLayout(
@@ -929,14 +943,11 @@ class KalmanMLEstimator:
                 "(result may be approximate)."
             )
         if identifiable_sources:
+            n_excited = len(excited_sources)
             msg_parts.append(
                 f"Heater scale estimated for {len(identifiable_sources)} "
-                "active source(s)."
-            )
-        else:
-            msg_parts.append(
-                "Heater scale not identifiable — heaters did not vary "
-                "enough during the window."
+                f"source(s) ({n_excited} with clear duty-cycle excitation; "
+                "the rest stay near unit scale)."
             )
         if identifiable_pairs:
             msg_parts.append(
