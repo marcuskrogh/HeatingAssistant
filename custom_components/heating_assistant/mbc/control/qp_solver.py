@@ -136,9 +136,27 @@ class HighsQPBackend:
     def __init__(self, *, options: dict[str, Any] | None = None) -> None:
         self._options = dict(options) if options is not None else {}
 
+    #: Retry attempts ``(box, relative_objective_scale)`` for failed QP solves.
+    #: HiGHS's active-set QP solver (observed up to 1.14) can spuriously
+    #: return "Solve error" or "Unbounded" on well-posed strictly convex QPs:
+    #: "Solve error" appears both with unbounded columns (e.g. soft-constraint
+    #: slack variables with ub = +inf) and with columns boxed at very large
+    #: values such as 1e10, while "Unbounded" can be misreported even when
+    #: every column has finite bounds.  No single formulation works for every
+    #: problem, so the first attempt passes the problem as given and failed
+    #: solves are retried with (a) infinite column bounds replaced by a large
+    #: finite box — far beyond any physically meaningful decision value — and
+    #: (b) the objective uniformly rescaled so its largest Hessian entry is
+    #: ``relative_objective_scale``.  Both transformations leave the argmin
+    #: unchanged.
+    _RETRY_ATTEMPTS = ((1e8, None), (1e8, 1e-2), (1e6, 1e-3))
+
+    #: Model-status strings that trigger a retry (spurious-failure modes).
+    _RETRY_STATUSES = frozenset({"Solve error", "Unbounded"})
+
     def solve(self, problem: QPProblem) -> QPResult:
         try:
-            import highspy
+            import highspy  # noqa: F401
         except ImportError as exc:  # pragma: no cover - core dependency
             raise RuntimeError(
                 "HiGHS QP backend requested but 'highspy' is not available. "
@@ -148,39 +166,66 @@ class HighsQPBackend:
         import scipy.sparse as sp
 
         P = problem.P if sp.issparse(problem.P) else np.asarray(problem.P, dtype=float)
-        q = np.asarray(problem.q, dtype=float).reshape(-1)
-        n = q.shape[0]
         lb = np.asarray(problem.lb, dtype=float).reshape(-1)
         ub = np.asarray(problem.ub, dtype=float).reshape(-1)
+
+        result = self._solve_once(problem, lb, ub)
+        has_hessian = P.nnz > 0 if sp.issparse(P) else bool(np.any(P))
+        if result.success or not has_hessian or result.status not in self._RETRY_STATUSES:
+            return result
+
+        P_max = abs(P).max() if sp.issparse(P) else float(np.abs(P).max())
+        boxed_lo = np.isneginf(lb)
+        boxed_hi = np.isposinf(ub)
+        for box, rel_scale in self._RETRY_ATTEMPTS:
+            lb_r = np.where(boxed_lo, -box, lb)
+            ub_r = np.where(boxed_hi, box, ub)
+            scale = rel_scale / P_max if (rel_scale and P_max > 0.0) else 1.0
+            retry = self._solve_once(problem, lb_r, ub_r, scale=scale)
+            if retry.success:
+                # If the optimum leans on a substituted box the problem may be
+                # genuinely unbounded — keep the original failure result.
+                hit = (boxed_lo & (retry.x < -0.5 * box)) | (
+                    boxed_hi & (retry.x > 0.5 * box)
+                )
+                if np.any(hit):
+                    break
+                return retry
+        return result
+
+    def _solve_once(
+        self,
+        problem: QPProblem,
+        lb: np.ndarray,
+        ub: np.ndarray,
+        scale: float = 1.0,
+    ) -> QPResult:
+        """Run a single HiGHS solve of ``problem`` with the given column bounds.
+
+        ``scale`` uniformly multiplies the objective (Hessian and linear term)
+        passed to HiGHS — the argmin is unchanged — and the reported objective
+        value is always computed from the *original* problem data.
+        """
+        import highspy
+        import scipy.sparse as sp
+
+        P = problem.P if sp.issparse(problem.P) else np.asarray(problem.P, dtype=float)
+        q = np.asarray(problem.q, dtype=float).reshape(-1)
+        n = q.shape[0]
 
         A_csc, row_lower, row_upper = _stack_constraints(problem, n)
         m = A_csc.shape[0]
 
         inf = highspy.kHighsInf
-
-        # HiGHS's active-set QP solver (observed up to 1.14) can return
-        # "Solve error" on otherwise well-posed convex QPs when columns are
-        # unbounded (e.g. soft-constraint slack variables with ub = +inf).
-        # Replace infinite *column* bounds with a huge finite box when a
-        # Hessian is present — far beyond any physically meaningful value,
-        # so the optimum is unchanged.  LPs keep true infinities.
-        _has_hessian = (
-            P.nnz > 0 if sp.issparse(P) else bool(np.any(P))
-        )
-        _qp_box = 1e10
-        if _has_hessian:
-            lb = np.where(np.isneginf(lb), -_qp_box, lb)
-            ub = np.where(np.isposinf(ub), _qp_box, ub)
-        else:
-            lb = np.where(np.isneginf(lb), -inf, lb)
-            ub = np.where(np.isposinf(ub), inf, ub)
+        lb = np.where(np.isneginf(lb), -inf, lb)
+        ub = np.where(np.isposinf(ub), inf, ub)
         row_lower = np.where(np.isneginf(row_lower), -inf, row_lower)
         row_upper = np.where(np.isposinf(row_upper), inf, row_upper)
 
         lp = highspy.HighsLp()
         lp.num_col_ = n
         lp.num_row_ = m
-        lp.col_cost_ = q
+        lp.col_cost_ = q * scale
         lp.col_lower_ = lb
         lp.col_upper_ = ub
         lp.row_lower_ = row_lower
@@ -202,7 +247,7 @@ class HighsQPBackend:
         hessian.format_ = highspy.HessianFormat.kTriangular
         hessian.start_ = P_tri.indptr.astype(np.int32)
         hessian.index_ = P_tri.indices.astype(np.int32)
-        hessian.value_ = P_tri.data.astype(float)
+        hessian.value_ = P_tri.data.astype(float) * scale
 
         model = highspy.HighsModel()
         model.lp_ = lp
