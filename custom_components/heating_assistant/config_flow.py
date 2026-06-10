@@ -28,7 +28,6 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
-    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -86,9 +85,6 @@ from .const import (
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
-    CONF_GAIN_ESTIMATOR_ENABLED,
-    CONF_GAIN_REVERSION_TIME_HOURS,
-    CONF_GAIN_STATIONARY_STD_WATTS,
     CONF_SKY_RADIATIVE_UA,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOFT_CONSTRAINT_WEIGHT,
@@ -170,9 +166,6 @@ from .const import (
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
-    DEFAULT_GAIN_ESTIMATOR_ENABLED,
-    DEFAULT_GAIN_REVERSION_TIME_HOURS,
-    DEFAULT_GAIN_STATIONARY_STD_WATTS,
     DEFAULT_SKY_RADIATIVE_UA,
     DEFAULT_SMOOTHING_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
@@ -821,7 +814,7 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_menu(
             step_id="init",
-            menu_options=["global_settings", "advanced_tuning", "manage_rooms", "manage_room_windows", "manage_room_heaters", "save"],
+            menu_options=["global_settings", "manage_rooms", "manage_room_windows", "manage_room_heaters", "save"],
         )
 
     # ------------------------------------------------------------------
@@ -908,63 +901,6 @@ class HeatingAssistantOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="global_settings", data_schema=vol.Schema(schema_dict),
-        )
-
-    # ------------------------------------------------------------------
-    # Advanced tuning (online parameter estimation)
-    # ------------------------------------------------------------------
-
-    async def async_step_advanced_tuning(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> ConfigFlowResult:
-        """Form for advanced tuning of the online internal-gain estimator.
-
-        Promotes each room's internal heat gain to an estimated state with a
-        regularised (Ornstein–Uhlenbeck) augmented-state process.  The two
-        knobs map onto the SDE parameters κ = 1/τ_g and σ_g = s_∞·√(2κ):
-
-        * reversion time τ_g [hours] — how quickly the estimate relaxes back
-          toward the configured nominal gain when observations are
-          uninformative (longer = more stable, shorter = more adaptive),
-        * stationary std s_∞ [W] — the steady-state spread of the estimated
-          gain deviation (larger = tracks bigger swings, smaller = steadier).
-        """
-        if user_input is not None:
-            self._data.update(user_input)
-            return await self.async_step_init()
-
-        current = self._data
-        schema_dict: Dict[Any, Any] = {
-            vol.Optional(
-                CONF_GAIN_ESTIMATOR_ENABLED,
-                default=bool(
-                    current.get(
-                        CONF_GAIN_ESTIMATOR_ENABLED, DEFAULT_GAIN_ESTIMATOR_ENABLED
-                    )
-                ),
-            ): BooleanSelector(),
-            vol.Optional(
-                CONF_GAIN_REVERSION_TIME_HOURS,
-                default=float(
-                    current.get(
-                        CONF_GAIN_REVERSION_TIME_HOURS,
-                        DEFAULT_GAIN_REVERSION_TIME_HOURS,
-                    )
-                ),
-            ): _number_box(min_value=0.5, max_value=720.0, step=0.5, unit="h"),
-            vol.Optional(
-                CONF_GAIN_STATIONARY_STD_WATTS,
-                default=float(
-                    current.get(
-                        CONF_GAIN_STATIONARY_STD_WATTS,
-                        DEFAULT_GAIN_STATIONARY_STD_WATTS,
-                    )
-                ),
-            ): _number_box(min_value=0.0, max_value=5000.0, step=10.0, unit="W"),
-        }
-
-        return self.async_show_form(
-            step_id="advanced_tuning", data_schema=vol.Schema(schema_dict),
         )
 
     # ------------------------------------------------------------------
