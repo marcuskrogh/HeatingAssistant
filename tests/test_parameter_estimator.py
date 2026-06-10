@@ -255,6 +255,55 @@ class TestKalmanMLEstimator:
         assert p["thermal_mass"] == pytest.approx(5_000_000.0, rel=0.1)
         assert p["r_external"] == pytest.approx(0.05, rel=0.1)
 
+    def test_default_regularisation_is_light(self):
+        """The default prior is deliberately very light so the configured
+        data window — not the prior — drives the estimate."""
+        rooms = [_make_single_room()]
+        sources = _make_sources(rooms)
+        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+        assert estimator._regularization <= 0.01
+
+    def test_default_prior_is_responsive_to_excited_data(self):
+        """With the default (light) prior, excited data moves the heater scale
+        and thermal parameters substantially off a wrong prior.
+
+        This guards against a heavy prior pinning the estimate near its
+        starting value — the symptom that made identification look
+        unresponsive even under strong heater excitation.  Only *movement off
+        the prior* is asserted (not the exact recovered values): a single room
+        at constant outdoor temperature has a scale/mass/gain degeneracy, so
+        the data can be fitted by more than one parameter combination.
+        """
+        # Truth: lighter mass and a clearly non-unit heater scale.
+        true_room = _make_single_room(thermal_mass=3_000_000.0, r_external=0.08)
+        sources = _make_sources([true_room])
+        sources[0].power_scale = 1.6
+        history = _generate_history_with_extras(
+            [true_room], sources, n_steps=180, seed=3,
+        )
+
+        # Fit from a wrong prior with the DEFAULT estimator (no explicit reg).
+        prior_room = _make_single_room(thermal_mass=6_000_000.0, r_external=0.04)
+        prior_sources = _make_sources([prior_room])
+        prior_sources[0].power_scale = 1.0
+        estimator = KalmanMLEstimator([prior_room], prior_sources, dt=60.0)
+        result = estimator.estimate(history)
+        assert result["success"] is True
+
+        # The recovered mass must move a meaningful fraction of the way from
+        # the prior (6e6) toward the truth (3e6) — i.e. the prior is not
+        # pinning it.
+        recovered_mass = result["estimated_params"]["living_room"]["thermal_mass"]
+        assert recovered_mass < 5_000_000.0, (
+            f"thermal mass stayed pinned near the prior: {recovered_mass}"
+        )
+        # The heater scale must move clearly away from its unit prior — the data
+        # (not the prior) decides where it lands.
+        scale = result["estimated_heater_scales"]["living_room_heater"]
+        assert abs(scale - 1.0) > 0.2, (
+            f"heater scale stayed pinned near the unit prior: {scale}"
+        )
+
     def test_result_contains_required_keys(self):
         rooms = [_make_single_room()]
         sources = _make_sources(rooms)

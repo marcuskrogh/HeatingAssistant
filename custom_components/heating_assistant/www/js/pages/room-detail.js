@@ -246,21 +246,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   chartsContainer.appendChild(powerChartEl);
   chartsContainer.appendChild(disturbChartEl);
 
-  // Estimated internal-gain plot — the online augmented-state parameter
-  // estimate [W]. Only rendered when the backend exposes the per-room
-  // estimate sensor (older backends without the feature simply omit it).
-  const gainEntity = room.entities['internal_gain_estimated'];
-  let gainChart = null;
-  if (gainEntity) {
-    const gainChartEl = document.createElement('div');
-    chartsContainer.appendChild(gainChartEl);
-    gainChart = new TimeSeriesChart(gainChartEl, {
-      title: 'ESTIMATED INTERNAL GAIN',
-      yLabel: 'W',
-      height: 200,
-    });
-  }
-
   const tempChart = new TimeSeriesChart(tempChartEl, {
     title: 'TEMPERATURE',
     yLabel: '\u00b0C',
@@ -286,7 +271,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // lastRunTs tracks the MPC solve timestamp; when it changes we know new
   // forecast data is available and re-fetch via the WS endpoint.
   const lastRunTs = { value: null };
-  loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, gainChart, lastRunTs, (roomForecast, priceForecast) => {
+  loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, (roomForecast, priceForecast) => {
     // The forecast carries this room's heating/cooling capacity — use it to
     // scale the power gauge so the bar reflects power as a fraction of capacity.
     if (roomForecast?.max_power != null) powerBounds.max = roomForecast.max_power;
@@ -332,9 +317,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       refreshSchedule();
 
       updateChartsFromState(room, newState, connection, tempChart, powerChart, disturbChart, lastRunTs);
-      // The estimated internal gain has no MPC forecast — it is a recorded
-      // sensor — so append the latest value live on every state update.
-      appendGainPoint(gainChart, gainEntity, newState);
     },
     destroy() {
       clearInterval(countdownInterval);
@@ -342,12 +324,11 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       tempChart.destroy();
       powerChart.destroy();
       disturbChart.destroy();
-      if (gainChart) gainChart.destroy();
     },
   };
 }
 
-async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, gainChart, lastRunTs, onPowerBounds) {
+async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onPowerBounds) {
   const tempFilteredEntity = room.entities['temperature_filtered'];
   const tempMeasuredEntity = room.entities['temperature_measured'];
   const setpointEntity = room.entities['setpoint'];
@@ -355,7 +336,6 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const constraintLowerEntity = room.entities['constraint_lower'];
   const powerMeasuredEntity = room.entities['heating_power_measured'];
   const solarMeasuredEntity = room.entities['solar_gain_measured'];
-  const gainEntity = room.entities['internal_gain_estimated'];
   const outdoorEntity = systemEntity('outdoor_temperature_measured');
   const priceEntity = systemEntity('electricity_price');
 
@@ -367,7 +347,6 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     constraintLowerEntity,
     powerMeasuredEntity,
     solarMeasuredEntity,
-    gainEntity,
     outdoorEntity,
     priceEntity,
   ].filter(Boolean);
@@ -450,14 +429,6 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   );
   buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
-
-  if (gainChart && gainEntity) {
-    const gainHistory = appendCurrentValue(historyToDataPoints(history[gainEntity]), state, gainEntity);
-    // The nominal (configured) gain is published as an attribute; draw it as a
-    // flat reference so the estimated deviation is visible at a glance.
-    const nominal = entityAttr(state, gainEntity, 'nominal_gain_w');
-    buildGainChart(gainChart, gainHistory, nominal);
-  }
 }
 
 function appendCurrentValue(dataPoints, state, entityId) {
@@ -650,60 +621,6 @@ function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHist
   ];
 
   chart.render(datasets, { yMin: outdoorMin, yMax: outdoorMax, y2Min: solarMin, y2Max: solarMax });
-}
-
-function buildGainChart(chart, gainHistory, nominal) {
-  const hasNominal = nominal != null && isFinite(Number(nominal));
-  const nominalVal = hasNominal ? Number(nominal) : null;
-
-  const { yMin, yMax } = computeYLimits([gainHistory], hasNominal ? [nominalVal] : []);
-
-  const datasets = [
-    makeDataset('Estimated', gainHistory, '#ab47bc', {
-      borderWidth: 2, fill: true, backgroundColor: 'rgba(171,71,188,0.10)',
-    }),
-  ];
-
-  // Flat dashed reference at the configured nominal gain, spanning the plotted
-  // window, so the online-estimated deviation reads as the gap to this line.
-  if (hasNominal && gainHistory.length > 0) {
-    const xStart = gainHistory[0].x;
-    const xEnd = Date.now();
-    datasets.push(
-      makeDataset('Nominal', [{ x: xStart, y: nominalVal }, { x: xEnd, y: nominalVal }], '#90a4ae', {
-        dashed: true, borderWidth: 1.5, pointRadius: 0,
-      })
-    );
-  }
-
-  chart.render(datasets, { yMin, yMax });
-}
-
-// Append the latest estimated-gain reading to the live chart. The gain is a
-// recorded sensor with no MPC forecast, so it is updated incrementally on each
-// state change rather than re-fetched on the MPC cadence.
-function appendGainPoint(gainChart, gainEntity, state) {
-  if (!gainChart || !gainChart._chart || !gainEntity) return;
-  const value = entityValue(state, gainEntity);
-  if (value == null) return;
-
-  const ds = gainChart._chart.data.datasets;
-  if (!ds[0]) return;
-
-  const now = Date.now();
-  const points = ds[0].data;
-  const last = points[points.length - 1];
-  // Avoid piling up duplicate points within the same coordinator tick.
-  if (last && now - last.x < 1000) {
-    last.y = value;
-  } else {
-    points.push({ x: now, y: value });
-  }
-
-  // Keep the nominal reference line extending to the present.
-  if (ds[1] && ds[1].data.length === 2) ds[1].data[1].x = now;
-
-  gainChart._chart.update('none');
 }
 
 function updateChartsFromState(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs) {
