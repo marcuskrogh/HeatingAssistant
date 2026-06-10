@@ -208,15 +208,19 @@ def run_sysid_ekf(
     P_curr = (sigma_v ** 2) * np.eye(n_x)
 
     # Record the initial anchor point.
+    _has_wall = n_x > n  # 2R2C: wall states at x[n:2n]
     ts0 = float(window[0].get("timestamp", 0.0))
     for i, name in enumerate(room_names):
-        per_room_sim[name].append({
+        entry0: Dict[str, Any] = {
             "time":      ts0,
             "measured":  float(y0[i]) if i < len(y0) else None,
             "predicted": float(x_curr[i]),
             "cov_upper": float(x_curr[i] + 2.0 * sigma_v),
             "cov_lower": float(x_curr[i] - 2.0 * sigma_v),
-        })
+        }
+        if _has_wall and n + i < n_x:
+            entry0["predicted_wall"] = float(x_curr[n + i])
+        per_room_sim[name].append(entry0)
 
     u_prev = _record_u(window[0], n_u)
     d_prev = _record_d(window[0], room_list, n_d)
@@ -273,13 +277,19 @@ def run_sysid_ekf(
         # ---- Record one-step-ahead prediction -----------------------
         for i, name in enumerate(room_names):
             std_i = float(np.sqrt(max(0.0, P_pred_rr[i, i] + sigma_v ** 2)))
-            per_room_sim[name].append({
+            entry: Dict[str, Any] = {
                 "time":      timestamp,
                 "measured":  y_meas[i],
                 "predicted": float(T_pred[i]),
                 "cov_upper": float(T_pred[i] + 2.0 * std_i),
                 "cov_lower": float(T_pred[i] - 2.0 * std_i),
-            })
+            }
+            if _has_wall and n + i < n_x and P_pred.shape[0] > n + i:
+                std_w = float(np.sqrt(max(0.0, P_pred[n + i, n + i])))
+                entry["predicted_wall"] = float(x_pred[n + i])
+                entry["wall_cov_upper"] = float(x_pred[n + i] + 2.0 * std_w)
+                entry["wall_cov_lower"] = float(x_pred[n + i] - 2.0 * std_w)
+            per_room_sim[name].append(entry)
 
         # ---- Update step --------------------------------------------
         valid = np.array([m is not None for m in y_meas], dtype=bool)

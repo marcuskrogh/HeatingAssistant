@@ -127,6 +127,7 @@ from .const import (
     CONF_SIGMA_B,
     CONF_SIGMA_V,
     CONF_SIGMA_W,
+    CONF_IDENTIFICATION_HORIZON_HOURS,
     CONF_SMOOTHING_WEIGHT,
     CONF_SOURCE_COOLING_COP,
     CONF_SOURCE_COOLING_EFFICIENCY,
@@ -1259,10 +1260,18 @@ def _register_services(hass: HomeAssistant) -> None:
         # the newly identified parameters immediately (without requiring a
         # separate sysid simulation run).
         if result.get("success"):
+            dt = coordinator.dt
+            horizon_steps = (
+                max(1, int(float(horizon_hours) * 3600.0 / dt))
+                if horizon_hours is not None
+                else None
+            )
             for room_name, params in result.get("estimated_params", {}).items():
                 existing = coordinator.sysid_results.get(room_name, {})
                 existing["thermal_mass"] = params.get("thermal_mass")
                 existing["r_external"] = params.get("r_external")
+                if horizon_steps is not None:
+                    existing["horizon_steps"] = horizon_steps
                 coordinator.sysid_results[room_name] = existing
             coordinator.async_update_listeners()
 
@@ -1328,6 +1337,8 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_run_open_loop_simulation(call: ServiceCall) -> None:
         """Run open-loop simulation diagnostic and report RMSE per room."""
         from .model_diagnostics import compute_open_loop_predictions
+        from .sysid import _build_sim_model
+        from .dashboard import slugify
 
         coordinator = _get_coordinator(hass)
         segment_length = int(call.data.get("segment_length", 30))
@@ -1346,9 +1357,59 @@ def _register_services(hass: HomeAssistant) -> None:
                 history, float(horizon_hours) * 3600.0, coordinator.dt
             )
 
-        system = coordinator.controller._system
+        # Build per-room parameter overrides from service data (same keys as
+        # run_sysid_simulation) so the open-loop diagnostic uses the same
+        # parameter set the user configured in the identification panel.
+        room_params: Dict[str, Dict[str, float]] = {}
+        for room_name in coordinator.model.room_names:
+            overrides: Dict[str, float] = {}
+            room_key = slugify(room_name)
+            tm_key = f"thermal_mass_{room_key}"
+            re_key = f"r_external_{room_key}"
+            if tm_key in call.data:
+                overrides["thermal_mass"] = float(call.data[tm_key])
+            if re_key in call.data:
+                overrides["r_external"] = float(call.data[re_key])
+            if overrides:
+                room_params[room_name] = overrides
+
+        # When room-parameter overrides are given, build a temporary
+        # HouseThermalSDE from a patched model copy so the open-loop
+        # simulation uses the parameters currently visible in the UI, not
+        # the last applied set.  Without overrides the live controller
+        # system is used directly (fast path, no copy needed).
         room_names = coordinator.model.room_names
         n_rooms = len(room_names)
+        dt = coordinator.dt
+
+        if room_params:
+            from .controller import HouseThermalSDE  # noqa: PLC0415
+            sigma_w: float = float(call.data.get(
+                "sigma_w", getattr(coordinator, "_sigma_w", 0.1)
+            ))
+            sigma_v: float = float(call.data.get(
+                "sigma_v", getattr(coordinator, "_sigma_v", 0.5)
+            ))
+            try:
+                sim_model = _build_sim_model(
+                    coordinator.model, room_params, room_names
+                )
+                system = HouseThermalSDE(
+                    sim_model,
+                    coordinator.heat_sources,
+                    dt,
+                    sigma_w=sigma_w,
+                    sigma_v=sigma_v,
+                    augment_offsets=False,
+                )
+            except Exception as exc:
+                _LOGGER.error(
+                    "Open-loop simulation: failed to build patched system: %s",
+                    exc, exc_info=True,
+                )
+                return
+        else:
+            system = coordinator.controller._system
 
         # Results are surfaced in the UI via the per-room OpenLoopRMSESensor
         # entities, so this service writes its output to the coordinator cache
@@ -1360,7 +1421,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 system,
                 room_names,
                 n_rooms,
-                coordinator.dt,
+                dt,
                 segment_length,
             )
 
@@ -1377,11 +1438,11 @@ def _register_services(hass: HomeAssistant) -> None:
                     name: {} for name in room_names
                 }
                 for hours in (4, 12, 24):
-                    steps = max(2, int(round(hours * 3600.0 / coordinator.dt)))
+                    steps = max(2, int(round(hours * 3600.0 / dt)))
                     res_h = await hass.async_add_executor_job(
                         compute_open_loop_predictions,
                         history, system, room_names, n_rooms,
-                        coordinator.dt, steps,
+                        dt, steps,
                     )
                     if "error" in res_h:
                         continue
@@ -1585,7 +1646,14 @@ def _register_services(hass: HomeAssistant) -> None:
                     vol.Coerce(int), vol.Range(min=5, max=120)
                 ),
                 vol.Optional("horizon_hours"): vol.Coerce(float),
-            }
+                vol.Optional("sigma_w"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
+                vol.Optional("sigma_v"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                ),
+            },
+            extra=vol.ALLOW_EXTRA,  # allow thermal_mass_<room>, r_external_<room> keys
         ),
     )
 
@@ -1748,6 +1816,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
     _ESTIMATION_PARAM_KEYS = {
         CONF_SIGMA_W, CONF_SIGMA_V, CONF_SIGMA_B,
+        CONF_IDENTIFICATION_HORIZON_HOURS,
         CONF_WINDOW_OPEN_DEBOUNCE, CONF_WINDOW_OPEN_CLOSE_SETTLE,
         CONF_WINDOW_OPEN_Q_INFLATION,
         CONF_GAIN_ESTIMATOR_ENABLED, CONF_GAIN_REVERSION_TIME_HOURS,
@@ -1829,6 +1898,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional(CONF_SIGMA_W): vol.Coerce(float),
                 vol.Optional(CONF_SIGMA_V): vol.Coerce(float),
                 vol.Optional(CONF_SIGMA_B): vol.Coerce(float),
+                vol.Optional(CONF_IDENTIFICATION_HORIZON_HOURS): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.5, max=72.0)
+                ),
                 vol.Optional(CONF_WINDOW_OPEN_DEBOUNCE): vol.Coerce(int),
                 vol.Optional(CONF_WINDOW_OPEN_CLOSE_SETTLE): vol.Coerce(int),
                 vol.Optional(CONF_WINDOW_OPEN_Q_INFLATION): vol.Coerce(float),

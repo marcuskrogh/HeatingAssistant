@@ -138,6 +138,8 @@ from .const import (
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
+    CONF_IDENTIFICATION_HORIZON_HOURS,
+    DEFAULT_IDENTIFICATION_HORIZON_HOURS,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_IDLE_OFFSET,
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
@@ -492,6 +494,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._sigma_b: float = float(
             options.get(CONF_SIGMA_B, data.get(CONF_SIGMA_B, DEFAULT_SIGMA_B))
+        )
+        self._identification_horizon_hours: float = float(
+            options.get(
+                CONF_IDENTIFICATION_HORIZON_HOURS,
+                data.get(CONF_IDENTIFICATION_HORIZON_HOURS, DEFAULT_IDENTIFICATION_HORIZON_HOURS),
+            )
         )
         # Online internal-gain estimation (augmented-state parameter estimation)
         self._gain_estimator_enabled: bool = bool(
@@ -1246,6 +1254,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 )
             )
             rebuild_controller = True
+        if CONF_IDENTIFICATION_HORIZON_HOURS in pending:
+            self._identification_horizon_hours = float(
+                pending.get(CONF_IDENTIFICATION_HORIZON_HOURS, self._identification_horizon_hours)
+            )
         if CONF_WINDOW_OPEN_DEBOUNCE in pending:
             self._window_open_debounce = float(
                 pending.get(CONF_WINDOW_OPEN_DEBOUNCE, self._window_open_debounce)

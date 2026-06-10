@@ -853,14 +853,19 @@ def compute_open_loop_predictions(
         # simulation starting exactly at the measurement.  predicted == measured
         # here by construction; the error at t=0 is always zero.
         ts_prev = float(seg[0].get("timestamp", 0.0))
+        _nx_total = len(x)
+        _has_wall_states = _nx_total > n
         for room_idx, room_name in enumerate(room_names):
             if room_idx < len(y0):
                 init_val = round(float(y0[room_idx]), 3)
-                simulation[room_name].append({
+                anchor: Dict[str, Any] = {
                     "time": ts_prev,
                     "measured": init_val,
                     "predicted": init_val,
-                })
+                }
+                if _has_wall_states and n + room_idx < _nx_total:
+                    anchor["predicted_wall"] = round(float(x[n + room_idx]), 3)
+                simulation[room_name].append(anchor)
 
         valid_segment = True
         for record in seg[1:]:
@@ -911,6 +916,8 @@ def compute_open_loop_predictions(
             ts_prev = ts
 
             y_meas = record.get("y", [])
+            _nx_total = len(x)
+            _has_wall = _nx_total > n
 
             for room_idx, room_name in enumerate(room_names):
                 if room_idx < len(y_meas):
@@ -918,11 +925,14 @@ def compute_open_loop_predictions(
                     meas_val = float(y_meas[room_idx])
                     per_room_preds[room_name].append(pred_val)
                     per_room_meas[room_name].append(meas_val)
-                    simulation[room_name].append({
+                    sim_entry: Dict[str, Any] = {
                         "time": ts,
                         "measured": round(meas_val, 3),
                         "predicted": round(pred_val, 3),
-                    })
+                    }
+                    if _has_wall and n + room_idx < _nx_total:
+                        sim_entry["predicted_wall"] = round(float(x[n + room_idx]), 3)
+                    simulation[room_name].append(sim_entry)
 
         if valid_segment:
             n_segments += 1
