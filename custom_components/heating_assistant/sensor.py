@@ -2707,6 +2707,18 @@ class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
             "gain_estimator_enabled": bool(getattr(c, "_gain_estimator_enabled", False)),
             "gain_reversion_time_hours": float(getattr(c, "_gain_reversion_time_hours", 24.0)),
             "gain_stationary_std_watts": float(getattr(c, "_gain_stationary_std_watts", 200.0)),
+            # Heater power-scale factors — identified vs applied
+            "identified_heater_scales": dict(
+                getattr(c, "_last_identified_heater_scales", {})
+            ),
+            "current_heater_scales": {
+                src.name: {
+                    "power_scale": round(float(getattr(src, "power_scale", 1.0)), 4),
+                    "room": getattr(src, "room", None),
+                    "room_slug": slugify(getattr(src, "room", "") or ""),
+                }
+                for src in getattr(c, "heat_sources", [])
+            },
         }
 
         # Schedule, setpoint and room data — requires model to be initialised.

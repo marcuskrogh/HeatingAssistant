@@ -223,6 +223,7 @@ SERVICE_COMPUTE_LOGLIK_SLICE = "compute_loglik_slice"
 SERVICE_RUN_SYSID_SIMULATION = "run_sysid_simulation"
 SERVICE_APPLY_MANUAL_PARAMETERS = "apply_manual_parameters"
 SERVICE_RESET_ESTIMATED_PARAMETERS = "reset_estimated_parameters"
+SERVICE_APPLY_HEATER_SCALES = "apply_heater_scales"
 # SERVICE_SET_SCHEDULE_ENABLED is imported from .const above
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
@@ -1273,6 +1274,12 @@ def _register_services(hass: HomeAssistant) -> None:
                 if horizon_steps is not None:
                     existing["horizon_steps"] = horizon_steps
                 coordinator.sysid_results[room_name] = existing
+
+            # Cache identified heater scales on the coordinator so the frontend
+            # can read them via the config sensor and optionally apply them later.
+            heater_scales = result.get("estimated_heater_scales", {})
+            coordinator._last_identified_heater_scales = dict(heater_scales)
+
             coordinator.async_update_listeners()
 
         # Fire an event so automations can consume the full result. The
@@ -1382,7 +1389,24 @@ def _register_services(hass: HomeAssistant) -> None:
         n_rooms = len(room_names)
         dt = coordinator.dt
 
-        if room_params:
+        # Patch heat-source copies with the most-recently identified power
+        # scales so the open-loop simulation uses the gain the estimator found,
+        # even when the user hasn't clicked Apply yet.
+        identified_scales: Dict[str, float] = getattr(
+            coordinator, "_last_identified_heater_scales", {}
+        )
+        if identified_scales:
+            import copy as _copy_ol  # noqa: PLC0415
+            base_heat_sources = [
+                _copy_ol.copy(src) for src in coordinator.heat_sources
+            ]
+            for src in base_heat_sources:
+                if src.name in identified_scales:
+                    src.power_scale = float(identified_scales[src.name])
+        else:
+            base_heat_sources = coordinator.heat_sources
+
+        if room_params or identified_scales:
             from .controller import HouseThermalSDE  # noqa: PLC0415
             sigma_w: float = float(call.data.get(
                 "sigma_w", getattr(coordinator, "_sigma_w", 0.1)
@@ -1396,7 +1420,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 )
                 system = HouseThermalSDE(
                     sim_model,
-                    coordinator.heat_sources,
+                    base_heat_sources,
                     dt,
                     sigma_w=sigma_w,
                     sigma_v=sigma_v,
@@ -1692,12 +1716,29 @@ def _register_services(hass: HomeAssistant) -> None:
 
         history = list(coordinator.history_buffer)
 
+        # Patch heat-source copies with the most-recently identified power
+        # scales so the EKF reconstruction uses the same gain the estimator
+        # found, even when the user hasn't clicked Apply yet.
+        identified_scales: Dict[str, float] = getattr(
+            coordinator, "_last_identified_heater_scales", {}
+        )
+        if identified_scales:
+            import copy as _copy  # noqa: PLC0415
+            sim_heat_sources = [
+                _copy.copy(src) for src in coordinator.heat_sources
+            ]
+            for src in sim_heat_sources:
+                if src.name in identified_scales:
+                    src.power_scale = float(identified_scales[src.name])
+        else:
+            sim_heat_sources = coordinator.heat_sources
+
         try:
             result = await hass.async_add_executor_job(
                 run_sysid_simulation,
                 history,
                 coordinator.model,
-                coordinator.heat_sources,
+                sim_heat_sources,
                 coordinator.model.room_names,
                 dt,
                 horizon_steps,
@@ -1875,6 +1916,38 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("r_external"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0001)
                 ),
+            }
+        ),
+    )
+
+    async def handle_apply_heater_scales(call: ServiceCall) -> None:
+        """Apply heater power-scale factors identified by ML estimation.
+
+        When called with no ``scales`` argument the last identified scales
+        cached on the coordinator (from the most-recent ``estimate_parameters_ml``
+        run) are used.  An explicit ``scales`` dict can override this for
+        testing or manual correction.
+        """
+        coordinator = _get_coordinator(hass)
+        scales: Optional[Dict[str, float]] = call.data.get("scales")
+        if not scales:
+            scales = getattr(coordinator, "_last_identified_heater_scales", {})
+        if not scales:
+            _LOGGER.warning(
+                "apply_heater_scales: no scales provided and none identified yet; "
+                "run estimate_parameters_ml first."
+            )
+            return
+        coordinator.apply_heater_scales(scales)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_APPLY_HEATER_SCALES,
+        handle_apply_heater_scales,
+        schema=vol.Schema(
+            {
+                vol.Optional("scales"): {cv.string: vol.Coerce(float)},
             }
         ),
     )

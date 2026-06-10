@@ -501,6 +501,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 data.get(CONF_IDENTIFICATION_HORIZON_HOURS, DEFAULT_IDENTIFICATION_HORIZON_HOURS),
             )
         )
+        # Most-recently identified heater power-scales from an ML estimation run
+        # (populated regardless of whether apply_params was True).  Keyed by
+        # source name; value is the raw scale factor (dimensionless, 1.0 = 100%).
+        self._last_identified_heater_scales: Dict[str, float] = {}
         # Online internal-gain estimation (augmented-state parameter estimation)
         self._gain_estimator_enabled: bool = bool(
             _opt(CONF_GAIN_ESTIMATOR_ENABLED, DEFAULT_GAIN_ESTIMATOR_ENABLED)
@@ -1549,6 +1553,71 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.store_identified_parameters(
             room_name, thermal_mass, r_external, source="manual"
         )
+
+    def apply_heater_scales(
+        self,
+        heater_scales: Dict[str, float],
+    ) -> None:
+        """Apply heater power-scale factors to heat sources and rebuild MPC.
+
+        Parameters
+        ----------
+        heater_scales:
+            Mapping of source name → dimensionless scale factor (1.0 = 100%).
+            Sources not present in the dict are left unchanged.
+        """
+        if not heater_scales:
+            return
+
+        applied: Dict[str, float] = {}
+        for src in self.heat_sources:
+            if src.name in heater_scales:
+                src.power_scale = float(heater_scales[src.name])
+                applied[src.name] = src.power_scale
+
+        if not applied:
+            return
+
+        # Rebuild MPC controller so the new scales feed into the QP.
+        self.controller = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=self._horizon,
+            dt=self.dt,
+            measurement_dt=self.dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
+            tracking_weight=self._tracking_weight,
+            energy_weight=self._energy_weight,
+            smoothing_weight=self._smoothing_weight,
+            soft_constraint_weight=self._soft_constraint_weight,
+            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
+            terminal_weight=self._terminal_weight,
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
+            energy_price_weight=self._energy_price_weight,
+            gain_estimator_enabled=self._gain_estimator_enabled,
+            gain_reversion_time_hours=self._gain_reversion_time_hours,
+            gain_stationary_std_watts=self._gain_stationary_std_watts,
+        )
+
+        # Persist the updated power scales in the estimated-params snapshot so
+        # they survive a restart.
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            snap = dict(self.estimated_params_snapshot or {})
+            snap["sources"] = {
+                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
+                for src in self.heat_sources
+            }
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snap},
+            )
+
+        _LOGGER.info("Applied heater power scales: %s", applied)
 
     def store_identified_parameters(
         self,
