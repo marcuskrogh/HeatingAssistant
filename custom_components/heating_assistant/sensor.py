@@ -1832,11 +1832,14 @@ class OpenLoopRMSESensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity)
         for entry in sim:
             ts = entry.get("time", 0.0)
             dt_iso = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
-            formatted_sim.append({
+            ol_entry: dict = {
                 "time": dt_iso,
                 "measured": entry.get("measured"),
                 "predicted": entry.get("predicted"),
-            })
+            }
+            if entry.get("predicted_wall") is not None:
+                ol_entry["predicted_wall"] = entry["predicted_wall"]
+            formatted_sim.append(ol_entry)
         attrs: dict = {
             "open_loop_rmse": room_data.get("rmse"),
             "open_loop_mae": room_data.get("mae"),
@@ -2610,13 +2613,18 @@ class SysIdSimulationSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
         for entry in sim_raw:
             ts = entry.get("time", 0.0)
             dt_iso = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
-            formatted.append({
+            sim_entry: dict = {
                 "time": dt_iso,
                 "measured": entry.get("measured"),
                 "predicted": entry.get("predicted"),
                 "cov_upper": entry.get("cov_upper"),
                 "cov_lower": entry.get("cov_lower"),
-            })
+            }
+            if entry.get("predicted_wall") is not None:
+                sim_entry["predicted_wall"] = entry["predicted_wall"]
+                sim_entry["wall_cov_upper"] = entry.get("wall_cov_upper")
+                sim_entry["wall_cov_lower"] = entry.get("wall_cov_lower")
+            formatted.append(sim_entry)
         dt_val = self._coordinator.dt
         horizon_steps = room_data.get("horizon_steps", 0)
         horizon_hours = round(horizon_steps * dt_val / 3600.0, 2) if horizon_steps else None
@@ -2690,6 +2698,9 @@ class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
             "sigma_w": c._sigma_w,
             "sigma_v": c._sigma_v,
             "sigma_b": c._sigma_b,
+            "identification_horizon_hours": float(
+                getattr(c, "_identification_horizon_hours", 6.0)
+            ),
             "window_open_debounce": c._window_open_debounce,
             "window_open_close_settle": c._window_open_close_settle,
             "window_open_q_inflation": c._window_open_q_inflation,

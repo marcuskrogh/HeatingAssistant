@@ -416,9 +416,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   // Populate all parameter fields from current system state.
   // Model params come from the active temperature_filtered sensor (authoritative
-  // source for the live thermal model). Stochastic params come from the
-  // controller_config sensor. Horizon falls back to the last sysid run or the
-  // default of 6 h.
+  // source for the live thermal model). Stochastic params and the identification
+  // horizon come from the controller_config sensor (persisted by Apply Parameters).
   function populateFromState(slug, st) {
     const filteredAttrs = st[filteredEntityId(slug)]?.attributes;
     if (filteredAttrs) {
@@ -430,9 +429,15 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     if (configAttrs.sigma_w != null) sigmaWInput.value = configAttrs.sigma_w;
     if (configAttrs.sigma_v != null) sigmaVInput.value = configAttrs.sigma_v;
     if (configAttrs.sigma_b != null) sigmaBInput.value = configAttrs.sigma_b;
-
-    const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
-    if (sysidAttrs?.horizon_hours != null) horizonInput.value = sysidAttrs.horizon_hours;
+    // Horizon is now persisted in the config entity (set by Apply Parameters).
+    // Fall back to sysid sensor's last-run horizon if the config hasn't been
+    // saved yet (e.g. on first use before Apply Parameters is clicked).
+    if (configAttrs.identification_horizon_hours != null) {
+      horizonInput.value = configAttrs.identification_horizon_hours;
+    } else {
+      const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
+      if (sysidAttrs?.horizon_hours != null) horizonInput.value = sysidAttrs.horizon_hours;
+    }
   }
 
   // After an ML dry-run the coordinator writes identified C and R into
@@ -648,6 +653,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         sigma_w: parseFloat(sigmaWInput.value),
         sigma_v: parseFloat(sigmaVInput.value),
         sigma_b: parseFloat(sigmaBInput.value),
+        identification_horizon_hours: parseFloat(horizonInput.value),
       });
       // Edits are now the applied parameters; resume syncing the form from
       // system state so it reflects the authoritative committed values.
@@ -699,7 +705,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnOpenLoop.disabled = false;
   });
 
-  // Open-Loop Simulation: run with the current horizon field value.
+  // Open-Loop Simulation: run with the current parameter field values so the
+  // chart reflects the model the user is currently evaluating, not the last
+  // applied set.
   btnOpenLoop.addEventListener('click', async () => {
     setStatus(olStatusEl, 'Running open-loop simulation…', 'running');
     btnSysid.disabled = true;
@@ -709,6 +717,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         room_name: roomSlug,
         segment_length: 30,
         horizon_hours: parseFloat(horizonInput.value),
+        sigma_w: parseFloat(sigmaWInput.value),
+        sigma_v: parseFloat(sigmaVInput.value),
+        [`thermal_mass_${roomSlug}`]: parseFloat(thermalMassInput.value),
+        [`r_external_${roomSlug}`]: parseFloat(rExternalInput.value),
       });
       await new Promise((res) => setTimeout(res, 800));
       renderOlResults(roomSlug, latestState);
@@ -790,6 +802,9 @@ function buildEkfChart(chart, simulation) {
   const predicted = [];
   const covUpper = [];
   const covLower = [];
+  const predictedWall = [];
+  const wallCovUpper = [];
+  const wallCovLower = [];
 
   for (const entry of simulation) {
     const t = new Date(entry.time).getTime();
@@ -798,25 +813,46 @@ function buildEkfChart(chart, simulation) {
     if (entry.predicted != null) predicted.push({ x: t, y: entry.predicted });
     if (entry.cov_upper != null) covUpper.push({ x: t, y: entry.cov_upper });
     if (entry.cov_lower != null) covLower.push({ x: t, y: entry.cov_lower });
+    if (entry.predicted_wall != null) predictedWall.push({ x: t, y: entry.predicted_wall });
+    if (entry.wall_cov_upper != null) wallCovUpper.push({ x: t, y: entry.wall_cov_upper });
+    if (entry.wall_cov_lower != null) wallCovLower.push({ x: t, y: entry.wall_cov_lower });
   }
 
   const datasets = [
-    makeDataset('Measured', measured, '#e57373', {
+    makeDataset('Measured (air)', measured, '#e57373', {
       borderWidth: 0, pointRadius: 2, pointHoverRadius: 4,
       pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
       showLine: false,
     }),
-    makeDataset('Predicted', predicted, '#4fc3f7', { borderWidth: 2 }),
-    makeDataset('Above 2σ', covUpper, 'rgba(79,195,247,0.25)', {
+    makeDataset('Predicted (air)', predicted, '#4fc3f7', { borderWidth: 2 }),
+    makeDataset('Above 2σ (air)', covUpper, 'rgba(79,195,247,0.25)', {
       borderWidth: 0, pointRadius: 0, fill: false,
     }),
-    makeDataset('Below 2σ', covLower, 'rgba(79,195,247,0.25)', {
+    makeDataset('Below 2σ (air)', covLower, 'rgba(79,195,247,0.25)', {
       borderWidth: 0, pointRadius: 0,
       fill: '-1', backgroundColor: 'rgba(79,195,247,0.10)',
     }),
   ];
 
-  const { yMin, yMax } = computeChartLimits([measured, predicted, covUpper, covLower]);
+  if (predictedWall.length > 0) {
+    datasets.push(
+      makeDataset('Predicted (wall)', predictedWall, '#a5d6a7', { borderWidth: 2, borderDash: [4, 3] }),
+    );
+    if (wallCovUpper.length > 0) {
+      datasets.push(
+        makeDataset('Above 2σ (wall)', wallCovUpper, 'rgba(165,214,167,0.25)', {
+          borderWidth: 0, pointRadius: 0, fill: false,
+        }),
+        makeDataset('Below 2σ (wall)', wallCovLower, 'rgba(165,214,167,0.25)', {
+          borderWidth: 0, pointRadius: 0,
+          fill: '-1', backgroundColor: 'rgba(165,214,167,0.10)',
+        }),
+      );
+    }
+  }
+
+  const allSeries = [measured, predicted, covUpper, covLower, predictedWall, wallCovUpper, wallCovLower];
+  const { yMin, yMax } = computeChartLimits(allSeries);
   chart.render(datasets, { yMin, yMax });
 }
 
@@ -828,24 +864,32 @@ function buildOlChart(chart, simulation) {
 
   const measured = [];
   const predicted = [];
+  const predictedWall = [];
 
   for (const entry of simulation) {
     const t = new Date(entry.time).getTime();
     if (isNaN(t)) continue;
     if (entry.measured != null) measured.push({ x: t, y: entry.measured });
     if (entry.predicted != null) predicted.push({ x: t, y: entry.predicted });
+    if (entry.predicted_wall != null) predictedWall.push({ x: t, y: entry.predicted_wall });
   }
 
   const datasets = [
-    makeDataset('Measured', measured, '#e57373', {
+    makeDataset('Measured (air)', measured, '#e57373', {
       borderWidth: 0, pointRadius: 2, pointHoverRadius: 4,
       pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
       showLine: false,
     }),
-    makeDataset('Predicted', predicted, '#4fc3f7', { borderWidth: 2 }),
+    makeDataset('Predicted (air)', predicted, '#4fc3f7', { borderWidth: 2 }),
   ];
 
-  const { yMin, yMax } = computeChartLimits([measured, predicted]);
+  if (predictedWall.length > 0) {
+    datasets.push(
+      makeDataset('Predicted (wall)', predictedWall, '#a5d6a7', { borderWidth: 2, borderDash: [4, 3] }),
+    );
+  }
+
+  const { yMin, yMax } = computeChartLimits([measured, predicted, predictedWall]);
   chart.render(datasets, { yMin, yMax });
 }
 
