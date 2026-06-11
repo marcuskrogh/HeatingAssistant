@@ -934,6 +934,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # which is also bumped by the fast UI refresh that runs between solves.
         self._last_mpc_run_ts: Optional[float] = None
 
+        # Integration-managed identification history store (set by async_setup_entry
+        # after the coordinator is created; None until then).
+        self.id_history_store: Optional[Any] = None
+
 
     # ------------------------------------------------------------------
     # Public properties
@@ -2308,6 +2312,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
                     "kalman_innovation": kalman_innovation,
                 })
+
+                if self.id_history_store is not None:
+                    await self.id_history_store.async_append(
+                        self._history_buffer[-1]
+                    )
+                    await self.id_history_store.async_purge_old()
 
             # 7. Write set-points to heater entities. Keep the latest
             # forecast/prediction entities available even if HA service calls
@@ -3853,6 +3863,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         apply_params: bool = True,
         horizon_hours: Optional[float] = None,
         locked_params: Optional[Dict[str, Any]] = None,
+        history_override: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Estimate thermal parameters using Kalman-filter maximum-likelihood.
@@ -3897,11 +3908,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             ))
         )
 
-        history = list(self._history_buffer)
-        if eff_horizon_hours > 0 and history:
-            history = select_recent_window(
-                history, eff_horizon_hours * 3600.0
-            )
+        if history_override is not None:
+            history = list(history_override)
+        else:
+            history = list(self._history_buffer)
+            if eff_horizon_hours > 0 and history:
+                history = select_recent_window(
+                    history, eff_horizon_hours * 3600.0
+                )
 
         # NOTE: the configured horizon controls only *which* data is used (the
         # most recent ``eff_horizon_hours`` of history, sliced above).  It does
