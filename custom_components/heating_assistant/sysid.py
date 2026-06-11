@@ -65,6 +65,7 @@ def run_sysid_ekf(
     room_params: Dict[str, Dict[str, float]], # {room: {thermal_mass, r_external}}
     sigma_w: float,                           # continuous process noise intensity [K/√s]
     sigma_v: float,                           # measurement noise std [K]
+    window_spec: Optional[Any] = None,        # (start_ts, end_ts) explicit window, or None
 ) -> Dict[str, Any]:
     """
     Reconstruct the state trajectory with the production CD-EKF and return
@@ -85,7 +86,8 @@ def run_sysid_ekf(
     dt
         Sampling interval in seconds (= coordinator update interval).
     horizon_steps
-        Number of most-recent history steps to reconstruct.
+        Number of most-recent history steps to reconstruct.  Ignored when
+        ``window_spec`` is provided.
     room_params
         Per-room overrides applied to the copy.  Keys: ``thermal_mass``
         [J/K], ``r_external`` [K/W].
@@ -94,6 +96,13 @@ def run_sysid_ekf(
         Matches the units used by the production CD-EKF controller.
     sigma_v
         Measurement noise std [K].  Used by ``HouseThermalSDE.Rm``.
+    window_spec
+        Optional explicit window selection as ``(start_ts, end_ts)`` where
+        both values are UNIX timestamps [s].  When provided, ``horizon_steps``
+        is ignored and the specified slice of *history* is used instead of
+        the most-recent trailing window.  This enables identification over
+        a specific past experiment (e.g. an overnight step-response test)
+        without that experiment needing to be the most recent data.
 
     Returns
     -------
@@ -118,19 +127,37 @@ def run_sysid_ekf(
             "horizon_steps": 0,
         }
 
-    # Select the window by *active sampled time* rather than raw wall-clock or
-    # step count.  The history buffer may contain gaps (standby, restarts).
-    # Pure step-count selection can span far more wall-clock time than intended,
-    # while a pure wall-clock cutoff lets a single restart gap inside the window
-    # consume the whole horizon — leaving only post-restart samples.  Counting
-    # active time (capping each interval so a gap costs at most one nominal step)
-    # spans ~horizon of real operation and bridges restarts naturally; the
-    # continuous-time CD-EKF then propagates across each gap using the true dt.
-    from .history_window import select_recent_window  # noqa: PLC0415
+    # Window selection: explicit range takes priority over the trailing window.
+    if window_spec is not None:
+        from .history_window import select_window_by_timestamps  # noqa: PLC0415
+        try:
+            start_ts, end_ts = float(window_spec[0]), float(window_spec[1])
+        except (TypeError, IndexError, ValueError) as exc:
+            return {
+                "error": f"Invalid window_spec {window_spec!r}: {exc}",
+                "per_room": {},
+                "horizon_steps": 0,
+            }
+        window = select_window_by_timestamps(history, start_ts, end_ts)
+        if len(window) < 2:
+            return {
+                "error": (
+                    f"No data (or < 2 records) in specified window "
+                    f"[{start_ts:.0f}, {end_ts:.0f}]."
+                ),
+                "per_room": {},
+                "horizon_steps": 0,
+            }
+    else:
+        # Default: select the most-recent wall-clock horizon.  The history
+        # buffer may contain gaps (standby, restarts).  Wall-clock selection
+        # ensures the window never exceeds the configured horizon regardless
+        # of sample density; the CD-EKF bridges each gap using the true dt.
+        from .history_window import select_recent_window  # noqa: PLC0415
 
-    window = select_recent_window(history, horizon_steps * dt, dt)
-    if len(window) < 2:
-        window = list(history)[-(min(horizon_steps, len(history) - 1) + 1):]
+        window = select_recent_window(history, horizon_steps * dt, dt)
+        if len(window) < 2:
+            window = list(history)[-(min(horizon_steps, len(history) - 1) + 1):]
 
     # Skip leading records that pre-date a room-count change (e.g. config
     # edits that added rooms while the buffer was already populated).

@@ -17,8 +17,10 @@ import numpy as np
 
 from custom_components.heating_assistant.history_window import (
     DEFAULT_MAX_GAP_FACTOR,
+    history_time_range,
     prune_stale_records,
     select_recent_window,
+    select_window_by_timestamps,
     split_contiguous_runs,
 )
 
@@ -158,6 +160,130 @@ def test_prune_non_positive_age_is_noop():
 
 def test_gap_factor_constant_sane():
     assert DEFAULT_MAX_GAP_FACTOR > 1.0
+
+
+# ---------------------------------------------------------------------------
+# select_window_by_timestamps
+# ---------------------------------------------------------------------------
+
+def test_select_by_timestamps_basic():
+    """Records exactly within [start, end] are returned."""
+    dt = 900.0
+    h = _regular(200, dt=dt)                    # 200 steps at 15-min intervals
+    t0 = h[0]["timestamp"]
+    start = t0 + 24 * 3600.0                    # 24 h in
+    end   = t0 + 36 * 3600.0                    # 36 h in
+
+    w = select_window_by_timestamps(h, start, end)
+    assert len(w) > 0
+    assert all(start <= float(r["timestamp"]) <= end for r in w)
+    span_h = (w[-1]["timestamp"] - w[0]["timestamp"]) / 3600.0
+    assert abs(span_h - 12.0) < 0.25
+
+
+def test_select_by_timestamps_inverted_returns_empty():
+    """start > end must return an empty list (not raise)."""
+    h = _regular(50)
+    t0 = h[0]["timestamp"]
+    assert select_window_by_timestamps(h, t0 + 3600.0, t0) == []
+
+
+def test_select_by_timestamps_whole_range():
+    """Selecting [min_ts, max_ts] must return the full history."""
+    h = _regular(50)
+    t0 = h[0]["timestamp"]
+    t_end = h[-1]["timestamp"]
+    w = select_window_by_timestamps(h, t0, t_end)
+    assert len(w) == 50
+
+
+def test_select_by_timestamps_outside_range_returns_empty():
+    """Requesting a window entirely outside the history returns nothing."""
+    h = _regular(20)
+    future_start = h[-1]["timestamp"] + 100_000.0
+    assert select_window_by_timestamps(h, future_start, future_start + 3600.0) == []
+
+
+def test_select_by_timestamps_normalises_order():
+    """Shuffled history is normalised before slicing."""
+    dt = 900.0
+    h = _regular(100, dt=dt)
+    t0 = h[0]["timestamp"]
+    shuffled = h[50:] + h[:50]                  # out of order
+
+    start = t0 + 60 * dt
+    end   = t0 + 80 * dt
+    w = select_window_by_timestamps(shuffled, start, end)
+    times = [r["timestamp"] for r in w]
+    assert times == sorted(times)
+    assert all(start <= t <= end for t in times)
+
+
+# ---------------------------------------------------------------------------
+# history_time_range
+# ---------------------------------------------------------------------------
+
+def test_history_time_range_basic():
+    h = _regular(50)
+    min_ts, max_ts = history_time_range(h)
+    assert min_ts == h[0]["timestamp"]
+    assert max_ts == h[-1]["timestamp"]
+
+
+def test_history_time_range_empty():
+    assert history_time_range([]) == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# sysid window_spec (explicit timestamp range)
+# ---------------------------------------------------------------------------
+
+def test_sysid_window_spec_selects_correct_range():
+    """run_sysid_ekf with window_spec selects only data in the given range."""
+    from custom_components.heating_assistant.sysid import run_sysid_ekf
+
+    dt = 900.0
+    model, heater, _ = _make_system(dt)
+    history, recent_t0 = _scenario_history(dt)
+
+    # Select a 6-hour slice from the middle of the recent data
+    mid = recent_t0 + 24 * 3600.0
+    win_start = mid
+    win_end   = mid + 6 * 3600.0
+
+    res = run_sysid_ekf(
+        history, model, [heater], ["studio"], dt,
+        horizon_steps=96,            # ignored — window_spec takes priority
+        room_params={}, sigma_w=0.1, sigma_v=0.5,
+        window_spec=(win_start, win_end),
+    )
+
+    assert "error" not in res, res.get("error")
+    sim = res["per_room"]["studio"]["simulation"]
+    assert sim
+    for entry in sim:
+        assert win_start - dt <= entry["time"] <= win_end + dt, (
+            f"entry at {entry['time']} outside [{win_start}, {win_end}]"
+        )
+    span_h = (sim[-1]["time"] - sim[0]["time"]) / 3600.0
+    assert span_h <= 6.5, f"window_spec reconstruction spans {span_h:.1f} h"
+
+
+def test_sysid_window_spec_invalid_returns_error():
+    """window_spec with start > end returns an error, not a crash."""
+    from custom_components.heating_assistant.sysid import run_sysid_ekf
+
+    dt = 900.0
+    model, heater, _ = _make_system(dt)
+    history, _ = _scenario_history(dt)
+
+    res = run_sysid_ekf(
+        history, model, [heater], ["studio"], dt,
+        horizon_steps=96,
+        room_params={}, sigma_w=0.1, sigma_v=0.5,
+        window_spec=(1e12, 1.0),  # wildly out-of-range
+    )
+    assert "error" in res
 
 
 # ---------------------------------------------------------------------------
