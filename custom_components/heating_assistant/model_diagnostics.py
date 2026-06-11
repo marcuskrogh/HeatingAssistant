@@ -691,17 +691,21 @@ def compute_open_loop_predictions(
     room_names: List[str],
     n_rooms: int,
     dt: float,
-    segment_length: int = 30,
+    segment_length: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Evaluate model quality by running open-loop (no Kalman correction)
-    simulations over sliding windows of the history buffer.
+    simulations over the history buffer.
 
-    For each window of ``segment_length`` steps the model is initialised from
-    the first measurement in the window and then propagated forward purely
-    using the recorded control inputs and disturbances — no state correction.
-    This reveals the true multi-step prediction quality of the thermal model,
-    which is what the MPC actually relies on.
+    When ``segment_length`` is ``None`` (the default) the simulation runs as
+    one **continuous** pass per contiguous data run — no artificial restarts.
+    This is the correct mode for visualisation: the wall/envelope temperature
+    evolves freely and the plot has no discontinuities.
+
+    When ``segment_length`` is an integer the history is divided into
+    fixed-length windows of that many steps, each re-initialised from the
+    first measurement in the window.  Use this mode only for computing
+    N-step-ahead prediction accuracy (e.g. the multi-horizon RMSE analysis).
 
     Integration uses the **actual elapsed time** between consecutive history
     entries (derived from their ``timestamp`` fields) rather than the nominal
@@ -725,9 +729,12 @@ def compute_open_loop_predictions(
     dt : float
         Nominal sampling interval [s] – used only as a fallback when a
         consecutive pair of entries lacks a valid timestamp difference.
-    segment_length : int
-        Number of steps per open-loop segment (default 30).  Automatically
-        clamped to ``len(history) // 2`` when the history is shorter.
+    segment_length : int or None
+        Number of steps per open-loop segment.  ``None`` (default) runs each
+        contiguous data run as a single uninterrupted simulation.  Pass an
+        integer to force fixed-length re-initialised segments (N-step-ahead
+        accuracy analysis).  Automatically clamped to ``len(history) // 2``
+        when the history is shorter.
 
     Returns
     -------
@@ -736,25 +743,35 @@ def compute_open_loop_predictions(
             ``simulation``  : list of {time, measured, predicted}
         ``overall_rmse``    : {room_name: float}
         ``n_segments``      : int
-        ``segment_length``  : int
+        ``segment_length``  : int or None
         ``error``           : str (only present on failure)
     """
     n = n_rooms
 
-    # Clamp segment_length to what the available history allows.
-    effective_segment_length = min(segment_length, max(1, len(history) // 2))
-    if len(history) < effective_segment_length + 1:
-        return {
-            "error": (
-                f"Insufficient history: need ≥ {effective_segment_length + 1} steps, "
-                f"have {len(history)}."
-            ),
-            "per_room": {},
-            "overall_rmse": {},
-            "n_segments": 0,
-            "segment_length": effective_segment_length,
-        }
-    segment_length = effective_segment_length
+    if segment_length is not None:
+        # Clamp segment_length to what the available history allows.
+        effective_segment_length = min(segment_length, max(1, len(history) // 2))
+        if len(history) < effective_segment_length + 1:
+            return {
+                "error": (
+                    f"Insufficient history: need ≥ {effective_segment_length + 1} steps, "
+                    f"have {len(history)}."
+                ),
+                "per_room": {},
+                "overall_rmse": {},
+                "n_segments": 0,
+                "segment_length": effective_segment_length,
+            }
+        segment_length = effective_segment_length
+    else:
+        if len(history) < 2:
+            return {
+                "error": f"Insufficient history: need ≥ 2 steps, have {len(history)}.",
+                "per_room": {},
+                "overall_rmse": {},
+                "n_segments": 0,
+                "segment_length": None,
+            }
 
     # Prefer the system's own disturbance builder so the open-loop diagnostic
     # uses *exactly* the same heat balance as the live MPC/EKF.  Crucially this
@@ -798,18 +815,27 @@ def compute_open_loop_predictions(
     # Split the history into contiguous runs at restart gaps so a segment never
     # straddles a dead interval: free-running the model across a multi-hour (or
     # multi-day) gap with stale held inputs would otherwise produce a large
-    # spurious error spike.  Each run is independently divided into fixed-length
-    # open-loop segments.
-    # The final stride covers the trailing records too (a partial last segment)
-    # so the most recent samples are not dropped from the plot — previously up to
-    # ``segment_length - 1`` of the newest points were silently discarded.
+    # spurious error spike.
+    #
+    # Continuous mode (segment_length is None): each contiguous run becomes a
+    # single uninterrupted simulation — no re-initialisation mid-run, so the
+    # wall/envelope temperature evolves smoothly without jumps.
+    #
+    # Segmented mode (segment_length is int): each run is further divided into
+    # fixed-length windows for N-step-ahead accuracy analysis.  The final stride
+    # covers the trailing records too (a partial last segment) so the most recent
+    # samples are not dropped.
     from .history_window import split_contiguous_runs
 
-    segments = [
-        run[s: s + segment_length]
-        for run in split_contiguous_runs(history, dt)
-        for s in range(0, max(1, len(run) - 1), segment_length)
-    ]
+    contiguous_runs = list(split_contiguous_runs(history, dt))
+    if segment_length is None:
+        segments = contiguous_runs
+    else:
+        segments = [
+            run[s: s + segment_length]
+            for run in contiguous_runs
+            for s in range(0, max(1, len(run) - 1), segment_length)
+        ]
     for seg in segments:
         if len(seg) < 2:
             continue

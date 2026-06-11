@@ -1522,6 +1522,12 @@ def _register_services(hass: HomeAssistant) -> None:
         # Results are surfaced in the UI via the per-room OpenLoopRMSESensor
         # entities, so this service writes its output to the coordinator cache
         # rather than raising a persistent notification.
+        #
+        # Use continuous mode (segment_length=None) for the main simulation so
+        # the plot shows no artificial discontinuities: the wall/envelope state
+        # is never re-initialised mid-run, it just evolves freely from the
+        # starting condition.  The multi-horizon RMSE analysis below uses fixed
+        # segment lengths specifically to measure N-step-ahead accuracy.
         try:
             result = await hass.async_add_executor_job(
                 compute_open_loop_predictions,
@@ -1530,7 +1536,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 room_names,
                 n_rooms,
                 dt,
-                segment_length,
+                None,
             )
 
             if "error" not in result:
