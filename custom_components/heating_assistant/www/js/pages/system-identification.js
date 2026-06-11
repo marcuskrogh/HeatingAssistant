@@ -870,10 +870,14 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     const ids = [powerEntity, solarEntity, outdoorEntity].filter(Boolean);
     if (ids.length === 0) return;
 
-    const hours = horizonHours > 0 ? horizonHours : DEFAULTS.horizon_hours;
     let hist = {};
     try {
-      hist = await connection.getHistory(ids, hours);
+      if (xRange?.xMin != null && xRange?.xMax != null) {
+        hist = await connection.getHistoryRange(ids, new Date(xRange.xMin), new Date(xRange.xMax));
+      } else {
+        const hours = horizonHours > 0 ? horizonHours : DEFAULTS.horizon_hours;
+        hist = await connection.getHistory(ids, hours);
+      }
     } catch (err) {
       return;
     }

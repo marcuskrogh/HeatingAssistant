@@ -91,6 +91,23 @@ export class HaConnection {
     }
   }
 
+  async getHistoryRange(entityIds, startDate, endDate) {
+    try {
+      const result = await this._hass.callWS({
+        type: 'history/history_during_period',
+        start_time: startDate.toISOString(),
+        end_time: endDate.toISOString(),
+        entity_ids: entityIds,
+        minimal_response: true,
+        significant_changes_only: false,
+      });
+      return result;
+    } catch (e) {
+      console.warn('History range fetch failed:', e);
+      return {};
+    }
+  }
+
   async subscribe(callback) {
     const unsub = await this._hass.connection.subscribeEvents(
       callback,
