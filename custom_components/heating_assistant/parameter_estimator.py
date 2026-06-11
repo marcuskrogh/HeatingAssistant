@@ -103,6 +103,17 @@ _Q_INT_HI =  5_000.0   # large internal source (server room, sauna…)
 _LOG_ALPHA_LO = math.log(0.3)   # 30 % of rated
 _LOG_ALPHA_HI = math.log(3.0)   # 300 % of rated
 
+#: Relative MAP-prior weight for the heater power-scale α, multiplying the base
+#: regularisation.  Unlike thermal mass / R_external (which are genuinely
+#: unknown a priori and get the light base weight so the data drives them), a
+#: heater's rated power is usually known to within ~±20 %, so α carries real
+#: prior information: log-space σ ≈ 0.2 ⇒ a much tighter penalty.  This is the
+#: lever that keeps the joint optimum off the documented "C huge / R huge"
+#: degenerate ridge, where C, R and α trade off against one another (README
+#: §17.5): pinning α near its physical value resolves that degeneracy so the
+#: data identifies C and R instead of sliding α to a bound.
+_ALPHA_PRIOR_WEIGHT = 25.0
+
 #: Minimum std of inter-room temperature difference for R_ij identifiability.
 _MIN_TEMP_DIFF_STD = 0.3   # °C
 
@@ -337,10 +348,16 @@ class KalmanMLEstimator:
     * α_s    – std(u_s) over the history ≥ ``_MIN_HEATER_USAGE_STD``
     * R_ij   – std(T_i − T_j) over the history ≥ ``_MIN_TEMP_DIFF_STD``
 
-    A multi-start IPOPT run is started from the prior and a few random
-    perturbations; the lowest-objective restart is returned.  Analytical
-    gradients of the CD-EKF PED log-likelihood are computed via a
-    forward-sensitivity pass and supplied directly to IPOPT.
+    The objective is the multi-step open-loop simulation error (a free-run of
+    the grey-box model over the history window), minimised by IPOPT
+    (L-BFGS-B fallback) with analytical gradients from a forward-sensitivity
+    pass.  The forward model is integrated with L-stable backward Euler so the
+    stiff 2R2C air node stays stable at the coarse sampling interval.  The
+    optimiser is run from two physically-anchored starts — a coarse
+    physics-informed least-squares fit and the configured prior — and the
+    lower-objective finisher is kept; a MAP prior (tight on the heater scale,
+    whose rated power is known a priori) regularises the otherwise-degenerate
+    C / R / α ridge.
 
     Parameters
     ----------
@@ -823,20 +840,28 @@ class KalmanMLEstimator:
         best_f = float("inf")
         best_converged = False
 
-        # ── Choose a single starting point ─────────────────────────────────
-        # Prefer the physics-informed start (a coarse least-squares fit of the
-        # per-room 1R1C energy balance) — it places the search in a basin
-        # consistent with the data even when the configured prior is far off.
-        # Fall back to the prior when the LS fit fails or the data are too
-        # sparse to constrain it.
+        # ── Multistart from physically-anchored points ─────────────────────
+        # The open-loop identification landscape is non-convex with a
+        # documented degenerate ridge (the "C huge / R huge" basin, README
+        # §17.5).  We run the optimiser from the physics-informed start (a
+        # coarse least-squares 1R1C fit) and from the configured prior, then
+        # keep whichever finisher has the lower regularised objective.  The
+        # MAP prior (see _compute_regularization_theta) — tight on the heater
+        # scale, whose rated power is genuinely known a priori — is what keeps
+        # the chosen optimum off the degenerate ridge; the second start simply
+        # guards against the physics-informed seed landing in a bad basin.
         phys_theta = self._physics_informed_theta(
             std_history, layout, theta_prior, lb, ub,
         )
-        theta_start = phys_theta if phys_theta is not None else theta_prior.copy()
+        starts: List[np.ndarray] = []
+        if phys_theta is not None:
+            starts.append(phys_theta)
+        starts.append(theta_prior.copy())
 
-        _cache[0] = None
-
-        try:
+        def _solve_from(theta_start: np.ndarray) -> Optional[Tuple[float, np.ndarray, bool]]:
+            """Run the active backend from one start; return (f, theta, ok)."""
+            nonlocal _active_backend
+            _cache[0] = None
             problem = NLPProblem(
                 objective=_fun,
                 objective_jac=_jac,
@@ -845,29 +870,36 @@ class KalmanMLEstimator:
                 ub=ub,
                 constraints=(),
             )
-            res = _active_backend.solve(problem)
-            if np.isfinite(res.fun):
-                best_f = float(res.fun)
-                best_theta = np.asarray(res.x, dtype=float)
-                best_converged = bool(res.success)
-        except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
-            _LOGGER.warning(
-                "IPOPT backend unavailable for parameter estimation (%s); "
-                "falling back to L-BFGS-B.",
-                exc,
-            )
-            _active_backend = scipy_backend
-            _cache[0] = None
             try:
                 res = _active_backend.solve(problem)
-                if np.isfinite(res.fun):
-                    best_f = float(res.fun)
-                    best_theta = np.asarray(res.x, dtype=float)
-                    best_converged = bool(res.success)
-            except Exception as exc2:
-                _LOGGER.debug("Optimiser fallback failed: %s", exc2)
-        except Exception as exc:
-            _LOGGER.debug("Optimiser failed: %s", exc)
+            except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
+                _LOGGER.warning(
+                    "IPOPT backend unavailable for parameter estimation (%s); "
+                    "falling back to L-BFGS-B.", exc,
+                )
+                _active_backend = scipy_backend
+                _cache[0] = None
+                try:
+                    res = _active_backend.solve(problem)
+                except Exception as exc2:
+                    _LOGGER.debug("Optimiser fallback failed: %s", exc2)
+                    return None
+            except Exception as exc:
+                _LOGGER.debug("Optimiser failed: %s", exc)
+                return None
+            if not np.isfinite(res.fun):
+                return None
+            return float(res.fun), np.asarray(res.x, dtype=float), bool(res.success)
+
+        for theta_start in starts:
+            out = _solve_from(theta_start)
+            if out is None:
+                continue
+            f_cand, theta_c, converged = out
+            if f_cand < best_f:
+                best_f = f_cand
+                best_theta = theta_c
+                best_converged = converged
 
         # ── Unpack and clip the best solution ──────────────────────────────
         (log_mass, log_r, q_int, log_alpha, log_r_ij,
@@ -1399,7 +1431,16 @@ class KalmanMLEstimator:
 
         n = self._n
         nx = int(model.nx)
-        n_sub = 1
+        _I = np.eye(nx)
+        # Sub-steps per measurement interval for the implicit-Euler propagation.
+        # Backward Euler is L-stable, so this is purely for accuracy: at the
+        # 900 s sampling interval the 2R2C air node (~300 s) needs a sub-step
+        # below its time constant for the heating/cooling transient that
+        # separates heater-scale from thermal-mass to be resolved.  ~300 s
+        # sub-steps (3 per 900 s interval) keep the truncation error small while
+        # keeping each objective evaluation affordable for the joint multi-room
+        # optimisation.
+        n_sub = max(1, int(math.ceil(self._dt / 300.0)))
 
         quants = self._theta_model_quantities(layout, theta)
         _p0 = model.params
@@ -1492,14 +1533,42 @@ class KalmanMLEstimator:
                             valid = False
                             break
 
-                        dfdtheta_val = self._dfdtheta_step(
-                            quants, layout, model, f_val, x, u_k, d_k,
-                            ntheta, nx,
-                        )
-
-                        # Euler step for state and sensitivity
-                        sx = sx + h_sub * (sx @ F_full.T + dfdtheta_val)
-                        x = x + h_sub * f_val
+                        # Linearly-implicit (backward) Euler step.  The 2R2C
+                        # air node has a ~300 s time constant, so an *explicit*
+                        # Euler step at the 900 s sampling interval (h/τ ≈ 3)
+                        # sits past the |1+hλ|<1 stability limit and amplifies
+                        # the air mode by ~2× per step — the trajectory (and its
+                        # sensitivity) diverged, corrupting the objective and
+                        # gradient that drive the optimiser.  Backward Euler is
+                        # L-stable, matching the live CD-EKF's implicit-Euler
+                        # propagation.  The heat input does not depend on the
+                        # state, so f is affine in x within the ZOH step
+                        # (f(y)=F·y+c, F constant in x) and one linear solve is
+                        # exact:
+                        #     (I − hF) x⁺ = x + h·c,      c = f(x) − F·x
+                        M = _I - h_sub * F_full
+                        try:
+                            c_aff = f_val - F_full @ x
+                            x_new = np.linalg.solve(M, x + h_sub * c_aff)
+                            # Forward-sensitivity for backward Euler:
+                            #     (I − hF) sx⁺ = sx + h·∂f/∂θ|_{x⁺}
+                            # ∂f/∂θ must be evaluated at the *post-step* state so
+                            # the analytic sensitivity matches the exact
+                            # derivative of the implicit trajectory (it depends
+                            # on x through f ∝ 1/C and the matrix reshaping by
+                            # the envelope-split fractions).
+                            f_new = model.f(x_new, u_k, d_k, _p0, 0.0)
+                            dfdtheta_val = self._dfdtheta_step(
+                                quants, layout, model, f_new, x_new, u_k, d_k,
+                                ntheta, nx,
+                            )
+                            sx = np.linalg.solve(
+                                M, (sx + h_sub * dfdtheta_val).T
+                            ).T
+                            x = x_new
+                        except np.linalg.LinAlgError:
+                            valid = False
+                            break
 
                     if (not valid or not np.all(np.isfinite(x))
                             or not np.all(np.isfinite(sx))):
@@ -1761,7 +1830,7 @@ class KalmanMLEstimator:
             la_prior = np.array(
                 [self._log_alpha_prior_full[s] for s in layout.identifiable_sources]
             )
-            grad[a:b] = 2.0 * lam * (log_alpha - la_prior)
+            grad[a:b] = 2.0 * lam * _ALPHA_PRIOR_WEIGHT * (log_alpha - la_prior)
 
         a, b = layout.idx_log_r_ij
         if a < b:
@@ -2017,7 +2086,7 @@ class KalmanMLEstimator:
             + float(np.sum((q_int - self._q_int_prior) ** 2)) / (100.0 ** 2)
         )
         if len(log_alpha):
-            reg += self._regularization * float(
+            reg += self._regularization * _ALPHA_PRIOR_WEIGHT * float(
                 np.sum((log_alpha - log_alpha_prior) ** 2)
             )
         if len(log_r_ij):
