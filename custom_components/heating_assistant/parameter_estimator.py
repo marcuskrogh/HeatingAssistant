@@ -503,7 +503,10 @@ class KalmanMLEstimator:
         system0 = _model_factory(theta_prior)
         if system0 is None:
             return None
-        x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
+        x0, P0 = self._initial_state_and_covariance(
+            system0, std_history[0]["ym"],
+            u=std_history[0].get("u"), d=std_history[0].get("d"),
+        )
 
         try:
             # Evaluate negative log-likelihood using CD-EKF
@@ -586,7 +589,10 @@ class KalmanMLEstimator:
         system0 = _model_factory(theta_prior)
         if system0 is None:
             return None
-        x0, P0 = self._initial_state_and_covariance(system0, std_history[0]["ym"])
+        x0, P0 = self._initial_state_and_covariance(
+            system0, std_history[0]["ym"],
+            u=std_history[0].get("u"), d=std_history[0].get("d"),
+        )
 
         n_grid = max(3, int(n_grid))
         span = float(abs(span_log))
@@ -2067,19 +2073,49 @@ class KalmanMLEstimator:
         self,
         system: HouseThermalSystem,
         first_measurement: np.ndarray,
+        u: Optional[np.ndarray] = None,
+        d: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Build x0/P0 matching system dimensions (supports augmented states)."""
+        """Build x0/P0 matching system dimensions (supports augmented states).
+
+        When the first record's control ``u`` / disturbance ``d`` are supplied
+        the state is seeded via the system's ``initial_state_from_measurement``
+        helper — the single source of truth shared with the open-loop
+        diagnostic and the simulation objective — so the wall nodes start at
+        the (T_a, T_out) steady state and the emitter-lag states are
+        warm-started to the commanded fraction.  Without ``u``/``d`` (or for
+        legacy system objects) it falls back to seeding the wall block at the
+        air temperature; the latent states never start at 0.
+        """
         nx = int(system.nx)
         nym = int(system.nym)
         n = self._n
-        x0 = np.zeros(nx, dtype=float)
-        n_copy = min(nym, len(first_measurement), nx)
-        x0[:n_copy] = np.array(first_measurement[:n_copy], dtype=float)
 
-        # Wall block warm-starts at the air temperature; the emitter-lag
-        # block (and any further augmentation) stays at zero.
-        if nx >= 2 * n and n_copy >= n:
-            x0[n: 2 * n] = x0[:n]
+        x0: Optional[np.ndarray] = None
+        init_fn = getattr(system, "initial_state_from_measurement", None)
+        if callable(init_fn) and u is not None:
+            try:
+                x0 = np.asarray(
+                    init_fn(
+                        np.asarray(first_measurement, dtype=float),
+                        np.asarray(u, dtype=float),
+                        np.asarray(d, dtype=float) if d is not None else None,
+                    ),
+                    dtype=float,
+                )
+                if x0.shape[0] != nx or not np.all(np.isfinite(x0)):
+                    x0 = None
+            except Exception:
+                x0 = None
+
+        if x0 is None:
+            x0 = np.zeros(nx, dtype=float)
+            n_copy = min(nym, len(first_measurement), nx)
+            x0[:n_copy] = np.array(first_measurement[:n_copy], dtype=float)
+            # Wall block warm-starts at the air temperature; the emitter-lag
+            # block (and any further augmentation) stays at zero.
+            if nx >= 2 * n and n_copy >= n:
+                x0[n: 2 * n] = x0[:n]
 
         P0 = np.eye(nx, dtype=float) * self._R_var * 10.0
         if nx > nym:
