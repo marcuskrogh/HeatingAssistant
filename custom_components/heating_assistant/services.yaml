@@ -167,6 +167,20 @@ estimate_parameters_ml:
       default: false
       selector:
         boolean:
+    locked_params:
+      name: Locked parameters
+      description: >
+        Optional dict of parameters to hold fixed during optimisation (not
+        decision variables).  Each top-level key is a parameter name:
+        thermal_mass, r_external, internal_gain, solar_scale, c_air_fraction,
+        r_aw_fraction — mapping to a dict of room_name → fixed_value.
+        Use heater_scales for per-source scales (source_name → fixed_value).
+        Locked parameters are pinned by setting lb = ub = fixed_value so all
+        other parameters are still identified freely from the data.
+      required: false
+      example: '{"thermal_mass": {"living_room": 5000000}, "heater_scales": {"radiator": 1.0}}'
+      selector:
+        object:
 
 analyze_model_fit:
   name: Analyze model fit

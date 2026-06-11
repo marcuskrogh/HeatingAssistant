@@ -211,25 +211,37 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       <div class="params-subsection__title">Model Parameters</div>
       <div class="tuning-params-grid">
         <div class="form-group">
-          <label class="form-label" for="param-thermal-mass">Thermal Mass (C)</label>
+          <div class="form-group__header">
+            <label class="form-label" for="param-thermal-mass">Thermal Mass (C)</label>
+            <button class="param-lock-btn" data-param="thermal_mass" title="Lock: hold fixed during auto-identification">Fix</button>
+          </div>
           <input class="form-input" type="number" id="param-thermal-mass"
             step="100000" min="10000" value="${DEFAULTS.thermal_mass}">
           <span class="form-hint">J/K &mdash; thermal storage capacity of the room</span>
         </div>
         <div class="form-group">
-          <label class="form-label" for="param-r-external">Thermal Resistance (R<sub>ext</sub>)</label>
+          <div class="form-group__header">
+            <label class="form-label" for="param-r-external">Thermal Resistance (R<sub>ext</sub>)</label>
+            <button class="param-lock-btn" data-param="r_external" title="Lock: hold fixed during auto-identification">Fix</button>
+          </div>
           <input class="form-input" type="number" id="param-r-external"
             step="0.001" min="0.0001" value="${DEFAULTS.r_external}">
           <span class="form-hint">K/W &mdash; envelope resistance to outdoor</span>
         </div>
         <div class="form-group">
-          <label class="form-label" for="param-internal-gain">Internal Gain (Q<sub>int</sub>)</label>
+          <div class="form-group__header">
+            <label class="form-label" for="param-internal-gain">Internal Gain (Q<sub>int</sub>)</label>
+            <button class="param-lock-btn" data-param="internal_gain" title="Lock: hold fixed during auto-identification">Fix</button>
+          </div>
           <input class="form-input" type="number" id="param-internal-gain"
             step="10" value="${DEFAULTS.internal_gain}">
           <span class="form-hint">W &mdash; constant internal heat (people, appliances)</span>
         </div>
         <div class="form-group">
-          <label class="form-label" for="param-solar-scale">Solar Scale</label>
+          <div class="form-group__header">
+            <label class="form-label" for="param-solar-scale">Solar Scale</label>
+            <button class="param-lock-btn" data-param="solar_scale" title="Lock: hold fixed during auto-identification">Fix</button>
+          </div>
           <input class="form-input" type="number" id="param-solar-scale"
             step="0.01" min="0" value="${DEFAULTS.solar_scale}">
           <span class="form-hint">&times; &mdash; multiplier on modelled solar gain (1.0 = model)</span>
@@ -241,13 +253,19 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       <div class="params-subsection__title">Envelope Split (2R2C)</div>
       <div class="tuning-params-grid">
         <div class="form-group">
-          <label class="form-label" for="param-c-air-fraction">Air-node Mass Fraction</label>
+          <div class="form-group__header">
+            <label class="form-label" for="param-c-air-fraction">Air-node Mass Fraction</label>
+            <button class="param-lock-btn" data-param="c_air_fraction" title="Lock: hold fixed during auto-identification">Fix</button>
+          </div>
           <input class="form-input" type="number" id="param-c-air-fraction"
             step="0.001" min="0" max="1" value="${DEFAULTS.c_air_fraction}">
           <span class="form-hint">0&ndash;1 &mdash; share of mass on the fast air node</span>
         </div>
         <div class="form-group">
-          <label class="form-label" for="param-r-aw-fraction">Air&ndash;Wall Resistance Fraction</label>
+          <div class="form-group__header">
+            <label class="form-label" for="param-r-aw-fraction">Air&ndash;Wall Resistance Fraction</label>
+            <button class="param-lock-btn" data-param="r_aw_fraction" title="Lock: hold fixed during auto-identification">Fix</button>
+          </div>
           <input class="form-input" type="number" id="param-r-aw-fraction"
             step="0.001" min="0" max="1" value="${DEFAULTS.r_aw_fraction}">
           <span class="form-hint">0&ndash;1 &mdash; fraction of conductive-path resistance on the air&harr;wall film (infiltration excluded)</span>
@@ -428,6 +446,60 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     sigmaWInput, sigmaVInput, horizonInput,
   ];
 
+  // Tracks locked parameters (those held fixed during auto-identification).
+  // Keys for room params: 'thermal_mass', 'r_external', etc.
+  // Keys for heater scales: 'heater_scale:<source_name>'.
+  const lockedParams = new Set();
+
+  function toggleLock(paramKey, inputEl, btnEl) {
+    if (lockedParams.has(paramKey)) {
+      lockedParams.delete(paramKey);
+      inputEl.classList.remove('form-input--locked');
+      btnEl.classList.remove('param-lock-btn--locked');
+      btnEl.textContent = 'Fix';
+      btnEl.title = 'Lock: hold fixed during auto-identification';
+    } else {
+      lockedParams.add(paramKey);
+      inputEl.classList.add('form-input--locked');
+      btnEl.classList.add('param-lock-btn--locked');
+      btnEl.textContent = 'Fixed';
+      btnEl.title = 'Unlock: allow auto-identification to vary this parameter';
+    }
+  }
+
+  // Wire up lock buttons for the static parameter fields in paramsCard.
+  paramsCard.querySelectorAll('.param-lock-btn').forEach((btn) => {
+    const paramKey = btn.dataset.param;
+    const input = btn.closest('.form-group').querySelector('.form-input');
+    btn.addEventListener('click', () => toggleLock(paramKey, input, btn));
+  });
+
+  // Build the locked_params payload for the estimate_parameters_ml service call.
+  // Per-room params are keyed by room slug; heater scales by source name.
+  function buildLockedParams() {
+    const result = {};
+    const roomParamInputs = {
+      thermal_mass: thermalMassInput,
+      r_external: rExternalInput,
+      internal_gain: internalGainInput,
+      solar_scale: solarScaleInput,
+      c_air_fraction: cAirFractionInput,
+      r_aw_fraction: rAwFractionInput,
+    };
+    for (const [param, inp] of Object.entries(roomParamInputs)) {
+      if (lockedParams.has(param)) {
+        result[param] = { [roomSlug]: parseFloat(inp.value) };
+      }
+    }
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      if (lockedParams.has(`heater_scale:${srcName}`)) {
+        result.heater_scales = result.heater_scales || {};
+        result.heater_scales[srcName] = parseFloat(inp.value);
+      }
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+  }
+
   // Tracks whether the user has begun a manual identification process (i.e.
   // changed any parameter). Once true, the reactive update() callback stops
   // overwriting the form from system state, so running a reconstruction or
@@ -552,15 +624,20 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const group = document.createElement('div');
       group.className = 'form-group';
       group.innerHTML = `
-        <label class="form-label" for="${inputId}">${srcName}</label>
+        <div class="form-group__header">
+          <label class="form-label" for="${inputId}">${srcName}</label>
+          <button class="param-lock-btn" title="Lock: hold fixed during auto-identification">Fix</button>
+        </div>
         <input class="form-input" type="number" id="${inputId}"
           step="0.01" min="0" value="${info.power_scale ?? DEFAULTS.heater_scale}">
         <span class="form-hint">&times; &mdash; heater power scale (1.0 = rated power)</span>
       `;
       listEl.appendChild(group);
       const inp = group.querySelector('input');
+      const lockBtn = group.querySelector('.param-lock-btn');
       heaterScaleInputs[srcName] = inp;
       inp.addEventListener('input', () => { userEditing = true; });
+      lockBtn.addEventListener('click', () => toggleLock(`heater_scale:${srcName}`, inp, lockBtn));
       paramInputs.push(inp);
     }
     heaterInputsBuilt = true;
@@ -573,17 +650,24 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   function populateModelFromSysid(slug, st) {
     const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
     if (!sysidAttrs) return;
-    if (sysidAttrs.thermal_mass != null) thermalMassInput.value = sysidAttrs.thermal_mass;
-    if (sysidAttrs.r_external != null) rExternalInput.value = sysidAttrs.r_external;
-    if (sysidAttrs.internal_gain != null) internalGainInput.value = sysidAttrs.internal_gain;
-    if (sysidAttrs.solar_scale != null) solarScaleInput.value = sysidAttrs.solar_scale;
-    if (sysidAttrs.c_air_fraction != null) cAirFractionInput.value = sysidAttrs.c_air_fraction;
-    if (sysidAttrs.r_aw_fraction != null) rAwFractionInput.value = sysidAttrs.r_aw_fraction;
+    if (sysidAttrs.thermal_mass != null && !lockedParams.has('thermal_mass'))
+      thermalMassInput.value = sysidAttrs.thermal_mass;
+    if (sysidAttrs.r_external != null && !lockedParams.has('r_external'))
+      rExternalInput.value = sysidAttrs.r_external;
+    if (sysidAttrs.internal_gain != null && !lockedParams.has('internal_gain'))
+      internalGainInput.value = sysidAttrs.internal_gain;
+    if (sysidAttrs.solar_scale != null && !lockedParams.has('solar_scale'))
+      solarScaleInput.value = sysidAttrs.solar_scale;
+    if (sysidAttrs.c_air_fraction != null && !lockedParams.has('c_air_fraction'))
+      cAirFractionInput.value = sysidAttrs.c_air_fraction;
+    if (sysidAttrs.r_aw_fraction != null && !lockedParams.has('r_aw_fraction'))
+      rAwFractionInput.value = sysidAttrs.r_aw_fraction;
 
     ensureHeaterScaleInputs(st);
     const identifiedScales = sysidAttrs.heater_scales || {};
     for (const [srcName, scale] of Object.entries(identifiedScales)) {
-      if (heaterScaleInputs[srcName] != null && scale != null) {
+      if (heaterScaleInputs[srcName] != null && scale != null
+          && !lockedParams.has(`heater_scale:${srcName}`)) {
         heaterScaleInputs[srcName].value = scale;
       }
     }
@@ -762,9 +846,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     setStatus(actionStatusEl, 'Running identification…', 'running');
     btnAutoIdentify.disabled = true;
     try {
+      const lp = buildLockedParams();
       await hass.callService('heating_assistant', 'estimate_parameters_ml', {
         apply_parameters: false,
         horizon_hours: parseFloat(horizonInput.value),
+        ...(lp ? { locked_params: lp } : {}),
       });
       // The coordinator updates sysid_results and fires async_update_listeners()
       // before the service call resolves.  Allow ~800 ms for the HA websocket

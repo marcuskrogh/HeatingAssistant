@@ -3852,6 +3852,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self,
         apply_params: bool = True,
         horizon_hours: Optional[float] = None,
+        locked_params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Estimate thermal parameters using Kalman-filter maximum-likelihood.
@@ -3917,9 +3918,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         # Optimisation may take a few seconds; run in a thread executor.
-        result: Dict[str, Any] = await self.hass.async_add_executor_job(
-            estimator.estimate, history
-        )
+        _estimate = lambda: estimator.estimate(history, locked_params=locked_params)  # noqa: E731
+        result: Dict[str, Any] = await self.hass.async_add_executor_job(_estimate)
 
         if result["success"] and apply_params:
             self._apply_estimated_parameters(
