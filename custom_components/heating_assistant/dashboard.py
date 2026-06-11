@@ -2167,6 +2167,18 @@ def _sysid_param_card(room: RoomSpec) -> Dict[str, Any]:
                 "icon": "mdi:clock-outline",
                 "attribute": "horizon_hours",
             },
+            {
+                "entity": sysid,
+                "name": "Window start (UNIX)",
+                "icon": "mdi:calendar-arrow-right",
+                "attribute": "window_start",
+            },
+            {
+                "entity": sysid,
+                "name": "Window end (UNIX)",
+                "icon": "mdi:calendar-arrow-left",
+                "attribute": "window_end",
+            },
         ],
     }
 
@@ -2183,6 +2195,11 @@ def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
     tools or a button card.
     """
     sections: List[Dict[str, Any]] = []
+
+    # Entity IDs for the two window datetime pickers and the window-run button
+    _win_start_eid = _system_eid("datetime", "sysid_window_start")
+    _win_end_eid   = _system_eid("datetime", "sysid_window_end")
+    _win_btn_eid   = _system_eid("button", "run_sysid_with_window_button")
 
     # ------------------------------------------------------------------
     # Intro / run-simulation section
@@ -2202,26 +2219,90 @@ def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
             "uncertainty: √(P⁻[i,i] + σ_v²).  A wide band means the "
             "continuous process noise σ_w [K/√s] is large relative to the "
             "thermal time-constant.\n\n"
-            "Use **Run SysID Simulation** to regenerate with the default "
-            "parameters, or call `heating_assistant.run_sysid_simulation` "
-            "from Developer Tools → Services with custom `horizon_hours`, "
-            "`sigma_w`, `sigma_v`, and per-room `thermal_mass_<room>` / "
-            "`r_external_<room>` overrides."
+            "Use **Quick Horizon Presets** below to run over the most recent "
+            "N hours, or pick an exact date/time range with "
+            "**Custom Window** to target a specific experiment "
+            "(e.g. a step-response test performed last night)."
         ),
     }
 
-    run_button: Dict[str, Any] = {
+    sections.append(
+        {
+            "type": "grid",
+            "cards": [
+                {"type": "heading", "heading": "System Identification", "heading_style": "title"},
+                intro_md,
+            ],
+        }
+    )
+
+    # ------------------------------------------------------------------
+    # Custom window selection section
+    # ------------------------------------------------------------------
+    window_md: Dict[str, Any] = {
+        "type": "markdown",
+        "content": (
+            "### Custom Window\n\n"
+            "Set a precise **start** and **end** time for the identification "
+            "window — useful when the history buffer contains data from "
+            "multiple sessions or when you ran a dedicated step-response "
+            "experiment at a known time.  "
+            "Only data within the selected range is used; everything outside "
+            "is ignored.\n\n"
+            "1. Adjust the **Window Start** and **Window End** pickers.\n"
+            "2. Press **Run SysID with Window** to compute."
+        ),
+    }
+
+    window_start_card: Dict[str, Any] = {
+        "type": "entities",
+        "title": "Window Start",
+        "entities": [
+            {
+                "entity": _win_start_eid,
+                "name": "Start",
+            }
+        ],
+    }
+
+    window_end_card: Dict[str, Any] = {
+        "type": "entities",
+        "title": "Window End",
+        "entities": [
+            {
+                "entity": _win_end_eid,
+                "name": "End",
+            }
+        ],
+    }
+
+    run_window_button: Dict[str, Any] = {
         "type": "button",
-        "name": "Run SysID Simulation (all rooms, 6 h horizon)",
-        "icon": "mdi:play-circle-outline",
+        "name": "Run SysID with Window",
+        "icon": "mdi:calendar-search",
         "tap_action": {
             "action": "call-service",
-            "service": f"{DOMAIN}.run_sysid_simulation",
-            "service_data": {"horizon_hours": 6.0},
+            "service": "button.press",
+            "service_data": {"entity_id": _win_btn_eid},
         },
     }
 
-    # Per-horizon buttons for quick horizon switching
+    sections.append(
+        {
+            "type": "grid",
+            "cards": [
+                {"type": "heading", "heading": "Custom Window", "heading_style": "title"},
+                window_md,
+                window_start_card,
+                window_end_card,
+                run_window_button,
+            ],
+        }
+    )
+
+    # ------------------------------------------------------------------
+    # Quick horizon presets
+    # ------------------------------------------------------------------
     horizon_buttons: List[Dict[str, Any]] = [
         {
             "type": "button",
@@ -2240,9 +2321,7 @@ def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
         {
             "type": "grid",
             "cards": [
-                {"type": "heading", "heading": "System Identification", "heading_style": "title"},
-                intro_md,
-                run_button,
+                {"type": "heading", "heading": "Quick Horizon Presets", "heading_style": "title"},
                 *horizon_buttons,
             ],
         }
@@ -2292,7 +2371,9 @@ def _sysid_view(spec: DashboardSpec) -> Dict[str, Any]:
             "and supply any combination of:\n\n"
             "| Field | Description | Default |\n"
             "|---|---|---|\n"
-            "| `horizon_hours` | Window length [h] | 6.0 |\n"
+            "| `horizon_hours` | Window length from now [h] (ignored when `window_start`/`window_end` are set) | 6.0 |\n"
+            "| `window_start` | UNIX timestamp – explicit window start (overrides horizon) | — |\n"
+            "| `window_end` | UNIX timestamp – explicit window end | — |\n"
             "| `sigma_w` | Continuous process noise intensity [K/√s] | controller σ_w |\n"
             "| `sigma_v` | Measurement noise std [°C] | controller σ_v |\n"
             + "".join(

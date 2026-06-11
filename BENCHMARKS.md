@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-06-04 16:59 UTC*
+*Generated: 2026-06-11 10:26 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -42,9 +42,9 @@ History buffer: 90 steps (1-minute samples) of synthetic data.
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | IPOPT    | IPOPT          |    4410.0 |      4410.0 |   4410.0 |    1 |
-| two-bedroom-2room      | IPOPT    | SLSQP          |   25225.7 |     25225.7 |  25225.7 |    1 |
-| full-house-5room       | IPOPT    | IPOPT          |   45150.7 |     45150.7 |  45150.7 |    1 |
+| studio-1room           | IPOPT    | IPOPT          |    5246.5 |      5246.5 |   5246.5 |    1 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |   14869.6 |     14869.6 |  14869.6 |    1 |
+| full-house-5room       | IPOPT    | IPOPT          |    6242.4 |      6242.4 |   6242.4 |    1 |
 
 **Configurations:**
 
@@ -60,9 +60,9 @@ History buffer: 90 steps (1-minute samples) of synthetic data.
 
 | Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |
 |-----------------------------|------------------------|------------|-----------------|-----------------|----------|
-| KalmanMLEstimator.estimate  | studio-1room           | IPOPT    |      2382.8 |      4410.0 |     85.1% (slower) |
-| KalmanMLEstimator.estimate  | two-bedroom-2room      | IPOPT    |     14251.1 |     25225.7 |     77.0% (slower) |
-| KalmanMLEstimator.estimate  | full-house-5room       | IPOPT    |     22929.7 |     45150.7 |     96.9% (slower) |
+| KalmanMLEstimator.estimate  | studio-1room           | IPOPT    |      4410.0 |      5246.5 |     19.0% (slower) |
+| KalmanMLEstimator.estimate  | two-bedroom-2room      | IPOPT    |     25225.7 |     14869.6 |    -41.1% (faster) |
+| KalmanMLEstimator.estimate  | full-house-5room       | IPOPT    |     45150.7 |      6242.4 |    -86.2% (faster) |
 
 ---
 

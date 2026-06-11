@@ -207,7 +207,7 @@ from .yaml_merge import MergedEntry as _MergedEntry, merge_yaml_into_entry_data 
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["climate", "sensor", "button"]
+PLATFORMS = ["climate", "sensor", "button", "datetime"]
 
 SERVICE_SIMULATE_THERMAL_RESPONSE = "simulate_thermal_response"
 SERVICE_ESTIMATE_PARAMETERS = "estimate_parameters"
@@ -1826,10 +1826,14 @@ def _register_services(hass: HomeAssistant) -> None:
             if "error" not in result:
                 per_room = result.get("per_room", {})
 
-                # Tag each per-room result with the horizon so the sensor can
-                # derive horizon_hours without knowing dt.
+                # Tag each per-room result with the horizon and window so the
+                # sensor can surface them without knowing dt or call.data.
                 for room_data in per_room.values():
                     room_data["horizon_steps"] = result.get("horizon_steps", horizon_steps)
+                    if window_start is not None:
+                        room_data["window_start"] = window_start
+                    if window_end is not None:
+                        room_data["window_end"] = window_end
 
                 # Filter to requested room if specified
                 if room_name_filter:

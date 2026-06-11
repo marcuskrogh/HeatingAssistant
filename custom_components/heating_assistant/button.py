@@ -33,6 +33,7 @@ async def async_setup_entry(
     async_add_entities([
         EstimateParametersButton(coordinator),
         ResetParametersButton(coordinator),
+        RunSysIdWithWindowButton(coordinator),
     ])
 
 
@@ -114,3 +115,72 @@ class ResetParametersButton(ButtonEntity):
         """
         self._coordinator.reset_estimated_parameters()
         self._coordinator.async_update_listeners()
+
+
+class RunSysIdWithWindowButton(ButtonEntity):
+    """
+    Button that runs the SysID simulation over the explicitly selected time
+    window defined by the two SysID datetime pickers.
+
+    The button reads the current ``native_value`` of
+    ``datetime.heating_assistant_sysid_window_start`` and
+    ``datetime.heating_assistant_sysid_window_end``, converts them to UNIX
+    timestamps, then calls ``run_sysid_simulation`` with ``window_start`` /
+    ``window_end`` so only data in that range is used.
+    """
+
+    _attr_icon = "mdi:calendar-search"
+    _attr_has_entity_name = False
+
+    def __init__(self, coordinator: HeatingAssistantCoordinator) -> None:
+        self._coordinator = coordinator
+        self._attr_name = "Heating Assistant – Run SysID with Window"
+        self._attr_unique_id = f"{DOMAIN}_run_sysid_with_window_button"
+
+    async def async_press(self) -> None:
+        """Read datetime entities and call run_sysid_simulation with window_spec."""
+        from .const import DOMAIN as _DOMAIN
+
+        start_eid = f"datetime.{_DOMAIN}_sysid_window_start"
+        end_eid = f"datetime.{_DOMAIN}_sysid_window_end"
+
+        start_state = self.hass.states.get(start_eid)
+        end_state = self.hass.states.get(end_eid)
+
+        if start_state is None or end_state is None:
+            _LOGGER.warning(
+                "SysID window datetime entities not found (%s, %s) – "
+                "falling back to default horizon",
+                start_eid,
+                end_eid,
+            )
+            await self.hass.services.async_call(
+                _DOMAIN,
+                "run_sysid_simulation",
+                {},
+                blocking=False,
+            )
+            return
+
+        try:
+            from datetime import timezone as _tz
+            from datetime import datetime as _dt
+
+            def _parse(state_str: str) -> float:
+                dt = _dt.fromisoformat(state_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=_tz.utc)
+                return dt.timestamp()
+
+            window_start = _parse(start_state.state)
+            window_end = _parse(end_state.state)
+        except (ValueError, TypeError) as exc:
+            _LOGGER.error("Could not parse SysID window datetimes: %s", exc)
+            return
+
+        await self.hass.services.async_call(
+            _DOMAIN,
+            "run_sysid_simulation",
+            {"window_start": window_start, "window_end": window_end},
+            blocking=False,
+        )

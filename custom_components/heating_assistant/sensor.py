@@ -2648,6 +2648,8 @@ class SysIdSimulationSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
             "rmse": room_data.get("rmse"),
             "mae": room_data.get("mae"),
             "horizon_hours": horizon_hours,
+            "window_start": room_data.get("window_start"),
+            "window_end": room_data.get("window_end"),
         }
 
 
