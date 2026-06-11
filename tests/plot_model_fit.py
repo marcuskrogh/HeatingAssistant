@@ -16,22 +16,45 @@ Snapshot (--snapshot history.json):
     model parameters (currently not supported — re-run in synthetic mode
     to see those figures).
 
+Window selection
+----------------
+By default the script shows all available history.  Three ways to restrict
+the identification window:
+
+1. **Recent trailing window** (``--horizon HOURS``): use the last N hours of data
+   (like the HA dashboard horizon slider).
+
+2. **Explicit box selection** (``--start`` / ``--end``): pick an exact date/time
+   range, e.g. to target an overnight step-response experiment.
+
+      --start "2024-01-15 22:00" --end "2024-01-16 06:00"
+      --start 1705363200           --end 1705392000   # UNIX timestamps
+      --start 1705363200           # use from this point to end of history
+
+3. **Interactive Grafana-like selection** (``--interactive``): shows a full-history
+   overview with a draggable span selector.  Drag to highlight a region, then
+   close the window to use it as the identification window.  Requires an
+   interactive matplotlib backend (TkAgg / Qt5Agg).
+
 Usage
 -----
-    python tests/plot_model_fit.py                          # synthetic mode
-    python tests/plot_model_fit.py --snapshot history.json  # snapshot mode
-    python tests/plot_model_fit.py --room bedroom           # single room
-    python tests/plot_model_fit.py --save-dir /tmp/plots    # save PNGs
+    python tests/plot_model_fit.py                                 # synthetic, all data
+    python tests/plot_model_fit.py --snapshot history.json         # snapshot mode
+    python tests/plot_model_fit.py --horizon 6                     # last 6 h only
+    python tests/plot_model_fit.py --start "2024-01-15 22:00" --end "2024-01-16 06:00"
+    python tests/plot_model_fit.py --interactive                   # Grafana-like selector
+    python tests/plot_model_fit.py --room bedroom                  # single room
+    python tests/plot_model_fit.py --save-dir /tmp/plots           # save PNGs
 
-Six figures — each corresponds 1:1 to an Apex Charts card in
-MODEL_FIT_GUIDE.md:
+Seven figures (Fig 0 is the window-context overview, 1–6 are analysis):
 
-    1. Temperature history      – measured / predicted / setpoint / constraint
-    2. Prediction error + ACF   – residual time-series + autocorrelation bars
-    3. Heating power            – per-room heating fraction × max_power
-    4. Open-loop simulation     – multi-step free-run vs measurement
-    5. Heat flow breakdown      – stacked-area: heating / solar / loss / inter-room
-    6. Log-likelihood surface   – 2D contour of neg-LL vs (log C, log R_ext)
+    0. Window overview     – full history with identified window highlighted
+    1. Temperature history – measured / predicted / setpoint / constraint
+    2. Prediction error    – residual time-series + autocorrelation bars
+    3. Heating power       – per-room heating fraction × max_power
+    4. Open-loop sim.      – multi-step free-run vs measurement
+    5. Heat flow breakdown – stacked-area: heating / solar / loss / inter-room
+    6. Log-likelihood surf – 2D contour of neg-LL vs (log C, log R_ext)
 """
 
 from __future__ import annotations
@@ -42,15 +65,23 @@ import math
 import os
 import sys
 from copy import deepcopy
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-# ── matplotlib backend (must come before pyplot import) ─────────────────────
+# ── Backend selection BEFORE pyplot import ──────────────────────────────────
+# Check for --interactive flag in sys.argv before any pyplot import so we can
+# choose the right backend.  The Agg backend is headless-safe for CI/saving;
+# TkAgg / Qt5Agg are needed for the interactive SpanSelector.
 import matplotlib
-matplotlib.use("Agg")  # use Agg for PNG output; replace with "TkAgg" for interactive
+_INTERACTIVE_MODE = "--interactive" in sys.argv
+if not _INTERACTIVE_MODE:
+    matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from matplotlib.ticker import FuncFormatter
 
 # ── path setup ───────────────────────────────────────────────────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,71 +94,132 @@ sys.path.insert(0, os.path.join(_HERE, ".."))
 
 import types as _types
 
-def _stub_module(name: str) -> _types.ModuleType:
+# ── Robust auto-stubbing for HA and voluptuous ────────────────────────────────
+# The integration package's __init__.py imports many HA symbols at module level.
+# Rather than enumerating every one, we use stub modules whose __getattr__
+# returns a suitable sentinel for *any* attribute lookup.
+#
+# Special-cased values match what the integration code actually relies on for
+# the modules imported here (thermal_model, heat_sources, model_diagnostics,
+# history_window).
+
+class _AutoClass:
+    """Returned for any attribute that should act like a class."""
+    def __init__(self, *a, **kw): pass
+    def __init_subclass__(cls, **kw): pass
+    def __call__(self, *a, **kw): return self
+    def __getattr__(self, name): return _SENTINEL
+    def __bool__(self): return False
+
+class _Sentinel:
+    """Returned for scalar constants that just need to exist."""
+    def __init__(self, name="<stub>"): self._n = name
+    def __repr__(self): return self._n
+    def __str__(self): return self._n
+    def __eq__(self, o): return isinstance(o, _Sentinel) and self._n == o._n
+    def __hash__(self): return hash(self._n)
+    def __call__(self, *a, **kw): return self
+    def __getattr__(self, name): return _Sentinel(name)
+    def __iter__(self): return iter([])
+    def __bool__(self): return False
+
+_SENTINEL = _Sentinel()
+
+
+class _AutoStubModule(_types.ModuleType):
+    """A stub module that returns a _Sentinel for any attribute access."""
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.__path__: list = []
+
+    def __getattr__(self, name: str):  # type: ignore[override]
+        # Return an exception-derived class for names ending in Error/Exception/Ready
+        if any(name.endswith(s) for s in ("Error", "Exception", "NotReady", "Invalid")):
+            exc_cls = type(name, (Exception,), {})
+            setattr(self, name, exc_cls)
+            return exc_cls
+        # Return a callable class for PascalCase names (likely a class)
+        if name and name[0].isupper():
+            stub_cls = type(name, (_AutoClass,), {"__module__": self.__name__})
+            setattr(self, name, stub_cls)
+            return stub_cls
+        # Everything else is a sentinel constant
+        val = _Sentinel(name)
+        setattr(self, name, val)
+        return val
+
+
+def _stub_module(name: str) -> _AutoStubModule:
     parts = name.split(".")
     for i in range(1, len(parts) + 1):
         pkg = ".".join(parts[:i])
         if pkg not in sys.modules:
-            mod = _types.ModuleType(pkg)
-            mod.__path__ = []  # type: ignore[attr-defined]
+            mod = _AutoStubModule(pkg)
             sys.modules[pkg] = mod
-    return sys.modules[name]
+        elif not isinstance(sys.modules[pkg], _AutoStubModule):
+            pass  # already a real module (e.g., numpy)
+    m = sys.modules[name]
+    if not isinstance(m, _AutoStubModule):
+        return _AutoStubModule(name)  # return a fresh one without registering
+    return m  # type: ignore[return-value]
 
-_HA_PACKAGES = [
-    "voluptuous",
-    "homeassistant", "homeassistant.core", "homeassistant.config_entries",
-    "homeassistant.const", "homeassistant.helpers", "homeassistant.helpers.entity",
-    "homeassistant.helpers.update_coordinator", "homeassistant.helpers.event",
-    "homeassistant.helpers.storage", "homeassistant.helpers.config_validation",
-    "homeassistant.helpers.entity_platform", "homeassistant.components",
-    "homeassistant.components.sensor", "homeassistant.components.climate",
-    "homeassistant.components.button", "homeassistant.components.number",
-    "homeassistant.components.select", "homeassistant.components.notify",
-]
-for _p in _HA_PACKAGES:
-    _stub_module(_p)
 
-class _FE:
-    CELSIUS = "°C"; MEASUREMENT = "measurement"; TOTAL = "total"
-    HUMIDITY = "humidity"; TEMPERATURE = "temperature"; POWER = "power"
-    ENERGY = "energy"; SENSOR = "sensor"; CLIMATE = "climate"; BUTTON = "button"
+import importlib.abc as _iabc
+import importlib.machinery as _imach
 
-sys.modules["homeassistant.core"].HomeAssistant = object          # type: ignore
-sys.modules["homeassistant.core"].callback      = lambda f: f     # type: ignore
-sys.modules["homeassistant.core"].ServiceCall   = object          # type: ignore
-sys.modules["homeassistant.config_entries"].ConfigEntry = object  # type: ignore
-sys.modules["homeassistant.config_entries"].ConfigFlow  = object  # type: ignore
-sys.modules["homeassistant.config_entries"].OptionsFlow = object  # type: ignore
-sys.modules["homeassistant.config_entries"].SOURCE_USER = "user"  # type: ignore
-for _a in ["CONF_NAME","CONF_LATITUDE","CONF_LONGITUDE","STATE_UNAVAILABLE",
-           "STATE_UNKNOWN","TEMP_CELSIUS","PERCENTAGE","Platform"]:
-    setattr(sys.modules["homeassistant.const"], _a, _a)
-sys.modules["homeassistant.const"].UnitOfTemperature = _FE         # type: ignore
-sys.modules["homeassistant.helpers.entity"].Entity = object        # type: ignore
-_coord = sys.modules["homeassistant.helpers.update_coordinator"]
-_coord.DataUpdateCoordinator = object; _coord.CoordinatorEntity = object  # type: ignore
-_coord.UpdateFailed = Exception                                    # type: ignore
-_cv = sys.modules["homeassistant.helpers.config_validation"]
+class _HAStubFinder(_iabc.MetaPathFinder, _iabc.Loader):
+    """Intercept imports of homeassistant.* and voluptuous and return auto-stubs."""
+
+    _PREFIXES = ("homeassistant", "voluptuous")
+
+    def find_module(self, name, path=None):  # legacy interface, keep for compat
+        return self if any(name == p or name.startswith(p + ".") for p in self._PREFIXES) else None
+
+    def find_spec(self, name, path, target=None):
+        if any(name == p or name.startswith(p + ".") for p in self._PREFIXES):
+            return _imach.ModuleSpec(name, self, is_package=True)
+        return None
+
+    def create_module(self, spec):
+        if spec.name in sys.modules:
+            return sys.modules[spec.name]
+        mod = _AutoStubModule(spec.name)
+        sys.modules[spec.name] = mod
+        return mod
+
+    def exec_module(self, module):
+        pass  # nothing to execute; the auto-stub __getattr__ handles the rest
+
+# Install the finder BEFORE any HA imports happen.
+sys.meta_path.insert(0, _HAStubFinder())
+
+# Voluptuous needs special callable stubs (schema/validator factories).
+import voluptuous as _vol  # noqa: E402  — the stub finder intercepts this
+_vol.Schema   = lambda schema=None, **kw: (lambda x: x)  # type: ignore
+_vol.Required = lambda key, **kw: key                     # type: ignore
+_vol.Optional = lambda key, **kw: key                     # type: ignore
+_vol.All      = lambda *a: a[0] if a else None            # type: ignore
+_vol.Coerce   = lambda t: t                               # type: ignore
+_vol.Range    = lambda **kw: None                         # type: ignore
+_vol.In       = lambda v: None                            # type: ignore
+_vol.REMOVE_EXTRA = "REMOVE_EXTRA"                        # type: ignore
+_vol.ALLOW_EXTRA  = "ALLOW_EXTRA"                         # type: ignore
+_vol.PREVENT_EXTRA = "PREVENT_EXTRA"                      # type: ignore
+
+# homeassistant.core.callback must be the identity decorator
+import homeassistant.core as _ha_core  # noqa: E402
+_ha_core.callback = lambda f: f        # type: ignore
+
+# config_validation helpers used in YAML config schemas
+import homeassistant.helpers.config_validation as _cv  # noqa: E402
 _cv.string = str; _cv.positive_float = float; _cv.positive_int = int  # type: ignore
-_cv.boolean = bool; _cv.entity_id = str; _cv.entity_ids = list    # type: ignore
-_cv.ensure_list = list                                             # type: ignore
-_cv.make_entity_service_schema = lambda s: s                       # type: ignore
-sys.modules["homeassistant.components.sensor"].SensorEntity      = object  # type: ignore
-sys.modules["homeassistant.components.sensor"].SensorDeviceClass = _FE    # type: ignore
-sys.modules["homeassistant.components.sensor"].SensorStateClass  = _FE    # type: ignore
-sys.modules["homeassistant.components.climate"].ClimateEntity    = object  # type: ignore
-sys.modules["homeassistant.components.climate"].ClimateEntityFeature = _FE  # type: ignore
-sys.modules["homeassistant.components.climate"].HVACMode         = _FE    # type: ignore
-sys.modules["homeassistant.components.button"].ButtonEntity      = object  # type: ignore
-_vol = sys.modules["voluptuous"]
-_vol.Schema = lambda schema=None, **kw: (lambda x: x)  # type: ignore
-_vol.Required = lambda key, **kw: key                  # type: ignore
-_vol.Optional = lambda key, **kw: key                  # type: ignore
-_vol.All = lambda *a: a[0] if a else None              # type: ignore
-_vol.Coerce = lambda t: t; _vol.Range = lambda **kw: None  # type: ignore
-_vol.In = lambda v: None                               # type: ignore
-_vol.REMOVE_EXTRA = "REMOVE_EXTRA"; _vol.ALLOW_EXTRA = "ALLOW_EXTRA"  # type: ignore
-_vol.PREVENT_EXTRA = "PREVENT_EXTRA"                   # type: ignore
+_cv.boolean = bool; _cv.entity_id = str; _cv.entity_ids = list        # type: ignore
+_cv.ensure_list = list                                                 # type: ignore
+_cv.make_entity_service_schema = lambda s: s                           # type: ignore
+
+import homeassistant.helpers.update_coordinator as _coord  # noqa: E402
+_coord.UpdateFailed = Exception                            # type: ignore
 
 from custom_components.heating_assistant.thermal_model import (
     HouseModel, Room, RoomConnection,
@@ -135,6 +227,11 @@ from custom_components.heating_assistant.thermal_model import (
 from custom_components.heating_assistant.heat_sources import ElectricHeater
 from custom_components.heating_assistant.model_diagnostics import (
     compute_autocorrelation_function,
+)
+from custom_components.heating_assistant.history_window import (
+    select_recent_window,
+    select_window_by_timestamps,
+    history_time_range,
 )
 
 # ── Apex Charts colour palette (matches MODEL_FIT_GUIDE.md) ─────────────────
@@ -148,9 +245,132 @@ C_SOLAR       = "#FF9800"   # orange
 C_EXT_LOSS    = "#F44336"   # red
 C_INTER_ROOM  = "#2196F3"   # blue
 C_GRID        = "#E0E0E0"   # light grey
+C_WINDOW_FILL = "#2196F3"   # blue for window highlight
+C_OVERVIEW_BG = "#F5F5F5"   # light grey for out-of-window data
+
+# Colour rotation for overview room lines
+_ROOM_COLORS = ["#2196F3", "#FF9800", "#4CAF50", "#F44336", "#9C27B0", "#00BCD4"]
 
 FIGSIZE = (12, 6)
 DPI     = 100
+
+
+# ── Datetime helpers ─────────────────────────────────────────────────────────
+
+def _is_real_ts(ts: float) -> bool:
+    """Return True if ``ts`` looks like a real UNIX timestamp (after year 2001)."""
+    return ts > 1_000_000_000.0
+
+
+def _ts_to_label(ts: float) -> str:
+    """Format a UNIX timestamp as a human-readable datetime string."""
+    try:
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+    except (OSError, OverflowError, ValueError):
+        return f"{ts:.0f}"
+
+
+def _parse_datetime_arg(s: str) -> float:
+    """Parse a ``--start`` / ``--end`` argument to a UNIX timestamp [s].
+
+    Accepts ISO-format datetime strings (``YYYY-MM-DD HH:MM:SS``,
+    ``YYYY-MM-DD HH:MM``, ``YYYY-MM-DD``) and plain float timestamps.
+    """
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).timestamp()
+        except ValueError:
+            pass
+    return float(s)
+
+
+# ── X-axis helpers ───────────────────────────────────────────────────────────
+
+def _x_axis_data(
+    history: List[Dict[str, Any]],
+    dt: float = 60.0,
+) -> Tuple[np.ndarray, str, bool, float]:
+    """Return ``(x_vals, xlabel, is_real_ts, base_ts)`` for plotting.
+
+    For synthetic histories (small timestamps) ``x_vals`` is in minutes from 0.
+    For real HA histories (UNIX epoch timestamps) ``x_vals`` is in hours from
+    the window start so axes are compact; tick labels show human-readable times.
+
+    Returns
+    -------
+    x_vals : ndarray of shape (len(history),)
+    xlabel : axis label string
+    is_real_ts : True when timestamps are real UNIX epoch values
+    base_ts : UNIX timestamp of the first record (0.0 for synthetic)
+    """
+    if not history:
+        return np.array([]), "Time [min]", False, 0.0
+
+    ts_all = np.array([float(r.get("timestamp", 0.0)) for r in history])
+    base_ts = float(ts_all[0])
+
+    if _is_real_ts(base_ts):
+        x_vals = (ts_all - base_ts) / 3600.0  # hours from window start
+        return x_vals, f"Time  [h from {_ts_to_label(base_ts)}]", True, base_ts
+    else:
+        return ts_all / 60.0, "Time [min]", False, 0.0
+
+
+def _apply_datetime_ticks(
+    ax: plt.Axes,
+    base_ts: float,
+    span_hours: float,
+    axis: str = "x",
+) -> None:
+    """Apply human-readable datetime tick labels to a real-timestamp axis.
+
+    The axis values are hours from ``base_ts``; ticks are formatted as
+    ``MM-DD\\nHH:MM`` (or ``HH:MM`` for short spans).
+    """
+    if span_hours <= 2:
+        fmt_str = "%H:%M"
+    elif span_hours <= 48:
+        fmt_str = "%m-%d\n%H:%M"
+    else:
+        fmt_str = "%m-%d"
+
+    def _fmt(x_hours: float, _pos: Any) -> str:
+        try:
+            ts = base_ts + x_hours * 3600.0
+            return datetime.fromtimestamp(ts).strftime(fmt_str)
+        except (OSError, OverflowError):
+            return ""
+
+    formatter = FuncFormatter(_fmt)
+    if axis == "x":
+        ax.xaxis.set_major_formatter(formatter)
+    else:
+        ax.yaxis.set_major_formatter(formatter)
+
+
+# ── Style helper ─────────────────────────────────────────────────────────────
+
+def _style_ax(ax: plt.Axes, title: str, xlabel: str, ylabel: str) -> None:
+    ax.set_facecolor("white")
+    ax.grid(color=C_GRID, linewidth=0.8)
+    ax.set_title(title, fontsize=10, pad=4)
+    ax.set_xlabel(xlabel, fontsize=8)
+    ax.set_ylabel(ylabel, fontsize=8)
+    ax.tick_params(labelsize=7)
+    for spine in ax.spines.values():
+        spine.set_color(C_GRID)
+
+
+# Legacy helper kept for internal compatibility
+def _x_minutes(history: List[Dict[str, Any]], dt: float = 60.0) -> np.ndarray:
+    """Return x-axis values in minutes, using timestamps if present."""
+    ts = [r.get("timestamp") for r in history]
+    if ts[0] is not None:
+        try:
+            return np.array([float(t) / 60.0 for t in ts])
+        except (TypeError, ValueError):
+            pass
+    return np.arange(len(history)) * dt / 60.0
 
 
 # ── Model factories ───────────────────────────────────────────────────────────
@@ -526,28 +746,289 @@ def compute_ll_surface(
     }
 
 
-# ── Plot helpers ──────────────────────────────────────────────────────────────
+# ── Figure 0: Window overview ─────────────────────────────────────────────────
 
-def _style_ax(ax: plt.Axes, title: str, xlabel: str, ylabel: str) -> None:
+def fig_window_overview(
+    full_history: List[Dict[str, Any]],
+    window_history: List[Dict[str, Any]],
+    room_names: List[str],
+    dt: float = 60.0,
+) -> plt.Figure:
+    """
+    Figure 0 — Identification window overview.
+
+    Shows all room temperatures across the **full** history buffer.  The
+    selected identification window is highlighted with a shaded band and
+    boundary markers.  When the window covers the entire history the
+    highlight spans the full plot.
+
+    This figure provides context for *where* in the data the current window
+    sits — particularly useful when the window is a specific past experiment
+    (e.g. an overnight step-response test that is not the latest data).
+    """
+    if not full_history:
+        fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        fig.suptitle("Figure 0 — Window Overview (no data)", fontsize=11)
+        return fig
+
+    # Full-history x-axis in hours from the very first record
+    ts_full = np.array([float(r.get("timestamp", 0.0)) for r in full_history])
+    base_ts_full = float(ts_full[0])
+    is_real = _is_real_ts(base_ts_full)
+
+    if is_real:
+        x_full = (ts_full - base_ts_full) / 3600.0
+        xlabel = f"Time  [h from {_ts_to_label(base_ts_full)}]"
+    else:
+        x_full = ts_full / 60.0
+        xlabel = "Time [min]"
+
+    fig, ax = plt.subplots(figsize=FIGSIZE, dpi=DPI)
     ax.set_facecolor("white")
-    ax.grid(color=C_GRID, linewidth=0.8)
-    ax.set_title(title, fontsize=10, pad=4)
-    ax.set_xlabel(xlabel, fontsize=8)
-    ax.set_ylabel(ylabel, fontsize=8)
-    ax.tick_params(labelsize=7)
+    ax.grid(color=C_GRID, linewidth=0.8, zorder=0)
+
+    # Dimmed full-history lines (all rooms in grey)
+    for ridx, nm in enumerate(room_names):
+        y_full = np.array([
+            float(r["y"][ridx]) if ridx < len(r.get("y", [])) else np.nan
+            for r in full_history
+        ])
+        ax.plot(x_full[:len(y_full)], y_full,
+                color="#BDBDBD", lw=0.8, alpha=0.7, zorder=1)
+
+    # Window bounds in x-axis units
+    win_ts = np.array([float(r.get("timestamp", 0.0)) for r in window_history]) if window_history else np.array([])
+    if len(win_ts) >= 2:
+        if is_real:
+            x_win_start = (float(win_ts[0])  - base_ts_full) / 3600.0
+            x_win_end   = (float(win_ts[-1]) - base_ts_full) / 3600.0
+        else:
+            x_win_start = float(win_ts[0])  / 60.0
+            x_win_end   = float(win_ts[-1]) / 60.0
+
+        # Highlight the selected window
+        ax.axvspan(x_win_start, x_win_end,
+                   color=C_WINDOW_FILL, alpha=0.10, zorder=2, label="_highlight")
+        ax.axvline(x_win_start, color=C_WINDOW_FILL, lw=1.5, ls="--", zorder=3, alpha=0.8)
+        ax.axvline(x_win_end,   color=C_WINDOW_FILL, lw=1.5, ls="--", zorder=3, alpha=0.8)
+
+        # Coloured room lines inside the window
+        x_win = win_ts.copy()
+        if is_real:
+            x_win = (x_win - base_ts_full) / 3600.0
+        else:
+            x_win = x_win / 60.0
+
+        for ridx, nm in enumerate(room_names):
+            y_win = np.array([
+                float(r["y"][ridx]) if ridx < len(r.get("y", [])) else np.nan
+                for r in window_history
+            ])
+            color = _ROOM_COLORS[ridx % len(_ROOM_COLORS)]
+            ax.plot(x_win[:len(y_win)], y_win,
+                    color=color, lw=1.4, zorder=4,
+                    label=nm.replace("_", " ").title())
+
+        # Annotate window boundaries with actual date/time
+        y_top = ax.get_ylim()[1]
+        if is_real:
+            lbl_start = _ts_to_label(float(win_ts[0]))
+            lbl_end   = _ts_to_label(float(win_ts[-1]))
+        else:
+            lbl_start = f"{x_win_start:.0f} min"
+            lbl_end   = f"{x_win_end:.0f} min"
+
+        win_hours = (float(win_ts[-1]) - float(win_ts[0])) / 3600.0
+        win_steps = len(window_history)
+        ax.text(x_win_start, ax.get_ylim()[1], f" {lbl_start}",
+                fontsize=7, color=C_WINDOW_FILL, va="top", ha="left",
+                transform=ax.get_xaxis_transform(), clip_on=True)
+        ax.text(x_win_end, ax.get_ylim()[1], f"{lbl_end} ",
+                fontsize=7, color=C_WINDOW_FILL, va="top", ha="right",
+                transform=ax.get_xaxis_transform(), clip_on=True)
+
+        full_hours = (float(ts_full[-1]) - float(ts_full[0])) / 3600.0
+        title = (
+            f"Figure 0 — Identification Window Overview\n"
+            f"Window: {lbl_start}  →  {lbl_end}  "
+            f"({win_hours:.1f} h · {win_steps} steps)  "
+            f"|  Full history: {full_hours:.1f} h · {len(full_history)} steps"
+        )
+    else:
+        title = "Figure 0 — Identification Window Overview  (no window selected)"
+
+    _style_ax(ax, title, xlabel, "Temperature [°C]")
+    if is_real:
+        full_span_h = (float(ts_full[-1]) - float(ts_full[0])) / 3600.0
+        _apply_datetime_ticks(ax, base_ts_full, full_span_h)
+    ax.legend(fontsize=7, loc="upper right")
+
     for spine in ax.spines.values():
         spine.set_color(C_GRID)
 
+    fig.tight_layout()
+    return fig
 
-def _x_minutes(history: List[Dict[str, Any]], dt: float = 60.0) -> np.ndarray:
-    """Return x-axis values in minutes, using timestamps if present."""
-    ts = [r.get("timestamp") for r in history]
-    if ts[0] is not None:
+
+# ── Interactive window selector ───────────────────────────────────────────────
+
+def interactive_window_selector(
+    history: List[Dict[str, Any]],
+    room_names: List[str],
+    dt: float = 60.0,
+    initial_start_ts: Optional[float] = None,
+    initial_end_ts: Optional[float] = None,
+) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Launch a Grafana-like interactive window selector.
+
+    Displays all room temperatures over the full history.  The user can:
+
+    * **Drag** on the plot to define a time window (like Grafana's time-range
+      brush).  A semi-transparent blue highlight shows the selection in
+      real time.
+    * **Resize** the selection by dragging its edges (interactive SpanSelector).
+    * **Close** the figure (or press Enter) to confirm the current selection.
+
+    If no selection is made before the window is closed, ``(None, None)`` is
+    returned and the caller falls back to the full history.
+
+    Requires an interactive matplotlib backend (TkAgg, Qt5Agg, etc.).  If the
+    backend cannot be switched, a console prompt is used as fallback.
+
+    Parameters
+    ----------
+    history
+        Full history buffer (all available data).
+    room_names
+        Room names to display.
+    dt
+        Nominal sampling interval [s] (used for formatting only).
+    initial_start_ts, initial_end_ts
+        Optional pre-selection shown when the figure opens, e.g. from a
+        previous ``--start`` / ``--end`` argument.
+
+    Returns
+    -------
+    (start_ts, end_ts) as UNIX timestamps [s], or (None, None) if not selected.
+    """
+    from matplotlib.widgets import SpanSelector
+
+    if not history:
+        return None, None
+
+    ts_all = np.array([float(r.get("timestamp", 0.0)) for r in history])
+    base_ts = float(ts_all[0])
+    is_real = _is_real_ts(base_ts)
+    full_span_h = (float(ts_all[-1]) - base_ts) / 3600.0
+
+    if is_real:
+        x_all = (ts_all - base_ts) / 3600.0
+        xlabel = f"Time  [h from {_ts_to_label(base_ts)}]"
+    else:
+        x_all = ts_all / 60.0
+        xlabel = "Time [min]"
+
+    n_rooms = len(room_names)
+    fig_height = max(4.0, 2.0 + n_rooms * 0.8)
+    fig, ax = plt.subplots(figsize=(14, fig_height))
+    fig.patch.set_facecolor("#1C1C2E")
+    ax.set_facecolor("#252540")
+
+    # Grid
+    ax.grid(color="#3A3A5C", linewidth=0.7, zorder=0)
+    for spine in ax.spines.values():
+        spine.set_color("#3A3A5C")
+    ax.tick_params(colors="#CCCCCC", labelsize=8)
+    ax.xaxis.label.set_color("#CCCCCC")
+    ax.yaxis.label.set_color("#CCCCCC")
+
+    # Room temperature lines
+    for ridx, nm in enumerate(room_names):
+        y_arr = np.array([
+            float(r["y"][ridx]) if ridx < len(r.get("y", [])) else np.nan
+            for r in history
+        ])
+        color = _ROOM_COLORS[ridx % len(_ROOM_COLORS)]
+        ax.plot(x_all[:len(y_arr)], y_arr,
+                color=color, lw=1.3, alpha=0.9, label=nm.replace("_", " ").title(),
+                zorder=2)
+
+    # Pre-existing selection (from --start/--end args)
+    if initial_start_ts is not None and initial_end_ts is not None:
+        if is_real:
+            x_s = (initial_start_ts - base_ts) / 3600.0
+            x_e = (initial_end_ts   - base_ts) / 3600.0
+        else:
+            x_s = initial_start_ts / 60.0
+            x_e = initial_end_ts   / 60.0
+        ax.axvspan(x_s, x_e, color="#2196F3", alpha=0.20, zorder=1)
+
+    ax.set_xlabel(xlabel, color="#CCCCCC", fontsize=9)
+    ax.set_ylabel("Temperature [°C]", color="#CCCCCC", fontsize=9)
+    if is_real:
+        _apply_datetime_ticks(ax, base_ts, full_span_h)
+
+    title = (
+        "Identification Window Selector — Grafana-style\n"
+        "Drag to select · Drag edges to resize · Close window to confirm · "
+        "Close without selecting for full history"
+    )
+    ax.set_title(title, color="#E0E0E0", fontsize=9, pad=8)
+    ax.legend(fontsize=8, facecolor="#1C1C2E", labelcolor="#CCCCCC",
+              edgecolor="#3A3A5C", loc="upper right")
+
+    fig.tight_layout()
+
+    # SpanSelector: drag to define the window
+    selected: List[Optional[Tuple[float, float]]] = [None]
+
+    def on_select(xmin: float, xmax: float) -> None:
+        if abs(xmax - xmin) < 1e-6:
+            return
+        selected[0] = (xmin, xmax)
+        if is_real:
+            ts_s = base_ts + xmin * 3600.0
+            ts_e = base_ts + xmax * 3600.0
+            lbl_s = _ts_to_label(ts_s)
+            lbl_e = _ts_to_label(ts_e)
+            span_h = (ts_e - ts_s) / 3600.0
+            status = f"Selected: {lbl_s}  →  {lbl_e}  ({span_h:.2f} h)"
+        else:
+            span_m = xmax - xmin
+            status = f"Selected: {xmin:.1f}  →  {xmax:.1f} min  ({span_m:.1f} min)"
+        print(f"\r  {status}   ", end="", flush=True)
         try:
-            return np.array([float(t) / 60.0 for t in ts])
-        except (TypeError, ValueError):
+            fig.canvas.manager.set_window_title(f"Window: {status}")  # type: ignore[attr-defined]
+        except AttributeError:
             pass
-    return np.arange(len(history)) * dt / 60.0
+
+    span_sel = SpanSelector(  # noqa: F841 — must stay alive to keep callbacks connected
+        ax, on_select, "horizontal",
+        useblit=True,
+        props=dict(alpha=0.30, facecolor="#2196F3", edgecolor="#64B5F6", linewidth=1.5),
+        interactive=True,
+        drag_from_anywhere=True,
+    )
+
+    print("\n  Interactive window selector — dark Grafana-style view.")
+    print("  Drag on the chart to select an identification window.")
+    print("  Close the window (or press Enter in the terminal) to confirm.")
+    plt.show()
+
+    # plt.show() blocks until the figure is closed
+    print()
+
+    if selected[0] is None:
+        print("  No selection → using full history.")
+        return None, None
+
+    xmin, xmax = selected[0]
+    if is_real:
+        return base_ts + xmin * 3600.0, base_ts + xmax * 3600.0
+    else:
+        return xmin * 60.0, xmax * 60.0
 
 
 # ── Figure 1: Temperature history ────────────────────────────────────────────
@@ -572,7 +1053,8 @@ def fig_temperature_history(
     if n_rooms == 1:
         axes = [axes]
 
-    x_all = _x_minutes(history, dt)
+    x_all, xlabel, is_real, base_ts = _x_axis_data(history, dt)
+    span_h = float(x_all[-1] - x_all[0]) if len(x_all) >= 2 else 0.0
 
     for ridx, (nm, ax) in enumerate(zip(room_names, axes)):
         y_meas = np.array([r["y"][ridx] for r in history if ridx < len(r.get("y", []))])
@@ -597,7 +1079,9 @@ def fig_temperature_history(
             ax.plot(x_pred[:len(y_pred_arr)], y_pred_arr,
                     color=C_PREDICTED, lw=1.2, alpha=0.85, label="1-step predicted")
 
-        _style_ax(ax, f"{nm.replace('_', ' ').title()}", "Time [min]", "Temperature [°C]")
+        _style_ax(ax, f"{nm.replace('_', ' ').title()}", xlabel, "Temperature [°C]")
+        if is_real:
+            _apply_datetime_ticks(ax, base_ts, span_h)
         ax.legend(fontsize=7, loc="upper right")
 
     fig.suptitle("Figure 1 — Temperature History", fontsize=11, y=1.01)
@@ -623,7 +1107,8 @@ def fig_prediction_error_acf(
     fig = plt.figure(figsize=FIGSIZE, dpi=DPI)
     gs  = gridspec.GridSpec(2, n_rooms, figure=fig, hspace=0.45, wspace=0.35)
 
-    x_all = _x_minutes(history, dt)
+    x_all, xlabel, is_real, base_ts = _x_axis_data(history, dt)
+    span_h = float(x_all[-1] - x_all[0]) if len(x_all) >= 2 else 0.0
 
     for ridx, nm in enumerate(room_names):
         # Build aligned residuals: residual[k] = y_pred[k] - y_meas[k+1]
@@ -644,7 +1129,9 @@ def fig_prediction_error_acf(
         rmse = float(np.sqrt(np.mean(residuals ** 2))) if len(residuals) else float("nan")
         _style_ax(ax_top,
                   f"{nm.replace('_', ' ').title()}\nRMSE={rmse:.3f}°C",
-                  "Time [min]", "Error [°C]")
+                  xlabel, "Error [°C]")
+        if is_real:
+            _apply_datetime_ticks(ax_top, base_ts, span_h)
 
         # ACF
         ax_bot = fig.add_subplot(gs[1, ridx])
@@ -684,7 +1171,8 @@ def fig_heating_power(
     if n_rooms == 1:
         axes = [axes]
 
-    x_all = _x_minutes(history, dt)
+    x_all, xlabel, is_real, base_ts = _x_axis_data(history, dt)
+    span_h = float(x_all[-1] - x_all[0]) if len(x_all) >= 2 else 0.0
     src_by_room = {src.room: src for src in sources}
 
     for ridx, (nm, ax) in enumerate(zip(room_names, axes)):
@@ -697,7 +1185,9 @@ def fig_heating_power(
 
         ax.fill_between(x_all[:len(q_vals)], 0, q_vals, color=C_HEATING, alpha=0.70, step="post")
         ax.step(x_all[:len(q_vals)], q_vals, color=C_HEATING, lw=1.0, where="post")
-        _style_ax(ax, f"{nm.replace('_', ' ').title()}", "Time [min]", "Power [W]")
+        _style_ax(ax, f"{nm.replace('_', ' ').title()}", xlabel, "Power [W]")
+        if is_real:
+            _apply_datetime_ticks(ax, base_ts, span_h)
         if src:
             ax.set_ylim(0, src.max_power * 1.15)
 
@@ -730,6 +1220,9 @@ def fig_open_loop_simulation(
     if n_rooms == 1:
         axes = [axes]
 
+    x_all, xlabel, is_real, base_ts = _x_axis_data(history, dt)
+    span_h = float(x_all[-1] - x_all[0]) if len(x_all) >= 2 else 0.0
+
     for ridx, (nm, ax) in enumerate(zip(room_names, axes)):
         data  = ol["per_room"].get(nm, {})
         preds = np.array(data.get("predictions", []))
@@ -740,21 +1233,24 @@ def fig_open_loop_simulation(
         for s_start in seg_starts:
             x_idx.extend(range(s_start + 1, s_start + seg_len))
         x_idx = x_idx[:len(preds)]
-        x_min = np.array(x_idx) * dt / 60.0
+        x_plot = x_all[np.array(x_idx, dtype=int)] if len(x_idx) else np.array([])
 
-        if len(x_min):
-            ax.plot(x_min, meas[:len(x_min)], color=C_MEASURED,  lw=1.3, label="Measured")
-            ax.plot(x_min, preds[:len(x_min)], color=C_PREDICTED, lw=1.2, alpha=0.85,
+        if len(x_plot):
+            ax.plot(x_plot, meas[:len(x_plot)], color=C_MEASURED,  lw=1.3, label="Measured")
+            ax.plot(x_plot, preds[:len(x_plot)], color=C_PREDICTED, lw=1.2, alpha=0.85,
                     label="Open-loop pred.")
 
         # Segment boundary lines
         for s_start in seg_starts:
-            ax.axvline(s_start * dt / 60.0, color="grey", lw=0.6, ls=":", alpha=0.6)
+            if s_start < len(x_all):
+                ax.axvline(x_all[s_start], color="grey", lw=0.6, ls=":", alpha=0.6)
 
         rmse = data.get("rmse", float("nan"))
         rmse_str = f"{rmse:.3f}" if rmse == rmse else "N/A"
         _style_ax(ax, f"{nm.replace('_', ' ').title()}\nOpen-loop RMSE={rmse_str}°C",
-                  "Time [min]", "Temperature [°C]")
+                  xlabel, "Temperature [°C]")
+        if is_real:
+            _apply_datetime_ticks(ax, base_ts, span_h)
         ax.legend(fontsize=7)
 
     fig.suptitle(
@@ -788,7 +1284,8 @@ def fig_heat_flow_breakdown(
     if n_rooms == 1:
         axes = [axes]
 
-    x_all = _x_minutes(history, dt)
+    x_all, xlabel, is_real, base_ts = _x_axis_data(history, dt)
+    span_h = float(x_all[-1] - x_all[0]) if len(x_all) >= 2 else 0.0
 
     def _smooth(arr: List[float], w: int) -> np.ndarray:
         a = np.array(arr, dtype=float)
@@ -811,7 +1308,9 @@ def fig_heat_flow_breakdown(
         ax.fill_between(x, 0, inter, color=C_INTER_ROOM, alpha=0.45, label="Inter-room")
         ax.axhline(0.0, color="grey", lw=0.7, ls="--")
 
-        _style_ax(ax, f"{nm.replace('_', ' ').title()}", "Time [min]", "Power [W]")
+        _style_ax(ax, f"{nm.replace('_', ' ').title()}", xlabel, "Power [W]")
+        if is_real:
+            _apply_datetime_ticks(ax, base_ts, span_h)
         ax.legend(fontsize=6, loc="upper right")
 
     fig.suptitle(f"Figure 5 — Heat Flow Breakdown  (smoothed {smooth_window}-step MA)",
@@ -890,12 +1389,59 @@ def load_snapshot(path: str) -> List[Dict[str, Any]]:
     raise ValueError(f"Cannot parse snapshot at {path!r}: expected a list or {{history: [...]}} dict.")
 
 
+# ── Window selection helper ───────────────────────────────────────────────────
+
+def apply_window_selection(
+    full_history: List[Dict[str, Any]],
+    start_ts: Optional[float],
+    end_ts: Optional[float],
+    horizon_hours: Optional[float],
+    dt: float = 60.0,
+) -> List[Dict[str, Any]]:
+    """Return the slice of *full_history* matching the requested window.
+
+    Priority order:
+    1. Explicit ``[start_ts, end_ts]`` range when both are given.
+    2. Trailing ``horizon_hours`` window from the end of history.
+    3. Full history when neither is specified.
+
+    Parameters
+    ----------
+    full_history
+        All available history records.
+    start_ts, end_ts
+        Optional explicit UNIX timestamps [s] for box-style selection.
+        ``start_ts`` alone is also accepted (selects from that point to end).
+    horizon_hours
+        Optional trailing-window width [h].  Ignored when ``start_ts`` is set.
+    dt
+        Nominal sampling interval [s].
+    """
+    if not full_history:
+        return []
+
+    min_ts, max_ts = history_time_range(full_history)
+    if min_ts is None or max_ts is None:
+        return list(full_history)
+
+    if start_ts is not None:
+        eff_end = end_ts if end_ts is not None else max_ts
+        window = select_window_by_timestamps(full_history, start_ts, eff_end)
+        return window if window else list(full_history)
+
+    if horizon_hours is not None and horizon_hours > 0:
+        return select_recent_window(full_history, horizon_hours * 3600.0)
+
+    return list(full_history)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Heating Assistant — local model-fit visualisation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
     )
     p.add_argument("--snapshot",   metavar="PATH",
                    help="JSON history buffer exported from HA (snapshot mode)")
@@ -917,6 +1463,49 @@ def parse_args() -> argparse.Namespace:
                    help="Grid resolution for LL surface (default 30)")
     p.add_argument("--no-fig4",    action="store_true", help="Skip open-loop figure")
     p.add_argument("--no-fig6",    action="store_true", help="Skip LL surface figure")
+
+    # Window selection arguments
+    win = p.add_argument_group(
+        "Window selection",
+        "Control which slice of the history is used for identification.\n"
+        "Priority: --start/--end > --horizon > full history.\n"
+        "Use --interactive for the Grafana-like visual selector.",
+    )
+    win.add_argument(
+        "--start", metavar="DATETIME_OR_TS", default=None,
+        help=(
+            "Start of identification window.  "
+            "Accepts 'YYYY-MM-DD HH:MM:SS', 'YYYY-MM-DD HH:MM', 'YYYY-MM-DD', "
+            "or a UNIX timestamp float.  "
+            "Use with --end to define a box selection."
+        ),
+    )
+    win.add_argument(
+        "--end", metavar="DATETIME_OR_TS", default=None,
+        help=(
+            "End of identification window (same format as --start).  "
+            "If --start is given but --end is omitted, the window runs "
+            "from --start to the last record in the history."
+        ),
+    )
+    win.add_argument(
+        "--horizon", metavar="HOURS", type=float, default=None,
+        help=(
+            "Trailing window width in hours: use the most recent N hours of "
+            "data (equivalent to the HA dashboard horizon slider).  "
+            "Ignored when --start is given."
+        ),
+    )
+    win.add_argument(
+        "--interactive", action="store_true",
+        help=(
+            "Launch a Grafana-style interactive window selector.  "
+            "Shows a full-history overview with a draggable span brush; "
+            "close the window to confirm the selection.  "
+            "Requires an interactive matplotlib backend (TkAgg / Qt5Agg)."
+        ),
+    )
+
     return p.parse_args()
 
 
@@ -944,18 +1533,41 @@ def main() -> None:
     print("  Heating Assistant — model-fit visualisation")
     print("=" * 60)
 
+    # Parse explicit window arguments
+    start_ts: Optional[float] = None
+    end_ts:   Optional[float] = None
+
+    if args.start is not None:
+        try:
+            start_ts = _parse_datetime_arg(args.start)
+            print(f"  Window start : {_ts_to_label(start_ts) if _is_real_ts(start_ts) else f'{start_ts:.0f} s'}")
+        except (ValueError, OSError) as exc:
+            print(f"  Error parsing --start {args.start!r}: {exc}")
+            sys.exit(1)
+
+    if args.end is not None:
+        try:
+            end_ts = _parse_datetime_arg(args.end)
+            print(f"  Window end   : {_ts_to_label(end_ts) if _is_real_ts(end_ts) else f'{end_ts:.0f} s'}")
+        except (ValueError, OSError) as exc:
+            print(f"  Error parsing --end {args.end!r}: {exc}")
+            sys.exit(1)
+
+    if args.horizon is not None:
+        print(f"  Horizon      : {args.horizon:.1f} h (trailing window from end of history)")
+
     if args.snapshot:
         # ── Snapshot mode ────────────────────────────────────────
         print(f"  Mode   : snapshot ({args.snapshot!r})")
-        history = load_snapshot(args.snapshot)
-        dt      = args.dt
+        full_history = load_snapshot(args.snapshot)
+        dt           = args.dt
 
         # Infer room names from the first record with a non-empty "y"
-        n_rooms = max(len(r.get("y", [])) for r in history)
+        n_rooms = max(len(r.get("y", [])) for r in full_history)
         room_names_inferred = [f"room_{i}" for i in range(n_rooms)]
 
         # Try to read room names from "setpoint" dict in history
-        for rec in history:
+        for rec in full_history:
             sp = rec.get("setpoint", {})
             if isinstance(sp, dict) and sp:
                 room_names_inferred = list(sp.keys())
@@ -965,7 +1577,18 @@ def main() -> None:
             room_names_inferred = [nm for nm in room_names_inferred if nm == args.room]
 
         print(f"  Rooms  : {room_names_inferred}")
-        print(f"  Steps  : {len(history)}")
+        print(f"  Steps  : {len(full_history)} total")
+
+        # ── Interactive window selection ─────────────────────────
+        if args.interactive:
+            start_ts, end_ts = interactive_window_selector(
+                full_history, room_names_inferred, dt,
+                initial_start_ts=start_ts, initial_end_ts=end_ts,
+            )
+
+        # Apply window selection
+        history = apply_window_selection(full_history, start_ts, end_ts, args.horizon, dt)
+        print(f"  Window : {len(history)} steps")
 
         # Dummy Room objects for heat flow calculation (no real params available)
         rooms_dummy = [
@@ -975,6 +1598,8 @@ def main() -> None:
         sources_dummy = _make_sources(rooms_dummy)
 
         figs: List[Tuple[str, Optional[plt.Figure]]] = []
+        figs.append(("fig0_window_overview",
+                     fig_window_overview(full_history, history, room_names_inferred, dt)))
         figs.append(("fig1_temperature_history",
                      fig_temperature_history(history, room_names_inferred, None, rooms_dummy, dt)))
         figs.append(("fig3_heating_power",
@@ -996,23 +1621,42 @@ def main() -> None:
         sources      = _make_sources(rooms_true)
         dt           = args.dt
 
-        room_names = [r.name for r in rooms_true]
-        if args.room:
-            room_names = [nm for nm in room_names if nm == args.room]
+        all_room_names = [r.name for r in rooms_true]
+        room_names = [nm for nm in all_room_names if not args.room or nm == args.room]
 
         print(f"  Rooms       : {room_names}")
 
         # Generate history with the TRUE model
         print("  Generating history... ", end="", flush=True)
-        history = generate_synthetic_history(rooms_true, sources, dt, args.n_steps)
+        full_history = generate_synthetic_history(rooms_true, sources, dt, args.n_steps)
         print("done")
 
-        # One-step predictions using the MISSPECIFIED model
+        # ── Interactive window selection ─────────────────────────
+        if args.interactive:
+            start_ts, end_ts = interactive_window_selector(
+                full_history, room_names, dt,
+                initial_start_ts=start_ts, initial_end_ts=end_ts,
+            )
+
+        # Apply window selection
+        history = apply_window_selection(full_history, start_ts, end_ts, args.horizon, dt)
+        print(f"  Window      : {len(history)} of {len(full_history)} steps")
+
+        if len(history) < 2:
+            print("  Error: selected window contains fewer than 2 records — aborting.")
+            sys.exit(1)
+
+        # One-step predictions using the MISSPECIFIED model (on the window)
         print("  Computing one-step predictions (misspec)... ", end="", flush=True)
         y_preds = compute_one_step_preds(history, rooms_missp, sources, dt)
         print("done")
 
         figs: List[Tuple[str, Optional[plt.Figure]]] = []
+
+        print("  Rendering Fig 0 (window overview)... ", end="", flush=True)
+        figs.append(("fig0_window_overview",
+                     fig_window_overview(full_history, history, room_names, dt)))
+        print("done")
 
         print("  Rendering Fig 1 (temperature history)... ", end="", flush=True)
         figs.append(("fig1_temperature_history",
@@ -1056,7 +1700,7 @@ def main() -> None:
         # Summary statistics
         print()
         print("  One-step prediction RMSE (misspecified model):")
-        for ridx, nm in enumerate([r.name for r in rooms_true]):
+        for ridx, nm in enumerate(all_room_names):
             if nm not in room_names:
                 continue
             residuals = [
@@ -1066,6 +1710,17 @@ def main() -> None:
             ]
             rmse = float(np.sqrt(np.mean(np.array(residuals) ** 2))) if residuals else float("nan")
             print(f"    {nm:20s}  {rmse:.4f}°C")
+
+        # Print window summary
+        if start_ts is not None or end_ts is not None or args.horizon is not None:
+            ts_win = [float(r.get("timestamp", 0.0)) for r in history]
+            if ts_win:
+                win_min_ts, win_max_ts = ts_win[0], ts_win[-1]
+                if _is_real_ts(win_min_ts):
+                    print(f"\n  Identification window: {_ts_to_label(win_min_ts)}  →  {_ts_to_label(win_max_ts)}")
+                else:
+                    print(f"\n  Identification window: {win_min_ts/60:.0f}–{win_max_ts/60:.0f} min "
+                          f"({(win_max_ts - win_min_ts)/3600:.2f} h, {len(history)} steps)")
 
     print()
     _save_or_show(figs, args.save_dir, args.no_display)

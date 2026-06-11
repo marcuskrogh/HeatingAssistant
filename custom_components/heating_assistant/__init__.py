@@ -1776,6 +1776,20 @@ def _register_services(hass: HomeAssistant) -> None:
             "sigma_v", getattr(coordinator, "_sigma_v", 0.5)
         ))
 
+        # Explicit window: if window_start / window_end are supplied (UNIX
+        # timestamps), they override the horizon-based trailing window.
+        window_start: Optional[float] = (
+            float(call.data["window_start"]) if "window_start" in call.data else None
+        )
+        window_end: Optional[float] = (
+            float(call.data["window_end"]) if "window_end" in call.data else None
+        )
+        window_spec = (
+            (window_start, window_end)
+            if window_start is not None and window_end is not None
+            else None
+        )
+
         dt = coordinator.dt  # seconds; handles runtime overrides correctly
         horizon_steps = max(1, int(horizon_hours * 3600.0 / dt))
 
@@ -1803,6 +1817,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 room_params,
                 sigma_w,
                 sigma_v,
+                window_spec,
             )
 
             if "error" not in result:
@@ -1845,6 +1860,11 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("sigma_v"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=10.0)
                 ),
+                # Explicit identification window as UNIX timestamps [s].
+                # When both are provided, horizon_hours is ignored and only data
+                # in [window_start, window_end] is used for identification.
+                vol.Optional("window_start"): vol.Coerce(float),
+                vol.Optional("window_end"): vol.Coerce(float),
                 # Per-source heater power scales {source_name: scale}.
                 vol.Optional("heater_scales"): {cv.string: vol.Coerce(float)},
             },

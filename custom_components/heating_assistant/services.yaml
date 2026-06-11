@@ -416,6 +416,32 @@ run_sysid_simulation:
           max: 10.0
           step: 0.01
           unit_of_measurement: "°C"
+    window_start:
+      name: Window start (UNIX timestamp)
+      description: >
+        Optional explicit window start as a UNIX timestamp [s].  When both
+        ``window_start`` and ``window_end`` are supplied, the reconstruction
+        uses exactly the data in that range regardless of ``horizon_hours``.
+        This lets you target a specific past experiment (e.g. an overnight
+        step-response test) that is not the most recent data in the buffer.
+        Use 0 or omit to fall back to the trailing horizon-based window.
+      required: false
+      example: 1700000000
+      selector:
+        number:
+          min: 0
+          step: 1
+    window_end:
+      name: Window end (UNIX timestamp)
+      description: >
+        Optional explicit window end as a UNIX timestamp [s].  Must be used
+        together with ``window_start``.  See ``window_start`` for details.
+      required: false
+      example: 1700043200
+      selector:
+        number:
+          min: 0
+          step: 1
     heater_scales:
       name: Heater power scales
       description: >

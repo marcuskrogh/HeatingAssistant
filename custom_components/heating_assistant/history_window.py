@@ -7,11 +7,22 @@ disabled for a while).  It is also *count-bounded* (``deque(maxlen=…)``), not
 time-bounded, so it can legitimately hold records from a previous operating
 session weeks ago next to today's data.
 
+Two modes of window selection are provided:
+
+1. **Recent window** (``select_recent_window``): selects all records within
+   ``horizon_seconds`` of the most recent record.  This is the original
+   behaviour — the user controls the window width via the horizon slider.
+
+2. **Explicit timestamp window** (``select_window_by_timestamps``): selects all
+   records whose timestamp falls in ``[start_ts, end_ts]``.  This enables
+   targeted identification using a specific experiment (e.g. a step-response
+   performed the previous night) that may not be the most recent data.
+
 The identification diagnostics (EKF reconstruction and open-loop simulation)
-operate on the most recent ``horizon`` of data.  The window is selected by
-**wall-clock time**: every record whose timestamp falls within ``horizon`` of
-the most recent record is included.  This is the behaviour the user controls
-directly via the horizon slider and has the properties we want:
+operate on the most recent ``horizon`` of data by default.  The window is
+selected by **wall-clock time**: every record whose timestamp falls within
+``horizon`` of the most recent record is included.  This is the behaviour the
+user controls directly via the horizon slider and has the properties we want:
 
 * A short restart (a few minutes) does *not* truncate the window — all data on
   both sides of the gap is within the horizon and is kept.  The continuous-time
@@ -32,7 +43,7 @@ by the open-loop diagnostic and the persistence-restore path respectively.
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 #: An inter-sample interval larger than ``DEFAULT_MAX_GAP_FACTOR * nominal_dt``
 #: is treated as a discontinuity (restart / outage) rather than a regular step.
@@ -116,6 +127,53 @@ def select_recent_window(
             start = k + 1
             break
     return history[start:]
+
+
+def select_window_by_timestamps(
+    history: List[Dict[str, Any]],
+    start_ts: float,
+    end_ts: float,
+) -> List[Dict[str, Any]]:
+    """Return records with timestamp in ``[start_ts, end_ts]``, normalised.
+
+    Unlike :func:`select_recent_window`, this function selects an **explicit**
+    time range rather than a trailing window anchored to the most recent record.
+    This is the right tool when the user wants to identify from a specific
+    past experiment (e.g. an overnight step-response test) that is not the
+    most recent data in the buffer.
+
+    Parameters
+    ----------
+    history
+        History-buffer records, each carrying a numeric ``timestamp`` (UNIX
+        seconds).  Order is not trusted; it is normalised internally.
+    start_ts, end_ts
+        Inclusive window bounds as UNIX timestamps [s].  ``start_ts`` must be
+        ≤ ``end_ts``; passing ``start_ts > end_ts`` returns an empty list.
+
+    Returns
+    -------
+    list
+        The records whose timestamp lies in ``[start_ts, end_ts]``, sorted
+        ascending, de-duplicated.
+    """
+    if start_ts > end_ts:
+        return []
+    history = _normalise(history)
+    return [r for r in history if start_ts <= float(r["timestamp"]) <= end_ts]
+
+
+def history_time_range(
+    history: List[Dict[str, Any]],
+) -> Tuple[Optional[float], Optional[float]]:
+    """Return ``(min_ts, max_ts)`` for a normalised history buffer.
+
+    Returns ``(None, None)`` for an empty or all-invalid buffer.
+    """
+    hist = _normalise(history)
+    if not hist:
+        return None, None
+    return float(hist[0]["timestamp"]), float(hist[-1]["timestamp"])
 
 
 def split_contiguous_runs(
