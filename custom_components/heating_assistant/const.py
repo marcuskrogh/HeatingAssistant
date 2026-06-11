@@ -532,6 +532,9 @@ UI_REFRESH_INTERVAL = 60
 #: Number of update steps to keep in the rolling history buffer.
 #: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is exactly 120 hours of data.
 HISTORY_BUFFER_SIZE = 480
+#: Default number of days the integration-managed JSONL identification history
+#: store retains data.  Independent of HA Recorder's ``purge_keep_days``.
+DEFAULT_IDENTIFICATION_HISTORY_DAYS = 90
 #: Exponential-moving-average time constant [s] for smoothing the live cloud
 #: cover used by the solar model.  Clouds change gradually, so the instantaneous
 #: weather-entity reading is low-pass filtered to keep the solar attenuation

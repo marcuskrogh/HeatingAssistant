@@ -617,6 +617,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = HeatingAssistantCoordinator(hass, merged_entry)  # type: ignore[arg-type]
 
+    # Set up the integration-managed identification history store so it is
+    # available before the first update cycle and before history is restored.
+    from .identification_history import IdentificationHistoryStore
+    from .const import DEFAULT_IDENTIFICATION_HISTORY_DAYS
+    coordinator.id_history_store = IdentificationHistoryStore(
+        hass, entry.entry_id, DEFAULT_IDENTIFICATION_HISTORY_DAYS
+    )
+    await coordinator.id_history_store.async_setup()
+
     # Restore runtime state stashed by a prior unload (in-memory only; survives
     # a reload but not a full HA restart). Only keys still present in the new
     # configuration are restored — rooms removed by the YAML edit drop their
@@ -636,62 +645,79 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 coordinator.model.rooms[room].setpoint = float(value)
     else:
         # No in-memory state means this is a full HA restart (not a reload).
-        # Rebuild the history buffer from the recorder so the diagnostics replay
-        # exactly the continuous data the overview pages show, regardless of how
-        # the (clean-unload-only) persisted buffer fared across the restart.
+        # Priority: JSONL store (integration-managed, long-term) → HA Recorder
+        # (covers the period before the JSONL store existed) → legacy JSON store.
         rebuilt = []
         try:
-            from .history_seed import async_rebuild_history_from_recorder
-
-            rebuilt = await async_rebuild_history_from_recorder(
-                hass, coordinator, HISTORY_BUFFER_SIZE
+            rebuilt = await coordinator.id_history_store.async_query_recent(
+                HISTORY_BUFFER_SIZE
             )
         except Exception:
             _LOGGER.warning(
-                "Heating Assistant: history rebuild from recorder failed",
+                "Heating Assistant: JSONL history store query failed on startup",
                 exc_info=True,
             )
 
         if rebuilt:
             coordinator._history_buffer.extend(rebuilt[-HISTORY_BUFFER_SIZE:])
             _LOGGER.debug(
-                "Rebuilt %d history steps from the recorder",
+                "Restored %d history steps from JSONL store",
                 len(coordinator._history_buffer),
             )
         else:
-            # Fall back to the persisted buffer (recorder unavailable or empty).
+            # JSONL store empty (first run or files deleted): try HA Recorder.
             try:
-                store = Store(
-                    hass,
-                    version=1,
-                    key=f"{DOMAIN}_history_{entry.entry_id}",
-                )
-                stored_history = await store.async_load()
-                if stored_history and isinstance(stored_history, list):
-                    # Drop records older than the buffer's nominal time span so a
-                    # previous session's stale (e.g. week-old) data cannot survive
-                    # across a restart, linger at the front of the count-bounded
-                    # deque, and pollute the identification diagnostics.
-                    from .history_window import prune_stale_records
+                from .history_seed import async_rebuild_history_from_recorder
 
-                    _now = getattr(coordinator, "now_utc", None)
-                    _now_ts = _now.timestamp() if _now is not None else time.time()
-                    coordinator._history_buffer.extend(
-                        prune_stale_records(
-                            stored_history[-HISTORY_BUFFER_SIZE:],
-                            _now_ts,
-                            HISTORY_BUFFER_SIZE * coordinator.dt,
-                        )
-                    )
-                    _LOGGER.debug(
-                        "Restored %d history steps from persistent storage",
-                        len(coordinator._history_buffer),
-                    )
+                rebuilt = await async_rebuild_history_from_recorder(
+                    hass, coordinator, HISTORY_BUFFER_SIZE
+                )
             except Exception:
                 _LOGGER.warning(
-                    "Heating Assistant: failed to load persisted history buffer",
+                    "Heating Assistant: history rebuild from recorder failed",
                     exc_info=True,
                 )
+
+            if rebuilt:
+                coordinator._history_buffer.extend(rebuilt[-HISTORY_BUFFER_SIZE:])
+                _LOGGER.debug(
+                    "Rebuilt %d history steps from the recorder",
+                    len(coordinator._history_buffer),
+                )
+            else:
+                # Fall back to the persisted buffer (recorder unavailable or empty).
+                try:
+                    store = Store(
+                        hass,
+                        version=1,
+                        key=f"{DOMAIN}_history_{entry.entry_id}",
+                    )
+                    stored_history = await store.async_load()
+                    if stored_history and isinstance(stored_history, list):
+                        # Drop records older than the buffer's nominal time span so a
+                        # previous session's stale (e.g. week-old) data cannot survive
+                        # across a restart, linger at the front of the count-bounded
+                        # deque, and pollute the identification diagnostics.
+                        from .history_window import prune_stale_records
+
+                        _now = getattr(coordinator, "now_utc", None)
+                        _now_ts = _now.timestamp() if _now is not None else time.time()
+                        coordinator._history_buffer.extend(
+                            prune_stale_records(
+                                stored_history[-HISTORY_BUFFER_SIZE:],
+                                _now_ts,
+                                HISTORY_BUFFER_SIZE * coordinator.dt,
+                            )
+                        )
+                        _LOGGER.debug(
+                            "Restored %d history steps from persistent storage",
+                            len(coordinator._history_buffer),
+                        )
+                except Exception:
+                    _LOGGER.warning(
+                        "Heating Assistant: failed to load persisted history buffer",
+                        exc_info=True,
+                    )
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -828,7 +854,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=51",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=52",
                     "embed_iframe": False,
                 }
             },
@@ -1149,6 +1175,66 @@ def _get_coordinator(hass: HomeAssistant) -> HeatingAssistantCoordinator:
     raise ValueError("No Heating Assistant coordinator found")
 
 
+async def _get_history_for_window(
+    hass: HomeAssistant,
+    coordinator: HeatingAssistantCoordinator,
+    window_start: Optional[float],
+    window_end: Optional[float],
+) -> List[Dict[str, Any]]:
+    """Return history records for a time window.
+
+    Priority order:
+    1. In-memory buffer when it already covers the requested window (fast path).
+    2. Integration-managed JSONL store (covers up to ``retention_days`` back).
+    3. HA Recorder (fallback for the period before the JSONL store existed).
+    4. In-memory buffer as a last resort (with a debug log).
+    """
+    buf = list(coordinator.history_buffer)
+
+    if window_start is None or window_end is None:
+        return buf
+
+    oldest_buf_ts = float(buf[0]["timestamp"]) if buf else None
+    if oldest_buf_ts is not None and oldest_buf_ts <= window_start:
+        return buf  # fast path: buffer already covers the window
+
+    # Try the integration-managed JSONL store first.
+    if coordinator.id_history_store is not None:
+        try:
+            records = await coordinator.id_history_store.async_query_range(
+                window_start, window_end
+            )
+            if records:
+                return records
+        except Exception:
+            _LOGGER.warning(
+                "ID history store query failed for window [%s, %s]",
+                window_start, window_end, exc_info=True,
+            )
+
+    # Fall back to HA Recorder (works for the initial period before the store
+    # was populated, or if the store files were deleted).
+    try:
+        from .history_seed import async_fetch_history_range
+
+        records = await async_fetch_history_range(
+            hass, coordinator, window_start, window_end
+        )
+        if records:
+            return records
+    except Exception:
+        _LOGGER.debug(
+            "Recorder fallback for window [%s, %s] failed",
+            window_start, window_end, exc_info=True,
+        )
+
+    _LOGGER.debug(
+        "No long-term history found for window [%s, %s]; using in-memory buffer",
+        window_start, window_end,
+    )
+    return buf
+
+
 def _persist_tuning_updates(
     hass: HomeAssistant,
     coordinator: HeatingAssistantCoordinator,
@@ -1322,10 +1408,26 @@ def _register_services(hass: HomeAssistant) -> None:
         apply_params: bool = call.data.get("apply_parameters", False)
         horizon_hours: Optional[float] = call.data.get("horizon_hours")
         locked_params: Optional[Dict] = call.data.get("locked_params")
+        window_start_ml: Optional[float] = (
+            float(call.data["window_start"]) if "window_start" in call.data else None
+        )
+        window_end_ml: Optional[float] = (
+            float(call.data["window_end"]) if "window_end" in call.data else None
+        )
+
+        # Fetch history from JSONL store / Recorder when an explicit window is
+        # requested.  When both are set, horizon_hours is ignored.
+        history_override = None
+        if window_start_ml is not None and window_end_ml is not None:
+            history_override = await _get_history_for_window(
+                hass, coordinator, window_start_ml, window_end_ml
+            )
+
         result = await coordinator.async_estimate_parameters_ml(
             apply_params=apply_params,
-            horizon_hours=horizon_hours,
+            horizon_hours=horizon_hours if history_override is None else None,
             locked_params=locked_params,
+            history_override=history_override,
         )
 
         # Update sysid_results so that the dashboard sensor entities reflect
@@ -1439,6 +1541,10 @@ def _register_services(hass: HomeAssistant) -> None:
                     vol.Coerce(float), vol.Range(min=1.0)
                 ),
                 vol.Optional("locked_params"): dict,
+                # Explicit identification window as UNIX timestamps [s].
+                # When both are provided, horizon_hours is ignored.
+                vol.Optional("window_start"): vol.Coerce(float),
+                vol.Optional("window_end"): vol.Coerce(float),
             }
         ),
     )
@@ -1458,17 +1564,21 @@ def _register_services(hass: HomeAssistant) -> None:
             float(call.data["window_end"]) if "window_end" in call.data else None
         )
 
-        history = list(coordinator.history_buffer)
-
-        # Explicit window takes priority over horizon-based trailing window.
-        if window_start_ol is not None and window_end_ol is not None and history:
+        # Explicit window: fetch from JSONL store / Recorder if needed.
+        if window_start_ol is not None and window_end_ol is not None:
+            history = await _get_history_for_window(
+                hass, coordinator, window_start_ol, window_end_ol
+            )
             from .history_window import select_window_by_timestamps
             history = select_window_by_timestamps(history, window_start_ol, window_end_ol)
-        elif horizon_hours is not None and history:
+        elif horizon_hours is not None:
+            history = list(coordinator.history_buffer)
             from .history_window import select_recent_window
             history = select_recent_window(
                 history, float(horizon_hours) * 3600.0, coordinator.dt
             )
+        else:
+            history = list(coordinator.history_buffer)
 
         # Build per-room parameter overrides from service data (same keys as
         # run_sysid_simulation) so the open-loop diagnostic uses the full
@@ -1815,7 +1925,10 @@ def _register_services(hass: HomeAssistant) -> None:
         # set, keyed by ``<param>_<room_slug>``).
         room_params = _extract_sim_room_params(call, coordinator.model.room_names)
 
-        history = list(coordinator.history_buffer)
+        # Fetch history: use JSONL store / Recorder for out-of-buffer windows.
+        history = await _get_history_for_window(
+            hass, coordinator, window_start, window_end
+        )
 
         # Patch heat-source copies with the heater power scales currently shown
         # in the UI (falling back to the last auto-identified scales) so the EKF

@@ -181,6 +181,29 @@ estimate_parameters_ml:
       example: '{"thermal_mass": {"living_room": 5000000}, "heater_scales": {"radiator": 1.0}}'
       selector:
         object:
+    window_start:
+      name: Window start (UNIX timestamp)
+      description: >
+        Optional explicit identification window start as a UNIX timestamp
+        (seconds since epoch).  When both ``window_start`` and ``window_end``
+        are provided, only history records within that range are used and
+        ``horizon_hours`` is ignored.  Useful for targeting a known
+        experiment period in the long-term identification history store.
+      required: false
+      selector:
+        number:
+          mode: box
+          step: 1
+    window_end:
+      name: Window end (UNIX timestamp)
+      description: >
+        Optional explicit identification window end as a UNIX timestamp
+        (seconds since epoch).  Must be used together with ``window_start``.
+      required: false
+      selector:
+        number:
+          mode: box
+          step: 1
 
 analyze_model_fit:
   name: Analyze model fit
