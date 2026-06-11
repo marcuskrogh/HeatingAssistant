@@ -193,7 +193,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     <div class="tuning-actions">
       <button class="btn btn--accent tuning-actions__btn" id="btn-auto-identify">Run Auto-Identification</button>
       <button class="btn btn--primary tuning-actions__btn" id="btn-apply-params">Apply Parameters</button>
-      <button class="btn btn--ghost tuning-actions__btn" id="btn-reset-defaults">Reset to Defaults</button>
+      <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-defaults">Reset to Defaults</button>
       <span class="tuning-actions__status" id="action-status"></span>
     </div>
   `;
