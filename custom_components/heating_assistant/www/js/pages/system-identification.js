@@ -1228,17 +1228,23 @@ function buildEkfChart(chart, simulation) {
   const predictedWall = [];
   const wallCovUpper = [];
   const wallCovLower = [];
+  let hasWall = false;
 
+  // Open-window samples arrive as null measured/predicted.  Push an explicit
+  // {x, y: null} so the line datasets (drawn with spanGaps:false) break at the
+  // gap rather than drawing a straight segment across the excluded period.
+  // Measured is a scatter (showLine:false), so its nulls are simply not plotted.
   for (const entry of simulation) {
     const t = new Date(entry.time).getTime();
     if (isNaN(t)) continue;
     if (entry.measured != null) measured.push({ x: t, y: entry.measured });
-    if (entry.predicted != null) predicted.push({ x: t, y: entry.predicted });
-    if (entry.cov_upper != null) covUpper.push({ x: t, y: entry.cov_upper });
-    if (entry.cov_lower != null) covLower.push({ x: t, y: entry.cov_lower });
-    if (entry.predicted_wall != null) predictedWall.push({ x: t, y: entry.predicted_wall });
-    if (entry.wall_cov_upper != null) wallCovUpper.push({ x: t, y: entry.wall_cov_upper });
-    if (entry.wall_cov_lower != null) wallCovLower.push({ x: t, y: entry.wall_cov_lower });
+    predicted.push({ x: t, y: entry.predicted ?? null });
+    covUpper.push({ x: t, y: entry.cov_upper ?? null });
+    covLower.push({ x: t, y: entry.cov_lower ?? null });
+    if (entry.predicted_wall != null) hasWall = true;
+    predictedWall.push({ x: t, y: entry.predicted_wall ?? null });
+    wallCovUpper.push({ x: t, y: entry.wall_cov_upper ?? null });
+    wallCovLower.push({ x: t, y: entry.wall_cov_lower ?? null });
   }
 
   const datasets = [
@@ -1247,31 +1253,27 @@ function buildEkfChart(chart, simulation) {
       pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
       showLine: false,
     }),
-    makeDataset('Predicted (air)', predicted, '#4fc3f7', { borderWidth: 2 }),
+    makeDataset('Predicted (air)', predicted, '#4fc3f7', { borderWidth: 2, spanGaps: false }),
     makeDataset('Above 2σ (air)', covUpper, 'rgba(79,195,247,0.25)', {
-      borderWidth: 0, pointRadius: 0, fill: false,
+      borderWidth: 0, pointRadius: 0, fill: false, spanGaps: false,
     }),
     makeDataset('Below 2σ (air)', covLower, 'rgba(79,195,247,0.25)', {
       borderWidth: 0, pointRadius: 0,
-      fill: '-1', backgroundColor: 'rgba(79,195,247,0.10)',
+      fill: '-1', backgroundColor: 'rgba(79,195,247,0.10)', spanGaps: false,
     }),
   ];
 
-  if (predictedWall.length > 0) {
+  if (hasWall) {
     datasets.push(
-      makeDataset('Predicted (wall)', predictedWall, '#a5d6a7', { borderWidth: 2, borderDash: [4, 3] }),
+      makeDataset('Predicted (wall)', predictedWall, '#a5d6a7', { borderWidth: 2, borderDash: [4, 3], spanGaps: false }),
+      makeDataset('Above 2σ (wall)', wallCovUpper, 'rgba(165,214,167,0.25)', {
+        borderWidth: 0, pointRadius: 0, fill: false, spanGaps: false,
+      }),
+      makeDataset('Below 2σ (wall)', wallCovLower, 'rgba(165,214,167,0.25)', {
+        borderWidth: 0, pointRadius: 0,
+        fill: '-1', backgroundColor: 'rgba(165,214,167,0.10)', spanGaps: false,
+      }),
     );
-    if (wallCovUpper.length > 0) {
-      datasets.push(
-        makeDataset('Above 2σ (wall)', wallCovUpper, 'rgba(165,214,167,0.25)', {
-          borderWidth: 0, pointRadius: 0, fill: false,
-        }),
-        makeDataset('Below 2σ (wall)', wallCovLower, 'rgba(165,214,167,0.25)', {
-          borderWidth: 0, pointRadius: 0,
-          fill: '-1', backgroundColor: 'rgba(165,214,167,0.10)',
-        }),
-      );
-    }
   }
 
   const allSeries = [measured, predicted, covUpper, covLower, predictedWall, wallCovUpper, wallCovLower];
@@ -1288,13 +1290,17 @@ function buildOlChart(chart, simulation) {
   const measured = [];
   const predicted = [];
   const predictedWall = [];
+  let hasWall = false;
 
+  // Push explicit nulls at open-window gaps so the predicted line breaks
+  // (spanGaps:false) instead of bridging straight across the excluded period.
   for (const entry of simulation) {
     const t = new Date(entry.time).getTime();
     if (isNaN(t)) continue;
     if (entry.measured != null) measured.push({ x: t, y: entry.measured });
-    if (entry.predicted != null) predicted.push({ x: t, y: entry.predicted });
-    if (entry.predicted_wall != null) predictedWall.push({ x: t, y: entry.predicted_wall });
+    predicted.push({ x: t, y: entry.predicted ?? null });
+    if (entry.predicted_wall != null) hasWall = true;
+    predictedWall.push({ x: t, y: entry.predicted_wall ?? null });
   }
 
   const datasets = [
@@ -1303,12 +1309,12 @@ function buildOlChart(chart, simulation) {
       pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
       showLine: false,
     }),
-    makeDataset('Predicted (air)', predicted, '#4fc3f7', { borderWidth: 2 }),
+    makeDataset('Predicted (air)', predicted, '#4fc3f7', { borderWidth: 2, spanGaps: false }),
   ];
 
-  if (predictedWall.length > 0) {
+  if (hasWall) {
     datasets.push(
-      makeDataset('Predicted (wall)', predictedWall, '#a5d6a7', { borderWidth: 2, borderDash: [4, 3] }),
+      makeDataset('Predicted (wall)', predictedWall, '#a5d6a7', { borderWidth: 2, borderDash: [4, 3], spanGaps: false }),
     );
   }
 
@@ -1321,6 +1327,7 @@ function computeChartLimits(dataSets) {
   let yMax = -Infinity;
   for (const points of dataSets) {
     for (const p of points) {
+      if (p.y == null) continue;  // gap placeholder — ignore in limit search
       if (p.y < yMin) yMin = p.y;
       if (p.y > yMax) yMax = p.y;
     }

@@ -238,10 +238,22 @@ def run_sysid_ekf(
     x_curr = _init_state_from_measurement(sde, y0, n, n_x, u_prev, d_prev)
     P_curr = (sigma_v ** 2) * np.eye(n_x)
 
-    # Record the initial anchor point.
+    # Record the initial anchor point.  Rooms whose window was open at the first
+    # sample are rendered as a gap (null) — the open-window measurement is
+    # excluded data, so neither the point nor the prediction is shown.
     _has_wall = n_x > n  # 2R2C: wall states at x[n:2n]
     ts0 = float(window[0].get("timestamp", 0.0))
+    open0 = _record_window_open(window[0], room_names)
     for i, name in enumerate(room_names):
+        if open0[i]:
+            per_room_sim[name].append({
+                "time":      ts0,
+                "measured":  None,
+                "predicted": None,
+                "cov_upper": None,
+                "cov_lower": None,
+            })
+            continue
         entry0: Dict[str, Any] = {
             "time":      ts0,
             "measured":  float(y0[i]) if i < len(y0) else None,
@@ -265,8 +277,22 @@ def run_sysid_ekf(
             continue
 
         y_raw  = record.get("y", [])
-        y_meas: List[Optional[float]] = [
+        raw_meas: List[Optional[float]] = [
             float(y_raw[i]) if i < len(y_raw) else None for i in range(n)
+        ]
+        # Per-room open-window exclusion: the sensor still reads while a window
+        # is open, but that measurement carries unmodelled air-exchange loss.  We
+        # keep it OUT of the EKF update (so it neither corrects that room toward
+        # an unexplainable value nor — via the joint cross-covariance — drags the
+        # other rooms), render it as a gap (null) in the plot, and re-anchor the
+        # room's air state to the true reading afterwards so the state stays
+        # physical and the prediction reinitialises cleanly once the window
+        # closes.
+        excluded = _record_window_open(record, room_names)
+        # ``y_meas`` is the display/score copy (None where excluded → chart gap,
+        # skipped by the RMSE/MAE reducer).
+        y_meas: List[Optional[float]] = [
+            None if excluded[i] else raw_meas[i] for i in range(n)
         ]
         u_curr = _record_u(record, n_u)
         d_curr = _record_d(record, sde, room_list, n_d)
@@ -310,6 +336,18 @@ def run_sysid_ekf(
 
         # ---- Record one-step-ahead prediction -----------------------
         for i, name in enumerate(room_names):
+            if excluded[i]:
+                # Open window → render a gap in both the measured and the
+                # predicted series (the prediction would be an unanchored
+                # free-run against data we are deliberately excluding).
+                per_room_sim[name].append({
+                    "time":      timestamp,
+                    "measured":  None,
+                    "predicted": None,
+                    "cov_upper": None,
+                    "cov_lower": None,
+                })
+                continue
             std_i = float(np.sqrt(max(0.0, P_pred_rr[i, i] + sigma_v ** 2)))
             entry: Dict[str, Any] = {
                 "time":      timestamp,
@@ -326,9 +364,14 @@ def run_sysid_ekf(
             per_room_sim[name].append(entry)
 
         # ---- Update step --------------------------------------------
-        valid = np.array([m is not None for m in y_meas], dtype=bool)
+        # A room is updated only when it has a real measurement AND its window
+        # is closed.  Open-window rooms are masked out of the joint update.
+        valid = np.array(
+            [raw_meas[i] is not None and not excluded[i] for i in range(n)],
+            dtype=bool,
+        )
         y_k   = np.array([
-            y_meas[i] if y_meas[i] is not None else float(T_pred[i])
+            raw_meas[i] if raw_meas[i] is not None else float(T_pred[i])
             for i in range(n)
         ], dtype=float)
         mask  = valid if not valid.all() else None
@@ -348,6 +391,14 @@ def run_sysid_ekf(
 
         x_curr = ekf_step.x_hat
         P_curr = ekf_step.P
+        # Re-anchor each open-window room's air node to its true sensor reading.
+        # The reading is excluded from the *fit* (it was masked above) but is a
+        # perfectly good temperature, so using it to hold the state keeps the
+        # coupled-neighbour propagation physical and guarantees the room's
+        # prediction restarts from reality the moment the window closes.
+        for i in range(n):
+            if excluded[i] and raw_meas[i] is not None:
+                x_curr[i] = float(raw_meas[i])
         u_prev = u_curr
         d_prev = d_curr
         t_prev = timestamp
@@ -439,6 +490,20 @@ def _init_state_from_measurement(
     if n_x >= 2 * n:
         x[n:2 * n] = air
     return x
+
+
+def _record_window_open(
+    record: Dict[str, Any],
+    room_names: List[str],
+) -> List[bool]:
+    """Per-room open-window flags for a history record, ordered by ``room_names``.
+
+    The coordinator stores ``{"window_open": {room_name: bool}}`` (True while a
+    window override is active).  Records that pre-date the field — seeded or
+    legacy history — return all-``False`` (treated as good data).
+    """
+    wo = record.get("window_open") or {}
+    return [bool(wo.get(name, False)) for name in room_names]
 
 
 def _record_u(record: Dict[str, Any], n_u: int) -> np.ndarray:

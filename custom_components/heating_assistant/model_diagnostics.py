@@ -881,8 +881,19 @@ def compute_open_loop_predictions(
         ts_prev = float(seg[0].get("timestamp", 0.0))
         _nx_total = len(x)
         _has_wall_states = _nx_total > n
+        wo0 = seg[0].get("window_open") or {}
         for room_idx, room_name in enumerate(room_names):
             if room_idx < len(y0):
+                # Open window at the segment start → render a gap (the
+                # open-window sample is excluded data).  The state is still
+                # seeded from the real reading above so the free-run is anchored.
+                if wo0.get(room_name, False):
+                    simulation[room_name].append({
+                        "time": ts_prev,
+                        "measured": None,
+                        "predicted": None,
+                    })
+                    continue
                 init_val = round(float(y0[room_idx]), 3)
                 anchor: Dict[str, Any] = {
                     "time": ts_prev,
@@ -944,11 +955,24 @@ def compute_open_loop_predictions(
             y_meas = record.get("y", [])
             _nx_total = len(x)
             _has_wall = _nx_total > n
+            wo = record.get("window_open") or {}
 
             for room_idx, room_name in enumerate(room_names):
                 if room_idx < len(y_meas):
-                    pred_val = float(x[room_idx])
                     meas_val = float(y_meas[room_idx])
+                    # Per-room open-window exclusion: hold the open room's air
+                    # node at its true reading (keeps the coupled free-run
+                    # physical and restarts the room from reality on close),
+                    # render a gap, and drop it from the RMSE/MAE.
+                    if wo.get(room_name, False):
+                        x[room_idx] = meas_val
+                        simulation[room_name].append({
+                            "time": ts,
+                            "measured": None,
+                            "predicted": None,
+                        })
+                        continue
+                    pred_val = float(x[room_idx])
                     per_room_preds[room_name].append(pred_val)
                     per_room_meas[room_name].append(meas_val)
                     sim_entry: Dict[str, Any] = {
