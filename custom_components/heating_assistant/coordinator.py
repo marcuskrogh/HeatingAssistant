@@ -3909,6 +3909,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         if history_override is not None:
+            # Caller pre-fetched the data (e.g. from HA Recorder for a custom
+            # window that extends beyond the in-memory buffer).
             history = list(history_override)
         else:
             history = list(self._history_buffer)

@@ -1540,6 +1540,8 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("horizon_hours"): vol.All(
                     vol.Coerce(float), vol.Range(min=1.0)
                 ),
+                vol.Optional("window_start"): vol.Coerce(float),
+                vol.Optional("window_end"): vol.Coerce(float),
                 vol.Optional("locked_params"): dict,
                 # Explicit identification window as UNIX timestamps [s].
                 # When both are provided, horizon_hours is ignored.
