@@ -203,8 +203,12 @@ def run_sysid_ekf(
     #     the actual outage duration, which is then corrected by the update).
     # ------------------------------------------------------------------
     y0 = window[0].get("y", [])
-    x_curr = np.zeros(n_x, dtype=float)
-    x_curr[:n] = [float(y0[i]) if i < len(y0) else 0.0 for i in range(n)]
+    u_prev = _record_u(window[0], n_u)
+    d_prev = _record_d(window[0], sde, room_list, n_d)
+    # Seed the full state from the first measurement so the wall and emitter-lag
+    # nodes start at physically sensible values (steady-state wall, warm emitter)
+    # rather than 0 — see _init_state_from_measurement.
+    x_curr = _init_state_from_measurement(sde, y0, n, n_x, u_prev, d_prev)
     P_curr = (sigma_v ** 2) * np.eye(n_x)
 
     # Record the initial anchor point.
@@ -222,8 +226,7 @@ def run_sysid_ekf(
             entry0["predicted_wall"] = float(x_curr[n + i])
         per_room_sim[name].append(entry0)
 
-    u_prev = _record_u(window[0], n_u)
-    d_prev = _record_d(window[0], sde, room_list, n_d)
+    # u_prev / d_prev were computed above for the initial-state seeding.
     t_prev = ts0
 
     for record in window[1:]:
@@ -259,12 +262,16 @@ def run_sysid_ekf(
                 "SysID CD-EKF predict failed at ts=%.0f (dt_step=%.1f s): %s",
                 timestamp, dt_step, exc,
             )
-            # Reinitialise from the raw measurement and continue.
-            x_curr = np.zeros(n_x, dtype=float)
-            x_curr[:n] = [
-                float(y_meas[i]) if y_meas[i] is not None else x_curr[i]
+            # Reinitialise from the raw measurement and continue.  Seed the
+            # latent states (wall, emitter lag) from the measurement too so the
+            # wall does not restart at 0 °C after a transient EKF failure.
+            y_reinit = [
+                y_meas[i] if y_meas[i] is not None else float(x_curr[i])
                 for i in range(n)
             ]
+            x_curr = _init_state_from_measurement(
+                sde, y_reinit, n, n_x, u_curr, d_curr
+            )
             P_curr = (sigma_v ** 2) * np.eye(n_x)
             t_prev = timestamp
             u_prev = u_curr
@@ -360,6 +367,51 @@ run_sysid_simulation = run_sysid_ekf
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _init_state_from_measurement(
+    sde: Any,
+    y_vals: List[Any],
+    n: int,
+    n_x: int,
+    u_vec: np.ndarray,
+    d_vec: np.ndarray,
+) -> np.ndarray:
+    """Build a full EKF state vector consistent with a measurement.
+
+    Delegates to the SDE's ``initial_state_from_measurement`` (the single
+    source of truth shared with the open-loop diagnostic and the estimator):
+    air temperatures from the measurement, wall nodes at the (T_a, T_out)
+    steady state, and emitter-lag states warm-started to the commanded
+    fraction.  Without this the reconstruction cold-started every latent state
+    at 0 — the wall node began at 0 °C and only recovered after a long EKF
+    transient, badly distorting the start of the reconstruction.  Falls back to
+    the air-temperature-only initialisation for monkeypatched/legacy SDE
+    objects that do not provide the helper (the wall then starts at the air
+    temperature rather than zero).
+    """
+    air = np.array(
+        [float(y_vals[i]) if i < len(y_vals) else 0.0 for i in range(n)],
+        dtype=float,
+    )
+    init_fn = getattr(sde, "initial_state_from_measurement", None)
+    if callable(init_fn):
+        try:
+            return np.asarray(init_fn(air, u_vec, d_vec), dtype=float)
+        except TypeError:
+            try:
+                return np.asarray(init_fn(air, u_vec), dtype=float)
+            except Exception:
+                pass
+        except Exception:
+            pass
+    # Fallback: air temperatures measured, wall block warm-started to the air
+    # temperature (never 0), remaining latent states left at 0.
+    x = np.zeros(n_x, dtype=float)
+    x[:n] = air
+    if n_x >= 2 * n:
+        x[n:2 * n] = air
+    return x
 
 
 def _record_u(record: Dict[str, Any], n_u: int) -> np.ndarray:
