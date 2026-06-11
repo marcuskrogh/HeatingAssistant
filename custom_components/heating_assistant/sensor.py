@@ -230,6 +230,10 @@ class TemperatureFilteredSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
         return {
             "thermal_mass": room.thermal_mass,
             "r_external": room.r_external,
+            "internal_gain": round(float(getattr(room, "internal_gain", 0.0)), 2),
+            "solar_scale": round(float(getattr(room, "solar_scale", 1.0)), 4),
+            "c_air_fraction": round(float(room.c_air_fraction), 4),
+            "r_aw_fraction": round(float(room.r_aw_fraction), 4),
         }
 
 

@@ -251,7 +251,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
           <label class="form-label" for="param-r-aw-fraction">Air&ndash;Wall Resistance Fraction</label>
           <input class="form-input" type="number" id="param-r-aw-fraction"
             step="0.001" min="0" max="1" value="${DEFAULTS.r_aw_fraction}">
-          <span class="form-hint">0&ndash;1 &mdash; share of resistance on the air&harr;wall film</span>
+          <span class="form-hint">0&ndash;1 &mdash; fraction of conductive-path resistance on the air&harr;wall film (infiltration excluded)</span>
         </div>
       </div>
     </div>
@@ -285,7 +285,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
           <label class="form-label" for="param-sigma-b">Calibration Drift (&sigma;<sub>b</sub>)</label>
           <input class="form-input" type="number" id="param-sigma-b"
             step="0.0001" min="0.00000001" max="1" value="${DEFAULTS.sigma_b}">
-          <span class="form-hint">K/&radic;s &mdash; allowed sensor drift rate</span>
+          <span class="form-hint">K/&radic;s &mdash; sensor offset drift rate (live controller only)</span>
         </div>
       </div>
     </div>
@@ -710,7 +710,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       <thead>
         <tr>
           <th>#</th><th>Date</th>
-          <th>Thermal Mass</th><th>R External</th><th>RMSE</th><th></th>
+          <th>Thermal Mass</th><th>R External</th><th>Int. Gain</th><th>Solar</th><th>RMSE</th><th></th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -722,6 +722,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const roomData = entry.rooms?.[roomSlug] || {};
       const thermalMass = roomData.thermal_mass;
       const rExternal = roomData.r_external;
+      const internalGain = roomData.internal_gain;
+      const solarScale = roomData.solar_scale;
       const date = entry.estimated_at
         ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '—';
@@ -731,6 +733,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <td>${date}</td>
         <td>${thermalMass != null ? formatMass(thermalMass) : '—'}</td>
         <td>${rExternal != null ? formatNumber(rExternal, 4) : '—'}</td>
+        <td>${internalGain != null ? formatNumber(internalGain, 0) + ' W' : '—'}</td>
+        <td>${solarScale != null ? formatNumber(solarScale, 2) + '×' : '—'}</td>
         <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' °C' : '—'}</td>
         <td><button class="btn btn--ghost btn--sm" data-revert="${i}">Revert</button></td>
       `;

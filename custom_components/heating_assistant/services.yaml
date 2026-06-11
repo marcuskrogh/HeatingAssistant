@@ -270,8 +270,8 @@ run_open_loop_simulation:
     genuinely predicts temperature evolution rather than merely fitting a
     one-step-ahead filter.
 
-    Rule of thumb: open-loop RMSE < 0.2 °C over 30 steps (30 min) is
-    excellent; > 0.5 °C indicates that the model should be re-estimated.
+    Rule of thumb: open-loop RMSE < 0.2 °C over 30 steps is excellent;
+    > 0.5 °C indicates that the model should be re-estimated.
   fields:
     room_name:
       name: Room name
@@ -286,8 +286,8 @@ run_open_loop_simulation:
       name: Segment length (steps)
       description: >
         Number of history-buffer steps per open-loop simulation segment.
-        Each step is one UPDATE_INTERVAL (60 s), so the default of 30 steps
-        corresponds to a 30-minute free-run window.
+        Each step is one UPDATE_INTERVAL (default 900 s / 15 min), so the
+        default of 30 steps corresponds to ~7.5 hours with default settings.
       required: false
       default: 30
       example: 30
