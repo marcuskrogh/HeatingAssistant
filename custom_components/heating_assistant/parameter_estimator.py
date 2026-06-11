@@ -85,6 +85,10 @@ _MIN_HISTORY_TIME_S: float = 3600.0
 #: parameters (R_ext, q_int); 20 minutes is a practical lower bound.
 _MIN_SEGMENT_TIME_S: float = 1200.0
 
+#: Shared empty integer index array, returned by the per-room open-window
+#: bookkeeping when no room is excluded at a step (avoids per-step allocation).
+_EMPTY_IDX: np.ndarray = np.array([], dtype=int)
+
 #: Log-space parameter bounds (hard limits).
 _LOG_MASS_LO = math.log(1e4)    # ~10 kJ/K
 _LOG_MASS_HI = math.log(5e8)    # ~500 MJ/K
@@ -1638,9 +1642,42 @@ class KalmanMLEstimator:
                     try:
                         u_k = np.asarray(rec_k["u"], dtype=float)
                         d_k = np.asarray(rec_k["d"], dtype=float)
+                        ym_k = np.asarray(rec_k["ym"], dtype=float)
                         ym_next = np.asarray(rec_next["ym"], dtype=float)
                     except (KeyError, TypeError, ValueError):
                         break
+
+                    # ── Per-room open-window exclusion ───────────────────────
+                    # A room whose window is open carries unmodelled
+                    # air-exchange loss.  Rather than dropping the whole step
+                    # (which would discard every *other* room too), we:
+                    #   (1) pin the open room's air node to its measurement for
+                    #       the duration of the interval (so the coupled
+                    #       neighbours see the *true* boundary temperature, not a
+                    #       model free-run that cools too slowly), with zero
+                    #       parameter sensitivity since a pinned value is data,
+                    #       not a function of θ; and
+                    #   (2) drop that room's residual from the objective so its
+                    #       open-window dynamics never bias C / R / α / R_ij.
+                    # A room is excluded at step k→k+1 if its window was open at
+                    # either endpoint (the prediction is then built from a pinned
+                    # state and/or scored against an open-window measurement).
+                    open_k = rec_k.get("window_open")
+                    open_next = rec_next.get("window_open")
+                    pin_idx = (
+                        np.where(open_k)[0]
+                        if open_k is not None and open_k.any()
+                        else _EMPTY_IDX
+                    )
+                    if open_k is None and open_next is None:
+                        drop_idx = _EMPTY_IDX
+                    else:
+                        drop_mask = np.zeros(n, dtype=bool)
+                        if open_k is not None:
+                            drop_mask |= open_k
+                        if open_next is not None:
+                            drop_mask |= open_next
+                        drop_idx = np.where(drop_mask)[0]
 
                     t_k = rec_k.get("t")
                     t_next = rec_next.get("t")
@@ -1694,6 +1731,15 @@ class KalmanMLEstimator:
                                 M, (sx + h_sub * dfdtheta_val).T
                             ).T
                             x = x_new
+                            # Hold each open room's air node at its measurement
+                            # across the ZOH interval so the coupled neighbours
+                            # integrate against the real (cooling) boundary
+                            # temperature.  The pinned value is data ⇒ its
+                            # parameter sensitivity is zero.  The wall node is left
+                            # to evolve, driven by the pinned air via R_aw.
+                            if pin_idx.size:
+                                x[pin_idx] = ym_k[pin_idx]
+                                sx[:, pin_idx] = 0.0
                         except np.linalg.LinAlgError:
                             valid = False
                             break
@@ -1707,6 +1753,11 @@ class KalmanMLEstimator:
                         return _SENTINEL, _zero_grad.copy()
 
                     residual = ym_next - x[:n]  # shape (n,)
+                    # Drop open-window rooms: zeroing the residual removes the
+                    # room from both the SSE and the gradient (which is
+                    # sx[:, :n] @ residual) at this step.
+                    if drop_idx.size:
+                        residual[drop_idx] = 0.0
                     total_sse += float(np.dot(residual, residual))
                     # ∂||residual||²/∂θ_i = -2 * sx[i, :n] · residual
                     total_grad -= 2.0 * (sx[:, :n] @ residual)
@@ -2170,11 +2221,22 @@ class KalmanMLEstimator:
             # Carry the Unix timestamp so _simulation_mse_and_grad can detect
             # gaps from controller restarts and treat them as segment boundaries.
             t_val = record.get("timestamp")
+            # Per-room window-open data-quality label.  When a room's window was
+            # open at this step its air-exchange loss is unmodelled, so the
+            # open-loop objective must neither score that room's residual nor let
+            # its (cooling) air node leak into the coupled neighbours.  Missing
+            # key (old records / seeded history) ⇒ all-closed.
+            wo_map = record.get("window_open") or {}
+            window_open = np.array(
+                [bool(wo_map.get(name, False)) for name in self._room_names],
+                dtype=bool,
+            )
             std.append({
                 meas_key: y,
                 "u": u,
                 "d": d,
                 "t": float(t_val) if t_val is not None else None,
+                "window_open": window_open,
             })
         return std
 

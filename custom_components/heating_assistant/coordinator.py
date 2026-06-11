@@ -2311,6 +2311,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     "timestamp": now.timestamp(),
                     # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
                     "kalman_innovation": kalman_innovation,
+                    # Per-room data-quality label: True while a window override is
+                    # active (state ``open``/``pending_closed``).  These samples
+                    # carry unmodelled air-exchange losses, so system
+                    # identification excludes the affected room at those steps and
+                    # the reconstruction/open-loop diagnostics render them as gaps.
+                    # Uses the *same* predicate as the real-time EKF Q-inflation so
+                    # "don't trust the model here" has a single definition.
+                    "window_open": {
+                        name: self.is_window_override_active(name)
+                        for name in self.model.room_names
+                    },
                 })
 
                 if self.id_history_store is not None:
