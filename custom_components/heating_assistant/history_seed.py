@@ -212,6 +212,80 @@ async def async_rebuild_history_from_recorder(
     return records
 
 
+async def async_fetch_history_range(
+    hass: Any,
+    coordinator: Any,
+    start_ts: float,
+    end_ts: float,
+) -> List[Dict[str, Any]]:
+    """Fetch recorder history for an explicit UNIX timestamp range and return
+    buffer-compatible records resampled onto the coordinator's ``dt`` grid.
+
+    This is used when the user selects a custom identification window that
+    extends further back than the in-memory history buffer can reach (the
+    buffer holds at most ``HISTORY_BUFFER_SIZE × dt`` seconds of data, but the
+    HA Recorder retains sensor data for the full configured retention period —
+    typically 10 days or more).
+
+    Returns an empty list if the recorder is unavailable or has no usable data
+    for the requested range, so callers can fall back to the in-memory buffer.
+    """
+    try:
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.history import get_significant_states
+    except Exception:
+        _LOGGER.debug("Recorder unavailable; cannot fetch history range")
+        return []
+
+    ids = _entity_ids(coordinator)
+    if not ids["room_names"]:
+        return []
+
+    dt = float(coordinator.dt)
+    if dt <= 0:
+        return []
+
+    start = datetime.fromtimestamp(start_ts - dt, tz=timezone.utc)
+    end = datetime.fromtimestamp(end_ts + dt, tz=timezone.utc)
+    entity_ids = ids["temp"] + ids["solar"] + ids["control"] + [ids["outdoor"]]
+
+    def _fetch() -> Dict[str, List[Any]]:
+        return get_significant_states(
+            hass,
+            start,
+            end,
+            entity_ids,
+            None,
+            True,   # include_start_time_state
+            False,  # significant_changes_only
+            False,  # minimal_response
+            True,   # no_attributes
+        )
+
+    try:
+        history = await get_instance(hass).async_add_executor_job(_fetch)
+    except Exception:
+        _LOGGER.warning("Recorder range fetch failed", exc_info=True)
+        return []
+
+    if not history:
+        return []
+
+    grid = build_uniform_grid(start_ts, end_ts, dt)
+    if not grid:
+        return []
+
+    records = build_records_from_history(history, ids, grid)
+    if records:
+        _LOGGER.debug(
+            "Fetched %d history records from recorder for range [%.0f, %.0f]",
+            len(records),
+            start_ts,
+            end_ts,
+        )
+    return records
+
+
 def _earliest_usable_ts(
     history: Dict[str, List[Any]], ids: Dict[str, Any]
 ) -> Optional[float]:

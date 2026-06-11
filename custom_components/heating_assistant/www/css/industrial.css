@@ -1137,11 +1137,14 @@
   flex-wrap: wrap;
 }
 
-/* datetime-local inputs need the same styling as number inputs plus a bit of
-   extra width since the value string is longer. */
+/* datetime-local inputs need the same styling as number inputs. Setting
+   min-width: 0 is critical on mobile: browsers enforce an intrinsic minimum
+   for datetime-local (wide enough to show the full date string) which causes
+   the input to overflow its grid cell if not overridden. */
 .form-input--datetime {
   font-family: var(--font-sans);
   color-scheme: dark;
+  min-width: 0;
 }
 
 /* Heater scales table in the identification detail view */
