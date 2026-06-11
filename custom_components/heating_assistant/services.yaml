@@ -311,6 +311,28 @@ run_open_loop_simulation:
           max: 120
           step: 5
           unit_of_measurement: "steps"
+    window_start:
+      name: Window start (UNIX timestamp)
+      description: >
+        Optional explicit window start as a UNIX timestamp (seconds since
+        epoch).  When both ``window_start`` and ``window_end`` are supplied
+        the simulation uses only history records within that range, ignoring
+        ``horizon_hours``.  Useful for targeting a known experiment period.
+      required: false
+      selector:
+        number:
+          mode: box
+          step: 1
+    window_end:
+      name: Window end (UNIX timestamp)
+      description: >
+        Optional explicit window end as a UNIX timestamp (seconds since
+        epoch).  Must be used together with ``window_start``.
+      required: false
+      selector:
+        number:
+          mode: box
+          step: 1
     heater_scales:
       name: Heater power scales
       description: >

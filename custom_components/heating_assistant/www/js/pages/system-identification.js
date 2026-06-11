@@ -298,12 +298,37 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
     <div class="params-subsection params-subsection--last">
       <div class="params-subsection__title">Identification Window</div>
-      <div class="tuning-params-grid">
+      <div class="window-mode-toggle">
+        <button class="window-mode-btn window-mode-btn--active" id="window-mode-recent" type="button">Recent Horizon</button>
+        <button class="window-mode-btn" id="window-mode-custom" type="button">Custom Date Range</button>
+      </div>
+      <div id="window-panel-recent" class="tuning-params-grid">
         <div class="form-group">
           <label class="form-label" for="param-horizon">Horizon</label>
           <input class="form-input" type="number" id="param-horizon"
             step="0.5" min="0.5" max="72" value="${DEFAULTS.horizon_hours}">
-          <span class="form-hint">hours &mdash; history window used for simulation and validation</span>
+          <span class="form-hint">hours &mdash; history window ending at the most recent record</span>
+        </div>
+      </div>
+      <div id="window-panel-custom" class="tuning-params-grid" style="display:none">
+        <div class="form-group">
+          <label class="form-label" for="param-window-start">Window Start</label>
+          <input class="form-input form-input--datetime" type="datetime-local" id="param-window-start">
+          <span class="form-hint">Start of the identification window (local time)</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="param-window-end">Window End</label>
+          <input class="form-input form-input--datetime" type="datetime-local" id="param-window-end">
+          <span class="form-hint">End of the identification window (local time)</span>
+        </div>
+        <div class="form-group window-preset-row">
+          <span class="form-hint">Quick presets:</span>
+          <div class="window-presets">
+            <button class="btn btn--ghost btn--sm" data-preset="1h" type="button">Last 1 h</button>
+            <button class="btn btn--ghost btn--sm" data-preset="6h" type="button">Last 6 h</button>
+            <button class="btn btn--ghost btn--sm" data-preset="12h" type="button">Last 12 h</button>
+            <button class="btn btn--ghost btn--sm" data-preset="24h" type="button">Last 24 h</button>
+          </div>
         </div>
       </div>
     </div>
@@ -420,6 +445,12 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const sigmaWInput = container.querySelector('#param-sigma-w');
   const sigmaVInput = container.querySelector('#param-sigma-v');
   const horizonInput = container.querySelector('#param-horizon');
+  const windowModeRecentBtn = container.querySelector('#window-mode-recent');
+  const windowModeCustomBtn = container.querySelector('#window-mode-custom');
+  const windowPanelRecent = container.querySelector('#window-panel-recent');
+  const windowPanelCustom = container.querySelector('#window-panel-custom');
+  const windowStartInput = container.querySelector('#param-window-start');
+  const windowEndInput = container.querySelector('#param-window-end');
   const btnAutoIdentify = container.querySelector('#btn-auto-identify');
   const btnApplyParams = container.querySelector('#btn-apply-params');
   const btnResetDefaults = container.querySelector('#btn-reset-defaults');
@@ -542,6 +573,88 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   });
 
   // -----------------------------------------------------------------------
+  // Window mode: 'recent' (horizon-based) or 'custom' (explicit date range)
+  // -----------------------------------------------------------------------
+  const _WINDOW_MODE_KEY = `heating_assistant_sysid_window_mode_v1_${roomSlug}`;
+  const _WINDOW_START_KEY = `heating_assistant_sysid_window_start_v1_${roomSlug}`;
+  const _WINDOW_END_KEY = `heating_assistant_sysid_window_end_v1_${roomSlug}`;
+
+  let windowMode = (() => {
+    try { return localStorage.getItem(_WINDOW_MODE_KEY) || 'recent'; } catch (_) { return 'recent'; }
+  })();
+
+  // Format a Date as the value string for <input type="datetime-local">.
+  // That format is "YYYY-MM-DDTHH:MM" in local time (no timezone suffix).
+  function _toDatetimeLocal(date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function _initWindowDefaults() {
+    const storedStart = (() => { try { return localStorage.getItem(_WINDOW_START_KEY); } catch (_) { return null; } })();
+    const storedEnd   = (() => { try { return localStorage.getItem(_WINDOW_END_KEY);   } catch (_) { return null; } })();
+    if (storedStart) {
+      windowStartInput.value = storedStart;
+    } else {
+      const defaultStart = new Date(Date.now() - parseFloat(horizonInput.value) * 3600_000);
+      windowStartInput.value = _toDatetimeLocal(defaultStart);
+    }
+    if (storedEnd) {
+      windowEndInput.value = storedEnd;
+    } else {
+      windowEndInput.value = _toDatetimeLocal(new Date());
+    }
+  }
+
+  function _applyWindowMode(mode) {
+    windowMode = mode;
+    try { localStorage.setItem(_WINDOW_MODE_KEY, mode); } catch (_) {}
+    if (mode === 'custom') {
+      windowModeRecentBtn.classList.remove('window-mode-btn--active');
+      windowModeCustomBtn.classList.add('window-mode-btn--active');
+      windowPanelRecent.style.display = 'none';
+      windowPanelCustom.style.display = '';
+    } else {
+      windowModeCustomBtn.classList.remove('window-mode-btn--active');
+      windowModeRecentBtn.classList.add('window-mode-btn--active');
+      windowPanelCustom.style.display = 'none';
+      windowPanelRecent.style.display = '';
+    }
+  }
+
+  _initWindowDefaults();
+  _applyWindowMode(windowMode);
+
+  windowModeRecentBtn.addEventListener('click', () => _applyWindowMode('recent'));
+  windowModeCustomBtn.addEventListener('click', () => _applyWindowMode('custom'));
+
+  // Persist datetime values on change so they survive navigation.
+  windowStartInput.addEventListener('change', () => {
+    try { localStorage.setItem(_WINDOW_START_KEY, windowStartInput.value); } catch (_) {}
+    userEditing = true;
+  });
+  windowEndInput.addEventListener('change', () => {
+    try { localStorage.setItem(_WINDOW_END_KEY, windowEndInput.value); } catch (_) {}
+    userEditing = true;
+  });
+
+  // Quick-preset buttons (Last 1h / 6h / 12h / 24h).
+  windowPanelCustom.querySelectorAll('[data-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const hours = parseFloat(btn.dataset.preset);
+      const now = new Date();
+      const start = new Date(now.getTime() - hours * 3600_000);
+      windowStartInput.value = _toDatetimeLocal(start);
+      windowEndInput.value = _toDatetimeLocal(now);
+      try {
+        localStorage.setItem(_WINDOW_START_KEY, windowStartInput.value);
+        localStorage.setItem(_WINDOW_END_KEY, windowEndInput.value);
+      } catch (_) {}
+      userEditing = true;
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
 
@@ -566,7 +679,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     }
     const params = {
       room_name: roomSlug,
-      horizon_hours: parseFloat(horizonInput.value),
       sigma_w: parseFloat(sigmaWInput.value),
       sigma_v: parseFloat(sigmaVInput.value),
       [`thermal_mass_${roomSlug}`]: parseFloat(thermalMassInput.value),
@@ -576,6 +688,19 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       [`c_air_fraction_${roomSlug}`]: parseFloat(cAirFractionInput.value),
       [`r_aw_fraction_${roomSlug}`]: parseFloat(rAwFractionInput.value),
     };
+
+    if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
+      // Convert datetime-local (local time) to UNIX timestamp.
+      const startTs = new Date(windowStartInput.value).getTime() / 1000;
+      const endTs   = new Date(windowEndInput.value).getTime() / 1000;
+      if (isFinite(startTs) && isFinite(endTs) && startTs < endTs) {
+        params.window_start = startTs;
+        params.window_end   = endTs;
+      }
+    } else {
+      params.horizon_hours = parseFloat(horizonInput.value);
+    }
+
     if (Object.keys(heaterScales).length) params.heater_scales = heaterScales;
     return params;
   }
@@ -771,23 +896,40 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     );
   }
 
+  // Derive the xRange to pass to renderAuxPlots based on the current window
+  // mode so the input/disturbance plots align with the fit chart.
+  function _effectiveXRange(simAttrs) {
+    const fromSim = simTimeRange(simAttrs?.simulation);
+    if (fromSim) return fromSim;
+    // Fall back to the configured window.
+    if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
+      const xMin = new Date(windowStartInput.value).getTime();
+      const xMax = new Date(windowEndInput.value).getTime();
+      if (isFinite(xMin) && isFinite(xMax) && xMin < xMax) return { xMin, xMax };
+    }
+    return null;
+  }
+
+  function _effectiveHorizon(attrs) {
+    if (attrs?.horizon_hours != null) return Number(attrs.horizon_hours);
+    if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
+      const ms = new Date(windowEndInput.value) - new Date(windowStartInput.value);
+      return ms / 3_600_000;
+    }
+    return parseFloat(horizonInput.value);
+  }
+
   function renderEkfAux() {
     const attrs = latestState[sysidEntityId(roomSlug)]?.attributes || {};
-    const horizon = attrs.horizon_hours != null
-      ? Number(attrs.horizon_hours)
-      : parseFloat(horizonInput.value);
     return renderAuxPlots(
-      ekfInputsChart, ekfDisturbChart, horizon, simTimeRange(attrs.simulation),
+      ekfInputsChart, ekfDisturbChart, _effectiveHorizon(attrs), _effectiveXRange(attrs),
     );
   }
 
   function renderOlAux() {
     const attrs = latestState[openLoopEntityId(roomSlug)]?.attributes || {};
-    const horizon = attrs.horizon_hours != null
-      ? Number(attrs.horizon_hours)
-      : parseFloat(horizonInput.value);
     return renderAuxPlots(
-      olInputsChart, olDisturbChart, horizon, simTimeRange(attrs.simulation),
+      olInputsChart, olDisturbChart, _effectiveHorizon(attrs), _effectiveXRange(attrs),
     );
   }
 
@@ -878,9 +1020,20 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnAutoIdentify.disabled = true;
     try {
       const lp = buildLockedParams();
+      const windowData = {};
+      if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
+        const startTs = new Date(windowStartInput.value).getTime() / 1000;
+        const endTs   = new Date(windowEndInput.value).getTime() / 1000;
+        if (isFinite(startTs) && isFinite(endTs) && startTs < endTs) {
+          windowData.window_start = startTs;
+          windowData.window_end   = endTs;
+        }
+      } else {
+        windowData.horizon_hours = parseFloat(horizonInput.value);
+      }
       await hass.callService('heating_assistant', 'estimate_parameters_ml', {
         apply_parameters: false,
-        horizon_hours: parseFloat(horizonInput.value),
+        ...windowData,
         ...(lp ? { locked_params: lp } : {}),
       });
       // The coordinator updates sysid_results and fires async_update_listeners()
