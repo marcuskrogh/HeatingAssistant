@@ -828,7 +828,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=50",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=51",
                     "embed_iframe": False,
                 }
             },
@@ -1451,16 +1451,21 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _get_coordinator(hass)
         segment_length = int(call.data.get("segment_length", 30))
         horizon_hours: Optional[float] = call.data.get("horizon_hours")
+        window_start_ol: Optional[float] = (
+            float(call.data["window_start"]) if "window_start" in call.data else None
+        )
+        window_end_ol: Optional[float] = (
+            float(call.data["window_end"]) if "window_end" in call.data else None
+        )
 
         history = list(coordinator.history_buffer)
 
-        # Filter history to the requested horizon measured in *active sampled
-        # time*, so a restart gap inside the window does not consume the budget
-        # and leave only post-restart data.  The continuous-time model bridges
-        # the gaps; small sample-interval discrepancies are irrelevant.
-        if horizon_hours is not None and history:
+        # Explicit window takes priority over horizon-based trailing window.
+        if window_start_ol is not None and window_end_ol is not None and history:
+            from .history_window import select_window_by_timestamps
+            history = select_window_by_timestamps(history, window_start_ol, window_end_ol)
+        elif horizon_hours is not None and history:
             from .history_window import select_recent_window
-
             history = select_recent_window(
                 history, float(horizon_hours) * 3600.0, coordinator.dt
             )
@@ -1749,6 +1754,10 @@ def _register_services(hass: HomeAssistant) -> None:
                     vol.Coerce(int), vol.Range(min=5, max=120)
                 ),
                 vol.Optional("horizon_hours"): vol.Coerce(float),
+                # Explicit window overrides horizon when both start and end are
+                # provided. Values are UNIX timestamps (seconds since epoch).
+                vol.Optional("window_start"): vol.Coerce(float),
+                vol.Optional("window_end"): vol.Coerce(float),
                 vol.Optional("sigma_w"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=10.0)
                 ),
