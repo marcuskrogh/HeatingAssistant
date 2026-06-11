@@ -297,6 +297,19 @@ run_open_loop_simulation:
           max: 120
           step: 5
           unit_of_measurement: "steps"
+    heater_scales:
+      name: Heater power scales
+      description: >
+        Optional per-source heater power scales {source_name: scale} (1.0 =
+        rated power) to preview in the simulation without applying them to the
+        live model.  Falls back to the last auto-identified scales when omitted.
+        Per-room thermal-model overrides may also be passed as
+        ``<param>_<room_slug>`` keys (thermal_mass, r_external, internal_gain,
+        solar_scale, c_air_fraction, r_aw_fraction).
+      required: false
+      example: '{"living_room_heater": 0.85}'
+      selector:
+        object:
 
 compute_loglik_slice:
   name: Compute log-likelihood slice
@@ -403,6 +416,19 @@ run_sysid_simulation:
           max: 10.0
           step: 0.01
           unit_of_measurement: "°C"
+    heater_scales:
+      name: Heater power scales
+      description: >
+        Optional per-source heater power scales {source_name: scale} (1.0 =
+        rated power) to preview in the reconstruction without applying them to
+        the live model.  Falls back to the last auto-identified scales when
+        omitted.  Per-room thermal-model overrides may also be passed as
+        ``<param>_<room_slug>`` keys (thermal_mass, r_external, internal_gain,
+        solar_scale, c_air_fraction, r_aw_fraction).
+      required: false
+      example: '{"living_room_heater": 0.85}'
+      selector:
+        object:
 
 regenerate_dashboard:
   name: Regenerate Lovelace dashboard

@@ -183,7 +183,7 @@ def run_sysid_ekf(
     # ZOH bookkeeping
     # ------------------------------------------------------------------
     n_u = len(heat_sources)
-    n_d = sde.nd   # 1 + n_rooms
+    n_d = sde.nd   # 1 + 2·n_rooms  ([T_out, q_solar(n), q_air(n)])
 
     # ------------------------------------------------------------------
     # Output containers
@@ -223,7 +223,7 @@ def run_sysid_ekf(
         per_room_sim[name].append(entry0)
 
     u_prev = _record_u(window[0], n_u)
-    d_prev = _record_d(window[0], room_list, n_d)
+    d_prev = _record_d(window[0], sde, room_list, n_d)
     t_prev = ts0
 
     for record in window[1:]:
@@ -239,7 +239,7 @@ def run_sysid_ekf(
             float(y_raw[i]) if i < len(y_raw) else None for i in range(n)
         ]
         u_curr = _record_u(record, n_u)
-        d_curr = _record_d(record, room_list, n_d)
+        d_curr = _record_d(record, sde, room_list, n_d)
 
         # Build an EKF for this specific interval length.
         # n_steps scales with dt_step so the sub-step size stays ≤ dt/10
@@ -373,20 +373,46 @@ def _record_u(record: Dict[str, Any], n_u: int) -> np.ndarray:
 
 def _record_d(
     record: Dict[str, Any],
+    sde: Any,
     room_list: List[str],
     n_d: int,
 ) -> np.ndarray:
-    """Build the disturbance vector d = [T_outdoor, Q_solar_1, ..., Q_solar_n].
+    """Build the disturbance vector for a history record.
 
-    Layout matches ``HouseThermalSDE.nd``:  d[0] = outdoor temperature,
-    d[1+i] = solar gain for room ``room_list[i]`` [W].
+    Layout matches ``HouseThermalSDE.nd``: ``d = [T_out, q_solar(n), q_air(n)]``
+    — outdoor temperature, the per-room *unscaled* modelled solar gain, and the
+    per-room air-node heat (internal gain).  The SDE's own
+    ``disturbance_vector`` is used so the reconstruction folds in each room's
+    identified ``internal_gain`` exactly as the live CD-EKF / MPC does; without
+    it the internal-gain field had no effect on the reconstruction.
     """
+    outdoor = float(record.get("d_outdoor", 10.0))
+    solar = record.get("d_solar", {}) or {}
+    builder = getattr(sde, "disturbance_vector", None)
+    if builder is not None:
+        return np.asarray(builder(outdoor, solar), dtype=float)
+
+    # Fallback for SDEs without a disturbance builder: solar only.
     d = np.zeros(n_d, dtype=float)
-    d[0] = float(record.get("d_outdoor", 10.0))
-    solar = record.get("d_solar", {})
+    d[0] = outdoor
     for i, name in enumerate(room_list):
-        d[1 + i] = float(solar.get(name, 0.0))
+        if 1 + i < n_d:
+            d[1 + i] = float(solar.get(name, 0.0))
     return d
+
+
+# Per-room thermal-model attributes that a sysid / open-loop run may override
+# from the System Identification panel.  Each maps a service-data / room_params
+# key to the corresponding ``Room`` attribute so the simulation reflects exactly
+# the values the user has entered, without applying them to the live model.
+_ROOM_PARAM_ATTRS = (
+    "thermal_mass",
+    "r_external",
+    "internal_gain",
+    "solar_scale",
+    "c_air_fraction",
+    "r_aw_fraction",
+)
 
 
 def _build_sim_model(
@@ -394,7 +420,14 @@ def _build_sim_model(
     room_params: Dict[str, Dict[str, float]],
     room_names: List[str],
 ) -> Any:
-    """Return a deep copy of *live_model* with *room_params* overrides applied."""
+    """Return a deep copy of *live_model* with *room_params* overrides applied.
+
+    Every per-room thermal-model parameter the identification panel exposes
+    (``thermal_mass``, ``r_external``, ``internal_gain``, ``solar_scale`` and
+    the 2R2C envelope split ``c_air_fraction`` / ``r_aw_fraction``) is applied
+    when present so the reconstruction / open-loop simulation uses the full set
+    of values currently shown in the UI, not just C and R_ext.
+    """
     sim_model = copy.deepcopy(live_model)
     for name in room_names:
         overrides = room_params.get(name, {})
@@ -403,10 +436,9 @@ def _build_sim_model(
         room = sim_model.rooms.get(name)
         if room is None:
             continue
-        if "thermal_mass" in overrides:
-            room.thermal_mass = float(overrides["thermal_mass"])
-        if "r_external" in overrides:
-            room.r_external = float(overrides["r_external"])
+        for attr in _ROOM_PARAM_ATTRS:
+            if attr in overrides:
+                setattr(room, attr, float(overrides[attr]))
 
     # Rebuild cached matrices so HouseThermalSDE picks up the new parameters.
     sim_model.rebuild_derived_parameters()

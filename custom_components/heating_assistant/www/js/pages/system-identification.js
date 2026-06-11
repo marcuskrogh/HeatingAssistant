@@ -301,15 +301,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         </div>
       </div>
     </div>
-
-    <div class="params-subsection params-subsection--last" id="heater-scales-subsection">
-      <div class="params-subsection__title">Heater Power Scales</div>
-      <p class="form-hint" style="margin-bottom:8px">
-        Identified by Auto-Identification &mdash; applied separately from thermal model parameters.
-        A scale &lt; 1 means the heater delivers less heat than its rated power suggests.
-      </p>
-      <div id="heater-scales-list"></div>
-    </div>
   `;
   container.appendChild(paramsCard);
 
@@ -470,6 +461,35 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     el.textContent = text;
     el.className = 'tuning-actions__status';
     if (type) el.classList.add(`tuning-actions__status--${type}`);
+  }
+
+  // Collect every parameter field currently shown in the panel into the
+  // service-data payload used by the EKF reconstruction and open-loop
+  // simulation.  Per-room thermal-model parameters are keyed as
+  // ``<param>_<room_slug>`` (matching the backend's _extract_sim_room_params);
+  // the per-source heater scales are passed as a ``heater_scales`` map.  This
+  // makes both simulations reflect exactly what the user has entered, with no
+  // need to click Apply first.
+  function collectSimParams() {
+    const heaterScales = {};
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      const val = parseFloat(inp.value);
+      if (isFinite(val)) heaterScales[srcName] = val;
+    }
+    const params = {
+      room_name: roomSlug,
+      horizon_hours: parseFloat(horizonInput.value),
+      sigma_w: parseFloat(sigmaWInput.value),
+      sigma_v: parseFloat(sigmaVInput.value),
+      [`thermal_mass_${roomSlug}`]: parseFloat(thermalMassInput.value),
+      [`r_external_${roomSlug}`]: parseFloat(rExternalInput.value),
+      [`internal_gain_${roomSlug}`]: parseFloat(internalGainInput.value),
+      [`solar_scale_${roomSlug}`]: parseFloat(solarScaleInput.value),
+      [`c_air_fraction_${roomSlug}`]: parseFloat(cAirFractionInput.value),
+      [`r_aw_fraction_${roomSlug}`]: parseFloat(rAwFractionInput.value),
+    };
+    if (Object.keys(heaterScales).length) params.heater_scales = heaterScales;
+    return params;
   }
 
   function filteredEntityId(slug) {
@@ -832,14 +852,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
-      await hass.callService('heating_assistant', 'run_sysid_simulation', {
-        room_name: roomSlug,
-        horizon_hours: parseFloat(horizonInput.value),
-        sigma_w: parseFloat(sigmaWInput.value),
-        sigma_v: parseFloat(sigmaVInput.value),
-        [`thermal_mass_${roomSlug}`]: parseFloat(thermalMassInput.value),
-        [`r_external_${roomSlug}`]: parseFloat(rExternalInput.value),
-      });
+      await hass.callService('heating_assistant', 'run_sysid_simulation', collectSimParams());
       // Let the websocket state event with the fresh results arrive, then plot
       // the temperature fit and the input/disturbance signals over its horizon.
       await new Promise((res) => setTimeout(res, 800));
@@ -862,13 +875,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnOpenLoop.disabled = true;
     try {
       await hass.callService('heating_assistant', 'run_open_loop_simulation', {
-        room_name: roomSlug,
+        ...collectSimParams(),
         segment_length: 30,
-        horizon_hours: parseFloat(horizonInput.value),
-        sigma_w: parseFloat(sigmaWInput.value),
-        sigma_v: parseFloat(sigmaVInput.value),
-        [`thermal_mass_${roomSlug}`]: parseFloat(thermalMassInput.value),
-        [`r_external_${roomSlug}`]: parseFloat(rExternalInput.value),
       });
       await new Promise((res) => setTimeout(res, 800));
       renderOlResults(roomSlug, latestState);

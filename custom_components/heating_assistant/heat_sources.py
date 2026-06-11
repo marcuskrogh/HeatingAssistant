@@ -61,7 +61,14 @@ class HeatSource(ABC):
         self.heater_entity = heater_entity   # optional HA entity_id
         # Multiplicative correction on actual delivered thermal power.
         # Identified jointly with thermal-mass and resistance parameters.
-        self.power_scale = power_scale
+        # Stored behind a property so assigning a new value re-derives the
+        # cached power-dependent gains (``_gain`` / ``_q_heat_base`` …) that the
+        # SDE and MPC read; a plain attribute left those caches stale, so
+        # identified or manually-entered heater scales had no effect on the
+        # model.  The raw private attribute is set here (not via the property)
+        # because subclass attributes the recompute hook needs are not assigned
+        # until after ``super().__init__`` returns.
+        self._power_scale = float(power_scale)
         # Phase 1 B2 (pragmatic emitter filter): first-order time
         # constant [s] for the commanded-fraction → delivered-fraction
         # filter.  Captures TRV / valve / water-loop / metal-mass lag
@@ -88,6 +95,27 @@ class HeatSource(ABC):
     def current_power(self) -> float:
         """Current thermal output power [W]."""
         return self._current_power
+
+    @property
+    def power_scale(self) -> float:
+        """Multiplicative correction on delivered thermal power (1.0 = rated)."""
+        return self._power_scale
+
+    @power_scale.setter
+    def power_scale(self, value: float) -> None:
+        self._power_scale = float(value)
+        # Re-derive any cached power-dependent gains so a runtime scale change
+        # (Apply Parameters, identified scales, or a simulation preview) takes
+        # effect.  Subclasses override ``_recompute_power_scaled_gains``.
+        self._recompute_power_scaled_gains()
+
+    def _recompute_power_scaled_gains(self) -> None:
+        """Recompute cached gains that depend on ``power_scale``.
+
+        No-op in the base class; subclasses that precompute thermal-output
+        constants from ``power_scale`` at construction override this so those
+        caches stay consistent when ``power_scale`` is reassigned.
+        """
 
     @abstractmethod
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
@@ -193,7 +221,11 @@ class ElectricHeater(HeatSource):
             raise ValueError(f"max_temp_offset must be >= 0; got {max_temp_offset}")
         self.efficiency = efficiency
         self.max_temp_offset = max_temp_offset
-        self._gain: float = max_power * efficiency * power_scale
+        self._gain: float = max_power * efficiency * self._power_scale
+
+    def _recompute_power_scaled_gains(self) -> None:
+        """Re-derive the cached linear gain after a ``power_scale`` change."""
+        self._gain = self.max_power * self.efficiency * self._power_scale
 
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """Thermal power = electrical power × efficiency × power_scale."""
@@ -309,16 +341,28 @@ class HeatPump(HeatSource):
 
         # Precomputed constants (cop_rated is fixed at construction time)
         self._electric_max: float = max_power / cop_rated if cop_rated > 0 else 0.0
-        self._q_cool_const: float = (
-            self._electric_max * cooling_cop * cooling_efficiency * power_scale
-        )
         # Precomputed Carnot-ratio scale factor: cop(T_out) = _cop_scale * T_supply / denom
         _T_ref_K = cop_temp_ref + 273.15
         self._cop_scale: float = cop_rated * max(_T_SUPPLY_K - _T_ref_K, 1.0) / _T_SUPPLY_K
+        # Power-scale-dependent thermal-output caches (cooling const, base heat
+        # output at COP=1, and the rated-output ceiling).  Derived in the hook
+        # so they are re-computed whenever ``power_scale`` is reassigned.
+        self._recompute_power_scaled_gains()
+
+    def _recompute_power_scaled_gains(self) -> None:
+        """Re-derive cached thermal-output constants after a scale change."""
+        self._q_cool_const: float = (
+            self._electric_max * self.cooling_cop
+            * self.cooling_efficiency * self._power_scale
+        )
         # Base thermal output at COP=1 (used in thermal_power / smooth_thermal_power)
-        self._q_heat_base: float = self._electric_max * heating_efficiency * power_scale
+        self._q_heat_base: float = (
+            self._electric_max * self.heating_efficiency * self._power_scale
+        )
         # Hard ceiling: rated thermal output must never be exceeded regardless of outdoor COP
-        self._q_heat_max: float = max_power * heating_efficiency * power_scale
+        self._q_heat_max: float = (
+            self.max_power * self.heating_efficiency * self._power_scale
+        )
 
     @property
     def can_cool(self) -> bool:

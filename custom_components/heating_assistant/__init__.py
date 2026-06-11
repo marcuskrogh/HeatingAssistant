@@ -1199,6 +1199,84 @@ def _persist_tuning_updates(
     )
 
 
+# Per-room thermal-model parameters the System Identification panel can preview
+# in the EKF reconstruction / open-loop simulation.  Each is passed as a
+# ``<param>_<room_slug>`` service-data key (e.g. ``thermal_mass_living_room``)
+# so a parameter set can be tried without applying it to the live model.
+_SIM_ROOM_PARAM_KEYS = (
+    "thermal_mass",
+    "r_external",
+    "internal_gain",
+    "solar_scale",
+    "c_air_fraction",
+    "r_aw_fraction",
+)
+
+
+def _extract_sim_room_params(
+    call: ServiceCall,
+    room_names: Any,
+) -> Dict[str, Dict[str, float]]:
+    """Collect per-room parameter overrides from a simulation service call.
+
+    Reads every ``<param>_<room_slug>`` key present in ``call.data`` into a
+    ``{room_name: {param: value}}`` mapping so the EKF reconstruction and
+    open-loop simulation use the full set of values currently shown in the UI,
+    not just ``thermal_mass`` / ``r_external``.
+    """
+    from .dashboard import slugify  # noqa: PLC0415
+
+    room_params: Dict[str, Dict[str, float]] = {}
+    for room_name in room_names:
+        room_key = slugify(room_name)
+        overrides: Dict[str, float] = {}
+        for param in _SIM_ROOM_PARAM_KEYS:
+            key = f"{param}_{room_key}"
+            if key in call.data:
+                overrides[param] = float(call.data[key])
+        if overrides:
+            room_params[room_name] = overrides
+    return room_params
+
+
+def _effective_heater_scales(
+    call: ServiceCall,
+    coordinator: HeatingAssistantCoordinator,
+) -> Dict[str, float]:
+    """Resolve the heater power scales a simulation should use.
+
+    Prefers the explicit ``heater_scales`` mapping supplied by the
+    identification panel (so manual edits take effect without clicking Apply);
+    falls back to the last auto-identified scales cached on the coordinator for
+    direct service calls that omit it.
+    """
+    ui_scales = call.data.get("heater_scales") or {}
+    if ui_scales:
+        return {str(k): float(v) for k, v in ui_scales.items()}
+    return dict(getattr(coordinator, "_last_identified_heater_scales", {}))
+
+
+def _patched_heat_sources(
+    coordinator: HeatingAssistantCoordinator,
+    scales: Dict[str, float],
+) -> Any:
+    """Return heat sources with *scales* applied to shallow copies.
+
+    The live heat sources are never mutated — when ``scales`` is empty the live
+    list is returned unchanged (fast path), otherwise each affected source is
+    shallow-copied and its ``power_scale`` overridden for the simulation only.
+    """
+    if not scales:
+        return coordinator.heat_sources
+    import copy as _copy  # noqa: PLC0415
+
+    patched = [_copy.copy(src) for src in coordinator.heat_sources]
+    for src in patched:
+        if src.name in scales:
+            src.power_scale = float(scales[src.name])
+    return patched
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register domain services for setup assistance."""
 
@@ -1366,7 +1444,6 @@ def _register_services(hass: HomeAssistant) -> None:
         """Run open-loop simulation diagnostic and report RMSE per room."""
         from .model_diagnostics import compute_open_loop_predictions
         from .sysid import _build_sim_model
-        from .dashboard import slugify
 
         coordinator = _get_coordinator(hass)
         segment_length = int(call.data.get("segment_length", 30))
@@ -1386,20 +1463,9 @@ def _register_services(hass: HomeAssistant) -> None:
             )
 
         # Build per-room parameter overrides from service data (same keys as
-        # run_sysid_simulation) so the open-loop diagnostic uses the same
+        # run_sysid_simulation) so the open-loop diagnostic uses the full
         # parameter set the user configured in the identification panel.
-        room_params: Dict[str, Dict[str, float]] = {}
-        for room_name in coordinator.model.room_names:
-            overrides: Dict[str, float] = {}
-            room_key = slugify(room_name)
-            tm_key = f"thermal_mass_{room_key}"
-            re_key = f"r_external_{room_key}"
-            if tm_key in call.data:
-                overrides["thermal_mass"] = float(call.data[tm_key])
-            if re_key in call.data:
-                overrides["r_external"] = float(call.data[re_key])
-            if overrides:
-                room_params[room_name] = overrides
+        room_params = _extract_sim_room_params(call, coordinator.model.room_names)
 
         # When room-parameter overrides are given, build a temporary
         # HouseThermalSDE from a patched model copy so the open-loop
@@ -1410,24 +1476,13 @@ def _register_services(hass: HomeAssistant) -> None:
         n_rooms = len(room_names)
         dt = coordinator.dt
 
-        # Patch heat-source copies with the most-recently identified power
-        # scales so the open-loop simulation uses the gain the estimator found,
-        # even when the user hasn't clicked Apply yet.
-        identified_scales: Dict[str, float] = getattr(
-            coordinator, "_last_identified_heater_scales", {}
-        )
-        if identified_scales:
-            import copy as _copy_ol  # noqa: PLC0415
-            base_heat_sources = [
-                _copy_ol.copy(src) for src in coordinator.heat_sources
-            ]
-            for src in base_heat_sources:
-                if src.name in identified_scales:
-                    src.power_scale = float(identified_scales[src.name])
-        else:
-            base_heat_sources = coordinator.heat_sources
+        # Patch heat-source copies with the heater power scales currently shown
+        # in the UI (falling back to the last auto-identified scales) so the
+        # open-loop simulation uses them even when the user hasn't clicked Apply.
+        heater_scales = _effective_heater_scales(call, coordinator)
+        base_heat_sources = _patched_heat_sources(coordinator, heater_scales)
 
-        if room_params or identified_scales:
+        if room_params or heater_scales:
             from .controller import HouseThermalSDE  # noqa: PLC0415
             sigma_w: float = float(call.data.get(
                 "sigma_w", getattr(coordinator, "_sigma_w", 0.1)
@@ -1697,15 +1752,19 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("sigma_v"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=10.0)
                 ),
+                # Per-source heater power scales {source_name: scale}.
+                vol.Optional("heater_scales"): {cv.string: vol.Coerce(float)},
             },
-            extra=vol.ALLOW_EXTRA,  # allow thermal_mass_<room>, r_external_<room> keys
+            # Allow per-room parameter overrides keyed as <param>_<room_slug>
+            # (thermal_mass_<room>, r_external_<room>, internal_gain_<room>,
+            # solar_scale_<room>, c_air_fraction_<room>, r_aw_fraction_<room>).
+            extra=vol.ALLOW_EXTRA,
         ),
     )
 
     async def handle_run_sysid_simulation(call: ServiceCall) -> None:
         """Run system-identification open-loop simulation with configurable params."""
         from .sysid import run_sysid_simulation
-        from .dashboard import slugify
 
         coordinator = _get_coordinator(hass)
         room_name_filter: Optional[str] = call.data.get("room_name")
@@ -1720,39 +1779,17 @@ def _register_services(hass: HomeAssistant) -> None:
         dt = coordinator.dt  # seconds; handles runtime overrides correctly
         horizon_steps = max(1, int(horizon_hours * 3600.0 / dt))
 
-        # Build per-room parameter overrides from service data
-        room_params: Dict[str, Dict[str, float]] = {}
-        for room_name in coordinator.model.room_names:
-            overrides: Dict[str, float] = {}
-            room_key = slugify(room_name)
-            # Accept both the exact room name and a slug form as service data keys
-            tm_key = f"thermal_mass_{room_key}"
-            re_key = f"r_external_{room_key}"
-            if tm_key in call.data:
-                overrides["thermal_mass"] = float(call.data[tm_key])
-            if re_key in call.data:
-                overrides["r_external"] = float(call.data[re_key])
-            if overrides:
-                room_params[room_name] = overrides
+        # Build per-room parameter overrides from service data (full parameter
+        # set, keyed by ``<param>_<room_slug>``).
+        room_params = _extract_sim_room_params(call, coordinator.model.room_names)
 
         history = list(coordinator.history_buffer)
 
-        # Patch heat-source copies with the most-recently identified power
-        # scales so the EKF reconstruction uses the same gain the estimator
-        # found, even when the user hasn't clicked Apply yet.
-        identified_scales: Dict[str, float] = getattr(
-            coordinator, "_last_identified_heater_scales", {}
-        )
-        if identified_scales:
-            import copy as _copy  # noqa: PLC0415
-            sim_heat_sources = [
-                _copy.copy(src) for src in coordinator.heat_sources
-            ]
-            for src in sim_heat_sources:
-                if src.name in identified_scales:
-                    src.power_scale = float(identified_scales[src.name])
-        else:
-            sim_heat_sources = coordinator.heat_sources
+        # Patch heat-source copies with the heater power scales currently shown
+        # in the UI (falling back to the last auto-identified scales) so the EKF
+        # reconstruction uses them even when the user hasn't clicked Apply yet.
+        heater_scales = _effective_heater_scales(call, coordinator)
+        sim_heat_sources = _patched_heat_sources(coordinator, heater_scales)
 
         try:
             result = await hass.async_add_executor_job(
@@ -1808,8 +1845,13 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("sigma_v"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=10.0)
                 ),
+                # Per-source heater power scales {source_name: scale}.
+                vol.Optional("heater_scales"): {cv.string: vol.Coerce(float)},
             },
-            extra=vol.ALLOW_EXTRA,  # allow thermal_mass_<room>, r_external_<room> keys
+            # Allow per-room parameter overrides keyed as <param>_<room_slug>
+            # (thermal_mass_<room>, r_external_<room>, internal_gain_<room>,
+            # solar_scale_<room>, c_air_fraction_<room>, r_aw_fraction_<room>).
+            extra=vol.ALLOW_EXTRA,
         ),
     )
 
