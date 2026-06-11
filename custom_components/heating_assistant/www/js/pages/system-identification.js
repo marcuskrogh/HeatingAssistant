@@ -6,7 +6,6 @@ import { entityValue, formatNumber, systemEntity } from '../utils.js';
 const DEFAULTS = {
   sigma_w: 0.1,
   sigma_v: 0.5,
-  sigma_b: 0.002,
   thermal_mass: 5000000,
   r_external: 0.05,
   internal_gain: 0,
@@ -251,18 +250,13 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
           <label class="form-label" for="param-r-aw-fraction">Air&ndash;Wall Resistance Fraction</label>
           <input class="form-input" type="number" id="param-r-aw-fraction"
             step="0.001" min="0" max="1" value="${DEFAULTS.r_aw_fraction}">
-          <span class="form-hint">0&ndash;1 &mdash; share of resistance on the air&harr;wall film</span>
+          <span class="form-hint">0&ndash;1 &mdash; fraction of conductive-path resistance on the air&harr;wall film (infiltration excluded)</span>
         </div>
       </div>
     </div>
 
     <div class="params-subsection" id="heater-scales-subsection">
       <div class="params-subsection__title">Heater Power Scales</div>
-      <p class="form-hint" style="margin-bottom:8px">
-        One scale per heat source in this room. A scale &lt; 1 means the heater
-        delivers less heat than its rated power suggests. Applied together with
-        the other parameters.
-      </p>
       <div class="tuning-params-grid" id="heater-scales-list"></div>
     </div>
 
@@ -280,12 +274,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
           <input class="form-input" type="number" id="param-sigma-v"
             step="0.001" min="0.000001" max="10" value="${DEFAULTS.sigma_v}">
           <span class="form-hint">K &mdash; expected temperature sensor noise</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="param-sigma-b">Calibration Drift (&sigma;<sub>b</sub>)</label>
-          <input class="form-input" type="number" id="param-sigma-b"
-            step="0.0001" min="0.00000001" max="1" value="${DEFAULTS.sigma_b}">
-          <span class="form-hint">K/&radic;s &mdash; allowed sensor drift rate</span>
         </div>
       </div>
     </div>
@@ -413,7 +401,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const rAwFractionInput = container.querySelector('#param-r-aw-fraction');
   const sigmaWInput = container.querySelector('#param-sigma-w');
   const sigmaVInput = container.querySelector('#param-sigma-v');
-  const sigmaBInput = container.querySelector('#param-sigma-b');
   const horizonInput = container.querySelector('#param-horizon');
   const btnAutoIdentify = container.querySelector('#btn-auto-identify');
   const btnApplyParams = container.querySelector('#btn-apply-params');
@@ -438,7 +425,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const paramInputs = [
     thermalMassInput, rExternalInput, internalGainInput, solarScaleInput,
     cAirFractionInput, rAwFractionInput,
-    sigmaWInput, sigmaVInput, sigmaBInput, horizonInput,
+    sigmaWInput, sigmaVInput, horizonInput,
   ];
 
   // Tracks whether the user has begun a manual identification process (i.e.
@@ -522,7 +509,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
     if (configAttrs.sigma_w != null) sigmaWInput.value = configAttrs.sigma_w;
     if (configAttrs.sigma_v != null) sigmaVInput.value = configAttrs.sigma_v;
-    if (configAttrs.sigma_b != null) sigmaBInput.value = configAttrs.sigma_b;
     // Horizon is now persisted in the config entity (set by Apply Parameters).
     // Fall back to sysid sensor's last-run horizon if the config hasn't been
     // saved yet (e.g. on first use before Apply Parameters is clicked).
@@ -710,7 +696,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       <thead>
         <tr>
           <th>#</th><th>Date</th>
-          <th>Thermal Mass</th><th>R External</th><th>RMSE</th><th></th>
+          <th>Thermal Mass</th><th>R External</th><th>Int. Gain</th><th>Solar</th><th>RMSE</th><th></th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -722,6 +708,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const roomData = entry.rooms?.[roomSlug] || {};
       const thermalMass = roomData.thermal_mass;
       const rExternal = roomData.r_external;
+      const internalGain = roomData.internal_gain;
+      const solarScale = roomData.solar_scale;
       const date = entry.estimated_at
         ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '—';
@@ -731,6 +719,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <td>${date}</td>
         <td>${thermalMass != null ? formatMass(thermalMass) : '—'}</td>
         <td>${rExternal != null ? formatNumber(rExternal, 4) : '—'}</td>
+        <td>${internalGain != null ? formatNumber(internalGain, 0) + ' W' : '—'}</td>
+        <td>${solarScale != null ? formatNumber(solarScale, 2) + '×' : '—'}</td>
         <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' °C' : '—'}</td>
         <td><button class="btn btn--ghost btn--sm" data-revert="${i}">Revert</button></td>
       `;
@@ -815,7 +805,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       await hass.callService('heating_assistant', 'update_estimation_params', {
         sigma_w: parseFloat(sigmaWInput.value),
         sigma_v: parseFloat(sigmaVInput.value),
-        sigma_b: parseFloat(sigmaBInput.value),
         identification_horizon_hours: parseFloat(horizonInput.value),
       });
       // Edits are now the applied parameters; resume syncing the form from
@@ -838,7 +827,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     rAwFractionInput.value = DEFAULTS.r_aw_fraction;
     sigmaWInput.value = DEFAULTS.sigma_w;
     sigmaVInput.value = DEFAULTS.sigma_v;
-    sigmaBInput.value = DEFAULTS.sigma_b;
     horizonInput.value = DEFAULTS.horizon_hours;
     for (const inp of Object.values(heaterScaleInputs)) inp.value = DEFAULTS.heater_scale;
     // Defaults are pending review; protect them from state-sync resets.
