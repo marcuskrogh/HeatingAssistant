@@ -815,6 +815,7 @@
 .form-group {
   display: flex;
   flex-direction: column;
+  min-width: 0; /* Prevent grid items from overflowing their track */
 }
 
 .form-group__header {
@@ -1145,6 +1146,7 @@
   font-family: var(--font-sans);
   color-scheme: dark;
   min-width: 0;
+  max-width: 100%;
 }
 
 /* Heater scales table in the identification detail view */
