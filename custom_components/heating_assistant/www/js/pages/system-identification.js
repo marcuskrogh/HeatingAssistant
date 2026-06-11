@@ -310,16 +310,18 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
           <span class="form-hint">hours &mdash; history window ending at the most recent record</span>
         </div>
       </div>
-      <div id="window-panel-custom" class="tuning-params-grid" style="display:none">
-        <div class="form-group">
-          <label class="form-label" for="param-window-start">Window Start</label>
-          <input class="form-input form-input--datetime" type="datetime-local" id="param-window-start">
-          <span class="form-hint">Start of the identification window (local time)</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="param-window-end">Window End</label>
-          <input class="form-input form-input--datetime" type="datetime-local" id="param-window-end">
-          <span class="form-hint">End of the identification window (local time)</span>
+      <div id="window-panel-custom" class="window-datetime-panel" style="display:none">
+        <div class="window-datetime-inputs">
+          <div class="form-group">
+            <label class="form-label" for="param-window-start">Window Start</label>
+            <input class="form-input form-input--datetime" type="datetime-local" id="param-window-start">
+            <span class="form-hint">Start of the identification window (local time)</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="param-window-end">Window End</label>
+            <input class="form-input form-input--datetime" type="datetime-local" id="param-window-end">
+            <span class="form-hint">End of the identification window (local time)</span>
+          </div>
         </div>
         <div class="form-group window-preset-row">
           <span class="form-hint">Quick presets:</span>
