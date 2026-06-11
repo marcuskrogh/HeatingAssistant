@@ -1125,7 +1125,6 @@
 }
 
 .window-preset-row {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1138,10 +1137,32 @@
   flex-wrap: wrap;
 }
 
-/* datetime-local inputs need the same styling as number inputs. Setting
-   min-width: 0 is critical on mobile: browsers enforce an intrinsic minimum
-   for datetime-local (wide enough to show the full date string) which causes
-   the input to overflow its grid cell if not overridden. */
+/* Custom date-range panel — outer flex column keeps everything stacked and
+   bounded; inner 2-column grid (1fr 1fr) places Start/End side-by-side on
+   desktop.  Using 1fr columns (not minmax(160px,1fr)) means there is no hard
+   minimum track width that could push the panel wider than its card. */
+.window-datetime-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.window-datetime-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .window-datetime-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* datetime-local inputs: ensure they never exceed their container regardless
+   of browser-imposed intrinsic sizing for the date/time picker widget. */
 .form-input--datetime {
   font-family: var(--font-sans);
   color-scheme: dark;
