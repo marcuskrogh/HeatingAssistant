@@ -822,36 +822,40 @@
 .param-lock-btn {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   background: none;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  color: var(--text-dim);
-  padding: 1px 5px;
+  color: var(--text-secondary);
+  padding: 2px 6px;
   font-size: 9px;
   font-family: var(--font-sans);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   line-height: 1.4;
-  opacity: 0.55;
-  transition: opacity var(--transition), color var(--transition), border-color var(--transition);
+  opacity: 0.75;
+  transition: opacity var(--transition), color var(--transition), border-color var(--transition), background var(--transition);
 }
 
 .param-lock-btn:hover {
   opacity: 1;
-  border-color: var(--border);
-  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .param-lock-btn--locked {
   color: var(--warning);
-  border-color: rgba(245, 166, 35, 0.5);
+  border-color: rgba(245, 166, 35, 0.6);
+  background: rgba(245, 166, 35, 0.08);
   opacity: 1;
 }
 
 .param-lock-btn--locked:hover {
   border-color: var(--warning);
+  background: rgba(245, 166, 35, 0.15);
 }
 
 .form-input--locked {

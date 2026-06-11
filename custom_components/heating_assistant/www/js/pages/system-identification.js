@@ -446,31 +446,60 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     sigmaWInput, sigmaVInput, horizonInput,
   ];
 
+  // SVG icons for the lock button — open (unlocked) and closed (locked).
+  const _ICON_OPEN = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`;
+  const _ICON_LOCKED = `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+
+  // Per-room localStorage key so each room's locks persist independently.
+  const _LOCKS_KEY = `heating_assistant_sysid_locks_v1_${roomSlug}`;
+
+  function _saveLocks() {
+    try { localStorage.setItem(_LOCKS_KEY, JSON.stringify([...lockedParams])); } catch (_) {}
+  }
+
+  function _loadLocks() {
+    try {
+      const raw = localStorage.getItem(_LOCKS_KEY);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (_) { return new Set(); }
+  }
+
   // Tracks locked parameters (those held fixed during auto-identification).
   // Keys for room params: 'thermal_mass', 'r_external', etc.
   // Keys for heater scales: 'heater_scale:<source_name>'.
-  const lockedParams = new Set();
+  // Initialised from localStorage so locks survive page reloads.
+  const lockedParams = _loadLocks();
+
+  // Apply visual lock state to a button+input pair without toggling.
+  function _applyLockVisual(paramKey, inputEl, btnEl) {
+    const locked = lockedParams.has(paramKey);
+    inputEl.classList.toggle('form-input--locked', locked);
+    btnEl.classList.toggle('param-lock-btn--locked', locked);
+    if (locked) {
+      btnEl.innerHTML = `${_ICON_LOCKED} Fixed`;
+      btnEl.title = 'Unlock: allow auto-identification to vary this parameter';
+    } else {
+      btnEl.innerHTML = `${_ICON_OPEN} Fix`;
+      btnEl.title = 'Lock: hold fixed during auto-identification';
+    }
+  }
 
   function toggleLock(paramKey, inputEl, btnEl) {
     if (lockedParams.has(paramKey)) {
       lockedParams.delete(paramKey);
-      inputEl.classList.remove('form-input--locked');
-      btnEl.classList.remove('param-lock-btn--locked');
-      btnEl.textContent = 'Fix';
-      btnEl.title = 'Lock: hold fixed during auto-identification';
     } else {
       lockedParams.add(paramKey);
-      inputEl.classList.add('form-input--locked');
-      btnEl.classList.add('param-lock-btn--locked');
-      btnEl.textContent = 'Fixed';
-      btnEl.title = 'Unlock: allow auto-identification to vary this parameter';
     }
+    _applyLockVisual(paramKey, inputEl, btnEl);
+    _saveLocks();
   }
 
-  // Wire up lock buttons for the static parameter fields in paramsCard.
+  // Wire up lock buttons for the static parameter fields in paramsCard,
+  // and restore any persisted locked state immediately.
   paramsCard.querySelectorAll('.param-lock-btn').forEach((btn) => {
     const paramKey = btn.dataset.param;
     const input = btn.closest('.form-group').querySelector('.form-input');
+    _applyLockVisual(paramKey, input, btn);
     btn.addEventListener('click', () => toggleLock(paramKey, input, btn));
   });
 
@@ -637,7 +666,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const lockBtn = group.querySelector('.param-lock-btn');
       heaterScaleInputs[srcName] = inp;
       inp.addEventListener('input', () => { userEditing = true; });
-      lockBtn.addEventListener('click', () => toggleLock(`heater_scale:${srcName}`, inp, lockBtn));
+      const heaterKey = `heater_scale:${srcName}`;
+      _applyLockVisual(heaterKey, inp, lockBtn);
+      lockBtn.addEventListener('click', () => toggleLock(heaterKey, inp, lockBtn));
       paramInputs.push(inp);
     }
     heaterInputsBuilt = true;
