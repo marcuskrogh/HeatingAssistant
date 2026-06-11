@@ -660,11 +660,35 @@ class KalmanMLEstimator:
             },
         }
 
-    def estimate(self, history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def estimate(
+        self,
+        history: List[Dict[str, Any]],
+        locked_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Estimate all identifiable thermal parameters from the history buffer
         using a single joint optimisation with multistart IPOPT and analytical
         gradients.
+
+        Parameters
+        ----------
+        locked_params : dict, optional
+            Parameters to hold fixed (not decision variables) during
+            optimisation.  Format::
+
+                {
+                    "thermal_mass":   {"room_name": value, ...},
+                    "r_external":     {"room_name": value, ...},
+                    "internal_gain":  {"room_name": value, ...},
+                    "solar_scale":    {"room_name": value, ...},
+                    "c_air_fraction": {"room_name": value, ...},
+                    "r_aw_fraction":  {"room_name": value, ...},
+                    "heater_scales":  {"source_name": value, ...},
+                }
+
+            Locked parameters are pinned to the given value by setting their
+            lower and upper bounds equal (lb = ub = fixed_value), so the
+            optimiser never moves them while leaving all other parameters free.
         """
         n_steps = len(history)
         current = {
@@ -785,6 +809,14 @@ class KalmanMLEstimator:
             + [(_C_AIR_LO, _C_AIR_HI)] * len(identifiable_splits)
             + [(_R_AW_LO, _R_AW_HI)] * len(identifiable_splits)
         )
+
+        # ── Apply parameter locks (equality constraints via lb = ub) ──────
+        if locked_params:
+            self._pin_locked_params(
+                bounds, theta_prior, locked_params,
+                layout, identifiable_sources,
+                identifiable_solar, identifiable_splits,
+            )
 
         # ── Convert history (carries timestamps for gap detection) ────────
         std_history = self._convert_history_std(history, use_ym=True)
@@ -1046,6 +1078,96 @@ class KalmanMLEstimator:
         }
 
     # ── Internal helpers ──────────────────────────────────────────────────
+
+    def _pin_locked_params(
+        self,
+        bounds: List[Tuple[float, float]],
+        theta_prior: np.ndarray,
+        locked_params: Dict[str, Any],
+        layout: "_ThetaLayout",
+        identifiable_sources: List[int],
+        identifiable_solar: List[int],
+        identifiable_splits: List[int],
+    ) -> None:
+        """Pin locked parameters to their fixed values by setting lb = ub.
+
+        Modifies *bounds* and *theta_prior* in-place so the optimiser treats
+        each locked parameter as a constant rather than a decision variable.
+        Values outside the physical bounds are silently clamped.
+        """
+        for param_key, room_or_src_dict in locked_params.items():
+            if not isinstance(room_or_src_dict, dict):
+                continue
+
+            if param_key == "heater_scales":
+                for src_name, value in room_or_src_dict.items():
+                    src_idx = next(
+                        (j for j, s in enumerate(self._sources)
+                         if s.name == src_name),
+                        None,
+                    )
+                    if src_idx is None or src_idx not in identifiable_sources:
+                        continue
+                    k = identifiable_sources.index(src_idx)
+                    log_val = math.log(max(float(value), 1e-3))
+                    log_val = max(_LOG_ALPHA_LO, min(_LOG_ALPHA_HI, log_val))
+                    idx = layout.idx_log_alpha[0] + k
+                    bounds[idx] = (log_val, log_val)
+                    theta_prior[idx] = log_val
+                continue
+
+            for room_name, value in room_or_src_dict.items():
+                if room_name not in self._room_names:
+                    continue
+                i = self._room_names.index(room_name)
+
+                if param_key == "thermal_mass":
+                    log_val = math.log(max(float(value), 1.0))
+                    log_val = max(_LOG_MASS_LO, min(_LOG_MASS_HI, log_val))
+                    idx = layout.idx_log_mass[0] + i
+                    bounds[idx] = (log_val, log_val)
+                    theta_prior[idx] = log_val
+
+                elif param_key == "r_external":
+                    log_val = math.log(max(float(value), 1e-9))
+                    log_val = max(_LOG_R_LO, min(_LOG_R_HI, log_val))
+                    idx = layout.idx_log_r[0] + i
+                    bounds[idx] = (log_val, log_val)
+                    theta_prior[idx] = log_val
+
+                elif param_key == "internal_gain":
+                    val = max(_Q_INT_LO, min(_Q_INT_HI, float(value)))
+                    idx = layout.idx_q_int[0] + i
+                    bounds[idx] = (val, val)
+                    theta_prior[idx] = val
+
+                elif param_key == "solar_scale":
+                    if i not in identifiable_solar:
+                        continue
+                    k = identifiable_solar.index(i)
+                    log_val = math.log(max(float(value), 1e-3))
+                    log_val = max(_LOG_SOLAR_LO, min(_LOG_SOLAR_HI, log_val))
+                    idx = layout.idx_log_solar[0] + k
+                    bounds[idx] = (log_val, log_val)
+                    theta_prior[idx] = log_val
+
+                elif param_key == "c_air_fraction":
+                    if i not in identifiable_splits:
+                        continue
+                    k = identifiable_splits.index(i)
+                    val = max(_C_AIR_LO, min(_C_AIR_HI, float(value)))
+                    idx = layout.idx_c_air[0] + k
+                    bounds[idx] = (val, val)
+                    theta_prior[idx] = val
+
+                elif param_key == "r_aw_fraction":
+                    if i not in identifiable_splits:
+                        continue
+                    k = identifiable_splits.index(i)
+                    val = max(_R_AW_LO, min(_R_AW_HI, float(value)))
+                    idx = layout.idx_r_aw[0] + k
+                    bounds[idx] = (val, val)
+                    theta_prior[idx] = val
 
     def _physics_informed_theta(
         self,

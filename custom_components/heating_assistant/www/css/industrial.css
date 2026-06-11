@@ -808,6 +808,62 @@
   flex-direction: column;
 }
 
+.form-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.form-group__header .form-label {
+  margin-bottom: 0;
+}
+
+.param-lock-btn {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-dim);
+  padding: 1px 5px;
+  font-size: 9px;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  opacity: 0.55;
+  transition: opacity var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.param-lock-btn:hover {
+  opacity: 1;
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.param-lock-btn--locked {
+  color: var(--warning);
+  border-color: rgba(245, 166, 35, 0.5);
+  opacity: 1;
+}
+
+.param-lock-btn--locked:hover {
+  border-color: var(--warning);
+}
+
+.form-input--locked {
+  border-color: rgba(245, 166, 35, 0.6);
+  background: rgba(245, 166, 35, 0.05);
+}
+
+.form-input--locked:focus,
+.form-input--locked:hover {
+  border-color: var(--warning);
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

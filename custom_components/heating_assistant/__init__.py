@@ -1321,9 +1321,11 @@ def _register_services(hass: HomeAssistant) -> None:
         coordinator = _get_coordinator(hass)
         apply_params: bool = call.data.get("apply_parameters", False)
         horizon_hours: Optional[float] = call.data.get("horizon_hours")
+        locked_params: Optional[Dict] = call.data.get("locked_params")
         result = await coordinator.async_estimate_parameters_ml(
             apply_params=apply_params,
             horizon_hours=horizon_hours,
+            locked_params=locked_params,
         )
 
         # Update sysid_results so that the dashboard sensor entities reflect
