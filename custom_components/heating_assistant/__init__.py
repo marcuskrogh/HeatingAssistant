@@ -2119,11 +2119,16 @@ def _register_services(hass: HomeAssistant) -> None:
                     if window_end is not None:
                         room_data["window_end"] = window_end
 
-                # Filter to requested room if specified
+                # Filter to requested room if specified.  The frontend
+                # sends the room slug (e.g. "bedroom") while per_room keys are
+                # the canonical room names (e.g. "Bedroom") stored in the
+                # model.  Accept both exact and slug matches so rooms with
+                # capital letters or spaces are not silently dropped.
                 if room_name_filter:
+                    from .dashboard import slugify as _slugify  # noqa: PLC0415
                     per_room = {
                         k: v for k, v in per_room.items()
-                        if k == room_name_filter
+                        if k == room_name_filter or _slugify(k) == room_name_filter
                     }
 
                 # Results are surfaced via the per-room SysID diagnostic
