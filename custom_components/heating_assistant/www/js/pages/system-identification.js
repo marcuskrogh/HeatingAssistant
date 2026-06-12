@@ -315,12 +315,16 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <div class="window-datetime-inputs">
           <div class="form-group">
             <label class="form-label" for="param-window-start">Window Start</label>
-            <input class="form-input form-input--datetime" type="datetime-local" id="param-window-start">
+            <div class="form-input form-input--datetime-wrap">
+              <input class="form-input--datetime" type="datetime-local" id="param-window-start">
+            </div>
             <span class="form-hint">Start of the identification window (local time)</span>
           </div>
           <div class="form-group">
             <label class="form-label" for="param-window-end">Window End</label>
-            <input class="form-input form-input--datetime" type="datetime-local" id="param-window-end">
+            <div class="form-input form-input--datetime-wrap">
+              <input class="form-input--datetime" type="datetime-local" id="param-window-end">
+            </div>
             <span class="form-hint">End of the identification window (local time)</span>
           </div>
         </div>
@@ -1360,11 +1364,15 @@ function setupDatasetsAndExperiments(ctx) {
     <div class="window-datetime-inputs ds-section-gap">
       <div class="form-group">
         <label class="form-label" for="exp-start">Start</label>
-        <input class="form-input form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
+        <div class="form-input form-input--datetime-wrap">
+          <input class="form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label" for="exp-end">End</label>
-        <input class="form-input form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
+        <div class="form-input form-input--datetime-wrap">
+          <input class="form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
+        </div>
       </div>
     </div>
     <div class="tuning-params-grid ds-section-gap">

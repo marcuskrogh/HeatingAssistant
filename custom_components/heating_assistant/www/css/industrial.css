@@ -1139,25 +1139,34 @@
 
 /* Custom date-range panel — outer flex column keeps everything stacked and
    bounded; inner grid places Start/End side-by-side on wide screens and
-   collapses to a single column on mobile (portrait and landscape).
+   collapses to a single column on narrow containers.
 
-   `min(220px,100%)` inside minmax() was previously used to make the grid
-   self-collapse based on container width, but percentage minimums inside
-   minmax() are treated as `auto` (intrinsic minimum) during the first pass
-   of the grid track-sizing algorithm in several mobile browsers (iOS Safari,
-   Chrome for Android).  This caused the guard to silently resolve to the
-   widget's native minimum width (~220 px) on every pass, so two 220 px
-   columns would appear even in a 300 px card, overflowing the boundary.
+   ROOT CAUSE of the iOS overflow: input[type="datetime-local"] is rendered by
+   the OS as a native widget.  iOS Safari enforces an intrinsic minimum width
+   for this widget regardless of CSS width / min-width / display: block rules
+   applied to the <input> element itself.  Every CSS-only constraint that was
+   tried (min-width:0, display:block, max-width:100%, minmax(0,1fr), etc.)
+   worked in most browsers but was overridden by iOS's native control sizing.
 
-   The reliable fix is a plain `1fr 1fr` grid (no minimum that can trigger the
-   browser's intrinsic-size path) combined with an explicit media query at 768 px
-   so that both portrait *and* landscape phones (up to ~844 px wide) always get
-   a single full-width column.  `display: block` on the inputs (below) ensures
-   width:100% resolves against the grid track rather than the native picker size. */
+   THE FIX — wrapper div approach used by every production UI framework:
+   Each <input> is placed inside a plain <div class="form-input--datetime-wrap">.
+   The wrapper div provides all visual styling (border, border-radius, background).
+   The wrapper has overflow:hidden.  Because the wrapper is a plain div (not a
+   native control), every browser respects overflow:hidden on it without
+   exception.  Any iOS native-control overflow is clipped inside the rounded
+   wrapper, so the border-radius is preserved and the card never overflows.
+
+   RESPONSIVE LAYOUT — container queries (primary) + media query (fallback):
+   container-type:inline-size on .window-datetime-panel lets children respond
+   to the actual card width, not the viewport.  This fixes the HA-sidebar case
+   where the card can be < 400 px while the viewport is > 768 px.  A viewport
+   media query is kept as a fallback for iOS 15 / Safari 15 which do not
+   support container queries. */
 .window-datetime-panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  container-type: inline-size;
 }
 
 .window-datetime-inputs {
@@ -1166,22 +1175,47 @@
   gap: 16px;
   align-items: start;
   min-width: 0;
-  /* NOTE: do NOT add overflow:hidden here — it clips the inputs' border-radius
-     at the track boundary, cutting the right rounded corner in portrait and
-     making the 16 px column gap invisible in landscape. */
 }
 
-/* datetime-local inputs: block display lets iOS Safari resolve width:100%
-   against the grid track rather than the input's intrinsic content size.
-   Without it the browser may ignore the track boundary and render the
-   native picker widget at its own preferred width, overflowing the card. */
+/* Collapse to single column when the panel container is phone-width.
+   500 px leaves room for two ~220 px datetime inputs plus the gap. */
+@container (max-width: 500px) {
+  .window-datetime-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Wrapper div: carries the visual border/radius/background so that
+   overflow:hidden clips the native iOS control without also cutting the
+   rounded corner (the radius is on this div, not on the <input>). */
+.form-input--datetime-wrap {
+  padding: 0; /* Input provides its own 8px/12px padding */
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Forward the focus ring from the inner input to the visible wrapper */
+.form-input--datetime-wrap:focus-within {
+  border-color: var(--accent);
+}
+
+/* Inner input: visually bare — border, radius, and background are on the
+   wrapper; padding is re-declared here so the text sits correctly. */
 .form-input--datetime {
-  font-family: var(--font-sans);
-  color-scheme: dark;
   display: block;
   width: 100%;
   min-width: 0;
   max-width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color-scheme: dark;
+  outline: none;
+  cursor: pointer;
 }
 
 /* Heater scales table in the identification detail view */
@@ -2928,11 +2962,8 @@
 /* ---------------------------------------------------------------------------
    Mobile: keep date/time pickers and dense grids inside their cards.
    --------------------------------------------------------------------------- */
-/* Native date/time controls have a wide intrinsic size; force them to honour
-   their container on every browser (notably iOS Safari).  `display: block`
-   switches inputs from their default `inline-block` so that `width: 100%`
-   resolves against the block containing block (the grid track) rather than
-   the inline formatting context, which is the root cause of iOS overflow. */
+/* Baseline constraints for all date/time inputs — belt-and-suspenders for any
+   datetime input outside the wrapper pattern. */
 input[type="datetime-local"],
 input[type="date"],
 input[type="time"] {
@@ -2942,8 +2973,8 @@ input[type="time"] {
   max-width: 100%;
 }
 
-/* Collapse datetime grids to single column on all phones — portrait (≤430 px)
-   and landscape (up to ~844 px on iPhone 14 Pro Max). */
+/* Fallback media query for browsers without @container support (iOS 15 / Safari 15).
+   Container queries (above) handle the same case for iOS 16+. */
 @media (max-width: 768px) {
   .window-datetime-inputs {
     grid-template-columns: 1fr;
