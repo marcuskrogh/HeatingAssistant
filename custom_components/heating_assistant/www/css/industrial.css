@@ -2820,29 +2820,45 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Collapsible section header (e.g. the Experiment Scheduler)
+   Reusable collapsible / expandable section (components/collapsible.js).
+   A single consistent expandable-menu look for the whole app: title on the
+   left, a chevron on the right that rotates when open, optional status badge.
    --------------------------------------------------------------------------- */
-.collapsible__header {
+.ha-collapsible {
+  display: block;
+}
+.ha-collapsible__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  padding: 0;
+  padding: 2px 0;
   background: none;
   border: none;
   cursor: pointer;
   text-align: left;
   color: inherit;
 }
-.collapsible__title { margin: 0; }
-.collapsible__right {
+/* Match the section-title typography so a collapsible reads as a section. */
+.ha-collapsible__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  transition: color var(--transition);
+}
+.ha-collapsible__header:hover .ha-collapsible__title { color: var(--accent); }
+.ha-collapsible__header:hover .ha-collapsible__chevron { color: var(--accent); }
+.ha-collapsible__meta {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
 }
-.collapsible__badge {
+.ha-collapsible__badge {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -2853,20 +2869,19 @@
   border: 1px solid var(--good);
   background: rgba(39, 174, 96, 0.1);
 }
-.collapsible__badge[hidden] { display: none; }
-.collapsible__chevron {
+.ha-collapsible__badge[hidden] { display: none; }
+.ha-collapsible__chevron {
   flex: 0 0 auto;
-  width: 0;
-  height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid var(--text-secondary);
-  transition: transform var(--transition);
+  color: var(--text-secondary);
+  transition: transform var(--transition), color var(--transition);
 }
-.collapsible--open .collapsible__chevron {
+.ha-collapsible--open .ha-collapsible__chevron {
   transform: rotate(180deg);
 }
-.collapsible__body[hidden] { display: none; }
+.ha-collapsible__body {
+  margin-top: 16px;
+}
+.ha-collapsible__body[hidden] { display: none; }
 
 /* Consistent vertical spacing between stacked sub-blocks inside a card so
    action buttons never crowd the field above them. */

@@ -1617,8 +1617,12 @@ class KalmanMLEstimator:
                 # the free-run at the *same* state the data is in: air temps
                 # from the measurement, wall states at the steady-state value
                 # implied by (T_a, T_out), and emitter-lag states warm-started
-                # to the commanded fraction.  This mirrors the open-loop
-                # diagnostic and the live EKF.
+                # to the commanded fraction.  The steady-state wall seed starts
+                # the unobserved envelope close to its true value over these
+                # short windows, keeping the heater-scale / resistance
+                # parameters identifiable (the reconstruction / open-loop
+                # *diagnostics* instead seed the wall at the air temperature for
+                # an unbiased display — see initial_state_from_measurement).
                 ym0 = np.asarray(win[0]["ym"], dtype=float)
                 u0 = np.asarray(win[0].get("u", []), dtype=float)
                 d0 = np.asarray(win[0].get("d", []), dtype=float)

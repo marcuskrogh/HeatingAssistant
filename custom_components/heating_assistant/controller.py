@@ -1001,6 +1001,7 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         y: np.ndarray,
         u: Optional[np.ndarray] = None,
         d: Optional[np.ndarray] = None,
+        wall_seed: str = "steady_state",
     ) -> np.ndarray:
         """Build a full state vector that is consistent with a measurement.
 
@@ -1012,10 +1013,19 @@ class HouseThermalSDE(ContinuousDiscreteModel):
           that ``hm(x0) == y`` exactly (the offset block ``b`` is zeroed,
           so the predicted output equals the measured temperature with no
           initial innovation);
-        * wall block ``T_w`` ← steady-state value implied by the air and
-          outdoor temperatures (:meth:`wall_equilibrium`).  When no
-          disturbance vector is supplied the wall starts at the air
-          temperature;
+        * wall block ``T_w`` ← depends on ``wall_seed``:
+
+          - ``"steady_state"`` (default): the steady-state value implied by the
+            air and outdoor temperatures (:meth:`wall_equilibrium`), falling
+            back to the air temperature when no disturbance vector is supplied.
+            This starts the unobserved wall close to its true value for the
+            estimator's short free-run windows, which improves identifiability.
+          - ``"air"``: the measured air temperature, i.e. the envelope starts
+            equal to the air node (``T_air = T_envelope``).  This is the
+            unbiased seed used by the reconstruction / open-loop **diagnostics**:
+            it makes no assumption about the (yet-to-be-identified) parameters,
+            so the displayed envelope starts at the air temperature instead of
+            jumping to a parameter-dependent steady state near the setpoint;
         * emitter-lag block ``φ`` ← warm-started to the commanded fraction
           ``u`` of each filtered source (the steady state of the first-order
           emitter filter ``dφ/dt = (u − φ)/τ``).  Cold-starting ``φ`` at zero
@@ -1034,7 +1044,9 @@ class HouseThermalSDE(ContinuousDiscreteModel):
             emitter-lag states start at zero (cold).
         d : array-like, optional
             Disturbance vector; only ``d[0]`` (outdoor temperature) is used,
-            for the wall-node steady-state warm start.
+            for the ``"steady_state"`` wall warm start.
+        wall_seed : str, optional
+            ``"steady_state"`` (default) or ``"air"`` — see above.
 
         Returns
         -------
@@ -1050,16 +1062,20 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         n_copy = min(n, y_arr.size)
         x[:n_copy] = y_arr[:n_copy]
 
-        # Wall warm start: steady state given (T_a, T_out), else T_a.
-        t_out: Optional[float] = None
-        if d is not None:
-            d_arr = np.asarray(d, dtype=float).ravel()
-            if d_arr.size > 0 and np.isfinite(d_arr[0]):
-                t_out = float(d_arr[0])
-        if t_out is None:
+        # Wall warm start.  ``"air"`` (diagnostics) seeds the envelope at the air
+        # node; ``"steady_state"`` (estimator) uses the (T_a, T_out) equilibrium.
+        if wall_seed == "air":
             x[n: 2 * n] = x[:n]
         else:
-            x[n: 2 * n] = self.wall_equilibrium(x[:n], t_out)
+            t_out: Optional[float] = None
+            if d is not None:
+                d_arr = np.asarray(d, dtype=float).ravel()
+                if d_arr.size > 0 and np.isfinite(d_arr[0]):
+                    t_out = float(d_arr[0])
+            if t_out is None:
+                x[n: 2 * n] = x[:n]
+            else:
+                x[n: 2 * n] = self.wall_equilibrium(x[:n], t_out)
 
         if m > 0 and u is not None:
             u_arr = np.asarray(u, dtype=float).ravel()

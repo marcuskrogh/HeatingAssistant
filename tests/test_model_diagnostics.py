@@ -485,13 +485,12 @@ def test_open_loop_simulation_includes_internal_gain():
     dt = 60.0
     room = Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0,
                 internal_gain=600.0)
-    # Start the truth generator's (unmeasured) wall node at its steady-state
-    # value for (T_a, T_out) — the same warm start the open-loop diagnostic
-    # uses.  With agreeing initial conditions a matching model must
-    # reproduce the data exactly; a mismatched wall start would only test
+    # Start the truth generator's (unmeasured) wall node at the air
+    # temperature — the same warm start the open-loop diagnostic now uses
+    # (T_air = T_envelope).  With agreeing initial conditions a matching model
+    # must reproduce the data exactly; a mismatched wall start would only test
     # the (irreducible) hidden-state uncertainty, not the internal gain.
-    rf = room.r_aw_fraction
-    room.wall_temperature = (1.0 - rf) * 20.0 + rf * 5.0
+    room.wall_temperature = 20.0
     model = HouseModel([room])
     heater = ElectricHeater("h", "studio", 3000.0)
 
