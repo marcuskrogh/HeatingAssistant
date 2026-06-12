@@ -1425,6 +1425,7 @@ _SIM_ROOM_PARAM_KEYS = (
     "solar_scale",
     "c_air_fraction",
     "r_aw_fraction",
+    "t_wall_initial",
 )
 
 
@@ -1582,6 +1583,7 @@ def _register_services(hass: HomeAssistant) -> None:
             internal_gains = result.get("estimated_internal_gains", {})
             solar_scales = result.get("estimated_solar_scales", {})
             envelope_splits = result.get("estimated_envelope_splits", {})
+            t_wall_initial = result.get("estimated_t_wall_initial", {})
             heater_scales = result.get("estimated_heater_scales", {})
 
             # Map each room to the identified scales of the heaters in it so the
@@ -1612,6 +1614,8 @@ def _register_services(hass: HomeAssistant) -> None:
                         existing["c_air_fraction"] = splits["c_air_fraction"]
                     if "r_aw_fraction" in splits:
                         existing["r_aw_fraction"] = splits["r_aw_fraction"]
+                if room_name in t_wall_initial:
+                    existing["t_wall_initial"] = t_wall_initial[room_name]
                 if room_name in sources_by_room:
                     existing["heater_scales"] = sources_by_room[room_name]
                 if horizon_steps is not None:

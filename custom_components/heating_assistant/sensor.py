@@ -2642,6 +2642,7 @@ class SysIdSimulationSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
             "solar_scale": room_data.get("solar_scale"),
             "c_air_fraction": room_data.get("c_air_fraction"),
             "r_aw_fraction": room_data.get("r_aw_fraction"),
+            "t_wall_initial": room_data.get("t_wall_initial"),
             "heater_scales": room_data.get("heater_scales"),
             "sigma_w": room_data.get("sigma_w"),
             "sigma_v": room_data.get("sigma_v"),

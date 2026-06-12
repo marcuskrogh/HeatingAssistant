@@ -145,6 +145,26 @@ _R_AW_LO, _R_AW_HI = 0.02, 0.90
 #: real multi-hour excitation to move them.
 _SPLIT_PRIOR_STD = 0.1
 
+#: Linear-space bounds for the wall-envelope initial temperature [°C].
+_T_WALL_LO = -30.0
+_T_WALL_HI =  60.0
+
+#: Prior standard deviation for the wall initial temperature [°C].  A
+#: 5 °C width says "the wall probably started close to the measured air
+#: temperature, but could be a few degrees off."  The prior mean is set
+#: to the first measured air temperature at estimation time.
+_T_WALL_PRIOR_STD = 5.0
+
+#: Minimum regularisation weight for the wall initial temperature.  With
+#: default regularisation ≤ 0.01 the Gaussian prior on t_wall_init is too
+#: weak to keep the parameter in a physically plausible range: the MSE
+#: gradient (~4 per window) dwarfs the prior gradient (0.008 at 10 °C off),
+#: and the optimiser drives t_wall to ±60 °C, corrupting every other
+#: gradient.  A floor of 10 limits the maximum drift from the prior to
+#: ~±5 °C while still being negligibly small compared to the strong
+#: (1e6) regularisation used in validation tests.
+_T_WALL_MIN_LAM = 10.0
+
 #: Number of random restarts in multistart Nelder–Mead.
 _N_RESTARTS = 3
 
@@ -296,8 +316,9 @@ class _ThetaLayout:
         self.idx_log_mass = (0, n)
         self.idx_log_r = (n, 2 * n)
         self.idx_q_int = (2 * n, 3 * n)
+        self.idx_t_wall_init = (3 * n, 4 * n)
 
-        off = 3 * n
+        off = 4 * n
         self.idx_log_alpha = (off, off + len(identifiable_sources))
         off = self.idx_log_alpha[1]
         self.idx_log_r_ij = (off, off + len(identifiable_pairs))
@@ -317,6 +338,8 @@ class _ThetaLayout:
         log_r = theta[a:b]
         a, b = self.idx_q_int
         q_int = theta[a:b]
+        a, b = self.idx_t_wall_init
+        t_wall_init = theta[a:b]
         a, b = self.idx_log_alpha
         log_alpha = theta[a:b]
         a, b = self.idx_log_r_ij
@@ -328,7 +351,7 @@ class _ThetaLayout:
         a, b = self.idx_r_aw
         r_aw = theta[a:b]
         return (
-            log_mass, log_r, q_int, log_alpha, log_r_ij,
+            log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
             log_solar, c_air, r_aw,
         )
 
@@ -466,6 +489,9 @@ class KalmanMLEstimator:
         self._r_aw_prior_full = np.array([
             float(getattr(r, "r_aw_fraction", 0.05)) for r in rooms
         ])
+        # Wall initial temperature prior: seeded at 20 °C; estimate() updates
+        # it to the steady-state wall temperature from the first record.
+        self._t_wall_init_prior = np.full(len(rooms), 20.0)
 
         # Build unique inter-room connection pairs (i, j) with i < j.
         room_idx = {r.name: k for k, r in enumerate(rooms)}
@@ -506,11 +532,12 @@ class KalmanMLEstimator:
             identifiable_pairs=[],
         )
 
-        # Theta is just [log_mass, log_r, q_int] at the prior
+        # Theta is [log_mass, log_r, q_int, t_wall_init] at the prior
         theta_prior = np.concatenate([
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
+            self._t_wall_init_prior,
         ])
 
         # Convert history to CD-EKF format (use "ym" key)
@@ -598,6 +625,7 @@ class KalmanMLEstimator:
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
+            self._t_wall_init_prior,
         ])
 
         center_log_mass = float(self._log_mass_prior[room_idx])
@@ -681,13 +709,14 @@ class KalmanMLEstimator:
             optimisation.  Format::
 
                 {
-                    "thermal_mass":   {"room_name": value, ...},
-                    "r_external":     {"room_name": value, ...},
-                    "internal_gain":  {"room_name": value, ...},
-                    "solar_scale":    {"room_name": value, ...},
-                    "c_air_fraction": {"room_name": value, ...},
-                    "r_aw_fraction":  {"room_name": value, ...},
-                    "heater_scales":  {"source_name": value, ...},
+                    "thermal_mass":    {"room_name": value, ...},
+                    "r_external":      {"room_name": value, ...},
+                    "internal_gain":   {"room_name": value, ...},
+                    "solar_scale":     {"room_name": value, ...},
+                    "c_air_fraction":  {"room_name": value, ...},
+                    "r_aw_fraction":   {"room_name": value, ...},
+                    "t_wall_initial":  {"room_name": value, ...},
+                    "heater_scales":   {"source_name": value, ...},
                 }
 
             Locked parameters are pinned to the given value by setting their
@@ -695,6 +724,19 @@ class KalmanMLEstimator:
             optimiser never moves them while leaving all other parameters free.
         """
         n_steps = len(history)
+
+        # Update wall-initial-temperature prior from the first measured air
+        # temperatures.  Physical rationale: absent other information the
+        # wall likely started close to the air temperature at window start.
+        if history:
+            first_y = history[0].get("y", [])
+            for i in range(self._n):
+                if i < len(first_y):
+                    try:
+                        self._t_wall_init_prior[i] = float(first_y[i])
+                    except (ValueError, TypeError):
+                        pass
+
         current = {
             r.name: {
                 "thermal_mass": r.thermal_mass,
@@ -794,6 +836,7 @@ class KalmanMLEstimator:
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
+            self._t_wall_init_prior,
             log_alpha_prior,
             log_r_ij_prior,
             log_solar_prior,
@@ -807,6 +850,7 @@ class KalmanMLEstimator:
             [(_LOG_MASS_LO, _LOG_MASS_HI)] * n
             + [(_LOG_R_LO, _LOG_R_HI)] * n
             + [(_Q_INT_LO, _Q_INT_HI)] * n
+            + [(_T_WALL_LO, _T_WALL_HI)] * n
             + [(_LOG_ALPHA_LO, _LOG_ALPHA_HI)] * len(identifiable_sources)
             + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
             + [(_LOG_SOLAR_LO, _LOG_SOLAR_HI)] * len(identifiable_solar)
@@ -944,11 +988,12 @@ class KalmanMLEstimator:
                 best_converged = converged
 
         # ── Unpack and clip the best solution ──────────────────────────────
-        (log_mass, log_r, q_int, log_alpha, log_r_ij,
+        (log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
          log_solar, c_air, r_aw) = layout.unpack(best_theta)
         log_mass = np.clip(log_mass, _LOG_MASS_LO, _LOG_MASS_HI)
         log_r = np.clip(log_r, _LOG_R_LO, _LOG_R_HI)
         q_int = np.clip(q_int, _Q_INT_LO, _Q_INT_HI)
+        t_wall_init = np.clip(t_wall_init, _T_WALL_LO, _T_WALL_HI)
         log_alpha = np.clip(log_alpha, _LOG_ALPHA_LO, _LOG_ALPHA_HI)
         log_r_ij = np.clip(log_r_ij, _LOG_R_IJ_LO, _LOG_R_IJ_HI)
         log_solar = np.clip(log_solar, _LOG_SOLAR_LO, _LOG_SOLAR_HI)
@@ -1003,6 +1048,12 @@ class KalmanMLEstimator:
                 "c_air_fraction": round(float(c_air[k]), 4),
                 "r_aw_fraction": round(float(r_aw[k]), 4),
             }
+
+        # Per-room wall initial temperatures (always identified).
+        estimated_t_wall_initial: Dict[str, float] = {
+            self._room_names[i]: round(float(t_wall_init[i]), 2)
+            for i in range(self._n)
+        }
 
         # Report negative normalised MSE (higher → better fit).
         # Stored in the same "log_likelihood" field for dashboard compatibility;
@@ -1067,6 +1118,7 @@ class KalmanMLEstimator:
             "estimated_inter_room_r": estimated_r_ij,
             "estimated_solar_scales": estimated_solar_scales,
             "estimated_envelope_splits": estimated_splits,
+            "estimated_t_wall_initial": estimated_t_wall_initial,
             "identifiable_connections": identifiable_names,
             "identifiable_sources": identifiable_source_names,
             "identifiable_solar_rooms": [
@@ -1170,6 +1222,12 @@ class KalmanMLEstimator:
                     k = identifiable_splits.index(i)
                     val = max(_R_AW_LO, min(_R_AW_HI, float(value)))
                     idx = layout.idx_r_aw[0] + k
+                    bounds[idx] = (val, val)
+                    theta_prior[idx] = val
+
+                elif param_key == "t_wall_initial":
+                    val = max(_T_WALL_LO, min(_T_WALL_HI, float(value)))
+                    idx = layout.idx_t_wall_init[0] + i
                     bounds[idx] = (val, val)
                     theta_prior[idx] = val
 
@@ -1312,7 +1370,7 @@ class KalmanMLEstimator:
             MAX_INFILTRATION_FRACTION,
             SOLAR_WALL_FRACTION,
         )
-        (log_mass, log_r, _q_int, log_alpha, log_r_ij,
+        (log_mass, log_r, _q_int, _t_wall_init, log_alpha, log_r_ij,
          log_solar, c_air, r_aw) = layout.unpack(theta)
         n = self._n
 
@@ -1593,6 +1651,12 @@ class KalmanMLEstimator:
         n_steps_used = 0
 
         ra0, _ = layout.idx_r_aw
+        tw0, _ = layout.idx_t_wall_init
+
+        # Track which window is first in the entire dataset so the identified
+        # t_wall_initial is applied exactly once (at the very start of the
+        # history) and the sensitivity is only non-zero there.
+        is_first_dataset_window = True
 
         for seg_i in range(len(seg_starts) - 1):
             seg_begin = seg_starts[seg_i]
@@ -1613,16 +1677,6 @@ class KalmanMLEstimator:
                     continue
                 win = seg[win_start:win_end]
 
-                # Initialise from first measurement of this window, starting
-                # the free-run at the *same* state the data is in: air temps
-                # from the measurement, wall states at the steady-state value
-                # implied by (T_a, T_out), and emitter-lag states warm-started
-                # to the commanded fraction.  The steady-state wall seed starts
-                # the unobserved envelope close to its true value over these
-                # short windows, keeping the heater-scale / resistance
-                # parameters identifiable (the reconstruction / open-loop
-                # *diagnostics* instead seed the wall at the air temperature for
-                # an unbiased display — see initial_state_from_measurement).
                 ym0 = np.asarray(win[0]["ym"], dtype=float)
                 u0 = np.asarray(win[0].get("u", []), dtype=float)
                 d0 = np.asarray(win[0].get("d", []), dtype=float)
@@ -1631,13 +1685,24 @@ class KalmanMLEstimator:
                     dtype=float,
                 )
                 sx = np.zeros((ntheta, nx))  # ∂x/∂θ — reset per window
-                # The wall warm start T_w0 = (1−rf)·T_a + rf·T_out depends
-                # on the identified r_aw fraction (sky/bridge neglected):
-                # ∂T_w0/∂rf = T_out − T_a.
-                if len(d0) > 0 and len(layout.identifiable_splits):
-                    T_out0 = float(d0[0])
-                    for k_sp, i in enumerate(layout.identifiable_splits):
-                        sx[ra0 + k_sp, n + i] = T_out0 - float(x[i])
+
+                if is_first_dataset_window:
+                    # For the first window use the identified t_wall_initial
+                    # to seed the wall nodes; ∂x₀[n+i]/∂θ[tw0+i] = 1.
+                    is_first_dataset_window = False
+                    for i in range(n):
+                        if n + i < nx:
+                            x[n + i] = float(
+                                np.clip(theta[tw0 + i], _T_WALL_LO, _T_WALL_HI)
+                            )
+                            sx[tw0 + i, n + i] = 1.0
+                else:
+                    # Later windows: keep steady-state wall seed; propagate
+                    # r_aw sensitivity for that warmstart.
+                    if len(d0) > 0 and len(layout.identifiable_splits):
+                        T_out0 = float(d0[0])
+                        for k_sp, i in enumerate(layout.identifiable_splits):
+                            sx[ra0 + k_sp, n + i] = T_out0 - float(x[i])
 
                 for step in range(len(win) - 1):
                     rec_k = win[step]
@@ -1994,7 +2059,7 @@ class KalmanMLEstimator:
         Return ∂reg/∂θ where reg(θ) is the Gaussian regularisation term
         from :meth:`_compute_regularization_theta`.
         """
-        (log_mass, log_r, q_int, log_alpha, log_r_ij,
+        (log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
          log_solar, c_air, r_aw) = layout.unpack(theta)
         lam = self._regularization
         grad = np.zeros_like(theta)
@@ -2007,6 +2072,13 @@ class KalmanMLEstimator:
 
         a, b = layout.idx_q_int
         grad[a:b] = 2.0 * lam * (q_int - self._q_int_prior) / (100.0 ** 2)
+
+        lam_tw = max(lam, _T_WALL_MIN_LAM)
+        a, b = layout.idx_t_wall_init
+        grad[a:b] = (
+            2.0 * lam_tw * (t_wall_init - self._t_wall_init_prior)
+            / (_T_WALL_PRIOR_STD ** 2)
+        )
 
         a, b = layout.idx_log_alpha
         if a < b:
@@ -2154,7 +2226,7 @@ class KalmanMLEstimator:
         scales remain in θ and are applied inside ``HouseThermalSDE.f``.
         """
         try:
-            (log_mass, log_r, _q_int, _log_alpha, log_r_ij,
+            (log_mass, log_r, _q_int, _t_wall_init, _log_alpha, log_r_ij,
              log_solar, c_air, r_aw) = layout.unpack(theta)
 
             log_r_ij_map: Optional[Dict[Tuple[int, int], float]] = None
@@ -2169,6 +2241,13 @@ class KalmanMLEstimator:
                 log_solar=log_solar, c_air=c_air, r_aw=r_aw,
             )
             model = HouseModel(new_rooms)
+            # HouseThermalSystem._get_heater_scales expects the OLD layout:
+            #   [log_mass(n), log_r(n), q_int(n), log_alpha(*), ...]
+            # Our _ThetaLayout inserts t_wall_init at [3n, 4n), so we strip
+            # that block before handing theta to the model, ensuring the
+            # hardcoded offset 3*n lands on log_alpha as expected.
+            a_tw, b_tw = layout.idx_t_wall_init
+            theta_for_model = np.concatenate([theta[:a_tw], theta[b_tw:]])
             return HouseThermalSystem(
                 model, self._sources, self._dt,
                 sigma_w=math.sqrt(self._Q_var),
@@ -2176,7 +2255,7 @@ class KalmanMLEstimator:
                 augment_offsets=False,
                 n_int_steps=10,
                 identifiable_sources=layout.identifiable_sources,
-                theta=theta,
+                theta=theta_for_model,
             )
         except Exception as exc:
             _LOGGER.debug("Failed to build parametric system: %s", exc, exc_info=True)
@@ -2301,13 +2380,20 @@ class KalmanMLEstimator:
         scale, and tight ``_SPLIT_PRIOR_STD`` priors for the linear-space
         envelope split fractions.
         """
-        (log_mass, log_r, q_int, log_alpha, log_r_ij,
+        (log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
          log_solar, c_air, r_aw) = layout.unpack(theta)
         reg = self._compute_regularization(
             log_mass, log_r, q_int, log_alpha, log_r_ij,
             layout.identifiable_pairs, layout.identifiable_sources,
         )
         lam = self._regularization
+        lam_tw = max(lam, _T_WALL_MIN_LAM)
+        # Wall initial temperature: Gaussian prior toward first air temp.
+        # Uses lam_tw ≥ _T_WALL_MIN_LAM so even under the default weak
+        # regularisation the parameter stays in a physically plausible range.
+        reg += lam_tw * float(
+            np.sum((t_wall_init - self._t_wall_init_prior) ** 2)
+        ) / (_T_WALL_PRIOR_STD ** 2)
         if len(log_solar):
             prior = np.array([
                 self._log_solar_prior_full[i] for i in layout.identifiable_solar
