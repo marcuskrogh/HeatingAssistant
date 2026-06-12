@@ -11,6 +11,10 @@
   --warning: #f5a623;
   --alarm: #e74c3c;
   --good: #27ae60;
+  /* Identification-experiment accent — a distinct violet so an in-progress run
+     reads as its own mode, clearly apart from heating (amber) and off (red). */
+  --experiment: #b58bf2;
+  --experiment-dim: rgba(181, 139, 242, 0.15);
   --chart-temp: #4fc3f7;
   --chart-temp-measured: #e57373;
   --chart-power: #ffb74d;
@@ -2713,6 +2717,169 @@
 /* Dim the surviving current-temperature readout so the off-state reads clearly */
 .climate-card--off .climate-card__current-value {
   color: var(--text-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXPERIMENT state ── while a system-identification experiment is exciting the
+   room the setpoint, comfort corridor and power toggle are not in play (the
+   controller drives the heaters with the excitation signal regardless), so the
+   card swaps them for a progress panel: an EXPERIMENT badge, a live progress
+   bar with time remaining, and the run's key facts.  Mirrors the OFF-state
+   transform but in the violet experiment accent.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* "EXPERIMENT" status badge */
+.climate-card__status--experiment {
+  background: var(--experiment-dim);
+  color: var(--experiment);
+}
+
+.climate-card--experiment {
+  border-color: rgba(181, 139, 242, 0.35);
+  background: linear-gradient(135deg, var(--bg-card) 0%, rgba(181, 139, 242, 0.05) 100%);
+}
+
+.climate-card--experiment .climate-card__control,
+.climate-card--experiment .climate-card__comfort,
+.climate-card--experiment .climate-card__track,
+.climate-card--experiment .climate-card__track-scale,
+.climate-card--experiment .climate-card__off-note,
+.climate-card--experiment .climate-card__power {
+  display: none;
+}
+
+/* Tint the surviving current-temperature readout in the experiment accent so
+   the live room response reads as part of the running experiment. */
+.climate-card--experiment .climate-card__current-value {
+  color: var(--experiment);
+}
+
+/* ── Experiment progress panel ── hidden unless the card is in experiment mode */
+.climate-card__experiment {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.climate-card--experiment .climate-card__experiment {
+  display: flex;
+}
+
+.climate-card__exp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.climate-card__exp-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.climate-card__exp-signal {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: var(--experiment);
+  background: var(--experiment-dim);
+}
+
+/* Progress bar — track + violet fill, with a gentle shimmer signalling "live" */
+.climate-card__exp-bar {
+  position: relative;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.climate-card__exp-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  min-width: 3px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(181, 139, 242, 0.65), var(--experiment));
+  transition: width 0.8s ease;
+}
+
+/* Animated sheen sliding across the filled portion to read as in-progress */
+.climate-card__exp-bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  transform: translateX(-100%);
+  animation: exp-sheen 2.2s ease-in-out infinite;
+}
+
+@keyframes exp-sheen {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(100%); }
+  100% { transform: translateX(100%); }
+}
+
+.climate-card__exp-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.climate-card__exp-pct {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--experiment);
+  line-height: 1;
+}
+
+.climate-card__exp-remaining {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+/* Key facts — a compact two-up grid mirroring the KPI label/value rhythm */
+.climate-card__exp-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.climate-card__exp-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+}
+
+.climate-card__exp-fact-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.climate-card__exp-fact-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

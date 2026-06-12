@@ -25,6 +25,10 @@
  */
 
 import { formatTemperature } from '../utils.js';
+import {
+  experimentPanelHtml, experimentPanelEls,
+  paintExperimentPanel, paintExperimentProgress, experimentProgress,
+} from '../experiment-utils.js';
 
 const SP_STEP = 0.5;
 const SP_MIN = 5;
@@ -40,6 +44,8 @@ const COMMIT_DEBOUNCE_MS = 700;
 // so the card reacts instantly; backend truth resumes once this elapses.
 const POWER_OPTIMISTIC_MS = 6000;
 const TRACK_HALF_WIDTH = 3; // minimum °C either side of the setpoint shown on the track
+// Cadence at which the experiment progress bar self-advances between updates.
+const PROGRESS_TICK_MS = 1000;
 
 function clampSetpoint(v) {
   const snapped = Math.round((v ?? 22) / SP_STEP) * SP_STEP;
@@ -74,7 +80,7 @@ function statusInfo(power) {
 }
 
 export function createClimateCard({
-  temperature, setpoint, power, comfortLower, comfortUpper, off,
+  temperature, setpoint, power, comfortLower, comfortUpper, off, experiment,
   onSetpointChange, onComfortOffsetChange, onPowerToggle,
 } = {}) {
   const container = document.createElement('div');
@@ -88,8 +94,10 @@ export function createClimateCard({
     power,
     comfortOffset: offsetFromCorridor(cl, cu) ?? DEFAULT_OFFSET,
     off: !!off,          // backend off-state (user toggle or off-schedule)
+    experiment: experiment || null, // active identification experiment, or null
     optimisticOff: null, // optimistic power override (null = follow backend)
     powerTimer: null,    // clears optimisticOff after POWER_OPTIMISTIC_MS
+    progressTimer: null, // ticks the experiment progress bar while a run is live
     editing: false,      // true while the user is mid setpoint adjustment
     commitTimer: null,   // pending setpoint debounce timer id
     offsetEditing: false, // true while the user is mid comfort-offset adjustment
@@ -119,6 +127,7 @@ export function createClimateCard({
       </div>
       <div class="climate-card__off-note">HEATING OFF</div>
     </div>
+    ${experimentPanelHtml()}
     <div class="climate-card__comfort">
       <span class="climate-card__comfort-title">COMFORT BAND</span>
       <button class="climate-card__offset-step climate-card__offset-step--down" aria-label="Narrow comfort band">−</button>
@@ -152,10 +161,25 @@ export function createClimateCard({
     trackMin: container.querySelector('.climate-card__track-min'),
     trackMax: container.querySelector('.climate-card__track-max'),
     comfortLabel: container.querySelector('.climate-card__track-comfort-label'),
+    experiment: experimentPanelEls(container),
   };
 
   function currentOff() {
     return st.optimisticOff !== null ? st.optimisticOff : st.off;
+  }
+
+  /** Keep a 1 s timer running only while an experiment is in progress so the
+   *  progress bar creeps forward between the (infrequent) state pushes. */
+  function syncProgressTimer() {
+    const live = st.experiment && experimentProgress(st.experiment).remainingS > 0;
+    if (live && !st.progressTimer) {
+      st.progressTimer = setInterval(() => {
+        if (st.experiment) paintExperimentProgress(els.experiment, st.experiment);
+      }, PROGRESS_TICK_MS);
+    } else if (!live && st.progressTimer) {
+      clearInterval(st.progressTimer);
+      st.progressTimer = null;
+    }
   }
 
   function togglePower() {
@@ -218,11 +242,21 @@ export function createClimateCard({
   els.offsetUp.addEventListener('click', () => adjustOffset(OFFSET_STEP));
 
   function paint() {
-    const off = currentOff();
+    // A live identification experiment overrides the off-schedule (the backend
+    // excites this room regardless), so it wins the card's visual mode.
+    const experiment = st.experiment || null;
+    syncProgressTimer();
+    const off = !experiment && currentOff();
+
+    container.classList.toggle('climate-card--experiment', !!experiment);
     container.classList.toggle('climate-card--off', off);
     els.power.classList.toggle('climate-card__power--off', off);
 
-    if (off) {
+    if (experiment) {
+      els.status.textContent = 'EXPERIMENT';
+      els.status.className = 'climate-card__status climate-card__status--experiment';
+      paintExperimentPanel(els.experiment, experiment);
+    } else if (off) {
       els.status.textContent = 'OFF';
       els.status.className = 'climate-card__status climate-card__status--off';
     } else {
@@ -240,9 +274,10 @@ export function createClimateCard({
         `<span class="climate-card__current-unit">°C</span>`;
     }
 
-    // When off, the setpoint / comfort corridor / marker are irrelevant — the
-    // CSS hides them via .climate-card--off, so skip the rest of the paint.
-    if (off) return;
+    // When off or running an experiment, the setpoint / comfort corridor /
+    // marker are irrelevant — the CSS hides them via the .climate-card--off /
+    // .climate-card--experiment modifiers, so skip the rest of the paint.
+    if (off || experiment) return;
 
     els.target.textContent = st.setpoint.toFixed(1) + '°';
     els.down.disabled = st.setpoint <= SP_MIN;
@@ -310,10 +345,11 @@ export function createClimateCard({
 
   return {
     element: container,
-    update({ temperature, setpoint, power, comfortLower, comfortUpper, off } = {}) {
+    update({ temperature, setpoint, power, comfortLower, comfortUpper, off, experiment } = {}) {
       if (temperature !== undefined) st.temperature = temperature;
       if (power !== undefined) st.power = power;
       if (off !== undefined) st.off = !!off;
+      if (experiment !== undefined) st.experiment = experiment || null;
       // Never overwrite the setpoint while the user is mid-edit or a commit is
       // still pending — the optimistic value must win until HA confirms it.
       if (setpoint !== undefined && setpoint !== null && !st.editing && !st.commitTimer) {
@@ -341,6 +377,10 @@ export function createClimateCard({
       if (st.powerTimer) {
         clearTimeout(st.powerTimer);
         st.powerTimer = null;
+      }
+      if (st.progressTimer) {
+        clearInterval(st.progressTimer);
+        st.progressTimer = null;
       }
     },
   };

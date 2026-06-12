@@ -1,6 +1,7 @@
 import { createGauge, updateGauge } from '../components/gauge.js';
 import { createRoomClimateTile } from '../components/room-climate-tile.js';
 import { createCountdown, updateCountdown } from '../components/countdown.js';
+import { indexExperimentsByRoom } from '../experiment-utils.js';
 import {
   formatEnergy, formatTemperature, formatPercent, formatIrradiance,
   entityValue, entityAttr, systemEntity, modelFitLabel,
@@ -45,6 +46,9 @@ export function renderOverview(container, rooms, state, connection, hass) {
   container.appendChild(roomSection);
 
   let latestState = state;
+  // Per-room index of scheduled identification experiments; kept fresh so the
+  // tiles can flip into their "experiment in progress" look as a run starts.
+  let latestExperiments = null;
   const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
 
   // Fetch fresh schedule data via WebSocket (bypasses entity-state cache) and
@@ -67,15 +71,30 @@ export function renderOverview(container, rooms, state, connection, hass) {
     }, 300);
   }
 
+  // Fetch the experiment list and push the per-room index to all tiles. A null
+  // response means the fetch failed, so keep whatever the tiles already hold.
+  function refreshExperiments() {
+    connection.listExperiments().then((experiments) => {
+      if (experiments == null) return;
+      latestExperiments = indexExperimentsByRoom(experiments);
+      tiles.forEach((t) => t.tile.update(latestState, hass, undefined, latestExperiments));
+    });
+  }
+
   // Initial fetch — runs after the tiles are already in the DOM so the first
   // paint is instant and the schedule section fills in within one WS round-trip.
   refreshSchedules(true);
+  refreshExperiments();
+  // Experiments transition scheduled → running on a wall-clock boundary that may
+  // not coincide with any state event, so poll on a slow cadence to catch the
+  // start/end even when the dashboard is otherwise idle.
+  const experimentInterval = setInterval(refreshExperiments, 30000);
 
   return {
     update(newState) {
       latestState = newState;
       gauges.forEach((g) => g.updater(newState));
-      tiles.forEach((t) => t.tile.update(newState, hass));
+      tiles.forEach((t) => t.tile.update(newState, hass, undefined, latestExperiments));
       updateCountdown(countdown, newState);
       // Re-fetch schedules so the badge and period list reflect any toggle or
       // save that triggered this state update. Debounced to coalesce bursts.
@@ -84,6 +103,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
     _countdownInterval: countdownInterval,
     destroy() {
       clearInterval(countdownInterval);
+      clearInterval(experimentInterval);
       clearTimeout(_scheduleRefreshTimer);
       tiles.forEach((t) => t.tile.destroy());
     },
