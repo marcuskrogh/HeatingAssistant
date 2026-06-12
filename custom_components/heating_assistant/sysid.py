@@ -232,10 +232,24 @@ def run_sysid_ekf(
     y0 = window[0].get("y", [])
     u_prev = _record_u(window[0], n_u)
     d_prev = _record_d(window[0], sde, room_list, n_d)
+
+    # If the caller supplied identified wall initial temperatures (via room_params
+    # key "t_wall_initial"), use them instead of the default T_wall = T_air seed.
+    _has_t_wall = any(
+        "t_wall_initial" in room_params.get(name, {}) for name in room_list
+    )
+    t_wall_init_arr: Optional[np.ndarray] = None
+    if _has_t_wall:
+        t_wall_init_arr = np.array([
+            float(room_params.get(name, {}).get("t_wall_initial", float("nan")))
+            for name in room_list
+        ])
+
     # Seed the full state from the first measurement so the wall and emitter-lag
-    # nodes start at physically sensible values (steady-state wall, warm emitter)
-    # rather than 0 — see _init_state_from_measurement.
-    x_curr = _init_state_from_measurement(sde, y0, n, n_x, u_prev, d_prev)
+    # nodes start at physically sensible values — see _init_state_from_measurement.
+    x_curr = _init_state_from_measurement(
+        sde, y0, n, n_x, u_prev, d_prev, t_wall_init=t_wall_init_arr,
+    )
     P_curr = (sigma_v ** 2) * np.eye(n_x)
 
     # Record the initial anchor point.  Rooms whose window was open at the first
@@ -454,6 +468,7 @@ def _init_state_from_measurement(
     n_x: int,
     u_vec: np.ndarray,
     d_vec: np.ndarray,
+    t_wall_init: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Build a full EKF state vector consistent with a measurement.
 
@@ -468,6 +483,10 @@ def _init_state_from_measurement(
     air-temperature-only initialisation for monkeypatched/legacy SDE objects
     that do not provide the helper (the wall then starts at the air temperature
     rather than zero).
+
+    When ``t_wall_init`` is provided (identified wall initial temperatures per
+    room), those values override the default wall seed so the reconstruction
+    starts from the identified envelope state rather than assuming T_wall = T_air.
     """
     air = np.array(
         [float(y_vals[i]) if i < len(y_vals) else 0.0 for i in range(n)],
@@ -495,17 +514,26 @@ def _init_state_from_measurement(
         except Exception:
             x = None
     if x is not None:
-        # Guarantee the displayed envelope starts at the air temperature,
-        # regardless of whether the SDE honoured the wall_seed kwarg.
         if x.shape[0] >= 2 * n:
-            x[n:2 * n] = air[:n]
+            if t_wall_init is not None:
+                # Use identified wall initial temperatures.
+                for i in range(n):
+                    if i < len(t_wall_init) and np.isfinite(float(t_wall_init[i])):
+                        x[n + i] = float(t_wall_init[i])
+            else:
+                # Default: wall starts at the measured air temperature.
+                x[n:2 * n] = air[:n]
         return x
-    # Fallback (no helper): air temperatures measured, wall block at the air
-    # temperature (never 0), remaining latent states left at 0.
+    # Fallback (no helper): air temperatures measured, wall block seeded.
     x = np.zeros(n_x, dtype=float)
     x[:n] = air
     if n_x >= 2 * n:
-        x[n:2 * n] = air
+        if t_wall_init is not None:
+            for i in range(n):
+                if i < len(t_wall_init) and np.isfinite(float(t_wall_init[i])):
+                    x[n + i] = float(t_wall_init[i])
+        else:
+            x[n:2 * n] = air
     return x
 
 

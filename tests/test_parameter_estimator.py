@@ -554,6 +554,7 @@ class TestObjectiveScaling:
             estimator._log_mass_prior,
             estimator._log_r_prior,
             estimator._q_int_prior,
+            estimator._t_wall_init_prior,
         ])
 
         sh_short = estimator._convert_history_std(hist_short, use_ym=True)
@@ -608,6 +609,7 @@ class TestAnalyticalGradient:
             estimator._log_mass_prior,
             estimator._log_r_prior,
             estimator._q_int_prior,
+            estimator._t_wall_init_prior,
             np.array([estimator._log_alpha_prior_full[s]
                       for s in identifiable_sources]),
             np.array([estimator._connection_r_priors[
