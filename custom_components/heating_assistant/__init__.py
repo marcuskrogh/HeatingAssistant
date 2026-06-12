@@ -1425,7 +1425,10 @@ _SIM_ROOM_PARAM_KEYS = (
     "solar_scale",
     "c_air_fraction",
     "r_aw_fraction",
-    "t_wall_initial",
+    # t_wall_initial is identified per-dataset but never shown in the UI
+    # parameter list. It is injected automatically from sysid_results by the
+    # EKF and open-loop handlers below so reconstruction uses the last
+    # identified value without any user interaction.
 )
 
 
@@ -1453,6 +1456,28 @@ def _extract_sim_room_params(
         if overrides:
             room_params[room_name] = overrides
     return room_params
+
+
+def _inject_identified_t_wall_initial(
+    room_params: Dict[str, Dict[str, float]],
+    coordinator: HeatingAssistantCoordinator,
+) -> None:
+    """Add identified t_wall_initial from sysid_results into room_params.
+
+    The wall envelope initial temperature is identified per dataset but is
+    not shown in the UI parameter list.  This function ensures that every
+    EKF/open-loop reconstruction run automatically uses the last identified
+    value for each room, falling back to the steady-state seed when no
+    identified value is available.  Explicit overrides already present in
+    room_params (e.g. from a direct service call) are never overwritten.
+    """
+    for room_name in coordinator.model.room_names:
+        sysid = coordinator.sysid_results.get(room_name, {})
+        t_wall = sysid.get("t_wall_initial")
+        if t_wall is not None:
+            room_params.setdefault(room_name, {}).setdefault(
+                "t_wall_initial", float(t_wall)
+            )
 
 
 def _effective_heater_scales(
@@ -1735,7 +1760,9 @@ def _register_services(hass: HomeAssistant) -> None:
         # Build per-room parameter overrides from service data (same keys as
         # run_sysid_simulation) so the open-loop diagnostic uses the full
         # parameter set the user configured in the identification panel.
+        # Inject the last identified wall initial temperature automatically.
         room_params = _extract_sim_room_params(call, coordinator.model.room_names)
+        _inject_identified_t_wall_initial(room_params, coordinator)
 
         # When room-parameter overrides are given, build a temporary
         # HouseThermalSDE from a patched model copy so the open-loop
@@ -2074,8 +2101,11 @@ def _register_services(hass: HomeAssistant) -> None:
         horizon_steps = max(1, int(horizon_hours * 3600.0 / dt))
 
         # Build per-room parameter overrides from service data (full parameter
-        # set, keyed by ``<param>_<room_slug>``).
+        # set, keyed by ``<param>_<room_slug>``), then inject the last identified
+        # wall envelope initial temperature so reconstruction always starts from
+        # a physically informed wall state without requiring any UI interaction.
         room_params = _extract_sim_room_params(call, coordinator.model.room_names)
+        _inject_identified_t_wall_initial(room_params, coordinator)
 
         # Fetch history: a stored dataset (``dataset_id``) supplies its
         # snapshotted records directly; otherwise use the JSONL store / Recorder

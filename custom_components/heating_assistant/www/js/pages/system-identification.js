@@ -13,7 +13,6 @@ const DEFAULTS = {
   solar_scale: 1.0,
   c_air_fraction: 0.05,
   r_aw_fraction: 0.05,
-  t_wall_initial: 20.0,
   heater_scale: 1.0,
   horizon_hours: 6,
 };
@@ -272,15 +271,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
             step="0.001" min="0" max="1" value="${DEFAULTS.r_aw_fraction}">
           <span class="form-hint">0&ndash;1 &mdash; fraction of conductive-path resistance on the air&harr;wall film (infiltration excluded)</span>
         </div>
-        <div class="form-group">
-          <div class="form-group__header">
-            <label class="form-label" for="param-t-wall-initial">Wall Envelope Initial Temperature (T<sub>w0</sub>)</label>
-            <button class="param-lock-btn" data-param="t_wall_initial" title="Lock: hold fixed during auto-identification">Fix</button>
-          </div>
-          <input class="form-input" type="number" id="param-t-wall-initial"
-            step="0.1" min="-30" max="60" value="${DEFAULTS.t_wall_initial}">
-          <span class="form-hint">&deg;C &mdash; wall envelope temperature at window start (identified, not stored)</span>
-        </div>
       </div>
     </div>
 
@@ -465,7 +455,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const solarScaleInput = container.querySelector('#param-solar-scale');
   const cAirFractionInput = container.querySelector('#param-c-air-fraction');
   const rAwFractionInput = container.querySelector('#param-r-aw-fraction');
-  const tWallInitialInput = container.querySelector('#param-t-wall-initial');
   const sigmaWInput = container.querySelector('#param-sigma-w');
   const sigmaVInput = container.querySelector('#param-sigma-v');
   const horizonInput = container.querySelector('#param-horizon');
@@ -497,7 +486,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // they are built by ensureHeaterScaleInputs).
   const paramInputs = [
     thermalMassInput, rExternalInput, internalGainInput, solarScaleInput,
-    cAirFractionInput, rAwFractionInput, tWallInitialInput,
+    cAirFractionInput, rAwFractionInput,
     sigmaWInput, sigmaVInput, horizonInput,
   ];
 
@@ -569,7 +558,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       solar_scale: solarScaleInput,
       c_air_fraction: cAirFractionInput,
       r_aw_fraction: rAwFractionInput,
-      t_wall_initial: tWallInitialInput,
     };
     for (const [param, inp] of Object.entries(roomParamInputs)) {
       if (lockedParams.has(param)) {
@@ -734,7 +722,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       [`solar_scale_${roomSlug}`]: parseFloat(solarScaleInput.value),
       [`c_air_fraction_${roomSlug}`]: parseFloat(cAirFractionInput.value),
       [`r_aw_fraction_${roomSlug}`]: parseFloat(rAwFractionInput.value),
-      [`t_wall_initial_${roomSlug}`]: parseFloat(tWallInitialInput.value),
     };
 
     if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
@@ -878,8 +865,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       cAirFractionInput.value = sysidAttrs.c_air_fraction;
     if (sysidAttrs.r_aw_fraction != null && !lockedParams.has('r_aw_fraction'))
       rAwFractionInput.value = sysidAttrs.r_aw_fraction;
-    if (sysidAttrs.t_wall_initial != null && !lockedParams.has('t_wall_initial'))
-      tWallInitialInput.value = sysidAttrs.t_wall_initial;
 
     ensureHeaterScaleInputs(st);
     const identifiedScales = sysidAttrs.heater_scales || {};
