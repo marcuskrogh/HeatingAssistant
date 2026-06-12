@@ -168,9 +168,16 @@ class DatasetStore:
 
     # -- queries ----------------------------------------------------------
 
-    def list_meta(self) -> List[Dict[str, Any]]:
-        """Return metadata for all datasets (newest first), without records."""
-        metas = [dataset_meta(d) for d in self._datasets]
+    def list_meta(self, room_slug: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return metadata for all datasets (newest first), without records.
+
+        If *room_slug* is provided only datasets belonging to that room are
+        returned.
+        """
+        datasets = self._datasets
+        if room_slug is not None:
+            datasets = [d for d in datasets if d.get("room_slug") == room_slug]
+        metas = [dataset_meta(d) for d in datasets]
         metas.sort(key=lambda d: d.get("created_at") or 0.0, reverse=True)
         return metas
 

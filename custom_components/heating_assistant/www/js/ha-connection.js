@@ -46,11 +46,11 @@ export class HaConnection {
   // distinguish ``null`` (transient error — keep the previous list) from ``[]``
   // (a successful response with no datasets) so a momentary WebSocket failure
   // never wipes a populated list.
-  async listDatasets() {
+  async listDatasets(roomSlug) {
     try {
-      const result = await this._hass.callWS({
-        type: 'heating_assistant/list_datasets',
-      });
+      const msg = { type: 'heating_assistant/list_datasets' };
+      if (roomSlug != null) msg.room_slug = roomSlug;
+      const result = await this._hass.callWS(msg);
       return (result && Array.isArray(result.datasets)) ? result.datasets : null;
     } catch (e) {
       console.warn('Failed to fetch datasets via WebSocket:', e);
