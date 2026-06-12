@@ -1760,9 +1760,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Build per-room parameter overrides from service data (same keys as
         # run_sysid_simulation) so the open-loop diagnostic uses the full
         # parameter set the user configured in the identification panel.
-        # Inject the last identified wall initial temperature automatically.
         room_params = _extract_sim_room_params(call, coordinator.model.room_names)
-        _inject_identified_t_wall_initial(room_params, coordinator)
 
         # When room-parameter overrides are given, build a temporary
         # HouseThermalSDE from a patched model copy so the open-loop
@@ -1808,6 +1806,34 @@ def _register_services(hass: HomeAssistant) -> None:
         else:
             system = coordinator.controller._system
 
+        # Quickly identify the wall-envelope initial temperature for this
+        # specific dataset so the continuous simulation starts from a
+        # physically informed wall state.  All structural parameters are
+        # locked to the values already in use; only t_wall_init is free.
+        # A single L-BFGS-B pass is used — no multistart — so this is fast.
+        t_wall_initial_identified: Optional[Dict[str, float]] = None
+        try:
+            from .parameter_estimator import KalmanMLEstimator
+            fast_estimator = KalmanMLEstimator(
+                rooms=list(coordinator.model.rooms.values()),
+                sources=coordinator.heat_sources,
+                dt=dt,
+            )
+            t_wall_initial_identified = await hass.async_add_executor_job(
+                fast_estimator.estimate_wall_initial_only,
+                history,
+                room_params if room_params else None,
+            )
+            _LOGGER.debug(
+                "Fast t_wall_init estimate for open-loop sim: %s",
+                t_wall_initial_identified,
+            )
+        except Exception as exc:
+            _LOGGER.warning(
+                "Open-loop: fast t_wall_init estimation failed (%s); "
+                "falling back to air-temperature seed.", exc,
+            )
+
         # Results are surfaced in the UI via the per-room OpenLoopRMSESensor
         # entities, so this service writes its output to the coordinator cache
         # rather than raising a persistent notification.
@@ -1826,6 +1852,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 n_rooms,
                 dt,
                 None,
+                t_wall_initial_identified,
             )
 
             if "error" not in result:

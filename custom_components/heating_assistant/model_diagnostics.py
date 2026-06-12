@@ -692,6 +692,7 @@ def compute_open_loop_predictions(
     n_rooms: int,
     dt: float,
     segment_length: Optional[int] = None,
+    t_wall_initial: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluate model quality by running open-loop (no Kalman correction)
@@ -876,10 +877,18 @@ def compute_open_loop_predictions(
                 except TypeError:
                     # Older system objects accept (y, u) only.
                     x = np.asarray(init_fn(y0_arr, u_prev), dtype=float)
-            # Guarantee the envelope starts at the air node regardless of
-            # whether the helper honoured the wall_seed kwarg.
+            # Seed the wall/envelope state.  When an identified t_wall_initial
+            # is provided use it; otherwise fall back to air temperature so the
+            # free-run starts without a parameter-dependent jump.
             if x.shape[0] >= 2 * n:
-                x[n:2 * n] = y0_arr[:n]
+                if t_wall_initial:
+                    for room_idx, room_name in enumerate(room_names):
+                        if room_idx < n and room_name in t_wall_initial:
+                            x[n + room_idx] = float(t_wall_initial[room_name])
+                        elif room_idx < n:
+                            x[n + room_idx] = float(y0_arr[room_idx])
+                else:
+                    x[n:2 * n] = y0_arr[:n]
         else:
             x = np.zeros(nx, dtype=float)
             x[:n] = np.array(y0[:n], dtype=float)

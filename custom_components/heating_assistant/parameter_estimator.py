@@ -1133,6 +1133,146 @@ class KalmanMLEstimator:
             "message": "  ".join(msg_parts),
         }
 
+    def estimate_wall_initial_only(
+        self,
+        history: List[Dict[str, Any]],
+        room_params: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, float]:
+        """Quickly estimate only the wall-envelope initial temperature.
+
+        All structural parameters are held fixed at their configured /
+        overridden values.  Only ``t_wall_init`` (one value per room) is a
+        free decision variable.  A single L-BFGS-B pass is used — no
+        multistart, no OLS warm-start — so this is fast enough to run
+        before every open-loop simulation.
+
+        Returns a dict ``{room_name: t_wall_initial_float}``.  Falls back to
+        the first measured air temperature when history is too short or the
+        optimiser fails.
+        """
+        n = self._n
+
+        # Seed the prior from the first measured air temperatures.
+        if history:
+            first_y = history[0].get("y", [])
+            for i in range(n):
+                if i < len(first_y):
+                    try:
+                        self._t_wall_init_prior[i] = float(first_y[i])
+                    except (ValueError, TypeError):
+                        pass
+
+        fallback = {
+            self._room_names[i]: round(float(self._t_wall_init_prior[i]), 2)
+            for i in range(n)
+        }
+
+        if len(history) < self._min_history_steps:
+            return fallback
+
+        # Minimal layout: only the 4n core parameters; no heater / R_ij /
+        # solar / split blocks — those are all locked via equal bounds.
+        layout = _ThetaLayout(
+            n_rooms=n,
+            identifiable_sources=[],
+            identifiable_pairs=[],
+            identifiable_solar=[],
+            identifiable_splits=[],
+        )
+
+        # Start from configured/overridden structural params.
+        log_mass_init = self._log_mass_prior.copy()
+        log_r_init = self._log_r_prior.copy()
+        q_int_init = self._q_int_prior.copy()
+        if room_params:
+            for room_name, overrides in room_params.items():
+                if room_name not in self._room_names:
+                    continue
+                i = self._room_names.index(room_name)
+                if "thermal_mass" in overrides:
+                    log_mass_init[i] = math.log(
+                        max(float(overrides["thermal_mass"]), 1.0)
+                    )
+                if "r_external" in overrides:
+                    log_r_init[i] = math.log(
+                        max(float(overrides["r_external"]), 1e-9)
+                    )
+                if "internal_gain" in overrides:
+                    q_int_init[i] = float(overrides["internal_gain"])
+
+        theta_prior = np.concatenate([
+            log_mass_init,
+            log_r_init,
+            q_int_init,
+            self._t_wall_init_prior.copy(),
+        ])
+
+        # Lock everything except the t_wall_init block (3n … 4n).
+        bounds: List[Tuple[float, float]] = (
+            [(float(theta_prior[i]), float(theta_prior[i])) for i in range(n)]
+            + [(float(theta_prior[n + i]), float(theta_prior[n + i])) for i in range(n)]
+            + [(float(theta_prior[2 * n + i]), float(theta_prior[2 * n + i])) for i in range(n)]
+            + [(_T_WALL_LO, _T_WALL_HI)] * n
+        )
+
+        std_history = self._convert_history_std(history, use_ym=False)
+
+        _cache: List[Optional[object]] = [None, None, None]
+
+        def _eval(theta: np.ndarray) -> None:
+            if _cache[0] is None or not np.array_equal(theta, _cache[0]):
+                mse, g_mse = self._simulation_mse_and_grad(
+                    theta, layout, std_history, nominal_dt=self._dt,
+                    max_window_steps=self._max_window_steps,
+                    min_segment_steps=self._min_segment_steps,
+                )
+                a_tw, b_tw = layout.idx_t_wall_init
+                t_wall = theta[a_tw:b_tw]
+                lam_tw = max(self._regularization, _T_WALL_MIN_LAM)
+                reg = lam_tw * float(
+                    np.sum((t_wall - self._t_wall_init_prior) ** 2)
+                ) / (_T_WALL_PRIOR_STD ** 2)
+                reg_grad = np.zeros(len(theta))
+                reg_grad[a_tw:b_tw] = (
+                    2.0 * lam_tw * (t_wall - self._t_wall_init_prior)
+                    / (_T_WALL_PRIOR_STD ** 2)
+                )
+                _cache[0] = theta.copy()
+                _cache[1] = mse + reg
+                _cache[2] = g_mse + reg_grad
+
+        def _fun(theta: np.ndarray) -> float:
+            _eval(theta)
+            return float(_cache[1])  # type: ignore[arg-type]
+
+        def _jac(theta: np.ndarray) -> np.ndarray:
+            _eval(theta)
+            return np.asarray(_cache[2], dtype=float)  # type: ignore[arg-type]
+
+        lb = np.array([lo for lo, _ in bounds])
+        ub = np.array([hi for _, hi in bounds])
+
+        try:
+            from scipy.optimize import minimize as _sp_minimize
+            res = _sp_minimize(
+                _fun, theta_prior,
+                jac=_jac,
+                bounds=list(zip(lb, ub)),
+                method="L-BFGS-B",
+                options={"maxiter": 200, "ftol": 1e-10, "gtol": 1e-5},
+            )
+            if np.isfinite(res.fun):
+                a_tw, b_tw = layout.idx_t_wall_init
+                t_wall = np.clip(res.x[a_tw:b_tw], _T_WALL_LO, _T_WALL_HI)
+                return {
+                    self._room_names[i]: round(float(t_wall[i]), 2)
+                    for i in range(n)
+                }
+        except Exception as exc:
+            _LOGGER.debug("Fast t_wall_init estimation failed: %s", exc)
+
+        return fallback
+
     # ── Internal helpers ──────────────────────────────────────────────────
 
     def _pin_locked_params(
