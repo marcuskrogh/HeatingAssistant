@@ -1138,9 +1138,22 @@
 }
 
 /* Custom date-range panel — outer flex column keeps everything stacked and
-   bounded; inner 2-column grid (1fr 1fr) places Start/End side-by-side on
-   desktop.  Using 1fr columns (not minmax(160px,1fr)) means there is no hard
-   minimum track width that could push the panel wider than its card. */
+   bounded; inner grid places Start/End side-by-side when there is room.
+
+   The inner grid must respond to the *container* width, not the viewport.
+   A fixed `1fr 1fr` (plus a viewport media query) overflowed whenever the
+   card itself was narrowed — e.g. with the Home Assistant sidebar open the
+   card can be < 400px wide while the viewport stays > 480px, so the media
+   query never fired and each column collapsed to ~190px.  A datetime-local
+   input needs ~220px to show its full date/time value plus the picker icon,
+   so the widget pushed past its column and out through the card boundary.
+
+   `repeat(auto-fit, minmax(min(220px, 100%), 1fr))` fixes this at the source:
+   each column is at least 220px (wide enough for the datetime widget) and the
+   grid automatically drops to a single column when two 220px tracks no longer
+   fit the available width — based on the real container width, independent of
+   the viewport.  The `min(220px, 100%)` guard caps the track at 100% so it can
+   never exceed the card even on extremely narrow containers. */
 .window-datetime-panel {
   display: flex;
   flex-direction: column;
@@ -1149,16 +1162,10 @@
 
 .window-datetime-inputs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 16px;
   align-items: start;
   min-width: 0;
-}
-
-@media (max-width: 480px) {
-  .window-datetime-inputs {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* datetime-local inputs: ensure they never exceed their container regardless
