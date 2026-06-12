@@ -2818,3 +2818,161 @@
   border-color: var(--chart-temp-measured);
   color: var(--chart-temp-measured);
 }
+
+/* ---------------------------------------------------------------------------
+   Collapsible section header (e.g. the Experiment Scheduler)
+   --------------------------------------------------------------------------- */
+.collapsible__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.collapsible__title { margin: 0; }
+.collapsible__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.collapsible__badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: var(--good);
+  border: 1px solid var(--good);
+  background: rgba(39, 174, 96, 0.1);
+}
+.collapsible__badge[hidden] { display: none; }
+.collapsible__chevron {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--text-secondary);
+  transition: transform var(--transition);
+}
+.collapsible--open .collapsible__chevron {
+  transform: rotate(180deg);
+}
+.collapsible__body[hidden] { display: none; }
+
+/* Consistent vertical spacing between stacked sub-blocks inside a card so
+   action buttons never crowd the field above them. */
+.ds-section-gap { margin-top: 16px; }
+.ds-actions-gap { margin-top: 20px; margin-bottom: 0; }
+
+/* ---------------------------------------------------------------------------
+   Parameter-store cards (Applied Model History) — visually distinct from the
+   dataset cards: a blue accent rail and a calmer, non-selectable presentation.
+   --------------------------------------------------------------------------- */
+.ps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ps-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chart-temp);
+  border-radius: var(--radius-sm);
+}
+.ps-row__main { min-width: 0; flex: 1 1 auto; }
+.ps-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ps-row__title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.ps-row__tag {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.ps-row__tag--ml { color: var(--chart-temp); border-color: var(--chart-temp); }
+.ps-row__tag--reverted { color: var(--warning); border-color: var(--warning); }
+.ps-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 3px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+.ps-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.ps-row__del:hover {
+  border-color: var(--chart-temp-measured);
+  color: var(--chart-temp-measured);
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile: keep date/time pickers and dense grids inside their cards.
+   --------------------------------------------------------------------------- */
+/* Native date/time controls have a wide intrinsic size; force them to honour
+   their container on every browser (notably iOS Safari). */
+input[type="datetime-local"],
+input[type="date"],
+input[type="time"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 600px) {
+  /* Single-column forms so a datetime widget always has the full card width
+     and never overflows a too-narrow grid track. */
+  .tuning-params-grid,
+  .window-datetime-inputs {
+    grid-template-columns: 1fr;
+  }
+  /* Stack the save-dataset row and its action button. */
+  .ds-save-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ds-save-row__action {
+    justify-content: flex-start;
+  }
+  /* Let dataset / parameter rows wrap their action buttons under the text. */
+  .ds-row,
+  .ps-row {
+    flex-wrap: wrap;
+  }
+  .ds-row__actions,
+  .ps-row__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

@@ -2435,6 +2435,26 @@ def _register_services(hass: HomeAssistant) -> None:
         ),
     )
 
+    async def handle_delete_parameter_history(call: ServiceCall) -> None:
+        """Delete a single entry from the parameter history."""
+        coordinator = _get_coordinator(hass)
+        history_index: int = call.data["history_index"]
+        coordinator.delete_parameter_history(history_index)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "delete_parameter_history",
+        handle_delete_parameter_history,
+        schema=vol.Schema(
+            {
+                vol.Required("history_index"): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=9)
+                ),
+            }
+        ),
+    )
+
     async def handle_update_room_schedule(call: ServiceCall) -> None:
         """Update the schedule for a single room and persist to config entry."""
         from .dashboard import slugify as _slugify

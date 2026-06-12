@@ -899,6 +899,25 @@ revert_parameters:
           max: 9
           step: 1
 
+delete_parameter_history:
+  name: Delete parameter history entry
+  description: >
+    Delete a single stored entry from the parameter history. The active
+    parameter set is not affected — only a historical snapshot is removed.
+  fields:
+    history_index:
+      name: History index
+      description: >
+        Zero-based index into the parameter history list (0 = most recent
+        previous entry, up to 9).
+      required: true
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 9
+          step: 1
+
 update_room_schedule:
   name: Update room schedule
   description: >
