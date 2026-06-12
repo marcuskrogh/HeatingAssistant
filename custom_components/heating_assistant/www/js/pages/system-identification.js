@@ -801,13 +801,22 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     const listEl = container.querySelector('#heater-scales-list');
     if (!listEl) return;
     const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
-    const currentScales = configAttrs.current_heater_scales || {};
+    // current_heater_scales is null/undefined until the config sensor reports.
+    // Once it's an object (even {}) the config is loaded.
+    const rawScales = configAttrs.current_heater_scales;
+    if (rawScales == null) {
+      // Config not loaded yet — try again on the next update.
+      return;
+    }
+    const currentScales = rawScales;
     const sources = Object.entries(currentScales).filter(
       ([, info]) => info.room_slug === roomSlug
     );
     if (sources.length === 0) {
-      // Config not loaded yet (or no heaters) — try again on the next update.
+      // Config is loaded but no heaters for this room — mark as done so we
+      // don't keep re-running on every state update.
       listEl.innerHTML = '<span class="form-hint">No heaters configured for this room.</span>';
+      heaterInputsBuilt = true;
       return;
     }
     listEl.innerHTML = '';
