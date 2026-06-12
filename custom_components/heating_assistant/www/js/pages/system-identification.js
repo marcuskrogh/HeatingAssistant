@@ -1,5 +1,6 @@
 import { TimeSeriesChart, makeDataset, loadChartJs, createSparkline, historyToDataPoints } from '../components/time-series-chart.js';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js';
+import { createCollapsible } from '../components/collapsible.js';
 import { entityValue, formatNumber, systemEntity } from '../utils.js';
 
 // Default parameter values — must match backend DEFAULT_* constants in const.py
@@ -1316,8 +1317,6 @@ function setupDatasetsAndExperiments(ctx) {
   } = ctx;
 
   // ---- Experiment scheduler card ----------------------------------------
-  const expCard = document.createElement('div');
-  expCard.className = 'card tuning-section';
   // Default window: tonight 23:00 → 05:00 next morning (a typically unoccupied
   // period), nudged to the next day when 23:00 has already passed.
   const now = new Date();
@@ -1326,102 +1325,84 @@ function setupDatasetsAndExperiments(ctx) {
   if (defStart <= now) defStart.setDate(defStart.getDate() + 1);
   const defEnd = new Date(defStart.getTime() + 6 * 3600 * 1000);
 
-  expCard.innerHTML = `
-    <button type="button" class="collapsible__header" id="exp-toggle" aria-expanded="false">
-      <span class="tuning-section__title collapsible__title">Experiment Scheduler</span>
-      <span class="collapsible__right">
-        <span class="collapsible__badge" id="exp-count" hidden></span>
-        <span class="collapsible__chevron" aria-hidden="true"></span>
-      </span>
-    </button>
-    <div class="collapsible__body" id="exp-body" hidden>
-      <p class="tuning-section__desc">
-        Schedule an excitation experiment for <strong>${room.name}</strong> over a
-        future window (e.g. overnight). The controller drives this room's heaters
-        with an informative signal so the response is good for identification, then
-        stores the captured data as a dataset. Comfort-schedule "off" periods are
-        overridden for this room during the window; open-window safety and the
-        min/max temperature limits still apply.
-      </p>
-      <div class="tuning-params-grid">
-        <div class="form-group">
-          <label class="form-label" for="exp-name">Name</label>
-          <input class="form-input" type="text" id="exp-name" placeholder="${room.name} overnight test">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="exp-signal">Excitation signal</label>
-          <select class="form-input" id="exp-signal">
-            ${EXCITATION_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
-          </select>
-        </div>
+  // Collapsed by default to reduce clutter (especially on mobile); the shared
+  // collapsible primitive gives a consistent title-left / chevron-right look.
+  const expCard = document.createElement('div');
+  expCard.className = 'card tuning-section';
+  const expCollapsible = createCollapsible({ title: 'Experiment Scheduler', open: false });
+  expCollapsible.body.innerHTML = `
+    <p class="tuning-section__desc">
+      Schedule an excitation experiment for <strong>${room.name}</strong> over a
+      future window (e.g. overnight). The controller drives this room's heaters
+      with an informative signal so the response is good for identification, then
+      stores the captured data as a dataset. Comfort-schedule "off" periods are
+      overridden for this room during the window; open-window safety and the
+      min/max temperature limits still apply.
+    </p>
+    <div class="tuning-params-grid">
+      <div class="form-group">
+        <label class="form-label" for="exp-name">Name</label>
+        <input class="form-input" type="text" id="exp-name" placeholder="${room.name} overnight test">
       </div>
-      <div class="window-datetime-inputs ds-section-gap">
-        <div class="form-group">
-          <label class="form-label" for="exp-start">Start</label>
-          <input class="form-input form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="exp-end">End</label>
-          <input class="form-input form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
-        </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-signal">Excitation signal</label>
+        <select class="form-input" id="exp-signal">
+          ${EXCITATION_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
+        </select>
       </div>
-      <div class="tuning-params-grid ds-section-gap">
-        <div class="form-group">
-          <label class="form-label" for="exp-high">High power</label>
-          <input class="form-input" type="number" id="exp-high" min="0" max="1" step="0.05" value="1.0">
-          <span class="form-hint">fraction (0–1) of rated heater power</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="exp-low">Low power</label>
-          <input class="form-input" type="number" id="exp-low" min="0" max="1" step="0.05" value="0.0">
-          <span class="form-hint">fraction (0–1) of rated heater power</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="exp-period">Switching period</label>
-          <input class="form-input" type="number" id="exp-period" min="5" step="5" value="60">
-          <span class="form-hint">minutes between PRBS / pulse switches</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="exp-min">Min temp (frost floor)</label>
-          <input class="form-input" type="number" id="exp-min" step="0.5" value="12">
-          <span class="form-hint">°C — heating forced on below this</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="exp-max">Max temp (ceiling)</label>
-          <input class="form-input" type="number" id="exp-max" step="0.5" value="26">
-          <span class="form-hint">°C — heating forced off at/above this</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="exp-autosave">Auto-save dataset</label>
-          <select class="form-input" id="exp-autosave">
-            <option value="yes" selected>Yes</option>
-            <option value="no">No</option>
-          </select>
-        </div>
-      </div>
-      <div class="tuning-actions ds-actions-gap">
-        <button class="btn btn--accent" id="btn-schedule-exp">Schedule Experiment</button>
-        <span class="tuning-actions__status" id="exp-status"></span>
-      </div>
-      <div id="exp-list" class="ds-section-gap"></div>
     </div>
+    <div class="window-datetime-inputs ds-section-gap">
+      <div class="form-group">
+        <label class="form-label" for="exp-start">Start</label>
+        <input class="form-input form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-end">End</label>
+        <input class="form-input form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
+      </div>
+    </div>
+    <div class="tuning-params-grid ds-section-gap">
+      <div class="form-group">
+        <label class="form-label" for="exp-high">High power</label>
+        <input class="form-input" type="number" id="exp-high" min="0" max="1" step="0.05" value="1.0">
+        <span class="form-hint">fraction (0–1) of rated heater power</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-low">Low power</label>
+        <input class="form-input" type="number" id="exp-low" min="0" max="1" step="0.05" value="0.0">
+        <span class="form-hint">fraction (0–1) of rated heater power</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-period">Switching period</label>
+        <input class="form-input" type="number" id="exp-period" min="5" step="5" value="60">
+        <span class="form-hint">minutes between PRBS / pulse switches</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-min">Min temp (frost floor)</label>
+        <input class="form-input" type="number" id="exp-min" step="0.5" value="12">
+        <span class="form-hint">°C — heating forced on below this</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-max">Max temp (ceiling)</label>
+        <input class="form-input" type="number" id="exp-max" step="0.5" value="26">
+        <span class="form-hint">°C — heating forced off at/above this</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-autosave">Auto-save dataset</label>
+        <select class="form-input" id="exp-autosave">
+          <option value="yes" selected>Yes</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+    </div>
+    <div class="tuning-actions ds-actions-gap">
+      <button class="btn btn--accent" id="btn-schedule-exp">Schedule Experiment</button>
+      <span class="tuning-actions__status" id="exp-status"></span>
+    </div>
+    <div id="exp-list" class="ds-section-gap"></div>
   `;
+  expCard.appendChild(expCollapsible.element);
   container.appendChild(expCard);
-
-  // Collapsible behaviour: the scheduler starts collapsed to reduce clutter
-  // (especially on mobile) and expands on click / Enter / Space.
-  const expToggle = expCard.querySelector('#exp-toggle');
-  const expBody = expCard.querySelector('#exp-body');
-  expToggle.addEventListener('click', () => {
-    const open = expBody.hasAttribute('hidden');
-    if (open) {
-      expBody.removeAttribute('hidden');
-    } else {
-      expBody.setAttribute('hidden', '');
-    }
-    expToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    expCard.classList.toggle('collapsible--open', open);
-  });
 
   // ---- Stored datasets card ---------------------------------------------
   const dsCard = document.createElement('div');
@@ -1580,16 +1561,9 @@ function setupDatasetsAndExperiments(ctx) {
     }
   });
 
-  const expCountBadge = expCard.querySelector('#exp-count');
-
   function updateExperimentBadge(mine) {
     const active = mine.filter((e) => e.status === 'scheduled' || e.status === 'running').length;
-    if (active > 0) {
-      expCountBadge.textContent = `${active} active`;
-      expCountBadge.removeAttribute('hidden');
-    } else {
-      expCountBadge.setAttribute('hidden', '');
-    }
+    expCollapsible.setBadge(active > 0 ? `${active} active` : '');
   }
 
   async function refreshExperiments() {

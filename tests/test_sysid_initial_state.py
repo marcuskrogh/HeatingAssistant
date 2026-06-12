@@ -9,8 +9,9 @@ start of the plotted trajectory and the early one-step residuals.
 
 The reconstruction now seeds the full state from the first measurement via the
 shared ``initial_state_from_measurement`` helper (the same one the open-loop
-diagnostic and the estimator objective use): air temps from the measurement,
-wall nodes at the (T_a, T_out) steady state, emitter lags warm-started.
+diagnostic and the estimator objective use): air temps from the measurement, the
+wall node equal to the air node (``T_air = T_envelope`` — the unbiased seed for
+the unobserved envelope), emitter lags warm-started.
 """
 
 import numpy as np
@@ -41,8 +42,8 @@ def _history(dt=900.0, n=40, air=20.5, outdoor=5.0):
     ]
 
 
-def test_reconstruction_wall_initialised_near_air_not_zero():
-    """The anchor wall temperature must be physical (between outdoor and air)."""
+def test_reconstruction_wall_initialised_at_air_not_zero():
+    """The anchor wall temperature must equal the air temperature (Tair=Tenv)."""
     dt = 900.0
     model, heater, _ = _system(dt)
     air, outdoor = 20.5, 5.0
@@ -56,14 +57,13 @@ def test_reconstruction_wall_initialised_near_air_not_zero():
     assert anchor["predicted"] == air            # air seeded from measurement
     wall = anchor["predicted_wall"]
     assert wall is not None
-    # Wall warm start is the (T_a, T_out) steady state — strictly between the
-    # two and far from the old 0 °C cold start.
-    assert outdoor < wall <= air
-    assert wall > 10.0
+    # The unobserved envelope starts equal to the air node (unbiased seed),
+    # not at the old 0 °C cold start nor the parameter-dependent steady state.
+    assert wall == air
 
 
-def test_init_helper_seeds_wall_via_sde():
-    """The helper delegates to the SDE so the wall is the steady-state value."""
+def test_init_helper_seeds_wall_at_air():
+    """The helper delegates to the SDE; the wall starts equal to the air node."""
     dt = 900.0
     _, _, sde = _system(dt)
     n, nx = 1, int(sde.nx)
@@ -74,7 +74,7 @@ def test_init_helper_seeds_wall_via_sde():
     assert x.shape[0] == nx
     assert x[0] == 20.5                # air from measurement
     if nx >= 2 * n:
-        assert 5.0 < x[1] <= 20.5      # wall steady state, not 0
+        assert x[1] == 20.5            # wall equals air, not 0 nor steady state
 
 
 def test_init_helper_fallback_without_sde_helper():

@@ -857,20 +857,29 @@ def compute_open_loop_predictions(
         # Robust initial state: start the open-loop free-run at the *same*
         # state the data is in.  ``initial_state_from_measurement`` sets the
         # air temperatures from the measurement (so hm(x0) == y0 with the
-        # offset block zeroed), seeds the wall nodes from the (T_a, T_out)
-        # steady state, and warm-starts the emitter-lag states to the
-        # commanded fraction, avoiding a spurious cold-emitter transient at
-        # the start of every segment.  Fall back to the legacy room-only
-        # initialisation for system objects that don't provide the helper.
+        # offset block zeroed) and warm-starts the emitter-lag states to the
+        # commanded fraction, avoiding a spurious cold-emitter transient at the
+        # start of every segment.  The envelope is seeded at the air temperature
+        # (``wall_seed="air"`` → T_air = T_envelope) so the displayed free-run
+        # starts unbiased rather than jumping the wall to a parameter-dependent
+        # steady state.  Fall back to the legacy room-only initialisation for
+        # system objects that don't provide the helper.
         d_prev = _make_d(seg[0])
         init_fn = getattr(system, "initial_state_from_measurement", None)
         if callable(init_fn):
             y0_arr = np.asarray(y0[:n], dtype=float)
             try:
-                x = np.asarray(init_fn(y0_arr, u_prev, d_prev), dtype=float)
+                x = np.asarray(init_fn(y0_arr, u_prev, d_prev, wall_seed="air"), dtype=float)
             except TypeError:
-                # Older system objects accept (y, u) only.
-                x = np.asarray(init_fn(y0_arr, u_prev), dtype=float)
+                try:
+                    x = np.asarray(init_fn(y0_arr, u_prev, d_prev), dtype=float)
+                except TypeError:
+                    # Older system objects accept (y, u) only.
+                    x = np.asarray(init_fn(y0_arr, u_prev), dtype=float)
+            # Guarantee the envelope starts at the air node regardless of
+            # whether the helper honoured the wall_seed kwarg.
+            if x.shape[0] >= 2 * n:
+                x[n:2 * n] = y0_arr[:n]
         else:
             x = np.zeros(nx, dtype=float)
             x[:n] = np.array(y0[:n], dtype=float)

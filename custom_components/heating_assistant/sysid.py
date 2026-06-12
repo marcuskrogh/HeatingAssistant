@@ -459,31 +459,48 @@ def _init_state_from_measurement(
 
     Delegates to the SDE's ``initial_state_from_measurement`` (the single
     source of truth shared with the open-loop diagnostic and the estimator):
-    air temperatures from the measurement, wall nodes at the (T_a, T_out)
-    steady state, and emitter-lag states warm-started to the commanded
-    fraction.  Without this the reconstruction cold-started every latent state
-    at 0 — the wall node began at 0 °C and only recovered after a long EKF
-    transient, badly distorting the start of the reconstruction.  Falls back to
-    the air-temperature-only initialisation for monkeypatched/legacy SDE
-    objects that do not provide the helper (the wall then starts at the air
-    temperature rather than zero).
+    air temperatures from the measurement, the wall node equal to the air node
+    (``T_air = T_envelope`` — the unbiased seed for the unobserved envelope),
+    and emitter-lag states warm-started to the commanded fraction.  Without this
+    the reconstruction cold-started every latent state at 0 — the wall node
+    began at 0 °C and only recovered after a long EKF transient, badly
+    distorting the start of the reconstruction.  Falls back to the
+    air-temperature-only initialisation for monkeypatched/legacy SDE objects
+    that do not provide the helper (the wall then starts at the air temperature
+    rather than zero).
     """
     air = np.array(
         [float(y_vals[i]) if i < len(y_vals) else 0.0 for i in range(n)],
         dtype=float,
     )
     init_fn = getattr(sde, "initial_state_from_measurement", None)
+    x: Optional[np.ndarray] = None
     if callable(init_fn):
+        # Request the diagnostics wall seed (envelope = air node) so the
+        # reconstruction starts at T_air = T_envelope.  Older / monkeypatched
+        # SDEs without the ``wall_seed`` kwarg fall back to the plain call and
+        # the explicit air overwrite below.
         try:
-            return np.asarray(init_fn(air, u_vec, d_vec), dtype=float)
+            x = np.asarray(init_fn(air, u_vec, d_vec, wall_seed="air"), dtype=float)
         except TypeError:
             try:
-                return np.asarray(init_fn(air, u_vec), dtype=float)
+                x = np.asarray(init_fn(air, u_vec, d_vec), dtype=float)
+            except TypeError:
+                try:
+                    x = np.asarray(init_fn(air, u_vec), dtype=float)
+                except Exception:
+                    x = None
             except Exception:
-                pass
+                x = None
         except Exception:
-            pass
-    # Fallback: air temperatures measured, wall block warm-started to the air
+            x = None
+    if x is not None:
+        # Guarantee the displayed envelope starts at the air temperature,
+        # regardless of whether the SDE honoured the wall_seed kwarg.
+        if x.shape[0] >= 2 * n:
+            x[n:2 * n] = air[:n]
+        return x
+    # Fallback (no helper): air temperatures measured, wall block at the air
     # temperature (never 0), remaining latent states left at 0.
     x = np.zeros(n_x, dtype=float)
     x[:n] = air
