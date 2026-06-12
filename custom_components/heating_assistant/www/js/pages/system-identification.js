@@ -1046,32 +1046,19 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   // Run Auto-Identification: dry-run ML estimation, then populate model
   // parameter fields with the identified C and R from the sysid sensor.
-  btnAutoIdentify.addEventListener('click', async () => {
-    setStatus(actionStatusEl, 'Running identification…', 'running');
-    btnAutoIdentify.disabled = true;
+  // Shared auto-identification routine: runs a dry-run ML estimation over the
+  // data described by ``idData`` (a window, horizon, single dataset_id or a
+  // list of dataset_ids), then populates the parameter fields from the result
+  // for review. Reused by the top "Run Auto-Identification" button (window /
+  // loaded dataset) and the datasets section's "Run on Selected" button
+  // (multiple datasets). Returns true on success.
+  async function runAutoIdentification(idData, statusEl) {
+    setStatus(statusEl, 'Running identification…', 'running');
     try {
       const lp = buildLockedParams();
-      const windowData = {};
-      if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
-        const startTs = new Date(windowStartInput.value).getTime() / 1000;
-        const endTs   = new Date(windowEndInput.value).getTime() / 1000;
-        if (isFinite(startTs) && isFinite(endTs) && startTs < endTs) {
-          windowData.window_start = startTs;
-          windowData.window_end   = endTs;
-        }
-      } else {
-        windowData.horizon_hours = parseFloat(horizonInput.value);
-      }
-      // A selected stored dataset overrides the window for identification.
-      if (selectedDatasetId) {
-        delete windowData.window_start;
-        delete windowData.window_end;
-        delete windowData.horizon_hours;
-        windowData.dataset_id = selectedDatasetId;
-      }
       await hass.callService('heating_assistant', 'estimate_parameters_ml', {
         apply_parameters: false,
-        ...windowData,
+        ...idData,
         ...(lp ? { locked_params: lp } : {}),
       });
       // The coordinator updates sysid_results and fires async_update_listeners()
@@ -1081,10 +1068,31 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       populateModelFromSysid(roomSlug, latestState);
       // Loaded values are pending review; protect them from state-sync resets.
       userEditing = true;
-      setStatus(actionStatusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
+      setStatus(statusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
+      return true;
     } catch (err) {
-      setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
+      setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
+      return false;
     }
+  }
+
+  btnAutoIdentify.addEventListener('click', async () => {
+    btnAutoIdentify.disabled = true;
+    const idData = {};
+    // A loaded stored dataset overrides the window for identification.
+    if (selectedDatasetId) {
+      idData.dataset_id = selectedDatasetId;
+    } else if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
+      const startTs = new Date(windowStartInput.value).getTime() / 1000;
+      const endTs   = new Date(windowEndInput.value).getTime() / 1000;
+      if (isFinite(startTs) && isFinite(endTs) && startTs < endTs) {
+        idData.window_start = startTs;
+        idData.window_end   = endTs;
+      }
+    } else {
+      idData.horizon_hours = parseFloat(horizonInput.value);
+    }
+    await runAutoIdentification(idData, actionStatusEl);
     btnAutoIdentify.disabled = false;
   });
 
@@ -1195,6 +1203,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     setSelectedDataset, clearSelectedDataset,
     onDatasetSelectionRenderer: (fn) => { renderDatasetSelection = fn; },
     getSelectedDatasetId: () => selectedDatasetId,
+    runAutoIdentification,
   });
 
   // -----------------------------------------------------------------------
@@ -1385,27 +1394,37 @@ function setupDatasetsAndExperiments(ctx) {
   dsCard.innerHTML = `
     <div class="tuning-section__title">Stored Datasets</div>
     <p class="tuning-section__desc">
-      Save the current identification window as a named, permanent dataset, or
-      reuse any stored dataset (including experiment captures) for identification.
-      Selecting a dataset routes the EKF reconstruction, open-loop simulation and
-      auto-identification above through its snapshotted data.
+      Save the current identification window as a named, permanent dataset, then
+      use any number of stored datasets for identification. Tick the datasets you
+      want and run a joint automatic identification across all of them, or load a
+      single dataset into the custom window to inspect, validate or identify it on
+      its own.
     </p>
-    <div class="tuning-params-grid">
-      <div class="form-group">
-        <label class="form-label" for="ds-name">Dataset name</label>
+
+    <div class="ds-save-row">
+      <div class="form-group ds-save-row__name">
+        <label class="form-label" for="ds-name">New dataset name</label>
         <input class="form-input" type="text" id="ds-name" placeholder="e.g. Cold snap — ${room.name}">
       </div>
-      <div class="form-group">
+      <div class="form-group ds-save-row__notes">
         <label class="form-label" for="ds-notes">Notes (optional)</label>
         <input class="form-input" type="text" id="ds-notes" placeholder="description">
       </div>
+      <div class="ds-save-row__action">
+        <button class="btn btn--primary" id="btn-save-dataset">Save Current Window</button>
+        <span class="tuning-actions__status" id="ds-status"></span>
+      </div>
     </div>
-    <div class="tuning-actions">
-      <button class="btn btn--primary" id="btn-save-dataset">Save Current Window</button>
-      <span class="tuning-actions__status" id="ds-status"></span>
+
+    <div class="ds-toolbar">
+      <button class="btn btn--accent" id="btn-identify-selected" disabled>
+        Run Automatic Identification (0)
+      </button>
+      <button class="btn btn--ghost btn--sm" id="btn-clear-selection" disabled>Clear selection</button>
+      <span class="tuning-actions__status" id="ds-id-status"></span>
     </div>
-    <div id="ds-selected-note" class="tuning-section__desc" style="margin-top:8px"></div>
-    <div id="ds-list" style="margin-top:8px"></div>
+    <div id="ds-selected-note" class="ds-loaded-note"></div>
+    <div id="ds-list" class="ds-list"></div>
   `;
   container.appendChild(dsCard);
 
@@ -1417,6 +1436,12 @@ function setupDatasetsAndExperiments(ctx) {
   const dsNameInput = dsCard.querySelector('#ds-name');
   const dsNotesInput = dsCard.querySelector('#ds-notes');
   const dsSelectedNote = dsCard.querySelector('#ds-selected-note');
+  const dsIdStatus = dsCard.querySelector('#ds-id-status');
+  const btnIdentifySelected = dsCard.querySelector('#btn-identify-selected');
+  const btnClearSelection = dsCard.querySelector('#btn-clear-selection');
+
+  // Multi-select set of dataset ids chosen for joint identification.
+  const selectedIds = new Set();
 
   function setStatus(el, text, type = '') {
     el.textContent = text;
@@ -1424,18 +1449,62 @@ function setupDatasetsAndExperiments(ctx) {
     if (type) el.classList.add(`tuning-actions__status--${type}`);
   }
 
-  // Renderer for the "using dataset …" note (wired back to the page closure).
+  // Renderer for the "loaded dataset" note (wired back to the page closure).
+  // A loaded dataset drives the top auto-identification / EKF / open-loop tools
+  // through its snapshotted data; the note offers a way back to the live window.
   onDatasetSelectionRenderer((label) => {
+    dsSelectedNote.innerHTML = '';
     if (label) {
-      dsSelectedNote.innerHTML = `Identifying from dataset: <strong>${label}</strong> `;
+      const text = document.createElement('span');
+      text.innerHTML = `Loaded for the tools above: <strong>${label}</strong> `;
+      dsSelectedNote.appendChild(text);
       const clearBtn = document.createElement('button');
       clearBtn.className = 'btn btn--ghost btn--sm';
       clearBtn.textContent = 'Use live window instead';
       clearBtn.addEventListener('click', () => clearSelectedDataset());
       dsSelectedNote.appendChild(clearBtn);
-    } else {
-      dsSelectedNote.textContent = '';
     }
+    // Re-mark the loaded row whenever the loaded dataset changes.
+    markLoadedRow();
+  });
+
+  // ---- Multi-select identification ---------------------------------------
+  function updateSelectionToolbar() {
+    const n = selectedIds.size;
+    btnIdentifySelected.textContent = `Run Automatic Identification (${n})`;
+    btnIdentifySelected.disabled = n === 0;
+    btnClearSelection.disabled = n === 0;
+  }
+
+  function markLoadedRow() {
+    const loadedId = ctx.getSelectedDatasetId ? ctx.getSelectedDatasetId() : null;
+    dsListEl.querySelectorAll('.ds-row').forEach((row) => {
+      row.classList.toggle('ds-row--loaded', row.dataset.id === loadedId);
+    });
+  }
+
+  btnClearSelection.addEventListener('click', () => {
+    selectedIds.clear();
+    dsListEl.querySelectorAll('.ds-row').forEach((row) => {
+      row.classList.remove('ds-row--selected');
+      const b = row.querySelector('[data-sel]');
+      if (b) {
+        b.classList.remove('btn--accent');
+        b.classList.add('btn--ghost');
+        const lbl = b.querySelector('.ds-sel-label');
+        if (lbl) lbl.textContent = 'Use';
+      }
+    });
+    updateSelectionToolbar();
+  });
+
+  btnIdentifySelected.addEventListener('click', async () => {
+    if (selectedIds.size === 0) return;
+    btnIdentifySelected.disabled = true;
+    await ctx.runAutoIdentification(
+      { dataset_ids: [...selectedIds] }, dsIdStatus,
+    );
+    updateSelectionToolbar();
   });
 
   // ---- Experiment scheduling --------------------------------------------
@@ -1494,7 +1563,7 @@ function setupDatasetsAndExperiments(ctx) {
         ? `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Cancel</button>`
         : `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Remove</button>`;
       const dsLink = e.dataset_id
-        ? `<button class="btn btn--ghost btn--sm" data-use-ds="${e.dataset_id}">Use data</button>`
+        ? `<button class="btn btn--ghost btn--sm" data-load-ds="${e.dataset_id}">Load data</button>`
         : '';
       return `
         <tr>
@@ -1523,8 +1592,8 @@ function setupDatasetsAndExperiments(ctx) {
         } catch (_) { btn.disabled = false; }
       });
     });
-    expListEl.querySelectorAll('[data-use-ds]').forEach((btn) => {
-      btn.addEventListener('click', () => useDataset(btn.dataset.useDs));
+    expListEl.querySelectorAll('[data-load-ds]').forEach((btn) => {
+      btn.addEventListener('click', () => loadDataset(btn.dataset.loadDs));
     });
   }
 
@@ -1572,11 +1641,12 @@ function setupDatasetsAndExperiments(ctx) {
     }
   });
 
-  function useDataset(datasetId, datasets) {
+  // Load a single dataset into the custom window and mark it as the active
+  // source for the top auto-identification / EKF / open-loop tools, so the user
+  // can validate or manually identify it on its own.
+  function loadDataset(datasetId, datasets) {
     const ds = (datasets || lastDatasets).find((d) => d.id === datasetId);
     if (!ds) return;
-    // Reflect the dataset's window in the custom-range inputs so the user can
-    // see what is selected, then mark it as the active identification source.
     if (ds.data_start_ts != null) {
       windowStartInput.value = toDatetimeLocal(new Date(ds.data_start_ts * 1000));
     }
@@ -1587,6 +1657,22 @@ function setupDatasetsAndExperiments(ctx) {
     setSelectedDataset(ds.id, ds.name);
   }
 
+  // Toggle a dataset's membership in the multi-select identification set.
+  function toggleSelected(datasetId, rowEl, btnEl) {
+    if (selectedIds.has(datasetId)) {
+      selectedIds.delete(datasetId);
+    } else {
+      selectedIds.add(datasetId);
+    }
+    const on = selectedIds.has(datasetId);
+    rowEl.classList.toggle('ds-row--selected', on);
+    btnEl.classList.toggle('btn--accent', on);
+    btnEl.classList.toggle('btn--ghost', !on);
+    const lbl = btnEl.querySelector('.ds-sel-label');
+    if (lbl) lbl.textContent = on ? 'Selected' : 'Use';
+    updateSelectionToolbar();
+  }
+
   let lastDatasets = [];
   async function refreshDatasets() {
     let datasets = [];
@@ -1594,36 +1680,59 @@ function setupDatasetsAndExperiments(ctx) {
       datasets = await connection.listDatasets();
     } catch (_) { datasets = []; }
     lastDatasets = datasets;
+
+    // Drop selections for datasets that no longer exist.
+    const liveIds = new Set(datasets.map((d) => d.id));
+    [...selectedIds].forEach((id) => { if (!liveIds.has(id)) selectedIds.delete(id); });
+
     if (datasets.length === 0) {
-      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet.</span>';
+      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet. Save the current window or schedule an experiment to create one.</span>';
+      updateSelectionToolbar();
       return;
     }
-    const rows = datasets.map((d) => {
-      const roomLabel = d.room_name || (d.room_slug || '—');
-      const span = `${_fmtTs(d.data_start_ts)} → ${_fmtTs(d.data_end_ts)}`;
+
+    const loadedId = ctx.getSelectedDatasetId ? ctx.getSelectedDatasetId() : null;
+    dsListEl.innerHTML = datasets.map((d) => {
+      const sel = selectedIds.has(d.id);
+      const isLoaded = d.id === loadedId;
+      const roomLabel = d.room_name || d.room_slug || '—';
+      const source = (d.source || '').toLowerCase() === 'experiment' ? 'Experiment' : 'Manual';
+      const span = (d.data_start_ts != null)
+        ? `${_fmtTs(d.data_start_ts)} → ${_fmtTs(d.data_end_ts)}`
+        : '—';
+      const dur = _fmtDuration(d.duration_s != null ? d.duration_s : (d.data_end_ts - d.data_start_ts));
+      const recs = d.record_count != null ? `${d.record_count} pts` : '— pts';
+      const notes = d.notes ? `<div class="ds-row__notes">${d.notes}</div>` : '';
       return `
-        <tr>
-          <td>${d.name || '(unnamed)'}</td>
-          <td>${(d.source || '').toUpperCase()}</td>
-          <td>${roomLabel}</td>
-          <td>${span}</td>
-          <td>${d.record_count != null ? d.record_count : '—'}</td>
-          <td>${_fmtDuration(d.duration_s != null ? d.duration_s : (d.data_end_ts - d.data_start_ts))}</td>
-          <td>
-            <button class="btn btn--ghost btn--sm" data-use="${d.id}">Use</button>
-            <button class="btn btn--ghost btn--sm" data-del="${d.id}">Delete</button>
-          </td>
-        </tr>`;
+        <div class="ds-row ${sel ? 'ds-row--selected' : ''} ${isLoaded ? 'ds-row--loaded' : ''}" data-id="${d.id}">
+          <div class="ds-row__main">
+            <div class="ds-row__name">
+              <span class="ds-row__title">${d.name || '(unnamed)'}</span>
+              <span class="ds-row__tag ds-row__tag--${source.toLowerCase()}">${source}</span>
+            </div>
+            <div class="ds-row__meta">
+              <span>${roomLabel}</span><span>${span}</span><span>${dur}</span><span>${recs}</span>
+            </div>
+            ${notes}
+          </div>
+          <div class="ds-row__actions">
+            <button class="btn btn--sm ${sel ? 'btn--accent' : 'btn--ghost'}" data-sel="${d.id}">
+              <span class="ds-sel-label">${sel ? 'Selected' : 'Use'}</span>
+            </button>
+            <button class="btn btn--ghost btn--sm" data-load="${d.id}">Load</button>
+            <button class="btn btn--ghost btn--sm ds-row__del" data-del="${d.id}">Delete</button>
+          </div>
+        </div>`;
     }).join('');
-    dsListEl.innerHTML = `
-      <div class="param-history-table-wrapper">
-        <table class="param-history-table">
-          <thead><tr><th>Name</th><th>Source</th><th>Room</th><th>Span</th><th>Records</th><th>Duration</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-    dsListEl.querySelectorAll('[data-use]').forEach((btn) => {
-      btn.addEventListener('click', () => useDataset(btn.dataset.use, datasets));
+
+    dsListEl.querySelectorAll('[data-sel]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.ds-row');
+        toggleSelected(btn.dataset.sel, row, btn);
+      });
+    });
+    dsListEl.querySelectorAll('[data-load]').forEach((btn) => {
+      btn.addEventListener('click', () => loadDataset(btn.dataset.load, datasets));
     });
     dsListEl.querySelectorAll('[data-del]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -1633,10 +1742,13 @@ function setupDatasetsAndExperiments(ctx) {
           await hass.callService('heating_assistant', 'delete_dataset', {
             dataset_id: btn.dataset.del,
           });
+          selectedIds.delete(btn.dataset.del);
           await refreshDatasets();
         } catch (_) { btn.disabled = false; }
       });
     });
+
+    updateSelectionToolbar();
   }
 
   // Initial population, plus a light periodic refresh so experiment status and
