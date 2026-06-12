@@ -1710,7 +1710,7 @@ function setupDatasetsAndExperiments(ctx) {
 
   let lastDatasets = [];
   async function refreshDatasets() {
-    const datasets = await connection.listDatasets();
+    const datasets = await connection.listDatasets(roomSlug);
     // ``null`` means the fetch failed (transient WebSocket error). Keep the
     // currently-rendered list and selection rather than wiping them to an
     // empty "no datasets" state that only a page refresh would recover from.

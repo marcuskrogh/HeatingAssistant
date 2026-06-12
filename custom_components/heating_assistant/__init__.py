@@ -562,17 +562,24 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_forecasts)
 
     @websocket_api.websocket_command(
-        {vol.Required("type"): "heating_assistant/list_datasets"}
+        {
+            vol.Required("type"): "heating_assistant/list_datasets",
+            vol.Optional("room_slug"): str,
+        }
     )
     @websocket_api.async_response
     async def ws_list_datasets(
         hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
     ) -> None:
-        """Return metadata for all stored identification datasets (no records)."""
+        """Return metadata for stored identification datasets (no records).
+
+        When *room_slug* is present only datasets for that room are returned.
+        """
         try:
             coordinator = _get_coordinator(hass)
             store = getattr(coordinator, "dataset_store", None)
-            datasets = store.list_meta() if store is not None else []
+            room_slug = msg.get("room_slug")
+            datasets = store.list_meta(room_slug=room_slug) if store is not None else []
             connection.send_result(msg["id"], {"datasets": datasets})
         except Exception as err:
             _LOGGER.error("Heating Assistant: list_datasets WS failed: %s", err)
