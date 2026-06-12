@@ -1138,22 +1138,22 @@
 }
 
 /* Custom date-range panel — outer flex column keeps everything stacked and
-   bounded; inner grid places Start/End side-by-side when there is room.
+   bounded; inner grid places Start/End side-by-side on wide screens and
+   collapses to a single column on mobile (portrait and landscape).
 
-   The inner grid must respond to the *container* width, not the viewport.
-   A fixed `1fr 1fr` (plus a viewport media query) overflowed whenever the
-   card itself was narrowed — e.g. with the Home Assistant sidebar open the
-   card can be < 400px wide while the viewport stays > 480px, so the media
-   query never fired and each column collapsed to ~190px.  A datetime-local
-   input needs ~220px to show its full date/time value plus the picker icon,
-   so the widget pushed past its column and out through the card boundary.
+   `min(220px,100%)` inside minmax() was previously used to make the grid
+   self-collapse based on container width, but percentage minimums inside
+   minmax() are treated as `auto` (intrinsic minimum) during the first pass
+   of the grid track-sizing algorithm in several mobile browsers (iOS Safari,
+   Chrome for Android).  This caused the guard to silently resolve to the
+   widget's native minimum width (~220 px) on every pass, so two 220 px
+   columns would appear even in a 300 px card, overflowing the boundary.
 
-   `repeat(auto-fit, minmax(min(220px, 100%), 1fr))` fixes this at the source:
-   each column is at least 220px (wide enough for the datetime widget) and the
-   grid automatically drops to a single column when two 220px tracks no longer
-   fit the available width — based on the real container width, independent of
-   the viewport.  The `min(220px, 100%)` guard caps the track at 100% so it can
-   never exceed the card even on extremely narrow containers. */
+   The reliable fix is a plain `1fr 1fr` grid (no minimum that can trigger the
+   browser's intrinsic-size path) combined with an explicit media query at 768 px
+   so that both portrait *and* landscape phones (up to ~844 px wide) always get
+   a single full-width column.  `overflow: hidden` on the grid is a final safety
+   net that clips any remaining native-control bleed on iOS Safari. */
 .window-datetime-panel {
   display: flex;
   flex-direction: column;
@@ -1162,17 +1162,22 @@
 
 .window-datetime-inputs {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
   align-items: start;
   min-width: 0;
+  overflow: hidden;
 }
 
-/* datetime-local inputs: ensure they never exceed their container regardless
-   of browser-imposed intrinsic sizing for the date/time picker widget. */
+/* datetime-local inputs: block display lets iOS Safari resolve width:100%
+   against the grid track rather than the input's intrinsic content size.
+   Without it the browser may ignore the track boundary and render the
+   native picker widget at its own preferred width, overflowing the card. */
 .form-input--datetime {
   font-family: var(--font-sans);
   color-scheme: dark;
+  display: block;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
 }
@@ -2922,13 +2927,25 @@
    Mobile: keep date/time pickers and dense grids inside their cards.
    --------------------------------------------------------------------------- */
 /* Native date/time controls have a wide intrinsic size; force them to honour
-   their container on every browser (notably iOS Safari). */
+   their container on every browser (notably iOS Safari).  `display: block`
+   switches inputs from their default `inline-block` so that `width: 100%`
+   resolves against the block containing block (the grid track) rather than
+   the inline formatting context, which is the root cause of iOS overflow. */
 input[type="datetime-local"],
 input[type="date"],
 input[type="time"] {
+  display: block;
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+
+/* Collapse datetime grids to single column on all phones — portrait (≤430 px)
+   and landscape (up to ~844 px on iPhone 14 Pro Max). */
+@media (max-width: 768px) {
+  .window-datetime-inputs {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 600px) {
