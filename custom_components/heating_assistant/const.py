@@ -566,3 +566,44 @@ CONF_PERSISTED_SCHEDULES = "persisted_schedules"
 #: symmetric comfort-band half-width set from the dashboard climate cards) so
 #: they survive a full Home Assistant restart, mirroring CONF_PERSISTED_SETPOINTS.
 CONF_PERSISTED_COMFORT_OFFSETS = "persisted_comfort_offsets"
+
+# ---------------------------------------------------------------------------
+# System-identification experiments and stored datasets
+# ---------------------------------------------------------------------------
+#: Service names for the experiment / dataset features.
+SERVICE_SCHEDULE_EXPERIMENT = "schedule_experiment"
+SERVICE_CANCEL_EXPERIMENT = "cancel_experiment"
+SERVICE_CREATE_DATASET = "create_dataset"
+SERVICE_DELETE_DATASET = "delete_dataset"
+
+#: Excitation signal types a scheduled experiment can apply to a room's heaters
+#: to gather informative system-identification data.
+EXCITATION_PRBS = "prbs"          # pseudo-random binary sequence (best for SI)
+EXCITATION_STEP = "step"          # single on-step held for the whole window
+EXCITATION_PULSE = "pulse"        # square wave alternating high/low at a fixed period
+EXCITATION_TYPES = (EXCITATION_PRBS, EXCITATION_STEP, EXCITATION_PULSE)
+
+#: Default excitation parameters.
+DEFAULT_EXCITATION_TYPE = EXCITATION_PRBS
+#: High / low heater power fractions (0–1) used by the excitation signal.
+DEFAULT_EXCITATION_HIGH = 1.0
+DEFAULT_EXCITATION_LOW = 0.0
+#: Switching period [s] for PRBS / pulse signals.  One hour gives a good spread
+#: of excitation energy across the thermal time constants of a typical room.
+DEFAULT_EXCITATION_PERIOD_S = 3600.0
+#: Safety bounds enforced while an experiment runs, regardless of the signal:
+#: heating is forced on below ``min`` (frost protection) and off above ``max``.
+DEFAULT_EXPERIMENT_MIN_TEMP = 12.0
+DEFAULT_EXPERIMENT_MAX_TEMP = 26.0
+#: Maximum scheduled-experiment duration [s] accepted by the service (7 days).
+MAX_EXPERIMENT_DURATION_S = 7 * 24 * 3600.0
+
+#: Maximum number of stored datasets kept (oldest manual ones are pruned first).
+MAX_STORED_DATASETS = 50
+#: Maximum number of history records snapshotted into a single dataset.  Long
+#: windows are trimmed to the most recent records to keep the store bounded.
+MAX_DATASET_RECORDS = 20000
+
+#: Origin labels for stored datasets.
+DATASET_SOURCE_MANUAL = "manual"
+DATASET_SOURCE_EXPERIMENT = "experiment"

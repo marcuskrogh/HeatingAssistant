@@ -42,6 +42,43 @@ export class HaConnection {
     }
   }
 
+  async listDatasets() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/list_datasets',
+      });
+      return (result && Array.isArray(result.datasets)) ? result.datasets : [];
+    } catch (e) {
+      console.warn('Failed to fetch datasets via WebSocket:', e);
+      return [];
+    }
+  }
+
+  async getDataset(datasetId) {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/get_dataset',
+        dataset_id: datasetId,
+      });
+      return (result && result.dataset) ? result.dataset : null;
+    } catch (e) {
+      console.warn('Failed to fetch dataset via WebSocket:', e);
+      return null;
+    }
+  }
+
+  async listExperiments() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/list_experiments',
+      });
+      return (result && Array.isArray(result.experiments)) ? result.experiments : [];
+    } catch (e) {
+      console.warn('Failed to fetch experiments via WebSocket:', e);
+      return [];
+    }
+  }
+
   async getForecasts() {
     try {
       const result = await this._hass.callWS({
