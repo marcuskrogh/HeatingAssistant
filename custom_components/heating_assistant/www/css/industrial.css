@@ -1152,8 +1152,8 @@
    The reliable fix is a plain `1fr 1fr` grid (no minimum that can trigger the
    browser's intrinsic-size path) combined with an explicit media query at 768 px
    so that both portrait *and* landscape phones (up to ~844 px wide) always get
-   a single full-width column.  `overflow: hidden` on the grid is a final safety
-   net that clips any remaining native-control bleed on iOS Safari. */
+   a single full-width column.  `display: block` on the inputs (below) ensures
+   width:100% resolves against the grid track rather than the native picker size. */
 .window-datetime-panel {
   display: flex;
   flex-direction: column;
@@ -1166,7 +1166,9 @@
   gap: 16px;
   align-items: start;
   min-width: 0;
-  overflow: hidden;
+  /* NOTE: do NOT add overflow:hidden here — it clips the inputs' border-radius
+     at the track boundary, cutting the right rounded corner in portrait and
+     making the 16 px column gap invisible in landscape. */
 }
 
 /* datetime-local inputs: block display lets iOS Safari resolve width:100%
