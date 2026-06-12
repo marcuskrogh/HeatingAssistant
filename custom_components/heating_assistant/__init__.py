@@ -1329,6 +1329,34 @@ def _records_for_dataset(
     return records if records else None
 
 
+def _records_for_datasets(
+    coordinator: HeatingAssistantCoordinator,
+    dataset_ids: Optional[List[str]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Return the concatenated records of several stored datasets, or ``None``.
+
+    Each dataset's snapshotted records are gathered and merged into a single,
+    timestamp-sorted history list.  The estimator splits the merged history into
+    contiguous segments wherever the inter-record gap is large, so combining
+    disjoint datasets (e.g. several overnight experiments) just yields several
+    independent identification segments — exactly what we want for a joint fit.
+    """
+    if not dataset_ids:
+        return None
+    store = getattr(coordinator, "dataset_store", None)
+    if store is None:
+        return None
+    merged: List[Dict[str, Any]] = []
+    for ds_id in dataset_ids:
+        recs = store.get_records(ds_id)
+        if recs:
+            merged.extend(recs)
+    if not merged:
+        return None
+    merged.sort(key=lambda r: float(r.get("timestamp", 0.0)))
+    return merged
+
+
 def _persist_tuning_updates(
     hass: HomeAssistant,
     coordinator: HeatingAssistantCoordinator,
@@ -1509,11 +1537,19 @@ def _register_services(hass: HomeAssistant) -> None:
             float(call.data["window_end"]) if "window_end" in call.data else None
         )
 
-        # Fetch history from JSONL store / Recorder when an explicit window is
-        # requested.  When both are set, horizon_hours is ignored.  A stored
-        # dataset (``dataset_id``) takes precedence over both and supplies its
-        # snapshotted records directly.
-        history_override = _records_for_dataset(coordinator, call.data.get("dataset_id"))
+        # Resolve the data the estimator runs over, in priority order:
+        #   1. ``dataset_ids`` — joint identification over several stored
+        #      datasets (their records are merged into one history).
+        #   2. ``dataset_id`` — a single stored dataset's snapshot.
+        #   3. an explicit ``window_start``/``window_end`` (JSONL / Recorder).
+        # Each takes precedence over the trailing ``horizon_hours`` window.
+        history_override = _records_for_datasets(
+            coordinator, call.data.get("dataset_ids")
+        )
+        if history_override is None:
+            history_override = _records_for_dataset(
+                coordinator, call.data.get("dataset_id")
+            )
         if history_override is None and window_start_ml is not None and window_end_ml is not None:
             history_override = await _get_history_for_window(
                 hass, coordinator, window_start_ml, window_end_ml
@@ -1642,6 +1678,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 # Identify from a stored dataset's snapshotted records, taking
                 # precedence over window_start/window_end and horizon_hours.
                 vol.Optional("dataset_id"): cv.string,
+                # Joint identification over several stored datasets (their
+                # records are merged); takes precedence over dataset_id.
+                vol.Optional("dataset_ids"): [cv.string],
             }
         ),
     )

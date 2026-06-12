@@ -213,6 +213,16 @@ estimate_parameters_ml:
       required: false
       selector:
         text:
+    dataset_ids:
+      name: Stored dataset ids
+      description: >
+        Optional list of stored-dataset ids for joint identification.  Their
+        snapshotted records are merged into one history (the estimator treats
+        each as an independent segment), taking precedence over ``dataset_id``,
+        the explicit window and ``horizon_hours``.
+      required: false
+      selector:
+        object:
 
 analyze_model_fit:
   name: Analyze model fit

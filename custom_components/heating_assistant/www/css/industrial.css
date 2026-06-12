@@ -2697,3 +2697,124 @@
 .room-climate-tile .room-tile__schedules {
   margin-top: 0;
 }
+
+/* ---------------------------------------------------------------------------
+   Stored-datasets section (System Identification page)
+   --------------------------------------------------------------------------- */
+
+/* Save-current-window row: name + notes + action, aligned on one line. */
+.ds-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ds-save-row__name { flex: 1 1 220px; margin: 0; }
+.ds-save-row__notes { flex: 1 1 220px; margin: 0; }
+.ds-save-row__action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 2px;
+}
+
+/* Toolbar for the multi-select joint identification. */
+.ds-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.ds-loaded-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.ds-loaded-note:not(:empty) { margin: 4px 0 8px; }
+
+/* Dataset list as separated cards (refined replacement for the old table). */
+.ds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ds-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.ds-row--selected {
+  border-color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-dim);
+}
+.ds-row--loaded {
+  border-left-color: var(--warning);
+}
+
+.ds-row__main { min-width: 0; flex: 1 1 auto; }
+.ds-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ds-row__title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.ds-row__tag {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.ds-row__tag--experiment {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ds-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.ds-row__notes {
+  margin-top: 3px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+.ds-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.ds-row__del:hover {
+  border-color: var(--chart-temp-measured);
+  color: var(--chart-temp-measured);
+}
