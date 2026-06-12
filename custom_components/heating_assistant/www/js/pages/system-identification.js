@@ -425,19 +425,22 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // -----------------------------------------------------------------------
   // Section 4: Applied model history
   // -----------------------------------------------------------------------
+  // Collapsed by default (it can grow long) using the shared collapsible
+  // primitive — same expand/collapse design as the Experiment Scheduler.
   const historySection = document.createElement('div');
   historySection.className = 'card tuning-section';
-  historySection.innerHTML = `
-    <div class="tuning-section__title">Applied Model History</div>
-    <p class="tuning-section__desc" style="margin-bottom:12px">
+  const historyCollapsible = createCollapsible({ title: 'Applied Model History', open: false });
+  historyCollapsible.body.innerHTML = `
+    <p class="tuning-section__desc" style="margin:0 0 12px">
       Previously applied parameter sets. Load one back into the fields above to
       review and re-apply it, or delete entries you no longer need.
     </p>
     <div id="param-history-list"></div>
   `;
+  historySection.appendChild(historyCollapsible.element);
   container.appendChild(historySection);
 
-  const historyListEl = historySection.querySelector('#param-history-list');
+  const historyListEl = historyCollapsible.element.querySelector('#param-history-list');
 
   // -----------------------------------------------------------------------
   // Input references
@@ -990,12 +993,15 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     // Each entry: { rooms: { "room_slug": { thermal_mass, r_external, ... } },
     //               estimated_at, source, rmse? }
     const allHistory = config.parameter_history || [];
+    historyCollapsible.setBadge(allHistory.length ? `${allHistory.length}` : '');
     if (allHistory.length === 0) {
       historyListEl.innerHTML = '<span class="tuning-section__desc">No applied parameter sets yet.</span>';
       return;
     }
 
-    historyListEl.innerHTML = `<div class="ps-list">${allHistory.map((entry, i) => {
+    const stat = (label, value) => `<span class="store-stat"><span class="store-stat__k">${label}</span><span class="store-stat__v">${value}</span></span>`;
+
+    historyListEl.innerHTML = `<div class="store-list">${allHistory.map((entry, i) => {
       const roomData = entry.rooms?.[roomSlug] || {};
       const date = entry.estimated_at
         ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -1009,20 +1015,20 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const rmse = entry.rmse != null ? `${formatNumber(entry.rmse, 3)} °C` : '—';
       const hasRoom = roomData.thermal_mass != null;
       return `
-        <div class="ps-row" data-idx="${i}">
-          <div class="ps-row__main">
-            <div class="ps-row__name">
-              <span class="ps-row__title">#${i + 1} · ${date}</span>
-              <span class="ps-row__tag ps-row__tag--${src}">${srcLabel}</span>
+        <div class="store-row store-row--param" data-idx="${i}">
+          <div class="store-row__main">
+            <div class="store-row__name">
+              <span class="store-row__index">#${i + 1}</span>
+              <span class="store-row__title">${date}</span>
+              <span class="store-row__tag store-row__tag--${src === 'ml' ? 'accent' : (src === 'reverted' ? 'warn' : '')}">${srcLabel}</span>
             </div>
-            <div class="ps-row__meta">
-              <span>C ${mass}</span><span>R ${rExt}</span><span>Q ${gain}</span>
-              <span>Solar ${solar}</span><span>RMSE ${rmse}</span>
+            <div class="store-row__meta">
+              ${stat('C', mass)}${stat('R', rExt)}${stat('Q', gain)}${stat('Solar', solar)}${stat('RMSE', rmse)}
             </div>
           </div>
-          <div class="ps-row__actions">
+          <div class="store-row__actions">
             <button class="btn btn--sm btn--ghost" data-load="${i}" ${hasRoom ? '' : 'disabled'}>Load</button>
-            <button class="btn btn--ghost btn--sm ps-row__del" data-del="${i}">Delete</button>
+            <button class="btn btn--ghost btn--sm store-row__del" data-del="${i}">Delete</button>
           </div>
         </div>`;
     }).join('')}</div>`;
@@ -1329,7 +1335,7 @@ function setupDatasetsAndExperiments(ctx) {
   // collapsible primitive gives a consistent title-left / chevron-right look.
   const expCard = document.createElement('div');
   expCard.className = 'card tuning-section';
-  const expCollapsible = createCollapsible({ title: 'Experiment Scheduler', open: false });
+  const expCollapsible = createCollapsible({ title: 'Experiment Scheduler', open: false, badgeTone: 'success' });
   expCollapsible.body.innerHTML = `
     <p class="tuning-section__desc">
       Schedule an excitation experiment for <strong>${room.name}</strong> over a
@@ -1440,7 +1446,7 @@ function setupDatasetsAndExperiments(ctx) {
       <span class="tuning-actions__status" id="ds-id-status"></span>
     </div>
     <div id="ds-selected-note" class="ds-loaded-note"></div>
-    <div id="ds-list" class="ds-list"></div>
+    <div id="ds-list" class="store-list"></div>
   `;
   container.appendChild(dsCard);
 
@@ -1494,20 +1500,20 @@ function setupDatasetsAndExperiments(ctx) {
 
   function markLoadedRow() {
     const loadedId = ctx.getSelectedDatasetId ? ctx.getSelectedDatasetId() : null;
-    dsListEl.querySelectorAll('.ds-row').forEach((row) => {
-      row.classList.toggle('ds-row--loaded', row.dataset.id === loadedId);
+    dsListEl.querySelectorAll('.store-row').forEach((row) => {
+      row.classList.toggle('store-row--loaded', row.dataset.id === loadedId);
     });
   }
 
   btnClearSelection.addEventListener('click', () => {
     selectedIds.clear();
-    dsListEl.querySelectorAll('.ds-row').forEach((row) => {
-      row.classList.remove('ds-row--selected');
+    dsListEl.querySelectorAll('.store-row').forEach((row) => {
+      row.classList.remove('store-row--selected');
       const b = row.querySelector('[data-sel]');
       if (b) {
         b.classList.remove('btn--accent');
         b.classList.add('btn--ghost');
-        const lbl = b.querySelector('.ds-sel-label');
+        const lbl = b.querySelector('.store-sel-label');
         if (lbl) lbl.textContent = 'Use';
       }
     });
@@ -1686,10 +1692,10 @@ function setupDatasetsAndExperiments(ctx) {
       selectedIds.add(datasetId);
     }
     const on = selectedIds.has(datasetId);
-    rowEl.classList.toggle('ds-row--selected', on);
+    rowEl.classList.toggle('store-row--selected', on);
     btnEl.classList.toggle('btn--accent', on);
     btnEl.classList.toggle('btn--ghost', !on);
-    const lbl = btnEl.querySelector('.ds-sel-label');
+    const lbl = btnEl.querySelector('.store-sel-label');
     if (lbl) lbl.textContent = on ? 'Selected' : 'Use';
     updateSelectionToolbar();
   }
@@ -1714,6 +1720,7 @@ function setupDatasetsAndExperiments(ctx) {
     }
 
     const loadedId = ctx.getSelectedDatasetId ? ctx.getSelectedDatasetId() : null;
+    const stat = (label, value) => `<span class="store-stat"><span class="store-stat__k">${label}</span><span class="store-stat__v">${value}</span></span>`;
     dsListEl.innerHTML = datasets.map((d) => {
       const sel = selectedIds.has(d.id);
       const isLoaded = d.id === loadedId;
@@ -1723,33 +1730,33 @@ function setupDatasetsAndExperiments(ctx) {
         ? `${_fmtTs(d.data_start_ts)} → ${_fmtTs(d.data_end_ts)}`
         : '—';
       const dur = _fmtDuration(d.duration_s != null ? d.duration_s : (d.data_end_ts - d.data_start_ts));
-      const recs = d.record_count != null ? `${d.record_count} pts` : '— pts';
-      const notes = d.notes ? `<div class="ds-row__notes">${d.notes}</div>` : '';
+      const recs = d.record_count != null ? `${d.record_count}` : '—';
+      const notes = d.notes ? `<div class="store-row__notes">${d.notes}</div>` : '';
       return `
-        <div class="ds-row ${sel ? 'ds-row--selected' : ''} ${isLoaded ? 'ds-row--loaded' : ''}" data-id="${d.id}">
-          <div class="ds-row__main">
-            <div class="ds-row__name">
-              <span class="ds-row__title">${d.name || '(unnamed)'}</span>
-              <span class="ds-row__tag ds-row__tag--${source.toLowerCase()}">${source}</span>
+        <div class="store-row store-row--dataset ${sel ? 'store-row--selected' : ''} ${isLoaded ? 'store-row--loaded' : ''}" data-id="${d.id}">
+          <div class="store-row__main">
+            <div class="store-row__name">
+              <span class="store-row__title">${d.name || '(unnamed)'}</span>
+              <span class="store-row__tag store-row__tag--${source.toLowerCase() === 'experiment' ? 'accent' : ''}">${source}</span>
             </div>
-            <div class="ds-row__meta">
-              <span>${roomLabel}</span><span>${span}</span><span>${dur}</span><span>${recs}</span>
+            <div class="store-row__meta">
+              ${stat('Room', roomLabel)}${stat('Window', span)}${stat('Length', dur)}${stat('Points', recs)}
             </div>
             ${notes}
           </div>
-          <div class="ds-row__actions">
+          <div class="store-row__actions">
             <button class="btn btn--sm ${sel ? 'btn--accent' : 'btn--ghost'}" data-sel="${d.id}">
-              <span class="ds-sel-label">${sel ? 'Selected' : 'Use'}</span>
+              <span class="store-sel-label">${sel ? 'Selected' : 'Use'}</span>
             </button>
             <button class="btn btn--ghost btn--sm" data-load="${d.id}">Load</button>
-            <button class="btn btn--ghost btn--sm ds-row__del" data-del="${d.id}">Delete</button>
+            <button class="btn btn--ghost btn--sm store-row__del" data-del="${d.id}">Delete</button>
           </div>
         </div>`;
     }).join('');
 
     dsListEl.querySelectorAll('[data-sel]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const row = btn.closest('.ds-row');
+        const row = btn.closest('.store-row');
         toggleSelected(btn.dataset.sel, row, btn);
       });
     });
