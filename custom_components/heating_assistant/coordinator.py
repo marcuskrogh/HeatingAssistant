@@ -1882,6 +1882,41 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             history_index,
         )
 
+    def delete_parameter_history(self, history_index: int) -> None:
+        """Delete a single entry from the persisted parameter history.
+
+        The parameter history is a system-wide list of past parameter snapshots
+        (most recent first), shared by every room.  ``history_index`` is the
+        zero-based position in that list.  The active parameter set is never
+        touched — only a stored historical entry is removed — so this is purely a
+        housekeeping operation and does not rebuild the model or controller.
+        """
+        existing_snap = {}
+        try:
+            existing_snap = self.estimated_params_snapshot or {}
+        except Exception:
+            pass
+
+        history = list(existing_snap.get("history", []))
+        if history_index < 0 or history_index >= len(history):
+            raise ValueError(
+                f"history_index {history_index} out of range "
+                f"(0..{len(history) - 1})"
+            )
+
+        history.pop(history_index)
+
+        new_snap = dict(existing_snap)
+        new_snap["history"] = history
+
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: new_snap},
+            )
+        _LOGGER.info("Deleted parameter history entry at index %d", history_index)
+
     def reload_room_schedule(self, room_name: str, periods_raw: list) -> None:
         """Rebuild a single room's schedule from raw period definitions.
 

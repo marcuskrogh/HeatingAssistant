@@ -428,7 +428,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   historySection.className = 'card tuning-section';
   historySection.innerHTML = `
     <div class="tuning-section__title">Applied Model History</div>
-    <p class="tuning-section__desc" style="margin-bottom:12px">Previously applied parameter sets.</p>
+    <p class="tuning-section__desc" style="margin-bottom:12px">
+      Previously applied parameter sets. Load one back into the fields above to
+      review and re-apply it, or delete entries you no longer need.
+    </p>
     <div id="param-history-list"></div>
   `;
   container.appendChild(historySection);
@@ -964,77 +967,82 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     );
   }
 
+  // Populate the editable parameter fields from a stored history entry's room
+  // data, for review before Apply. Mirrors the dataset "Load" affordance but for
+  // parameter snapshots — it never applies anything to the live model.
+  function loadParamsFromHistory(roomData) {
+    if (roomData.thermal_mass != null) thermalMassInput.value = roomData.thermal_mass;
+    if (roomData.r_external != null) rExternalInput.value = roomData.r_external;
+    if (roomData.internal_gain != null) internalGainInput.value = roomData.internal_gain;
+    if (roomData.solar_scale != null) solarScaleInput.value = roomData.solar_scale;
+    if (roomData.c_air_fraction != null) cAirFractionInput.value = roomData.c_air_fraction;
+    if (roomData.r_aw_fraction != null) rAwFractionInput.value = roomData.r_aw_fraction;
+    // Loaded values are pending review; protect them from state-sync resets.
+    userEditing = true;
+    setStatus(actionStatusEl, 'Loaded from history — review the fields above, then click Apply Parameters.', '');
+  }
+
   function renderParamHistory(st) {
-    historyListEl.innerHTML = '';
     const config = st[CONFIG_ENTITY]?.attributes || {};
 
     // parameter_history is a LIST of full-system snapshots (most recent first).
     // Each entry: { rooms: { "room_slug": { thermal_mass, r_external, ... } },
     //               estimated_at, source, rmse? }
-    // Rooms are keyed by the configured room name (slug format, e.g. "living_room").
     const allHistory = config.parameter_history || [];
     if (allHistory.length === 0) {
-      historyListEl.innerHTML = '<span class="tuning-section__desc">No history available.</span>';
+      historyListEl.innerHTML = '<span class="tuning-section__desc">No applied parameter sets yet.</span>';
       return;
     }
 
-    const table = document.createElement('table');
-    table.className = 'param-history-table';
-    table.innerHTML = `
-      <thead>
-        <tr>
-          <th>#</th><th>Date</th>
-          <th>Thermal Mass</th><th>R External</th><th>Int. Gain</th><th>Solar</th><th>RMSE</th><th></th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    `;
-    const tbody = table.querySelector('tbody');
-    for (let i = 0; i < allHistory.length; i++) {
-      const entry = allHistory[i];
-      // Per-room params are keyed by the configured room name (slug format).
+    historyListEl.innerHTML = `<div class="ps-list">${allHistory.map((entry, i) => {
       const roomData = entry.rooms?.[roomSlug] || {};
-      const thermalMass = roomData.thermal_mass;
-      const rExternal = roomData.r_external;
-      const internalGain = roomData.internal_gain;
-      const solarScale = roomData.solar_scale;
       const date = entry.estimated_at
         ? new Date(entry.estimated_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '—';
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${i + 1}</td>
-        <td>${date}</td>
-        <td>${thermalMass != null ? formatMass(thermalMass) : '—'}</td>
-        <td>${rExternal != null ? formatNumber(rExternal, 4) : '—'}</td>
-        <td>${internalGain != null ? formatNumber(internalGain, 0) + ' W' : '—'}</td>
-        <td>${solarScale != null ? formatNumber(solarScale, 2) + '×' : '—'}</td>
-        <td>${entry.rmse != null ? formatNumber(entry.rmse, 3) + ' °C' : '—'}</td>
-        <td><button class="btn btn--ghost btn--sm" data-revert="${i}">Revert</button></td>
-      `;
-      tbody.appendChild(tr);
-    }
-    const wrapper = document.createElement('div');
-    wrapper.className = 'param-history-table-wrapper';
-    wrapper.appendChild(table);
-    historyListEl.appendChild(wrapper);
+      const src = (entry.source || 'manual').toLowerCase();
+      const srcLabel = src === 'ml' ? 'ML' : (src.charAt(0).toUpperCase() + src.slice(1));
+      const mass = roomData.thermal_mass != null ? formatMass(roomData.thermal_mass) : '—';
+      const rExt = roomData.r_external != null ? formatNumber(roomData.r_external, 4) : '—';
+      const gain = roomData.internal_gain != null ? `${formatNumber(roomData.internal_gain, 0)} W` : '—';
+      const solar = roomData.solar_scale != null ? `${formatNumber(roomData.solar_scale, 2)}×` : '—';
+      const rmse = entry.rmse != null ? `${formatNumber(entry.rmse, 3)} °C` : '—';
+      const hasRoom = roomData.thermal_mass != null;
+      return `
+        <div class="ps-row" data-idx="${i}">
+          <div class="ps-row__main">
+            <div class="ps-row__name">
+              <span class="ps-row__title">#${i + 1} · ${date}</span>
+              <span class="ps-row__tag ps-row__tag--${src}">${srcLabel}</span>
+            </div>
+            <div class="ps-row__meta">
+              <span>C ${mass}</span><span>R ${rExt}</span><span>Q ${gain}</span>
+              <span>Solar ${solar}</span><span>RMSE ${rmse}</span>
+            </div>
+          </div>
+          <div class="ps-row__actions">
+            <button class="btn btn--sm btn--ghost" data-load="${i}" ${hasRoom ? '' : 'disabled'}>Load</button>
+            <button class="btn btn--ghost btn--sm ps-row__del" data-del="${i}">Delete</button>
+          </div>
+        </div>`;
+    }).join('')}</div>`;
 
-    table.querySelectorAll('[data-revert]').forEach((btn) => {
+    historyListEl.querySelectorAll('[data-load]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const entry = allHistory[parseInt(btn.dataset.load, 10)];
+        if (entry) loadParamsFromHistory(entry.rooms?.[roomSlug] || {});
+      });
+    });
+    historyListEl.querySelectorAll('[data-del]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const idx = parseInt(btn.dataset.revert, 10);
+        if (!window.confirm('Delete this parameter history entry? This cannot be undone.')) return;
         btn.disabled = true;
-        btn.textContent = '…';
         try {
-          await hass.callService('heating_assistant', 'revert_parameters', {
-            room_name: roomSlug,
-            history_index: idx,
+          await hass.callService('heating_assistant', 'delete_parameter_history', {
+            history_index: parseInt(btn.dataset.del, 10),
           });
-          // The reverted set is now the applied one; resume state syncing so
-          // the form updates to reflect it.
-          userEditing = false;
-          btn.textContent = '✓';
+          // The config sensor updates and update() re-renders the list.
         } catch (err) {
-          btn.textContent = 'ERR';
+          btn.disabled = false;
         }
       });
     });
@@ -1319,74 +1327,101 @@ function setupDatasetsAndExperiments(ctx) {
   const defEnd = new Date(defStart.getTime() + 6 * 3600 * 1000);
 
   expCard.innerHTML = `
-    <div class="tuning-section__title">Experiment Scheduler</div>
-    <p class="tuning-section__desc">
-      Schedule an excitation experiment for <strong>${room.name}</strong> over a
-      future window (e.g. overnight). The controller drives this room's heaters
-      with an informative signal so the response is good for identification, then
-      stores the captured data as a dataset. Comfort-schedule "off" periods are
-      overridden for this room during the window; open-window safety and the
-      min/max temperature limits still apply.
-    </p>
-    <div class="tuning-params-grid">
-      <div class="form-group">
-        <label class="form-label" for="exp-name">Name</label>
-        <input class="form-input" type="text" id="exp-name" placeholder="${room.name} overnight test">
+    <button type="button" class="collapsible__header" id="exp-toggle" aria-expanded="false">
+      <span class="tuning-section__title collapsible__title">Experiment Scheduler</span>
+      <span class="collapsible__right">
+        <span class="collapsible__badge" id="exp-count" hidden></span>
+        <span class="collapsible__chevron" aria-hidden="true"></span>
+      </span>
+    </button>
+    <div class="collapsible__body" id="exp-body" hidden>
+      <p class="tuning-section__desc">
+        Schedule an excitation experiment for <strong>${room.name}</strong> over a
+        future window (e.g. overnight). The controller drives this room's heaters
+        with an informative signal so the response is good for identification, then
+        stores the captured data as a dataset. Comfort-schedule "off" periods are
+        overridden for this room during the window; open-window safety and the
+        min/max temperature limits still apply.
+      </p>
+      <div class="tuning-params-grid">
+        <div class="form-group">
+          <label class="form-label" for="exp-name">Name</label>
+          <input class="form-input" type="text" id="exp-name" placeholder="${room.name} overnight test">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="exp-signal">Excitation signal</label>
+          <select class="form-input" id="exp-signal">
+            ${EXCITATION_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
+          </select>
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-signal">Excitation signal</label>
-        <select class="form-input" id="exp-signal">
-          ${EXCITATION_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
-        </select>
+      <div class="window-datetime-inputs ds-section-gap">
+        <div class="form-group">
+          <label class="form-label" for="exp-start">Start</label>
+          <input class="form-input form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="exp-end">End</label>
+          <input class="form-input form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-start">Start</label>
-        <input class="form-input form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
+      <div class="tuning-params-grid ds-section-gap">
+        <div class="form-group">
+          <label class="form-label" for="exp-high">High power</label>
+          <input class="form-input" type="number" id="exp-high" min="0" max="1" step="0.05" value="1.0">
+          <span class="form-hint">fraction (0–1) of rated heater power</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="exp-low">Low power</label>
+          <input class="form-input" type="number" id="exp-low" min="0" max="1" step="0.05" value="0.0">
+          <span class="form-hint">fraction (0–1) of rated heater power</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="exp-period">Switching period</label>
+          <input class="form-input" type="number" id="exp-period" min="5" step="5" value="60">
+          <span class="form-hint">minutes between PRBS / pulse switches</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="exp-min">Min temp (frost floor)</label>
+          <input class="form-input" type="number" id="exp-min" step="0.5" value="12">
+          <span class="form-hint">°C — heating forced on below this</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="exp-max">Max temp (ceiling)</label>
+          <input class="form-input" type="number" id="exp-max" step="0.5" value="26">
+          <span class="form-hint">°C — heating forced off at/above this</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="exp-autosave">Auto-save dataset</label>
+          <select class="form-input" id="exp-autosave">
+            <option value="yes" selected>Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-end">End</label>
-        <input class="form-input form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
+      <div class="tuning-actions ds-actions-gap">
+        <button class="btn btn--accent" id="btn-schedule-exp">Schedule Experiment</button>
+        <span class="tuning-actions__status" id="exp-status"></span>
       </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-high">High power</label>
-        <input class="form-input" type="number" id="exp-high" min="0" max="1" step="0.05" value="1.0">
-        <span class="form-hint">fraction (0–1) of rated heater power</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-low">Low power</label>
-        <input class="form-input" type="number" id="exp-low" min="0" max="1" step="0.05" value="0.0">
-        <span class="form-hint">fraction (0–1) of rated heater power</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-period">Switching period</label>
-        <input class="form-input" type="number" id="exp-period" min="5" step="5" value="60">
-        <span class="form-hint">minutes between PRBS / pulse switches</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-min">Min temp (frost floor)</label>
-        <input class="form-input" type="number" id="exp-min" step="0.5" value="12">
-        <span class="form-hint">°C — heating forced on below this</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-max">Max temp (ceiling)</label>
-        <input class="form-input" type="number" id="exp-max" step="0.5" value="26">
-        <span class="form-hint">°C — heating forced off at/above this</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-autosave">Auto-save dataset</label>
-        <select class="form-input" id="exp-autosave">
-          <option value="yes" selected>Yes</option>
-          <option value="no">No</option>
-        </select>
-      </div>
+      <div id="exp-list" class="ds-section-gap"></div>
     </div>
-    <div class="tuning-actions">
-      <button class="btn btn--accent" id="btn-schedule-exp">Schedule Experiment</button>
-      <span class="tuning-actions__status" id="exp-status"></span>
-    </div>
-    <div id="exp-list" style="margin-top:14px"></div>
   `;
   container.appendChild(expCard);
+
+  // Collapsible behaviour: the scheduler starts collapsed to reduce clutter
+  // (especially on mobile) and expands on click / Enter / Space.
+  const expToggle = expCard.querySelector('#exp-toggle');
+  const expBody = expCard.querySelector('#exp-body');
+  expToggle.addEventListener('click', () => {
+    const open = expBody.hasAttribute('hidden');
+    if (open) {
+      expBody.removeAttribute('hidden');
+    } else {
+      expBody.setAttribute('hidden', '');
+    }
+    expToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    expCard.classList.toggle('collapsible--open', open);
+  });
 
   // ---- Stored datasets card ---------------------------------------------
   const dsCard = document.createElement('div');
@@ -1545,14 +1580,26 @@ function setupDatasetsAndExperiments(ctx) {
     }
   });
 
+  const expCountBadge = expCard.querySelector('#exp-count');
+
+  function updateExperimentBadge(mine) {
+    const active = mine.filter((e) => e.status === 'scheduled' || e.status === 'running').length;
+    if (active > 0) {
+      expCountBadge.textContent = `${active} active`;
+      expCountBadge.removeAttribute('hidden');
+    } else {
+      expCountBadge.setAttribute('hidden', '');
+    }
+  }
+
   async function refreshExperiments() {
-    let experiments = [];
-    try {
-      experiments = await connection.listExperiments();
-    } catch (_) { experiments = []; }
+    const experiments = await connection.listExperiments();
+    // ``null`` means the fetch failed — keep whatever is already rendered.
+    if (experiments == null) return;
     const mine = experiments
       .filter((e) => e.room_slug === roomSlug)
       .sort((a, b) => (b.start_ts || 0) - (a.start_ts || 0));
+    updateExperimentBadge(mine);
     if (mine.length === 0) {
       expListEl.innerHTML = '<span class="tuning-section__desc">No experiments scheduled for this room.</span>';
       return;
@@ -1675,10 +1722,11 @@ function setupDatasetsAndExperiments(ctx) {
 
   let lastDatasets = [];
   async function refreshDatasets() {
-    let datasets = [];
-    try {
-      datasets = await connection.listDatasets();
-    } catch (_) { datasets = []; }
+    const datasets = await connection.listDatasets();
+    // ``null`` means the fetch failed (transient WebSocket error). Keep the
+    // currently-rendered list and selection rather than wiping them to an
+    // empty "no datasets" state that only a page refresh would recover from.
+    if (datasets == null) return;
     lastDatasets = datasets;
 
     // Drop selections for datasets that no longer exist.

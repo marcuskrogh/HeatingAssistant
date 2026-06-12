@@ -42,15 +42,19 @@ export class HaConnection {
     }
   }
 
+  // Returns the dataset list, or ``null`` when the fetch fails. Callers must
+  // distinguish ``null`` (transient error — keep the previous list) from ``[]``
+  // (a successful response with no datasets) so a momentary WebSocket failure
+  // never wipes a populated list.
   async listDatasets() {
     try {
       const result = await this._hass.callWS({
         type: 'heating_assistant/list_datasets',
       });
-      return (result && Array.isArray(result.datasets)) ? result.datasets : [];
+      return (result && Array.isArray(result.datasets)) ? result.datasets : null;
     } catch (e) {
       console.warn('Failed to fetch datasets via WebSocket:', e);
-      return [];
+      return null;
     }
   }
 
@@ -67,15 +71,17 @@ export class HaConnection {
     }
   }
 
+  // Returns the experiment list, or ``null`` when the fetch fails (so callers
+  // can keep the previously-rendered list instead of clearing it).
   async listExperiments() {
     try {
       const result = await this._hass.callWS({
         type: 'heating_assistant/list_experiments',
       });
-      return (result && Array.isArray(result.experiments)) ? result.experiments : [];
+      return (result && Array.isArray(result.experiments)) ? result.experiments : null;
     } catch (e) {
       console.warn('Failed to fetch experiments via WebSocket:', e);
-      return [];
+      return null;
     }
   }
 
