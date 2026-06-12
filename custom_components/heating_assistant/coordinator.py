@@ -183,6 +183,12 @@ from .schedule import (
     resolve_effective_setpoint,
 )
 from . import weather as _weather
+from .experiments import (
+    ExperimentManager,
+    apply_safety_bounds,
+    excitation_fraction,
+)
+from .datasets import build_dataset
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -937,6 +943,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Integration-managed identification history store (set by async_setup_entry
         # after the coordinator is created; None until then).
         self.id_history_store: Optional[Any] = None
+
+        # System-identification experiments and stored datasets.
+        # ``experiment_manager`` holds the live experiment state machine and is
+        # populated from ``experiment_store`` (a persistent Store) during setup.
+        # ``dataset_store`` persists named, snapshotted identification datasets.
+        # Both stores are attached by async_setup_entry; until then the manager
+        # is empty and the stores are None.
+        self.experiment_manager: ExperimentManager = ExperimentManager()
+        self.experiment_store: Optional[Any] = None
+        self.dataset_store: Optional[Any] = None
+        # Room slugs whose heaters the active experiment is exciting *this*
+        # cycle; consumed by _apply_actions so the excitation bypasses the
+        # normal schedule-off / room-disabled gating.
+        self._experiment_active_rooms: Set[str] = set()
 
 
     # ------------------------------------------------------------------
@@ -2232,6 +2252,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if not self._system_enabled:
                 self.actions = self._read_delivered_actions(outdoor_temp)
 
+            # 4c. System-identification experiment overlay.  When an experiment is
+            # active for a room, its excitation signal replaces the MPC's chosen
+            # actions for that room's heaters *before* the history record is
+            # written, so the recorded input ``u`` matches what is applied and the
+            # captured response is genuinely informative.  Runs only while the
+            # controller is engaged.
+            if self._system_enabled:
+                self._apply_experiment_excitation(now)
+            else:
+                self._experiment_active_rooms = set()
+
             # 5. Store heat-flow breakdown (independent of MPC solve success)
             self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
 
@@ -3248,7 +3279,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             fraction = self.actions.get(src.name, 0.0)
             room_enabled = self.is_room_enabled(src.room)
             window_override_active = self.is_window_override_active(src.room)
-            effective_room_enabled = self._system_enabled and room_enabled and not window_override_active
+            # A running identification experiment may deliberately drive heaters
+            # in a room the comfort schedule has switched off (e.g. overnight),
+            # so an active experiment counts as "enabled" here.  Window overrides
+            # and the global stop switch still force the room off for safety.
+            experiment_active = self.is_experiment_active(src.room)
+            effective_room_enabled = (
+                self._system_enabled
+                and (room_enabled or experiment_active)
+                and not window_override_active
+            )
             controller = getattr(self, "controller", None)
 
             # If the room is disabled, force fraction to 0 (turn off).
@@ -3563,6 +3603,190 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if self._schedule_disabled.get(room_name, False):
             return False
         return True
+
+    # ------------------------------------------------------------------
+    # System-identification experiments
+    # ------------------------------------------------------------------
+
+    def is_experiment_active(self, room_name: str) -> bool:
+        """Return whether an identification experiment is exciting ``room_name``.
+
+        Reflects the set computed for the current cycle by
+        ``_apply_experiment_excitation`` (keyed by room slug).
+        """
+        from .dashboard import slugify as _slugify
+
+        active = getattr(self, "_experiment_active_rooms", None)
+        if not active:
+            return False
+        return _slugify(room_name) in active
+
+    def _apply_experiment_excitation(self, now: datetime) -> None:
+        """Overlay active experiment excitation signals onto ``self.actions``.
+
+        For each room with an active experiment, the chosen excitation fraction
+        replaces the MPC's action for every heat source in that room.  The signal
+        is clamped against the experiment's safety temperature band (frost floor
+        / overheat ceiling) and never overrides an open-window safety clamp.  The
+        controller is told the actually-applied input via ``notify_applied_u`` so
+        the next cycle's EKF state estimate stays consistent with the excitation.
+        """
+        from .dashboard import slugify as _slugify
+
+        active_rooms: Set[str] = set()
+        manager = self.experiment_manager
+        now_ts = now.timestamp()
+
+        # Advance lifecycle states; auto-save any experiment that just finished.
+        transitions = manager.advance(now_ts)
+        for finished in transitions.get("completed", []):
+            self._on_experiment_completed(finished)
+        if transitions.get("started") or transitions.get("completed"):
+            self._persist_experiments()
+
+        if not manager.has_active(now_ts):
+            self._experiment_active_rooms = active_rooms
+            return
+
+        # Map room slug -> canonical room name for measurement lookup.
+        slug_to_room = {_slugify(rn): rn for rn in self.model.room_names}
+        controller = getattr(self, "controller", None)
+
+        for src in self.heat_sources:
+            room_slug = _slugify(src.room)
+            exp = manager.active_for_room(room_slug, now_ts)
+            if exp is None:
+                continue
+            # An open window makes the room's air-exchange unmodelled, so the
+            # excitation is suppressed there for safety and data quality; the
+            # window-override clamp already forced u=0 earlier this cycle.
+            if self.is_window_override_active(src.room):
+                continue
+
+            room_name = slug_to_room.get(room_slug, src.room)
+            measured = self.measured_temperatures.get(room_name)
+            raw = excitation_fraction(exp, now_ts)
+            fraction = apply_safety_bounds(
+                raw, measured, exp.min_temp, exp.max_temp, exp.amplitude_high
+            )
+            # Respect each source's actuation range (e.g. heat-only sources have
+            # u_min = 0); excitation never commands cooling.
+            u_min = float(getattr(src, "u_min", 0.0))
+            u_max = float(getattr(src, "u_max", 1.0))
+            fraction = max(max(u_min, 0.0), min(u_max, float(fraction)))
+
+            self.actions[src.name] = fraction
+            if controller is not None:
+                controller.notify_applied_u(src.name, fraction)
+            active_rooms.add(room_slug)
+
+        self._experiment_active_rooms = active_rooms
+
+    def _on_experiment_completed(self, exp: Any) -> None:
+        """React to an experiment finishing: auto-save its window as a dataset.
+
+        The snapshot is taken asynchronously (it queries the JSONL history store)
+        so the control cycle is never blocked.
+        """
+        if not getattr(exp, "auto_save", False) or exp.dataset_id is not None:
+            return
+        if self.dataset_store is None:
+            return
+        try:
+            self.hass.async_create_task(self._async_autosave_experiment(exp))
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.warning(
+                "Experiment %s: failed to schedule dataset auto-save", exp.id,
+                exc_info=True,
+            )
+
+    async def _async_autosave_experiment(self, exp: Any) -> None:
+        """Snapshot a completed experiment's window into a stored dataset."""
+        records = await self._async_collect_window_records(exp.start_ts, exp.end_ts)
+        if not records:
+            _LOGGER.info(
+                "Experiment %s finished with no captured records; no dataset saved",
+                exp.id,
+            )
+            return
+        name = exp.name or f"Experiment {exp.room_name}"
+        dataset = build_dataset(
+            name,
+            records,
+            room_name=exp.room_name,
+            room_slug=exp.room_slug,
+            source="experiment",
+            notes=f"Auto-saved {exp.signal_type} experiment",
+            window_start=exp.start_ts,
+            window_end=exp.end_ts,
+            experiment=exp.to_dict(),
+        )
+        await self.dataset_store.async_add(dataset)
+        exp.dataset_id = dataset["id"]
+        self._persist_experiments()
+        self.async_update_listeners()
+        _LOGGER.info(
+            "Experiment %s auto-saved as dataset '%s' (%d records)",
+            exp.id, name, dataset["record_count"],
+        )
+
+    async def _async_collect_window_records(
+        self, start_ts: float, end_ts: float
+    ) -> List[Dict[str, Any]]:
+        """Return observation records covering ``[start_ts, end_ts]``.
+
+        Prefers the integration-managed JSONL store (durable across restarts),
+        falling back to the in-memory buffer filtered to the window.
+        """
+        records: List[Dict[str, Any]] = []
+        if self.id_history_store is not None:
+            try:
+                records = await self.id_history_store.async_query_range(
+                    start_ts, end_ts
+                )
+            except Exception:
+                _LOGGER.warning(
+                    "Dataset snapshot: JSONL query failed for [%s, %s]",
+                    start_ts, end_ts, exc_info=True,
+                )
+        if not records:
+            records = [
+                dict(r)
+                for r in self._history_buffer
+                if start_ts <= float(r.get("timestamp", 0.0)) <= end_ts
+            ]
+        return records
+
+    def schedule_experiment(self, exp: Any) -> Any:
+        """Register a new experiment and persist the experiment list."""
+        self.experiment_manager.add(exp)
+        self.experiment_manager.prune_terminal()
+        self._persist_experiments()
+        return exp
+
+    def cancel_experiment(self, experiment_id: str) -> bool:
+        """Cancel a scheduled/running experiment.  Returns True if it changed."""
+        cancelled = self.experiment_manager.cancel(experiment_id)
+        if cancelled is None:
+            # Allow removing terminal entries from the list entirely.
+            removed = self.experiment_manager.remove(experiment_id)
+            if removed:
+                self._persist_experiments()
+            return removed
+        self._experiment_active_rooms.discard(cancelled.room_slug)
+        self._persist_experiments()
+        return True
+
+    def _persist_experiments(self) -> None:
+        """Persist the experiment list (best-effort, never blocks a cycle)."""
+        if self.experiment_store is None:
+            return
+        try:
+            self.hass.async_create_task(
+                self.experiment_store.async_save(self.experiment_manager)
+            )
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.debug("Failed to persist experiments", exc_info=True)
 
     # ------------------------------------------------------------------
     # Comfort schedule helpers

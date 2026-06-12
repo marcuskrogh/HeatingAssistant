@@ -193,9 +193,14 @@ from .const import (
     DEFAULT_WINDOW_OPEN_DEBOUNCE,
     DEFAULT_WINDOW_OPEN_Q_INFLATION,
     DOMAIN,
+    EXCITATION_TYPES,
     HISTORY_BUFFER_SIZE,
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
+    SERVICE_CANCEL_EXPERIMENT,
+    SERVICE_CREATE_DATASET,
+    SERVICE_DELETE_DATASET,
+    SERVICE_SCHEDULE_EXPERIMENT,
     SERVICE_SET_SCHEDULE_ENABLED,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
@@ -556,6 +561,66 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, ws_get_forecasts)
 
+    @websocket_api.websocket_command(
+        {vol.Required("type"): "heating_assistant/list_datasets"}
+    )
+    @websocket_api.async_response
+    async def ws_list_datasets(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return metadata for all stored identification datasets (no records)."""
+        try:
+            coordinator = _get_coordinator(hass)
+            store = getattr(coordinator, "dataset_store", None)
+            datasets = store.list_meta() if store is not None else []
+            connection.send_result(msg["id"], {"datasets": datasets})
+        except Exception as err:
+            _LOGGER.error("Heating Assistant: list_datasets WS failed: %s", err)
+            connection.send_error(msg["id"], "datasets_fetch_failed", str(err))
+
+    websocket_api.async_register_command(hass, ws_list_datasets)
+
+    @websocket_api.websocket_command(
+        {
+            vol.Required("type"): "heating_assistant/get_dataset",
+            vol.Required("dataset_id"): str,
+        }
+    )
+    @websocket_api.async_response
+    async def ws_get_dataset(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return a single stored dataset including its snapshotted records."""
+        try:
+            coordinator = _get_coordinator(hass)
+            store = getattr(coordinator, "dataset_store", None)
+            dataset = store.get(msg["dataset_id"]) if store is not None else None
+            connection.send_result(msg["id"], {"dataset": dataset})
+        except Exception as err:
+            _LOGGER.error("Heating Assistant: get_dataset WS failed: %s", err)
+            connection.send_error(msg["id"], "dataset_fetch_failed", str(err))
+
+    websocket_api.async_register_command(hass, ws_get_dataset)
+
+    @websocket_api.websocket_command(
+        {vol.Required("type"): "heating_assistant/list_experiments"}
+    )
+    @websocket_api.async_response
+    async def ws_list_experiments(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return all scheduled / running / completed experiments."""
+        try:
+            coordinator = _get_coordinator(hass)
+            manager = getattr(coordinator, "experiment_manager", None)
+            experiments = manager.to_list() if manager is not None else []
+            connection.send_result(msg["id"], {"experiments": experiments})
+        except Exception as err:
+            _LOGGER.error("Heating Assistant: list_experiments WS failed: %s", err)
+            connection.send_error(msg["id"], "experiments_fetch_failed", str(err))
+
+    websocket_api.async_register_command(hass, ws_list_experiments)
+
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply options in-place when possible; reload only for structural changes."""
@@ -625,6 +690,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, entry.entry_id, DEFAULT_IDENTIFICATION_HISTORY_DAYS
     )
     await coordinator.id_history_store.async_setup()
+
+    # Set up the named-dataset and experiment stores, and restore any persisted
+    # experiments so a scheduled experiment survives a restart of Home Assistant.
+    from .datasets import DatasetStore
+    from .experiments import ExperimentStore
+    coordinator.dataset_store = DatasetStore(hass, entry.entry_id)
+    await coordinator.dataset_store.async_load()
+    coordinator.experiment_store = ExperimentStore(hass, entry.entry_id)
+    coordinator.experiment_manager = await coordinator.experiment_store.async_load()
 
     # Restore runtime state stashed by a prior unload (in-memory only; survives
     # a reload but not a full HA restart). Only keys still present in the new
@@ -1235,6 +1309,26 @@ async def _get_history_for_window(
     return buf
 
 
+def _records_for_dataset(
+    coordinator: HeatingAssistantCoordinator,
+    dataset_id: Optional[str],
+) -> Optional[List[Dict[str, Any]]]:
+    """Return the snapshotted records for a stored dataset, or ``None``.
+
+    Used by the identification / simulation services so a stored dataset can be
+    referenced directly (by ``dataset_id``) instead of a time window — the data
+    is read from the dataset's own permanent snapshot, so it works even after the
+    rolling history that produced it has been pruned.
+    """
+    if not dataset_id:
+        return None
+    store = getattr(coordinator, "dataset_store", None)
+    if store is None:
+        return None
+    records = store.get_records(dataset_id)
+    return records if records else None
+
+
 def _persist_tuning_updates(
     hass: HomeAssistant,
     coordinator: HeatingAssistantCoordinator,
@@ -1416,9 +1510,11 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
         # Fetch history from JSONL store / Recorder when an explicit window is
-        # requested.  When both are set, horizon_hours is ignored.
-        history_override = None
-        if window_start_ml is not None and window_end_ml is not None:
+        # requested.  When both are set, horizon_hours is ignored.  A stored
+        # dataset (``dataset_id``) takes precedence over both and supplies its
+        # snapshotted records directly.
+        history_override = _records_for_dataset(coordinator, call.data.get("dataset_id"))
+        if history_override is None and window_start_ml is not None and window_end_ml is not None:
             history_override = await _get_history_for_window(
                 hass, coordinator, window_start_ml, window_end_ml
             )
@@ -1543,10 +1639,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("window_start"): vol.Coerce(float),
                 vol.Optional("window_end"): vol.Coerce(float),
                 vol.Optional("locked_params"): dict,
-                # Explicit identification window as UNIX timestamps [s].
-                # When both are provided, horizon_hours is ignored.
-                vol.Optional("window_start"): vol.Coerce(float),
-                vol.Optional("window_end"): vol.Coerce(float),
+                # Identify from a stored dataset's snapshotted records, taking
+                # precedence over window_start/window_end and horizon_hours.
+                vol.Optional("dataset_id"): cv.string,
             }
         ),
     )
@@ -1566,8 +1661,13 @@ def _register_services(hass: HomeAssistant) -> None:
             float(call.data["window_end"]) if "window_end" in call.data else None
         )
 
+        # A stored dataset takes precedence over a window / horizon and supplies
+        # its snapshotted records directly.
+        dataset_records = _records_for_dataset(coordinator, call.data.get("dataset_id"))
+        if dataset_records is not None:
+            history = dataset_records
         # Explicit window: fetch from JSONL store / Recorder if needed.
-        if window_start_ol is not None and window_end_ol is not None:
+        elif window_start_ol is not None and window_end_ol is not None:
             history = await _get_history_for_window(
                 hass, coordinator, window_start_ol, window_end_ol
             )
@@ -1927,10 +2027,18 @@ def _register_services(hass: HomeAssistant) -> None:
         # set, keyed by ``<param>_<room_slug>``).
         room_params = _extract_sim_room_params(call, coordinator.model.room_names)
 
-        # Fetch history: use JSONL store / Recorder for out-of-buffer windows.
-        history = await _get_history_for_window(
-            hass, coordinator, window_start, window_end
-        )
+        # Fetch history: a stored dataset (``dataset_id``) supplies its
+        # snapshotted records directly; otherwise use the JSONL store / Recorder
+        # for out-of-buffer windows.  With a dataset the whole snapshot is used
+        # (window_spec cleared) since it was captured for exactly this purpose.
+        dataset_records = _records_for_dataset(coordinator, call.data.get("dataset_id"))
+        if dataset_records is not None:
+            history = dataset_records
+            window_spec = None
+        else:
+            history = await _get_history_for_window(
+                hass, coordinator, window_start, window_end
+            )
 
         # Patch heat-source copies with the heater power scales currently shown
         # in the UI (falling back to the last auto-identified scales) so the EKF
@@ -2526,4 +2634,188 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
             }
         ),
+    )
+
+    # ------------------------------------------------------------------
+    # System-identification experiments and stored datasets
+    # ------------------------------------------------------------------
+
+    def _resolve_room(coordinator: "HeatingAssistantCoordinator", name: str) -> str:
+        """Return the canonical room name for a name-or-slug, or raise."""
+        from .dashboard import slugify as _slugify
+
+        for rn in coordinator.model.room_names:
+            if rn == name or _slugify(rn) == name:
+                return rn
+        raise ValueError(f"Room '{name}' not found in configuration")
+
+    async def handle_schedule_experiment(call: ServiceCall) -> ServiceResponse:
+        """Schedule a system-identification experiment for one room/time window."""
+        from .dashboard import slugify as _slugify
+        from .experiments import Experiment, validate_signal_params
+        from .const import (
+            DEFAULT_EXCITATION_HIGH,
+            DEFAULT_EXCITATION_LOW,
+            DEFAULT_EXCITATION_PERIOD_S,
+            DEFAULT_EXCITATION_TYPE,
+            DEFAULT_EXPERIMENT_MAX_TEMP,
+            DEFAULT_EXPERIMENT_MIN_TEMP,
+            MAX_EXPERIMENT_DURATION_S,
+        )
+
+        coordinator = _get_coordinator(hass)
+        canonical = _resolve_room(coordinator, call.data["room_name"])
+
+        start_ts = float(call.data["start"])
+        end_ts = float(call.data["end"])
+        if end_ts <= start_ts:
+            raise ValueError("Experiment end must be after start")
+        if end_ts - start_ts > MAX_EXPERIMENT_DURATION_S:
+            raise ValueError("Experiment duration exceeds the 7-day maximum")
+
+        signal_type = str(call.data.get("signal_type", DEFAULT_EXCITATION_TYPE))
+        high = float(call.data.get("amplitude_high", DEFAULT_EXCITATION_HIGH))
+        low = float(call.data.get("amplitude_low", DEFAULT_EXCITATION_LOW))
+        period_s = float(call.data.get("period_s", DEFAULT_EXCITATION_PERIOD_S))
+        validate_signal_params(signal_type, high, low, period_s)
+
+        exp = Experiment(
+            room_name=canonical,
+            room_slug=_slugify(canonical),
+            start_ts=start_ts,
+            end_ts=end_ts,
+            name=str(call.data.get("name", "")),
+            signal_type=signal_type,
+            amplitude_high=high,
+            amplitude_low=low,
+            period_s=period_s,
+            min_temp=float(call.data.get("min_temp", DEFAULT_EXPERIMENT_MIN_TEMP)),
+            max_temp=float(call.data.get("max_temp", DEFAULT_EXPERIMENT_MAX_TEMP)),
+            auto_save=bool(call.data.get("auto_save", True)),
+        )
+        coordinator.schedule_experiment(exp)
+        coordinator.async_update_listeners()
+        return {"experiment_id": exp.id}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SCHEDULE_EXPERIMENT,
+        handle_schedule_experiment,
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("start"): vol.Coerce(float),
+                vol.Required("end"): vol.Coerce(float),
+                vol.Optional("name"): cv.string,
+                vol.Optional("signal_type"): vol.In(list(EXCITATION_TYPES)),
+                vol.Optional("amplitude_high"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                ),
+                vol.Optional("amplitude_low"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
+                ),
+                vol.Optional("period_s"): vol.All(
+                    vol.Coerce(float), vol.Range(min=60.0)
+                ),
+                vol.Optional("min_temp"): vol.Coerce(float),
+                vol.Optional("max_temp"): vol.Coerce(float),
+                vol.Optional("auto_save"): cv.boolean,
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def handle_cancel_experiment(call: ServiceCall) -> None:
+        """Cancel (or remove) a scheduled / running experiment."""
+        coordinator = _get_coordinator(hass)
+        coordinator.cancel_experiment(call.data["experiment_id"])
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CANCEL_EXPERIMENT,
+        handle_cancel_experiment,
+        schema=vol.Schema({vol.Required("experiment_id"): cv.string}),
+    )
+
+    async def handle_create_dataset(call: ServiceCall) -> ServiceResponse:
+        """Snapshot a custom data window into a named, permanent dataset."""
+        from .datasets import build_dataset
+        from .history_window import select_window_by_timestamps
+        from .dashboard import slugify as _slugify
+        from .const import DATASET_SOURCE_MANUAL
+
+        coordinator = _get_coordinator(hass)
+        if coordinator.dataset_store is None:
+            raise ValueError("Dataset store is not available")
+
+        name = str(call.data["name"]).strip()
+        if not name:
+            raise ValueError("Dataset name must not be empty")
+        window_start = float(call.data["window_start"])
+        window_end = float(call.data["window_end"])
+        if window_end <= window_start:
+            raise ValueError("window_end must be after window_start")
+
+        canonical: Optional[str] = None
+        room_name = call.data.get("room_name")
+        if room_name:
+            canonical = _resolve_room(coordinator, room_name)
+        room_slug = _slugify(canonical) if canonical else None
+
+        # Pull the actual records for the window (JSONL store → Recorder
+        # fallback), then clip to the exact bounds.
+        records = await _get_history_for_window(
+            hass, coordinator, window_start, window_end
+        )
+        records = select_window_by_timestamps(records, window_start, window_end)
+        if not records:
+            raise ValueError("No observation data found in the selected window")
+
+        dataset = build_dataset(
+            name,
+            records,
+            room_name=canonical,
+            room_slug=room_slug,
+            source=DATASET_SOURCE_MANUAL,
+            notes=str(call.data.get("notes", "")),
+            window_start=window_start,
+            window_end=window_end,
+        )
+        await coordinator.dataset_store.async_add(dataset)
+        coordinator.async_update_listeners()
+        return {
+            "dataset_id": dataset["id"],
+            "record_count": dataset["record_count"],
+        }
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_DATASET,
+        handle_create_dataset,
+        schema=vol.Schema(
+            {
+                vol.Required("name"): cv.string,
+                vol.Required("window_start"): vol.Coerce(float),
+                vol.Required("window_end"): vol.Coerce(float),
+                vol.Optional("room_name"): cv.string,
+                vol.Optional("notes"): cv.string,
+            }
+        ),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def handle_delete_dataset(call: ServiceCall) -> None:
+        """Delete a stored dataset by id."""
+        coordinator = _get_coordinator(hass)
+        if coordinator.dataset_store is None:
+            return
+        await coordinator.dataset_store.async_delete(call.data["dataset_id"])
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DELETE_DATASET,
+        handle_delete_dataset,
+        schema=vol.Schema({vol.Required("dataset_id"): cv.string}),
     )

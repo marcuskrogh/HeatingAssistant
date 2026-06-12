@@ -574,6 +574,25 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     inp.addEventListener('input', () => { userEditing = true; });
   });
 
+  // When a stored dataset is selected for identification, its id is sent with
+  // the EKF reconstruction / open-loop / auto-identification calls so they run
+  // over the dataset's permanently snapshotted records. Cleared whenever the
+  // user edits the identification window manually so the selection stays
+  // explicit. ``renderDatasetSelection`` is assigned by the dataset section
+  // setup below; it updates the "using dataset …" note.
+  let selectedDatasetId = null;
+  let renderDatasetSelection = () => {};
+  const setSelectedDataset = (id, label) => {
+    selectedDatasetId = id;
+    renderDatasetSelection(label || '');
+  };
+  const clearSelectedDataset = () => {
+    if (selectedDatasetId) {
+      selectedDatasetId = null;
+      renderDatasetSelection('');
+    }
+  };
+
   // -----------------------------------------------------------------------
   // Window mode: 'recent' (horizon-based) or 'custom' (explicit date range)
   // -----------------------------------------------------------------------
@@ -627,17 +646,19 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   _initWindowDefaults();
   _applyWindowMode(windowMode);
 
-  windowModeRecentBtn.addEventListener('click', () => _applyWindowMode('recent'));
+  windowModeRecentBtn.addEventListener('click', () => { _applyWindowMode('recent'); clearSelectedDataset(); });
   windowModeCustomBtn.addEventListener('click', () => _applyWindowMode('custom'));
 
   // Persist datetime values on change so they survive navigation.
   windowStartInput.addEventListener('change', () => {
     try { localStorage.setItem(_WINDOW_START_KEY, windowStartInput.value); } catch (_) {}
     userEditing = true;
+    clearSelectedDataset();
   });
   windowEndInput.addEventListener('change', () => {
     try { localStorage.setItem(_WINDOW_END_KEY, windowEndInput.value); } catch (_) {}
     userEditing = true;
+    clearSelectedDataset();
   });
 
   // Quick-preset buttons (Last 1h / 6h / 12h / 24h).
@@ -653,6 +674,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         localStorage.setItem(_WINDOW_END_KEY, windowEndInput.value);
       } catch (_) {}
       userEditing = true;
+      clearSelectedDataset();
     });
   });
 
@@ -704,6 +726,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     }
 
     if (Object.keys(heaterScales).length) params.heater_scales = heaterScales;
+    // A selected stored dataset overrides the window: the backend reconstructs
+    // over the dataset's snapshotted records.
+    if (selectedDatasetId) params.dataset_id = selectedDatasetId;
     return params;
   }
 
@@ -1037,6 +1062,13 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       } else {
         windowData.horizon_hours = parseFloat(horizonInput.value);
       }
+      // A selected stored dataset overrides the window for identification.
+      if (selectedDatasetId) {
+        delete windowData.window_start;
+        delete windowData.window_end;
+        delete windowData.horizon_hours;
+        windowData.dataset_id = selectedDatasetId;
+      }
       await hass.callService('heating_assistant', 'estimate_parameters_ml', {
         apply_parameters: false,
         ...windowData,
@@ -1154,6 +1186,18 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   });
 
   // -----------------------------------------------------------------------
+  // Section 5: Stored datasets & experiment scheduler
+  // -----------------------------------------------------------------------
+  const refreshHandles = setupDatasetsAndExperiments({
+    container, room, roomSlug, hass, connection,
+    windowStartInput, windowEndInput, applyWindowMode: _applyWindowMode,
+    toDatetimeLocal: _toDatetimeLocal,
+    setSelectedDataset, clearSelectedDataset,
+    onDatasetSelectionRenderer: (fn) => { renderDatasetSelection = fn; },
+    getSelectedDatasetId: () => selectedDatasetId,
+  });
+
+  // -----------------------------------------------------------------------
   // Initial render
   // -----------------------------------------------------------------------
   populateFromState(roomSlug, state);
@@ -1194,6 +1238,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       olChart.destroy();
       olInputsChart.destroy();
       olDisturbChart.destroy();
+      if (refreshHandles && refreshHandles.destroy) refreshHandles.destroy();
     },
   };
 }
@@ -1201,6 +1246,412 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Stored datasets & experiment scheduler (Section 5 of the detail page)
+// ---------------------------------------------------------------------------
+
+const EXCITATION_OPTIONS = [
+  { value: 'prbs', label: 'PRBS (recommended)' },
+  { value: 'step', label: 'Step' },
+  { value: 'pulse', label: 'Pulse' },
+];
+
+function _fmtTs(ts) {
+  if (ts == null) return '—';
+  const d = new Date(ts * 1000);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function _fmtDuration(seconds) {
+  if (seconds == null || !isFinite(seconds)) return '—';
+  const h = seconds / 3600;
+  if (h >= 1) return `${h.toFixed(1)} h`;
+  return `${Math.round(seconds / 60)} min`;
+}
+
+function _toLocalInput(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function _statusBadge(status) {
+  const cls = {
+    scheduled: 'fit--acceptable',
+    running: 'fit--good',
+    completed: '',
+    cancelled: 'fit--poor',
+  }[status] || '';
+  return `<span class="identification-tile__kpi-box ${cls}" style="display:inline-block;padding:1px 6px">${(status || '').toUpperCase()}</span>`;
+}
+
+// Build the experiment-scheduler and stored-dataset cards, append them to the
+// container, and wire all their interactions.  Returns a handle with a
+// ``destroy`` method that tears down the periodic refresh timer.
+function setupDatasetsAndExperiments(ctx) {
+  const {
+    container, room, roomSlug, hass, connection,
+    windowStartInput, windowEndInput, applyWindowMode, toDatetimeLocal,
+    setSelectedDataset, clearSelectedDataset, onDatasetSelectionRenderer,
+  } = ctx;
+
+  // ---- Experiment scheduler card ----------------------------------------
+  const expCard = document.createElement('div');
+  expCard.className = 'card tuning-section';
+  // Default window: tonight 23:00 → 05:00 next morning (a typically unoccupied
+  // period), nudged to the next day when 23:00 has already passed.
+  const now = new Date();
+  const defStart = new Date(now);
+  defStart.setHours(23, 0, 0, 0);
+  if (defStart <= now) defStart.setDate(defStart.getDate() + 1);
+  const defEnd = new Date(defStart.getTime() + 6 * 3600 * 1000);
+
+  expCard.innerHTML = `
+    <div class="tuning-section__title">Experiment Scheduler</div>
+    <p class="tuning-section__desc">
+      Schedule an excitation experiment for <strong>${room.name}</strong> over a
+      future window (e.g. overnight). The controller drives this room's heaters
+      with an informative signal so the response is good for identification, then
+      stores the captured data as a dataset. Comfort-schedule "off" periods are
+      overridden for this room during the window; open-window safety and the
+      min/max temperature limits still apply.
+    </p>
+    <div class="tuning-params-grid">
+      <div class="form-group">
+        <label class="form-label" for="exp-name">Name</label>
+        <input class="form-input" type="text" id="exp-name" placeholder="${room.name} overnight test">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-signal">Excitation signal</label>
+        <select class="form-input" id="exp-signal">
+          ${EXCITATION_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-start">Start</label>
+        <input class="form-input form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-end">End</label>
+        <input class="form-input form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-high">High power</label>
+        <input class="form-input" type="number" id="exp-high" min="0" max="1" step="0.05" value="1.0">
+        <span class="form-hint">fraction (0–1) of rated heater power</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-low">Low power</label>
+        <input class="form-input" type="number" id="exp-low" min="0" max="1" step="0.05" value="0.0">
+        <span class="form-hint">fraction (0–1) of rated heater power</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-period">Switching period</label>
+        <input class="form-input" type="number" id="exp-period" min="5" step="5" value="60">
+        <span class="form-hint">minutes between PRBS / pulse switches</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-min">Min temp (frost floor)</label>
+        <input class="form-input" type="number" id="exp-min" step="0.5" value="12">
+        <span class="form-hint">°C — heating forced on below this</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-max">Max temp (ceiling)</label>
+        <input class="form-input" type="number" id="exp-max" step="0.5" value="26">
+        <span class="form-hint">°C — heating forced off at/above this</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-autosave">Auto-save dataset</label>
+        <select class="form-input" id="exp-autosave">
+          <option value="yes" selected>Yes</option>
+          <option value="no">No</option>
+        </select>
+      </div>
+    </div>
+    <div class="tuning-actions">
+      <button class="btn btn--accent" id="btn-schedule-exp">Schedule Experiment</button>
+      <span class="tuning-actions__status" id="exp-status"></span>
+    </div>
+    <div id="exp-list" style="margin-top:14px"></div>
+  `;
+  container.appendChild(expCard);
+
+  // ---- Stored datasets card ---------------------------------------------
+  const dsCard = document.createElement('div');
+  dsCard.className = 'card tuning-section';
+  dsCard.innerHTML = `
+    <div class="tuning-section__title">Stored Datasets</div>
+    <p class="tuning-section__desc">
+      Save the current identification window as a named, permanent dataset, or
+      reuse any stored dataset (including experiment captures) for identification.
+      Selecting a dataset routes the EKF reconstruction, open-loop simulation and
+      auto-identification above through its snapshotted data.
+    </p>
+    <div class="tuning-params-grid">
+      <div class="form-group">
+        <label class="form-label" for="ds-name">Dataset name</label>
+        <input class="form-input" type="text" id="ds-name" placeholder="e.g. Cold snap — ${room.name}">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="ds-notes">Notes (optional)</label>
+        <input class="form-input" type="text" id="ds-notes" placeholder="description">
+      </div>
+    </div>
+    <div class="tuning-actions">
+      <button class="btn btn--primary" id="btn-save-dataset">Save Current Window</button>
+      <span class="tuning-actions__status" id="ds-status"></span>
+    </div>
+    <div id="ds-selected-note" class="tuning-section__desc" style="margin-top:8px"></div>
+    <div id="ds-list" style="margin-top:8px"></div>
+  `;
+  container.appendChild(dsCard);
+
+  // ---- References --------------------------------------------------------
+  const expStatus = expCard.querySelector('#exp-status');
+  const expListEl = expCard.querySelector('#exp-list');
+  const dsStatus = dsCard.querySelector('#ds-status');
+  const dsListEl = dsCard.querySelector('#ds-list');
+  const dsNameInput = dsCard.querySelector('#ds-name');
+  const dsNotesInput = dsCard.querySelector('#ds-notes');
+  const dsSelectedNote = dsCard.querySelector('#ds-selected-note');
+
+  function setStatus(el, text, type = '') {
+    el.textContent = text;
+    el.className = 'tuning-actions__status';
+    if (type) el.classList.add(`tuning-actions__status--${type}`);
+  }
+
+  // Renderer for the "using dataset …" note (wired back to the page closure).
+  onDatasetSelectionRenderer((label) => {
+    if (label) {
+      dsSelectedNote.innerHTML = `Identifying from dataset: <strong>${label}</strong> `;
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'btn btn--ghost btn--sm';
+      clearBtn.textContent = 'Use live window instead';
+      clearBtn.addEventListener('click', () => clearSelectedDataset());
+      dsSelectedNote.appendChild(clearBtn);
+    } else {
+      dsSelectedNote.textContent = '';
+    }
+  });
+
+  // ---- Experiment scheduling --------------------------------------------
+  expCard.querySelector('#btn-schedule-exp').addEventListener('click', async () => {
+    const startVal = expCard.querySelector('#exp-start').value;
+    const endVal = expCard.querySelector('#exp-end').value;
+    const startTs = new Date(startVal).getTime() / 1000;
+    const endTs = new Date(endVal).getTime() / 1000;
+    if (!isFinite(startTs) || !isFinite(endTs) || endTs <= startTs) {
+      setStatus(expStatus, 'End must be after start.', 'error');
+      return;
+    }
+    const high = parseFloat(expCard.querySelector('#exp-high').value);
+    const low = parseFloat(expCard.querySelector('#exp-low').value);
+    if (!(high > low)) {
+      setStatus(expStatus, 'High power must exceed low power.', 'error');
+      return;
+    }
+    setStatus(expStatus, 'Scheduling…', 'running');
+    try {
+      await hass.callService('heating_assistant', 'schedule_experiment', {
+        room_name: roomSlug,
+        start: startTs,
+        end: endTs,
+        name: expCard.querySelector('#exp-name').value || '',
+        signal_type: expCard.querySelector('#exp-signal').value,
+        amplitude_high: high,
+        amplitude_low: low,
+        period_s: Math.max(60, parseFloat(expCard.querySelector('#exp-period').value) * 60),
+        min_temp: parseFloat(expCard.querySelector('#exp-min').value),
+        max_temp: parseFloat(expCard.querySelector('#exp-max').value),
+        auto_save: expCard.querySelector('#exp-autosave').value === 'yes',
+      });
+      setStatus(expStatus, 'Scheduled.', 'success');
+      await refreshExperiments();
+    } catch (err) {
+      setStatus(expStatus, 'Error: ' + (err.message || err), 'error');
+    }
+  });
+
+  async function refreshExperiments() {
+    let experiments = [];
+    try {
+      experiments = await connection.listExperiments();
+    } catch (_) { experiments = []; }
+    const mine = experiments
+      .filter((e) => e.room_slug === roomSlug)
+      .sort((a, b) => (b.start_ts || 0) - (a.start_ts || 0));
+    if (mine.length === 0) {
+      expListEl.innerHTML = '<span class="tuning-section__desc">No experiments scheduled for this room.</span>';
+      return;
+    }
+    const rows = mine.map((e) => {
+      const cancellable = e.status === 'scheduled' || e.status === 'running';
+      const action = cancellable
+        ? `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Cancel</button>`
+        : `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Remove</button>`;
+      const dsLink = e.dataset_id
+        ? `<button class="btn btn--ghost btn--sm" data-use-ds="${e.dataset_id}">Use data</button>`
+        : '';
+      return `
+        <tr>
+          <td>${e.name || '(unnamed)'}</td>
+          <td>${(e.signal_type || '').toUpperCase()}</td>
+          <td>${_fmtTs(e.start_ts)} → ${_fmtTs(e.end_ts)}</td>
+          <td>${_statusBadge(e.status)}</td>
+          <td>${dsLink} ${action}</td>
+        </tr>`;
+    }).join('');
+    expListEl.innerHTML = `
+      <div class="param-history-table-wrapper">
+        <table class="param-history-table">
+          <thead><tr><th>Name</th><th>Signal</th><th>Window</th><th>Status</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    expListEl.querySelectorAll('[data-cancel]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await hass.callService('heating_assistant', 'cancel_experiment', {
+            experiment_id: btn.dataset.cancel,
+          });
+          await refreshExperiments();
+        } catch (_) { btn.disabled = false; }
+      });
+    });
+    expListEl.querySelectorAll('[data-use-ds]').forEach((btn) => {
+      btn.addEventListener('click', () => useDataset(btn.dataset.useDs));
+    });
+  }
+
+  // ---- Dataset saving / listing -----------------------------------------
+  function currentWindowBounds() {
+    // Resolve the window the user currently has configured into [start, end]
+    // UNIX seconds.  Honours an explicit custom range; otherwise falls back to
+    // the recent-horizon trailing window (now - horizon … now).
+    const startVal = windowStartInput.value;
+    const endVal = windowEndInput.value;
+    let startTs = startVal ? new Date(startVal).getTime() / 1000 : NaN;
+    let endTs = endVal ? new Date(endVal).getTime() / 1000 : NaN;
+    if (!isFinite(startTs) || !isFinite(endTs) || endTs <= startTs) {
+      const horizonEl = container.querySelector('#param-horizon');
+      const hrs = horizonEl ? parseFloat(horizonEl.value) : 6;
+      endTs = Date.now() / 1000;
+      startTs = endTs - (isFinite(hrs) ? hrs : 6) * 3600;
+    }
+    return { startTs, endTs };
+  }
+
+  dsCard.querySelector('#btn-save-dataset').addEventListener('click', async () => {
+    const name = (dsNameInput.value || '').trim();
+    if (!name) {
+      setStatus(dsStatus, 'Enter a dataset name first.', 'error');
+      return;
+    }
+    const { startTs, endTs } = currentWindowBounds();
+    setStatus(dsStatus, 'Saving…', 'running');
+    try {
+      const resp = await hass.callService('heating_assistant', 'create_dataset', {
+        name,
+        window_start: startTs,
+        window_end: endTs,
+        room_name: roomSlug,
+        notes: dsNotesInput.value || '',
+      }, undefined, undefined, true);
+      const count = resp?.response?.record_count;
+      setStatus(dsStatus, count != null ? `Saved (${count} records).` : 'Saved.', 'success');
+      dsNameInput.value = '';
+      dsNotesInput.value = '';
+      await refreshDatasets();
+    } catch (err) {
+      setStatus(dsStatus, 'Error: ' + (err.message || err), 'error');
+    }
+  });
+
+  function useDataset(datasetId, datasets) {
+    const ds = (datasets || lastDatasets).find((d) => d.id === datasetId);
+    if (!ds) return;
+    // Reflect the dataset's window in the custom-range inputs so the user can
+    // see what is selected, then mark it as the active identification source.
+    if (ds.data_start_ts != null) {
+      windowStartInput.value = toDatetimeLocal(new Date(ds.data_start_ts * 1000));
+    }
+    if (ds.data_end_ts != null) {
+      windowEndInput.value = toDatetimeLocal(new Date(ds.data_end_ts * 1000));
+    }
+    applyWindowMode('custom');
+    setSelectedDataset(ds.id, ds.name);
+  }
+
+  let lastDatasets = [];
+  async function refreshDatasets() {
+    let datasets = [];
+    try {
+      datasets = await connection.listDatasets();
+    } catch (_) { datasets = []; }
+    lastDatasets = datasets;
+    if (datasets.length === 0) {
+      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet.</span>';
+      return;
+    }
+    const rows = datasets.map((d) => {
+      const roomLabel = d.room_name || (d.room_slug || '—');
+      const span = `${_fmtTs(d.data_start_ts)} → ${_fmtTs(d.data_end_ts)}`;
+      return `
+        <tr>
+          <td>${d.name || '(unnamed)'}</td>
+          <td>${(d.source || '').toUpperCase()}</td>
+          <td>${roomLabel}</td>
+          <td>${span}</td>
+          <td>${d.record_count != null ? d.record_count : '—'}</td>
+          <td>${_fmtDuration(d.duration_s != null ? d.duration_s : (d.data_end_ts - d.data_start_ts))}</td>
+          <td>
+            <button class="btn btn--ghost btn--sm" data-use="${d.id}">Use</button>
+            <button class="btn btn--ghost btn--sm" data-del="${d.id}">Delete</button>
+          </td>
+        </tr>`;
+    }).join('');
+    dsListEl.innerHTML = `
+      <div class="param-history-table-wrapper">
+        <table class="param-history-table">
+          <thead><tr><th>Name</th><th>Source</th><th>Room</th><th>Span</th><th>Records</th><th>Duration</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    dsListEl.querySelectorAll('[data-use]').forEach((btn) => {
+      btn.addEventListener('click', () => useDataset(btn.dataset.use, datasets));
+    });
+    dsListEl.querySelectorAll('[data-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!window.confirm('Delete this dataset? This cannot be undone.')) return;
+        btn.disabled = true;
+        try {
+          await hass.callService('heating_assistant', 'delete_dataset', {
+            dataset_id: btn.dataset.del,
+          });
+          await refreshDatasets();
+        } catch (_) { btn.disabled = false; }
+      });
+    });
+  }
+
+  // Initial population, plus a light periodic refresh so experiment status and
+  // auto-saved datasets appear without a manual reload.
+  refreshExperiments();
+  refreshDatasets();
+  const timer = setInterval(() => {
+    refreshExperiments();
+    refreshDatasets();
+  }, 30000);
+
+  return {
+    destroy() { clearInterval(timer); },
+  };
+}
 
 function formatMass(val) {
   const num = parseFloat(val);

@@ -204,6 +204,15 @@ estimate_parameters_ml:
         number:
           mode: box
           step: 1
+    dataset_id:
+      name: Stored dataset id
+      description: >
+        Optional id of a stored identification dataset to identify from.  Takes
+        precedence over ``window_start``/``window_end`` and ``horizon_hours`` and
+        uses the dataset's permanently snapshotted records.
+      required: false
+      selector:
+        text:
 
 analyze_model_fit:
   name: Analyze model fit
@@ -369,6 +378,15 @@ run_open_loop_simulation:
       example: '{"living_room_heater": 0.85}'
       selector:
         object:
+    dataset_id:
+      name: Stored dataset id
+      description: >
+        Optional id of a stored identification dataset to simulate over.  Takes
+        precedence over the window / horizon and uses the dataset's snapshotted
+        records.
+      required: false
+      selector:
+        text:
 
 compute_loglik_slice:
   name: Compute log-likelihood slice
@@ -514,6 +532,15 @@ run_sysid_simulation:
       example: '{"living_room_heater": 0.85}'
       selector:
         object:
+    dataset_id:
+      name: Stored dataset id
+      description: >
+        Optional id of a stored identification dataset to reconstruct over.
+        Takes precedence over the window / horizon and uses the dataset's
+        snapshotted records.
+      required: false
+      selector:
+        text:
 
 regenerate_dashboard:
   name: Regenerate Lovelace dashboard
@@ -899,6 +926,194 @@ update_room_schedule:
           start: "22:00"
           end: "06:00"
           frost_protection: 12.0
+
+schedule_experiment:
+  name: Schedule identification experiment
+  description: >
+    Schedule a system-identification experiment for one room over a future time
+    window.  While the experiment runs, the controller deliberately excites the
+    room's heaters with an informative signal (PRBS by default) so the recorded
+    temperature response carries enough information to identify the thermal model
+    accurately.  The experiment overrides the comfort schedule for that room
+    during the window (so it can run overnight when the room is unoccupied) while
+    still respecting open-window safety overrides and the global stop switch, and
+    is clamped to the configured min/max temperature band.  When ``auto_save`` is
+    enabled the captured window is stored as a named dataset on completion.
+  fields:
+    room_name:
+      name: Room name
+      description: Name or slug of the room to excite (must match a configured room).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    start:
+      name: Start (UNIX timestamp)
+      description: Experiment window start as a UNIX timestamp [s].
+      required: true
+      selector:
+        number:
+          mode: box
+          step: 1
+    end:
+      name: End (UNIX timestamp)
+      description: Experiment window end as a UNIX timestamp [s] (after start, max 7 days).
+      required: true
+      selector:
+        number:
+          mode: box
+          step: 1
+    name:
+      name: Experiment name
+      description: Optional label used for the auto-saved dataset.
+      required: false
+      example: "Living room overnight step test"
+      selector:
+        text:
+    signal_type:
+      name: Excitation signal
+      description: >
+        Excitation waveform: ``prbs`` (pseudo-random binary sequence — best for
+        identification), ``step`` (single sustained on-step), or ``pulse``
+        (square wave alternating at ``period_s``).
+      required: false
+      default: "prbs"
+      selector:
+        select:
+          options:
+            - "prbs"
+            - "step"
+            - "pulse"
+    amplitude_high:
+      name: High power fraction
+      description: Heater power fraction (0–1) used for the signal's high level.
+      required: false
+      default: 1.0
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.05
+    amplitude_low:
+      name: Low power fraction
+      description: Heater power fraction (0–1) used for the signal's low level.
+      required: false
+      default: 0.0
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.05
+    period_s:
+      name: Switching period
+      description: Switching cadence [s] for PRBS / pulse signals.
+      required: false
+      default: 3600
+      selector:
+        number:
+          min: 60
+          max: 86400
+          step: 60
+          unit_of_measurement: "s"
+    min_temp:
+      name: Minimum temperature
+      description: Frost-protection floor [°C]; heating is forced on below this.
+      required: false
+      default: 12.0
+      selector:
+        number:
+          min: 0
+          max: 25
+          step: 0.5
+          unit_of_measurement: "°C"
+    max_temp:
+      name: Maximum temperature
+      description: Overheat ceiling [°C]; heating is forced off at/above this.
+      required: false
+      default: 26.0
+      selector:
+        number:
+          min: 15
+          max: 40
+          step: 0.5
+          unit_of_measurement: "°C"
+    auto_save:
+      name: Auto-save dataset
+      description: Store the captured window as a named dataset on completion.
+      required: false
+      default: true
+      selector:
+        boolean:
+
+cancel_experiment:
+  name: Cancel identification experiment
+  description: >
+    Cancel a scheduled or running identification experiment (or remove a
+    completed one) by its id.
+  fields:
+    experiment_id:
+      name: Experiment id
+      description: Identifier of the experiment to cancel.
+      required: true
+      selector:
+        text:
+
+create_dataset:
+  name: Store identification dataset
+  description: >
+    Snapshot a custom data window into a named, permanent identification
+    dataset.  The observation records in the window are copied into the
+    integration's own store so the dataset can be referenced for identification
+    indefinitely, even after the rolling history that produced it is pruned.
+  fields:
+    name:
+      name: Dataset name
+      description: Unique, human-readable name for the dataset.
+      required: true
+      example: "Cold snap — living room"
+      selector:
+        text:
+    window_start:
+      name: Window start (UNIX timestamp)
+      description: Start of the data window to capture [s].
+      required: true
+      selector:
+        number:
+          mode: box
+          step: 1
+    window_end:
+      name: Window end (UNIX timestamp)
+      description: End of the data window to capture [s].
+      required: true
+      selector:
+        number:
+          mode: box
+          step: 1
+    room_name:
+      name: Room name
+      description: Optional room the dataset is associated with.
+      required: false
+      example: "living_room"
+      selector:
+        text:
+    notes:
+      name: Notes
+      description: Optional free-text notes describing the dataset.
+      required: false
+      selector:
+        text:
+          multiline: true
+
+delete_dataset:
+  name: Delete identification dataset
+  description: Delete a stored identification dataset by its id.
+  fields:
+    dataset_id:
+      name: Dataset id
+      description: Identifier of the dataset to delete.
+      required: true
+      selector:
+        text:
 
 set_room_comfort_offset:
   name: Set room comfort offset
