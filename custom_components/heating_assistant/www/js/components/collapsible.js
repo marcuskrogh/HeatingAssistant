@@ -13,9 +13,12 @@
  *   sec.setBadge('2 active');            // optional right-aligned status pill
  *   card.appendChild(sec.element);
  *
+ * ``badgeTone`` controls the pill colour: 'neutral' (default, a muted count)
+ * or 'success' (green — e.g. "N active").
+ *
  * Returns { element, header, body, setOpen, isOpen, setBadge }.
  */
-export function createCollapsible({ title = '', open = false, badge = null } = {}) {
+export function createCollapsible({ title = '', open = false, badge = null, badgeTone = 'neutral' } = {}) {
   const element = document.createElement('div');
   element.className = 'ha-collapsible' + (open ? ' ha-collapsible--open' : '');
 
@@ -26,7 +29,7 @@ export function createCollapsible({ title = '', open = false, badge = null } = {
   header.innerHTML = `
     <span class="ha-collapsible__title">${title}</span>
     <span class="ha-collapsible__meta">
-      <span class="ha-collapsible__badge" hidden></span>
+      <span class="ha-collapsible__badge ha-collapsible__badge--${badgeTone}" hidden></span>
       <svg class="ha-collapsible__chevron" width="18" height="18" viewBox="0 0 24 24"
            fill="none" stroke="currentColor" stroke-width="2.2"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
