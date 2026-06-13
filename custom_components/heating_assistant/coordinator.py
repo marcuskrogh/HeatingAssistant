@@ -112,6 +112,7 @@ from .const import (
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
     DEFAULT_COMFORT_OFFSET,
+    EXPERIMENT_RELAXED_COMFORT_OFFSET,
     DEFAULT_ENERGY_PRICE_WEIGHT,
     DEFAULT_PRICE_NET_TARIFF,
     DEFAULT_PRICE_SPOT_SURCHARGE,
@@ -1381,11 +1382,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     else round(float(room.setpoint), 2)
                 )
                 o = float(step_off[i]) if have_traj else comfort_offset
+                # While an experiment governs this step the MPC's comfort corridor
+                # is relaxed wide open (so it doesn't react to the forced input);
+                # don't surface that widened band on the plot — it would zoom the
+                # temperature axis right out — so omit the corridor on those steps.
+                governed = (
+                    exp_steps is not None and i < len(exp_steps) and exp_steps[i]
+                )
+                show_corridor = step_on and not governed
                 entry: Dict[str, Any] = {
                     "time": step_time.isoformat(),
                     "setpoint": s if step_on else None,
-                    "constraint_upper": round(s + o, 2) if step_on else None,
-                    "constraint_lower": round(s - o, 2) if step_on else None,
+                    "constraint_upper": round(s + o, 2) if show_corridor else None,
+                    "constraint_lower": round(s - o, 2) if show_corridor else None,
                     "enabled": step_on,
                 }
                 if temp is not None:
@@ -1399,7 +1408,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # ``heating_schedule[i]`` is the control at now+i·dt; flag it when
                 # an experiment governs that step so the shaded plot region lines
                 # up exactly with the experiment signal.
-                if exp_steps is not None and i < len(exp_steps) and exp_steps[i]:
+                if governed:
                     entry["experiment"] = True
                 if i < n_solar:
                     entry["solar_gain"] = round(
@@ -2195,22 +2204,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # chosen action afterwards.  Only while the controller is engaged.
             if self._system_enabled:
                 experiment_clamps = self._build_experiment_clamps(now)
-                # During the steps an experiment governs, the room's input is
-                # pinned to the excitation signal, so tracking its comfort there
-                # is meaningless — and leaving it on makes the MPC *anticipate*
-                # the experiment (e.g. pre-heat just before it), producing the
-                # odd actions seen right at the experiment border and a
-                # contaminated baseline.  Zero the comfort weight on those steps
-                # so the controller leaves the room alone until the experiment
-                # actually drives it.
-                if control_traj is not None and self._experiment_horizon_steps:
-                    for room_name, mask in self._experiment_horizon_steps.items():
-                        q_seq = control_traj.q_scales.get(room_name)
-                        if q_seq is None:
-                            continue
-                        for k, governed in enumerate(mask):
-                            if governed and k < len(q_seq):
-                                q_seq[k] = 0.0
+                self._relax_experiment_comfort(control_traj)
             else:
                 experiment_clamps = {}
                 self._experiment_active_rooms = set()
@@ -3785,6 +3779,32 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._experiment_active_rooms = active_rooms
         self._experiment_horizon_steps = horizon_steps
         return clamps
+
+    def _relax_experiment_comfort(self, control_traj: Any) -> None:
+        """Neutralise comfort penalties on the steps an experiment governs.
+
+        Over those steps the room's input is pinned to the excitation signal, so
+        penalising its comfort is meaningless — and leaving it on makes the MPC
+        *anticipate* the experiment (aggressively pre-heating just before it),
+        which both produces odd actions at the border and contaminates the
+        baseline.  Both comfort penalties are removed per governed step: the
+        setpoint-tracking weight is zeroed and the soft comfort corridor is opened
+        wide so leaving it costs nothing.  The widened corridor is kept out of the
+        displayed forecast (see :meth:`build_forecast_payload`) so the temperature
+        plot does not zoom out.
+        """
+        if control_traj is None or not self._experiment_horizon_steps:
+            return
+        for room_name, mask in self._experiment_horizon_steps.items():
+            q_seq = control_traj.q_scales.get(room_name)
+            off_seq = control_traj.comfort_offsets.get(room_name)
+            for k, governed in enumerate(mask):
+                if not governed:
+                    continue
+                if q_seq is not None and k < len(q_seq):
+                    q_seq[k] = 0.0
+                if off_seq is not None and k < len(off_seq):
+                    off_seq[k] = EXPERIMENT_RELAXED_COMFORT_OFFSET
 
     def _on_experiment_completed(self, exp: Any) -> None:
         """React to an experiment finishing: auto-save its window as a dataset.

@@ -600,6 +600,12 @@ DEFAULT_EXCITATION_PERIOD_S = 3600.0
 #: typical room's dominant thermal response; the service caps it to never exceed
 #: half the window so a short experiment still gets meaningful excitation.
 DEFAULT_EXPERIMENT_SETTLE_S = 7200.0
+#: Comfort-corridor half-width [°C] applied to a room over the horizon steps an
+#: experiment governs.  The room's input is pinned to the excitation signal on
+#: those steps, so the corridor is opened wide (effectively unbounded) to stop
+#: the MPC penalising — and therefore *anticipating* — the forced excursion.  It
+#: is kept out of the displayed forecast so the temperature plot does not zoom.
+EXPERIMENT_RELAXED_COMFORT_OFFSET = 1000.0
 #: Safety bounds enforced while an experiment runs, regardless of the signal:
 #: heating is forced on below ``min`` (frost protection) and off above ``max``.
 DEFAULT_EXPERIMENT_MIN_TEMP = 12.0
