@@ -2465,14 +2465,16 @@ class HeatingMPCController:
             controller penalises electrical consumption proportional to the
             spot price at each step.
         input_clamps : dict, optional
-            ``{source_name: ndarray (N,)}`` of signed input fractions that the
-            source must take at each horizon step (``NaN`` = unclamped at that
-            step).  When given, the QP's input box bounds for those sources are
-            pinned to the clamp value (clipped to the source's actuation range)
-            over the horizon, so the MPC plans the rest of the house around the
-            prescribed signal and the planned trajectory (and thus the actuator
-            forecast plot) already reflects it.  Used to drive
-            system-identification experiments through the MPC.
+            ``{source_name: ndarray (N,)}`` of signed *power* fractions
+            (``+`` heat / ``-`` cool, as a fraction of capacity) the source must
+            deliver at each horizon step (``NaN`` = unclamped at that step).  Each
+            value is converted to the control input that delivers it (via
+            :meth:`HeatSource.control_for_power_fraction`, inverting the heat
+            pump's smooth sigmoid so the step is linear in delivered power), then
+            the QP's input box bounds for that source are pinned to it over the
+            horizon.  The MPC plans the rest of the house around the prescribed
+            signal and the planned trajectory (and thus the actuator forecast
+            plot) already reflects it.  Used to drive identification experiments.
         run_optimization : bool
             When ``True`` (default) the full MPC optimisation runs.  When
             ``False`` — i.e. the system is stopped — only the CD-EKF state
@@ -2617,6 +2619,7 @@ class HeatingMPCController:
             u_min_seq = np.tile(np.asarray(u_min_abs, dtype=float).reshape(1, -1), (N, 1))
             u_max_seq = np.tile(np.asarray(u_max_abs, dtype=float).reshape(1, -1), (N, 1))
             clamp_mask = np.zeros((N, len(self._sources)), dtype=bool)
+            k_sig = self._system._k_sigmoid
             for j, src in enumerate(self._sources):
                 arr = input_clamps.get(src.name)
                 if arr is None:
@@ -2627,9 +2630,14 @@ class HeatingMPCController:
                     v = arr[k]
                     if np.isnan(v):
                         continue
-                    vv = min(max(float(v), lo), hi)
-                    u_min_seq[k, j] = vv
-                    u_max_seq[k, j] = vv
+                    # The clamp value is a *power* fraction of the source's
+                    # capacity; convert to the control input that delivers it so
+                    # the step is linear in delivered power (inverts the heat
+                    # pump's smooth sigmoid; identity for linear sources).
+                    u_val = src.control_for_power_fraction(float(v), outdoor_temp, k_sig)
+                    u_val = min(max(float(u_val), lo), hi)
+                    u_min_seq[k, j] = u_val
+                    u_max_seq[k, j] = u_val
                     clamp_mask[k, j] = True
             if not clamp_mask.any():
                 u_min_seq = u_max_seq = clamp_mask = None

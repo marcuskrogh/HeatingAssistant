@@ -55,6 +55,11 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // The identification experiment currently exciting this room, or null —
   // refreshed via WebSocket so the climate card can show the in-progress look.
   let activeExperiment = null;
+  // Latest experiment list and this room's forecast block, kept so the plot's
+  // experiment shading can be recomputed (and grid-aligned) whenever either the
+  // experiment list (30 s poll) or the forecast (each MPC solve) changes.
+  let latestExperiments = null;
+  let latestForecastRoom = null;
 
   const nav = document.createElement('button');
   nav.className = 'nav-back';
@@ -243,17 +248,29 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // it to the climate card so it can flip into the "experiment in progress"
   // look. Polled on a slow cadence because the scheduled → running transition
   // happens on a wall-clock boundary that need not coincide with a state event.
+  // Recompute the shaded experiment window on every plot from the latest
+  // experiment list and forecast, snapping the future edge to the MPC step grid
+  // so the shading lines up with the (stepped) actuator signal.
+  function applyExperimentBands() {
+    if (latestExperiments == null) return;
+    const bands = experimentBands(latestExperiments, roomSlug, latestForecastRoom);
+    tempChart.setExperimentBands(bands);
+    powerChart.setExperimentBands(bands);
+    disturbChart.setExperimentBands(bands);
+  }
+
+  function onForecast(forecasts) {
+    latestForecastRoom = forecasts?.rooms?.[roomSlug] || null;
+    applyExperimentBands();
+  }
+
   function refreshExperiment() {
     connection.listExperiments().then((experiments) => {
       if (experiments == null) return; // fetch failed — keep the current state
+      latestExperiments = experiments;
       activeExperiment = findActiveExperiment(experiments, roomSlug);
       climateCard.update({ experiment: activeExperiment });
-      // Shade the window of any scheduled/ongoing experiment on every plot so an
-      // upcoming or in-progress run is obvious across the room-level charts.
-      const bands = experimentBands(experiments, roomSlug);
-      tempChart.setExperimentBands(bands);
-      powerChart.setExperimentBands(bands);
-      disturbChart.setExperimentBands(bands);
+      applyExperimentBands();
     }).catch(() => { /* keep the last-known experiment state on failure */ });
   }
 
@@ -304,6 +321,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     // scale the power gauge so the bar reflects power as a fraction of capacity.
     if (roomForecast?.max_power != null) powerBounds.max = roomForecast.max_power;
     if (roomForecast?.max_cooling_power != null) powerBounds.min = -roomForecast.max_cooling_power;
+    // Same forecast block feeds the experiment-band grid alignment.
+    latestForecastRoom = roomForecast || null;
+    applyExperimentBands();
     paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']));
 
     // Span the price bar over the upcoming price range so the fill shows where
@@ -345,7 +365,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       // this state update.
       refreshSchedule();
 
-      updateChartsFromState(room, newState, connection, tempChart, powerChart, disturbChart, lastRunTs);
+      updateChartsFromState(room, newState, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast);
     },
     destroy() {
       clearInterval(countdownInterval);
@@ -653,7 +673,7 @@ function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHist
   chart.render(datasets, { yMin: outdoorMin, yMax: outdoorMax, y2Min: solarMin, y2Max: solarMax });
 }
 
-function updateChartsFromState(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs) {
+function updateChartsFromState(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast) {
   // Forecast data only changes when the MPC runs; detect that via last_run_ts.
   const currentRunTs = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
   if (currentRunTs === lastRunTs.value) return;
@@ -662,6 +682,8 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
   // Re-fetch forecast data from the backend and update the chart forecast datasets.
   connection.getForecasts().then((forecasts) => {
     if (!forecasts) return;
+    // Re-align the experiment shading to the fresh forecast grid.
+    if (onForecast) onForecast(forecasts);
     const forecastData = forecasts.rooms?.[room.slug]?.forecast || [];
     const priceForecastData = forecasts.price_forecast || [];
 

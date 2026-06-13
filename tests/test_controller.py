@@ -832,20 +832,24 @@ class TestHeatingMPCController:
         )
         assert actions["lr_heater"] == pytest.approx(0.8, abs=1e-3)
 
-    def test_input_clamp_pins_negative_cool_for_reversible_source(self):
-        """A negative clamp (cool phase of a step test) is honoured by the QP for
-        a reversible heat pump, even when the room is below setpoint."""
-        room = Room("living_room", 5e6, 0.05, temperature=18.0, setpoint=21.0)
+    def test_input_clamp_is_linear_in_delivered_power_for_heat_pump(self):
+        """The clamp value is a *power* fraction: a reversible heat pump delivers
+        exactly that fraction of capacity (the sigmoid is inverted), so the step
+        is linear in power — including the negative (cool) direction."""
+        room = Room("living_room", 5e6, 0.05, temperature=21.0, setpoint=21.0)
         model = HouseModel([room])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
-        ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
+        ctrl = HeatingMPCController(model, [hp], horizon=2, dt=900)
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        outdoor = 5.0
+        q_heat = hp.thermal_power(1.0, outdoor)
+        q_cool = abs(hp.cooling_power(outdoor))
 
-        actions = ctrl.compute(
-            outdoor_temp=5.0, now=now,
-            input_clamps={"hp": np.full(3, -0.5)},
-        )
-        assert actions["hp"] == pytest.approx(-0.5, abs=1e-3)
+        for pf, q in [(0.75, q_heat), (0.25, q_heat), (-0.5, q_cool)]:
+            ctrl.compute(outdoor_temp=outdoor, now=now,
+                         input_clamps={"hp": np.full(2, pf)})
+            delivered = ctrl.heating_schedule[0]["living_room"]
+            assert delivered == pytest.approx(pf * q, rel=2e-2)
 
     def test_input_clamp_partial_horizon_zeros_unclamped_disabled_steps(self):
         """With a clamp only on the first step, a disabled source is pinned for
