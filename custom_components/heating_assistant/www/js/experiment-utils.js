@@ -51,6 +51,55 @@ export function findActiveExperiment(experiments, roomSlug, nowMs = Date.now()) 
   return active.reduce((earliest, e) => (e.start_ts < earliest.start_ts ? e : earliest));
 }
 
+/** Instant (UNIX s) at which active excitation stops, ahead of ``end_ts``.
+ *  Mirrors ``Experiment.excitation_end_ts``: a settle/response buffer of
+ *  ``settle_s`` is reserved at the tail, clamped so it never swallows the
+ *  whole window. */
+export function excitationEndTs(exp) {
+  const start = exp.start_ts ?? 0;
+  const end = exp.end_ts ?? 0;
+  const settle = Math.min(Math.max(0, exp.settle_s ?? 0), Math.max(0, end - start));
+  return end - settle;
+}
+
+/** Which phase an active experiment is in at ``now``: 'exciting' during active
+ *  excitation, 'settling' during the post-excitation buffer, or null when the
+ *  experiment is not currently inside its window. */
+export function experimentPhase(exp, nowMs = Date.now()) {
+  const nowS = nowMs / 1000;
+  if (nowS < (exp.start_ts ?? 0) || nowS >= (exp.end_ts ?? 0)) return null;
+  return nowS < excitationEndTs(exp) ? 'exciting' : 'settling';
+}
+
+/** Build shaded-band descriptors for every scheduled or ongoing experiment of a
+ *  room, for overlaying on the room-level plots.  Returns an array of
+ *  ``{ start, end, excitationEnd, label, status }`` with timestamps in **ms**,
+ *  one per non-terminal experiment (so an upcoming run shows before it starts).
+ *  ``experiments`` may be the raw backend list or a per-room index. */
+export function experimentBands(experiments, roomSlug) {
+  let list;
+  if (Array.isArray(experiments)) {
+    list = experiments.filter((e) => e && e.room_slug === roomSlug);
+  } else if (experiments && typeof experiments === 'object') {
+    list = experiments[roomSlug] || [];
+  } else {
+    return [];
+  }
+  const bands = [];
+  for (const e of list) {
+    if (!e || TERMINAL_STATUSES.has(e.status)) continue;
+    if (e.start_ts == null || e.end_ts == null) continue;
+    bands.push({
+      start: e.start_ts * 1000,
+      end: e.end_ts * 1000,
+      excitationEnd: excitationEndTs(e) * 1000,
+      label: e.name && e.name.trim() ? e.name.trim().toUpperCase() : 'EXPERIMENT',
+      status: e.status,
+    });
+  }
+  return bands;
+}
+
 /** Turn an experiment's time window into a progress snapshot at ``now``.
  *  Returns { pct, elapsedS, remainingS, totalS } with pct clamped to 0–100. */
 export function experimentProgress(exp, nowMs = Date.now()) {
@@ -148,5 +197,10 @@ export function paintExperimentProgress(els, exp, nowMs = Date.now()) {
   const { pct, remainingS } = experimentProgress(exp, nowMs);
   els.barFill.style.width = pct.toFixed(1) + '%';
   els.pct.textContent = Math.round(pct) + '%';
-  els.remaining.textContent = formatRemaining(remainingS);
+  // During the settle tail the heaters are released and the room is relaxing,
+  // so flag it rather than implying excitation is still running.
+  const settling = experimentPhase(exp, nowMs) === 'settling';
+  els.remaining.textContent = settling
+    ? `SETTLING · ${formatRemaining(remainingS)}`
+    : formatRemaining(remainingS);
 }

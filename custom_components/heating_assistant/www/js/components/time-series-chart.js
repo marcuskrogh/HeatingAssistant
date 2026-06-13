@@ -88,6 +88,9 @@ export class TimeSeriesChart {
     this._canvas = null;
     this._onResize = null;
     this._onOrientationChange = null;
+    // Shaded identification-experiment window(s) drawn behind the data; kept on
+    // the instance so they survive dataset-only updates and chart re-renders.
+    this._bands = [];
   }
 
   async render(datasets, dynamicLimits) {
@@ -110,8 +113,10 @@ export class TimeSeriesChart {
       type: 'line',
       data: { datasets },
       options,
-      plugins: [nowLinePlugin()],
+      plugins: [experimentBandPlugin(), nowLinePlugin()],
     });
+    // Re-attach any experiment bands set before the chart was rendered.
+    this._chart.$experimentBands = this._bands;
 
     // Force Chart.js to recalculate size after any viewport resize. Clearing the
     // canvas's inline pixel dimensions first lets the parent container report its
@@ -151,6 +156,17 @@ export class TimeSeriesChart {
     if (!this._chart) return;
     this._chart.data.datasets = datasets;
     this._chart.update('none');
+  }
+
+  /** Set the shaded identification-experiment window(s) to overlay on the plot.
+   *  ``bands`` is an array of ``{ start, end, excitationEnd?, label? }`` with
+   *  timestamps in ms.  Persisted so forecast-only updates keep the shading. */
+  setExperimentBands(bands) {
+    this._bands = Array.isArray(bands) ? bands : [];
+    if (this._chart) {
+      this._chart.$experimentBands = this._bands;
+      this._chart.update('none');
+    }
   }
 
   destroy() {
@@ -212,6 +228,83 @@ export class TimeSeriesChart {
 
     return opts;
   }
+}
+
+/** Shade the time span of any scheduled/ongoing identification experiment so an
+ *  upcoming or in-progress run is obvious on every room-level plot.  The bands
+ *  are read from ``chart.$experimentBands`` and drawn behind the data series in
+ *  the brand accent (teal): the active-excitation span is shaded a touch more
+ *  strongly than the trailing settle/response buffer, with dashed edges and a
+ *  label so the window reads clearly without overpowering the traces. */
+function experimentBandPlugin() {
+  // Mirrors the CSS ``--accent`` (#00d4aa) so the overlay matches the design.
+  const FILL_EXCITE = 'rgba(0, 212, 170, 0.10)';
+  const FILL_SETTLE = 'rgba(0, 212, 170, 0.045)';
+  const EDGE = 'rgba(0, 212, 170, 0.5)';
+  const TEXT = 'rgba(0, 212, 170, 0.9)';
+
+  return {
+    id: 'experimentBands',
+    beforeDatasetsDraw(chart) {
+      const bands = chart.$experimentBands;
+      if (!bands || !bands.length) return;
+      const xScale = chart.scales.x;
+      if (!xScale) return;
+      const { ctx, chartArea } = chart;
+      const { top, bottom, left, right } = chartArea;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(left, top, right - left, bottom - top);
+      ctx.clip();
+
+      for (const band of bands) {
+        if (band == null || band.start == null || band.end == null) continue;
+        const xs = xScale.getPixelForValue(band.start);
+        const xe = xScale.getPixelForValue(band.end);
+        if (xe < left || xs > right) continue;  // entirely off-screen
+
+        const x0 = Math.max(xs, left);
+        const x1 = Math.min(xe, right);
+        // Where active excitation gives way to the settle/response buffer.
+        const xSplit = band.excitationEnd != null
+          ? Math.min(Math.max(xScale.getPixelForValue(band.excitationEnd), x0), x1)
+          : x1;
+
+        ctx.fillStyle = FILL_EXCITE;
+        ctx.fillRect(x0, top, Math.max(0, xSplit - x0), bottom - top);
+        if (xSplit < x1) {
+          ctx.fillStyle = FILL_SETTLE;
+          ctx.fillRect(xSplit, top, x1 - xSplit, bottom - top);
+        }
+
+        ctx.strokeStyle = EDGE;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        if (xs >= left && xs <= right) {
+          ctx.beginPath();
+          ctx.moveTo(xs, top);
+          ctx.lineTo(xs, bottom);
+          ctx.stroke();
+        }
+        if (xe >= left && xe <= right) {
+          ctx.beginPath();
+          ctx.moveTo(xe, top);
+          ctx.lineTo(xe, bottom);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = TEXT;
+        ctx.font = '9px system-ui';
+        ctx.textAlign = 'left';
+        const lx = Math.min(Math.max(x0 + 4, left + 4), right - 4);
+        ctx.fillText(band.label || 'EXPERIMENT', lx, top + 10);
+      }
+
+      ctx.restore();
+    },
+  };
 }
 
 function nowLinePlugin() {

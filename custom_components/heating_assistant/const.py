@@ -578,19 +578,27 @@ SERVICE_DELETE_DATASET = "delete_dataset"
 
 #: Excitation signal types a scheduled experiment can apply to a room's heaters
 #: to gather informative system-identification data.
-EXCITATION_PRBS = "prbs"          # pseudo-random binary sequence (best for SI)
-EXCITATION_STEP = "step"          # single on-step held for the whole window
+EXCITATION_STEP = "step"          # single on-step then off — simple, interpretable
+EXCITATION_PRBS = "prbs"          # pseudo-random binary sequence (rich spectrum)
 EXCITATION_PULSE = "pulse"        # square wave alternating high/low at a fixed period
-EXCITATION_TYPES = (EXCITATION_PRBS, EXCITATION_STEP, EXCITATION_PULSE)
+EXCITATION_TYPES = (EXCITATION_STEP, EXCITATION_PRBS, EXCITATION_PULSE)
 
-#: Default excitation parameters.
-DEFAULT_EXCITATION_TYPE = EXCITATION_PRBS
+#: Default excitation parameters.  A *step* is the default: paired with the
+#: settle buffer below it heats the room, then releases so the captured window
+#: contains both the rise and the relaxation — the simplest informative test.
+DEFAULT_EXCITATION_TYPE = EXCITATION_STEP
 #: High / low heater power fractions (0–1) used by the excitation signal.
 DEFAULT_EXCITATION_HIGH = 1.0
 DEFAULT_EXCITATION_LOW = 0.0
 #: Switching period [s] for PRBS / pulse signals.  One hour gives a good spread
 #: of excitation energy across the thermal time constants of a typical room.
 DEFAULT_EXCITATION_PERIOD_S = 3600.0
+#: Settle / response buffer [s]: active excitation stops this long *before* the
+#: window ends, leaving the heaters at their low level so the heater's influence
+#: is absorbed by the room within the captured window.  Two hours covers a
+#: typical room's dominant thermal response; the service caps it to never exceed
+#: half the window so a short experiment still gets meaningful excitation.
+DEFAULT_EXPERIMENT_SETTLE_S = 7200.0
 #: Safety bounds enforced while an experiment runs, regardless of the signal:
 #: heating is forced on below ``min`` (frost protection) and off above ``max``.
 DEFAULT_EXPERIMENT_MIN_TEMP = 12.0
