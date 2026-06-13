@@ -1199,3 +1199,109 @@ set_room_comfort_offset:
           max: 5.0
           step: 0.1
           unit_of_measurement: "°C"
+
+update_ui_settings:
+  name: Update dashboard display settings
+  description: >
+    Update the industrial dashboard plot windows (history and forecast horizon)
+    from the Configuration page. These affect plotting only, not the controller.
+  fields:
+    plot_history_hours:
+      name: Plot history window
+      description: Hours of measured history shown on room plots.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 168
+          step: 1
+          unit_of_measurement: "h"
+    plot_forecast_hours:
+      name: Plot forecast horizon
+      description: >
+        Hours of forecast shown on room plots. 0 matches the controller horizon;
+        larger values extend the plot past it by holding the final actuation flat.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 168
+          step: 1
+          unit_of_measurement: "h"
+
+update_rooms:
+  name: Update rooms
+  description: >
+    Replace the configured room list from the Configuration page. This restarts
+    the integration so the new model takes effect.
+  fields:
+    rooms:
+      name: Rooms
+      description: Full list of room configuration objects.
+      required: true
+      selector:
+        object:
+
+update_heat_sources:
+  name: Update heat sources
+  description: >
+    Replace the configured heat-source list from the Configuration page. This
+    restarts the integration so the new model takes effect.
+  fields:
+    heat_sources:
+      name: Heat sources
+      description: Full list of heat-source configuration objects.
+      required: true
+      selector:
+        object:
+
+update_system_config:
+  name: Update environment and site
+  description: >
+    Update the environment sensor entities (outdoor temperature, weather, solar
+    irradiance, electricity price) and site location from the Configuration page.
+  fields:
+    outdoor_temp_entity:
+      name: Outdoor temperature entity
+      description: Sensor reporting outdoor air temperature. Empty clears it.
+      required: false
+      selector:
+        text:
+    weather_entity:
+      name: Weather entity
+      description: Weather entity used for the outdoor forecast. Empty clears it.
+      required: false
+      selector:
+        text:
+    solar_radiation_entity:
+      name: Solar irradiance entity
+      description: Sensor reporting GHI in W/m². Empty clears it.
+      required: false
+      selector:
+        text:
+    price_entity:
+      name: Electricity price entity
+      description: Sensor reporting hourly electricity price. Empty clears it.
+      required: false
+      selector:
+        text:
+    latitude:
+      name: Latitude
+      description: Site latitude for the solar-position model.
+      required: false
+      selector:
+        number:
+          min: -90
+          max: 90
+          step: 0.0001
+          mode: box
+    longitude:
+      name: Longitude
+      description: Site longitude for the solar-position model.
+      required: false
+      selector:
+        number:
+          min: -180
+          max: 180
+          step: 0.0001
+          mode: box

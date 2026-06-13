@@ -313,10 +313,16 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   refreshExperiment();
   const experimentInterval = setInterval(refreshExperiment, 30000);
 
+  // Plot display settings (Configuration → Display). historyHours sizes the
+  // measured-history window; forecastHours requests a plot prediction horizon
+  // that may extend past the controller horizon (0 = match controller horizon).
+  // Defaults match the backend until the WS fetch below resolves.
+  const plotSettings = { historyHours: 12, forecastHours: 0 };
+
   // lastRunTs tracks the MPC solve timestamp; when it changes we know new
   // forecast data is available and re-fetch via the WS endpoint.
   const lastRunTs = { value: null };
-  loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, (roomForecast, priceForecast) => {
+  const onChartsReady = (roomForecast, priceForecast) => {
     // The forecast carries this room's heating/cooling capacity — use it to
     // scale the power gauge so the bar reflects power as a fraction of capacity.
     if (roomForecast?.max_power != null) powerBounds.max = roomForecast.max_power;
@@ -336,6 +342,20 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       priceBounds.max = Math.max(...prices);
     }
     paintPriceGauge(current);
+  };
+
+  // Resolve display settings before the first chart load so the history window
+  // and forecast horizon honour the user's Configuration choices. Falls back to
+  // the defaults above if the fetch fails.
+  connection.getUiSettings().then((s) => {
+    if (s) {
+      const h = Number(s.plot_history_hours);
+      if (Number.isFinite(h) && h > 0) plotSettings.historyHours = h;
+      const f = Number(s.plot_forecast_hours);
+      if (Number.isFinite(f)) plotSettings.forecastHours = f;
+    }
+  }).catch(() => { /* keep defaults */ }).then(() => {
+    loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, plotSettings, onChartsReady);
   });
 
   const countdownInterval = setInterval(() => countdown.tick(latestState), 1000);
@@ -365,7 +385,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       // this state update.
       refreshSchedule();
 
-      updateChartsFromState(room, newState, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast);
+      updateChartsFromState(room, newState, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast, plotSettings);
     },
     destroy() {
       clearInterval(countdownInterval);
@@ -378,7 +398,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   };
 }
 
-async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onPowerBounds) {
+async function loadChartsData(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, plotSettings, onPowerBounds) {
   const tempFilteredEntity = room.entities['temperature_filtered'];
   const tempMeasuredEntity = room.entities['temperature_measured'];
   const setpointEntity = room.entities['setpoint'];
@@ -401,12 +421,13 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     priceEntity,
   ].filter(Boolean);
 
-  const historyHours = 12;
+  const historyHours = (plotSettings && plotSettings.historyHours) || 12;
+  const forecastHours = (plotSettings && plotSettings.forecastHours) || 0;
   const windowStart = Date.now() - historyHours * 3600 * 1000;
 
   const [history, forecasts] = await Promise.all([
     connection.getHistory(historyEntities, historyHours),
-    connection.getForecasts(),
+    connection.getForecasts(forecastHours),
   ]);
 
   // Seed lastRunTs so the first state-change event that matches the initial
@@ -673,14 +694,15 @@ function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHist
   chart.render(datasets, { yMin: outdoorMin, yMax: outdoorMax, y2Min: solarMin, y2Max: solarMax });
 }
 
-function updateChartsFromState(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast) {
+function updateChartsFromState(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast, plotSettings) {
   // Forecast data only changes when the MPC runs; detect that via last_run_ts.
   const currentRunTs = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
   if (currentRunTs === lastRunTs.value) return;
   lastRunTs.value = currentRunTs;
 
+  const forecastHours = (plotSettings && plotSettings.forecastHours) || 0;
   // Re-fetch forecast data from the backend and update the chart forecast datasets.
-  connection.getForecasts().then((forecasts) => {
+  connection.getForecasts(forecastHours).then((forecasts) => {
     if (!forecasts) return;
     // Re-align the experiment shading to the fresh forecast grid.
     if (onForecast) onForecast(forecasts);

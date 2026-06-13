@@ -135,6 +135,10 @@ from .const import (
     DEFAULT_SIGMA_W,
     CONF_IDENTIFICATION_HORIZON_HOURS,
     DEFAULT_IDENTIFICATION_HORIZON_HOURS,
+    CONF_PLOT_HISTORY_HOURS,
+    CONF_PLOT_FORECAST_HOURS,
+    DEFAULT_PLOT_HISTORY_HOURS,
+    DEFAULT_PLOT_FORECAST_HOURS,
     DEFAULT_TERMINAL_WEIGHT,
     DEFAULT_IDLE_OFFSET,
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
@@ -419,6 +423,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_WINDOW_OPEN_DEBOUNCE,
         CONF_WINDOW_OPEN_CLOSE_SETTLE,
         CONF_WINDOW_OPEN_Q_INFLATION,
+        CONF_PRICE_ENTITY,
+        CONF_PLOT_HISTORY_HOURS,
+        CONF_PLOT_FORECAST_HOURS,
     }
 
     def __init__(
@@ -497,6 +504,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             options.get(
                 CONF_IDENTIFICATION_HORIZON_HOURS,
                 data.get(CONF_IDENTIFICATION_HORIZON_HOURS, DEFAULT_IDENTIFICATION_HORIZON_HOURS),
+            )
+        )
+        # Industrial-panel plot display settings (Configuration → Display).
+        # These never affect the controller — only how the custom dashboard
+        # renders history / forecast windows.  ``plot_forecast_hours == 0``
+        # means "use the full controller horizon" (the historical behaviour).
+        self._plot_history_hours: float = float(
+            options.get(
+                CONF_PLOT_HISTORY_HOURS,
+                data.get(CONF_PLOT_HISTORY_HOURS, DEFAULT_PLOT_HISTORY_HOURS),
+            )
+        )
+        self._plot_forecast_hours: float = float(
+            options.get(
+                CONF_PLOT_FORECAST_HOURS,
+                data.get(CONF_PLOT_FORECAST_HOURS, DEFAULT_PLOT_FORECAST_HOURS),
             )
         )
         # Most-recently identified heater power-scales from an ML estimation run
@@ -1194,6 +1217,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._pending_runtime_reconfiguration.clear()
         rebuild_controller = False
 
+        if CONF_PRICE_ENTITY in pending:
+            self._price_entity = (str(pending.get(CONF_PRICE_ENTITY) or "") or None)
+        if CONF_PLOT_HISTORY_HOURS in pending:
+            self._plot_history_hours = float(
+                pending.get(CONF_PLOT_HISTORY_HOURS, self._plot_history_hours)
+            )
+        if CONF_PLOT_FORECAST_HOURS in pending:
+            self._plot_forecast_hours = float(
+                pending.get(CONF_PLOT_FORECAST_HOURS, self._plot_forecast_hours)
+            )
         if CONF_OUTDOOR_TEMP_ENTITY in pending:
             self._outdoor_entity = str(pending.get(CONF_OUTDOOR_TEMP_ENTITY, ""))
         if CONF_WEATHER_ENTITY in pending:
@@ -1298,7 +1331,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         return self._sources_by_room.get(room_name, [])
 
     def build_forecast_payload(
-        self, room_names: Optional[List[str]] = None
+        self,
+        room_names: Optional[List[str]] = None,
+        plot_forecast_steps: Optional[int] = None,
     ) -> dict:
         """Build the full forecast payload for WebSocket delivery.
 
@@ -1306,6 +1341,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         forecasts.  This is the authoritative source used by the custom
         ``heating_assistant/get_forecasts`` WS command; sensor attributes only
         keep lightweight metadata to stay under HA Recorder's 16 KB limit.
+
+        ``plot_forecast_steps`` lets the dashboard request a plot horizon that
+        differs from the controller (MPC) horizon.  This is purely a *display*
+        horizon and never changes the control problem:
+
+        * ``None`` (default) → use the full controller horizon (legacy
+          behaviour).
+        * ``<= len(predictions)`` → truncate to that many steps.
+        * ``> len(predictions)`` → extend past the controller horizon by
+          **holding the final actuation flat** and simulating the thermal
+          model forward, so the plotted trajectory continues smoothly.  The
+          extended steps are flagged with ``"extended": True``.
         """
         from .dashboard import slugify as _slugify
 
@@ -1321,6 +1368,52 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         linearised_predictions = self.linearised_predictions
         price_forecast = self.price_forecast or []
         traj = getattr(self, "_control_trajectory", None)
+
+        # Resolve the requested display horizon and precompute the (house-wide)
+        # forward simulation used to extend the plot beyond the MPC horizon.
+        n_pred = len(predictions)
+        n_outdoor_all = len(outdoor_forecast)
+        if plot_forecast_steps is None:
+            target_steps = n_pred
+        else:
+            target_steps = max(0, int(plot_forecast_steps))
+        main_n = min(target_steps, n_pred)
+        # Extension needs a base trajectory to simulate forward from; with no
+        # controller predictions yet there is nothing to hold flat.
+        extra = max(0, target_steps - n_pred) if n_pred > 0 else 0
+
+        extended_predictions: List[Dict[str, float]] = []
+        outdoor_ext: List[float] = []
+        last_heat_step: Dict[str, float] = {}
+        last_solar_step: Dict[str, float] = {}
+        if extra > 0 and n_pred > 0:
+            last_heat_step = dict(heating_schedule[-1]) if heating_schedule else {}
+            last_solar_step = dict(solar_forecast[-1]) if solar_forecast else {}
+            last_outdoor = (
+                outdoor_forecast[-1] if outdoor_forecast
+                else (self.outdoor_temp if self.outdoor_temp is not None else 0.0)
+            )
+            for k in range(extra):
+                idx = n_pred + k
+                outdoor_ext.append(
+                    outdoor_forecast[idx] if idx < n_outdoor_all else last_outdoor
+                )
+            try:
+                extended_predictions = self.model.predict(
+                    horizon=extra,
+                    dt=dt,
+                    heat_schedule=[last_heat_step] * extra,
+                    outdoor_temps=outdoor_ext,
+                    solar_gain_schedule=[last_solar_step] * extra,
+                    initial_temps=predictions[-1],
+                )
+            except Exception:  # pragma: no cover - defensive: never break the plot
+                _LOGGER.debug(
+                    "Forecast plot extension failed; showing controller horizon only",
+                    exc_info=True,
+                )
+                extended_predictions = []
+                extra = 0
 
         rooms_payload: dict = {}
         for room_name in room_names:
@@ -1368,7 +1461,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             n_solar = len(solar_forecast)
             n_outdoor = len(outdoor_forecast)
             n_lin = len(linearised_predictions)
-            for i, pred in enumerate(predictions):
+            for i in range(main_n):
+                pred = predictions[i]
                 temp = pred.get(room_name)
                 step_time = now + timedelta(seconds=dt * (i + 1))
                 have_traj = (
@@ -1422,6 +1516,53 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         entry["linearised_temperature"] = round(lin_temp, 2)
                 forecast.append(entry)
 
+            # Plot horizon extends past the controller horizon: hold the final
+            # actuation (heating power, setpoint, comfort band) flat and use the
+            # forward-simulated temperatures from ``extended_predictions``.
+            if extra > 0:
+                if step_sp is not None and len(step_sp) > 0:
+                    last_s = round(float(step_sp[-1]), 2)
+                    last_o = (
+                        float(step_off[-1])
+                        if step_off is not None and len(step_off) > 0
+                        else comfort_offset
+                    )
+                else:
+                    last_s = round(float(room.setpoint), 2)
+                    last_o = comfort_offset
+                last_on = (
+                    bool(step_enabled[-1])
+                    if step_enabled is not None and len(step_enabled) > 0
+                    else now_enabled
+                )
+                last_power = (
+                    round(last_heat_step.get(room_name, 0.0), 1)
+                    if heating_schedule else None
+                )
+                last_solar_room = round(last_solar_step.get(room_name, 0.0), 1)
+                for k in range(extra):
+                    step_time = now + timedelta(seconds=dt * (n_pred + k + 1))
+                    entry = {
+                        "time": step_time.isoformat(),
+                        "setpoint": last_s if last_on else None,
+                        "constraint_upper": round(last_s + last_o, 2) if last_on else None,
+                        "constraint_lower": round(last_s - last_o, 2) if last_on else None,
+                        "enabled": last_on,
+                        "extended": True,
+                    }
+                    if k < len(extended_predictions):
+                        t = extended_predictions[k].get(room_name)
+                        if t is not None:
+                            t_r = round(float(t), 2)
+                            trajectory.append(t_r)
+                            entry["temperature"] = t_r
+                    if last_power is not None:
+                        entry["heating_power"] = last_power
+                    entry["solar_gain"] = last_solar_room
+                    if k < len(outdoor_ext):
+                        entry["outdoor_temp"] = round(outdoor_ext[k], 2)
+                    forecast.append(entry)
+
             # Heating and cooling bounds are asymmetric: a heat pump's cooling
             # capacity is derived from its electrical input × cooling COP, which
             # differs from the rated thermal heating output.  Expose both so the
@@ -1441,13 +1582,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "setpoint": now_sp,
                 "comfort_offset": comfort_offset,
                 "horizon_steps": len(predictions),
+                "plot_horizon_steps": target_steps,
                 "step_seconds": dt,
                 "horizon_minutes": round(len(predictions) * dt / 60, 1),
                 "max_power": max_power if max_power > 0 else None,
                 "max_cooling_power": max_cooling_power if max_cooling_power > 0 else None,
             }
 
-        # Outdoor forecast
+        # Outdoor forecast — limited to the display horizon, then held flat for
+        # any extension steps so the disturbance plot spans the full window.
         outdoor_data: List[Dict[str, Any]] = [{
             "time": now.isoformat(),
             "outdoor_temp": (
@@ -1455,11 +1598,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 else round(self.outdoor_temp, 2)
             ),
         }]
-        for i, temp in enumerate(outdoor_forecast):
+        for i in range(min(main_n, n_outdoor_all)):
             step_time = now + timedelta(seconds=dt * (i + 1))
             outdoor_data.append({
                 "time": step_time.isoformat(),
-                "outdoor_temp": round(temp, 2),
+                "outdoor_temp": round(outdoor_forecast[i], 2),
+            })
+        for k in range(len(outdoor_ext)):
+            step_time = now + timedelta(seconds=dt * (n_pred + k + 1))
+            outdoor_data.append({
+                "time": step_time.isoformat(),
+                "outdoor_temp": round(outdoor_ext[k], 2),
             })
 
         # Price forecast

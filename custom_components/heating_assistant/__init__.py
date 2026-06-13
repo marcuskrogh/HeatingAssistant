@@ -208,6 +208,24 @@ from .const import (
     UPDATE_INTERVAL,
     UI_REFRESH_INTERVAL,
 )
+from .const import (
+    CONF_ENVELOPE_TIGHTNESS,
+    CONF_GROUND_ALBEDO,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_NET_TARIFF,
+    CONF_PRICE_SPOT_SURCHARGE,
+    CONF_PLOT_HISTORY_HOURS,
+    CONF_PLOT_FORECAST_HOURS,
+    CONF_SOURCE_HVAC_MODE,
+    DEFAULT_ENVELOPE_TIGHTNESS,
+    DEFAULT_PLOT_HISTORY_HOURS,
+    DEFAULT_PLOT_FORECAST_HOURS,
+    DEFAULT_SOURCE_HVAC_MODE,
+    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION,
+    SOURCE_HVAC_MODE_COOL,
+    SOURCE_HVAC_MODE_HEAT,
+    SOURCE_HVAC_MODE_HEAT_COOL,
+)
 from .coordinator import HeatingAssistantCoordinator
 from .yaml_merge import MergedEntry as _MergedEntry, merge_yaml_into_entry_data as _merge_yaml_into_entry_data
 
@@ -418,6 +436,14 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_WINDOW_OPEN_Q_INFLATION,
                     default=DEFAULT_WINDOW_OPEN_Q_INFLATION,
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=1000.0)),
+                vol.Optional(
+                    CONF_PLOT_HISTORY_HOURS,
+                    default=DEFAULT_PLOT_HISTORY_HOURS,
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=168.0)),
+                vol.Optional(
+                    CONF_PLOT_FORECAST_HOURS,
+                    default=DEFAULT_PLOT_FORECAST_HOURS,
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=168.0)),
             }
         )
     },
@@ -540,7 +566,14 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_controller_config)
 
     @websocket_api.websocket_command(
-        {vol.Required("type"): "heating_assistant/get_forecasts"}
+        {
+            vol.Required("type"): "heating_assistant/get_forecasts",
+            # Optional display horizon (hours) requested by the dashboard.  When
+            # absent or 0 the full controller horizon is used; when larger than
+            # the controller horizon the final actuation is held flat and the
+            # trajectory is simulated forward (see build_forecast_payload).
+            vol.Optional("plot_forecast_hours"): vol.Coerce(float),
+        }
     )
     @websocket_api.async_response
     async def ws_get_forecasts(
@@ -554,13 +587,132 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
         """
         try:
             coordinator = _get_coordinator(hass)
-            payload = coordinator.build_forecast_payload()
+            plot_hours = msg.get("plot_forecast_hours")
+            plot_steps: Optional[int] = None
+            if plot_hours is not None and float(plot_hours) > 0:
+                dt = coordinator.dt or DEFAULT_UPDATE_INTERVAL
+                import math
+                plot_steps = max(1, math.ceil(float(plot_hours) * 3600.0 / float(dt)))
+            payload = coordinator.build_forecast_payload(
+                plot_forecast_steps=plot_steps
+            )
             connection.send_result(msg["id"], payload)
         except Exception as err:
             _LOGGER.error("Heating Assistant: get_forecasts WS failed: %s", err)
             connection.send_error(msg["id"], "forecasts_fetch_failed", str(err))
 
     websocket_api.async_register_command(hass, ws_get_forecasts)
+
+    @websocket_api.websocket_command(
+        {vol.Required("type"): "heating_assistant/get_ui_settings"}
+    )
+    @websocket_api.async_response
+    async def ws_get_ui_settings(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return the industrial-panel display settings (plot windows)."""
+        try:
+            c = _get_coordinator(hass)
+            connection.send_result(
+                msg["id"],
+                {
+                    "ui_settings": {
+                        CONF_PLOT_HISTORY_HOURS: float(
+                            getattr(c, "_plot_history_hours", DEFAULT_PLOT_HISTORY_HOURS)
+                        ),
+                        CONF_PLOT_FORECAST_HOURS: float(
+                            getattr(c, "_plot_forecast_hours", DEFAULT_PLOT_FORECAST_HOURS)
+                        ),
+                    }
+                },
+            )
+        except Exception as err:
+            _LOGGER.error("Heating Assistant: get_ui_settings WS failed: %s", err)
+            connection.send_error(msg["id"], "ui_settings_fetch_failed", str(err))
+
+    websocket_api.async_register_command(hass, ws_get_ui_settings)
+
+    @websocket_api.websocket_command(
+        {vol.Required("type"): "heating_assistant/get_model_config"}
+    )
+    @websocket_api.async_response
+    async def ws_get_model_config(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Return the full editable model configuration for the Configuration UI.
+
+        Reads the live config entry (options shadowing data, matching the
+        coordinator's precedence) so the dashboard always edits the values that
+        are actually in force.  Returns the rooms list, heat-source list, the
+        environment/system entities, the display settings, and the enum choices
+        used to populate dropdowns.
+        """
+        try:
+            c = _get_coordinator(hass)
+            entry = hass.config_entries.async_get_entry(c._entry.entry_id)
+            data = dict(entry.data) if entry else {}
+            options = dict(entry.options) if entry else {}
+
+            def _merged(key, default=None):
+                if key in options:
+                    return options[key]
+                return data.get(key, default)
+
+            rooms = _merged(CONF_ROOMS, []) or []
+            # Heat sources follow the coordinator's data-first precedence.
+            sources = data.get(CONF_HEAT_SOURCES) or options.get(CONF_HEAT_SOURCES) or []
+
+            system = {
+                CONF_OUTDOOR_TEMP_ENTITY: _merged(CONF_OUTDOOR_TEMP_ENTITY) or "",
+                CONF_WEATHER_ENTITY: _merged(CONF_WEATHER_ENTITY) or "",
+                CONF_SOLAR_RADIATION_ENTITY: _merged(CONF_SOLAR_RADIATION_ENTITY) or "",
+                CONF_PRICE_ENTITY: _merged(CONF_PRICE_ENTITY) or "",
+                CONF_LATITUDE: _merged(CONF_LATITUDE, hass.config.latitude),
+                CONF_LONGITUDE: _merged(CONF_LONGITUDE, hass.config.longitude),
+            }
+
+            ui = {
+                CONF_PLOT_HISTORY_HOURS: float(
+                    _merged(CONF_PLOT_HISTORY_HOURS, DEFAULT_PLOT_HISTORY_HOURS)
+                ),
+                CONF_PLOT_FORECAST_HOURS: float(
+                    _merged(CONF_PLOT_FORECAST_HOURS, DEFAULT_PLOT_FORECAST_HOURS)
+                ),
+            }
+
+            enums = {
+                "floor_types": list(FLOOR_TYPE_DEFAULTS.keys()),
+                "facade_colours": list(FACADE_COLOUR_TO_ABSORPTANCE.keys()),
+                "solar_exposures": list(SOLAR_EXPOSURE_TO_APERTURE.keys()),
+                "envelope_tightness": list(
+                    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION.keys()
+                ),
+                "envelope_tightness_map": dict(
+                    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION
+                ),
+                "source_types": [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP],
+                "hvac_modes": [
+                    SOURCE_HVAC_MODE_HEAT,
+                    SOURCE_HVAC_MODE_COOL,
+                    SOURCE_HVAC_MODE_HEAT_COOL,
+                ],
+            }
+
+            connection.send_result(
+                msg["id"],
+                {
+                    "rooms": rooms,
+                    "heat_sources": sources,
+                    "system": system,
+                    "ui_settings": ui,
+                    "enums": enums,
+                },
+            )
+        except Exception as err:
+            _LOGGER.error("Heating Assistant: get_model_config WS failed: %s", err)
+            connection.send_error(msg["id"], "model_config_fetch_failed", str(err))
+
+    websocket_api.async_register_command(hass, ws_get_model_config)
 
     @websocket_api.websocket_command(
         {
@@ -936,7 +1088,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=58",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=59",
                     "embed_iframe": False,
                 }
             },
@@ -2416,6 +2568,142 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional(CONF_WINDOW_OPEN_DEBOUNCE): vol.Coerce(int),
                 vol.Optional(CONF_WINDOW_OPEN_CLOSE_SETTLE): vol.Coerce(int),
                 vol.Optional(CONF_WINDOW_OPEN_Q_INFLATION): vol.Coerce(float),
+            }
+        ),
+    )
+
+    # ------------------------------------------------------------------
+    # Configuration page services (industrial UI "Configuration" menu)
+    # ------------------------------------------------------------------
+
+    async def handle_update_ui_settings(call: ServiceCall) -> None:
+        """Persist industrial-panel display settings (plot history / horizon)."""
+        coordinator = _get_coordinator(hass)
+        updates = {
+            k: v
+            for k, v in call.data.items()
+            if k in (CONF_PLOT_HISTORY_HOURS, CONF_PLOT_FORECAST_HOURS)
+        }
+        if not updates:
+            return
+        _persist_tuning_updates(hass, coordinator, updates)
+        coordinator.apply_tuning_updates(updates)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_ui_settings",
+        handle_update_ui_settings,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_PLOT_HISTORY_HOURS): vol.All(
+                    vol.Coerce(float), vol.Range(min=1.0, max=168.0)
+                ),
+                vol.Optional(CONF_PLOT_FORECAST_HOURS): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0, max=168.0)
+                ),
+            }
+        ),
+    )
+
+    def _write_entry_config(updates: Dict[str, Any]) -> None:
+        """Write ``updates`` to both entry.data and entry.options.
+
+        Writing to both stores keeps the coordinator's options-first reads
+        consistent across restarts.  The registered update-listener reloads the
+        integration when a structural key (rooms / heat sources) changes and
+        applies the rest in-place.
+        """
+        coordinator = _get_coordinator(hass)
+        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
+        if entry is None:
+            return
+        new_data = {**dict(entry.data), **updates}
+        new_options = {**dict(entry.options), **updates}
+        hass.config_entries.async_update_entry(
+            entry, data=new_data, options=new_options
+        )
+
+    async def handle_update_rooms(call: ServiceCall) -> None:
+        """Replace the configured room list (triggers an integration reload)."""
+        rooms = call.data["rooms"]
+        _write_entry_config({CONF_ROOMS: rooms})
+
+    # Allow extra keys so a stored room/source dict carrying fields outside the
+    # canonical schema (e.g. an identified ``solar_scale``) round-trips through
+    # the Configuration UI without being rejected.
+    _ROOM_SERVICE_SCHEMA = (
+        _ROOM_SCHEMA.extend({}, extra=vol.ALLOW_EXTRA)
+        if hasattr(_ROOM_SCHEMA, "extend") else _ROOM_SCHEMA
+    )
+    _SOURCE_SERVICE_SCHEMA = (
+        _SOURCE_SCHEMA.extend({}, extra=vol.ALLOW_EXTRA)
+        if hasattr(_SOURCE_SCHEMA, "extend") else _SOURCE_SCHEMA
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_rooms",
+        handle_update_rooms,
+        schema=vol.Schema({vol.Required(CONF_ROOMS): [_ROOM_SERVICE_SCHEMA]}),
+    )
+
+    async def handle_update_heat_sources(call: ServiceCall) -> None:
+        """Replace the configured heat-source list (triggers a reload)."""
+        sources = call.data["heat_sources"]
+        _write_entry_config({CONF_HEAT_SOURCES: sources})
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_heat_sources",
+        handle_update_heat_sources,
+        schema=vol.Schema({vol.Required(CONF_HEAT_SOURCES): [_SOURCE_SERVICE_SCHEMA]}),
+    )
+
+    async def handle_update_system_config(call: ServiceCall) -> None:
+        """Update environment entities and site location from the dashboard.
+
+        Entity keys are applied in-place by the coordinator's runtime
+        reconfiguration; an empty string clears the entity.
+        """
+        coordinator = _get_coordinator(hass)
+        _entity_keys = (
+            CONF_OUTDOOR_TEMP_ENTITY,
+            CONF_WEATHER_ENTITY,
+            CONF_SOLAR_RADIATION_ENTITY,
+            CONF_PRICE_ENTITY,
+        )
+        updates: Dict[str, Any] = {}
+        for key in _entity_keys:
+            if key in call.data:
+                # Normalise to "" (cleared) rather than None so the coordinator's
+                # str() coercion never produces the literal string "None".
+                updates[key] = (call.data.get(key) or "").strip()
+        for key in (CONF_LATITUDE, CONF_LONGITUDE):
+            if key in call.data:
+                updates[key] = float(call.data[key])
+        if not updates:
+            return
+        _persist_tuning_updates(hass, coordinator, updates)
+        coordinator.apply_tuning_updates(updates)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_system_config",
+        handle_update_system_config,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): cv.string,
+                vol.Optional(CONF_WEATHER_ENTITY): cv.string,
+                vol.Optional(CONF_SOLAR_RADIATION_ENTITY): cv.string,
+                vol.Optional(CONF_PRICE_ENTITY): cv.string,
+                vol.Optional(CONF_LATITUDE): vol.All(
+                    vol.Coerce(float), vol.Range(min=-90.0, max=90.0)
+                ),
+                vol.Optional(CONF_LONGITUDE): vol.All(
+                    vol.Coerce(float), vol.Range(min=-180.0, max=180.0)
+                ),
             }
         ),
     )

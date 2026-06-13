@@ -3172,3 +3172,166 @@ input[type="time"] {
     justify-content: flex-end;
   }
 }
+
+/* ===========================================================================
+   Configuration page
+   ======================================================================== */
+
+.config-section {
+  margin-bottom: 20px;
+}
+
+.config-section__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.config-section__desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 16px 0;
+}
+
+/* Landing cards */
+.config-landing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.config-landing-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.config-landing-card__icon {
+  font-size: 28px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.config-landing-card__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.config-landing-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.config-landing-card__desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.config-landing-card__chevron {
+  font-size: 24px;
+  color: var(--text-dim);
+  flex: 0 0 auto;
+}
+
+/* List cards (rooms / sources) */
+.config-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.config-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+
+.config-list-card__name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.config-list-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.config-list-card .config-landing-card__chevron {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.config-empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+/* Add/remove list editor (windows, connections, sensors) */
+.config-list-editor {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.config-list-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.config-list-editor__title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.config-list-editor__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.config-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.config-item-row > .config-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.config-item-row .schedule-form__delete {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
+.config-select {
+  cursor: pointer;
+}

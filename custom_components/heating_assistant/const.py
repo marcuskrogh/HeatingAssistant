@@ -440,6 +440,20 @@ CONF_WINDOW_OPEN_DEBOUNCE = "window_open_debounce"            # seconds sensor m
 CONF_WINDOW_OPEN_CLOSE_SETTLE = "window_open_close_settle"    # seconds sensors must stay off before leaving open-state
 CONF_WINDOW_OPEN_Q_INFLATION = "window_open_q_inflation"      # covariance multiplier for EKF process noise while room is open
 
+# ---------------------------------------------------------------------------
+# UI / dashboard display settings (industrial panel "Configuration" page)
+# ---------------------------------------------------------------------------
+# These control how the custom industrial dashboard renders plots; they have
+# no effect on the controller itself.  The plot prediction horizon is
+# deliberately decoupled from the MPC ``CONF_HORIZON``: when the plot horizon
+# extends beyond the controller horizon, the final actuation is held flat and
+# the temperature trajectory is simulated forward (see
+# ``coordinator.build_forecast_payload``).
+CONF_PLOT_HISTORY_HOURS = "plot_history_hours"    # hours of measured history shown on room plots
+CONF_PLOT_FORECAST_HOURS = "plot_forecast_hours"  # hours of forecast shown on room plots (0 = match controller horizon)
+DEFAULT_PLOT_HISTORY_HOURS = 12.0
+DEFAULT_PLOT_FORECAST_HOURS = 0.0                 # 0 = auto: use the full controller horizon
+
 # Electricity price (Nord Pool / Tibber / any hourly price sensor)
 CONF_PRICE_ENTITY = "price_entity"                # HA sensor entity_id exposing Nord Pool / market prices
 CONF_ENERGY_PRICE_WEIGHT = "energy_price_weight"  # α: dimensionless scale on the linear price term

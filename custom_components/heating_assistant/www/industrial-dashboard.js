@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '50';
+  return '59';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -92,6 +92,7 @@ class HaIndustrialPanel extends HTMLElement {
         { renderSystemIdentification },
         { renderControllerTuning },
         { renderSchedules },
+        { renderConfiguration },
       ] = await Promise.all([
         import(`${BASE_PATH}/js/ha-connection.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/router.js?v=${PANEL_VERSION}`),
@@ -101,6 +102,7 @@ class HaIndustrialPanel extends HTMLElement {
         import(`${BASE_PATH}/js/pages/system-identification.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/tuning-controller.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/schedules.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/configuration.js?v=${PANEL_VERSION}`),
       ]);
 
       this._connection = new HaConnection(this._hass);
@@ -118,6 +120,7 @@ class HaIndustrialPanel extends HTMLElement {
         identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
         tuning: (slug) => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
         schedules: (slug) => renderSchedules(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+        config: (slug) => renderConfiguration(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
       });
 
       this._router.start();
@@ -201,6 +204,7 @@ class HaIndustrialPanel extends HTMLElement {
             <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
             <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
             <a class="panel-nav__link" href="#tuning">TUNING</a>
+            <a class="panel-nav__link" href="#config">CONFIGURATION</a>
           </div>
         </nav>
         <main id="content" class="content">
