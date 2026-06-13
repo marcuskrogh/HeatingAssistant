@@ -80,10 +80,11 @@ export function experimentPhase(exp, nowMs = Date.now()) {
  *  When the room's ``forecastRoom`` (``{ forecast: [...], step_seconds }``) is
  *  given, the band is snapped to the exact MPC steps the backend flagged with
  *  ``experiment: true`` — the same steps (and grid) the actuator signal is drawn
- *  on.  The power line is stepped (``stepped: 'before'``) so a step at point time
- *  ``t`` is rendered over ``[t − dt, t]``; deriving the band from the flagged
- *  steps guarantees the shaded area covers the experiment signal exactly, with no
- *  pre-experiment iterations bleeding in. */
+ *  on.  The power line is stepped (``stepped: 'before'``), which in Chart.js
+ *  holds each point's value *forward* (a point at ``t`` is rendered over
+ *  ``[t, t + dt]``); deriving the band from the flagged steps on that convention
+ *  makes the shaded area cover the experiment signal exactly, instead of sitting
+ *  one step to its left. */
 export function experimentBands(experiments, roomSlug, forecastRoom = null, nowMs = Date.now()) {
   let list;
   if (Array.isArray(experiments)) {
@@ -112,14 +113,17 @@ export function experimentBands(experiments, roomSlug, forecastRoom = null, nowM
     let startS = e.start_ts;
     let endS = e.end_ts;
     if (steps && steps.length && dt) {
-      // Steps the backend flagged for *this* experiment's window; a flagged
-      // step at point time ``t`` is rendered over ``[t − dt, t]``.
+      // Steps the backend flagged for *this* experiment's window.  Chart.js
+      // ``stepped: 'before'`` holds each point's value *forward*: a point at
+      // time ``t`` is rendered over ``[t, t + dt]``.  So a flagged point ``t``
+      // shades ``[t, t + dt]`` — derive the band edges accordingly (this lines
+      // the shading up with the heater signal instead of sitting one step left).
       const flagged = steps.filter(
         (p) => p.exp && (p.t - dt) >= e.start_ts && (p.t - dt) < e.end_ts,
       );
       if (flagged.length) {
-        const gridStart = Math.min(...flagged.map((p) => p.t)) - dt;
-        const gridEnd = Math.max(...flagged.map((p) => p.t));
+        const gridStart = Math.min(...flagged.map((p) => p.t));
+        const gridEnd = Math.max(...flagged.map((p) => p.t)) + dt;
         // Ongoing runs keep their true (already-applied) history start; upcoming
         // runs snap the leading edge to the grid so it lines up with the signal.
         startS = (nowS >= e.start_ts && nowS < e.end_ts) ? e.start_ts : gridStart;
