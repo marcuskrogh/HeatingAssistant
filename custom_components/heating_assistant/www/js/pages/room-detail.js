@@ -4,6 +4,7 @@ import { createClimateCard } from '../components/climate-card.js';
 import { createCountdown } from '../components/countdown.js';
 import { createScheduleOverview } from '../components/schedule-overview.js';
 import { getRoomScheduleData } from '../schedule-utils.js';
+import { findActiveExperiment } from '../experiment-utils.js';
 import {
   formatPower, formatTemperature, formatPrice,
   entityValue, entityAttr, systemEntity,
@@ -51,6 +52,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // Tracks the freshest state snapshot; declared up-front because some gauge
   // formatters (e.g. the price unit) read live attributes lazily on each paint.
   let latestState = state;
+  // The identification experiment currently exciting this room, or null —
+  // refreshed via WebSocket so the climate card can show the in-progress look.
+  let activeExperiment = null;
 
   const nav = document.createElement('button');
   nav.className = 'nav-back';
@@ -235,6 +239,20 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   }
   refreshSchedule();
 
+  // Resolve whether an identification experiment is exciting this room and push
+  // it to the climate card so it can flip into the "experiment in progress"
+  // look. Polled on a slow cadence because the scheduled → running transition
+  // happens on a wall-clock boundary that need not coincide with a state event.
+  function refreshExperiment() {
+    connection.listExperiments().then((experiments) => {
+      if (experiments == null) return; // fetch failed — keep the current state
+      activeExperiment = findActiveExperiment(experiments, roomSlug);
+      climateCard.update({ experiment: activeExperiment });
+    }).catch(() => { /* keep the last-known experiment state on failure */ });
+  }
+  refreshExperiment();
+  const experimentInterval = setInterval(refreshExperiment, 30000);
+
   const chartsContainer = document.createElement('div');
   chartsContainer.className = 'grid-charts';
   container.appendChild(chartsContainer);
@@ -306,6 +324,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       climateCard.update({
         temperature: tv, setpoint: sp, power: pv,
         comfortLower: cl, comfortUpper: cu, off,
+        experiment: activeExperiment,
       });
       paintPowerGauge(pv);
       paintPriceGauge(entityValue(newState, priceEntity));
@@ -320,6 +339,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     },
     destroy() {
       clearInterval(countdownInterval);
+      clearInterval(experimentInterval);
       climateCard.destroy();
       tempChart.destroy();
       powerChart.destroy();

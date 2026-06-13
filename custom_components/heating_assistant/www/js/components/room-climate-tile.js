@@ -18,6 +18,10 @@
 
 import { entityValue } from '../utils.js';
 import { findActivePeriod, findNextPeriod } from '../schedule-utils.js';
+import {
+  findActiveExperiment, experimentPanelHtml, experimentPanelEls,
+  paintExperimentPanel, paintExperimentProgress,
+} from '../experiment-utils.js';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -34,6 +38,9 @@ const COMMIT_DEBOUNCE_MS = 700;
 // so the card reacts instantly; backend truth resumes once this elapses.
 const POWER_OPTIMISTIC_MS = 6000;
 const TRACK_HALF_WIDTH = 3;
+// Cadence at which the experiment progress bar self-advances between state
+// pushes so the fill creeps forward smoothly while a run is in progress.
+const PROGRESS_TICK_MS = 1000;
 
 function clampSetpoint(v) {
   const snapped = Math.round((v ?? 22) / SP_STEP) * SP_STEP;
@@ -125,7 +132,7 @@ function buildScheduleHtml(schedData, activePeriod, nextPeriod) {
     ${rows}${more}`;
 }
 
-export function createRoomClimateTile(room, state, hass, scheduleData) {
+export function createRoomClimateTile(room, state, hass, scheduleData, experimentData) {
   const container = document.createElement('div');
   container.className = 'card card--clickable climate-card room-climate-tile';
   container.dataset.room = room.slug;
@@ -133,6 +140,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
   const st = {
     state,
     scheduleData: scheduleData || null,
+    experimentData: experimentData || null,
     hass: hass || null,
     temperature: entityValue(state, room.entities['temperature_filtered'] || room.entities['temperature_measured']),
     setpoint: clampSetpoint(entityValue(state, room.entities['setpoint'])),
@@ -147,6 +155,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     offsetCommitTimer: null, // pending comfort-offset debounce timer id
     optimisticOff: null,   // optimistic power override (null = follow backend)
     powerTimer: null,      // clears optimisticOff after POWER_OPTIMISTIC_MS
+    progressTimer: null,   // ticks the experiment progress bar while a run is live
   };
 
   container.innerHTML = `
@@ -172,6 +181,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
       </div>
       <div class="climate-card__off-note">HEATING OFF</div>
     </div>
+    ${experimentPanelHtml()}
     <div class="climate-card__comfort">
       <span class="climate-card__comfort-title">COMFORT BAND</span>
       <button class="climate-card__offset-step climate-card__offset-step--down" aria-label="Narrow comfort band">−</button>
@@ -207,6 +217,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     trackMax:     container.querySelector('.climate-card__track-max'),
     comfortLabel: container.querySelector('.climate-card__track-comfort-label'),
     schedules:    container.querySelector('.room-climate-tile__schedules'),
+    experiment:   experimentPanelEls(container),
   };
 
   els.down.addEventListener('click', (e) => { e.stopPropagation(); adjust(-SP_STEP); });
@@ -269,6 +280,26 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
     scheduleOffsetCommit();
   }
 
+  /** The system-identification experiment currently exciting this room, or null. */
+  function currentExperiment() {
+    return findActiveExperiment(st.experimentData, room.slug);
+  }
+
+  /** Keep a 1 s timer running only while an experiment is in progress so the
+   *  progress bar creeps forward between the (infrequent) state pushes. */
+  function syncProgressTimer(exp) {
+    if (exp && !st.progressTimer) {
+      st.progressTimer = setInterval(() => {
+        const live = currentExperiment();
+        if (live) paintExperimentProgress(els.experiment, live);
+        else { paint(); } // run just ended — repaint to drop the experiment look
+      }, PROGRESS_TICK_MS);
+    } else if (!exp && st.progressTimer) {
+      clearInterval(st.progressTimer);
+      st.progressTimer = null;
+    }
+  }
+
   /** Effective off-state: optimistic override wins, else backend/schedule. */
   function currentOff() {
     if (st.optimisticOff !== null) return st.optimisticOff;
@@ -294,11 +325,21 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
   }
 
   function paint() {
-    const off = currentOff();
+    // A live identification experiment overrides the off-schedule (the backend
+    // excites this room regardless), so it wins the card's visual mode.
+    const experiment = currentExperiment();
+    syncProgressTimer(experiment);
+    const off = !experiment && currentOff();
+
+    container.classList.toggle('climate-card--experiment', !!experiment);
     container.classList.toggle('climate-card--off', off);
     els.power.classList.toggle('climate-card__power--off', off);
 
-    if (off) {
+    if (experiment) {
+      els.status.textContent = 'EXPERIMENT';
+      els.status.className = 'climate-card__status climate-card__status--experiment';
+      paintExperimentPanel(els.experiment, experiment);
+    } else if (off) {
       els.status.textContent = 'OFF';
       els.status.className = 'climate-card__status climate-card__status--off';
     } else {
@@ -330,9 +371,10 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
       els.schedules.style.display = 'none';
     }
 
-    // When off, the setpoint / comfort corridor / marker are irrelevant — the
-    // CSS hides them via .climate-card--off, so skip the rest of the paint.
-    if (off) return;
+    // When off or running an experiment, the setpoint / comfort corridor /
+    // marker are irrelevant — the CSS hides them via the .climate-card--off /
+    // .climate-card--experiment modifiers, so skip the rest of the paint.
+    if (off || experiment) return;
 
     els.target.textContent = st.setpoint.toFixed(1) + '°';
     els.down.disabled = st.setpoint <= SP_MIN;
@@ -396,9 +438,10 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
 
   return {
     element: container,
-    update(newState, newHass, newScheduleData) {
+    update(newState, newHass, newScheduleData, newExperimentData) {
       if (newHass !== undefined) st.hass = newHass;
       if (newScheduleData !== undefined) st.scheduleData = newScheduleData;
+      if (newExperimentData !== undefined) st.experimentData = newExperimentData;
       st.state = newState;
 
       st.temperature = entityValue(newState, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
@@ -433,6 +476,10 @@ export function createRoomClimateTile(room, state, hass, scheduleData) {
       if (st.powerTimer) {
         clearTimeout(st.powerTimer);
         st.powerTimer = null;
+      }
+      if (st.progressTimer) {
+        clearInterval(st.progressTimer);
+        st.progressTimer = null;
       }
     },
   };
