@@ -3665,16 +3665,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     def _build_experiment_clamps(
         self, now: datetime
     ) -> Dict[str, "np.ndarray"]:
-        """Advance experiments and build per-room horizon input clamps for the MPC.
+        """Advance experiments and build per-source horizon input clamps for the MPC.
 
         Rather than overriding the MPC's chosen actions after the solve, an active
         experiment pins its room's heater inputs over the whole prediction horizon
-        by handing the controller a ``{room_name: ndarray(N,)}`` clamp: each entry
-        is the absolute heater fraction the excitation signal requests at
+        by handing the controller a ``{source_name: ndarray(N,)}`` clamp: each
+        entry is the *signed* input fraction the excitation signal requests at
         ``now + k·dt`` (``NaN`` where no experiment is active at that step).  The
-        MPC then treats the signal as a hard input constraint, planning the rest
-        of the house around it, and the resulting plan — and thus the actuator
-        forecast plot — already reflects the experiment.
+        clamp is built per source so a reversible (heat/cool) unit gets the cool
+        phases while a heat-only unit gets the heat-only pattern.  The MPC then
+        treats the signal as a hard input constraint, planning the rest of the
+        house around it, and the resulting plan — and thus the actuator forecast
+        plot — already reflects the experiment.
 
         The applied (k=0) entry is additionally passed through the experiment's
         safety temperature band (frost floor / overheat ceiling) using the current
@@ -3711,15 +3713,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         slug_to_room = {_slugify(rn): rn for rn in self.model.room_names}
 
         for src in self.heat_sources:
-            room_name = slug_to_room.get(_slugify(src.room), src.room)
-            if room_name in clamps:
-                continue  # one clamp per room covers all its sources
             room_slug = _slugify(src.room)
             # An open window makes the room's air-exchange unmodelled, so the
             # excitation is suppressed there; the window override forces u=0.
             if self.is_window_override_active(src.room):
                 continue
 
+            room_name = slug_to_room.get(room_slug, src.room)
+            can_cool = bool(getattr(src, "can_cool", False))
             arr = np.full(N, np.nan, dtype=float)
             clamped_any = False
             measured = self.measured_temperatures.get(room_name)
@@ -3728,17 +3729,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 exp = manager.active_for_room(room_slug, t_k)
                 if exp is None:
                     continue
-                frac = excitation_fraction(exp, t_k)
+                frac = excitation_fraction(exp, t_k, can_cool=can_cool)
                 if k == 0:
                     frac = apply_safety_bounds(
                         frac, measured, exp.min_temp, exp.max_temp,
-                        exp.amplitude_high,
+                        exp.step_pct,
                     )
                     active_rooms.add(room_slug)
                 arr[k] = frac
                 clamped_any = True
             if clamped_any:
-                clamps[room_name] = arr
+                clamps[src.name] = arr
 
         self._experiment_active_rooms = active_rooms
         return clamps

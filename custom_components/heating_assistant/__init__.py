@@ -2786,9 +2786,8 @@ def _register_services(hass: HomeAssistant) -> None:
         from .dashboard import slugify as _slugify
         from .experiments import Experiment, validate_signal_params
         from .const import (
-            DEFAULT_EXCITATION_HIGH,
-            DEFAULT_EXCITATION_LOW,
             DEFAULT_EXCITATION_PERIOD_S,
+            DEFAULT_EXCITATION_STEP_PCT,
             DEFAULT_EXCITATION_TYPE,
             DEFAULT_EXPERIMENT_MAX_TEMP,
             DEFAULT_EXPERIMENT_MIN_TEMP,
@@ -2808,10 +2807,9 @@ def _register_services(hass: HomeAssistant) -> None:
             raise ValueError("Experiment duration exceeds the 7-day maximum")
 
         signal_type = str(call.data.get("signal_type", DEFAULT_EXCITATION_TYPE))
-        high = float(call.data.get("amplitude_high", DEFAULT_EXCITATION_HIGH))
-        low = float(call.data.get("amplitude_low", DEFAULT_EXCITATION_LOW))
+        step_pct = float(call.data.get("step_pct", DEFAULT_EXCITATION_STEP_PCT))
         period_s = float(call.data.get("period_s", DEFAULT_EXCITATION_PERIOD_S))
-        validate_signal_params(signal_type, high, low, period_s)
+        validate_signal_params(signal_type, step_pct, period_s)
 
         # Settle / response buffer: excitation stops this long before the window
         # ends so the heater's influence is absorbed within the captured data.
@@ -2835,8 +2833,7 @@ def _register_services(hass: HomeAssistant) -> None:
             end_ts=end_ts,
             name=str(call.data.get("name", "")),
             signal_type=signal_type,
-            amplitude_high=high,
-            amplitude_low=low,
+            step_pct=step_pct,
             period_s=period_s,
             settle_s=settle_s,
             min_temp=float(call.data.get("min_temp", DEFAULT_EXPERIMENT_MIN_TEMP)),
@@ -2858,10 +2855,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Required("end"): vol.Coerce(float),
                 vol.Optional("name"): cv.string,
                 vol.Optional("signal_type"): vol.In(list(EXCITATION_TYPES)),
-                vol.Optional("amplitude_high"): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
-                ),
-                vol.Optional("amplitude_low"): vol.All(
+                vol.Optional("step_pct"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=1.0)
                 ),
                 vol.Optional("period_s"): vol.All(

@@ -12,11 +12,10 @@ def _make_exp(**kw):
         start_ts=1_000.0,
         end_ts=1_000.0 + 8 * 3600,
         signal_type="prbs",
-        amplitude_high=1.0,
-        amplitude_low=0.0,
+        step_pct=1.0,
         period_s=3600.0,
-        # Signal tests below assume the whole window is excited; settle-buffer
-        # behaviour is covered explicitly in its own tests.
+        # PRBS/pulse signal tests below assume the whole window is excited;
+        # the settle-buffer behaviour is covered explicitly in its own tests.
         settle_s=0.0,
         seed=42,
     )
@@ -25,7 +24,7 @@ def _make_exp(**kw):
 
 
 # --------------------------------------------------------------------------
-# Excitation signal
+# Excitation signal — PRBS / pulse
 # --------------------------------------------------------------------------
 
 def test_prbs_is_deterministic_for_a_given_seed():
@@ -37,46 +36,75 @@ def test_prbs_is_deterministic_for_a_given_seed():
     ]
 
 
-def test_prbs_uses_high_and_low_amplitudes_only():
-    exp = _make_exp(amplitude_high=0.8, amplitude_low=0.2, seed=7)
-    vals = {E.excitation_fraction(exp, 1_000.0 + k * 3600) for k in range(50)}
-    assert vals <= {0.2, 0.8}
-    # A non-trivial PRBS should exercise both levels over many steps.
-    assert vals == {0.2, 0.8}
+def test_prbs_uses_zero_and_step_pct_only():
+    exp = _make_exp(signal_type="prbs", step_pct=0.8, seed=7)
+    vals = {E.excitation_fraction(exp, 1_000.0 + k * 3600) for k in range(8)}
+    assert vals == {0.0, 0.8}
 
 
-def test_step_signal_is_high_for_whole_window():
-    exp = _make_exp(signal_type="step")
-    for k in range(8):
-        assert E.excitation_fraction(exp, 1_000.0 + k * 3600) == 1.0
-
-
-def test_pulse_alternates_each_period():
-    exp = _make_exp(signal_type="pulse")
+def test_pulse_alternates_between_zero_and_step():
+    exp = _make_exp(signal_type="pulse", step_pct=1.0)
     assert E.excitation_fraction(exp, 1_000.0 + 0 * 3600) == 1.0
     assert E.excitation_fraction(exp, 1_000.0 + 1 * 3600) == 0.0
     assert E.excitation_fraction(exp, 1_000.0 + 2 * 3600) == 1.0
 
 
-def test_signal_is_low_outside_the_window():
-    exp = _make_exp(signal_type="step", amplitude_low=0.1)
-    assert E.excitation_fraction(exp, 999.0) == 0.1          # before start
-    assert E.excitation_fraction(exp, exp.end_ts + 10) == 0.1  # after end
+def test_signal_is_zero_outside_the_window():
+    exp = _make_exp(signal_type="step")
+    assert E.excitation_fraction(exp, 999.0) == 0.0          # before start
+    assert E.excitation_fraction(exp, exp.end_ts + 10) == 0.0  # after end
 
 
 # --------------------------------------------------------------------------
-# Settle / response buffer
+# Excitation signal — multi-phase step test
+# --------------------------------------------------------------------------
+
+def test_step_heat_only_pattern_is_settle_heat_settle():
+    # Heat-only (can_cool=False): 0 → +step → 0 over three equal phases.
+    exp = _make_exp(signal_type="step", step_pct=0.75)
+    phase = (exp.end_ts - exp.start_ts) / 3
+    assert E.excitation_fraction(exp, exp.start_ts + 0.5 * phase) == 0.0
+    assert E.excitation_fraction(exp, exp.start_ts + 1.5 * phase) == 0.75
+    assert E.excitation_fraction(exp, exp.start_ts + 2.5 * phase) == 0.0
+
+
+def test_step_heat_cool_pattern_includes_cool_phase():
+    # Reversible (can_cool=True): 0 → +step → 0 → -step → 0 over five phases.
+    exp = _make_exp(signal_type="step", step_pct=0.5)
+    phase = (exp.end_ts - exp.start_ts) / 5
+    expected = [0.0, 0.5, 0.0, -0.5, 0.0]
+    for i, level in enumerate(expected):
+        t = exp.start_ts + (i + 0.5) * phase
+        assert E.excitation_fraction(exp, t, can_cool=True) == level
+
+
+def test_step_heat_only_never_emits_cool():
+    exp = _make_exp(signal_type="step", step_pct=1.0)
+    dur = exp.end_ts - exp.start_ts
+    vals = [
+        E.excitation_fraction(exp, exp.start_ts + (k + 0.5) * dur / 12, can_cool=False)
+        for k in range(12)
+    ]
+    assert min(vals) >= 0.0
+
+
+def test_step_uses_full_window_ignoring_settle_buffer():
+    # The step's interleaved zeros are its settles, so settle_s does not clip it.
+    exp = _make_exp(signal_type="step", step_pct=1.0, settle_s=4 * 3600)
+    phase = (exp.end_ts - exp.start_ts) / 3
+    assert E.excitation_fraction(exp, exp.start_ts + 1.5 * phase) == 1.0
+
+
+# --------------------------------------------------------------------------
+# Settle / response buffer (PRBS / pulse)
 # --------------------------------------------------------------------------
 
 def test_settle_buffer_stops_excitation_before_window_end():
-    # 8 h window, 2 h settle buffer → active excitation only in the first 6 h.
-    exp = _make_exp(signal_type="step", settle_s=2 * 3600, amplitude_low=0.0)
+    # 8 h window, 2 h settle buffer → PRBS/pulse rest at 0 in the final 2 h.
+    exp = _make_exp(signal_type="pulse", settle_s=2 * 3600, step_pct=1.0)
     assert exp.excitation_end_ts == exp.end_ts - 2 * 3600
-    # Mid-excitation and just before the buffer: high.
-    assert E.excitation_fraction(exp, exp.start_ts + 3 * 3600) == 1.0
-    assert E.excitation_fraction(exp, exp.excitation_end_ts - 60) == 1.0
-    # Inside the settle buffer: released to the low level.
-    assert E.excitation_fraction(exp, exp.excitation_end_ts + 60) == 0.0
+    assert E.excitation_fraction(exp, exp.start_ts + 60) == 1.0          # exciting
+    assert E.excitation_fraction(exp, exp.excitation_end_ts + 60) == 0.0  # settling
     assert E.excitation_fraction(exp, exp.end_ts - 60) == 0.0
 
 
@@ -116,7 +144,7 @@ def test_default_signal_type_is_step():
 # --------------------------------------------------------------------------
 
 def test_safety_forces_on_below_min_temp():
-    assert E.apply_safety_bounds(0.0, 8.0, 12.0, 26.0, 1.0) == 1.0
+    assert E.apply_safety_bounds(0.0, 8.0, 12.0, 26.0, 0.75) == 0.75
 
 
 def test_safety_forces_off_above_max_temp():
@@ -124,7 +152,7 @@ def test_safety_forces_off_above_max_temp():
 
 
 def test_safety_passes_through_inside_band():
-    assert E.apply_safety_bounds(0.7, 20.0, 12.0, 26.0, 1.0) == 0.7
+    assert E.apply_safety_bounds(-0.7, 20.0, 12.0, 26.0, 1.0) == -0.7
 
 
 def test_safety_ignores_missing_measurement():
@@ -137,18 +165,23 @@ def test_safety_ignores_missing_measurement():
 
 def test_validate_rejects_unknown_signal():
     try:
-        E.validate_signal_params("noise", 1.0, 0.0, 3600.0)
+        E.validate_signal_params("noise", 1.0, 3600.0)
     except ValueError:
         return
     raise AssertionError("expected ValueError for unknown signal type")
 
 
-def test_validate_rejects_high_not_above_low():
-    try:
-        E.validate_signal_params("prbs", 0.5, 0.5, 3600.0)
-    except ValueError:
-        return
-    raise AssertionError("expected ValueError when high <= low")
+def test_validate_rejects_step_pct_out_of_range():
+    for bad in (0.0, -0.1, 1.5):
+        try:
+            E.validate_signal_params("step", bad, 3600.0)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for step_pct={bad}")
+
+
+def test_validate_accepts_valid_params():
+    E.validate_signal_params("step", 0.5, 3600.0)  # must not raise
 
 
 # --------------------------------------------------------------------------
@@ -211,8 +244,11 @@ def test_roundtrip_serialisation():
 def test_from_dict_tolerates_unknown_keys():
     data = _make_exp().to_dict()
     data["future_field"] = "ignored"
+    # An experiment persisted under the old min/max amplitude schema still loads.
+    data["amplitude_high"] = 0.9
     exp = E.Experiment.from_dict(data)
     assert exp.room_slug == "living_room"
+    assert not hasattr(exp, "amplitude_high")
 
 
 def test_prune_terminal_keeps_active_and_recent():

@@ -73,9 +73,9 @@ export function experimentPhase(exp, nowMs = Date.now()) {
 
 /** Build shaded-band descriptors for every scheduled or ongoing experiment of a
  *  room, for overlaying on the room-level plots.  Returns an array of
- *  ``{ start, end, excitationEnd, label, status }`` with timestamps in **ms**,
- *  one per non-terminal experiment (so an upcoming run shows before it starts).
- *  ``experiments`` may be the raw backend list or a per-room index. */
+ *  ``{ start, end }`` with timestamps in **ms**, one per non-terminal experiment
+ *  (so an upcoming run shows before it starts).  ``experiments`` may be the raw
+ *  backend list or a per-room index. */
 export function experimentBands(experiments, roomSlug) {
   let list;
   if (Array.isArray(experiments)) {
@@ -89,13 +89,7 @@ export function experimentBands(experiments, roomSlug) {
   for (const e of list) {
     if (!e || TERMINAL_STATUSES.has(e.status)) continue;
     if (e.start_ts == null || e.end_ts == null) continue;
-    bands.push({
-      start: e.start_ts * 1000,
-      end: e.end_ts * 1000,
-      excitationEnd: excitationEndTs(e) * 1000,
-      label: e.name && e.name.trim() ? e.name.trim().toUpperCase() : 'EXPERIMENT',
-      status: e.status,
-    });
+    bands.push({ start: e.start_ts * 1000, end: e.end_ts * 1000 });
   }
   return bands;
 }

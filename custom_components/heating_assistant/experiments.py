@@ -16,12 +16,13 @@ Design
 * :class:`Experiment` is a plain, JSON-serialisable record describing one
   scheduled experiment (room, time window, signal type and parameters, safety
   bounds, and lifecycle status).
-* :func:`excitation_fraction` is a pure function returning the heater power
-  fraction (0–1) the signal requests at a given instant.  Active excitation stops
-  ``settle_s`` before the window ends — a settle / response buffer that lets the
-  heater's influence be absorbed by the room *within* the captured window — and
-  the coordinator then applies safety clamps (frost floor / overheat ceiling) on
-  top of it.
+* :func:`excitation_fraction` is a pure function returning the signed input
+  fraction (heat ``> 0`` / cool ``< 0``) the signal requests at a given instant.
+  The default *step* signal is a multi-phase step test (heat — settle — cool —
+  settle, or heat — settle for heat-only units); PRBS / pulse stop ``settle_s``
+  before the window ends so their influence is absorbed within the captured
+  window.  The coordinator clamps the value to each source's range and applies
+  the safety temperature band (frost floor / overheat ceiling) on top.
 * :class:`ExperimentManager` holds the live list of experiments and advances
   their state machine (``scheduled`` → ``running`` → ``completed``) each tick.
 * :class:`ExperimentStore` persists the list across restarts.
@@ -41,9 +42,8 @@ from typing import Any, Dict, List, Optional
 
 from .const import (
     DATASET_SOURCE_EXPERIMENT,
-    DEFAULT_EXCITATION_HIGH,
-    DEFAULT_EXCITATION_LOW,
     DEFAULT_EXCITATION_PERIOD_S,
+    DEFAULT_EXCITATION_STEP_PCT,
     DEFAULT_EXCITATION_TYPE,
     DEFAULT_EXPERIMENT_MAX_TEMP,
     DEFAULT_EXPERIMENT_MIN_TEMP,
@@ -103,8 +103,7 @@ class Experiment:
     end_ts: float
     name: str = ""
     signal_type: str = DEFAULT_EXCITATION_TYPE
-    amplitude_high: float = DEFAULT_EXCITATION_HIGH
-    amplitude_low: float = DEFAULT_EXCITATION_LOW
+    step_pct: float = DEFAULT_EXCITATION_STEP_PCT
     period_s: float = DEFAULT_EXCITATION_PERIOD_S
     settle_s: float = DEFAULT_EXPERIMENT_SETTLE_S
     min_temp: float = DEFAULT_EXPERIMENT_MIN_TEMP
@@ -176,29 +175,60 @@ class Experiment:
 # Excitation signal
 # ---------------------------------------------------------------------------
 
-def excitation_fraction(exp: Experiment, now_ts: float) -> float:
-    """Return the raw heater power fraction (0–1) the signal requests now.
+def excitation_fraction(exp: Experiment, now_ts: float, can_cool: bool = False) -> float:
+    """Return the *signed* input fraction the signal requests now.
 
-    This is the *unclamped* signal value; the coordinator applies the safety
-    temperature bounds on top of it.  Before the window starts, and once the
-    settle / response buffer at the tail begins (``now_ts >= excitation_end_ts``),
-    the low amplitude is returned so the room can relax within the window.
+    Positive values are a fraction of the source's max heat power; negative
+    values are a fraction of its max cool power (only emitted for cool-capable
+    sources, via ``can_cool``).  Outside the window the signal rests at 0 (no
+    input).  This is the *unclamped* value; the coordinator clamps it to each
+    source's actuation range and applies the safety temperature band on top.
     """
-    high = _clamp01(exp.amplitude_high)
-    low = _clamp01(exp.amplitude_low)
-    elapsed = now_ts - exp.start_ts
-    if elapsed < 0.0 or now_ts >= exp.excitation_end_ts:
-        return low
+    if now_ts < exp.start_ts or now_ts >= exp.end_ts:
+        return 0.0
 
-    period = exp.period_s if exp.period_s and exp.period_s > 0 else DEFAULT_EXCITATION_PERIOD_S
-    step_index = int(elapsed // period)
+    pct = _clamp01(exp.step_pct)
 
     if exp.signal_type == EXCITATION_STEP:
-        return high
+        return _step_pattern_fraction(exp, now_ts, pct, can_cool)
+
+    # PRBS / pulse switch between 0 and the step magnitude, and rest at 0 during
+    # the trailing settle / response buffer so the room relaxes within the window.
+    if now_ts >= exp.excitation_end_ts:
+        return 0.0
+    period = exp.period_s if exp.period_s and exp.period_s > 0 else DEFAULT_EXCITATION_PERIOD_S
+    step_index = int((now_ts - exp.start_ts) // period)
     if exp.signal_type == EXCITATION_PULSE:
-        return high if (step_index % 2 == 0) else low
+        return pct if (step_index % 2 == 0) else 0.0
     # Default / PRBS.
-    return high if prbs_bit(exp.seed, step_index) else low
+    return pct if prbs_bit(exp.seed, step_index) else 0.0
+
+
+def _step_pattern_fraction(
+    exp: Experiment, now_ts: float, step_pct: float, can_cool: bool
+) -> float:
+    """Signed level of the multi-phase step test at ``now_ts``.
+
+    The window is split into equal phases following ``0 → +1 → 0 → −1 → 0`` for
+    cool-capable sources (heat, settle, cool, settle) or ``0 → +1 → 0`` for
+    heat-only sources, where ``±1`` is ``±step_pct``.  The interleaved zeros let
+    the room settle between steps so each direction's response is clean.
+    """
+    duration = exp.end_ts - exp.start_ts
+    if duration <= 0.0:
+        return 0.0
+    levels = (
+        (0.0, step_pct, 0.0, -step_pct, 0.0)
+        if can_cool
+        else (0.0, step_pct, 0.0)
+    )
+    n = len(levels)
+    idx = int((now_ts - exp.start_ts) / (duration / n))
+    if idx < 0:
+        idx = 0
+    elif idx >= n:
+        idx = n - 1
+    return levels[idx]
 
 
 def apply_safety_bounds(
@@ -206,12 +236,12 @@ def apply_safety_bounds(
     measured_temp: Optional[float],
     min_temp: float,
     max_temp: float,
-    high: float,
+    force_level: float,
 ) -> float:
     """Clamp an excitation ``fraction`` against the room's safety temperature band.
 
-    * Below ``min_temp`` the heater is forced to ``high`` (frost protection).
-    * At/above ``max_temp`` the heater is forced off (prevents overheating).
+    * Below ``min_temp`` heating is forced on to ``force_level`` (frost protection).
+    * At/above ``max_temp`` the input is forced off (prevents overheating).
     * Otherwise the requested ``fraction`` passes through unchanged.
 
     A missing measurement (``None``) leaves the requested fraction untouched so a
@@ -220,7 +250,7 @@ def apply_safety_bounds(
     if measured_temp is None:
         return fraction
     if measured_temp <= min_temp:
-        return _clamp01(high)
+        return _clamp01(force_level)
     if measured_temp >= max_temp:
         return 0.0
     return fraction
@@ -240,8 +270,7 @@ def _clamp01(x: float) -> float:
 
 def validate_signal_params(
     signal_type: str,
-    amplitude_high: float,
-    amplitude_low: float,
+    step_pct: float,
     period_s: float,
 ) -> None:
     """Raise ``ValueError`` if the excitation parameters are not usable."""
@@ -249,10 +278,8 @@ def validate_signal_params(
         raise ValueError(
             f"signal_type must be one of {EXCITATION_TYPES}, got {signal_type!r}"
         )
-    hi = _clamp01(amplitude_high)
-    lo = _clamp01(amplitude_low)
-    if hi <= lo:
-        raise ValueError("amplitude_high must be greater than amplitude_low")
+    if not (0.0 < float(step_pct) <= 1.0):
+        raise ValueError("step_pct must be in (0, 1]")
     if period_s <= 0:
         raise ValueError("period_s must be positive")
 
