@@ -3670,10 +3670,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         Rather than overriding the MPC's chosen actions after the solve, an active
         experiment pins its room's heater inputs over the whole prediction horizon
         by handing the controller a ``{source_name: ndarray(N,)}`` clamp: each
-        entry is the *signed* input fraction the excitation signal requests at
-        ``now + k·dt`` (``NaN`` where no experiment is active at that step).  The
-        clamp is built per source so a reversible (heat/cool) unit gets the cool
-        phases while a heat-only unit gets the heat-only pattern.  The MPC then
+        entry is the *signed power* fraction (``+`` heat / ``-`` cool, of capacity)
+        the excitation signal requests at ``now + k·dt`` (``NaN`` where no
+        experiment is active at that step); the controller converts each to the
+        control input that delivers it, so the step is linear in delivered power.
+        The clamp is built per source so a reversible (heat/cool) unit gets the
+        cool phases while a heat-only unit gets the heat-only pattern.  The MPC then
         treats the signal as a hard input constraint, planning the rest of the
         house around it, and the resulting plan — and thus the actuator forecast
         plot — already reflects the experiment.

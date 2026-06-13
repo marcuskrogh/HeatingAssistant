@@ -366,6 +366,33 @@ class TestHeatPump:
         phi = hp.smooth_thermal_power(0.5, outdoor_temp=7.0)
         assert phi == pytest.approx(hp.thermal_power(0.5, outdoor_temp=7.0), rel=1e-6)
 
+    # -- control_for_power_fraction (linear power for experiments) ----------
+
+    def test_control_for_power_fraction_inverts_sigmoid(self):
+        """A commanded power fraction maps to the control input that delivers
+        exactly that fraction of capacity — so a step is linear in power."""
+        hp = HeatPump("hp1", "living_room", max_power=6600.0,
+                      cop_rated=3.5, cooling_cop=2.5)
+        outdoor = 5.0
+        k = 5.0
+        q_heat = hp.thermal_power(1.0, outdoor)
+        q_cool = abs(hp.cooling_power(outdoor))
+        for pf, q in [(0.75, q_heat), (0.5, q_heat), (0.25, q_heat),
+                      (-0.5, q_cool), (-0.25, q_cool)]:
+            u = hp.control_for_power_fraction(pf, outdoor, k)
+            delivered = hp.smooth_thermal_power(u, outdoor, k)
+            assert delivered == pytest.approx(pf * q, rel=1e-6)
+
+    def test_control_for_power_fraction_zero_maps_to_zero(self):
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.control_for_power_fraction(0.0, 5.0, 5.0) == 0.0
+
+    def test_control_for_power_fraction_linear_for_electric_heater(self):
+        # No sigmoid → the power fraction is the control input directly.
+        h = ElectricHeater("h1", "living_room", max_power=2000.0)
+        assert h.control_for_power_fraction(0.75, 5.0) == pytest.approx(0.75)
+        assert h.control_for_power_fraction(0.25, 5.0) == pytest.approx(0.25)
+
     # -- heating_efficiency -----------------------------------------------
 
     def test_heating_efficiency_default_is_one(self):

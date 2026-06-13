@@ -144,6 +144,22 @@ class HeatSource(ABC):
         self._current_power = power
         return power
 
+    def control_for_power_fraction(
+        self, power_fraction: float, outdoor_temp: float = 0.0, k_sigmoid: float = 5.0,
+    ) -> float:
+        """Return the control input ``u`` that delivers ``power_fraction`` of the
+        source's max heat (``>= 0``) / cool (``< 0``) capacity.
+
+        For sources whose input→power map is linear (electric heaters, heat-only
+        units) the control input *is* the power fraction, so this is the identity
+        (clamped to the actuation range).  Sources with a nonlinear map (a
+        cooling-capable heat pump's smooth sigmoid) override this to invert that
+        map, so a commanded power fraction lands linearly on delivered power —
+        used by identification experiments so a step of ``step_pct`` really
+        delivers ``step_pct`` of capacity.
+        """
+        return max(self.u_min, min(self.u_max, float(power_fraction)))
+
     @property
     def can_cool(self) -> bool:
         """Returns True if this source can actively remove heat from the room."""
@@ -526,3 +542,35 @@ class HeatPump(HeatSource):
 
         sigmoid_val = 1.0 / (1.0 + math.exp(-(k * u + offset)))
         return (q_heat + q_cool) * sigmoid_val - q_cool
+
+    def control_for_power_fraction(
+        self, power_fraction: float, outdoor_temp: float = 0.0, k_sigmoid: float = 5.0,
+    ) -> float:
+        """Invert :meth:`smooth_thermal_power` so a commanded power fraction lands
+        linearly on delivered power.
+
+        ``power_fraction`` is the signed fraction of capacity: ``+pf`` →
+        ``pf · Q_heat`` (heating), ``-pf`` → ``pf · Q_cool`` (cooling).  Returns
+        the control input ``u`` (clamped to ``[u_min, u_max]``) that produces that
+        thermal power under the same sigmoid the controller uses.  Heat-only mode
+        (no cooling) keeps the linear identity of the base class.
+        """
+        pf = float(power_fraction)
+        if not self.can_cool:
+            return max(self.u_min, min(self.u_max, pf))
+        if pf == 0.0 or outdoor_temp < self.min_outdoor_temp:
+            return 0.0
+        cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
+        q_heat = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max)
+        q_cool = self._q_cool_const
+        if q_heat <= 0.0 or q_cool <= 0.0:
+            return max(self.u_min, min(self.u_max, pf))
+        # Target thermal power for the requested fraction of the relevant capacity.
+        target = pf * (q_heat if pf > 0.0 else q_cool)
+        k = k_sigmoid + max(0.0, math.log(q_heat / q_cool))
+        offset = math.log(q_cool / q_heat)
+        # Invert φ(u) = (q_heat + q_cool)·σ(k·u + offset) − q_cool.
+        s = (target + q_cool) / (q_heat + q_cool)
+        s = min(max(s, 1e-9), 1.0 - 1e-9)
+        u = (math.log(s / (1.0 - s)) - offset) / k
+        return max(self.u_min, min(self.u_max, u))
