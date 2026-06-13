@@ -85,15 +85,47 @@ export class HaConnection {
     }
   }
 
-  async getForecasts() {
+  async getForecasts(plotForecastHours) {
     try {
-      const result = await this._hass.callWS({
-        type: 'heating_assistant/get_forecasts',
-      });
+      const msg = { type: 'heating_assistant/get_forecasts' };
+      // A positive value requests a display horizon that may differ from the
+      // controller horizon; 0 / undefined keeps the full controller horizon.
+      if (plotForecastHours != null && Number(plotForecastHours) > 0) {
+        msg.plot_forecast_hours = Number(plotForecastHours);
+      }
+      const result = await this._hass.callWS(msg);
       return result || {};
     } catch (e) {
       console.warn('Failed to fetch forecasts via WebSocket:', e);
       return {};
+    }
+  }
+
+  // Lightweight fetch of just the dashboard display settings (plot windows).
+  // Returns null on failure so callers can fall back to their own defaults.
+  async getUiSettings() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/get_ui_settings',
+      });
+      return (result && result.ui_settings) ? result.ui_settings : null;
+    } catch (e) {
+      console.warn('Failed to fetch UI settings via WebSocket:', e);
+      return null;
+    }
+  }
+
+  // Full editable model configuration (rooms, heat sources, system entities,
+  // display settings, enum choices) used by the Configuration page.
+  async getModelConfig() {
+    try {
+      const result = await this._hass.callWS({
+        type: 'heating_assistant/get_model_config',
+      });
+      return (result && typeof result === 'object') ? result : null;
+    } catch (e) {
+      console.warn('Failed to fetch model config via WebSocket:', e);
+      return null;
     }
   }
 
