@@ -32,7 +32,7 @@ def _make_coordinator():
         heating_schedule=[{"living_room": 1234.0}, {"living_room": 1100.0}],
         solar_forecast=[{"living_room": 50.0}, {"living_room": 60.0}],
         outdoor_forecast=[5.0, 4.5],
-        price_forecast=[],
+        price_forecast=[0.10, 0.11, 0.12],
         filtered_temperatures={"living_room": 20.63},
         solar_gains={"living_room": 50.0},
         heat_sources=sources,
@@ -83,6 +83,27 @@ def test_extended_horizon_holds_final_actuation():
         assert "temperature" in e
     # outdoor forecast in the top-level array also spans the full window
     assert len(payload["outdoor_forecast"]) == 5
+
+
+def test_price_forecast_tracks_display_horizon():
+    coord = _make_coordinator()
+    # Extended: price held flat past the available forecast (now + 4 steps = 5 points).
+    extended = HeatingAssistantCoordinator.build_forecast_payload(
+        coord, room_names=["living_room"], plot_forecast_steps=4
+    )
+    prices = extended["price_forecast"]
+    assert len(prices) == 5
+    assert prices[-1]["price"] == 0.12  # last known price held flat
+    # Truncated: fewer price points than the controller horizon.
+    truncated = HeatingAssistantCoordinator.build_forecast_payload(
+        coord, room_names=["living_room"], plot_forecast_steps=1
+    )
+    assert len(truncated["price_forecast"]) == 2  # now + 1 step
+    # Default (no plot horizon) keeps the full price forecast.
+    default = HeatingAssistantCoordinator.build_forecast_payload(
+        coord, room_names=["living_room"]
+    )
+    assert len(default["price_forecast"]) == 3
 
 
 def test_truncated_horizon():

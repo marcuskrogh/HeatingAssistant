@@ -11,6 +11,74 @@
 //   #config/system       → environment sensors + site location
 
 // ---------------------------------------------------------------------------
+// Teal line-art icons (same design language as the panel logo: teal strokes on
+// a transparent background, no fills).
+// ---------------------------------------------------------------------------
+
+const TEAL = '#00d4aa';
+
+const ICONS = {
+  display: `<svg viewBox="0 0 100 100" aria-hidden="true">
+    <line x1="20" y1="18" x2="20" y2="80" stroke="${TEAL}" stroke-width="5" stroke-linecap="round" opacity="0.4"/>
+    <line x1="20" y1="80" x2="84" y2="80" stroke="${TEAL}" stroke-width="5" stroke-linecap="round" opacity="0.4"/>
+    <polyline points="26,66 44,48 58,58 82,28" fill="none" stroke="${TEAL}" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <polyline points="26,74 44,64 58,70 82,52" fill="none" stroke="${TEAL}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 6" opacity="0.55"/>
+  </svg>`,
+  rooms: `<svg viewBox="0 0 100 100" aria-hidden="true">
+    <path d="M18 84 V46 L50 20 L82 46 V84 Z" fill="none" stroke="${TEAL}" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M42 84 V60 H58 V84" fill="none" stroke="${TEAL}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" opacity="0.6"/>
+  </svg>`,
+  sources: `<svg viewBox="0 0 100 100" aria-hidden="true">
+    <path d="M52 16 C 66 36, 76 46, 76 60 a26 26 0 0 1 -52 0 C 24 50, 34 48, 38 34 C 46 42, 52 40, 52 16 Z"
+      fill="none" stroke="${TEAL}" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M50 78 a12 12 0 0 1 -12 -14 C 42 60, 46 56, 48 48 C 52 56, 62 58, 62 66 a12 12 0 0 1 -12 12 Z"
+      fill="none" stroke="${TEAL}" stroke-width="4" stroke-linejoin="round" stroke-linecap="round" opacity="0.55"/>
+  </svg>`,
+  system: `<svg viewBox="0 0 100 100" aria-hidden="true">
+    <circle cx="38" cy="38" r="13" fill="none" stroke="${TEAL}" stroke-width="5"/>
+    <g stroke="${TEAL}" stroke-width="4" stroke-linecap="round" opacity="0.7">
+      <line x1="38" y1="14" x2="38" y2="8"/>
+      <line x1="18" y1="38" x2="12" y2="38"/>
+      <line x1="22" y1="22" x2="17" y2="17"/>
+      <line x1="54" y1="22" x2="59" y2="17"/>
+    </g>
+    <path d="M44 78 H72 a13 13 0 0 0 1 -26 a18 18 0 0 0 -34 -2 a13 13 0 0 0 -7 28 Z"
+      fill="none" stroke="${TEAL}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`,
+};
+
+// ---------------------------------------------------------------------------
+// Categorical thermal-model presets (the visible, required choices).  Precise
+// values are identified per-room on the Identification page; these only set a
+// sensible baseline.
+// ---------------------------------------------------------------------------
+
+const ROOM_SIZE_PRESETS = [
+  { value: 'small', label: 'Small room', thermal_mass: 2500000, hint: 'bathroom, small bedroom' },
+  { value: 'medium', label: 'Medium room', thermal_mass: 5000000, hint: 'bedroom, office' },
+  { value: 'large', label: 'Large room', thermal_mass: 9000000, hint: 'living room' },
+  { value: 'open', label: 'Open / open-plan', thermal_mass: 14000000, hint: 'open-plan, hall' },
+];
+
+const HOUSE_AGE_PRESETS = [
+  { value: 'old', label: 'Old / poorly insulated', r_external: 0.03, tightness: 'leaky' },
+  { value: 'standard', label: 'Standard insulation', r_external: 0.05, tightness: 'typical' },
+  { value: 'modern', label: 'Modern / well insulated', r_external: 0.08, tightness: 'tight' },
+  { value: 'passive', label: 'Passive house', r_external: 0.12, tightness: 'passive_house' },
+];
+
+function nearestPreset(presets, key, value) {
+  if (value == null) return presets[1] || presets[0];
+  let best = presets[0];
+  let bestDiff = Infinity;
+  for (const p of presets) {
+    const d = Math.abs(Number(p[key]) - Number(value));
+    if (d < bestDiff) { bestDiff = d; best = p; }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
 // Small DOM builders shared by every sub-page
 // ---------------------------------------------------------------------------
 
@@ -19,6 +87,10 @@ function el(tag, className, html) {
   if (className) node.className = className;
   if (html != null) node.innerHTML = html;
   return node;
+}
+
+function escapeAttr(v) {
+  return v != null ? String(v).replace(/"/g, '&quot;') : '';
 }
 
 function backNav(label, hash) {
@@ -33,6 +105,27 @@ function sectionCard(title, desc) {
   if (title) card.appendChild(el('div', 'config-section__title', title));
   if (desc) card.appendChild(el('p', 'config-section__desc', desc));
   return card;
+}
+
+// Collapsible "Advanced" subsection appended inside a section card. Returns the
+// body element callers append fields to.
+function advancedSubsection(parent, title = 'Advanced settings') {
+  const wrap = el('div', 'config-advanced');
+  const head = el('button', 'config-advanced__head');
+  head.type = 'button';
+  head.innerHTML = `<span class="config-advanced__chevron">▸</span><span>${title}</span>`;
+  const body = el('div', 'config-advanced__body');
+  body.hidden = true;
+  head.addEventListener('click', () => {
+    const open = body.hidden;
+    body.hidden = !open;
+    head.classList.toggle('config-advanced__head--open', open);
+    head.querySelector('.config-advanced__chevron').textContent = open ? '▾' : '▸';
+  });
+  wrap.appendChild(head);
+  wrap.appendChild(body);
+  parent.appendChild(wrap);
+  return body;
 }
 
 function actionsBar(primaryLabel) {
@@ -76,7 +169,7 @@ function textField(obj, key, label, { hint = '', placeholder = '' } = {}) {
   group.innerHTML = `
     <label class="form-label">${label}</label>
     <input class="form-input" type="text" placeholder="${placeholder}"
-      value="${obj[key] != null ? String(obj[key]).replace(/"/g, '&quot;') : ''}">
+      value="${escapeAttr(obj[key])}">
     <span class="form-hint">${hint}</span>
   `;
   const input = group.querySelector('input');
@@ -88,7 +181,7 @@ function textField(obj, key, label, { hint = '', placeholder = '' } = {}) {
   return group;
 }
 
-function selectField(obj, key, label, options, { hint = '', def } = {}) {
+function selectField(obj, key, label, options, { hint = '', def, onChange } = {}) {
   const group = el('div', 'form-group');
   const current = obj[key] != null ? obj[key] : def;
   const opts = options.map((o) => {
@@ -103,33 +196,9 @@ function selectField(obj, key, label, options, { hint = '', def } = {}) {
     <span class="form-hint">${hint}</span>
   `;
   const select = group.querySelector('select');
-  select.addEventListener('change', () => { obj[key] = select.value; });
-  return group;
-}
-
-// Entity picker: free-text input backed by a datalist of matching entity ids.
-function entityField(hass, obj, key, label, domains, { hint = '' } = {}) {
-  const group = el('div', 'form-group');
-  const listId = `dl-${key}-${Math.random().toString(36).slice(2, 8)}`;
-  const ids = Object.keys(hass?.states || {})
-    .filter((id) => domains.some((d) => id.startsWith(d + '.')))
-    .sort();
-  const optionsHtml = ids.map((id) => {
-    const name = hass.states[id]?.attributes?.friendly_name;
-    return `<option value="${id}">${name ? name : id}</option>`;
-  }).join('');
-  group.innerHTML = `
-    <label class="form-label">${label}</label>
-    <input class="form-input" type="text" list="${listId}" placeholder="(none)"
-      value="${obj[key] != null ? String(obj[key]).replace(/"/g, '&quot;') : ''}">
-    <datalist id="${listId}">${optionsHtml}</datalist>
-    <span class="form-hint">${hint || `Pick a ${domains.join(' / ')} entity, or leave blank.`}</span>
-  `;
-  const input = group.querySelector('input');
-  input.addEventListener('change', () => {
-    const v = input.value.trim();
-    if (v === '') { delete obj[key]; return; }
-    obj[key] = v;
+  select.addEventListener('change', () => {
+    obj[key] = select.value;
+    if (onChange) onChange(select.value);
   });
   return group;
 }
@@ -149,6 +218,154 @@ function prettify(token) {
 
 function loadingNode(text = 'Loading configuration…') {
   return el('div', 'loading', text);
+}
+
+function fmt(v, unit, def) {
+  const value = v != null ? v : def;
+  return value != null ? `${value}${unit}` : '—';
+}
+
+// ---------------------------------------------------------------------------
+// Searchable Home Assistant entity picker (modal)
+// ---------------------------------------------------------------------------
+
+function entityFriendlyName(hass, id) {
+  return hass?.states?.[id]?.attributes?.friendly_name || id;
+}
+
+function openEntityPicker(root, hass, { title, domains, onSelect }) {
+  const overlay = el('div', 'ha-modal-overlay');
+  const modal = el('div', 'ha-modal');
+  modal.innerHTML = `
+    <div class="ha-modal__head">
+      <span class="ha-modal__title">${title}</span>
+      <button class="ha-modal__close" aria-label="Close" type="button">×</button>
+    </div>
+    <input class="form-input ha-modal__search" type="text" placeholder="Search entities…">
+    <div class="ha-modal__list"></div>
+  `;
+  overlay.appendChild(modal);
+  root.appendChild(overlay);
+
+  const searchEl = modal.querySelector('.ha-modal__search');
+  const listEl = modal.querySelector('.ha-modal__list');
+
+  const entities = Object.entries(hass?.states || {})
+    .filter(([id]) => domains.some((d) => id.startsWith(d + '.')))
+    .map(([id, s]) => ({
+      id,
+      name: s.attributes?.friendly_name || id,
+      state: s.state,
+      unit: s.attributes?.unit_of_measurement || '',
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  function close() { overlay.remove(); }
+
+  function draw(filterText) {
+    const f = (filterText || '').trim().toLowerCase();
+    listEl.innerHTML = '';
+    const matches = entities.filter(
+      (e) => !f || e.name.toLowerCase().includes(f) || e.id.toLowerCase().includes(f),
+    );
+    if (matches.length === 0) {
+      listEl.appendChild(el('div', 'ha-modal__empty',
+        domains.length ? `No ${domains.join(' / ')} entities found.` : 'No entities found.'));
+      return;
+    }
+    matches.slice(0, 400).forEach((e) => {
+      const row = el('button', 'ha-modal__row');
+      row.type = 'button';
+      row.innerHTML = `
+        <span class="ha-modal__row-name">${e.name}</span>
+        <span class="ha-modal__row-id">${e.id}</span>
+        <span class="ha-modal__row-state">${e.state}${e.unit ? ' ' + e.unit : ''}</span>
+      `;
+      row.addEventListener('click', () => { close(); onSelect(e.id); });
+      listEl.appendChild(row);
+    });
+  }
+
+  modal.querySelector('.ha-modal__close').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  searchEl.addEventListener('input', () => draw(searchEl.value));
+  draw('');
+  setTimeout(() => searchEl.focus(), 30);
+}
+
+// Single-entity field: shows the current selection and opens the picker.
+function entityPickerField(root, hass, obj, key, label, domains, { hint = '' } = {}) {
+  const group = el('div', 'form-group');
+  group.innerHTML = `
+    <label class="form-label">${label}</label>
+    <div class="entity-pick">
+      <span class="entity-pick__value" data-role="value"></span>
+      <button class="btn btn--secondary btn--sm" type="button" data-role="choose">Choose…</button>
+      <button class="btn btn--ghost btn--sm" type="button" data-role="clear">Clear</button>
+    </div>
+    <span class="form-hint">${hint}</span>
+  `;
+  const valueEl = group.querySelector('[data-role="value"]');
+  function paint() {
+    const v = obj[key];
+    valueEl.textContent = v ? entityFriendlyName(hass, v) : '(none)';
+    valueEl.title = v || '';
+    valueEl.classList.toggle('entity-pick__value--empty', !v);
+  }
+  group.querySelector('[data-role="choose"]').addEventListener('click', () => {
+    openEntityPicker(root, hass, {
+      title: `Select ${label.toLowerCase()}`,
+      domains,
+      onSelect: (id) => { obj[key] = id; paint(); },
+    });
+  });
+  group.querySelector('[data-role="clear"]').addEventListener('click', () => {
+    delete obj[key];
+    paint();
+  });
+  paint();
+  return group;
+}
+
+// Multi-entity field: a chip list with add (via picker) / remove.
+function sensorListField(root, hass, obj, key, label, domains, { hint = '', emptyText = 'None selected.' } = {}) {
+  const arr = Array.isArray(obj[key]) ? obj[key] : (obj[key] = []);
+  const group = el('div', 'form-group form-group--full');
+  group.innerHTML = `
+    <div class="config-list-editor__head">
+      <span class="form-label">${label}</span>
+      <button class="btn btn--secondary btn--sm" type="button" data-role="add">+ Add</button>
+    </div>
+    <div class="entity-chips" data-role="chips"></div>
+    <span class="form-hint">${hint}</span>
+  `;
+  const chips = group.querySelector('[data-role="chips"]');
+  function draw() {
+    chips.innerHTML = '';
+    if (arr.length === 0) {
+      chips.appendChild(el('div', 'config-empty config-empty--inline', emptyText));
+      return;
+    }
+    arr.forEach((id, i) => {
+      const chip = el('span', 'entity-chip');
+      chip.innerHTML = `<span class="entity-chip__label" title="${escapeAttr(id)}">${entityFriendlyName(hass, id)}</span>`;
+      const rm = el('button', 'entity-chip__remove', '×');
+      rm.type = 'button';
+      rm.title = 'Remove';
+      rm.addEventListener('click', () => { arr.splice(i, 1); draw(); });
+      chip.appendChild(rm);
+      chips.appendChild(chip);
+    });
+  }
+  group.querySelector('[data-role="add"]').addEventListener('click', () => {
+    openEntityPicker(root, hass, {
+      title: `Add ${label.toLowerCase()}`,
+      domains,
+      onSelect: (id) => { if (!arr.includes(id)) arr.push(id); draw(); },
+    });
+  });
+  draw();
+  return group;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,25 +392,25 @@ export function renderConfiguration(container, rooms, state, connection, hass, s
 const LANDING_CARDS = [
   {
     hash: '#config/display',
-    icon: '📈',
+    icon: ICONS.display,
     title: 'Display & Plots',
     desc: 'How much history and forecast the room charts show. Decoupled from the controller horizon.',
   },
   {
     hash: '#config/rooms',
-    icon: '🏠',
+    icon: ICONS.rooms,
     title: 'Rooms',
     desc: 'Thermal model, comfort setpoints, sensors, windows and inter-room connections for each room.',
   },
   {
     hash: '#config/sources',
-    icon: '🔥',
+    icon: ICONS.sources,
     title: 'Heat Sources',
     desc: 'Electric heaters and heat pumps: capacity, efficiency, COP and the entity each one drives.',
   },
   {
     hash: '#config/system',
-    icon: '🌤️',
+    icon: ICONS.system,
     title: 'Environment & Site',
     desc: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors, plus site location.',
   },
@@ -324,11 +541,12 @@ function renderRoomList(container, connection, hass) {
     list.forEach((room, i) => {
       const card = el('div', 'card card--clickable config-list-card');
       const sources = (cfg.heat_sources || []).filter((s) => s.room === room.name).length;
+      const sensorCount = (room.temp_sensors || []).length || (room.temp_sensor ? 1 : 0);
       card.innerHTML = `
         <div class="config-list-card__name">${room.name || 'Room ' + (i + 1)}</div>
         <div class="config-list-card__meta">
           <span>Setpoint ${fmt(room.setpoint, '°C', 22)}</span>
-          <span>R ${fmt(room.r_external, 'K/W', 0.05)}</span>
+          <span>${sensorCount} sensor(s)</span>
           <span>${(room.windows || []).length} window(s)</span>
           <span>${sources} heater(s)</span>
         </div>
@@ -341,11 +559,6 @@ function renderRoomList(container, connection, hass) {
   });
 
   return { update() {}, destroy() {} };
-}
-
-function fmt(v, unit, def) {
-  const value = v != null ? v : def;
-  return value != null ? `${value}${unit}` : '—';
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +575,7 @@ function renderRoomEditor(container, connection, hass, idxParam) {
   connection.getModelConfig().then((cfg) => {
     const allRooms = (cfg && cfg.rooms) ? cfg.rooms.map((r) => ({ ...r })) : [];
     const enums = (cfg && cfg.enums) || {};
+    const tightMap = enums.envelope_tightness_map || {};
     const isNew = idxParam === 'new';
     const idx = isNew ? allRooms.length : Number(idxParam);
 
@@ -372,10 +586,16 @@ function renderRoomEditor(container, connection, hass, idxParam) {
 
     // Working copy — preserves unknown keys (schedule, etc.) via spread.
     const room = isNew
-      ? { name: '', setpoint: 22, comfort_offset: 2.0, windows: [], connections: [] }
+      ? { name: '', setpoint: 22, comfort_offset: 2.0, windows: [], connections: [], temp_sensors: [] }
       : { ...allRooms[idx] };
     room.windows = room.windows ? room.windows.map((w) => ({ ...w })) : [];
     room.connections = room.connections ? room.connections.map((c) => ({ ...c })) : [];
+    // Consolidate temperature sensors into a single averaged list.
+    room.temp_sensors = Array.isArray(room.temp_sensors) ? [...room.temp_sensors] : [];
+    if (room.temp_sensor && !room.temp_sensors.includes(room.temp_sensor)) {
+      room.temp_sensors.unshift(room.temp_sensor);
+    }
+    delete room.temp_sensor;
 
     body.innerHTML = '';
     body.appendChild(el('div', 'section-header', isNew ? 'NEW ROOM' : `EDIT ROOM: ${room.name || ''}`));
@@ -392,137 +612,145 @@ function renderRoomEditor(container, connection, hass, idxParam) {
     body.appendChild(idCard);
 
     // --- Sensors ------------------------------------------------------------
-    const sensorCard = sectionCard('Sensors',
-      'Which Home Assistant entities measure this room. The temperature sensor drives the '
-      + 'model; window sensors pause heating while a window is open.');
-    sensorCard.appendChild(paramGrid(
-      entityField(hass, room, 'temp_sensor', 'Temperature sensor', ['sensor'], { hint: 'Primary indoor temperature sensor.' }),
-    ));
-    sensorCard.appendChild(listEditor({
-      title: 'Window / contact sensors',
-      items: ensureArray(room, 'window_sensors'),
-      addLabel: '+ Add window sensor',
-      emptyText: 'No window sensors. Heating ignores open windows for this room.',
-      renderRow: (arr, i) => {
-        const listId = `dl-ws-${Math.random().toString(36).slice(2, 8)}`;
-        const ids = Object.keys(hass?.states || {})
-          .filter((id) => id.startsWith('binary_sensor.')).sort();
-        const group = el('div', 'config-row form-group');
-        group.innerHTML = `
-          <input class="form-input" type="text" list="${listId}" placeholder="binary_sensor.…"
-            value="${arr[i] != null ? String(arr[i]).replace(/"/g, '&quot;') : ''}">
-          <datalist id="${listId}">${ids.map((id) => `<option value="${id}"></option>`).join('')}</datalist>
-        `;
-        const input = group.querySelector('input');
-        input.addEventListener('change', () => { arr[i] = input.value.trim(); });
-        return group;
-      },
-      newItem: () => '',
-    }));
+    const sensorCard = sectionCard('Temperature sensors',
+      'One or more sensors measuring this room. When several are added their readings are '
+      + 'averaged in the backend.');
+    sensorCard.appendChild(sensorListField(container, hass, room, 'temp_sensors',
+      'Temperature sensors', ['sensor'],
+      { hint: 'Averaged when more than one is selected.', emptyText: 'No temperature sensors — add at least one.' }));
+    const sensorAdv = advancedSubsection(sensorCard, 'Window / contact sensors');
+    sensorAdv.appendChild(sensorListField(container, hass, room, 'window_sensors',
+      'Window sensors', ['binary_sensor'],
+      { hint: 'Heating pauses for this room while any of these report open.', emptyText: 'No window sensors.' }));
     body.appendChild(sensorCard);
 
-    // --- Thermal model ------------------------------------------------------
+    // --- Thermal model (categorical) ---------------------------------------
     const thermCard = sectionCard('Thermal model',
-      'Bulk thermal behaviour. Thermal mass is the heat capacity (higher = slower to heat/cool). '
-      + 'R-external is the resistance to outdoors (higher = better insulated). These are refined '
-      + 'automatically by system identification, but good starting values help.');
-    thermCard.appendChild(paramGrid(
-      numberField(room, 'thermal_mass', 'Thermal mass', { step: 100000, unit: 'J/K', min: 1000, hint: '~5,000,000 for a typical room.' }),
-      numberField(room, 'r_external', 'External resistance', { step: 0.005, unit: 'K/W', min: 0.0001, hint: '~0.05 typical; higher = better insulated.' }),
-      selectField(room, 'floor_type', 'Floor type', enums.floor_types || ['none'], { def: 'none', hint: 'Slab / underfloor heating coupling.' }),
-    ));
-    // Envelope tightness preset → fills infiltration_fraction.
-    const tightnessRow = el('div', 'tuning-params-grid tuning-params-grid--wide');
-    const infilField = numberField(room, 'infiltration_fraction', 'Infiltration fraction', {
-      step: 0.05, min: 0, max: 0.95,
-      hint: 'Share of envelope loss driven by air leakage (0–0.95).',
-    });
-    const tightMap = enums.envelope_tightness_map || {};
-    const tightSelect = selectField(
-      { _t: '' }, '_t', 'Envelope tightness preset',
-      [{ value: '', label: '(custom)' }].concat((enums.envelope_tightness || []).map((k) => ({ value: k, label: prettify(k) }))),
-      { hint: 'Pick a preset to fill the infiltration fraction.' },
+      'Pick the rough size and construction — these set a baseline. The precise thermal mass '
+      + 'and insulation are identified per room on the Identification page.');
+    const sizePreset = nearestPreset(ROOM_SIZE_PRESETS, 'thermal_mass', room.thermal_mass);
+    const agePreset = nearestPreset(HOUSE_AGE_PRESETS, 'r_external', room.r_external);
+    // Seed baseline values so a brand-new room is valid even if untouched.
+    if (room.thermal_mass == null) room.thermal_mass = sizePreset.thermal_mass;
+    if (room.r_external == null) room.r_external = agePreset.r_external;
+
+    // Forward declarations so the preset onChange handlers can sync the
+    // advanced numeric overrides below.
+    let tmInput = null;
+    let rInput = null;
+    let infInput = null;
+
+    const sizeField = selectField(
+      { v: sizePreset.value }, 'v', 'Room size',
+      ROOM_SIZE_PRESETS.map((p) => ({ value: p.value, label: `${p.label} (${p.hint})` })),
+      {
+        hint: 'Sets the baseline thermal mass.',
+        onChange: (v) => {
+          const p = ROOM_SIZE_PRESETS.find((x) => x.value === v);
+          if (p) { room.thermal_mass = p.thermal_mass; if (tmInput) tmInput.value = p.thermal_mass; }
+        },
+      },
     );
-    tightSelect.querySelector('select').addEventListener('change', (ev) => {
-      const v = ev.target.value;
-      if (v && tightMap[v] != null) {
-        room.infiltration_fraction = tightMap[v];
-        const inp = infilField.querySelector('input');
-        if (inp) inp.value = tightMap[v];
-      }
-    });
-    tightnessRow.appendChild(tightSelect);
-    tightnessRow.appendChild(infilField);
-    thermCard.appendChild(tightnessRow);
+    const ageField = selectField(
+      { v: agePreset.value }, 'v', 'Construction / insulation',
+      HOUSE_AGE_PRESETS.map((p) => ({ value: p.value, label: p.label })),
+      {
+        hint: 'Sets the baseline insulation and air-tightness.',
+        onChange: (v) => {
+          const p = HOUSE_AGE_PRESETS.find((x) => x.value === v);
+          if (p) {
+            room.r_external = p.r_external;
+            if (rInput) rInput.value = p.r_external;
+            if (tightMap[p.tightness] != null) {
+              room.infiltration_fraction = tightMap[p.tightness];
+              if (infInput) infInput.value = tightMap[p.tightness];
+            }
+          }
+        },
+      },
+    );
+    thermCard.appendChild(paramGrid(sizeField, ageField));
+
+    const thermAdv = advancedSubsection(thermCard, 'Advanced thermal model');
+    const tmGroup = numberField(room, 'thermal_mass', 'Thermal mass (override)', { step: 100000, unit: 'J/K', min: 1000, hint: 'Overrides the size preset.' });
+    const rGroup = numberField(room, 'r_external', 'External resistance (override)', { step: 0.005, unit: 'K/W', min: 0.0001, hint: 'Overrides the insulation preset.' });
+    const infGroup = numberField(room, 'infiltration_fraction', 'Infiltration fraction', { step: 0.05, min: 0, max: 0.95, hint: 'Share of envelope loss from air leakage.' });
+    tmInput = tmGroup.querySelector('input');
+    rInput = rGroup.querySelector('input');
+    infInput = infGroup.querySelector('input');
+    thermAdv.appendChild(paramGrid(
+      tmGroup, rGroup, infGroup,
+      selectField(room, 'floor_type', 'Floor type', enums.floor_types || ['none'], { def: 'none', hint: 'Slab / underfloor-heating coupling.' }),
+    ));
     body.appendChild(thermCard);
 
-    // --- Solar --------------------------------------------------------------
+    // --- Solar & windows (advanced) ----------------------------------------
     const solarCard = sectionCard('Solar gain',
-      'How much sun this room collects. Use the exposure preset for a quick estimate, or '
-      + 'enumerate individual windows below for higher fidelity (windows take precedence).');
-    solarCard.appendChild(paramGrid(
+      'Optional. How much sun this room collects. Identified from data when left at defaults.');
+    const solarAdv = advancedSubsection(solarCard, 'Configure solar & windows');
+    solarAdv.appendChild(paramGrid(
       selectField(room, 'solar_exposure', 'Solar exposure', enums.solar_exposures || ['none'], { def: 'none', hint: 'Coarse glazing/aperture preset.' }),
-      numberField(room, 'solar_facing', 'Solar facing', { step: 5, unit: '°', min: 0, max: 360, hint: 'Direction the glazing faces (0=N, 90=E, 180=S, 270=W).' }),
+      numberField(room, 'solar_facing', 'Solar facing', { step: 5, unit: '°', min: 0, max: 360, hint: '0=N, 90=E, 180=S, 270=W.' }),
     ));
-    solarCard.appendChild(listEditor({
+    solarAdv.appendChild(listEditor({
       title: 'Windows',
       items: room.windows,
       addLabel: '+ Add window',
       emptyText: 'No individual windows. The exposure preset above is used instead.',
       renderRow: (arr, i) => {
         const w = arr[i];
-        const row = el('div', 'config-row tuning-params-grid tuning-params-grid--wide');
-        row.appendChild(numberField(w, 'area', 'Area', { step: 0.5, unit: 'm²', min: 0, hint: 'Glazed area.' }));
-        row.appendChild(numberField(w, 'orientation', 'Orientation', { step: 5, unit: '°', min: 0, max: 360, hint: '0=N, 90=E, 180=S, 270=W.' }));
-        row.appendChild(numberField(w, 'tilt', 'Tilt', { step: 5, unit: '°', min: 0, max: 90, hint: '90 = vertical.' }));
-        return row;
+        const rowEl = el('div', 'config-row tuning-params-grid tuning-params-grid--wide');
+        rowEl.appendChild(numberField(w, 'area', 'Area', { step: 0.5, unit: 'm²', min: 0, hint: 'Glazed area.' }));
+        rowEl.appendChild(numberField(w, 'orientation', 'Orientation', { step: 5, unit: '°', min: 0, max: 360, hint: '0=N, 90=E, 180=S, 270=W.' }));
+        rowEl.appendChild(numberField(w, 'tilt', 'Tilt', { step: 5, unit: '°', min: 0, max: 90, hint: '90 = vertical.' }));
+        return rowEl;
       },
       newItem: () => ({ area: 1.0, orientation: 180, tilt: 90 }),
     }));
     body.appendChild(solarCard);
 
-    // --- Connections --------------------------------------------------------
+    // --- Connections (advanced) --------------------------------------------
     const otherRooms = allRooms.map((r) => r.name).filter((n) => n && n !== room.name);
     const connCard = sectionCard('Inter-room connections',
-      'Thermal links to adjacent rooms (through internal walls/doors). R-value is the '
-      + 'resistance of the link (lower = stronger coupling).');
-    connCard.appendChild(listEditor({
+      'Optional. Thermal links to adjacent rooms (through internal walls/doors).');
+    const connAdv = advancedSubsection(connCard, 'Configure connections');
+    connAdv.appendChild(listEditor({
       title: 'Connections',
       items: room.connections,
       addLabel: '+ Add connection',
       emptyText: 'No inter-room connections configured.',
       renderRow: (arr, i) => {
         const c = arr[i];
-        const row = el('div', 'config-row tuning-params-grid tuning-params-grid--wide');
-        row.appendChild(selectField(c, 'room', 'Connected room',
+        const rowEl = el('div', 'config-row tuning-params-grid tuning-params-grid--wide');
+        rowEl.appendChild(selectField(c, 'room', 'Connected room',
           otherRooms.length ? otherRooms : [''], { hint: 'Adjacent room.' }));
-        row.appendChild(numberField(c, 'r_value', 'R-value', { step: 0.05, unit: 'K/W', min: 0.0001, hint: 'Lower = stronger coupling.' }));
-        return row;
+        rowEl.appendChild(numberField(c, 'r_value', 'R-value', { step: 0.05, unit: 'K/W', min: 0.0001, hint: 'Lower = stronger coupling.' }));
+        return rowEl;
       },
       newItem: () => ({ room: otherRooms[0] || '', r_value: 0.2 }),
     }));
     body.appendChild(connCard);
 
     // --- Advanced envelope --------------------------------------------------
-    const advCard = sectionCard('Advanced envelope (optional)',
-      'Fine envelope corrections. Leave blank to use sensible defaults; these are normally '
-      + 'identified from data.');
-    advCard.appendChild(paramGrid(
+    const envCard = sectionCard('Building envelope',
+      'Optional fine corrections, normally identified from data.');
+    const envAdv = advancedSubsection(envCard, 'Advanced envelope settings');
+    envAdv.appendChild(paramGrid(
       selectField(room, 'facade_colour', 'Facade colour', enums.facade_colours || ['medium'], { def: 'medium', hint: 'Solar absorptance of the opaque facade.' }),
       numberField(room, 'facade_solar_share', 'Facade solar share', { step: 0.05, min: 0, max: 1, hint: 'Sol-air share on the wall node (0 = off).' }),
       numberField(room, 'sky_radiative_ua', 'Sky radiative UA', { step: 0.5, unit: 'W/K', min: 0, hint: 'Clear-night radiative cooling (0 = off).' }),
       numberField(room, 'thermal_bridge_psi_l', 'Thermal bridge', { step: 0.5, unit: 'W/K', min: 0, hint: 'Linear thermal-bridge correction (0 = off).' }),
-      numberField(room, 'c_air_fraction', 'Air-mass fraction', { step: 0.01, min: 0, max: 1, hint: 'Fast air node share of thermal mass (~0.05).' }),
-      numberField(room, 'r_aw_fraction', 'Air↔wall film fraction', { step: 0.01, min: 0, max: 1, hint: 'Internal film share of the conductive path (~0.05).' }),
+      numberField(room, 'c_air_fraction', 'Air-mass fraction', { step: 0.01, min: 0, max: 1, hint: 'Fast air node share (~0.05).' }),
+      numberField(room, 'r_aw_fraction', 'Air↔wall film fraction', { step: 0.01, min: 0, max: 1, hint: 'Internal film share (~0.05).' }),
     ));
-    body.appendChild(advCard);
+    body.appendChild(envCard);
 
     // --- Save / delete ------------------------------------------------------
     const actions = el('div', 'tuning-actions');
     actions.style.marginTop = '20px';
     actions.innerHTML = `
       <button class="btn btn--primary" data-role="save">${isNew ? 'Create Room' : 'Save Changes'}</button>
-      ${isNew ? '' : '<button class="btn btn--ghost" data-role="delete">Delete Room</button>'}
+      ${isNew ? '' : '<button class="btn btn--danger" data-role="delete">Delete Room</button>'}
       <span class="tuning-actions__status" data-role="status"></span>
     `;
     body.appendChild(actions);
@@ -532,6 +760,10 @@ function renderRoomEditor(container, connection, hass, idxParam) {
       const btn = e.currentTarget;
       if (!room.name || !String(room.name).trim()) {
         setStatus(statusEl, 'A room name is required.', 'error');
+        return;
+      }
+      if (!Array.isArray(room.temp_sensors) || room.temp_sensors.length === 0) {
+        setStatus(statusEl, 'Add at least one temperature sensor.', 'error');
         return;
       }
       btn.disabled = true;
@@ -586,6 +818,10 @@ function cleanRoom(room) {
       .filter((c) => c && c.room && Number(c.r_value) > 0)
       .map((c) => ({ room: c.room, r_value: Number(c.r_value) }));
     if (out.connections.length === 0) delete out.connections;
+  }
+  if (Array.isArray(out.temp_sensors)) {
+    out.temp_sensors = out.temp_sensors.map((s) => String(s).trim()).filter(Boolean);
+    if (out.temp_sensors.length === 0) delete out.temp_sensors;
   }
   if (Array.isArray(out.window_sensors)) {
     out.window_sensors = out.window_sensors.map((s) => String(s).trim()).filter(Boolean);
@@ -646,7 +882,7 @@ function renderSourceList(container, connection, hass) {
 }
 
 // ---------------------------------------------------------------------------
-// Heat sources — editor
+// Heat sources — editor (sections driven by HVAC mode)
 // ---------------------------------------------------------------------------
 
 function renderSourceEditor(container, connection, hass, idxParam) {
@@ -669,71 +905,91 @@ function renderSourceEditor(container, connection, hass, idxParam) {
     }
 
     const src = isNew
-      ? { name: '', type: 'electric_heater', room: roomNames[0] || '', max_power: 2000 }
+      ? { name: '', type: 'electric_heater', room: roomNames[0] || '', max_power: 2000, hvac_mode: 'heat_cool' }
       : { ...allSources[idx] };
 
     body.innerHTML = '';
     body.appendChild(el('div', 'section-header', isNew ? 'NEW HEAT SOURCE' : `EDIT SOURCE: ${src.name || ''}`));
 
-    // Render the dynamic body (re-rendered when the type changes).
+    // Dynamic body re-renders when type or HVAC mode changes (so the heating /
+    // cooling sections appear and disappear with the selected mode).
     const dynamic = el('div');
     body.appendChild(dynamic);
+
+    function modeIncludes(part) {
+      if (src.type !== 'heat_pump') return part === 'heat';
+      const m = src.hvac_mode || 'heat_cool';
+      return m === 'heat_cool' || m === part;
+    }
 
     function renderFields() {
       dynamic.innerHTML = '';
 
-      const idCard = sectionCard('Identity & placement',
-        'A unique name, the kind of source, and which room it heats. The driven entity is what '
-        + 'the controller switches or sets to deliver heat.');
-      idCard.appendChild(paramGrid(
+      // ── Shared settings ──────────────────────────────────────────────────
+      const sharedCard = sectionCard('Shared settings',
+        'Identity, placement, and the entity the controller commands.');
+      const typeField = selectField(src, 'type', 'Type',
+        enums.source_types || ['electric_heater', 'heat_pump'],
+        { hint: 'Electric heater or heat pump.', onChange: () => renderFields() });
+      const sharedFields = [
         textField(src, 'name', 'Name', { placeholder: 'living_room_heater', hint: 'Unique identifier.' }),
-        selectFieldRerender(src, 'type', 'Type', enums.source_types || ['electric_heater', 'heat_pump'], renderFields, { hint: 'Electric heater or heat pump.' }),
+        typeField,
         selectField(src, 'room', 'Room', roomNames.length ? roomNames : [''], { hint: 'Room this source heats.' }),
-        entityField(hass, src, 'heater_entity', 'Driven entity',
+        entityPickerField(container, hass, src, 'heater_entity', 'Driven entity',
           src.type === 'heat_pump' ? ['climate'] : ['switch', 'input_boolean', 'climate', 'number'],
           { hint: 'Entity the controller commands.' }),
-      ));
-      dynamic.appendChild(idCard);
-
-      const capCard = sectionCard('Capacity',
-        'Thermal output the source can deliver.');
-      const capFields = [
-        numberField(src, 'max_power', 'Max power', { step: 100, unit: 'W', min: 0, hint: 'Maximum thermal output.' }),
       ];
       if (src.type === 'heat_pump') {
-        capFields.push(numberField(src, 'min_power', 'Min power', { step: 100, unit: 'W', min: 0, hint: 'Minimum modulating output (0 = none).' }));
+        sharedFields.push(selectField(src, 'hvac_mode', 'HVAC mode',
+          enums.hvac_modes || ['heat', 'cool', 'heat_cool'],
+          { def: 'heat_cool', hint: 'Determines which settings below apply.', onChange: () => renderFields() }));
       }
-      capCard.appendChild(paramGrid(...capFields));
-      dynamic.appendChild(capCard);
-
-      if (src.type === 'heat_pump') {
-        const hpCard = sectionCard('Heat-pump performance',
-          'Coefficient of performance and operating mode. COP is referenced to an outdoor '
-          + 'temperature; cooling values apply when the unit can cool.');
-        hpCard.appendChild(paramGrid(
-          numberField(src, 'cop_rated', 'Rated COP', { step: 0.1, min: 1, hint: 'Heating COP at the reference temperature.' }),
-          numberField(src, 'cop_temp_ref', 'COP reference temp', { step: 1, unit: '°C', hint: 'Outdoor temp at which rated COP applies.' }),
-          numberField(src, 'max_temp_offset', 'Max temp offset', { step: 0.5, unit: '°C', min: 0, hint: 'Setpoint offset at full power.' }),
-          selectField(src, 'hvac_mode', 'HVAC mode', enums.hvac_modes || ['heat', 'cool', 'heat_cool'], { def: 'heat_cool', hint: 'Heating, cooling, or both.' }),
-          numberField(src, 'cooling_cop', 'Cooling COP', { step: 0.1, min: 0, hint: 'Cooling efficiency (EER).' }),
-          numberField(src, 'cooling_efficiency', 'Cooling efficiency', { step: 0.05, min: 0, max: 1, hint: 'Fraction of cooling capacity used.' }),
-        ));
-        dynamic.appendChild(hpCard);
-      } else {
-        const elCard = sectionCard('Electric heater',
-          'Conversion efficiency of electrical input to heat (1.0 for resistive heaters).');
-        elCard.appendChild(paramGrid(
-          numberField(src, 'efficiency', 'Efficiency', { step: 0.05, min: 0, max: 1, hint: '1.0 for resistive heaters.' }),
-        ));
-        dynamic.appendChild(elCard);
-      }
-
-      const advCard = sectionCard('Advanced (optional)',
-        'Emitter lag captures hydronic/radiator thermal inertia between command and delivered heat.');
-      advCard.appendChild(paramGrid(
+      sharedCard.appendChild(paramGrid(...sharedFields));
+      const sharedAdv = advancedSubsection(sharedCard, 'Advanced');
+      sharedAdv.appendChild(paramGrid(
         numberField(src, 'emitter_time_constant', 'Emitter time constant', { step: 30, unit: 's', min: 0, hint: '0 for electric; ~600 for hydronic radiators.' }),
       ));
-      dynamic.appendChild(advCard);
+      dynamic.appendChild(sharedCard);
+
+      // ── Heating settings ─────────────────────────────────────────────────
+      if (modeIncludes('heat')) {
+        const heatCard = sectionCard('Heating settings',
+          'Capacity and efficiency when delivering heat.');
+        const fields = [
+          numberField(src, 'max_power', 'Max heating power', { step: 100, unit: 'W', min: 0, hint: 'Maximum thermal output.' }),
+        ];
+        if (src.type === 'heat_pump') {
+          fields.push(
+            numberField(src, 'cop_rated', 'Rated COP', { step: 0.1, min: 1, hint: 'Heating COP at the reference temperature.' }),
+            numberField(src, 'cop_temp_ref', 'COP reference temp', { step: 1, unit: '°C', hint: 'Outdoor temp at which rated COP applies.' }),
+            numberField(src, 'max_temp_offset', 'Max temp offset', { step: 0.5, unit: '°C', min: 0, hint: 'Setpoint offset at full power.' }),
+            numberField(src, 'min_power', 'Min power', { step: 100, unit: 'W', min: 0, hint: 'Minimum modulating output (0 = none).' }),
+          );
+        } else {
+          fields.push(
+            numberField(src, 'efficiency', 'Efficiency', { step: 0.05, min: 0, max: 1, hint: '1.0 for resistive heaters.' }),
+          );
+        }
+        heatCard.appendChild(paramGrid(...fields));
+        dynamic.appendChild(heatCard);
+      }
+
+      // ── Cooling settings ─────────────────────────────────────────────────
+      if (modeIncludes('cool')) {
+        const coolCard = sectionCard('Cooling settings',
+          'Capacity and efficiency when cooling.');
+        const fields = [];
+        // Cool-only sources still need a capacity reference.
+        if (!modeIncludes('heat')) {
+          fields.push(numberField(src, 'max_power', 'Max power', { step: 100, unit: 'W', min: 0, hint: 'Capacity reference.' }));
+        }
+        fields.push(
+          numberField(src, 'cooling_cop', 'Cooling COP', { step: 0.1, min: 0, hint: 'Cooling efficiency (EER).' }),
+          numberField(src, 'cooling_efficiency', 'Cooling efficiency', { step: 0.05, min: 0, max: 1, hint: 'Fraction of cooling capacity used.' }),
+        );
+        coolCard.appendChild(paramGrid(...fields));
+        dynamic.appendChild(coolCard);
+      }
     }
 
     renderFields();
@@ -742,7 +998,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
     actions.style.marginTop = '20px';
     actions.innerHTML = `
       <button class="btn btn--primary" data-role="save">${isNew ? 'Create Source' : 'Save Changes'}</button>
-      ${isNew ? '' : '<button class="btn btn--ghost" data-role="delete">Delete Source</button>'}
+      ${isNew ? '' : '<button class="btn btn--danger" data-role="delete">Delete Source</button>'}
       <span class="tuning-actions__status" data-role="status"></span>
     `;
     body.appendChild(actions);
@@ -789,25 +1045,23 @@ function renderSourceEditor(container, connection, hass, idxParam) {
   return { update() {}, destroy() {} };
 }
 
-// Select that triggers a re-render callback after updating the model (used so
-// the heat-source form can swap fields when the type changes).
-function selectFieldRerender(obj, key, label, options, onChange, opts = {}) {
-  const group = selectField(obj, key, label, options, opts);
-  group.querySelector('select').addEventListener('change', () => onChange());
-  return group;
-}
-
 function cleanSource(src) {
   const out = { ...src };
   out.name = String(out.name).trim();
   out.max_power = Number(out.max_power || 0);
-  // Drop heat-pump-only keys for electric heaters (and vice-versa) so values
-  // from a previous type don't linger.
+  // Drop keys irrelevant to the chosen type/mode so stale values don't linger.
   if (out.type !== 'heat_pump') {
     ['cop_rated', 'cop_temp_ref', 'min_power', 'max_temp_offset', 'hvac_mode',
       'cooling_cop', 'cooling_efficiency', 'heating_efficiency'].forEach((k) => delete out[k]);
   } else {
     delete out.efficiency;
+    const m = out.hvac_mode || 'heat_cool';
+    if (m === 'cool') {
+      ['cop_rated', 'cop_temp_ref', 'min_power', 'max_temp_offset'].forEach((k) => delete out[k]);
+    }
+    if (m === 'heat') {
+      ['cooling_cop', 'cooling_efficiency'].forEach((k) => delete out[k]);
+    }
   }
   return out;
 }
@@ -836,19 +1090,20 @@ function renderSystem(container, connection, hass) {
     const envCard = sectionCard('Weather & energy sensors',
       'External signals the controller reads. Outdoor temperature is required for good control; '
       + 'weather and solar irradiance improve the forecast; the price sensor enables price-aware '
-      + 'optimisation. Leave any field blank to disable it.');
+      + 'optimisation. Use Clear to disable any of them.');
     envCard.appendChild(paramGrid(
-      entityField(hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], { hint: 'Measured outdoor air temperature.' }),
-      entityField(hass, working, 'weather_entity', 'Weather forecast', ['weather'], { hint: 'Weather entity for the outdoor forecast.' }),
-      entityField(hass, working, 'solar_radiation_entity', 'Solar irradiance', ['sensor'], { hint: 'GHI in W/m² (optional).' }),
-      entityField(hass, working, 'price_entity', 'Electricity price', ['sensor'], { hint: 'Hourly market price (optional).' }),
+      entityPickerField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], { hint: 'Measured outdoor air temperature.' }),
+      entityPickerField(container, hass, working, 'weather_entity', 'Weather forecast', ['weather'], { hint: 'Weather entity for the outdoor forecast.' }),
+      entityPickerField(container, hass, working, 'solar_radiation_entity', 'Solar irradiance', ['sensor'], { hint: 'GHI in W/m² (optional).' }),
+      entityPickerField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], { hint: 'Hourly market price (optional).' }),
     ));
     body.appendChild(envCard);
 
     const siteCard = sectionCard('Site location',
-      'Latitude and longitude drive the solar-position model. Defaults to your Home Assistant '
-      + 'location.');
-    siteCard.appendChild(paramGrid(
+      'Used by the solar-position model. Defaults to your Home Assistant location — only override '
+      + 'it if this building is somewhere else.');
+    const siteAdv = advancedSubsection(siteCard, 'Override site location');
+    siteAdv.appendChild(paramGrid(
       numberField(working, 'latitude', 'Latitude', { step: 0.0001, min: -90, max: 90, unit: '°' }),
       numberField(working, 'longitude', 'Longitude', { step: 0.0001, min: -180, max: 180, unit: '°' }),
     ));
@@ -881,20 +1136,15 @@ function renderSystem(container, connection, hass) {
 }
 
 // ---------------------------------------------------------------------------
-// Generic add/remove list editor used for windows, connections, sensors
+// Generic add/remove list editor used for windows and connections
 // ---------------------------------------------------------------------------
-
-function ensureArray(obj, key) {
-  if (!Array.isArray(obj[key])) obj[key] = [];
-  return obj[key];
-}
 
 function listEditor({ title, items, addLabel, emptyText, renderRow, newItem }) {
   const wrap = el('div', 'config-list-editor');
   const head = el('div', 'config-list-editor__head');
   head.innerHTML = `
     <span class="config-list-editor__title">${title}</span>
-    <button class="btn btn--secondary btn--sm" data-role="add">${addLabel}</button>
+    <button class="btn btn--secondary btn--sm" type="button" data-role="add">${addLabel}</button>
   `;
   wrap.appendChild(head);
   const rowsWrap = el('div', 'config-list-editor__rows');
@@ -910,6 +1160,7 @@ function listEditor({ title, items, addLabel, emptyText, renderRow, newItem }) {
       const rowCard = el('div', 'config-item-row');
       rowCard.appendChild(renderRow(items, i));
       const del = el('button', 'schedule-form__delete', '×');
+      del.type = 'button';
       del.title = 'Remove';
       del.addEventListener('click', () => { items.splice(i, 1); draw(); });
       rowCard.appendChild(del);
