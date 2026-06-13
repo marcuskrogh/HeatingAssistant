@@ -4,7 +4,7 @@ import { createClimateCard } from '../components/climate-card.js';
 import { createCountdown } from '../components/countdown.js';
 import { createScheduleOverview } from '../components/schedule-overview.js';
 import { getRoomScheduleData } from '../schedule-utils.js';
-import { findActiveExperiment } from '../experiment-utils.js';
+import { findActiveExperiment, experimentBands } from '../experiment-utils.js';
 import {
   formatPower, formatTemperature, formatPrice,
   entityValue, entityAttr, systemEntity,
@@ -248,10 +248,14 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       if (experiments == null) return; // fetch failed — keep the current state
       activeExperiment = findActiveExperiment(experiments, roomSlug);
       climateCard.update({ experiment: activeExperiment });
+      // Shade the window of any scheduled/ongoing experiment on every plot so an
+      // upcoming or in-progress run is obvious across the room-level charts.
+      const bands = experimentBands(experiments, roomSlug);
+      tempChart.setExperimentBands(bands);
+      powerChart.setExperimentBands(bands);
+      disturbChart.setExperimentBands(bands);
     }).catch(() => { /* keep the last-known experiment state on failure */ });
   }
-  refreshExperiment();
-  const experimentInterval = setInterval(refreshExperiment, 30000);
 
   const chartsContainer = document.createElement('div');
   chartsContainer.className = 'grid-charts';
@@ -285,6 +289,12 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     y2Label: 'W',
     height: 200,
   });
+
+  // Resolve experiments now that the charts exist (the band overlay needs them);
+  // polled on a slow cadence because the scheduled \u2192 running transition happens
+  // on a wall-clock boundary that need not coincide with a state event.
+  refreshExperiment();
+  const experimentInterval = setInterval(refreshExperiment, 30000);
 
   // lastRunTs tracks the MPC solve timestamp; when it changes we know new
   // forecast data is available and re-fetch via the WS endpoint.

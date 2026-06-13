@@ -71,6 +71,35 @@ export function experimentPhase(exp, nowMs = Date.now()) {
   return nowS < excitationEndTs(exp) ? 'exciting' : 'settling';
 }
 
+/** Build shaded-band descriptors for every scheduled or ongoing experiment of a
+ *  room, for overlaying on the room-level plots.  Returns an array of
+ *  ``{ start, end, excitationEnd, label, status }`` with timestamps in **ms**,
+ *  one per non-terminal experiment (so an upcoming run shows before it starts).
+ *  ``experiments`` may be the raw backend list or a per-room index. */
+export function experimentBands(experiments, roomSlug) {
+  let list;
+  if (Array.isArray(experiments)) {
+    list = experiments.filter((e) => e && e.room_slug === roomSlug);
+  } else if (experiments && typeof experiments === 'object') {
+    list = experiments[roomSlug] || [];
+  } else {
+    return [];
+  }
+  const bands = [];
+  for (const e of list) {
+    if (!e || TERMINAL_STATUSES.has(e.status)) continue;
+    if (e.start_ts == null || e.end_ts == null) continue;
+    bands.push({
+      start: e.start_ts * 1000,
+      end: e.end_ts * 1000,
+      excitationEnd: excitationEndTs(e) * 1000,
+      label: e.name && e.name.trim() ? e.name.trim().toUpperCase() : 'EXPERIMENT',
+      status: e.status,
+    });
+  }
+  return bands;
+}
+
 /** Turn an experiment's time window into a progress snapshot at ``now``.
  *  Returns { pct, elapsedS, remainingS, totalS } with pct clamped to 0–100. */
 export function experimentProgress(exp, nowMs = Date.now()) {
