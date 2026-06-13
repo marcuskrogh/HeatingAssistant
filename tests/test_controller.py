@@ -806,7 +806,7 @@ class TestHeatingMPCController:
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
         now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
 
-        clamps = {"living_room": np.full(3, 1.0)}
+        clamps = {"lr_heater": np.full(3, 1.0)}
         actions = ctrl.compute(outdoor_temp=22.0, now=now, input_clamps=clamps)
 
         # Warm rooms → MPC would idle; the clamp pins the living-room heater on
@@ -828,9 +828,24 @@ class TestHeatingMPCController:
         actions = ctrl.compute(
             outdoor_temp=5.0, now=now,
             disabled_sources={"lr_heater"},
-            input_clamps={"living_room": np.full(3, 0.8)},
+            input_clamps={"lr_heater": np.full(3, 0.8)},
         )
         assert actions["lr_heater"] == pytest.approx(0.8, abs=1e-3)
+
+    def test_input_clamp_pins_negative_cool_for_reversible_source(self):
+        """A negative clamp (cool phase of a step test) is honoured by the QP for
+        a reversible heat pump, even when the room is below setpoint."""
+        room = Room("living_room", 5e6, 0.05, temperature=18.0, setpoint=21.0)
+        model = HouseModel([room])
+        hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
+        ctrl = HeatingMPCController(model, [hp], horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        actions = ctrl.compute(
+            outdoor_temp=5.0, now=now,
+            input_clamps={"hp": np.full(3, -0.5)},
+        )
+        assert actions["hp"] == pytest.approx(-0.5, abs=1e-3)
 
     def test_input_clamp_partial_horizon_zeros_unclamped_disabled_steps(self):
         """With a clamp only on the first step, a disabled source is pinned for
@@ -843,7 +858,7 @@ class TestHeatingMPCController:
         ctrl.compute(
             outdoor_temp=5.0, now=now,
             disabled_sources={"lr_heater"},
-            input_clamps={"living_room": clamp},
+            input_clamps={"lr_heater": clamp},
         )
         sched = ctrl.heating_schedule
         assert sched[0]["living_room"] == pytest.approx(2000.0, rel=1e-2)

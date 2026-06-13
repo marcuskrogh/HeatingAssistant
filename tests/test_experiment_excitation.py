@@ -1,11 +1,12 @@
 """Tests for the coordinator's experiment → MPC input-clamp wiring.
 
-An active experiment is applied by clamping the room's heater inputs over the
+An active experiment is applied by clamping each source's heater input over the
 MPC horizon (``_build_experiment_clamps``) rather than overriding the chosen
 action afterwards.  These build a partially-initialised coordinator (the same
 pattern used by ``test_window_override``) and exercise the clamp builder so the
-right rooms are clamped, the settle buffer releases, safety is applied at the
-applied step, and open windows are respected.
+right sources are clamped, the multi-phase step (including the cool phase for
+reversible units) is emitted, safety is applied at the applied step, and open
+windows are respected.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
+from custom_components.heating_assistant import experiments as E
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from custom_components.heating_assistant.experiments import Experiment, ExperimentManager
 
@@ -44,8 +46,8 @@ def _make_coord(rooms, sources, horizon=4, interval_s=3600):
     return coord
 
 
-def _src(name, room):
-    return SimpleNamespace(name=name, room=room, u_min=0.0, u_max=1.0)
+def _src(name, room, u_min=0.0, u_max=1.0, can_cool=False):
+    return SimpleNamespace(name=name, room=room, u_min=u_min, u_max=u_max, can_cool=can_cool)
 
 
 def _exp(room, start, end, **kw):
@@ -53,8 +55,7 @@ def _exp(room, start, end, **kw):
         room_name=room, room_slug=_slug(room),
         start_ts=start, end_ts=end,
         signal_type=kw.get("signal_type", "step"),
-        amplitude_high=kw.get("amplitude_high", 1.0),
-        amplitude_low=kw.get("amplitude_low", 0.0),
+        step_pct=kw.get("step_pct", 1.0),
         period_s=kw.get("period_s", 3600.0),
         settle_s=kw.get("settle_s", 0.0),
         min_temp=kw.get("min_temp", 12.0),
@@ -64,55 +65,71 @@ def _exp(room, start, end, **kw):
     )
 
 
-def test_clamp_built_for_active_room_only():
+def test_clamp_built_for_active_source_only():
     coord = _make_coord(
         ["Living Room", "Kitchen"],
         [_src("lr_heater", "Living Room"), _src("k_heater", "Kitchen")],
     )
     coord.measured_temperatures = {"Living Room": 20.0, "Kitchen": 20.0}
-    coord.experiment_manager.add(
-        _exp("Living Room", 1_000.0, 1_000.0 + 8 * 3600, signal_type="step")
-    )
-    now = datetime.fromtimestamp(1_000.0 + 1800, tz=timezone.utc)
+    exp = _exp("Living Room", 1_000.0, 1_000.0 + 8 * 3600, signal_type="step")
+    coord.experiment_manager.add(exp)
+    now_ts = 1_000.0 + 1800
+    now = datetime.fromtimestamp(now_ts, tz=timezone.utc)
 
     clamps = coord._build_experiment_clamps(now)
 
-    assert "Living Room" in clamps
-    assert "Kitchen" not in clamps
-    arr = clamps["Living Room"]
+    assert "lr_heater" in clamps
+    assert "k_heater" not in clamps
+    arr = clamps["lr_heater"]
     assert arr.shape == (4,)
-    # A step holds the high level across the whole (in-window) horizon.
-    assert np.allclose(arr, 1.0)
+    # The clamp samples the heat-only step pattern over the horizon.
+    expected = [E.excitation_fraction(exp, now_ts + k * 3600, can_cool=False) for k in range(4)]
+    assert np.allclose(arr, expected)
     assert coord.is_experiment_active("Living Room") is True
     assert coord.is_experiment_active("Kitchen") is False
+
+
+def test_clamp_emits_cool_phase_for_reversible_source():
+    coord = _make_coord(
+        ["Living Room"],
+        [_src("hp", "Living Room", u_min=-1.0, u_max=1.0, can_cool=True)],
+    )
+    coord.measured_temperatures = {"Living Room": 20.0}
+    # 10 h window, 5 phases of 2 h: [0, +0.5, 0, -0.5, 0]; sample 7 h in → cool.
+    exp = _exp("Living Room", 1_000.0, 1_000.0 + 10 * 3600,
+               signal_type="step", step_pct=0.5)
+    coord.experiment_manager.add(exp)
+    now = datetime.fromtimestamp(1_000.0 + 7 * 3600, tz=timezone.utc)
+
+    arr = coord._build_experiment_clamps(now)["hp"]
+    assert arr[0] == -0.5            # cool phase, within [u_min, u_max] = [-1, 1]
+    assert arr[1] == 0.0             # settle phase
+    assert np.isnan(arr[3])          # at window end → released
 
 
 def test_clamp_safety_ceiling_forces_off_at_applied_step():
     coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
     coord.measured_temperatures = {"Living Room": 27.0}  # above the 26° ceiling
-    coord.experiment_manager.add(
-        _exp("Living Room", 1_000.0, 1_000.0 + 8 * 3600, signal_type="step")
-    )
-    now = datetime.fromtimestamp(1_000.0 + 1800, tz=timezone.utc)
+    # Sample 3 h in so the applied step lands in the heat phase.
+    exp = _exp("Living Room", 1_000.0, 1_000.0 + 8 * 3600, signal_type="step")
+    coord.experiment_manager.add(exp)
+    now = datetime.fromtimestamp(1_000.0 + 3 * 3600, tz=timezone.utc)
 
-    arr = coord._build_experiment_clamps(now)["Living Room"]
-    # The applied step is forced off for safety; future steps use the raw
-    # signal (their temperatures are only known to the MPC's own rollout).
+    arr = coord._build_experiment_clamps(now)["lr_heater"]
     assert arr[0] == 0.0
-    assert arr[1] == 1.0
 
 
-def test_window_override_excludes_room_from_clamps():
+def test_window_override_excludes_source_from_clamps():
     coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
     coord.measured_temperatures = {"Living Room": 20.0}
     coord._window_state["Living Room"] = "open"
     coord.experiment_manager.add(
         _exp("Living Room", 1_000.0, 1_000.0 + 8 * 3600, signal_type="step")
     )
-    now = datetime.fromtimestamp(1_000.0 + 1800, tz=timezone.utc)
+    now = datetime.fromtimestamp(1_000.0 + 3 * 3600, tz=timezone.utc)
 
     clamps = coord._build_experiment_clamps(now)
-    assert "Living Room" not in clamps
+    assert "lr_heater" not in clamps
     assert coord.is_experiment_active("Living Room") is False
 
 
@@ -127,21 +144,3 @@ def test_no_active_experiment_returns_empty():
     clamps = coord._build_experiment_clamps(now)
     assert clamps == {}
     assert coord._experiment_active_rooms == set()
-
-
-def test_settle_buffer_releases_tail_within_horizon():
-    coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
-    coord.measured_temperatures = {"Living Room": 20.0}
-    # 4 h window with a 2 h settle buffer → excitation ends at +2 h.
-    coord.experiment_manager.add(
-        _exp("Living Room", 1_000.0, 1_000.0 + 4 * 3600,
-             signal_type="step", settle_s=2 * 3600)
-    )
-    # Sample 1 h in; horizon steps land at +1, +2, +3, +4 h from start.
-    now = datetime.fromtimestamp(1_000.0 + 1 * 3600, tz=timezone.utc)
-
-    arr = coord._build_experiment_clamps(now)["Living Room"]
-    assert arr[0] == 1.0          # still exciting
-    assert arr[1] == 0.0          # settle buffer → released to low
-    assert arr[2] == 0.0          # settle buffer
-    assert np.isnan(arr[3])       # at/after window end → unclamped (MPC free)

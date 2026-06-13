@@ -1386,14 +1386,9 @@ function setupDatasetsAndExperiments(ctx) {
     </div>
     <div class="tuning-params-grid ds-section-gap">
       <div class="form-group">
-        <label class="form-label" for="exp-high">High power</label>
-        <input class="form-input" type="number" id="exp-high" min="0" max="1" step="0.05" value="1.0">
-        <span class="form-hint">fraction (0–1) of rated heater power</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-low">Low power</label>
-        <input class="form-input" type="number" id="exp-low" min="0" max="1" step="0.05" value="0.0">
-        <span class="form-hint">fraction (0–1) of rated heater power</span>
+        <label class="form-label" for="exp-step">Step magnitude</label>
+        <input class="form-input" type="number" id="exp-step" min="0.05" max="1" step="0.05" value="1.0">
+        <span class="form-hint">fraction (0–1) of max heat / cool power per step</span>
       </div>
       <div class="form-group">
         <label class="form-label" for="exp-period">Switching period</label>
@@ -1403,7 +1398,7 @@ function setupDatasetsAndExperiments(ctx) {
       <div class="form-group">
         <label class="form-label" for="exp-settle">Settle buffer</label>
         <input class="form-input" type="number" id="exp-settle" min="0" step="15" value="120">
-        <span class="form-hint">minutes of rest before the window ends, so the response settles within it</span>
+        <span class="form-hint">PRBS / pulse: minutes of rest before the window ends so the response settles (step has its own settles)</span>
       </div>
       <div class="form-group">
         <label class="form-label" for="exp-min">Min temp (frost floor)</label>
@@ -1561,10 +1556,9 @@ function setupDatasetsAndExperiments(ctx) {
       setStatus(expStatus, 'End must be after start.', 'error');
       return;
     }
-    const high = parseFloat(expCard.querySelector('#exp-high').value);
-    const low = parseFloat(expCard.querySelector('#exp-low').value);
-    if (!(high > low)) {
-      setStatus(expStatus, 'High power must exceed low power.', 'error');
+    const stepPct = parseFloat(expCard.querySelector('#exp-step').value);
+    if (!(stepPct > 0 && stepPct <= 1)) {
+      setStatus(expStatus, 'Step magnitude must be between 0 and 1.', 'error');
       return;
     }
     const settleS = Math.max(0, parseFloat(expCard.querySelector('#exp-settle').value) * 60);
@@ -1580,8 +1574,7 @@ function setupDatasetsAndExperiments(ctx) {
         end: endTs,
         name: expCard.querySelector('#exp-name').value || '',
         signal_type: expCard.querySelector('#exp-signal').value,
-        amplitude_high: high,
-        amplitude_low: low,
+        step_pct: stepPct,
         period_s: Math.max(60, parseFloat(expCard.querySelector('#exp-period').value) * 60),
         settle_s: settleS,
         min_temp: parseFloat(expCard.querySelector('#exp-min').value),

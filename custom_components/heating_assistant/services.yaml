@@ -1005,9 +1005,10 @@ schedule_experiment:
     signal_type:
       name: Excitation signal
       description: >
-        Excitation waveform: ``step`` (single sustained on-step then released for
-        the settle buffer — simple and interpretable), ``prbs`` (pseudo-random
-        binary sequence — rich spectrum), or ``pulse`` (square wave alternating at
+        Excitation waveform: ``step`` (a multi-phase step test — heat, settle,
+        then cool, settle for reversible units, or heat then settle for heat-only
+        units — simple and interpretable), ``prbs`` (pseudo-random binary
+        sequence — rich spectrum), or ``pulse`` (square wave alternating at
         ``period_s``).
       required: false
       default: "step"
@@ -1017,21 +1018,14 @@ schedule_experiment:
             - "step"
             - "prbs"
             - "pulse"
-    amplitude_high:
-      name: High power fraction
-      description: Heater power fraction (0–1) used for the signal's high level.
+    step_pct:
+      name: Step magnitude
+      description: >
+        Step magnitude as a fraction (0–1) of the source's max heat / cool power.
+        The step drives ``+step_pct`` (heat) and, for reversible units,
+        ``-step_pct`` (cool); ``0`` is no input.
       required: false
       default: 1.0
-      selector:
-        number:
-          min: 0
-          max: 1
-          step: 0.05
-    amplitude_low:
-      name: Low power fraction
-      description: Heater power fraction (0–1) used for the signal's low level.
-      required: false
-      default: 0.0
       selector:
         number:
           min: 0

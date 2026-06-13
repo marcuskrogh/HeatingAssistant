@@ -583,13 +583,13 @@ EXCITATION_PRBS = "prbs"          # pseudo-random binary sequence (rich spectrum
 EXCITATION_PULSE = "pulse"        # square wave alternating high/low at a fixed period
 EXCITATION_TYPES = (EXCITATION_STEP, EXCITATION_PRBS, EXCITATION_PULSE)
 
-#: Default excitation parameters.  A *step* is the default: paired with the
-#: settle buffer below it heats the room, then releases so the captured window
-#: contains both the rise and the relaxation — the simplest informative test.
+#: Default excitation parameters.  A *step* is the default: it drives the room
+#: with a multi-phase step test (heat — settle — cool — settle for reversible
+#: units, or heat — settle for heat-only units), the simplest informative test.
 DEFAULT_EXCITATION_TYPE = EXCITATION_STEP
-#: High / low heater power fractions (0–1) used by the excitation signal.
-DEFAULT_EXCITATION_HIGH = 1.0
-DEFAULT_EXCITATION_LOW = 0.0
+#: Step magnitude as a fraction (0–1) of the source's max heat / cool power; the
+#: step drives ``+step_pct`` (heat) and, for reversible units, ``-step_pct`` (cool).
+DEFAULT_EXCITATION_STEP_PCT = 1.0
 #: Switching period [s] for PRBS / pulse signals.  One hour gives a good spread
 #: of excitation energy across the thermal time constants of a typical room.
 DEFAULT_EXCITATION_PERIOD_S = 3600.0

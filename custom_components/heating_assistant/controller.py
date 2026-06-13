@@ -2465,13 +2465,14 @@ class HeatingMPCController:
             controller penalises electrical consumption proportional to the
             spot price at each step.
         input_clamps : dict, optional
-            ``{room_name: ndarray (N,)}`` of absolute heater fractions that the
-            room's sources must take at each horizon step (``NaN`` = unclamped at
-            that step).  When given, the QP's input box bounds for those sources
-            are pinned to the clamp value over the horizon, so the MPC plans the
-            rest of the house around the prescribed signal and the planned
-            trajectory (and thus the actuator forecast plot) already reflects it.
-            Used to drive system-identification experiments through the MPC.
+            ``{source_name: ndarray (N,)}`` of signed input fractions that the
+            source must take at each horizon step (``NaN`` = unclamped at that
+            step).  When given, the QP's input box bounds for those sources are
+            pinned to the clamp value (clipped to the source's actuation range)
+            over the horizon, so the MPC plans the rest of the house around the
+            prescribed signal and the planned trajectory (and thus the actuator
+            forecast plot) already reflects it.  Used to drive
+            system-identification experiments through the MPC.
         run_optimization : bool
             When ``True`` (default) the full MPC optimisation runs.  When
             ``False`` — i.e. the system is stopped — only the CD-EKF state
@@ -2617,7 +2618,7 @@ class HeatingMPCController:
             u_max_seq = np.tile(np.asarray(u_max_abs, dtype=float).reshape(1, -1), (N, 1))
             clamp_mask = np.zeros((N, len(self._sources)), dtype=bool)
             for j, src in enumerate(self._sources):
-                arr = input_clamps.get(src.room)
+                arr = input_clamps.get(src.name)
                 if arr is None:
                     continue
                 arr = np.asarray(arr, dtype=float).reshape(-1)
