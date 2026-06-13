@@ -1547,6 +1547,33 @@ function setupDatasetsAndExperiments(ctx) {
   });
 
   // ---- Experiment scheduling --------------------------------------------
+  // When set, the "Schedule" button is editing this existing experiment: it
+  // schedules the updated definition, then removes the old one.
+  let editingExperimentId = null;
+
+  function startEditExperiment(exp) {
+    editingExperimentId = exp.id;
+    expCard.querySelector('#exp-name').value = exp.name || '';
+    expCard.querySelector('#exp-signal').value = exp.signal_type || 'step';
+    expCard.querySelector('#exp-start').value = _toLocalInput(new Date((exp.start_ts || 0) * 1000));
+    expCard.querySelector('#exp-end').value = _toLocalInput(new Date((exp.end_ts || 0) * 1000));
+    expCard.querySelector('#exp-step').value = exp.step_pct ?? 1.0;
+    expCard.querySelector('#exp-period').value = Math.round((exp.period_s ?? 3600) / 60);
+    expCard.querySelector('#exp-settle').value = Math.round((exp.settle_s ?? 0) / 60);
+    expCard.querySelector('#exp-min').value = exp.min_temp ?? 12;
+    expCard.querySelector('#exp-max').value = exp.max_temp ?? 26;
+    expCard.querySelector('#exp-autosave').value = exp.auto_save ? 'yes' : 'no';
+    expCard.querySelector('#btn-schedule-exp').textContent = 'Update Experiment';
+    setStatus(expStatus, 'Editing scheduled experiment — adjust the fields and press Update.', 'running');
+    expCard.querySelector('#exp-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function resetExperimentForm() {
+    editingExperimentId = null;
+    const btn = expCard.querySelector('#btn-schedule-exp');
+    if (btn) btn.textContent = 'Schedule Experiment';
+  }
+
   expCard.querySelector('#btn-schedule-exp').addEventListener('click', async () => {
     const startVal = expCard.querySelector('#exp-start').value;
     const endVal = expCard.querySelector('#exp-end').value;
@@ -1566,7 +1593,8 @@ function setupDatasetsAndExperiments(ctx) {
       setStatus(expStatus, 'Settle buffer must be shorter than the experiment.', 'error');
       return;
     }
-    setStatus(expStatus, 'Scheduling…', 'running');
+    const updatingId = editingExperimentId;
+    setStatus(expStatus, updatingId ? 'Updating…' : 'Scheduling…', 'running');
     try {
       await hass.callService('heating_assistant', 'schedule_experiment', {
         room_name: roomSlug,
@@ -1581,7 +1609,16 @@ function setupDatasetsAndExperiments(ctx) {
         max_temp: parseFloat(expCard.querySelector('#exp-max').value),
         auto_save: expCard.querySelector('#exp-autosave').value === 'yes',
       });
-      setStatus(expStatus, 'Scheduled.', 'success');
+      // On an edit, drop the original now that the replacement is scheduled.
+      if (updatingId) {
+        try {
+          await hass.callService('heating_assistant', 'delete_experiment', {
+            experiment_id: updatingId,
+          });
+        } catch (_) { /* leave the original if removal fails */ }
+      }
+      resetExperimentForm();
+      setStatus(expStatus, updatingId ? 'Updated.' : 'Scheduled.', 'success');
       await refreshExperiments();
     } catch (err) {
       setStatus(expStatus, 'Error: ' + (err.message || err), 'error');
@@ -1606,10 +1643,17 @@ function setupDatasetsAndExperiments(ctx) {
       return;
     }
     const rows = mine.map((e) => {
-      const cancellable = e.status === 'scheduled' || e.status === 'running';
-      const action = cancellable
-        ? `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Cancel</button>`
-        : `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Remove</button>`;
+      // Scheduled runs can be edited or deleted directly; a running run can be
+      // cancelled; terminal ones can be deleted from the list.
+      let action;
+      if (e.status === 'scheduled') {
+        action = `<button class="btn btn--ghost btn--sm" data-edit="${e.id}">Edit</button>
+                  <button class="btn btn--ghost btn--sm" data-delete="${e.id}">Delete</button>`;
+      } else if (e.status === 'running') {
+        action = `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Cancel</button>`;
+      } else {
+        action = `<button class="btn btn--ghost btn--sm" data-delete="${e.id}">Delete</button>`;
+      }
       const dsLink = e.dataset_id
         ? `<button class="btn btn--ghost btn--sm" data-load-ds="${e.dataset_id}">Load data</button>`
         : '';
@@ -1638,6 +1682,24 @@ function setupDatasetsAndExperiments(ctx) {
           });
           await refreshExperiments();
         } catch (_) { btn.disabled = false; }
+      });
+    });
+    expListEl.querySelectorAll('[data-delete]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await hass.callService('heating_assistant', 'delete_experiment', {
+            experiment_id: btn.dataset.delete,
+          });
+          if (editingExperimentId === btn.dataset.delete) resetExperimentForm();
+          await refreshExperiments();
+        } catch (_) { btn.disabled = false; }
+      });
+    });
+    expListEl.querySelectorAll('[data-edit]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const exp = mine.find((e) => e.id === btn.dataset.edit);
+        if (exp) startEditExperiment(exp);
       });
     });
     expListEl.querySelectorAll('[data-load-ds]').forEach((btn) => {

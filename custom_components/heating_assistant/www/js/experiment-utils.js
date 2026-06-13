@@ -78,11 +78,12 @@ export function experimentPhase(exp, nowMs = Date.now()) {
  *  backend list or a per-room index.
  *
  *  When the room's ``forecastRoom`` (``{ forecast: [...], step_seconds }``) is
- *  given, the *future* edge of each band is snapped to the MPC step grid the
- *  actuator signal is drawn on.  The power line is stepped (``stepped: 'before'``)
- *  so the control applied at ``t − dt`` is rendered over ``[t − dt, t]``; snapping
- *  to the same grid keeps the shaded area from spilling onto pre-experiment
- *  iterations (which made the start look "not yet 0"). */
+ *  given, the band is snapped to the exact MPC steps the backend flagged with
+ *  ``experiment: true`` — the same steps (and grid) the actuator signal is drawn
+ *  on.  The power line is stepped (``stepped: 'before'``) so a step at point time
+ *  ``t`` is rendered over ``[t − dt, t]``; deriving the band from the flagged
+ *  steps guarantees the shaded area covers the experiment signal exactly, with no
+ *  pre-experiment iterations bleeding in. */
 export function experimentBands(experiments, roomSlug, forecastRoom = null, nowMs = Date.now()) {
   let list;
   if (Array.isArray(experiments)) {
@@ -94,13 +95,13 @@ export function experimentBands(experiments, roomSlug, forecastRoom = null, nowM
   }
 
   const nowS = nowMs / 1000;
-  let stepTimes = null;
+  let steps = null;
   let dt = null;
   if (forecastRoom && Array.isArray(forecastRoom.forecast) && forecastRoom.step_seconds) {
     dt = forecastRoom.step_seconds;
-    stepTimes = forecastRoom.forecast
-      .map((e) => new Date(e.time).getTime() / 1000)
-      .filter((t) => isFinite(t));
+    steps = forecastRoom.forecast
+      .map((p) => ({ t: new Date(p.time).getTime() / 1000, exp: p.experiment === true }))
+      .filter((p) => isFinite(p.t));
   }
 
   const bands = [];
@@ -110,13 +111,15 @@ export function experimentBands(experiments, roomSlug, forecastRoom = null, nowM
 
     let startS = e.start_ts;
     let endS = e.end_ts;
-    if (stepTimes && stepTimes.length && dt) {
-      // Forecast steps the experiment governs: step at point time ``t`` covers
-      // the control interval ``[t − dt, t)`` (stepped:'before').
-      const covered = stepTimes.filter((t) => (t - dt) >= e.start_ts && (t - dt) < e.end_ts);
-      if (covered.length) {
-        const gridStart = Math.min(...covered) - dt;
-        const gridEnd = Math.max(...covered);
+    if (steps && steps.length && dt) {
+      // Steps the backend flagged for *this* experiment's window; a flagged
+      // step at point time ``t`` is rendered over ``[t − dt, t]``.
+      const flagged = steps.filter(
+        (p) => p.exp && (p.t - dt) >= e.start_ts && (p.t - dt) < e.end_ts,
+      );
+      if (flagged.length) {
+        const gridStart = Math.min(...flagged.map((p) => p.t)) - dt;
+        const gridEnd = Math.max(...flagged.map((p) => p.t));
         // Ongoing runs keep their true (already-applied) history start; upcoming
         // runs snap the leading edge to the grid so it lines up with the signal.
         startS = (nowS >= e.start_ts && nowS < e.end_ts) ? e.start_ts : gridStart;

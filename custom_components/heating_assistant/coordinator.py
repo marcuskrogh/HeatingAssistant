@@ -957,6 +957,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # cycle; consumed by _apply_actions so the excitation bypasses the
         # normal schedule-off / room-disabled gating.
         self._experiment_active_rooms: Set[str] = set()
+        # Per-canonical-room boolean list (length = horizon) marking which MPC
+        # steps an experiment governs this cycle.  Drives the comfort relaxation
+        # over those steps and the per-step ``experiment`` flag in the forecast.
+        self._experiment_horizon_steps: Dict[str, List[bool]] = {}
 
 
     # ------------------------------------------------------------------
@@ -1324,6 +1328,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             step_off = traj.comfort_offsets.get(room_name) if traj is not None else None
             step_enabled = traj.enabled_steps.get(room_name) if traj is not None else None
             comfort_offset = float(getattr(room, "comfort_offset", 2.0))
+            # Horizon steps an experiment governs this cycle (control at now+i·dt),
+            # so the frontend can shade the experiment region exactly on the same
+            # grid the actuator signal is drawn on.
+            exp_steps = getattr(self, "_experiment_horizon_steps", {}).get(room_name)
 
             current_heating = sum(
                 getattr(s, "current_power", 0.0)
@@ -1388,6 +1396,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     entry["heating_power"] = round(
                         heating_schedule[i].get(room_name, 0.0), 1
                     )
+                # ``heating_schedule[i]`` is the control at now+i·dt; flag it when
+                # an experiment governs that step so the shaded plot region lines
+                # up exactly with the experiment signal.
+                if exp_steps is not None and i < len(exp_steps) and exp_steps[i]:
+                    entry["experiment"] = True
                 if i < n_solar:
                     entry["solar_gain"] = round(
                         solar_forecast[i].get(room_name, 0.0), 1
@@ -2182,9 +2195,26 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # chosen action afterwards.  Only while the controller is engaged.
             if self._system_enabled:
                 experiment_clamps = self._build_experiment_clamps(now)
+                # During the steps an experiment governs, the room's input is
+                # pinned to the excitation signal, so tracking its comfort there
+                # is meaningless — and leaving it on makes the MPC *anticipate*
+                # the experiment (e.g. pre-heat just before it), producing the
+                # odd actions seen right at the experiment border and a
+                # contaminated baseline.  Zero the comfort weight on those steps
+                # so the controller leaves the room alone until the experiment
+                # actually drives it.
+                if control_traj is not None and self._experiment_horizon_steps:
+                    for room_name, mask in self._experiment_horizon_steps.items():
+                        q_seq = control_traj.q_scales.get(room_name)
+                        if q_seq is None:
+                            continue
+                        for k, governed in enumerate(mask):
+                            if governed and k < len(q_seq):
+                                q_seq[k] = 0.0
             else:
                 experiment_clamps = {}
                 self._experiment_active_rooms = set()
+                self._experiment_horizon_steps = {}
             try:
                 self.actions = self.controller.compute(
                     outdoor_temp=outdoor_temp,
@@ -3701,6 +3731,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._persist_experiments()
 
         clamps: Dict[str, "np.ndarray"] = {}
+        horizon_steps: Dict[str, List[bool]] = {}
         N = int(self._horizon)
         dt = float(self.dt)
         horizon_end = now_ts + N * dt
@@ -3710,6 +3741,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             for e in manager.experiments
         ):
             self._experiment_active_rooms = active_rooms
+            self._experiment_horizon_steps = horizon_steps
             return clamps
 
         slug_to_room = {_slugify(rn): rn for rn in self.model.room_names}
@@ -3742,8 +3774,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 clamped_any = True
             if clamped_any:
                 clamps[src.name] = arr
+                # Per-room mask of horizon steps the experiment governs (any of
+                # the room's sources), keyed by canonical room name — drives the
+                # comfort-relaxation below and the forecast ``experiment`` flag.
+                mask = horizon_steps.setdefault(room_name, [False] * N)
+                for k in range(N):
+                    if not np.isnan(arr[k]):
+                        mask[k] = True
 
         self._experiment_active_rooms = active_rooms
+        self._experiment_horizon_steps = horizon_steps
         return clamps
 
     def _on_experiment_completed(self, exp: Any) -> None:
@@ -3840,6 +3880,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._experiment_active_rooms.discard(cancelled.room_slug)
         self._persist_experiments()
         return True
+
+    def delete_experiment(self, experiment_id: str) -> bool:
+        """Remove an experiment from the list outright, regardless of status.
+
+        A running/scheduled experiment is first cancelled so it stops driving the
+        room, then dropped entirely (no lingering ``cancelled`` record to remove
+        separately).  Returns True if an experiment was removed.
+        """
+        exp = self.experiment_manager.get(experiment_id)
+        if exp is not None and not exp.is_terminal():
+            self.experiment_manager.cancel(experiment_id)
+            self._experiment_active_rooms.discard(exp.room_slug)
+        removed = self.experiment_manager.remove(experiment_id)
+        if removed:
+            self._persist_experiments()
+        return removed
 
     def _persist_experiments(self) -> None:
         """Persist the experiment list (best-effort, never blocks a cycle)."""

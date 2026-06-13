@@ -144,3 +144,32 @@ def test_no_active_experiment_returns_empty():
     clamps = coord._build_experiment_clamps(now)
     assert clamps == {}
     assert coord._experiment_active_rooms == set()
+    assert coord._experiment_horizon_steps == {}
+
+
+def test_build_clamps_records_per_room_horizon_mask():
+    coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
+    coord.measured_temperatures = {"Living Room": 20.0}
+    exp = _exp("Living Room", 1_000.0, 1_000.0 + 8 * 3600, signal_type="step")
+    coord.experiment_manager.add(exp)
+    now_ts = 1_000.0 + 1800
+    now = datetime.fromtimestamp(now_ts, tz=timezone.utc)
+
+    clamps = coord._build_experiment_clamps(now)
+
+    # Mask is keyed by canonical room name and True exactly where the clamp is set.
+    mask = coord._experiment_horizon_steps["Living Room"]
+    arr = clamps["lr_heater"]
+    assert mask == [not np.isnan(arr[k]) for k in range(len(arr))]
+    assert all(mask)  # full window in horizon → every step governed
+
+
+def test_delete_experiment_removes_scheduled():
+    coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
+    exp = _exp("Living Room", 9_000.0, 9_000.0 + 3600)
+    coord.experiment_manager.add(exp)
+
+    assert coord.delete_experiment(exp.id) is True
+    assert coord.experiment_manager.get(exp.id) is None
+    # Deleting an unknown id is a no-op.
+    assert coord.delete_experiment("nope") is False
