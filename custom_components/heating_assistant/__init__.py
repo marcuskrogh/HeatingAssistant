@@ -200,6 +200,7 @@ from .const import (
     SERVICE_CANCEL_EXPERIMENT,
     SERVICE_CREATE_DATASET,
     SERVICE_DELETE_DATASET,
+    SERVICE_DELETE_EXPERIMENT,
     SERVICE_SCHEDULE_EXPERIMENT,
     SERVICE_SET_SCHEDULE_ENABLED,
     SOURCE_TYPE_ELECTRIC,
@@ -2882,6 +2883,19 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_CANCEL_EXPERIMENT,
         handle_cancel_experiment,
+        schema=vol.Schema({vol.Required("experiment_id"): cv.string}),
+    )
+
+    async def handle_delete_experiment(call: ServiceCall) -> None:
+        """Delete an experiment outright, regardless of its status."""
+        coordinator = _get_coordinator(hass)
+        coordinator.delete_experiment(call.data["experiment_id"])
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_DELETE_EXPERIMENT,
+        handle_delete_experiment,
         schema=vol.Schema({vol.Required("experiment_id"): cv.string}),
     )
 

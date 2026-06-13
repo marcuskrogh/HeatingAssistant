@@ -573,6 +573,7 @@ CONF_PERSISTED_COMFORT_OFFSETS = "persisted_comfort_offsets"
 #: Service names for the experiment / dataset features.
 SERVICE_SCHEDULE_EXPERIMENT = "schedule_experiment"
 SERVICE_CANCEL_EXPERIMENT = "cancel_experiment"
+SERVICE_DELETE_EXPERIMENT = "delete_experiment"
 SERVICE_CREATE_DATASET = "create_dataset"
 SERVICE_DELETE_DATASET = "delete_dataset"
 

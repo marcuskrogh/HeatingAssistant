@@ -1100,6 +1100,20 @@ cancel_experiment:
       selector:
         text:
 
+delete_experiment:
+  name: Delete identification experiment
+  description: >
+    Delete an identification experiment outright by its id, regardless of
+    status (scheduled, running, or completed) — it is stopped if needed and
+    removed from the list in one step.
+  fields:
+    experiment_id:
+      name: Experiment id
+      description: Identifier of the experiment to delete.
+      required: true
+      selector:
+        text:
+
 create_dataset:
   name: Store identification dataset
   description: >
