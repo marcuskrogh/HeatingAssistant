@@ -1289,8 +1289,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 // ---------------------------------------------------------------------------
 
 const EXCITATION_OPTIONS = [
-  { value: 'prbs', label: 'PRBS (recommended)' },
-  { value: 'step', label: 'Step' },
+  { value: 'step', label: 'Step (recommended)' },
+  { value: 'prbs', label: 'PRBS' },
   { value: 'pulse', label: 'Pulse' },
 ];
 
@@ -1399,6 +1399,11 @@ function setupDatasetsAndExperiments(ctx) {
         <label class="form-label" for="exp-period">Switching period</label>
         <input class="form-input" type="number" id="exp-period" min="5" step="5" value="60">
         <span class="form-hint">minutes between PRBS / pulse switches</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="exp-settle">Settle buffer</label>
+        <input class="form-input" type="number" id="exp-settle" min="0" step="15" value="120">
+        <span class="form-hint">minutes of rest before the window ends, so the response settles within it</span>
       </div>
       <div class="form-group">
         <label class="form-label" for="exp-min">Min temp (frost floor)</label>
@@ -1562,6 +1567,11 @@ function setupDatasetsAndExperiments(ctx) {
       setStatus(expStatus, 'High power must exceed low power.', 'error');
       return;
     }
+    const settleS = Math.max(0, parseFloat(expCard.querySelector('#exp-settle').value) * 60);
+    if (settleS >= endTs - startTs) {
+      setStatus(expStatus, 'Settle buffer must be shorter than the experiment.', 'error');
+      return;
+    }
     setStatus(expStatus, 'Scheduling…', 'running');
     try {
       await hass.callService('heating_assistant', 'schedule_experiment', {
@@ -1573,6 +1583,7 @@ function setupDatasetsAndExperiments(ctx) {
         amplitude_high: high,
         amplitude_low: low,
         period_s: Math.max(60, parseFloat(expCard.querySelector('#exp-period').value) * 60),
+        settle_s: settleS,
         min_temp: parseFloat(expCard.querySelector('#exp-min').value),
         max_temp: parseFloat(expCard.querySelector('#exp-max').value),
         auto_save: expCard.querySelector('#exp-autosave').value === 'yes',

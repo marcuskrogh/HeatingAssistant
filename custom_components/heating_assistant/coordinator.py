@@ -2175,6 +2175,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 or self.is_window_override_active(src.room)
                 or src.room in rooms_not_ready
             }
+            # System-identification experiments: advance their lifecycle and build
+            # per-room input clamps over the horizon.  Passing these into the MPC
+            # makes it plan *around* the prescribed excitation (so the actuator
+            # forecast already shows the experiment) instead of overriding the
+            # chosen action afterwards.  Only while the controller is engaged.
+            if self._system_enabled:
+                experiment_clamps = self._build_experiment_clamps(now)
+            else:
+                experiment_clamps = {}
+                self._experiment_active_rooms = set()
             try:
                 self.actions = self.controller.compute(
                     outdoor_temp=outdoor_temp,
@@ -2189,6 +2199,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     disabled_sources=disabled_src_names or None,
                     control_trajectory=control_traj,
                     price_forecast=self.price_forecast,
+                    input_clamps=experiment_clamps or None,
                     # While stopped, run state estimation only — the MPC
                     # optimisation is skipped so no control trajectory is solved.
                     run_optimization=self._system_enabled,
@@ -2287,16 +2298,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if not self._system_enabled:
                 self.actions = self._read_delivered_actions(outdoor_temp)
 
-            # 4c. System-identification experiment overlay.  When an experiment is
-            # active for a room, its excitation signal replaces the MPC's chosen
-            # actions for that room's heaters *before* the history record is
-            # written, so the recorded input ``u`` matches what is applied and the
-            # captured response is genuinely informative.  Runs only while the
-            # controller is engaged.
-            if self._system_enabled:
-                self._apply_experiment_excitation(now)
-            else:
-                self._experiment_active_rooms = set()
+            # 4c. System-identification experiments are now applied *inside* the
+            # MPC via per-room input clamps (built above and passed to
+            # ``compute``), so the chosen action, recorded input ``u`` and the
+            # planned trajectory all already reflect the excitation — no
+            # post-solve override is needed.
 
             # 5. Store heat-flow breakdown (independent of MPC solve success)
             self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
@@ -3647,7 +3653,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         """Return whether an identification experiment is exciting ``room_name``.
 
         Reflects the set computed for the current cycle by
-        ``_apply_experiment_excitation`` (keyed by room slug).
+        ``_build_experiment_clamps`` (keyed by room slug).
         """
         from .dashboard import slugify as _slugify
 
@@ -3656,15 +3662,26 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             return False
         return _slugify(room_name) in active
 
-    def _apply_experiment_excitation(self, now: datetime) -> None:
-        """Overlay active experiment excitation signals onto ``self.actions``.
+    def _build_experiment_clamps(
+        self, now: datetime
+    ) -> Dict[str, "np.ndarray"]:
+        """Advance experiments and build per-room horizon input clamps for the MPC.
 
-        For each room with an active experiment, the chosen excitation fraction
-        replaces the MPC's action for every heat source in that room.  The signal
-        is clamped against the experiment's safety temperature band (frost floor
-        / overheat ceiling) and never overrides an open-window safety clamp.  The
-        controller is told the actually-applied input via ``notify_applied_u`` so
-        the next cycle's EKF state estimate stays consistent with the excitation.
+        Rather than overriding the MPC's chosen actions after the solve, an active
+        experiment pins its room's heater inputs over the whole prediction horizon
+        by handing the controller a ``{room_name: ndarray(N,)}`` clamp: each entry
+        is the absolute heater fraction the excitation signal requests at
+        ``now + k·dt`` (``NaN`` where no experiment is active at that step).  The
+        MPC then treats the signal as a hard input constraint, planning the rest
+        of the house around it, and the resulting plan — and thus the actuator
+        forecast plot — already reflects the experiment.
+
+        The applied (k=0) entry is additionally passed through the experiment's
+        safety temperature band (frost floor / overheat ceiling) using the current
+        measurement, so the realised action is safe; future steps use the raw
+        signal (their temperatures are only known to the MPC's own rollout).  A
+        room whose window is open is left unclamped — the window override forces it
+        off and its air-exchange is unmodelled.
         """
         from .dashboard import slugify as _slugify
 
@@ -3679,43 +3696,52 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if transitions.get("started") or transitions.get("completed"):
             self._persist_experiments()
 
-        if not manager.has_active(now_ts):
+        clamps: Dict[str, "np.ndarray"] = {}
+        N = int(self._horizon)
+        dt = float(self.dt)
+        horizon_end = now_ts + N * dt
+        # Nothing to do unless an experiment overlaps the horizon window.
+        if not any(
+            e.start_ts < horizon_end and now_ts < e.end_ts and not e.is_terminal()
+            for e in manager.experiments
+        ):
             self._experiment_active_rooms = active_rooms
-            return
+            return clamps
 
-        # Map room slug -> canonical room name for measurement lookup.
         slug_to_room = {_slugify(rn): rn for rn in self.model.room_names}
-        controller = getattr(self, "controller", None)
 
         for src in self.heat_sources:
+            room_name = slug_to_room.get(_slugify(src.room), src.room)
+            if room_name in clamps:
+                continue  # one clamp per room covers all its sources
             room_slug = _slugify(src.room)
-            exp = manager.active_for_room(room_slug, now_ts)
-            if exp is None:
-                continue
             # An open window makes the room's air-exchange unmodelled, so the
-            # excitation is suppressed there for safety and data quality; the
-            # window-override clamp already forced u=0 earlier this cycle.
+            # excitation is suppressed there; the window override forces u=0.
             if self.is_window_override_active(src.room):
                 continue
 
-            room_name = slug_to_room.get(room_slug, src.room)
+            arr = np.full(N, np.nan, dtype=float)
+            clamped_any = False
             measured = self.measured_temperatures.get(room_name)
-            raw = excitation_fraction(exp, now_ts)
-            fraction = apply_safety_bounds(
-                raw, measured, exp.min_temp, exp.max_temp, exp.amplitude_high
-            )
-            # Respect each source's actuation range (e.g. heat-only sources have
-            # u_min = 0); excitation never commands cooling.
-            u_min = float(getattr(src, "u_min", 0.0))
-            u_max = float(getattr(src, "u_max", 1.0))
-            fraction = max(max(u_min, 0.0), min(u_max, float(fraction)))
-
-            self.actions[src.name] = fraction
-            if controller is not None:
-                controller.notify_applied_u(src.name, fraction)
-            active_rooms.add(room_slug)
+            for k in range(N):
+                t_k = now_ts + k * dt
+                exp = manager.active_for_room(room_slug, t_k)
+                if exp is None:
+                    continue
+                frac = excitation_fraction(exp, t_k)
+                if k == 0:
+                    frac = apply_safety_bounds(
+                        frac, measured, exp.min_temp, exp.max_temp,
+                        exp.amplitude_high,
+                    )
+                    active_rooms.add(room_slug)
+                arr[k] = frac
+                clamped_any = True
+            if clamped_any:
+                clamps[room_name] = arr
 
         self._experiment_active_rooms = active_rooms
+        return clamps
 
     def _on_experiment_completed(self, exp: Any) -> None:
         """React to an experiment finishing: auto-save its window as a dataset.

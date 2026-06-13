@@ -2792,6 +2792,7 @@ def _register_services(hass: HomeAssistant) -> None:
             DEFAULT_EXCITATION_TYPE,
             DEFAULT_EXPERIMENT_MAX_TEMP,
             DEFAULT_EXPERIMENT_MIN_TEMP,
+            DEFAULT_EXPERIMENT_SETTLE_S,
             MAX_EXPERIMENT_DURATION_S,
         )
 
@@ -2802,7 +2803,8 @@ def _register_services(hass: HomeAssistant) -> None:
         end_ts = float(call.data["end"])
         if end_ts <= start_ts:
             raise ValueError("Experiment end must be after start")
-        if end_ts - start_ts > MAX_EXPERIMENT_DURATION_S:
+        duration = end_ts - start_ts
+        if duration > MAX_EXPERIMENT_DURATION_S:
             raise ValueError("Experiment duration exceeds the 7-day maximum")
 
         signal_type = str(call.data.get("signal_type", DEFAULT_EXCITATION_TYPE))
@@ -2810,6 +2812,21 @@ def _register_services(hass: HomeAssistant) -> None:
         low = float(call.data.get("amplitude_low", DEFAULT_EXCITATION_LOW))
         period_s = float(call.data.get("period_s", DEFAULT_EXCITATION_PERIOD_S))
         validate_signal_params(signal_type, high, low, period_s)
+
+        # Settle / response buffer: excitation stops this long before the window
+        # ends so the heater's influence is absorbed within the captured data.
+        # Default to the configured buffer but never more than half the window so
+        # a short experiment still gets meaningful excitation; an explicit value
+        # must leave at least some excitation time.
+        settle_raw = call.data.get("settle_s")
+        if settle_raw is None:
+            settle_s = min(DEFAULT_EXPERIMENT_SETTLE_S, duration / 2.0)
+        else:
+            settle_s = float(settle_raw)
+            if settle_s < 0.0:
+                raise ValueError("settle_s must be non-negative")
+            if settle_s >= duration:
+                raise ValueError("settle_s must be shorter than the experiment duration")
 
         exp = Experiment(
             room_name=canonical,
@@ -2821,6 +2838,7 @@ def _register_services(hass: HomeAssistant) -> None:
             amplitude_high=high,
             amplitude_low=low,
             period_s=period_s,
+            settle_s=settle_s,
             min_temp=float(call.data.get("min_temp", DEFAULT_EXPERIMENT_MIN_TEMP)),
             max_temp=float(call.data.get("max_temp", DEFAULT_EXPERIMENT_MAX_TEMP)),
             auto_save=bool(call.data.get("auto_save", True)),
@@ -2848,6 +2866,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
                 vol.Optional("period_s"): vol.All(
                     vol.Coerce(float), vol.Range(min=60.0)
+                ),
+                vol.Optional("settle_s"): vol.All(
+                    vol.Coerce(float), vol.Range(min=0.0)
                 ),
                 vol.Optional("min_temp"): vol.Coerce(float),
                 vol.Optional("max_temp"): vol.Coerce(float),

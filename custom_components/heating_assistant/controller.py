@@ -1334,6 +1334,8 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         offset_seq: Optional[np.ndarray] = None,
         q_scale_seq: Optional[np.ndarray] = None,
         r_scale_seq: Optional[np.ndarray] = None,
+        u_min_seq: Optional[np.ndarray] = None,
+        u_max_seq: Optional[np.ndarray] = None,
         price_seq: Optional[np.ndarray] = None,
         elec_heat: Optional[np.ndarray] = None,
         elec_cool: Optional[np.ndarray] = None,
@@ -1353,6 +1355,8 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             and offset_seq is None
             and q_scale_seq is None
             and r_scale_seq is None
+            and u_min_seq is None
+            and u_max_seq is None
             and not has_price
         ):
             return super().solve(x0, D, x_ref, u_prev)
@@ -1480,10 +1484,23 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         if self._rho_lin > 0.0:
             f[n_U:] = self._rho_lin
 
-        # Input box bounds
+        # Input box bounds.  ``self._model.u_bounds`` is in deviation coordinates
+        # (du = u_abs − u_ss); per-step absolute bounds are shifted by the same
+        # u_ss so a time-varying input corridor lines up with the static one.
         u_min_np, u_max_np = self._model.u_bounds
-        u_min_tiled = np.tile(u_min_np.reshape(-1), N)
-        u_max_tiled = np.tile(u_max_np.reshape(-1), N)
+        if u_min_seq is not None or u_max_seq is not None:
+            u_ss_row = np.asarray(self._model.u_ss, dtype=float).reshape(1, -1)
+            if u_min_seq is not None:
+                u_min_tiled = (np.asarray(u_min_seq, dtype=float) - u_ss_row).reshape(-1)
+            else:
+                u_min_tiled = np.tile(u_min_np.reshape(-1), N)
+            if u_max_seq is not None:
+                u_max_tiled = (np.asarray(u_max_seq, dtype=float) - u_ss_row).reshape(-1)
+            else:
+                u_max_tiled = np.tile(u_max_np.reshape(-1), N)
+        else:
+            u_min_tiled = np.tile(u_min_np.reshape(-1), N)
+            u_max_tiled = np.tile(u_max_np.reshape(-1), N)
 
         # Soft output corridor bounds: time-varying when offset_seq/x_ref_dev_seq given.
         if has_varying:
@@ -1675,6 +1692,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         offset_seq: Optional[np.ndarray] = None,
         q_scale_seq: Optional[np.ndarray] = None,
         r_scale_seq: Optional[np.ndarray] = None,
+        u_min_seq: Optional[np.ndarray] = None,
+        u_max_seq: Optional[np.ndarray] = None,
         price_seq: Optional[np.ndarray] = None,
         elec_heat: Optional[np.ndarray] = None,
         elec_cool: Optional[np.ndarray] = None,
@@ -1696,6 +1715,11 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             Per-step multiplier applied to the global Q diagonal per room.
         r_scale_seq : (N, n_sources) ndarray, optional
             Per-step multiplier applied to the global R diagonal per source.
+        u_min_seq, u_max_seq : (N, nu) ndarray, optional
+            Per-step *absolute* input box bounds.  When given they replace the
+            static ``[u_min, u_max]`` corridor with a time-varying one (shifted
+            into deviation coordinates by ``u_ss`` inside the OCP), allowing a
+            source to be pinned to a prescribed signal over the horizon.
         price_seq : (N,) ndarray, optional
             Forecasted electricity price at each horizon step [currency/kWh].
         elec_heat : (nu,) ndarray, optional
@@ -1794,6 +1818,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             offset_seq=offset_seq,
             q_scale_seq=q_scale_seq,
             r_scale_seq=r_scale_seq,
+            u_min_seq=u_min_seq,
+            u_max_seq=u_max_seq,
             price_seq=price_seq,
             elec_heat=elec_heat,
             elec_cool=elec_cool,
@@ -2384,6 +2410,7 @@ class HeatingMPCController:
         disabled_sources: Optional[Set[str]] = None,
         control_trajectory: Optional[Any] = None,
         price_forecast: Optional[List[float]] = None,
+        input_clamps: Optional[Dict[str, "np.ndarray"]] = None,
         run_optimization: bool = True,
     ) -> Dict[str, float]:
         """
@@ -2437,6 +2464,14 @@ class HeatingMPCController:
             [currency/kWh].  When provided and energy_price_weight > 0 the
             controller penalises electrical consumption proportional to the
             spot price at each step.
+        input_clamps : dict, optional
+            ``{room_name: ndarray (N,)}`` of absolute heater fractions that the
+            room's sources must take at each horizon step (``NaN`` = unclamped at
+            that step).  When given, the QP's input box bounds for those sources
+            are pinned to the clamp value over the horizon, so the MPC plans the
+            rest of the house around the prescribed signal and the planned
+            trajectory (and thus the actuator forecast plot) already reflects it.
+            Used to drive system-identification experiments through the MPC.
         run_optimization : bool
             When ``True`` (default) the full MPC optimisation runs.  When
             ``False`` — i.e. the system is stopped — only the CD-EKF state
@@ -2565,6 +2600,39 @@ class HeatingMPCController:
             q_scale_seq = None
             r_scale_seq = None
 
+        # ── Per-step input clamps (e.g. identification experiment) ───────────
+        # Pin the absolute input box bounds of clamped sources to the prescribed
+        # signal over the horizon (u_min = u_max = value).  The MPC then plans
+        # the rest of the house around it, and the planned trajectory used by the
+        # forecast plots already carries the experiment signal.  ``clamp_mask``
+        # records which (step, source) entries are pinned so the disabled-source
+        # zeroing below leaves the clamped steps intact (an experiment overrides
+        # the comfort schedule's off periods).
+        u_min_seq: Optional[np.ndarray] = None
+        u_max_seq: Optional[np.ndarray] = None
+        clamp_mask: Optional[np.ndarray] = None
+        if input_clamps:
+            u_min_abs, u_max_abs = self._control_system.u_bounds
+            u_min_seq = np.tile(np.asarray(u_min_abs, dtype=float).reshape(1, -1), (N, 1))
+            u_max_seq = np.tile(np.asarray(u_max_abs, dtype=float).reshape(1, -1), (N, 1))
+            clamp_mask = np.zeros((N, len(self._sources)), dtype=bool)
+            for j, src in enumerate(self._sources):
+                arr = input_clamps.get(src.room)
+                if arr is None:
+                    continue
+                arr = np.asarray(arr, dtype=float).reshape(-1)
+                lo, hi = float(src.u_min), float(src.u_max)
+                for k in range(min(N, arr.shape[0])):
+                    v = arr[k]
+                    if np.isnan(v):
+                        continue
+                    vv = min(max(float(v), lo), hi)
+                    u_min_seq[k, j] = vv
+                    u_max_seq[k, j] = vv
+                    clamp_mask[k, j] = True
+            if not clamp_mask.any():
+                u_min_seq = u_max_seq = clamp_mask = None
+
         # ── Price forecast aligned to horizon ────────────────────────────
         price_seq_np: Optional[np.ndarray] = None
         if (price_forecast is not None
@@ -2588,6 +2656,8 @@ class HeatingMPCController:
             offset_seq=offset_seq,
             q_scale_seq=q_scale_seq,
             r_scale_seq=r_scale_seq,
+            u_min_seq=u_min_seq,
+            u_max_seq=u_max_seq,
             price_seq=price_seq_np,
             elec_heat=self._elec_heat,
             elec_cool=self._elec_cool,
@@ -2621,9 +2691,18 @@ class HeatingMPCController:
         # EKF automatically picks up the correct applied value next cycle.
         if disabled_sources:
             for j, src in enumerate(self._sources):
-                if src.name in disabled_sources:
+                if src.name not in disabled_sources:
+                    continue
+                if clamp_mask is None:
                     u_abs[j] = 0.0
                     U_abs[:, j] = 0.0
+                else:
+                    # An active experiment clamp owns its steps even when the
+                    # comfort schedule has the room off; zero only the rest.
+                    col = clamp_mask[:, j]
+                    if not col[0]:
+                        u_abs[j] = 0.0
+                    U_abs[~col, j] = 0.0
 
         # ── Apply actions to heat sources ────────────────────────────────
         actions: Dict[str, float] = {}

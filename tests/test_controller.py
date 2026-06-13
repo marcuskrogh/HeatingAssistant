@@ -793,6 +793,63 @@ class TestHeatingMPCController:
         assert len(ctrl.solar_forecast) == 4  # N+1: covers now through now+N*dt
         assert len(ctrl.heating_schedule) == 3
 
+    def test_input_clamps_pin_applied_action_over_horizon(self):
+        """An input clamp forces the room's heater to the prescribed signal even
+        when the unconstrained MPC would idle, and the plan reflects it."""
+        living = Room("living_room", 5e6, 0.05, temperature=25.0, setpoint=21.0)
+        bedroom = Room("bedroom", 3e6, 0.08, temperature=24.0, setpoint=20.0)
+        model = HouseModel([living, bedroom])
+        sources = [
+            ElectricHeater("lr_heater", "living_room", max_power=2000.0),
+            ElectricHeater("br_heater", "bedroom", max_power=1500.0),
+        ]
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        clamps = {"living_room": np.full(3, 1.0)}
+        actions = ctrl.compute(outdoor_temp=22.0, now=now, input_clamps=clamps)
+
+        # Warm rooms → MPC would idle; the clamp pins the living-room heater on
+        # while the (unclamped) bedroom heater stays off.
+        assert actions["lr_heater"] == pytest.approx(1.0, abs=1e-3)
+        assert actions["br_heater"] == pytest.approx(0.0, abs=1e-2)
+        # The planned heating schedule carries the clamp across the horizon, so
+        # the actuator forecast plot shows the experiment signal.
+        for step in ctrl.heating_schedule:
+            assert step["living_room"] == pytest.approx(2000.0, rel=1e-2)
+
+    def test_input_clamp_survives_disabled_source(self):
+        """A clamped step overrides a disabled (schedule-off) source so an
+        experiment can run during the comfort schedule's off periods."""
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        actions = ctrl.compute(
+            outdoor_temp=5.0, now=now,
+            disabled_sources={"lr_heater"},
+            input_clamps={"living_room": np.full(3, 0.8)},
+        )
+        assert actions["lr_heater"] == pytest.approx(0.8, abs=1e-3)
+
+    def test_input_clamp_partial_horizon_zeros_unclamped_disabled_steps(self):
+        """With a clamp only on the first step, a disabled source is pinned for
+        that step and zeroed for the released tail."""
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
+        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+        clamp = np.array([1.0, np.nan, np.nan])
+        ctrl.compute(
+            outdoor_temp=5.0, now=now,
+            disabled_sources={"lr_heater"},
+            input_clamps={"living_room": clamp},
+        )
+        sched = ctrl.heating_schedule
+        assert sched[0]["living_room"] == pytest.approx(2000.0, rel=1e-2)
+        assert sched[1]["living_room"] == pytest.approx(0.0, abs=1e-6)
+        assert sched[2]["living_room"] == pytest.approx(0.0, abs=1e-6)
+
     def test_controller_uses_unaugmented_states_for_runtime_efficiency(self):
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)

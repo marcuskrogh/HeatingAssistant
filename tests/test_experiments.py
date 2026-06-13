@@ -15,6 +15,9 @@ def _make_exp(**kw):
         amplitude_high=1.0,
         amplitude_low=0.0,
         period_s=3600.0,
+        # Signal tests below assume the whole window is excited; settle-buffer
+        # behaviour is covered explicitly in its own tests.
+        settle_s=0.0,
         seed=42,
     )
     base.update(kw)
@@ -59,6 +62,53 @@ def test_signal_is_low_outside_the_window():
     exp = _make_exp(signal_type="step", amplitude_low=0.1)
     assert E.excitation_fraction(exp, 999.0) == 0.1          # before start
     assert E.excitation_fraction(exp, exp.end_ts + 10) == 0.1  # after end
+
+
+# --------------------------------------------------------------------------
+# Settle / response buffer
+# --------------------------------------------------------------------------
+
+def test_settle_buffer_stops_excitation_before_window_end():
+    # 8 h window, 2 h settle buffer → active excitation only in the first 6 h.
+    exp = _make_exp(signal_type="step", settle_s=2 * 3600, amplitude_low=0.0)
+    assert exp.excitation_end_ts == exp.end_ts - 2 * 3600
+    # Mid-excitation and just before the buffer: high.
+    assert E.excitation_fraction(exp, exp.start_ts + 3 * 3600) == 1.0
+    assert E.excitation_fraction(exp, exp.excitation_end_ts - 60) == 1.0
+    # Inside the settle buffer: released to the low level.
+    assert E.excitation_fraction(exp, exp.excitation_end_ts + 60) == 0.0
+    assert E.excitation_fraction(exp, exp.end_ts - 60) == 0.0
+
+
+def test_settle_phase_helpers():
+    exp = _make_exp(settle_s=2 * 3600)
+    t_excite = exp.start_ts + 3600
+    t_settle = exp.end_ts - 60
+    assert exp.is_exciting_at(t_excite) is True
+    assert exp.is_settling_at(t_excite) is False
+    assert exp.is_exciting_at(t_settle) is False
+    assert exp.is_settling_at(t_settle) is True
+    # The experiment still owns the heaters during the settle tail.
+    assert exp.is_active_at(t_settle) is True
+
+
+def test_settle_buffer_never_swallows_whole_window():
+    # A buffer longer than the window is clamped so excitation_end == start.
+    exp = _make_exp(settle_s=100 * 3600)
+    assert exp.excitation_end_ts == exp.start_ts
+
+
+def test_default_signal_type_is_step():
+    from custom_components.heating_assistant.const import (
+        DEFAULT_EXCITATION_TYPE,
+        EXCITATION_STEP,
+    )
+
+    assert DEFAULT_EXCITATION_TYPE == EXCITATION_STEP
+    exp = E.Experiment(
+        room_name="r", room_slug="r", start_ts=0.0, end_ts=3600.0,
+    )
+    assert exp.signal_type == EXCITATION_STEP
 
 
 # --------------------------------------------------------------------------

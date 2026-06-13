@@ -17,8 +17,11 @@ Design
   scheduled experiment (room, time window, signal type and parameters, safety
   bounds, and lifecycle status).
 * :func:`excitation_fraction` is a pure function returning the heater power
-  fraction (0–1) the signal requests at a given instant.  The coordinator then
-  applies safety clamps (frost floor / overheat ceiling) on top of it.
+  fraction (0–1) the signal requests at a given instant.  Active excitation stops
+  ``settle_s`` before the window ends — a settle / response buffer that lets the
+  heater's influence be absorbed by the room *within* the captured window — and
+  the coordinator then applies safety clamps (frost floor / overheat ceiling) on
+  top of it.
 * :class:`ExperimentManager` holds the live list of experiments and advances
   their state machine (``scheduled`` → ``running`` → ``completed``) each tick.
 * :class:`ExperimentStore` persists the list across restarts.
@@ -44,6 +47,7 @@ from .const import (
     DEFAULT_EXCITATION_TYPE,
     DEFAULT_EXPERIMENT_MAX_TEMP,
     DEFAULT_EXPERIMENT_MIN_TEMP,
+    DEFAULT_EXPERIMENT_SETTLE_S,
     DOMAIN,
     EXCITATION_PRBS,
     EXCITATION_PULSE,
@@ -102,6 +106,7 @@ class Experiment:
     amplitude_high: float = DEFAULT_EXCITATION_HIGH
     amplitude_low: float = DEFAULT_EXCITATION_LOW
     period_s: float = DEFAULT_EXCITATION_PERIOD_S
+    settle_s: float = DEFAULT_EXPERIMENT_SETTLE_S
     min_temp: float = DEFAULT_EXPERIMENT_MIN_TEMP
     max_temp: float = DEFAULT_EXPERIMENT_MAX_TEMP
     auto_save: bool = True
@@ -130,11 +135,41 @@ class Experiment:
     def is_terminal(self) -> bool:
         return self.status in (STATUS_COMPLETED, STATUS_CANCELLED)
 
+    @property
+    def excitation_end_ts(self) -> float:
+        """Instant at which *active* excitation stops, ahead of ``end_ts``.
+
+        A settle / response buffer of ``settle_s`` is reserved at the tail of the
+        window so the heater's influence can be absorbed by the room *within* the
+        captured window.  The buffer is clamped so it can never swallow the whole
+        window (which would leave no excitation at all).
+        """
+        settle = self.settle_s if self.settle_s and self.settle_s > 0.0 else 0.0
+        settle = min(settle, max(0.0, self.end_ts - self.start_ts))
+        return self.end_ts - settle
+
     def is_active_at(self, now_ts: float) -> bool:
-        """Whether the experiment should be driving heaters at ``now_ts``."""
+        """Whether the experiment owns the room's heaters at ``now_ts``.
+
+        Stays true through the settle buffer: the controller keeps holding the
+        heaters at the low level there (rather than handing back to the MPC,
+        which would re-heat and contaminate the recorded relaxation).
+        """
         if self.status in (STATUS_COMPLETED, STATUS_CANCELLED):
             return False
         return self.start_ts <= now_ts < self.end_ts
+
+    def is_exciting_at(self, now_ts: float) -> bool:
+        """Whether *active* excitation (not the settle tail) is driving heaters."""
+        if self.is_terminal():
+            return False
+        return self.start_ts <= now_ts < self.excitation_end_ts
+
+    def is_settling_at(self, now_ts: float) -> bool:
+        """Whether ``now_ts`` falls in the post-excitation settle/response tail."""
+        if self.is_terminal():
+            return False
+        return self.excitation_end_ts <= now_ts < self.end_ts
 
 
 # ---------------------------------------------------------------------------
@@ -145,13 +180,14 @@ def excitation_fraction(exp: Experiment, now_ts: float) -> float:
     """Return the raw heater power fraction (0–1) the signal requests now.
 
     This is the *unclamped* signal value; the coordinator applies the safety
-    temperature bounds on top of it.  Before the window starts (or after it
-    ends) the low amplitude is returned.
+    temperature bounds on top of it.  Before the window starts, and once the
+    settle / response buffer at the tail begins (``now_ts >= excitation_end_ts``),
+    the low amplitude is returned so the room can relax within the window.
     """
     high = _clamp01(exp.amplitude_high)
     low = _clamp01(exp.amplitude_low)
     elapsed = now_ts - exp.start_ts
-    if elapsed < 0.0 or now_ts >= exp.end_ts:
+    if elapsed < 0.0 or now_ts >= exp.excitation_end_ts:
         return low
 
     period = exp.period_s if exp.period_s and exp.period_s > 0 else DEFAULT_EXCITATION_PERIOD_S

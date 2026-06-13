@@ -961,13 +961,16 @@ schedule_experiment:
   description: >
     Schedule a system-identification experiment for one room over a future time
     window.  While the experiment runs, the controller deliberately excites the
-    room's heaters with an informative signal (PRBS by default) so the recorded
+    room's heaters with an informative signal (a step by default) so the recorded
     temperature response carries enough information to identify the thermal model
-    accurately.  The experiment overrides the comfort schedule for that room
-    during the window (so it can run overnight when the room is unoccupied) while
-    still respecting open-window safety overrides and the global stop switch, and
-    is clamped to the configured min/max temperature band.  When ``auto_save`` is
-    enabled the captured window is stored as a named dataset on completion.
+    accurately.  Active excitation stops a settle / response buffer (``settle_s``)
+    before the window ends so the heater's influence is absorbed by the room
+    within the captured window.  The experiment overrides the comfort schedule for
+    that room during the window (so it can run overnight when the room is
+    unoccupied) while still respecting open-window safety overrides and the global
+    stop switch, and is clamped to the configured min/max temperature band.  When
+    ``auto_save`` is enabled the captured window is stored as a named dataset on
+    completion.
   fields:
     room_name:
       name: Room name
@@ -1002,16 +1005,17 @@ schedule_experiment:
     signal_type:
       name: Excitation signal
       description: >
-        Excitation waveform: ``prbs`` (pseudo-random binary sequence — best for
-        identification), ``step`` (single sustained on-step), or ``pulse``
-        (square wave alternating at ``period_s``).
+        Excitation waveform: ``step`` (single sustained on-step then released for
+        the settle buffer — simple and interpretable), ``prbs`` (pseudo-random
+        binary sequence — rich spectrum), or ``pulse`` (square wave alternating at
+        ``period_s``).
       required: false
-      default: "prbs"
+      default: "step"
       selector:
         select:
           options:
-            - "prbs"
             - "step"
+            - "prbs"
             - "pulse"
     amplitude_high:
       name: High power fraction
@@ -1041,6 +1045,21 @@ schedule_experiment:
       selector:
         number:
           min: 60
+          max: 86400
+          step: 60
+          unit_of_measurement: "s"
+    settle_s:
+      name: Settle / response buffer
+      description: >
+        Seconds of no excitation reserved before the window ends so the heater's
+        influence is absorbed by the room within the captured data.  Defaults to
+        two hours, capped to half the window for short experiments; must be
+        shorter than the experiment duration.
+      required: false
+      default: 7200
+      selector:
+        number:
+          min: 0
           max: 86400
           step: 60
           unit_of_measurement: "s"
