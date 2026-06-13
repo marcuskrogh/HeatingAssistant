@@ -1611,9 +1611,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "outdoor_temp": round(outdoor_ext[k], 2),
             })
 
-        # Price forecast
+        # Price forecast — bounded to the display horizon so the power/price
+        # plot's price line spans the same window as the heating-power line
+        # (truncated when shorter, held flat when the plot extends past it).
         price_data: List[Dict[str, Any]] = []
-        for i, price in enumerate(price_forecast):
+        price_len = len(price_forecast)
+        if plot_forecast_steps is None:
+            n_price_points = price_len
+        else:
+            n_price_points = target_steps + 1
+        last_price = price_forecast[-1] if price_len else None
+        for i in range(n_price_points):
+            if i < price_len:
+                price = price_forecast[i]
+            elif last_price is not None:
+                price = last_price
+            else:
+                break
             step_time = now + timedelta(seconds=dt * i)
             try:
                 price_data.append({
