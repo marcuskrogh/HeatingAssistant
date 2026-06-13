@@ -164,6 +164,40 @@ def test_build_clamps_records_per_room_horizon_mask():
     assert all(mask)  # full window in horizon → every step governed
 
 
+def test_relax_experiment_comfort_zeros_tracking_and_widens_corridor():
+    from custom_components.heating_assistant.const import (
+        EXPERIMENT_RELAXED_COMFORT_OFFSET,
+    )
+
+    coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
+    coord._experiment_horizon_steps = {"Living Room": [True, True, False, False]}
+    traj = SimpleNamespace(
+        q_scales={"Living Room": np.array([1.0, 1.0, 1.0, 1.0])},
+        comfort_offsets={"Living Room": np.array([2.0, 2.0, 2.0, 2.0])},
+    )
+
+    coord._relax_experiment_comfort(traj)
+
+    # Governed steps: tracking weight zeroed, corridor opened wide; others intact.
+    assert list(traj.q_scales["Living Room"]) == [0.0, 0.0, 1.0, 1.0]
+    assert list(traj.comfort_offsets["Living Room"]) == [
+        EXPERIMENT_RELAXED_COMFORT_OFFSET, EXPERIMENT_RELAXED_COMFORT_OFFSET, 2.0, 2.0,
+    ]
+
+
+def test_relax_experiment_comfort_noop_without_experiments():
+    coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
+    coord._experiment_horizon_steps = {}
+    traj = SimpleNamespace(
+        q_scales={"Living Room": np.array([1.0])},
+        comfort_offsets={"Living Room": np.array([2.0])},
+    )
+
+    coord._relax_experiment_comfort(traj)  # must not raise
+    assert list(traj.q_scales["Living Room"]) == [1.0]
+    assert list(traj.comfort_offsets["Living Room"]) == [2.0]
+
+
 def test_delete_experiment_removes_scheduled():
     coord = _make_coord(["Living Room"], [_src("lr_heater", "Living Room")])
     exp = _exp("Living Room", 9_000.0, 9_000.0 + 3600)
