@@ -328,7 +328,11 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const onChartsReady = (roomForecast, priceForecast) => {
     // The forecast carries this room's heating/cooling capacity — use it to
     // scale the power gauge so the bar reflects power as a fraction of capacity.
-    if (roomForecast?.max_power != null) powerBounds.max = roomForecast.max_power;
+    // Use current_max_power (capacity at current outdoor temp) for the gauge so
+    // it reads 100 % when the heat pump is at the limit it can deliver right now,
+    // falling back to the rated max_power when the current-capacity field is absent.
+    const gaugeMax = roomForecast?.current_max_power ?? roomForecast?.max_power;
+    if (gaugeMax != null) powerBounds.max = gaugeMax;
     if (roomForecast?.max_cooling_power != null) powerBounds.min = -roomForecast.max_cooling_power;
     // Same forecast block feeds the experiment-band grid alignment.
     latestForecastRoom = roomForecast || null;
