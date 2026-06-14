@@ -3533,3 +3533,159 @@ input[type="time"] {
   color: var(--accent);
   font-style: italic;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXPERIMENT CARDS  — used in schedules detail page
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.schedule-form__period--exp-running {
+  border-color: rgba(181, 139, 242, 0.45);
+  background: linear-gradient(160deg, var(--bg-card) 0%, rgba(181, 139, 242, 0.04) 100%);
+}
+
+.schedule-form__period--exp-scheduled {
+  border-color: rgba(245, 166, 35, 0.35);
+  background: linear-gradient(160deg, var(--bg-card) 0%, rgba(245, 166, 35, 0.03) 100%);
+}
+
+.exp-status-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.exp-status-badge--scheduled {
+  color: var(--warning);
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+}
+
+.exp-status-badge--running {
+  color: var(--experiment);
+  background: var(--experiment-dim);
+  border: 1px solid rgba(181, 139, 242, 0.3);
+}
+
+.exp-status-badge--completed {
+  color: var(--text-dim);
+  background: rgba(107, 114, 128, 0.12);
+  border: 1px solid rgba(107, 114, 128, 0.2);
+}
+
+.exp-status-badge--cancelled {
+  color: var(--alarm);
+  background: rgba(231, 76, 60, 0.12);
+  border: 1px solid rgba(231, 76, 60, 0.2);
+}
+
+.exp-signal-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+/* Schedule index card — experiment count badge */
+.sched-index-card__exp-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 10px;
+  color: var(--experiment);
+  background: var(--experiment-dim);
+  border: 1px solid rgba(181, 139, 242, 0.25);
+  white-space: nowrap;
+}
+
+/* Schedule overview — experiment section label */
+.sched-index-card__exp-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--experiment);
+  text-transform: uppercase;
+  margin: 4px 0;
+}
+
+/* Experiment rows in overview room climate tiles */
+.room-tile__exp-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.room-tile__exp-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--experiment);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.room-tile__exp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 3px;
+}
+
+.room-tile__exp-row--running {
+  background: var(--experiment-dim);
+  border: 1px solid rgba(181, 139, 242, 0.2);
+}
+
+.room-tile__exp-row--scheduled {
+  background: rgba(245, 166, 35, 0.05);
+  border: 1px solid rgba(245, 166, 35, 0.15);
+}
+
+.room-tile__exp-badge {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.room-tile__exp-badge--running {
+  color: var(--experiment);
+  background: rgba(181, 139, 242, 0.2);
+}
+
+.room-tile__exp-badge--scheduled {
+  color: var(--warning);
+  background: rgba(245, 166, 35, 0.15);
+}
+
+.room-tile__exp-name {
+  flex: 1;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.room-tile__exp-window {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
