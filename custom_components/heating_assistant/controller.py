@@ -2546,6 +2546,22 @@ class HeatingMPCController:
                 for j, src in enumerate(self._sources)
             }
             self._mpc_actions = dict(actions)
+            # Update current_power from emitter state so heating_power_measured
+            # reflects actual thermal delivery while the system is stopped.
+            _nx_phys = self._system._nx_phys
+            _x_hat = self._ekf.x_hat
+            _filter_idx = self._system._filter_idx_for_source
+            for j, src in enumerate(self._sources):
+                k = int(_filter_idx[j])
+                if k < 0:
+                    continue
+                eff_frac = float(np.clip(_x_hat[_nx_phys + k], src.u_min, src.u_max))
+                if src.can_cool:
+                    src._current_power = src.smooth_thermal_power(
+                        eff_frac, outdoor_temp, self._system._k_sigmoid,
+                    )
+                else:
+                    src.set_power(eff_frac, outdoor_temp)
             return actions
 
         # ── Disturbance forecast matrix for the OCP ──────────────────────
@@ -2714,15 +2730,34 @@ class HeatingMPCController:
                     U_abs[~col, j] = 0.0
 
         # ── Apply actions to heat sources ────────────────────────────────
+        # For the commanded actions dict (sent to heaters and stored in the
+        # history buffer) use the raw MPC output u_abs.  For current_power
+        # (read by heating_power_measured sensors) use the EKF's emitter-state
+        # estimate phi so the recorded sensor value reflects the actual thermal
+        # delivery to the room, not the instantaneous command.  Sources with no
+        # emitter time constant (tau_em = 0, _filter_idx < 0) are unaffected —
+        # their commanded fraction equals the delivered fraction.
+        _nx_phys = self._system._nx_phys
+        _x_hat = self._ekf.x_hat
+        _filter_idx = self._system._filter_idx_for_source
+
         actions: Dict[str, float] = {}
         for j, src in enumerate(self._sources):
             frac = float(np.clip(u_abs[j], src.u_min, src.u_max))
             actions[src.name] = frac
+
+            k = int(_filter_idx[j])
+            eff_frac = (
+                float(np.clip(_x_hat[_nx_phys + k], src.u_min, src.u_max))
+                if k >= 0
+                else frac
+            )
+
             if src.can_cool:
                 # Track the smooth-sigmoid power so sensors and the EKF are
                 # consistent with the model function f().
                 p_smooth = src.smooth_thermal_power(
-                    frac, outdoor_temp, self._system._k_sigmoid,
+                    eff_frac, outdoor_temp, self._system._k_sigmoid,
                 )
                 # Apply the source's min_power clamp: a positive output below
                 # min_power is reported as zero (hardware cannot deliver it).
@@ -2732,7 +2767,7 @@ class HeatingMPCController:
                     p_smooth = 0.0
                 src._current_power = p_smooth
             else:
-                src.set_power(frac, outdoor_temp)
+                src.set_power(eff_frac, outdoor_temp)
 
         self._u_prev = u_abs.copy()
 
