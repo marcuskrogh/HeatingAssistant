@@ -869,6 +869,53 @@ class TestHeatingMPCController:
         assert sched[1]["living_room"] == pytest.approx(0.0, abs=1e-6)
         assert sched[2]["living_room"] == pytest.approx(0.0, abs=1e-6)
 
+    def test_input_clamp_with_experiment_comfort_relaxation_and_disabled_source(self):
+        """Experiment clamps must still force the prescribed signal even when
+        the coordinator applies full comfort relaxation (Q=0, offset=1000 °C)
+        AND the room is schedule-disabled.
+
+        This is the regression guard for the bug where _relax_experiment_comfort
+        opening the corridor to 1000 °C caused the QP to return zero for all
+        horizon steps in the room view power chart.
+        """
+        from types import SimpleNamespace
+        room = Room("living_room", 5e6, 0.05, temperature=18.0, setpoint=21.0)
+        model = HouseModel([room])
+        sources = [ElectricHeater("lr_heater", "living_room", max_power=2000.0)]
+        ctrl = HeatingMPCController(model, sources, horizon=4, dt=3600)
+        now = datetime(2024, 1, 15, 2, 0, tzinfo=timezone.utc)
+
+        # Simulate what _relax_experiment_comfort does: zero Q weight and open
+        # the comfort corridor wide (1000 °C) for all governed horizon steps.
+        EXPERIMENT_RELAXED_OFFSET = 1000.0
+        traj = SimpleNamespace(
+            setpoints={"living_room": np.full(4, 21.0)},
+            comfort_offsets={"living_room": np.full(4, EXPERIMENT_RELAXED_OFFSET)},
+            q_scales={"living_room": np.zeros(4)},   # experiment relaxation: Q=0
+            r_scales={"living_room": np.ones(4)},
+            enabled_steps={"living_room": np.zeros(4, dtype=bool)},  # room off
+        )
+
+        # Step experiment: heating phase (50 % for steps 0-2), settle (0 %) at step 3.
+        clamps = {"lr_heater": np.array([0.5, 0.5, 0.5, 0.0])}
+
+        ctrl.compute(
+            outdoor_temp=5.0, now=now,
+            disabled_sources={"lr_heater"},
+            control_trajectory=traj,
+            input_clamps=clamps,
+        )
+        sched = ctrl.heating_schedule
+        # Steps 0-2 must reflect the 50 % clamp = 1000 W.
+        assert sched[0]["living_room"] == pytest.approx(1000.0, rel=5e-2), (
+            "Step 0: experiment clamp should force 50 % power (1000 W); got zero — "
+            "comfort relaxation is incorrectly suppressing the experiment signal"
+        )
+        assert sched[1]["living_room"] == pytest.approx(1000.0, rel=5e-2)
+        assert sched[2]["living_room"] == pytest.approx(1000.0, rel=5e-2)
+        # Settle phase must be off.
+        assert sched[3]["living_room"] == pytest.approx(0.0, abs=1e-6)
+
     def test_controller_uses_unaugmented_states_for_runtime_efficiency(self):
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)

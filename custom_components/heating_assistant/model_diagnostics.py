@@ -20,6 +20,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+try:
+    from scipy.stats import chi2 as _scipy_chi2
+except Exception:  # scipy absent or import error at startup
+    _scipy_chi2 = None
+
 from .integrator import (
     ImplicitEulerConvergenceError,
     implicit_euler_substeps,
@@ -1195,14 +1200,14 @@ def _chi2_sf(x: float, dof: int) -> float:
     """
     if x <= 0 or dof <= 0:
         return 1.0
-    try:
-        from scipy.stats import chi2
-
-        return float(chi2.sf(x, dof))
-    except Exception:
-        # Wilson–Hilferty: ((x/dof)^(1/3) − (1 − 2/(9 dof))) / sqrt(2/(9 dof))
-        # is approximately N(0, 1). We use the complementary error function
-        # for the right tail.
-        a = 2.0 / (9.0 * dof)
-        z = ((x / dof) ** (1.0 / 3.0) - (1.0 - a)) / math.sqrt(a)
-        return 0.5 * math.erfc(z / math.sqrt(2.0))
+    if _scipy_chi2 is not None:
+        try:
+            return float(_scipy_chi2.sf(x, dof))
+        except Exception:
+            pass
+    # Wilson–Hilferty: ((x/dof)^(1/3) − (1 − 2/(9 dof))) / sqrt(2/(9 dof))
+    # is approximately N(0, 1). Use the complementary error function for the
+    # right tail as a fallback when scipy is unavailable or raises.
+    a = 2.0 / (9.0 * dof)
+    z = ((x / dof) ** (1.0 / 3.0) - (1.0 - a)) / math.sqrt(a)
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
