@@ -1199,11 +1199,38 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         looks that name up in its room index, so an orphaned source raises
         ``KeyError`` and prevents the whole integration from starting.  Dropping
         it (with a warning) keeps setup resilient to stale configuration.
+
+        If the source's room name is a slug form of a known canonical room name
+        (e.g. ``"living_room"`` vs ``"Living Room"``), the reference is corrected
+        in-memory so the controller sees the right name.  This handles setups
+        where heat sources were originally configured with slug-style room names.
         """
+        from .dashboard import slugify as _slugify
+
         known_rooms = set(self.model.rooms)
-        valid = [s for s in sources if s.room in known_rooms]
+        slug_to_canonical: Dict[str, str] = {
+            _slugify(name): name for name in known_rooms
+        }
+        valid: List[HeatSource] = []
         for s in sources:
-            if s.room not in known_rooms:
+            if s.room in known_rooms:
+                valid.append(s)
+                continue
+            # Fallback: check if the room name is a slug of a known canonical name.
+            canonical = slug_to_canonical.get(_slugify(s.room))
+            if canonical is not None:
+                _LOGGER.warning(
+                    "Heating Assistant: heat source %r references room %r by "
+                    "slug form; correcting to canonical name %r. "
+                    "Update the heat source configuration to use the canonical "
+                    "room name to suppress this warning.",
+                    getattr(s, "name", s),
+                    s.room,
+                    canonical,
+                )
+                s.room = canonical
+                valid.append(s)
+            else:
                 _LOGGER.warning(
                     "Heating Assistant: dropping heat source %r — its room %r "
                     "is not configured",

@@ -134,3 +134,44 @@ def test_all_valid_sources_are_kept():
     )
 
     assert kept == sources
+
+
+def test_slug_room_name_is_corrected_to_canonical():
+    """A source whose room is stored as a slug (e.g. 'living_room') but the
+    model uses a canonical name (e.g. 'Living Room') must be kept, not dropped,
+    with src.room corrected to the canonical name in-memory.
+
+    This is the regression guard for the bug where _drop_orphaned_sources
+    dropped heat sources that were configured with slug-style room names while
+    the room model used Title Case names — silencing all heaters and making the
+    MPC return zero power across every horizon step.
+    """
+    coord = _fake_coordinator_with_rooms("Living Room", "Office")
+    sources = [
+        SimpleNamespace(name="living_room_heater", room="living_room"),
+        SimpleNamespace(name="office_heater", room="office"),
+    ]
+
+    kept = coord_mod.HeatingAssistantCoordinator._drop_orphaned_sources(
+        coord, sources
+    )
+
+    assert len(kept) == 2, "Both slug-named sources should be kept after correction"
+    assert kept[0].room == "Living Room", "Slug 'living_room' must be corrected to 'Living Room'"
+    assert kept[1].room == "Office", "Slug 'office' must be corrected to 'Office'"
+
+
+def test_truly_orphaned_source_still_dropped():
+    """A source referencing a room that has no slug match in the model is dropped."""
+    coord = _fake_coordinator_with_rooms("Living Room")
+    sources = [
+        SimpleNamespace(name="ghost_heater", room="basement"),  # no match at all
+        SimpleNamespace(name="lr_heater", room="Living Room"),  # exact match
+    ]
+
+    kept = coord_mod.HeatingAssistantCoordinator._drop_orphaned_sources(
+        coord, sources
+    )
+
+    assert len(kept) == 1
+    assert kept[0].name == "lr_heater"
