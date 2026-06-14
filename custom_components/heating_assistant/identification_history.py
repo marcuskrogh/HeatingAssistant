@@ -192,7 +192,7 @@ class IdentificationHistoryStore:
                             continue
                         if start_ts is not None and ts < start_ts:
                             continue
-                        if end_ts is not None and ts > end_ts:
+                        if end_ts is not None and ts >= end_ts:
                             continue
                     records.append(rec)
         except OSError:
