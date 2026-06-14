@@ -135,6 +135,8 @@ from .const import (
     DEFAULT_SIGMA_W,
     CONF_IDENTIFICATION_HORIZON_HOURS,
     DEFAULT_IDENTIFICATION_HORIZON_HOURS,
+    CONF_IDENTIFICATION_HISTORY_DAYS,
+    DEFAULT_IDENTIFICATION_HISTORY_DAYS,
     CONF_PLOT_HISTORY_HOURS,
     CONF_PLOT_FORECAST_HOURS,
     DEFAULT_PLOT_HISTORY_HOURS,
@@ -460,6 +462,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_PRICE_ENTITY,
         CONF_PLOT_HISTORY_HOURS,
         CONF_PLOT_FORECAST_HOURS,
+        CONF_IDENTIFICATION_HISTORY_DAYS,
     }
 
     def __init__(
@@ -538,6 +541,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             options.get(
                 CONF_IDENTIFICATION_HORIZON_HOURS,
                 data.get(CONF_IDENTIFICATION_HORIZON_HOURS, DEFAULT_IDENTIFICATION_HORIZON_HOURS),
+            )
+        )
+        self._identification_history_days: int = int(
+            options.get(
+                CONF_IDENTIFICATION_HISTORY_DAYS,
+                data.get(CONF_IDENTIFICATION_HISTORY_DAYS, DEFAULT_IDENTIFICATION_HISTORY_DAYS),
             )
         )
         # Industrial-panel plot display settings (Configuration → Display).
@@ -1339,6 +1348,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             self._identification_horizon_hours = float(
                 pending.get(CONF_IDENTIFICATION_HORIZON_HOURS, self._identification_horizon_hours)
             )
+        if CONF_IDENTIFICATION_HISTORY_DAYS in pending:
+            self._identification_history_days = int(
+                pending.get(CONF_IDENTIFICATION_HISTORY_DAYS, self._identification_history_days)
+            )
+            if self.id_history_store is not None:
+                self.id_history_store.update_retention_days(self._identification_history_days)
         if CONF_WINDOW_OPEN_DEBOUNCE in pending:
             self._window_open_debounce = float(
                 pending.get(CONF_WINDOW_OPEN_DEBOUNCE, self._window_open_debounce)

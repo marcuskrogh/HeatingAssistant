@@ -47,6 +47,11 @@ const ICONS = {
     <path d="M44 78 H72 a13 13 0 0 0 1 -26 a18 18 0 0 0 -34 -2 a13 13 0 0 0 -7 28 Z"
       fill="none" stroke="${TEAL}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
   </svg>`,
+  params: `<svg viewBox="0 0 100 100" aria-hidden="true">
+    <ellipse cx="50" cy="28" rx="28" ry="10" fill="none" stroke="${TEAL}" stroke-width="5" stroke-linecap="round"/>
+    <path d="M22 28 v18 c0 5.5 12.5 10 28 10 s28 -4.5 28 -10 V28" fill="none" stroke="${TEAL}" stroke-width="5" stroke-linecap="round" opacity="0.7"/>
+    <path d="M22 46 v18 c0 5.5 12.5 10 28 10 s28 -4.5 28 -10 V46" fill="none" stroke="${TEAL}" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+  </svg>`,
 };
 
 // ---------------------------------------------------------------------------
@@ -358,6 +363,7 @@ export function renderConfiguration(container, rooms, state, connection, hass, s
 
   if (page === 'display') return renderDisplay(container, connection, hass);
   if (page === 'system') return renderSystem(container, connection, hass);
+  if (page === 'params') return renderSystemParams(container, connection, hass);
   if (page === 'rooms' && parts[1] != null) return renderRoomEditor(container, connection, hass, parts[1]);
   if (page === 'rooms') return renderRoomList(container, connection, hass);
   if (page === 'sources' && parts[1] != null) return renderSourceEditor(container, connection, hass, parts[1]);
@@ -393,6 +399,12 @@ const LANDING_CARDS = [
     icon: ICONS.system,
     title: 'Environment & Site',
     desc: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors, plus site location.',
+  },
+  {
+    hash: '#config/params',
+    icon: ICONS.params,
+    title: 'System Parameters',
+    desc: 'Data retention, history depth and other system-level settings that control how the integration stores and manages data.',
   },
 ];
 
@@ -1137,7 +1149,68 @@ function cleanSource(src) {
 }
 
 // ---------------------------------------------------------------------------
-// System / environment
+// System Parameters
+// ---------------------------------------------------------------------------
+
+function renderSystemParams(container, connection, hass) {
+  container.innerHTML = '';
+  container.appendChild(backNav('CONFIGURATION', '#config'));
+  container.appendChild(el('div', 'section-header', 'SYSTEM PARAMETERS'));
+
+  const body = el('div');
+  body.appendChild(loadingNode());
+  container.appendChild(body);
+
+  connection.getModelConfig().then((cfg) => {
+    const sp = (cfg && cfg.system_params) || {};
+    const working = {
+      identification_history_days: sp.identification_history_days,
+    };
+
+    body.innerHTML = '';
+    const actions = actionsBar('Apply Changes');
+    body.appendChild(actions);
+
+    const histCard = sectionCard(
+      'Identification history',
+      'Controls how much past observation data the integration keeps on disk. '
+      + 'Each day of operation produces one JSONL file; files older than the '
+      + 'retention window are deleted automatically once per day. '
+      + 'Longer retention means more data is available for system identification, '
+      + 'at the cost of a small amount of extra storage (roughly 1–2 MB per day).',
+    );
+    histCard.appendChild(paramGrid(
+      numberField(working, 'identification_history_days', 'History retention', {
+        step: 1, unit: 'days', min: 7, max: 365,
+        hint: 'How many days of JSONL observation files to keep. Default: 90.',
+      }),
+    ));
+    body.appendChild(histCard);
+
+    const statusEl = actions.querySelector('[data-role="status"]');
+    actions.querySelector('[data-role="save"]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      setStatus(statusEl, 'Applying…', 'running');
+      try {
+        const data = {};
+        if (working.identification_history_days != null) {
+          data.identification_history_days = Math.round(Number(working.identification_history_days));
+        }
+        await hass.callService('heating_assistant', 'update_system_params', data);
+        setStatus(statusEl, 'Applied.', 'success');
+      } catch (err) {
+        setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
+      }
+      btn.disabled = false;
+    });
+  });
+
+  return { update() {}, destroy() {} };
+}
+
+// ---------------------------------------------------------------------------
+// Environment & Site
 // ---------------------------------------------------------------------------
 
 function renderSystem(container, connection, hass) {

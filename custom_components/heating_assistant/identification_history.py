@@ -102,6 +102,12 @@ class IdentificationHistoryStore:
         await self._hass.async_add_executor_job(self._sync_purge_old)
         self._last_purge_date = today
 
+    def update_retention_days(self, days: int) -> None:
+        """Update the retention period and reset the daily-purge guard so the
+        new cutoff is applied at the next ``async_purge_old`` call."""
+        self._retention_days = max(1, int(days))
+        self._last_purge_date = None
+
     # ------------------------------------------------------------------
     # Synchronous helpers (run in executor threads)
     # ------------------------------------------------------------------
