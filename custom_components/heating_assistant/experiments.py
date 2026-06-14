@@ -90,6 +90,21 @@ def prbs_bit(seed: int, step_index: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Shared timing utility
+# ---------------------------------------------------------------------------
+
+def snap_to_interval(ts: float, interval_s: int) -> float:
+    """Round a UNIX timestamp down to the nearest interval grid boundary.
+
+    All schedule-aware calculations use this to share a common timing grid:
+    every coordinator cycle that falls within the same interval maps to the
+    same canonical instant, so comfort-corridor transitions, experiment bands,
+    and data-collection windows all align on the plot.
+    """
+    return float(int(ts) // interval_s * interval_s)
+
+
+# ---------------------------------------------------------------------------
 # Experiment data model
 # ---------------------------------------------------------------------------
 

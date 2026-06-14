@@ -194,6 +194,7 @@ from .experiments import (
     ExperimentManager,
     apply_safety_bounds,
     excitation_fraction,
+    snap_to_interval,
 )
 from .datasets import build_dataset
 
@@ -1635,7 +1636,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if room_names is None:
             room_names = self.model.room_names
 
-        now = getattr(self, "now_utc", None) or datetime.now(tz=timezone.utc)
+        now = getattr(self, "now_snapped_utc", None) or getattr(self, "now_utc", None) or datetime.now(tz=timezone.utc)
         dt = self.dt
         predictions = self.predictions
         outdoor_forecast = self.outdoor_forecast
@@ -2404,7 +2405,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #    anchors a forecast trace to the current instant uses the same
             #    timestamp (and avoids redundant ``datetime.now()`` calls in
             #    each sensor's ``extra_state_attributes`` getter).
+            #    Also compute the interval-snapped version used by all
+            #    schedule-aware calculations so comfort corridors, experiment
+            #    bands, and data-collection windows share a common timing grid.
             self.now_utc = datetime.now(tz=timezone.utc)
+            _interval_s = int(self._update_interval_s)
+            self.now_snapped_utc = datetime.fromtimestamp(
+                snap_to_interval(self.now_utc.timestamp(), _interval_s),
+                tz=timezone.utc,
+            )
             self._apply_pending_runtime_reconfiguration()
 
             # 1. Update measured room temperatures from HA sensor states.
@@ -2449,11 +2458,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #     room and update the live setpoint / enabled flag accordingly.
             #     Done after measurements are read so frost-protection logic
             #     sees the current temperature.
-            now_local = datetime.now()
+            #     Use the interval-snapped time so schedule transitions, forecast
+            #     horizon steps, and experiment bands all share the same grid.
+            now_snapped_local = self.now_snapped_utc.astimezone()
             try:
-                self._apply_schedule(now_local)
+                self._apply_schedule(now_snapped_local)
                 control_traj = self._compute_control_trajectory(
-                    now_local, self._horizon, float(self.dt)
+                    now_snapped_local, self._horizon, float(self.dt)
                 )
                 self._control_trajectory = control_traj
             except Exception:
@@ -2666,7 +2677,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # forecast already shows the experiment) instead of overriding the
             # chosen action afterwards.  Only while the controller is engaged.
             if self._system_enabled:
-                experiment_clamps = self._build_experiment_clamps(now)
+                experiment_clamps = self._build_experiment_clamps(self.now_snapped_utc)
                 self._relax_experiment_comfort(control_traj)
             else:
                 experiment_clamps = {}
@@ -3671,6 +3682,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Stamp a fresh "now" so forecast-timestamp calculations in entity
         # extra_state_attributes use the current time, not the last tick's.
         self.now_utc = datetime.now(tz=timezone.utc)
+        self.now_snapped_utc = datetime.fromtimestamp(
+            snap_to_interval(self.now_utc.timestamp(), int(self._update_interval_s)),
+            tz=timezone.utc,
+        )
 
         # Measured room temperatures.
         self.measured_temperatures = {}
@@ -3691,7 +3706,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         # Live setpoints / enabled flags from the active schedule.
         try:
-            self._apply_schedule(datetime.now())
+            self._apply_schedule(self.now_snapped_utc.astimezone())
         except Exception:
             _LOGGER.debug("UI refresh: schedule apply failed", exc_info=True)
 
@@ -4346,6 +4361,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     def schedule_experiment(self, exp: Any) -> Any:
         """Register a new experiment and persist the experiment list."""
+        interval_s = int(self._update_interval_s)
+        exp.start_ts = snap_to_interval(exp.start_ts, interval_s)
+        exp.end_ts = snap_to_interval(exp.end_ts, interval_s)
         self.experiment_manager.add(exp)
         self.experiment_manager.prune_terminal()
         self._persist_experiments()
@@ -4551,7 +4569,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._schedule_enabled[room_name] = bool(enabled)
         # Re-apply now so the next tick already reflects the change in the
         # MPC reference; otherwise the user would have to wait one cycle.
-        self._apply_schedule(datetime.now())
+        now_utc = datetime.now(tz=timezone.utc)
+        snapped = datetime.fromtimestamp(
+            snap_to_interval(now_utc.timestamp(), int(self._update_interval_s)),
+            tz=timezone.utc,
+        )
+        self._apply_schedule(snapped.astimezone())
 
     def active_schedule_period(self, room_name: str) -> Optional[EffectiveControlParams]:
         """Return the most recently resolved effective setpoint for the room."""
