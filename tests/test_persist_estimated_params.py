@@ -143,6 +143,11 @@ class _FakeCoordinator:
             index.setdefault(src.room, []).append(src)
         self._sources_by_room = index
 
+    def _drop_orphaned_sources(self, sources):
+        """Mirror the real coordinator: keep only sources with a known room."""
+        known_rooms = set(self.model.rooms)
+        return [s for s in sources if s.room in known_rooms]
+
 
 # ---------------------------------------------------------------------------
 # Part 1: _apply_estimated_parameters applies internal_gain and power_scale

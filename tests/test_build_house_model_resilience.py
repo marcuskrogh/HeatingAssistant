@@ -10,6 +10,7 @@ stale sub-record left behind by a room edit must never crash integration setup
 
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -90,3 +91,46 @@ def test_invalid_window_is_dropped_not_raised():
     model = coord_mod.build_house_model(rooms_cfg)
     assert len(model.rooms["living_room"].windows) == 1
     assert model.rooms["living_room"].windows[0].area == 2.0
+
+
+# ---------------------------------------------------------------------------
+# Heat sources pointing at a room that no longer exists
+# ---------------------------------------------------------------------------
+
+def _fake_coordinator_with_rooms(*room_names):
+    """A minimal stand-in exposing only what _drop_orphaned_sources reads."""
+    model = SimpleNamespace(rooms={name: object() for name in room_names})
+    return SimpleNamespace(model=model)
+
+
+def test_orphaned_heat_source_is_dropped_not_raised():
+    """A source whose room was deleted/renamed is dropped, not fed to the model.
+
+    Otherwise the controller's room-index lookup raises KeyError during setup
+    and the whole integration fails to start.
+    """
+    coord = _fake_coordinator_with_rooms("kitchen")
+    sources = [
+        SimpleNamespace(name="kitchen_heater", room="kitchen"),
+        SimpleNamespace(name="ghost_heater", room="living_room"),  # orphaned
+    ]
+
+    kept = coord_mod.HeatingAssistantCoordinator._drop_orphaned_sources(
+        coord, sources
+    )
+
+    assert [s.name for s in kept] == ["kitchen_heater"]
+
+
+def test_all_valid_sources_are_kept():
+    coord = _fake_coordinator_with_rooms("kitchen", "living_room")
+    sources = [
+        SimpleNamespace(name="a", room="kitchen"),
+        SimpleNamespace(name="b", room="living_room"),
+    ]
+
+    kept = coord_mod.HeatingAssistantCoordinator._drop_orphaned_sources(
+        coord, sources
+    )
+
+    assert kept == sources

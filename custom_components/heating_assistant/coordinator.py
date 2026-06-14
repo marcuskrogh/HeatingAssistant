@@ -595,7 +595,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         sources_cfg: List[Dict[str, Any]] = data.get(CONF_HEAT_SOURCES, [])
 
         self.model: HouseModel = build_house_model(rooms_cfg)
-        self.heat_sources: List[HeatSource] = build_heat_sources(sources_cfg)
+        self.heat_sources: List[HeatSource] = self._drop_orphaned_sources(
+            build_heat_sources(sources_cfg)
+        )
         # Cache room → list[HeatSource] index so per-room sensors don't have to
         # filter the full source list on every attribute access.  Must be
         # rebuilt whenever ``self.heat_sources`` is reassigned (see
@@ -1178,6 +1180,29 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._estimation_log_likelihood = snapshot.get("log_likelihood")
         _LOGGER.info("Restored persisted estimated parameters from entry.data")
 
+    def _drop_orphaned_sources(
+        self, sources: List[HeatSource]
+    ) -> List[HeatSource]:
+        """Drop heat sources whose room is not in the current model.
+
+        A source references its room by name; deleting or renaming a room can
+        leave a source pointing at a room that no longer exists.  The controller
+        looks that name up in its room index, so an orphaned source raises
+        ``KeyError`` and prevents the whole integration from starting.  Dropping
+        it (with a warning) keeps setup resilient to stale configuration.
+        """
+        known_rooms = set(self.model.rooms)
+        valid = [s for s in sources if s.room in known_rooms]
+        for s in sources:
+            if s.room not in known_rooms:
+                _LOGGER.warning(
+                    "Heating Assistant: dropping heat source %r — its room %r "
+                    "is not configured",
+                    getattr(s, "name", s),
+                    s.room,
+                )
+        return valid
+
     def _rebuild_sources_by_room(self) -> None:
         """Refresh the room → heat-sources index after ``self.heat_sources``
         is (re)assigned.  Sensors read from this cache instead of filtering
@@ -1700,7 +1725,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         rooms_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_ROOMS, [])
         sources_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_HEAT_SOURCES, [])
         self.model = build_house_model(rooms_cfg)
-        self.heat_sources = build_heat_sources(sources_cfg)
+        self.heat_sources = self._drop_orphaned_sources(
+            build_heat_sources(sources_cfg)
+        )
 
         # Restore user-controlled setpoints so that "Reset to Defaults"
         # only affects estimated thermal parameters (thermal_mass,
