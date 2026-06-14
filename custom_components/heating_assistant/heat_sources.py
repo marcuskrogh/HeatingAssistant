@@ -461,6 +461,19 @@ class HeatPump(HeatSource):
             return 0.0
         return -self._q_cool_const
 
+    @property
+    def rated_cooling_power(self) -> float:
+        """Rated (configured) cooling capacity [W], without power_scale adjustment.
+
+        Analogous to ``max_power`` for heating: reflects the values the user
+        configured (electric_max × cooling_cop × cooling_efficiency) rather than
+        the runtime-scaled ``_q_cool_const``.  Use this for stable plot bounds;
+        use ``-cooling_power()`` for the gauge where the identified scale matters.
+        """
+        if not self.can_cool or self.cop_rated <= 0:
+            return 0.0
+        return self._electric_max * self.cooling_cop * self.cooling_efficiency
+
     def target_temperature(self, fraction: float, internal_temp: float) -> float:
         """
         Compute the climate-entity setpoint from the control fraction.

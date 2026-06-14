@@ -1863,7 +1863,18 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # it can actually deliver right now (a heat pump's output drops at
             # cold outdoor temps because COP falls with the temperature delta).
             current_max_power = sum(s.thermal_power(1.0, outdoor_now) for s in room_sources)
+            # Rated cooling capacity (without power_scale) — used for the plot
+            # Y-axis bound so it matches the configured values just like
+            # max_power does for heating.
             max_cooling_power = sum(
+                s.rated_cooling_power
+                for s in room_sources
+                if getattr(s, "can_cool", False) and hasattr(s, "rated_cooling_power")
+            )
+            # Current cooling capacity (with power_scale) — used for the power
+            # gauge so it reads 100 % when the heat pump is at the identified
+            # cooling limit (mirrors current_max_power for the heating side).
+            current_max_cooling_power = sum(
                 -s.cooling_power(outdoor_now)
                 for s in room_sources
                 if getattr(s, "can_cool", False) and hasattr(s, "cooling_power")
@@ -1881,6 +1892,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "max_power": max_power if max_power > 0 else None,
                 "current_max_power": current_max_power if current_max_power > 0 else None,
                 "max_cooling_power": max_cooling_power if max_cooling_power > 0 else None,
+                "current_max_cooling_power": current_max_cooling_power if current_max_cooling_power > 0 else None,
             }
 
         # Outdoor forecast — limited to the display horizon, then held flat for
