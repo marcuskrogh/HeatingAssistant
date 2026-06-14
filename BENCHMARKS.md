@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-06-12 19:12 UTC*
+*Generated: 2026-06-14 14:19 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,7 +18,14 @@ One control step consists of:
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-
+| studio-1room           | SLSQP    | qp             |       6.6 |         6.4 |      9.3 |   15 |
+| studio-1room           | IPOPT    | qp             |       6.5 |         6.2 |      9.4 |   15 |
+| two-bedroom-2room      | SLSQP    | qp             |       7.2 |         7.0 |      9.4 |   15 |
+| two-bedroom-2room      | IPOPT    | qp             |       6.9 |         6.9 |      7.4 |   15 |
+| full-house-5room       | SLSQP    | qp             |      13.1 |        12.9 |     14.1 |   15 |
+| full-house-5room       | IPOPT    | qp             |      13.4 |        13.3 |     14.7 |   15 |
+| full-house-5room-N16   | SLSQP    | qp             |      96.4 |        98.9 |    135.4 |   15 |
+| full-house-5room-N16   | IPOPT    | qp             |      69.9 |        66.2 |    116.6 |   15 |
 
 **Configurations:**
 
@@ -42,9 +49,9 @@ History buffer: 90 steps (1-minute samples) of synthetic data.
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | IPOPT    | IPOPT          |    3600.6 |      3600.6 |   3600.6 |    1 |
-| two-bedroom-2room      | IPOPT    | SLSQP          |   14754.0 |     14754.0 |  14754.0 |    1 |
-| full-house-5room       | IPOPT    | IPOPT          |    6530.9 |      6530.9 |   6530.9 |    1 |
+| studio-1room           | IPOPT    | IPOPT          |    3517.7 |      3517.7 |   3517.7 |    1 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |   14524.0 |     14524.0 |  14524.0 |    1 |
+| full-house-5room       | IPOPT    | IPOPT          |    6428.1 |      6428.1 |   6428.1 |    1 |
 
 **Configurations:**
 
@@ -60,9 +67,9 @@ History buffer: 90 steps (1-minute samples) of synthetic data.
 
 | Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |
 |-----------------------------|------------------------|------------|-----------------|-----------------|----------|
-| KalmanMLEstimator.estimate  | studio-1room           | IPOPT    |      5246.5 |      3600.6 |    -31.4% (faster) |
-| KalmanMLEstimator.estimate  | two-bedroom-2room      | IPOPT    |     14869.6 |     14754.0 |     -0.8% (faster) |
-| KalmanMLEstimator.estimate  | full-house-5room       | IPOPT    |      6242.4 |      6530.9 |      4.6% (slower) |
+| KalmanMLEstimator.estimate  | studio-1room           | IPOPT    |      3600.6 |      3517.7 |     -2.3% (faster) |
+| KalmanMLEstimator.estimate  | two-bedroom-2room      | IPOPT    |     14754.0 |     14524.0 |     -1.6% (faster) |
+| KalmanMLEstimator.estimate  | full-house-5room       | IPOPT    |      6530.9 |      6428.1 |     -1.6% (faster) |
 
 ---
 
