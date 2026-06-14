@@ -4040,7 +4040,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             records = [
                 dict(r)
                 for r in self._history_buffer
-                if start_ts <= float(r.get("timestamp", 0.0)) <= end_ts
+                if start_ts <= float(r.get("timestamp", 0.0)) < end_ts
             ]
         return records
 

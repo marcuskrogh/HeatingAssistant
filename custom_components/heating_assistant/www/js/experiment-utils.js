@@ -73,18 +73,19 @@ export function experimentPhase(exp, nowMs = Date.now()) {
 
 /** Build shaded-band descriptors for every scheduled or ongoing experiment of a
  *  room, for overlaying on the room-level plots.  Returns an array of
- *  ``{ start, end }`` with timestamps in **ms**, one per non-terminal experiment
- *  (so an upcoming run shows before it starts).  ``experiments`` may be the raw
+ *  ``{ start, end }`` with timestamps in **ms**.  ``experiments`` may be the raw
  *  backend list or a per-room index.
  *
- *  When the room's ``forecastRoom`` (``{ forecast: [...], step_seconds }``) is
- *  given, the band is snapped to the exact MPC steps the backend flagged with
- *  ``experiment: true`` — the same steps (and grid) the actuator signal is drawn
- *  on.  The power line is stepped (``stepped: 'before'``), which in Chart.js
- *  holds each point's value *forward* (a point at ``t`` is rendered over
- *  ``[t, t + dt]``); deriving the band from the flagged steps on that convention
- *  makes the shaded area cover the experiment signal exactly, instead of sitting
- *  one step to its left. */
+ *  Non-terminal experiments always produce a band.  Terminal (completed /
+ *  cancelled) experiments continue to produce a band while their window falls
+ *  within the last ``COMPLETED_LOOKBACK_S`` seconds so the shading stays visible
+ *  in the historical portion of the plot rather than vanishing the instant the
+ *  experiment completes.
+ *
+ *  Band edges are taken directly from the experiment's defined ``start_ts`` /
+ *  ``end_ts`` so the shading is consistent across the historical and predicted
+ *  portions of the chart — the only difference being that the now-line bisects
+ *  it when an experiment is ongoing. */
 export function experimentBands(experiments, roomSlug, forecastRoom = null, nowMs = Date.now()) {
   let list;
   if (Array.isArray(experiments)) {
@@ -96,41 +97,18 @@ export function experimentBands(experiments, roomSlug, forecastRoom = null, nowM
   }
 
   const nowS = nowMs / 1000;
-  let steps = null;
-  let dt = null;
-  if (forecastRoom && Array.isArray(forecastRoom.forecast) && forecastRoom.step_seconds) {
-    dt = forecastRoom.step_seconds;
-    steps = forecastRoom.forecast
-      .map((p) => ({ t: new Date(p.time).getTime() / 1000, exp: p.experiment === true }))
-      .filter((p) => isFinite(p.t));
-  }
+  // Keep recently-completed / cancelled experiments visible while their window
+  // is still within the default history plot horizon.
+  const COMPLETED_LOOKBACK_S = 24 * 3600;
 
   const bands = [];
   for (const e of list) {
-    if (!e || TERMINAL_STATUSES.has(e.status)) continue;
+    if (!e) continue;
     if (e.start_ts == null || e.end_ts == null) continue;
+    // Drop terminal experiments that ended too long ago to be visible.
+    if (TERMINAL_STATUSES.has(e.status) && e.end_ts < nowS - COMPLETED_LOOKBACK_S) continue;
 
-    let startS = e.start_ts;
-    let endS = e.end_ts;
-    if (steps && steps.length && dt) {
-      // Steps the backend flagged for *this* experiment's window.  Chart.js
-      // ``stepped: 'before'`` holds each point's value *forward*: a point at
-      // time ``t`` is rendered over ``[t, t + dt]``.  So a flagged point ``t``
-      // shades ``[t, t + dt]`` — derive the band edges accordingly (this lines
-      // the shading up with the heater signal instead of sitting one step left).
-      const flagged = steps.filter(
-        (p) => p.exp && (p.t - dt) >= e.start_ts && (p.t - dt) < e.end_ts,
-      );
-      if (flagged.length) {
-        const gridStart = Math.min(...flagged.map((p) => p.t));
-        const gridEnd = Math.max(...flagged.map((p) => p.t)) + dt;
-        // Ongoing runs keep their true (already-applied) history start; upcoming
-        // runs snap the leading edge to the grid so it lines up with the signal.
-        startS = (nowS >= e.start_ts && nowS < e.end_ts) ? e.start_ts : gridStart;
-        endS = gridEnd;
-      }
-    }
-    bands.push({ start: startS * 1000, end: endS * 1000 });
+    bands.push({ start: e.start_ts * 1000, end: e.end_ts * 1000 });
   }
   return bands;
 }
