@@ -222,6 +222,8 @@ from .const import (
     CONF_PRICE_SPOT_SURCHARGE,
     CONF_PLOT_HISTORY_HOURS,
     CONF_PLOT_FORECAST_HOURS,
+    CONF_IDENTIFICATION_HISTORY_DAYS,
+    DEFAULT_IDENTIFICATION_HISTORY_DAYS,
     CONF_SOURCE_HVAC_MODE,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_PLOT_HISTORY_HOURS,
@@ -456,6 +458,10 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_PLOT_FORECAST_HOURS,
                     default=DEFAULT_PLOT_FORECAST_HOURS,
                 ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=168.0)),
+                vol.Optional(
+                    CONF_IDENTIFICATION_HISTORY_DAYS,
+                    default=DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+                ): vol.All(vol.Coerce(int), vol.Range(min=7, max=365)),
             }
         )
     },
@@ -692,6 +698,12 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                 ),
             }
 
+            system_params = {
+                CONF_IDENTIFICATION_HISTORY_DAYS: int(
+                    _merged(CONF_IDENTIFICATION_HISTORY_DAYS, DEFAULT_IDENTIFICATION_HISTORY_DAYS)
+                ),
+            }
+
             enums = {
                 "floor_types": list(FLOOR_TYPE_DEFAULTS.keys()),
                 "facade_colours": list(FACADE_COLOUR_TO_ABSORPTANCE.keys()),
@@ -717,6 +729,7 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                     "heat_sources": sources,
                     "system": system,
                     "ui_settings": ui,
+                    "system_params": system_params,
                     "enums": enums,
                 },
             )
@@ -857,9 +870,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up the integration-managed identification history store so it is
     # available before the first update cycle and before history is restored.
     from .identification_history import IdentificationHistoryStore
-    from .const import DEFAULT_IDENTIFICATION_HISTORY_DAYS
+    _history_days = int(
+        merged_entry.options.get(
+            CONF_IDENTIFICATION_HISTORY_DAYS,
+            merged_entry.data.get(CONF_IDENTIFICATION_HISTORY_DAYS, DEFAULT_IDENTIFICATION_HISTORY_DAYS),
+        )
+    )
     coordinator.id_history_store = IdentificationHistoryStore(
-        hass, entry.entry_id, DEFAULT_IDENTIFICATION_HISTORY_DAYS
+        hass, entry.entry_id, _history_days
     )
     await coordinator.id_history_store.async_setup()
 
@@ -2759,6 +2777,31 @@ def _register_services(hass: HomeAssistant) -> None:
                 ),
                 vol.Optional(CONF_PLOT_FORECAST_HOURS): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=168.0)
+                ),
+            }
+        ),
+    )
+
+    _SYSTEM_PARAM_KEYS = {CONF_IDENTIFICATION_HISTORY_DAYS}
+
+    async def handle_update_system_params(call: ServiceCall) -> None:
+        """Persist system-level parameters (e.g. history retention)."""
+        coordinator = _get_coordinator(hass)
+        updates = {k: v for k, v in call.data.items() if k in _SYSTEM_PARAM_KEYS}
+        if not updates:
+            return
+        _persist_tuning_updates(hass, coordinator, updates)
+        coordinator.apply_tuning_updates(updates)
+        coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_system_params",
+        handle_update_system_params,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_IDENTIFICATION_HISTORY_DAYS): vol.All(
+                    vol.Coerce(int), vol.Range(min=7, max=365)
                 ),
             }
         ),

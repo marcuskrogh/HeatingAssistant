@@ -546,6 +546,8 @@ UI_REFRESH_INTERVAL = 60
 #: Number of update steps to keep in the rolling history buffer.
 #: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is exactly 120 hours of data.
 HISTORY_BUFFER_SIZE = 480
+#: Config-entry key for the JSONL identification-history retention period.
+CONF_IDENTIFICATION_HISTORY_DAYS = "identification_history_days"
 #: Default number of days the integration-managed JSONL identification history
 #: store retains data.  Independent of HA Recorder's ``purge_keep_days``.
 DEFAULT_IDENTIFICATION_HISTORY_DAYS = 90

@@ -1229,6 +1229,25 @@ update_ui_settings:
           step: 1
           unit_of_measurement: "h"
 
+update_system_params:
+  name: Update system parameters
+  description: >
+    Update system-level parameters such as how long the identification history
+    is retained on disk. Changes take effect immediately without a restart.
+  fields:
+    identification_history_days:
+      name: Identification history retention
+      description: >
+        Number of days to keep the JSONL identification history files on disk.
+        Older daily files are deleted automatically. Does not affect HA Recorder.
+      required: false
+      selector:
+        number:
+          min: 7
+          max: 365
+          step: 1
+          unit_of_measurement: "days"
+
 update_rooms:
   name: Update rooms
   description: >
