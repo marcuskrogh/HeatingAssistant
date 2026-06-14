@@ -443,14 +443,18 @@ function renderExperimentsSection(container, room, connection, hass) {
       card.className = `card schedule-form__period${modifier}${isExpanded ? ' schedule-form__period--expanded' : ''}`;
 
       card.innerHTML = `
-        <div class="schedule-form__period-header">
-          <span class="schedule-form__period-name">${exp.name || '(unnamed)'}</span>
-          <span class="schedule-form__period-time">${fmtExpWindow(exp)}</span>
-          <span class="exp-signal-badge">${signalLabel(exp.signal_type)}</span>
-          <span class="exp-status-badge ${statusCls}">${statusLabel}</span>
-          ${isRunning ? `<button class="btn btn--ghost btn--sm" data-cancel="${exp.id}">Cancel</button>` : ''}
-          ${(isScheduled || isTerminal) ? `<button class="schedule-form__delete" data-delete="${exp.id}" title="Delete">×</button>` : ''}
-          <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
+        <div class="schedule-form__period-header exp-card__header">
+          <div class="exp-card__header-row">
+            <span class="schedule-form__period-name">${exp.name || '(unnamed)'}</span>
+            <span class="exp-signal-badge">${signalLabel(exp.signal_type)}</span>
+            <span class="exp-status-badge ${statusCls}">${statusLabel}</span>
+            ${isRunning ? `<button class="btn btn--ghost btn--sm" data-cancel="${exp.id}">Cancel</button>` : ''}
+            ${(isScheduled || isTerminal) ? `<button class="schedule-form__delete" data-delete="${exp.id}" title="Delete">×</button>` : ''}
+            <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
+          </div>
+          <div class="exp-card__header-window">
+            <span class="schedule-form__period-time">${fmtExpWindow(exp)}</span>
+          </div>
         </div>
         <div class="schedule-form__period-body"${isExpanded ? '' : ' hidden'}>
           <div class="schedule-form__period-row">

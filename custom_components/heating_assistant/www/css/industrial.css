@@ -3689,3 +3689,49 @@ input[type="time"] {
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXPERIMENT CARD HEADER  — two-row layout so the long date/time window
+   never overflows the card on narrow (mobile) screens.
+
+   Structure:
+     .schedule-form__period-header.exp-card__header
+       .exp-card__header-row        ← name · signal · status · delete · chevron
+       .exp-card__header-window     ← date/time window on its own line
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Override the single-row flex to a column so the two child rows stack. */
+.exp-card__header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  /* Prevent the header (and therefore the card) from overflowing its container */
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Top row: name takes remaining space; badges + actions are fixed-width. */
+.exp-card__header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;    /* allow flex children to shrink below intrinsic width */
+  overflow: hidden;
+}
+
+/* Ensure the name itself also truncates rather than stretching the row. */
+.exp-card__header-row .schedule-form__period-name {
+  min-width: 0;
+}
+
+/* Second row: time window — mono text, truncates with ellipsis on very narrow screens. */
+.exp-card__header-window {
+  overflow: hidden;
+}
+
+.exp-card__header-window .schedule-form__period-time {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
