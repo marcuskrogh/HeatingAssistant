@@ -35,6 +35,7 @@ the recorded input always matches what was applied.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -93,15 +94,18 @@ def prbs_bit(seed: int, step_index: int) -> int:
 # Shared timing utility
 # ---------------------------------------------------------------------------
 
-def snap_to_interval(ts: float, interval_s: int) -> float:
-    """Round a UNIX timestamp down to the nearest interval grid boundary.
+def ceil_to_grid(t: float, ref_ts: float, interval_s: int) -> float:
+    """Snap timestamp *t* to the first coordinator-cycle boundary at or after *t*.
 
-    All schedule-aware calculations use this to share a common timing grid:
-    every coordinator cycle that falls within the same interval maps to the
-    same canonical instant, so comfort-corridor transitions, experiment bands,
-    and data-collection windows all align on the plot.
+    The coordinator fires every ``interval_s`` seconds, with ``ref_ts`` (the
+    most recent actual run-time) as the known reference point on that grid.
+    Using the actual run-time — not the Unix epoch — as the grid anchor ensures
+    that snapped values coincide with real actuator steps (ZOH boundaries), so
+    experiment bands, comfort-corridor transitions and data-collection windows
+    all align with when the heater output physically changes.
     """
-    return float(int(ts) // interval_s * interval_s)
+    steps = math.ceil((t - ref_ts) / interval_s)
+    return ref_ts + steps * interval_s
 
 
 # ---------------------------------------------------------------------------
