@@ -213,7 +213,10 @@ from .const import (
 )
 from .const import (
     CONF_ENVELOPE_TIGHTNESS,
+    CONF_ESTIMATED_PARAMS,
     CONF_GROUND_ALBEDO,
+    CONF_PERSISTED_COMFORT_OFFSETS,
+    CONF_PERSISTED_SETPOINTS,
     CONF_PRICE_ENTITY,
     CONF_PRICE_NET_TARIFF,
     CONF_PRICE_SPOT_SURCHARGE,
@@ -875,14 +878,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # state, which is the right outcome.
     reload_state = hass.data[DOMAIN].get("_reload_state", {}).pop(entry.entry_id, None)
     if reload_state is not None:
+        # A room rename queued by update_rooms remaps the stashed runtime state
+        # (keyed by the old name) onto the new name so the toggle / setpoint
+        # state follows the rename instead of resetting to defaults.
+        _renames = hass.data[DOMAIN].pop("_pending_room_renames", {}) or {}
+
+        def _remap(state_dict: Dict[str, Any]) -> Dict[str, Any]:
+            return {_renames.get(k, k): v for k, v in state_dict.items()}
+
         coordinator._history_buffer.extend(reload_state.get("history_buffer", []))
-        for room, value in reload_state.get("room_enabled", {}).items():
+        for room, value in _remap(reload_state.get("room_enabled", {})).items():
             if room in coordinator._room_enabled:
                 coordinator._room_enabled[room] = value
-        for room, value in reload_state.get("schedule_enabled", {}).items():
+        for room, value in _remap(reload_state.get("schedule_enabled", {})).items():
             if room in coordinator._schedule_enabled:
                 coordinator._schedule_enabled[room] = value
-        for room, value in reload_state.get("base_setpoint", {}).items():
+        for room, value in _remap(reload_state.get("base_setpoint", {})).items():
             if room in coordinator._base_setpoint:
                 coordinator._base_setpoint[room] = float(value)
                 coordinator.model.rooms[room].setpoint = float(value)
@@ -1097,7 +1108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=62",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=63",
                     "embed_iframe": False,
                 }
             },
@@ -1678,6 +1689,144 @@ def _patched_heat_sources(
         if src.name in scales:
             src.power_scale = float(scales[src.name])
     return patched
+
+
+# ---------------------------------------------------------------------------
+# Room-rename migration
+# ---------------------------------------------------------------------------
+# When a room is renamed from the Configuration page, everything keyed by the
+# old room name must follow it to the new name — otherwise the renamed room
+# starts blank and the old data is orphaned.  These helpers migrate the
+# config-entry data (persisted state, estimated parameters, heat-source room
+# links) and inter-room connection references.  The entity registry is migrated
+# separately (best-effort) so the room keeps its history and entity ids.
+
+#: ``entry.data`` keys whose value is a ``{room_name: ...}`` dict.
+_ROOM_KEYED_STATE_KEYS = (
+    CONF_PERSISTED_SETPOINTS,
+    CONF_PERSISTED_COMFORT_OFFSETS,
+    CONF_PERSISTED_SCHEDULES,
+)
+
+
+def _remap_keys(d: Any, renames: Dict[str, str]) -> Any:
+    """Return ``d`` with any top-level keys present in ``renames`` remapped."""
+    if not isinstance(d, dict):
+        return d
+    return {renames.get(k, k): v for k, v in d.items()}
+
+
+def _migrate_room_name_data(data: Dict[str, Any], renames: Dict[str, str]) -> Dict[str, Any]:
+    """Migrate every room-name-keyed structure in a ``data``/``options`` dict.
+
+    Covers persisted per-room state, the nested ``rooms`` map inside the
+    estimated-parameters snapshot, and the ``room`` link on each heat source.
+    Returns a new dict; the input is not mutated.
+    """
+    if not renames:
+        return dict(data)
+    new = dict(data)
+
+    for key in _ROOM_KEYED_STATE_KEYS:
+        if isinstance(new.get(key), dict):
+            new[key] = _remap_keys(new[key], renames)
+
+    estimated = new.get(CONF_ESTIMATED_PARAMS)
+    if isinstance(estimated, dict) and isinstance(estimated.get("rooms"), dict):
+        estimated = dict(estimated)
+        estimated["rooms"] = _remap_keys(estimated["rooms"], renames)
+        new[CONF_ESTIMATED_PARAMS] = estimated
+
+    sources = new.get(CONF_HEAT_SOURCES)
+    if isinstance(sources, list):
+        new[CONF_HEAT_SOURCES] = [
+            {**s, CONF_SOURCE_ROOM: renames[s[CONF_SOURCE_ROOM]]}
+            if isinstance(s, dict) and s.get(CONF_SOURCE_ROOM) in renames
+            else s
+            for s in sources
+        ]
+    return new
+
+
+def _apply_renames_to_connections(
+    rooms: List[Dict[str, Any]], renames: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """Re-point inter-room connection targets to renamed rooms."""
+    if not renames:
+        return rooms
+    out: List[Dict[str, Any]] = []
+    for room in rooms:
+        if isinstance(room, dict) and isinstance(room.get(CONF_CONNECTIONS), list):
+            room = {
+                **room,
+                CONF_CONNECTIONS: [
+                    {**c, CONF_CONNECTED_ROOM: renames[c[CONF_CONNECTED_ROOM]]}
+                    if isinstance(c, dict) and c.get(CONF_CONNECTED_ROOM) in renames
+                    else c
+                    for c in room[CONF_CONNECTIONS]
+                ],
+            }
+        out.append(room)
+    return out
+
+
+def _migrate_room_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    renames: Dict[str, str],
+    all_room_names: List[str],
+) -> None:
+    """Best-effort: move this integration's per-room entities to the new name.
+
+    Updates each affected registry entry's ``unique_id`` (and ``entity_id`` slug)
+    in place so the room keeps its recorder history, dashboards and automations
+    instead of orphaning the old entities and creating fresh ones.  Any failure
+    is logged and swallowed — a rename must never be blocked by registry quirks.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    from .dashboard import slugify as _slugify
+
+    registry = er.async_get(hass)
+    entries = er.async_entries_for_config_entry(registry, entry.entry_id)
+    existing_uids = {e.unique_id for e in entries}
+    other_names = [n for n in all_room_names if n]
+
+    for ent in entries:
+        for old, new in renames.items():
+            prefix = f"{DOMAIN}_{old}_"
+            if not ent.unique_id.startswith(prefix):
+                continue
+            # Skip when a longer room name also prefixes this id (e.g. renaming
+            # "living" must not capture "living_room"'s entities).
+            if any(
+                other != old
+                and len(other) > len(old)
+                and ent.unique_id.startswith(f"{DOMAIN}_{other}_")
+                for other in other_names
+            ):
+                break
+            new_uid = f"{DOMAIN}_{new}_" + ent.unique_id[len(prefix):]
+            if new_uid in existing_uids:
+                break
+            updates: Dict[str, Any] = {"new_unique_id": new_uid}
+            old_slug = _slugify(old)
+            new_slug = _slugify(new)
+            old_eid_part = f"{DOMAIN}_{old_slug}_"
+            if old_slug != new_slug and old_eid_part in ent.entity_id:
+                updates["new_entity_id"] = ent.entity_id.replace(
+                    old_eid_part, f"{DOMAIN}_{new_slug}_", 1
+                )
+            try:
+                registry.async_update_entity(ent.entity_id, **updates)
+                existing_uids.add(new_uid)
+            except Exception:  # pragma: no cover - defensive
+                _LOGGER.warning(
+                    "Heating Assistant: failed migrating entity %s on room rename",
+                    ent.entity_id,
+                    exc_info=True,
+                )
+            break
 
 
 def _register_services(hass: HomeAssistant) -> None:
@@ -2634,9 +2783,52 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
     async def handle_update_rooms(call: ServiceCall) -> None:
-        """Replace the configured room list (triggers an integration reload)."""
+        """Replace the configured room list (triggers an integration reload).
+
+        When ``renames`` is supplied ({old_name: new_name}) all data keyed by
+        the old room name — persisted state, estimated parameters, heat-source
+        links, inter-room connections and the room's entities — is migrated to
+        the new name so nothing is left orphaned.
+        """
         rooms = call.data["rooms"]
-        _write_entry_config({CONF_ROOMS: rooms})
+        renames = {
+            str(k): str(v)
+            for k, v in (call.data.get("renames") or {}).items()
+            if k and v and str(k) != str(v)
+        }
+        if not renames:
+            _write_entry_config({CONF_ROOMS: rooms})
+            return
+
+        coordinator = _get_coordinator(hass)
+        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
+        if entry is None:
+            return
+
+        rooms = _apply_renames_to_connections(rooms, renames)
+        room_names = [r.get(CONF_ROOM_NAME) for r in rooms if isinstance(r, dict)]
+        # Carry the rename map so the post-reload setup can also remap the
+        # in-memory runtime state (room/schedule enabled, base setpoints).
+        hass.data.setdefault(DOMAIN, {})["_pending_room_renames"] = renames
+
+        try:
+            _migrate_room_entities(hass, entry, renames, room_names)
+        except Exception:  # pragma: no cover - defensive
+            _LOGGER.warning(
+                "Heating Assistant: room-rename entity migration failed",
+                exc_info=True,
+            )
+
+        new_data = _migrate_room_name_data(
+            {**dict(entry.data), CONF_ROOMS: rooms}, renames
+        )
+        new_options = _migrate_room_name_data(
+            {**dict(entry.options), CONF_ROOMS: rooms}, renames
+        )
+        new_options[CONF_ROOMS] = rooms
+        hass.config_entries.async_update_entry(
+            entry, data=new_data, options=new_options
+        )
 
     # Allow extra keys so a stored room/source dict carrying fields outside the
     # canonical schema (e.g. an identified ``solar_scale``) round-trips through
@@ -2664,7 +2856,14 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         "update_rooms",
         handle_update_rooms,
-        schema=vol.Schema({vol.Required(CONF_ROOMS): [_ROOM_SERVICE_SCHEMA]}),
+        schema=vol.Schema(
+            {
+                vol.Required(CONF_ROOMS): [_ROOM_SERVICE_SCHEMA],
+                # Optional {old_name: new_name} map so a rename migrates all
+                # data keyed by the old room name.
+                vol.Optional("renames"): {cv.string: cv.string},
+            }
+        ),
     )
 
     async def handle_update_heat_sources(call: ServiceCall) -> None:

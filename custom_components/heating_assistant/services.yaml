@@ -1241,6 +1241,15 @@ update_rooms:
       required: true
       selector:
         object:
+    renames:
+      name: Room renames
+      description: >
+        Optional {old_name: new_name} mapping. When a room is renamed this
+        migrates all data keyed by the old name (persisted state, estimated
+        parameters, heat-source links, connections and entities) to the new name.
+      required: false
+      selector:
+        object:
 
 update_heat_sources:
   name: Update heat sources
