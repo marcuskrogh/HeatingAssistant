@@ -2830,19 +2830,22 @@ def _register_services(hass: HomeAssistant) -> None:
             entry, data=new_data, options=new_options
         )
 
-    # Allow extra keys so a stored room/source dict carrying fields outside the
-    # canonical schema (e.g. an identified ``solar_scale``) round-trips through
-    # the Configuration UI without being rejected.  The nested ``schedule`` list
-    # is also made permissive: the Configuration UI never edits schedules, it
-    # only carries the room's existing schedule verbatim, so any per-period keys
-    # the schedule editor wrote (comfort_offset, tracking_weight, …) must pass
-    # through untouched rather than tripping "extra keys not allowed".
+    # The Configuration UI carries a room's nested structures (schedule, windows,
+    # connections) and any out-of-schema fields (e.g. an identified
+    # ``solar_scale``) through verbatim — it does not re-validate them, they were
+    # validated when first written.  So the update_rooms service schema accepts
+    # those nested lists as opaque dicts and allows extra top-level keys, rather
+    # than re-imposing the canonical room schema on already-stored data (which
+    # tripped errors such as "expected str @ schedule[0].days[0]" because stored
+    # weekday indices are ints, not strings).  The top-level editable fields are
+    # still coerced/validated by the base room schema.
     if hasattr(_ROOM_SCHEMA, "extend"):
-        _SCHEDULE_PERIOD_SERVICE_SCHEMA = _SCHEDULE_PERIOD_SCHEMA.extend(
-            {}, extra=vol.ALLOW_EXTRA
-        )
         _ROOM_SERVICE_SCHEMA = _ROOM_SCHEMA.extend(
-            {vol.Optional(CONF_SCHEDULE): [_SCHEDULE_PERIOD_SERVICE_SCHEMA]},
+            {
+                vol.Optional(CONF_SCHEDULE): [dict],
+                vol.Optional(CONF_WINDOWS): [dict],
+                vol.Optional(CONF_CONNECTIONS): [dict],
+            },
             extra=vol.ALLOW_EXTRA,
         )
     else:
