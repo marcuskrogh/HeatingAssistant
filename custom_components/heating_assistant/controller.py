@@ -2351,6 +2351,60 @@ class HeatingMPCController:
         """Monotonically increasing count of all compute() calls (never resets)."""
         return self._total_computes
 
+    @property
+    def ekf_state(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (x_hat, P) copies from the EKF estimator."""
+        return self._ekf.x_hat, self._ekf.P
+
+    @property
+    def ekf_inputs(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (u_prev, d_prev) last passed to the EKF predict step."""
+        return self._mpc._u_prev.copy(), self._mpc._d_prev.copy()
+
+    def restore_ekf_state(self, x_hat: np.ndarray, P: np.ndarray) -> bool:
+        """Inject a previously persisted EKF state into the filter.
+
+        Used to preserve state across stop/start sequences without triggering
+        a full-variance cold-start.  Silently ignores the restore when the
+        array shapes do not match the current model (e.g. after a room was
+        added or removed) so the filter falls back to its default warm-up.
+
+        Returns True on success, False if the dimensions were incompatible.
+        """
+        x_hat = np.asarray(x_hat, dtype=float)
+        P = np.asarray(P, dtype=float)
+        n_x = self._ekf._x_np.shape[0]
+        if x_hat.shape != (n_x,) or P.shape != (n_x, n_x):
+            return False
+        self._ekf._x_np = x_hat.copy()
+        self._ekf._P_np = P.copy()
+        return True
+
+    def propagate_ekf(self, u_seq: np.ndarray, d: np.ndarray) -> None:
+        """Propagate the EKF forward without measurement updates.
+
+        Called after restoring a persisted EKF state to fill the gap between
+        the last save and the current restart time, using the actuator/
+        disturbance sequence that best reflects what happened during the gap
+        (experiment excitation, schedule off-periods, or last commanded value).
+
+        Parameters
+        ----------
+        u_seq : (n_steps, nu) array — per-step actuator commands.
+        d     : (nd,) array       — disturbance held constant over the gap.
+        """
+        p_ = np.array([], dtype=float)
+        d_arr = np.asarray(d, dtype=float)
+        u_arr = np.asarray(u_seq, dtype=float)
+        if u_arr.ndim == 1:
+            u_arr = u_arr.reshape(1, -1)
+        for u_k in u_arr:
+            self._ekf.predict(u_k, d_arr, p_, 0.0)
+        # Update _mpc's bookkeeping so the next EKF step uses the last
+        # gap actuator as its u_prev (consistent with normal operation).
+        if len(u_arr) > 0:
+            self._mpc._u_prev = u_arr[-1].copy()
+
     def _effective_room_temperatures(
         self,
         system: HouseThermalSDE,
