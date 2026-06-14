@@ -205,6 +205,12 @@ _LOGGER = logging.getLogger(__name__)
 # With the default 15-minute update interval this gives ~45 minutes of grace.
 _OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
 
+# Maximum number of EKF prediction steps to propagate when filling a stop/start
+# gap.  Beyond this limit the persisted state is still restored (better than a
+# cold start) but no forward propagation is attempted.  At a 15-minute update
+# interval this caps the gap at 4 days.
+_MAX_EKF_GAP_STEPS = 384
+
 
 @dataclasses.dataclass
 class ControlTrajectory:
@@ -920,6 +926,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._runtime_store: Store = Store(
             hass, version=1, key=f"{DOMAIN}_runtime_{self._entry.entry_id}"
         )
+        # EKF state loaded from the previous session; injected into the
+        # controller on the first compute cycle then cleared.
+        # Tuple: (x_hat, P, save_timestamp, u_prev, d_prev)
+        self._pending_ekf_state: Optional[
+            Tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray]
+        ] = None
         self.outdoor_temp: Optional[float] = None
         # Last valid outdoor temperature reading.  When outdoor_temp is
         # transiently None (entity unavailable mid-run) this value is used as a
@@ -1068,11 +1080,33 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             data = await self._runtime_store.async_load()
         except Exception:  # pragma: no cover - defensive; never block a cycle
             data = None
-        if isinstance(data, dict) and self._cloud_cover_filtered is None:
-            cc = data.get("cloud_cover_filtered")
-            if cc is not None:
+        if isinstance(data, dict):
+            if self._cloud_cover_filtered is None:
+                cc = data.get("cloud_cover_filtered")
+                if cc is not None:
+                    try:
+                        self._cloud_cover_filtered = max(0.0, min(1.0, float(cc)))
+                    except (TypeError, ValueError):
+                        pass
+            ekf_x_hat = data.get("ekf_x_hat")
+            ekf_P = data.get("ekf_P")
+            ekf_save_ts = data.get("ekf_save_ts")
+            ekf_u_prev = data.get("ekf_u_prev")
+            ekf_d_prev = data.get("ekf_d_prev")
+            if ekf_x_hat is not None and ekf_P is not None:
                 try:
-                    self._cloud_cover_filtered = max(0.0, min(1.0, float(cc)))
+                    x_hat = np.array(ekf_x_hat, dtype=float)
+                    P_mat = np.array(ekf_P, dtype=float)
+                    save_ts = float(ekf_save_ts) if ekf_save_ts is not None else 0.0
+                    u_prev = (
+                        np.array(ekf_u_prev, dtype=float)
+                        if ekf_u_prev is not None else None
+                    )
+                    d_prev = (
+                        np.array(ekf_d_prev, dtype=float)
+                        if ekf_d_prev is not None else None
+                    )
+                    self._pending_ekf_state = (x_hat, P_mat, save_ts, u_prev, d_prev)
                 except (TypeError, ValueError):
                     pass
 
@@ -1091,14 +1125,143 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         return self._cloud_cover_filtered
 
     def _save_runtime_state(self) -> None:
-        """Persist the smoothed cloud cover (throttled) so it survives restarts."""
+        """Persist cloud cover and EKF state (throttled) so they survive restarts."""
         try:
-            self._runtime_store.async_delay_save(
-                lambda: {"cloud_cover_filtered": self._cloud_cover_filtered},
-                RUNTIME_STATE_SAVE_DELAY_S,
-            )
+            def _snapshot() -> Dict[str, Any]:
+                payload: Dict[str, Any] = {
+                    "cloud_cover_filtered": self._cloud_cover_filtered,
+                }
+                try:
+                    import time as _time
+                    x_hat, P = self.controller.ekf_state
+                    u_prev, d_prev = self.controller.ekf_inputs
+                    payload["ekf_x_hat"] = x_hat.tolist()
+                    payload["ekf_P"] = P.tolist()
+                    payload["ekf_save_ts"] = _time.time()
+                    payload["ekf_u_prev"] = u_prev.tolist()
+                    payload["ekf_d_prev"] = d_prev.tolist()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+                return payload
+
+            self._runtime_store.async_delay_save(_snapshot, RUNTIME_STATE_SAVE_DELAY_S)
         except Exception:  # pragma: no cover - defensive; never block a cycle
             pass
+
+    def _propagate_ekf_gap(
+        self,
+        save_ts: float,
+        u_prev: Optional[np.ndarray],
+        d_prev: Optional[np.ndarray],
+    ) -> None:
+        """Propagate the EKF forward from save_ts to now without measurement updates.
+
+        Fills the time gap that accumulates during a system stop or HA restart
+        so the restored state is consistent with the current wall-clock time.
+        The actuator signal for each gap step is chosen by priority:
+
+        1. Experiment excitation — if an identification experiment was scheduled
+           to run at that step it prescribes the exact actuator fraction.
+        2. Schedule off-period — rooms in an off period contribute u=0 for those
+           sources (heating was logically off, so propagating as if it were on
+           would bias the wall-temperature estimate).
+        3. Fallback — the last commanded actuator (u_prev) is used, which is the
+           best available proxy for what was actually delivered during the gap.
+
+        The disturbance (outdoor temp + solar gains) is held constant at the
+        last saved value (d_prev) since we have no measurements for the gap.
+        """
+        if save_ts <= 0.0:
+            return
+        import time as _time
+        now_ts = _time.time()
+        gap_s = now_ts - save_ts
+        if gap_s <= 0.0:
+            return
+        dt = float(self.dt)
+        n_gap = min(round(gap_s / dt), _MAX_EKF_GAP_STEPS)
+        if n_gap <= 0:
+            return
+
+        u_default = (
+            np.asarray(u_prev, dtype=float)
+            if u_prev is not None
+            else np.zeros(len(self.heat_sources), dtype=float)
+        )
+        d_arr = (
+            np.asarray(d_prev, dtype=float)
+            if d_prev is not None
+            else np.zeros(self._system_nd(), dtype=float)
+        )
+
+        try:
+            u_seq = self._build_gap_u_sequence(save_ts, n_gap, dt, u_default)
+            self.controller.propagate_ekf(u_seq, d_arr)
+            _LOGGER.debug(
+                "EKF gap propagation: %.0f s gap → %d steps (max %d)",
+                gap_s, n_gap, _MAX_EKF_GAP_STEPS,
+            )
+        except Exception:  # pragma: no cover - defensive; never block startup
+            _LOGGER.debug(
+                "EKF gap propagation failed; state restored without propagation",
+                exc_info=True,
+            )
+
+    def _system_nd(self) -> int:
+        """Return the disturbance dimension of the current controller model."""
+        try:
+            return self.controller._mpc._model.nd
+        except Exception:
+            return 1 + 2 * len(self.model.room_names)
+
+    def _build_gap_u_sequence(
+        self,
+        start_ts: float,
+        n_steps: int,
+        dt: float,
+        u_default: np.ndarray,
+    ) -> np.ndarray:
+        """Build per-step actuator commands for EKF gap propagation.
+
+        For each step k at time t_k = start_ts + k*dt:
+        - Uses experiment excitation fractions where an experiment was active.
+        - Uses u=0 for sources whose room was in an off-period (comfort schedule).
+        - Falls back to u_default everywhere else.
+        """
+        from .dashboard import slugify as _slugify
+
+        n_sources = len(self.heat_sources)
+        u_seq = np.empty((n_steps, n_sources), dtype=float)
+        u_seq[:] = u_default  # broadcast default over all steps
+
+        manager = getattr(self, "experiment_manager", None)
+
+        for k in range(n_steps):
+            t_k = start_ts + k * dt
+
+            for i, src in enumerate(self.heat_sources):
+                room_slug = _slugify(src.room)
+                can_cool = bool(getattr(src, "can_cool", False))
+
+                # Priority 1: active experiment prescribes the exact fraction
+                if manager is not None:
+                    exp = manager.active_for_room(room_slug, t_k)
+                    if exp is not None:
+                        u_seq[k, i] = excitation_fraction(exp, t_k, can_cool=can_cool)
+                        continue
+
+                # Priority 2: comfort schedule off-period → zero input
+                room_name = src.room
+                schedule = self._room_schedule.get(room_name)
+                if schedule is not None and self._schedule_enabled.get(room_name, True):
+                    base_sp = self._base_setpoint.get(room_name, DEFAULT_SETPOINT)
+                    default_off = self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
+                    t_local = datetime.fromtimestamp(t_k)
+                    params = control_params_at(schedule, base_sp, t_local, default_off)
+                    if params is None:  # off period
+                        u_seq[k, i] = 0.0
+
+        return u_seq
 
     @property
     def estimated_params_snapshot(self) -> Optional[Dict[str, Any]]:
@@ -1251,6 +1414,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     def _build_controller(self) -> None:
         """Build or rebuild the MPC controller from current settings."""
+        # Snapshot EKF state before rebuilding so it is not lost on hot reconfig.
+        _prior_ekf: Optional[Tuple[np.ndarray, np.ndarray]] = None
+        if hasattr(self, "controller"):
+            try:
+                _prior_ekf = self.controller.ekf_state
+            except Exception:
+                pass
+
         self.controller = HeatingMPCController(
             model=self.model,
             heat_sources=self.heat_sources,
@@ -1271,6 +1442,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             sigma_b=self._sigma_b,
             energy_price_weight=self._energy_price_weight,
         )
+
+        if _prior_ekf is not None:
+            x_hat, P = _prior_ekf
+            self.controller.restore_ekf_state(x_hat, P)
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
         """Queue non-structural config changes for the next regular tick.
@@ -2357,6 +2532,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #     and cloud-cover (used to attenuate the clear-sky solar model)
             outdoor_forecast = await self._async_read_weather_forecast()
             await self._ensure_runtime_state_loaded()
+            # Restore persisted EKF state (x̂, P) on the first cycle after a
+            # stop/start so the wall/envelope temperature estimate is not lost.
+            # If there is a gap between the save time and now, propagate the
+            # EKF forward through it so the state is consistent with the
+            # current wall-clock time.  The actuator sequence used for the
+            # gap respects experiment prescriptions and schedule off-periods
+            # (timing unification) rather than blindly using the last command.
+            if self._pending_ekf_state is not None:
+                x_hat, P, save_ts, u_prev, d_prev = self._pending_ekf_state
+                self._pending_ekf_state = None
+                if self.controller.restore_ekf_state(x_hat, P):
+                    self._propagate_ekf_gap(save_ts, u_prev, d_prev)
+                else:
+                    _LOGGER.debug(
+                        "Persisted EKF state has incompatible dimensions — "
+                        "starting from cold initial conditions"
+                    )
             # Low-pass the live cloud cover so the solar attenuation is
             # continuous and robust to the weather entity being briefly
             # unavailable right after a restart (which previously produced an
