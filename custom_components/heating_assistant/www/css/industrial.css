@@ -3357,66 +3357,29 @@ input[type="time"] {
   color: #fff;
 }
 
-/* Collapsible "advanced" subsection inside a section card */
+/* Collapsible "advanced" subsection inside a section card — wraps the shared
+   .ha-collapsible primitive with a divider so it reads as a sub-block. */
 .config-advanced {
   margin-top: 16px;
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
 
-.config-advanced__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 4px 0;
+/* Sub-heading used to label alternative methods within a section (e.g. the two
+   ways to describe solar gain). */
+.config-subhead {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-secondary);
-  font-family: inherit;
-}
-.config-advanced__head:hover {
   color: var(--accent);
+  margin-bottom: 6px;
 }
-.config-advanced__chevron {
-  color: var(--accent);
-  font-size: 11px;
-}
-.config-advanced__body {
-  padding-top: 14px;
+.config-subhead--spaced {
+  margin-top: 22px;
 }
 
-/* Entity picker — single value field */
-.entity-pick {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.entity-pick__value {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: var(--text-primary);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-}
-.entity-pick__value--empty {
-  color: var(--text-dim);
-  font-style: italic;
-}
-
-/* Entity picker — multi-select chips */
+/* Entity selector chips (configured entities shown consistently everywhere) */
 .entity-chips {
   display: flex;
   flex-wrap: wrap;

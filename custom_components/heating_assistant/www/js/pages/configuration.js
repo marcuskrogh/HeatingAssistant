@@ -10,6 +10,8 @@
 //   #config/sources/<i>  → edit a heat source (i = index, or "new")
 //   #config/system       → environment sensors + site location
 
+import { createCollapsible } from '../components/collapsible.js';
+
 // ---------------------------------------------------------------------------
 // Teal line-art icons (same design language as the panel logo: teal strokes on
 // a transparent background, no fills).
@@ -107,25 +109,15 @@ function sectionCard(title, desc) {
   return card;
 }
 
-// Collapsible "Advanced" subsection appended inside a section card. Returns the
-// body element callers append fields to.
+// Collapsible "Advanced" subsection appended inside a section card. Uses the
+// shared collapsible primitive (title left, grey chevron right) so every
+// expandable menu in the app looks and behaves identically. Returns the body
+// element callers append fields to.
 function advancedSubsection(parent, title = 'Advanced settings') {
-  const wrap = el('div', 'config-advanced');
-  const head = el('button', 'config-advanced__head');
-  head.type = 'button';
-  head.innerHTML = `<span class="config-advanced__chevron">▸</span><span>${title}</span>`;
-  const body = el('div', 'config-advanced__body');
-  body.hidden = true;
-  head.addEventListener('click', () => {
-    const open = body.hidden;
-    body.hidden = !open;
-    head.classList.toggle('config-advanced__head--open', open);
-    head.querySelector('.config-advanced__chevron').textContent = open ? '▾' : '▸';
-  });
-  wrap.appendChild(head);
-  wrap.appendChild(body);
-  parent.appendChild(wrap);
-  return body;
+  const sec = createCollapsible({ title, open: false });
+  sec.element.classList.add('config-advanced');
+  parent.appendChild(sec.element);
+  return sec.body;
 }
 
 function actionsBar(primaryLabel) {
@@ -293,75 +285,62 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
   setTimeout(() => searchEl.focus(), 30);
 }
 
-// Single-entity field: shows the current selection and opens the picker.
-function entityPickerField(root, hass, obj, key, label, domains, { hint = '' } = {}) {
-  const group = el('div', 'form-group');
-  group.innerHTML = `
-    <label class="form-label">${label}</label>
-    <div class="entity-pick">
-      <span class="entity-pick__value" data-role="value"></span>
-      <button class="btn btn--secondary btn--sm" type="button" data-role="choose">Choose…</button>
-      <button class="btn btn--ghost btn--sm" type="button" data-role="clear">Clear</button>
-    </div>
-    <span class="form-hint">${hint}</span>
-  `;
-  const valueEl = group.querySelector('[data-role="value"]');
-  function paint() {
-    const v = obj[key];
-    valueEl.textContent = v ? entityFriendlyName(hass, v) : '(none)';
-    valueEl.title = v || '';
-    valueEl.classList.toggle('entity-pick__value--empty', !v);
-  }
-  group.querySelector('[data-role="choose"]').addEventListener('click', () => {
-    openEntityPicker(root, hass, {
-      title: `Select ${label.toLowerCase()}`,
-      domains,
-      onSelect: (id) => { obj[key] = id; paint(); },
-    });
-  });
-  group.querySelector('[data-role="clear"]').addEventListener('click', () => {
-    delete obj[key];
-    paint();
-  });
-  paint();
-  return group;
-}
-
-// Multi-entity field: a chip list with add (via picker) / remove.
-function sensorListField(root, hass, obj, key, label, domains, { hint = '', emptyText = 'None selected.' } = {}) {
-  const arr = Array.isArray(obj[key]) ? obj[key] : (obj[key] = []);
+// Unified entity selector — one consistent design across the whole config UI.
+// Configured entities are shown as chips; a single "Choose…/Add" button opens
+// the searchable picker. ``multiple: true`` keeps a list (chips accumulate);
+// otherwise it holds a single value (choosing replaces it).
+function entitySelectorField(root, hass, obj, key, label, domains, { hint = '', multiple = false, emptyText } = {}) {
+  if (multiple && !Array.isArray(obj[key])) obj[key] = [];
   const group = el('div', 'form-group form-group--full');
   group.innerHTML = `
     <div class="config-list-editor__head">
       <span class="form-label">${label}</span>
-      <button class="btn btn--secondary btn--sm" type="button" data-role="add">+ Add</button>
+      <button class="btn btn--secondary btn--sm" type="button" data-role="add"></button>
     </div>
     <div class="entity-chips" data-role="chips"></div>
     <span class="form-hint">${hint}</span>
   `;
   const chips = group.querySelector('[data-role="chips"]');
+  const addBtn = group.querySelector('[data-role="add"]');
+  const placeholder = emptyText || (multiple ? 'None selected.' : 'No entity selected.');
+
+  function values() {
+    if (multiple) return obj[key];
+    return obj[key] ? [obj[key]] : [];
+  }
+  function removeAt(i) {
+    if (multiple) obj[key].splice(i, 1);
+    else delete obj[key];
+    draw();
+  }
   function draw() {
+    const vals = values();
+    addBtn.textContent = multiple ? '+ Add' : (vals.length ? 'Change…' : 'Choose…');
     chips.innerHTML = '';
-    if (arr.length === 0) {
-      chips.appendChild(el('div', 'config-empty config-empty--inline', emptyText));
+    if (vals.length === 0) {
+      chips.appendChild(el('div', 'config-empty config-empty--inline', placeholder));
       return;
     }
-    arr.forEach((id, i) => {
+    vals.forEach((id, i) => {
       const chip = el('span', 'entity-chip');
       chip.innerHTML = `<span class="entity-chip__label" title="${escapeAttr(id)}">${entityFriendlyName(hass, id)}</span>`;
       const rm = el('button', 'entity-chip__remove', '×');
       rm.type = 'button';
       rm.title = 'Remove';
-      rm.addEventListener('click', () => { arr.splice(i, 1); draw(); });
+      rm.addEventListener('click', () => removeAt(i));
       chip.appendChild(rm);
       chips.appendChild(chip);
     });
   }
-  group.querySelector('[data-role="add"]').addEventListener('click', () => {
+  addBtn.addEventListener('click', () => {
     openEntityPicker(root, hass, {
-      title: `Add ${label.toLowerCase()}`,
+      title: `${multiple ? 'Add' : 'Select'} ${label.toLowerCase()}`,
       domains,
-      onSelect: (id) => { if (!arr.includes(id)) arr.push(id); draw(); },
+      onSelect: (id) => {
+        if (multiple) { if (!obj[key].includes(id)) obj[key].push(id); }
+        else { obj[key] = id; }
+        draw();
+      },
     });
   });
   draw();
@@ -600,14 +579,13 @@ function renderRoomEditor(container, connection, hass, idxParam) {
     body.innerHTML = '';
     body.appendChild(el('div', 'section-header', isNew ? 'NEW ROOM' : `EDIT ROOM: ${room.name || ''}`));
 
-    // --- Identity & comfort -------------------------------------------------
-    const idCard = sectionCard('Identity & comfort',
-      'The room name is the unique key used across the model and dashboard. Setpoint is the '
-      + 'target temperature; the comfort band is ± the comfort offset around it.');
+    // --- Identity -----------------------------------------------------------
+    const idCard = sectionCard('Room identity',
+      'The room name is the unique key used across the model and dashboard. The target '
+      + 'temperature and comfort band are set per room from its climate card or schedules — '
+      + 'not here. New rooms start at a sensible default.');
     idCard.appendChild(paramGrid(
       textField(room, 'name', 'Room name', { placeholder: 'living_room', hint: 'Unique identifier. Changing it on an existing room re-creates its entities.' }),
-      numberField(room, 'setpoint', 'Setpoint', { step: 0.5, unit: '°C', min: 5, max: 35, hint: 'Target temperature.' }),
-      numberField(room, 'comfort_offset', 'Comfort offset', { step: 0.1, unit: '±°C', min: 0.1, max: 5, hint: 'Half-width of the comfort band.' }),
     ));
     body.appendChild(idCard);
 
@@ -615,13 +593,13 @@ function renderRoomEditor(container, connection, hass, idxParam) {
     const sensorCard = sectionCard('Temperature sensors',
       'One or more sensors measuring this room. When several are added their readings are '
       + 'averaged in the backend.');
-    sensorCard.appendChild(sensorListField(container, hass, room, 'temp_sensors',
+    sensorCard.appendChild(entitySelectorField(container, hass, room, 'temp_sensors',
       'Temperature sensors', ['sensor'],
-      { hint: 'Averaged when more than one is selected.', emptyText: 'No temperature sensors — add at least one.' }));
+      { multiple: true, hint: 'Averaged when more than one is selected.', emptyText: 'No temperature sensors — add at least one.' }));
     const sensorAdv = advancedSubsection(sensorCard, 'Window / contact sensors');
-    sensorAdv.appendChild(sensorListField(container, hass, room, 'window_sensors',
+    sensorAdv.appendChild(entitySelectorField(container, hass, room, 'window_sensors',
       'Window sensors', ['binary_sensor'],
-      { hint: 'Heating pauses for this room while any of these report open.', emptyText: 'No window sensors.' }));
+      { multiple: true, hint: 'Heating pauses for this room while any of these report open.', emptyText: 'No window sensors.' }));
     body.appendChild(sensorCard);
 
     // --- Thermal model (categorical) ---------------------------------------
@@ -686,17 +664,27 @@ function renderRoomEditor(container, connection, hass, idxParam) {
 
     // --- Solar & windows (advanced) ----------------------------------------
     const solarCard = sectionCard('Solar gain',
-      'Optional. How much sun this room collects. Identified from data when left at defaults.');
+      'Optional. How much sun this room collects. There are two ways to describe it — '
+      + 'pick whichever is easier. Left at defaults, the solar gain is identified from data.');
     const solarAdv = advancedSubsection(solarCard, 'Configure solar & windows');
+
+    solarAdv.appendChild(el('div', 'config-subhead', 'Option A · Quick estimate'));
+    solarAdv.appendChild(el('p', 'config-section__desc',
+      'Approximate the glazing with a single exposure level and the direction it mostly faces.'));
     solarAdv.appendChild(paramGrid(
-      selectField(room, 'solar_exposure', 'Solar exposure', enums.solar_exposures || ['none'], { def: 'none', hint: 'Coarse glazing/aperture preset.' }),
-      numberField(room, 'solar_facing', 'Solar facing', { step: 5, unit: '°', min: 0, max: 360, hint: '0=N, 90=E, 180=S, 270=W.' }),
+      selectField(room, 'solar_exposure', 'Solar exposure', enums.solar_exposures || ['none'], { def: 'none', hint: 'Coarse glazing / aperture amount.' }),
+      numberField(room, 'solar_facing', 'Facing direction', { step: 5, unit: '°', min: 0, max: 360, hint: '0=N, 90=E, 180=S, 270=W.' }),
     ));
+
+    solarAdv.appendChild(el('div', 'config-subhead config-subhead--spaced', 'Option B · Individual windows'));
+    solarAdv.appendChild(el('p', 'config-section__desc',
+      'Enter each window precisely. When any window is listed here it takes precedence over '
+      + 'the quick estimate above.'));
     solarAdv.appendChild(listEditor({
       title: 'Windows',
       items: room.windows,
       addLabel: '+ Add window',
-      emptyText: 'No individual windows. The exposure preset above is used instead.',
+      emptyText: 'No individual windows — the quick estimate above is used instead.',
       renderRow: (arr, i) => {
         const w = arr[i];
         const rowEl = el('div', 'config-row tuning-params-grid tuning-params-grid--wide');
@@ -935,7 +923,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
         textField(src, 'name', 'Name', { placeholder: 'living_room_heater', hint: 'Unique identifier.' }),
         typeField,
         selectField(src, 'room', 'Room', roomNames.length ? roomNames : [''], { hint: 'Room this source heats.' }),
-        entityPickerField(container, hass, src, 'heater_entity', 'Driven entity',
+        entitySelectorField(container, hass, src, 'heater_entity', 'Driven entity',
           src.type === 'heat_pump' ? ['climate'] : ['switch', 'input_boolean', 'climate', 'number'],
           { hint: 'Entity the controller commands.' }),
       ];
@@ -977,14 +965,16 @@ function renderSourceEditor(container, connection, hass, idxParam) {
       // ── Cooling settings ─────────────────────────────────────────────────
       if (modeIncludes('cool')) {
         const coolCard = sectionCard('Cooling settings',
-          'Capacity and efficiency when cooling.');
+          'Capacity and efficiency when cooling. Cooling COP (EER) is cooling power ÷ '
+          + 'electrical input — if your spec sheet lists max cooling power and rated input '
+          + 'power, divide them (e.g. 5000 W cooling ÷ 1600 W input ≈ 3.1).');
         const fields = [];
         // Cool-only sources still need a capacity reference.
         if (!modeIncludes('heat')) {
           fields.push(numberField(src, 'max_power', 'Max power', { step: 100, unit: 'W', min: 0, hint: 'Capacity reference.' }));
         }
         fields.push(
-          numberField(src, 'cooling_cop', 'Cooling COP', { step: 0.1, min: 0, hint: 'Cooling efficiency (EER).' }),
+          numberField(src, 'cooling_cop', 'Cooling COP (EER)', { step: 0.1, min: 0, hint: 'Cooling power ÷ electrical input. = max cooling power (W) ÷ rated input (W).' }),
           numberField(src, 'cooling_efficiency', 'Cooling efficiency', { step: 0.05, min: 0, max: 1, hint: 'Fraction of cooling capacity used.' }),
         );
         coolCard.appendChild(paramGrid(...fields));
@@ -1092,10 +1082,10 @@ function renderSystem(container, connection, hass) {
       + 'weather and solar irradiance improve the forecast; the price sensor enables price-aware '
       + 'optimisation. Use Clear to disable any of them.');
     envCard.appendChild(paramGrid(
-      entityPickerField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], { hint: 'Measured outdoor air temperature.' }),
-      entityPickerField(container, hass, working, 'weather_entity', 'Weather forecast', ['weather'], { hint: 'Weather entity for the outdoor forecast.' }),
-      entityPickerField(container, hass, working, 'solar_radiation_entity', 'Solar irradiance', ['sensor'], { hint: 'GHI in W/m² (optional).' }),
-      entityPickerField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], { hint: 'Hourly market price (optional).' }),
+      entitySelectorField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], { hint: 'Measured outdoor air temperature.' }),
+      entitySelectorField(container, hass, working, 'weather_entity', 'Weather forecast', ['weather'], { hint: 'Weather entity for the outdoor forecast.' }),
+      entitySelectorField(container, hass, working, 'solar_radiation_entity', 'Solar irradiance', ['sensor'], { hint: 'GHI in W/m² (optional).' }),
+      entitySelectorField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], { hint: 'Hourly market price (optional).' }),
     ));
     body.appendChild(envCard);
 
