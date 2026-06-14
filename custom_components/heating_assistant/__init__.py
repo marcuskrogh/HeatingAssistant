@@ -119,6 +119,9 @@ from .const import (
     CONF_SCHEDULE_NAME,
     CONF_SCHEDULE_SETPOINT,
     CONF_SCHEDULE_START,
+    CONF_SCHEDULE_COMFORT_OFFSET,
+    CONF_SCHEDULE_TRACKING_WEIGHT,
+    CONF_SCHEDULE_ENERGY_WEIGHT,
     CONF_PERSISTED_SCHEDULES,
     CONF_SETPOINT,
     CONF_SIGMA_B,
@@ -279,6 +282,12 @@ _SCHEDULE_PERIOD_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_SCHEDULE_FROST_PROTECTION, default=DEFAULT_FROST_PROTECTION
         ): vol.Coerce(float),
+        # Per-period overrides written by the schedule editor.  Optional so a
+        # period round-tripped through update_rooms (which carries the room's
+        # full schedule) validates instead of being rejected as an extra key.
+        vol.Optional(CONF_SCHEDULE_COMFORT_OFFSET): vol.Any(None, vol.Coerce(float)),
+        vol.Optional(CONF_SCHEDULE_TRACKING_WEIGHT): vol.Any(None, vol.Coerce(float)),
+        vol.Optional(CONF_SCHEDULE_ENERGY_WEIGHT): vol.Any(None, vol.Coerce(float)),
     }
 )
 
@@ -1088,7 +1097,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=61",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=62",
                     "embed_iframe": False,
                 }
             },
@@ -2631,11 +2640,21 @@ def _register_services(hass: HomeAssistant) -> None:
 
     # Allow extra keys so a stored room/source dict carrying fields outside the
     # canonical schema (e.g. an identified ``solar_scale``) round-trips through
-    # the Configuration UI without being rejected.
-    _ROOM_SERVICE_SCHEMA = (
-        _ROOM_SCHEMA.extend({}, extra=vol.ALLOW_EXTRA)
-        if hasattr(_ROOM_SCHEMA, "extend") else _ROOM_SCHEMA
-    )
+    # the Configuration UI without being rejected.  The nested ``schedule`` list
+    # is also made permissive: the Configuration UI never edits schedules, it
+    # only carries the room's existing schedule verbatim, so any per-period keys
+    # the schedule editor wrote (comfort_offset, tracking_weight, …) must pass
+    # through untouched rather than tripping "extra keys not allowed".
+    if hasattr(_ROOM_SCHEMA, "extend"):
+        _SCHEDULE_PERIOD_SERVICE_SCHEMA = _SCHEDULE_PERIOD_SCHEMA.extend(
+            {}, extra=vol.ALLOW_EXTRA
+        )
+        _ROOM_SERVICE_SCHEMA = _ROOM_SCHEMA.extend(
+            {vol.Optional(CONF_SCHEDULE): [_SCHEDULE_PERIOD_SERVICE_SCHEMA]},
+            extra=vol.ALLOW_EXTRA,
+        )
+    else:
+        _ROOM_SERVICE_SCHEMA = _ROOM_SCHEMA
     _SOURCE_SERVICE_SCHEMA = (
         _SOURCE_SCHEMA.extend({}, extra=vol.ALLOW_EXTRA)
         if hasattr(_SOURCE_SCHEMA, "extend") else _SOURCE_SCHEMA

@@ -137,7 +137,7 @@ function setStatus(statusEl, text, type = '') {
 
 // A labelled numeric field bound to obj[key]. Empty input deletes the key so
 // the backend default applies.
-function numberField(obj, key, label, { step = 1, unit = '', hint = '', min, max } = {}) {
+function numberField(obj, key, label, { step = 1, unit = '', hint = '', min, max, onChange } = {}) {
   const group = el('div', 'form-group');
   const val = obj[key];
   const minAttr = min != null ? ` min="${min}"` : '';
@@ -150,8 +150,9 @@ function numberField(obj, key, label, { step = 1, unit = '', hint = '', min, max
   `;
   const input = group.querySelector('input');
   input.addEventListener('change', () => {
-    if (input.value === '') { delete obj[key]; return; }
-    obj[key] = Number(input.value);
+    if (input.value === '') { delete obj[key]; }
+    else { obj[key] = Number(input.value); }
+    if (onChange) onChange();
   });
   return group;
 }
@@ -941,44 +942,114 @@ function renderSourceEditor(container, connection, hass, idxParam) {
 
       // ── Heating settings ─────────────────────────────────────────────────
       if (modeIncludes('heat')) {
-        const heatCard = sectionCard('Heating settings',
-          'Capacity and efficiency when delivering heat.');
-        const fields = [
-          numberField(src, 'max_power', 'Max heating power', { step: 100, unit: 'W', min: 0, hint: 'Maximum thermal output.' }),
-        ];
         if (src.type === 'heat_pump') {
-          fields.push(
-            numberField(src, 'cop_rated', 'Rated COP', { step: 0.1, min: 1, hint: 'Heating COP at the reference temperature.' }),
-            numberField(src, 'cop_temp_ref', 'COP reference temp', { step: 1, unit: '°C', hint: 'Outdoor temp at which rated COP applies.' }),
+          const heatCard = sectionCard('Heating settings',
+            'Enter the unit as it appears on the datasheet: the electrical power it draws '
+            + 'and its COP. The heat output is derived (power input × COP).');
+          // Virtual datasheet fields → stored as thermal max_power + cop_rated.
+          const hp = {
+            power_input: (src.max_power != null && src.cop_rated != null)
+              ? Math.round(src.max_power / src.cop_rated) : 1300,
+            cop: src.cop_rated != null ? src.cop_rated : 3.5,
+          };
+          const derived = el('span', 'config-derived');
+          const setDerived = () => {
+            derived.textContent = `Rated heat output ≈ ${src.max_power != null ? src.max_power : '—'} W (power input × COP).`;
+          };
+          const syncHeat = () => {
+            const pin = Number(hp.power_input) || 0;
+            const cop = Number(hp.cop) || 0;
+            src.cop_rated = cop;
+            src.max_power = Math.round(pin * cop);
+            setDerived();
+          };
+          heatCard.appendChild(paramGrid(
+            numberField(hp, 'power_input', 'Rated power input', { step: 50, unit: 'W', min: 0, onChange: syncHeat, hint: 'Electrical power the unit draws at full load (datasheet "power input").' }),
+            numberField(hp, 'cop', 'Rated COP (heating)', { step: 0.1, min: 1, onChange: syncHeat, hint: 'Heating COP at the reference outdoor temperature.' }),
+            numberField(src, 'min_power', 'Minimum heat output', { step: 100, unit: 'W', min: 0, hint: 'Lowest thermal output the unit modulates to (0 = none).' }),
+          ));
+          heatCard.appendChild(derived);
+          // Seed stored values when missing/inconsistent; otherwise keep them exact.
+          if (src.cop_rated == null || src.max_power == null) syncHeat(); else setDerived();
+          const heatAdv = advancedSubsection(heatCard, 'Advanced');
+          heatAdv.appendChild(paramGrid(
+            numberField(src, 'cop_temp_ref', 'COP reference temp', { step: 1, unit: '°C', hint: 'Outdoor temp the rated COP is measured at (datasheet point, e.g. 7 °C).' }),
             numberField(src, 'max_temp_offset', 'Max temp offset', { step: 0.5, unit: '°C', min: 0, hint: 'Setpoint offset at full power.' }),
-            numberField(src, 'min_power', 'Min power', { step: 100, unit: 'W', min: 0, hint: 'Minimum modulating output (0 = none).' }),
-          );
+          ));
+          dynamic.appendChild(heatCard);
         } else {
-          fields.push(
-            numberField(src, 'efficiency', 'Efficiency', { step: 0.05, min: 0, max: 1, hint: '1.0 for resistive heaters.' }),
-          );
+          const heatCard = sectionCard('Heating settings',
+            'A resistive heater’s heat output equals its electrical power draw.');
+          heatCard.appendChild(paramGrid(
+            numberField(src, 'max_power', 'Rated power', { step: 100, unit: 'W', min: 0, hint: 'Electrical power draw at full output.' }),
+            numberField(src, 'efficiency', 'Efficiency', { step: 0.05, min: 0, max: 1, hint: 'Fraction of electricity turned into heat (1.0 for resistive).' }),
+          ));
+          dynamic.appendChild(heatCard);
         }
-        heatCard.appendChild(paramGrid(...fields));
-        dynamic.appendChild(heatCard);
       }
 
       // ── Cooling settings ─────────────────────────────────────────────────
       if (modeIncludes('cool')) {
         const coolCard = sectionCard('Cooling settings',
-          'Capacity and efficiency when cooling. Cooling COP (EER) is cooling power ÷ '
-          + 'electrical input — if your spec sheet lists max cooling power and rated input '
-          + 'power, divide them (e.g. 5000 W cooling ÷ 1600 W input ≈ 3.1).');
-        const fields = [];
-        // Cool-only sources still need a capacity reference.
+          'Cooling COP (EER) is max cooling power ÷ electrical power input. If your datasheet '
+          + 'lists a max cooling power and a power input, divide them (e.g. 5000 W ÷ 1600 W ≈ 3.1).');
+        const eff = () => (src.cooling_efficiency != null ? Number(src.cooling_efficiency) : 1);
         if (!modeIncludes('heat')) {
-          fields.push(numberField(src, 'max_power', 'Max power', { step: 100, unit: 'W', min: 0, hint: 'Capacity reference.' }));
+          // Cool-only: there is no heating section, so capture the electrical
+          // input here. Stored as max_power with cop_rated = 1 so the model's
+          // electrical input equals the entered value.
+          const co = {
+            // Recover electrical input: divide by cop_rated when it carries a
+            // heating COP (switched from heat/cool); cool-only stores cop_rated=1.
+            power_input: (src.max_power != null && src.cop_rated)
+              ? Math.round(src.max_power / src.cop_rated)
+              : (src.max_power != null ? Math.round(src.max_power) : 1300),
+            cop: src.cooling_cop != null ? src.cooling_cop : 2.5,
+          };
+          const derived = el('span', 'config-derived');
+          const setDerived = () => {
+            const pin = Number(co.power_input) || 0;
+            derived.textContent = `Max cooling power ≈ ${Math.round(pin * (Number(co.cop) || 0) * eff())} W (power input × EER).`;
+          };
+          const syncCool = () => {
+            src.cop_rated = 1;
+            src.max_power = Math.round(Number(co.power_input) || 0);
+            src.cooling_cop = Number(co.cop) || 0;
+            setDerived();
+          };
+          coolCard.appendChild(paramGrid(
+            numberField(co, 'power_input', 'Rated power input', { step: 50, unit: 'W', min: 0, onChange: syncCool, hint: 'Electrical power drawn while cooling.' }),
+            numberField(co, 'cop', 'Cooling COP (EER)', { step: 0.1, min: 0, onChange: syncCool, hint: 'Max cooling power ÷ power input.' }),
+          ));
+          coolCard.appendChild(derived);
+          syncCool();
+          const coolAdv = advancedSubsection(coolCard, 'Advanced');
+          coolAdv.appendChild(paramGrid(
+            numberField(src, 'cooling_efficiency', 'Cooling efficiency', { step: 0.05, min: 0, max: 1, onChange: setDerived, hint: 'Fraction of cooling capacity used (1.0 = full).' }),
+          ));
+          dynamic.appendChild(coolCard);
+        } else {
+          // Reversible unit: cooling capacity is derived from the same electrical
+          // input as heating, so only the cooling COP (EER) is needed here.
+          if (src.cooling_cop == null) src.cooling_cop = 2.5;
+          const pinHeat = (src.max_power && src.cop_rated) ? src.max_power / src.cop_rated : 0;
+          const derived = el('span', 'config-derived');
+          const setDerived = () => {
+            derived.textContent = pinHeat > 0
+              ? `Max cooling power ≈ ${Math.round(pinHeat * (Number(src.cooling_cop) || 0) * eff())} W (heating power input × EER).`
+              : '';
+          };
+          coolCard.appendChild(paramGrid(
+            numberField(src, 'cooling_cop', 'Cooling COP (EER)', { step: 0.1, min: 0, onChange: setDerived, hint: 'Uses the heating power input above as the electrical input.' }),
+          ));
+          coolCard.appendChild(derived);
+          setDerived();
+          const coolAdv = advancedSubsection(coolCard, 'Advanced');
+          coolAdv.appendChild(paramGrid(
+            numberField(src, 'cooling_efficiency', 'Cooling efficiency', { step: 0.05, min: 0, max: 1, onChange: setDerived, hint: 'Fraction of cooling capacity used (1.0 = full).' }),
+          ));
+          dynamic.appendChild(coolCard);
         }
-        fields.push(
-          numberField(src, 'cooling_cop', 'Cooling COP (EER)', { step: 0.1, min: 0, hint: 'Cooling power ÷ electrical input. = max cooling power (W) ÷ rated input (W).' }),
-          numberField(src, 'cooling_efficiency', 'Cooling efficiency', { step: 0.05, min: 0, max: 1, hint: 'Fraction of cooling capacity used.' }),
-        );
-        coolCard.appendChild(paramGrid(...fields));
-        dynamic.appendChild(coolCard);
       }
     }
 
@@ -1047,7 +1118,9 @@ function cleanSource(src) {
     delete out.efficiency;
     const m = out.hvac_mode || 'heat_cool';
     if (m === 'cool') {
-      ['cop_rated', 'cop_temp_ref', 'min_power', 'max_temp_offset'].forEach((k) => delete out[k]);
+      // Cool-only keeps cop_rated (= 1) and max_power so the model's electrical
+      // input equals what the user entered; heating-only knobs are dropped.
+      ['cop_temp_ref', 'min_power', 'max_temp_offset'].forEach((k) => delete out[k]);
     }
     if (m === 'heat') {
       ['cooling_cop', 'cooling_efficiency'].forEach((k) => delete out[k]);
