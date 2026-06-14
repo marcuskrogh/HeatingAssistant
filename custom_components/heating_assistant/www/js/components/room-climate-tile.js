@@ -95,41 +95,75 @@ function resolveBackendOff(st, room, activePeriod) {
   return false;
 }
 
-function buildScheduleHtml(schedData, activePeriod, nextPeriod) {
+function fmtTileExpWindow(exp) {
+  if (!exp.start_ts) return '—';
+  const sd = new Date(exp.start_ts * 1000);
+  const ed = new Date((exp.end_ts || 0) * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  const fmtT = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const fmtD = (d) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const sameDay = sd.toDateString() === ed.toDateString();
+  return sameDay
+    ? `${fmtD(sd)} ${fmtT(sd)}–${fmtT(ed)}`
+    : `${fmtD(sd)} ${fmtT(sd)} – ${fmtD(ed)} ${fmtT(ed)}`;
+}
+
+function buildScheduleHtml(schedData, activePeriod, nextPeriod, upcomingExperiments = []) {
   const periods = schedData?.periods || [];
-  if (periods.length === 0) return '';
+  const upcoming = upcomingExperiments.filter((e) => e.status === 'scheduled');
 
-  const schedEnabled = schedData ? (schedData.enabled ?? true) : null;
-  const badgeCls = schedEnabled === false
-    ? 'room-tile__sched-badge room-tile__sched-badge--off'
-    : 'room-tile__sched-badge room-tile__sched-badge--on';
-  const badgeText = schedEnabled === false ? 'INACTIVE' : 'ACTIVE';
+  if (periods.length === 0 && upcoming.length === 0) return '';
 
-  const renderRow = (p, isActive, isNext) => {
-    const rowCls = 'room-tile__sched-row' +
-      (isActive ? ' room-tile__sched-row--active' : '') +
-      (isNext ? ' room-tile__sched-row--next' : '');
-    return `<div class="${rowCls}">
-      ${isActive ? '<span class="room-tile__sched-now">NOW</span>' : ''}
-      ${isNext ? '<span class="room-tile__sched-next">NEXT</span>' : ''}
-      <span class="room-tile__sched-name">${p.name || 'Period'}</span>
-      <span class="room-tile__sched-time">${p.start}–${p.end}</span>
+  let html = '';
+
+  // Comfort schedule section
+  if (periods.length > 0) {
+    const schedEnabled = schedData ? (schedData.enabled ?? true) : null;
+    const badgeCls = schedEnabled === false
+      ? 'room-tile__sched-badge room-tile__sched-badge--off'
+      : 'room-tile__sched-badge room-tile__sched-badge--on';
+    const badgeText = schedEnabled === false ? 'INACTIVE' : 'ACTIVE';
+
+    const renderRow = (p, isActive, isNext) => {
+      const rowCls = 'room-tile__sched-row' +
+        (isActive ? ' room-tile__sched-row--active' : '') +
+        (isNext ? ' room-tile__sched-row--next' : '');
+      return `<div class="${rowCls}">
+        ${isActive ? '<span class="room-tile__sched-now">NOW</span>' : ''}
+        ${isNext ? '<span class="room-tile__sched-next">NEXT</span>' : ''}
+        <span class="room-tile__sched-name">${p.name || 'Period'}</span>
+        <span class="room-tile__sched-time">${p.start}–${p.end}</span>
+      </div>`;
+    };
+
+    const preview = periods.slice(0, 3);
+    const overflow = periods.length - preview.length;
+    const rows = preview.map((p) => renderRow(p, p === activePeriod, p === nextPeriod)).join('');
+    const more = overflow > 0 ? `<div class="room-tile__sched-more">+${overflow} more</div>` : '';
+
+    html += `<div class="room-tile__sched-header">
+        <span class="room-tile__sched-title">SCHEDULE</span>
+        <span class="${badgeCls}">${badgeText}</span>
+      </div>
+      ${rows}${more}`;
+  }
+
+  // Experiment sub-section
+  if (upcoming.length > 0) {
+    const expRows = upcoming.slice(0, 2).map((e) => `
+      <div class="room-tile__exp-row room-tile__exp-row--scheduled">
+        <span class="room-tile__exp-badge room-tile__exp-badge--scheduled">EXP</span>
+        <span class="room-tile__exp-name">${e.name || 'Experiment'}</span>
+        <span class="room-tile__exp-window">${fmtTileExpWindow(e)}</span>
+      </div>`).join('');
+    const expMore = upcoming.length > 2 ? `<div class="room-tile__sched-more">+${upcoming.length - 2} more</div>` : '';
+    html += `<div class="room-tile__exp-section">
+      <div class="room-tile__exp-title">UPCOMING EXPERIMENTS</div>
+      ${expRows}${expMore}
     </div>`;
-  };
+  }
 
-  const preview = periods.slice(0, 3);
-  const overflow = periods.length - preview.length;
-
-  const rows = preview.map((p) => renderRow(p, p === activePeriod, p === nextPeriod)).join('');
-  const more = overflow > 0
-    ? `<div class="room-tile__sched-more">+${overflow} more</div>`
-    : '';
-
-  return `<div class="room-tile__sched-header">
-      <span class="room-tile__sched-title">SCHEDULE</span>
-      <span class="${badgeCls}">${badgeText}</span>
-    </div>
-    ${rows}${more}`;
+  return html;
 }
 
 export function createRoomClimateTile(room, state, hass, scheduleData, experimentData) {
@@ -363,7 +397,8 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     const periods = schedData?.periods || [];
     const activePeriod = findActivePeriod(periods);
     const nextPeriod = findNextPeriod(periods);
-    const html = buildScheduleHtml(schedData, activePeriod, nextPeriod);
+    const roomExps = (st.experimentData && st.experimentData[room.slug]) ? st.experimentData[room.slug] : [];
+    const html = buildScheduleHtml(schedData, activePeriod, nextPeriod, roomExps);
     if (html) {
       els.schedules.innerHTML = html;
       els.schedules.style.display = '';

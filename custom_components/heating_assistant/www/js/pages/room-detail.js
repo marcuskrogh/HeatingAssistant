@@ -271,6 +271,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       activeExperiment = findActiveExperiment(experiments, roomSlug);
       climateCard.update({ experiment: activeExperiment });
       applyExperimentBands();
+      // Update the schedule overview with room-specific experiments
+      const roomExps = experiments.filter((e) => e.room_slug === roomSlug);
+      scheduleOverview.update(undefined, roomExps);
     }).catch(() => { /* keep the last-known experiment state on failure */ });
   }
 

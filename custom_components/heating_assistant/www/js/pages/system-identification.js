@@ -1285,14 +1285,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Stored datasets & experiment scheduler (Section 5 of the detail page)
+// Stored datasets (Section 5 of the detail page)
 // ---------------------------------------------------------------------------
-
-const EXCITATION_OPTIONS = [
-  { value: 'step', label: 'Step (recommended)' },
-  { value: 'prbs', label: 'PRBS' },
-  { value: 'pulse', label: 'Pulse' },
-];
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -1335,97 +1329,18 @@ function setupDatasetsAndExperiments(ctx) {
     setSelectedDataset, clearSelectedDataset, onDatasetSelectionRenderer,
   } = ctx;
 
-  // ---- Experiment scheduler card ----------------------------------------
-  // Default window: tonight 23:00 → 05:00 next morning (a typically unoccupied
-  // period), nudged to the next day when 23:00 has already passed.
-  const now = new Date();
-  const defStart = new Date(now);
-  defStart.setHours(23, 0, 0, 0);
-  if (defStart <= now) defStart.setDate(defStart.getDate() + 1);
-  const defEnd = new Date(defStart.getTime() + 6 * 3600 * 1000);
-
-  // Collapsed by default to reduce clutter (especially on mobile); the shared
-  // collapsible primitive gives a consistent title-left / chevron-right look.
-  const expCard = document.createElement('div');
-  expCard.className = 'card tuning-section';
-  const expCollapsible = createCollapsible({ title: 'Experiment Scheduler', open: false, badgeTone: 'success' });
-  expCollapsible.body.innerHTML = `
+  // ---- Experiments note card ---------------------------------------------
+  const expNote = document.createElement('div');
+  expNote.className = 'card tuning-section';
+  expNote.innerHTML = `
+    <div class="tuning-section__title">Experiments</div>
     <p class="tuning-section__desc">
-      Schedule an excitation experiment for <strong>${room.name}</strong> over a
-      future window (e.g. overnight). The controller drives this room's heaters
-      with an informative signal so the response is good for identification, then
-      stores the captured data as a dataset. Comfort-schedule "off" periods are
-      overridden for this room during the window; open-window safety and the
-      min/max temperature limits still apply.
+      Schedule identification experiments from the
+      <a href="#schedules/${roomSlug}" class="link">Schedules page</a>
+      for this room. Experiment datasets, once auto-saved, appear in the Stored Datasets section below.
     </p>
-    <div class="tuning-params-grid">
-      <div class="form-group">
-        <label class="form-label" for="exp-name">Name</label>
-        <input class="form-input" type="text" id="exp-name" placeholder="${room.name} overnight test">
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-signal">Excitation signal</label>
-        <select class="form-input" id="exp-signal">
-          ${EXCITATION_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div class="window-datetime-inputs ds-section-gap">
-      <div class="form-group">
-        <label class="form-label" for="exp-start">Start</label>
-        <div class="form-input form-input--datetime-wrap">
-          <input class="form-input--datetime" type="datetime-local" id="exp-start" value="${_toLocalInput(defStart)}">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-end">End</label>
-        <div class="form-input form-input--datetime-wrap">
-          <input class="form-input--datetime" type="datetime-local" id="exp-end" value="${_toLocalInput(defEnd)}">
-        </div>
-      </div>
-    </div>
-    <div class="tuning-params-grid ds-section-gap">
-      <div class="form-group">
-        <label class="form-label" for="exp-step">Step magnitude</label>
-        <input class="form-input" type="number" id="exp-step" min="0.05" max="1" step="0.05" value="1.0">
-        <span class="form-hint">fraction (0–1) of max heat / cool power per step</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-period">Switching period</label>
-        <input class="form-input" type="number" id="exp-period" min="5" step="5" value="60">
-        <span class="form-hint">minutes between PRBS / pulse switches</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-settle">Settle buffer</label>
-        <input class="form-input" type="number" id="exp-settle" min="0" step="15" value="120">
-        <span class="form-hint">PRBS / pulse: minutes of rest before the window ends so the response settles (step has its own settles)</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-min">Min temp (frost floor)</label>
-        <input class="form-input" type="number" id="exp-min" step="0.5" value="12">
-        <span class="form-hint">°C — heating forced on below this</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-max">Max temp (ceiling)</label>
-        <input class="form-input" type="number" id="exp-max" step="0.5" value="26">
-        <span class="form-hint">°C — heating forced off at/above this</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="exp-autosave">Auto-save dataset</label>
-        <select class="form-input" id="exp-autosave">
-          <option value="yes" selected>Yes</option>
-          <option value="no">No</option>
-        </select>
-      </div>
-    </div>
-    <div class="tuning-actions ds-actions-gap">
-      <button class="btn btn--accent" id="btn-schedule-exp">Schedule Experiment</button>
-      <span class="tuning-actions__status" id="exp-status"></span>
-    </div>
-    <div id="exp-list" class="ds-section-gap"></div>
   `;
-  expCard.appendChild(expCollapsible.element);
-  container.appendChild(expCard);
+  container.appendChild(expNote);
 
   // ---- Stored datasets card ---------------------------------------------
   const dsCard = document.createElement('div');
@@ -1468,8 +1383,6 @@ function setupDatasetsAndExperiments(ctx) {
   container.appendChild(dsCard);
 
   // ---- References --------------------------------------------------------
-  const expStatus = expCard.querySelector('#exp-status');
-  const expListEl = expCard.querySelector('#exp-list');
   const dsStatus = dsCard.querySelector('#ds-status');
   const dsListEl = dsCard.querySelector('#ds-list');
   const dsNameInput = dsCard.querySelector('#ds-name');
@@ -1545,167 +1458,6 @@ function setupDatasetsAndExperiments(ctx) {
     );
     updateSelectionToolbar();
   });
-
-  // ---- Experiment scheduling --------------------------------------------
-  // When set, the "Schedule" button is editing this existing experiment: it
-  // schedules the updated definition, then removes the old one.
-  let editingExperimentId = null;
-
-  function startEditExperiment(exp) {
-    editingExperimentId = exp.id;
-    expCard.querySelector('#exp-name').value = exp.name || '';
-    expCard.querySelector('#exp-signal').value = exp.signal_type || 'step';
-    expCard.querySelector('#exp-start').value = _toLocalInput(new Date((exp.start_ts || 0) * 1000));
-    expCard.querySelector('#exp-end').value = _toLocalInput(new Date((exp.end_ts || 0) * 1000));
-    expCard.querySelector('#exp-step').value = exp.step_pct ?? 1.0;
-    expCard.querySelector('#exp-period').value = Math.round((exp.period_s ?? 3600) / 60);
-    expCard.querySelector('#exp-settle').value = Math.round((exp.settle_s ?? 0) / 60);
-    expCard.querySelector('#exp-min').value = exp.min_temp ?? 12;
-    expCard.querySelector('#exp-max').value = exp.max_temp ?? 26;
-    expCard.querySelector('#exp-autosave').value = exp.auto_save ? 'yes' : 'no';
-    expCard.querySelector('#btn-schedule-exp').textContent = 'Update Experiment';
-    setStatus(expStatus, 'Editing scheduled experiment — adjust the fields and press Update.', 'running');
-    expCard.querySelector('#exp-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-
-  function resetExperimentForm() {
-    editingExperimentId = null;
-    const btn = expCard.querySelector('#btn-schedule-exp');
-    if (btn) btn.textContent = 'Schedule Experiment';
-  }
-
-  expCard.querySelector('#btn-schedule-exp').addEventListener('click', async () => {
-    const startVal = expCard.querySelector('#exp-start').value;
-    const endVal = expCard.querySelector('#exp-end').value;
-    const startTs = new Date(startVal).getTime() / 1000;
-    const endTs = new Date(endVal).getTime() / 1000;
-    if (!isFinite(startTs) || !isFinite(endTs) || endTs <= startTs) {
-      setStatus(expStatus, 'End must be after start.', 'error');
-      return;
-    }
-    const stepPct = parseFloat(expCard.querySelector('#exp-step').value);
-    if (!(stepPct > 0 && stepPct <= 1)) {
-      setStatus(expStatus, 'Step magnitude must be between 0 and 1.', 'error');
-      return;
-    }
-    const settleS = Math.max(0, parseFloat(expCard.querySelector('#exp-settle').value) * 60);
-    if (settleS >= endTs - startTs) {
-      setStatus(expStatus, 'Settle buffer must be shorter than the experiment.', 'error');
-      return;
-    }
-    const updatingId = editingExperimentId;
-    setStatus(expStatus, updatingId ? 'Updating…' : 'Scheduling…', 'running');
-    try {
-      await hass.callService('heating_assistant', 'schedule_experiment', {
-        room_name: roomSlug,
-        start: startTs,
-        end: endTs,
-        name: expCard.querySelector('#exp-name').value || '',
-        signal_type: expCard.querySelector('#exp-signal').value,
-        step_pct: stepPct,
-        period_s: Math.max(60, parseFloat(expCard.querySelector('#exp-period').value) * 60),
-        settle_s: settleS,
-        min_temp: parseFloat(expCard.querySelector('#exp-min').value),
-        max_temp: parseFloat(expCard.querySelector('#exp-max').value),
-        auto_save: expCard.querySelector('#exp-autosave').value === 'yes',
-      });
-      // On an edit, drop the original now that the replacement is scheduled.
-      if (updatingId) {
-        try {
-          await hass.callService('heating_assistant', 'delete_experiment', {
-            experiment_id: updatingId,
-          });
-        } catch (_) { /* leave the original if removal fails */ }
-      }
-      resetExperimentForm();
-      setStatus(expStatus, updatingId ? 'Updated.' : 'Scheduled.', 'success');
-      await refreshExperiments();
-    } catch (err) {
-      setStatus(expStatus, 'Error: ' + (err.message || err), 'error');
-    }
-  });
-
-  function updateExperimentBadge(mine) {
-    const active = mine.filter((e) => e.status === 'scheduled' || e.status === 'running').length;
-    expCollapsible.setBadge(active > 0 ? `${active} active` : '');
-  }
-
-  async function refreshExperiments() {
-    const experiments = await connection.listExperiments();
-    // ``null`` means the fetch failed — keep whatever is already rendered.
-    if (experiments == null) return;
-    const mine = experiments
-      .filter((e) => e.room_slug === roomSlug)
-      .sort((a, b) => (b.start_ts || 0) - (a.start_ts || 0));
-    updateExperimentBadge(mine);
-    if (mine.length === 0) {
-      expListEl.innerHTML = '<span class="tuning-section__desc">No experiments scheduled for this room.</span>';
-      return;
-    }
-    const rows = mine.map((e) => {
-      // Scheduled runs can be edited or deleted directly; a running run can be
-      // cancelled; terminal ones can be deleted from the list.
-      let action;
-      if (e.status === 'scheduled') {
-        action = `<button class="btn btn--ghost btn--sm" data-edit="${e.id}">Edit</button>
-                  <button class="btn btn--ghost btn--sm" data-delete="${e.id}">Delete</button>`;
-      } else if (e.status === 'running') {
-        action = `<button class="btn btn--ghost btn--sm" data-cancel="${e.id}">Cancel</button>`;
-      } else {
-        action = `<button class="btn btn--ghost btn--sm" data-delete="${e.id}">Delete</button>`;
-      }
-      const dsLink = e.dataset_id
-        ? `<button class="btn btn--ghost btn--sm" data-load-ds="${e.dataset_id}">Load data</button>`
-        : '';
-      return `
-        <tr>
-          <td>${e.name || '(unnamed)'}</td>
-          <td>${(e.signal_type || '').toUpperCase()}</td>
-          <td>${_fmtTs(e.start_ts)} → ${_fmtTs(e.end_ts)}</td>
-          <td>${_statusBadge(e.status)}</td>
-          <td>${dsLink} ${action}</td>
-        </tr>`;
-    }).join('');
-    expListEl.innerHTML = `
-      <div class="param-history-table-wrapper">
-        <table class="param-history-table">
-          <thead><tr><th>Name</th><th>Signal</th><th>Window</th><th>Status</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-    expListEl.querySelectorAll('[data-cancel]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        try {
-          await hass.callService('heating_assistant', 'cancel_experiment', {
-            experiment_id: btn.dataset.cancel,
-          });
-          await refreshExperiments();
-        } catch (_) { btn.disabled = false; }
-      });
-    });
-    expListEl.querySelectorAll('[data-delete]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        try {
-          await hass.callService('heating_assistant', 'delete_experiment', {
-            experiment_id: btn.dataset.delete,
-          });
-          if (editingExperimentId === btn.dataset.delete) resetExperimentForm();
-          await refreshExperiments();
-        } catch (_) { btn.disabled = false; }
-      });
-    });
-    expListEl.querySelectorAll('[data-edit]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const exp = mine.find((e) => e.id === btn.dataset.edit);
-        if (exp) startEditExperiment(exp);
-      });
-    });
-    expListEl.querySelectorAll('[data-load-ds]').forEach((btn) => {
-      btn.addEventListener('click', () => loadDataset(btn.dataset.loadDs));
-    });
-  }
 
   // ---- Dataset saving / listing -----------------------------------------
   function currentWindowBounds() {
@@ -1797,7 +1549,7 @@ function setupDatasetsAndExperiments(ctx) {
     [...selectedIds].forEach((id) => { if (!liveIds.has(id)) selectedIds.delete(id); });
 
     if (datasets.length === 0) {
-      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet. Save the current window or schedule an experiment to create one.</span>';
+      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet. Save the current window to create one, or check the Schedules page to run an experiment.</span>';
       updateSelectionToolbar();
       return;
     }
@@ -1863,12 +1615,10 @@ function setupDatasetsAndExperiments(ctx) {
     updateSelectionToolbar();
   }
 
-  // Initial population, plus a light periodic refresh so experiment status and
-  // auto-saved datasets appear without a manual reload.
-  refreshExperiments();
+  // Initial population, plus a light periodic refresh so auto-saved datasets
+  // appear without a manual reload.
   refreshDatasets();
   const timer = setInterval(() => {
-    refreshExperiments();
     refreshDatasets();
   }, 30000);
 
