@@ -3524,3 +3524,12 @@ input[type="time"] {
   color: var(--text-dim);
   font-size: 13px;
 }
+
+/* Derived/computed helper note under datasheet-driven fields */
+.config-derived {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--accent);
+  font-style: italic;
+}
