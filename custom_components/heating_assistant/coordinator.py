@@ -1668,9 +1668,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # capacity is derived from its electrical input × cooling COP, which
             # differs from the rated thermal heating output.  Expose both so the
             # power chart can draw the true (non-symmetric) corridor.
+            # Use the *current* outdoor temperature to compute both bounds so
+            # that the scale matches what the experiment actually delivers —
+            # heating capacity drops at cold outdoor temps while cooling is
+            # constant, and scaling by rated max_power would make the heating
+            # gauge show a lower percentage than the configured step_pct.
             room_sources = self.sources_for_room(room_name)
-            max_power = sum(s.max_power for s in room_sources)
             outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
+            max_power = sum(s.thermal_power(1.0, outdoor_now) for s in room_sources)
             max_cooling_power = sum(
                 -s.cooling_power(outdoor_now)
                 for s in room_sources
