@@ -761,7 +761,14 @@ function renderRoomEditor(container, connection, hass, idxParam) {
         const cleaned = cleanRoom(room);
         const next = allRooms.map((r) => ({ ...r }));
         if (isNew) next.push(cleaned); else next[idx] = cleaned;
-        await hass.callService('heating_assistant', 'update_rooms', { rooms: next });
+        const payload = { rooms: next };
+        // On a rename, tell the backend so it migrates all data (persisted
+        // state, heat-source links, connections, entities) to the new name.
+        const originalName = isNew ? null : allRooms[idx].name;
+        if (originalName && originalName !== cleaned.name) {
+          payload.renames = { [originalName]: cleaned.name };
+        }
+        await hass.callService('heating_assistant', 'update_rooms', payload);
         setStatus(statusEl, 'Saved. Restarting model…', 'success');
         setTimeout(() => { window.location.hash = '#config/rooms'; }, 800);
       } catch (err) {
