@@ -241,24 +241,58 @@ def _coerce_opt_float(value: Any) -> Optional[float]:
 def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
     """
     Construct a :class:`HouseModel` from the YAML / config-entry rooms list.
+
+    Inter-room connections reference the adjacent room by name.  Deleting or
+    renaming a room can leave other rooms with a connection pointing at a name
+    that no longer exists; such a dangling connection (or one with a
+    non-positive R-value) is dropped here with a warning rather than allowed to
+    raise — a stale link must never take down the whole integration on setup.
     """
+    known_rooms = {
+        rc.get(CONF_ROOM_NAME)
+        for rc in rooms_cfg
+        if isinstance(rc, dict) and rc.get(CONF_ROOM_NAME)
+    }
     rooms = []
     for rc in rooms_cfg:
-        connections = [
-            RoomConnection(
-                connected_room=c[CONF_CONNECTED_ROOM],
-                r_value=c[CONF_R_VALUE],
+        connections = []
+        for c in rc.get(CONF_CONNECTIONS, []) or []:
+            target = c.get(CONF_CONNECTED_ROOM)
+            try:
+                r_value = float(c.get(CONF_R_VALUE))
+            except (TypeError, ValueError):
+                r_value = None
+            if target not in known_rooms or r_value is None or r_value <= 0:
+                _LOGGER.warning(
+                    "Heating Assistant: dropping invalid connection %r on room "
+                    "%r (target unknown or R-value non-positive)",
+                    c,
+                    rc.get(CONF_ROOM_NAME),
+                )
+                continue
+            connections.append(
+                RoomConnection(connected_room=target, r_value=r_value)
             )
-            for c in rc.get(CONF_CONNECTIONS, [])
-        ]
-        windows = [
-            Window(
-                area=w[CONF_WINDOW_AREA],
-                orientation=w[CONF_WINDOW_ORIENTATION],
-                tilt=w.get(CONF_WINDOW_TILT, DEFAULT_WINDOW_TILT),
+        windows = []
+        for w in rc.get(CONF_WINDOWS, []) or []:
+            try:
+                area = float(w[CONF_WINDOW_AREA])
+                orientation = float(w[CONF_WINDOW_ORIENTATION])
+            except (KeyError, TypeError, ValueError):
+                _LOGGER.warning(
+                    "Heating Assistant: dropping invalid window %r on room %r "
+                    "(missing/invalid area or orientation)",
+                    w,
+                    rc.get(CONF_ROOM_NAME),
+                )
+                continue
+            windows.append(
+                Window(
+                    area=area,
+                    orientation=orientation,
+                    tilt=w.get(CONF_WINDOW_TILT, DEFAULT_WINDOW_TILT),
+                )
             )
-            for w in rc.get(CONF_WINDOWS, [])
-        ]
         rooms.append(
             Room(
                 name=rc[CONF_ROOM_NAME],

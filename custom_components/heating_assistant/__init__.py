@@ -2830,38 +2830,23 @@ def _register_services(hass: HomeAssistant) -> None:
             entry, data=new_data, options=new_options
         )
 
-    # The Configuration UI carries a room's nested structures (schedule, windows,
-    # connections) and any out-of-schema fields (e.g. an identified
-    # ``solar_scale``) through verbatim — it does not re-validate them, they were
-    # validated when first written.  So the update_rooms service schema accepts
-    # those nested lists as opaque dicts and allows extra top-level keys, rather
-    # than re-imposing the canonical room schema on already-stored data (which
-    # tripped errors such as "expected str @ schedule[0].days[0]" because stored
-    # weekday indices are ints, not strings).  The top-level editable fields are
-    # still coerced/validated by the base room schema.
-    if hasattr(_ROOM_SCHEMA, "extend"):
-        _ROOM_SERVICE_SCHEMA = _ROOM_SCHEMA.extend(
-            {
-                vol.Optional(CONF_SCHEDULE): [dict],
-                vol.Optional(CONF_WINDOWS): [dict],
-                vol.Optional(CONF_CONNECTIONS): [dict],
-            },
-            extra=vol.ALLOW_EXTRA,
-        )
-    else:
-        _ROOM_SERVICE_SCHEMA = _ROOM_SCHEMA
-    _SOURCE_SERVICE_SCHEMA = (
-        _SOURCE_SCHEMA.extend({}, extra=vol.ALLOW_EXTRA)
-        if hasattr(_SOURCE_SCHEMA, "extend") else _SOURCE_SCHEMA
-    )
-
+    # The Configuration UI sends back the WHOLE rooms list — the room being
+    # edited plus every other room carried verbatim from the backend.  Those
+    # carried rooms already passed the canonical room schema when first written,
+    # and they hold values the round-trip schema cannot reproduce: stored weekday
+    # indices are ints (not the schema's ``[str]``), schedule periods carry
+    # editor-only keys, and identification writes out-of-schema fields like
+    # ``solar_scale``.  Re-imposing the room schema on this data only rejected or
+    # mangled valid rooms, so the service accepts the rooms list as opaque dicts
+    # and leaves validation/coercion to the coordinator (``build_house_model``),
+    # which already tolerates partial rooms and now drops dangling sub-records.
     hass.services.async_register(
         DOMAIN,
         "update_rooms",
         handle_update_rooms,
         schema=vol.Schema(
             {
-                vol.Required(CONF_ROOMS): [_ROOM_SERVICE_SCHEMA],
+                vol.Required(CONF_ROOMS): [dict],
                 # Optional {old_name: new_name} map so a rename migrates all
                 # data keyed by the old room name.
                 vol.Optional("renames"): {cv.string: cv.string},
@@ -2878,7 +2863,10 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         "update_heat_sources",
         handle_update_heat_sources,
-        schema=vol.Schema({vol.Required(CONF_HEAT_SOURCES): [_SOURCE_SERVICE_SCHEMA]}),
+        # Heat sources are likewise carried verbatim from the backend and may
+        # hold out-of-schema fields (e.g. an identified ``power_scale``), so the
+        # list is accepted as opaque dicts; the coordinator validates on build.
+        schema=vol.Schema({vol.Required(CONF_HEAT_SOURCES): [dict]}),
     )
 
     async def handle_update_system_config(call: ServiceCall) -> None:
