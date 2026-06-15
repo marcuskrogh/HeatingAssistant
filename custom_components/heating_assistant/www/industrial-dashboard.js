@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '63';
+  return '64';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
