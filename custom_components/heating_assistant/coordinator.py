@@ -38,6 +38,7 @@ from .const import (
     CONF_PERSISTED_SETPOINTS,
     CONF_PERSISTED_SCHEDULES,
     CONF_PERSISTED_COMFORT_OFFSETS,
+    CONF_PERSISTED_ROOM_ENABLED,
     CONF_TRACKING_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -448,6 +449,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_PERSISTED_SETPOINTS,
         CONF_PERSISTED_SCHEDULES,
         CONF_ESTIMATED_PARAMS,
+        CONF_PERSISTED_COMFORT_OFFSETS,
+        CONF_PERSISTED_ROOM_ENABLED,
     }
     _RUNTIME_RECONFIG_KEYS: Set[str] = {
         CONF_OUTDOOR_TEMP_ENTITY,
@@ -798,6 +801,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 rc.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET)
             )
             self._schedule_enabled[room_name] = True
+
+        # Overlay with user-controlled room-enabled state persisted across restarts.
+        persisted_enabled: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_ROOM_ENABLED, {})
+        for room_name, value in persisted_enabled.items():
+            if room_name in self._room_enabled:
+                self._room_enabled[room_name] = bool(value)
 
         # Overlay with user-modified setpoints persisted across restarts.
         persisted: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_SETPOINTS, {})
@@ -4142,6 +4151,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     def set_room_enabled(self, room_name: str, enabled: bool) -> None:
         """Enable or disable heating control for a room (user toggle)."""
         self._room_enabled[room_name] = enabled
+        # Persist so the toggle survives a full HA restart (same pattern as setpoints).
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={
+                    **dict(real_entry.data),
+                    CONF_PERSISTED_ROOM_ENABLED: dict(self._room_enabled),
+                },
+            )
 
     def is_room_enabled(self, room_name: str) -> bool:
         """Return whether heating control should run for a room *right now*.

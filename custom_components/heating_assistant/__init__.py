@@ -1592,6 +1592,16 @@ def _persist_tuning_updates(
             {**r, CONF_COMFORT_OFFSET: new_co}
             for r in new_data.get(CONF_ROOMS, [])
         ]
+        # Propagate into CONF_PERSISTED_COMFORT_OFFSETS so that the global
+        # tuning value also takes effect after a restart.  Without this the
+        # persisted per-room values would silently win over the global setting
+        # on the next startup, making in-session and post-restart behaviour
+        # inconsistent.
+        new_data[CONF_PERSISTED_COMFORT_OFFSETS] = {
+            r[CONF_ROOM_NAME]: new_co
+            for r in new_data.get(CONF_ROOMS, [])
+            if CONF_ROOM_NAME in r
+        }
         # Update options rooms only when they already exist; if options has no
         # CONF_ROOMS yet the coordinator falls back to the updated data rooms.
         if CONF_ROOMS in new_options:
