@@ -212,48 +212,53 @@
 .panel-nav__run-btn {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 14px;
-  background: transparent;
-  border: 1px solid var(--border);
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-elevated);
+  border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-family: var(--font-sans);
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.08em;
-  transition: border-color var(--transition), color var(--transition), background var(--transition);
+  text-transform: uppercase;
+  transition: all var(--transition);
   white-space: nowrap;
+  min-width: 92px;
 }
 
 .panel-nav__run-btn-icon {
-  font-size: 9px;
+  font-size: 14px;
   line-height: 1;
-  color: var(--good);
-}
-
-/* When running, the whole button is red (stop affordance); the square icon
-   inherits that colour. */
-.panel-nav__run-btn--running .panel-nav__run-btn-icon {
   color: inherit;
 }
 
 .panel-nav__run-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-dim);
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
+/* OFF state: grey appearance */
+.panel-nav__run-btn {
+  border-color: var(--text-dim);
+  color: var(--text-secondary);
+}
+
+/* ON state: teal appearance indicating active/running */
 .panel-nav__run-btn--running {
-  border-color: var(--alarm);
-  color: var(--alarm);
+  background: rgba(0, 212, 170, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 170, 0.3);
 }
 
 .panel-nav__run-btn--running:hover {
-  border-color: var(--alarm);
-  color: var(--alarm);
-  background: rgba(231, 76, 60, 0.12);
+  background: rgba(0, 212, 170, 0.25);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(0, 212, 170, 0.5);
 }
 
 .panel-nav__status {
@@ -735,7 +740,9 @@
   }
 
   .panel-nav__run-btn {
-    padding: 5px 12px;
+    padding: 7px 14px;
+    font-size: 11px;
+    min-width: 80px;
   }
 
   .panel-nav__status {
