@@ -13,6 +13,7 @@ from custom_components.heating_assistant.heat_sources import (
     GasHeater,
     GenericThermostat,
     HeatPump,
+    HydronicRadiator,
     _cop_at_temp,
     _soft_ceiling,
     _SOFT_CEIL_K,
@@ -663,3 +664,66 @@ class TestGasHeater:
         gh = GasHeater("gh1", "kitchen", max_power=3000.0)
         assert gh.u_min == pytest.approx(0.0)
         assert gh.u_max == pytest.approx(1.0)
+
+
+class TestHydronicRadiator:
+    def test_full_power(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.thermal_power(1.0) == pytest.approx(2000.0)
+
+    def test_off(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.thermal_power(0.0) == pytest.approx(0.0)
+
+    def test_partial_power(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.thermal_power(0.5) == pytest.approx(1000.0)
+
+    def test_outdoor_temp_ignored(self):
+        # District heating supply temp is controlled by the network, not outdoor temp
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.thermal_power(1.0, outdoor_temp=-10.0) == pytest.approx(
+            hr.thermal_power(1.0, outdoor_temp=20.0)
+        )
+
+    def test_elec_per_unit_heat_is_zero(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.elec_per_unit_heat == pytest.approx(0.0)
+
+    def test_power_scale_update_recomputes_gain(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        hr.power_scale = 0.85
+        assert hr.thermal_power(1.0) == pytest.approx(1700.0)
+
+    def test_set_power_clamps_fraction(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        hr.set_power(1.5)
+        assert hr.current_power == pytest.approx(2000.0)
+        hr.set_power(-0.5)
+        assert hr.current_power == pytest.approx(0.0)
+
+    def test_target_temperature(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0, max_temp_offset=4.0)
+        assert hr.target_temperature(0.5, 20.0) == pytest.approx(22.0)
+
+    def test_default_emitter_time_constant(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.emitter_time_constant == pytest.approx(600.0)
+
+    def test_custom_emitter_time_constant(self):
+        # Hydronic UFH users should set a longer tau
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0, emitter_time_constant=3600.0)
+        assert hr.emitter_time_constant == pytest.approx(3600.0)
+
+    def test_invalid_max_temp_offset(self):
+        with pytest.raises(ValueError):
+            HydronicRadiator("hr1", "living_room", max_power=2000.0, max_temp_offset=-1.0)
+
+    def test_cannot_cool(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.can_cool is False
+
+    def test_control_bounds(self):
+        hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
+        assert hr.u_min == pytest.approx(0.0)
+        assert hr.u_max == pytest.approx(1.0)

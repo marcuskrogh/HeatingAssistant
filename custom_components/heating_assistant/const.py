@@ -515,6 +515,8 @@ SOURCE_TYPE_GENERIC_THERMOSTAT = "generic_thermostat"
 SOURCE_TYPE_OIL_RADIATOR = "oil_radiator"
 SOURCE_TYPE_ELECTRIC_FLOOR = "electric_floor_heating"
 SOURCE_TYPE_GAS_HEATER = "gas_heater"
+SOURCE_TYPE_HYDRONIC_RADIATOR = "hydronic_radiator"
+SOURCE_TYPE_HYDRONIC_FLOOR = "hydronic_floor_heating"
 
 # Default combustion efficiency for gas heaters (condensing ≈ 0.95; conventional ≈ 0.80–0.85).
 DEFAULT_GAS_EFFICIENCY = 0.90
@@ -526,20 +528,26 @@ DEFAULT_GAS_EFFICIENCY = 0.90
 # * electric_heater / generic_thermostat / gas_heater → 0 s.  The
 #   heat source itself delivers power almost instantly; thermal mass
 #   in the room is captured by the room model, not the source.
-# * heat_pump              → 60 s.  Indoor unit + compressor +
+# * heat_pump              →   60 s.  Indoor unit + compressor +
 #   refrigerant loop have ~1 min of lag between commanded fraction
 #   and delivered air-side power.
+# * hydronic_radiator      →  600 s.  Water mass + steel/cast-iron
+#   radiator body; ~10 min between TRV command and room-air effect.
 # * oil_radiator           → 1800 s.  Large oil reservoir acts as a
 #   slow thermal buffer (~30 min time constant).
 # * electric_floor_heating → 3600 s.  Concrete/screed slab stores
 #   energy over hours; the commanded fraction changes floor surface
 #   temperature very slowly.
+# * hydronic_floor_heating → 3600 s.  Water-pipe-heated screed slab;
+#   similar inertia to electric UFH but draws no electricity.
 SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU: dict = {
     SOURCE_TYPE_ELECTRIC: 0.0,
     SOURCE_TYPE_HEAT_PUMP: 60.0,
     SOURCE_TYPE_GENERIC_THERMOSTAT: 0.0,
+    SOURCE_TYPE_HYDRONIC_RADIATOR: 600.0,
     SOURCE_TYPE_OIL_RADIATOR: 1800.0,
     SOURCE_TYPE_ELECTRIC_FLOOR: 3600.0,
+    SOURCE_TYPE_HYDRONIC_FLOOR: 3600.0,
     SOURCE_TYPE_GAS_HEATER: 0.0,
 }
 
