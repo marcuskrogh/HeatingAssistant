@@ -677,7 +677,7 @@
   }
 
   .panel-nav__brand {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     order: 1;
     padding-right: 12px;
   }
@@ -686,52 +686,50 @@
     font-size: 12px;
   }
 
-  /* Row 1: brand (left) + PAGES toggle (right). */
-  .panel-nav__toggle {
-    display: flex;
-    order: 2;
-    margin: 6px 0;
-  }
-
+  /* Row 1: brand (left) + fill spacer + controls with button (right) */
   .panel-nav__fill {
-    display: none;
-  }
-
-  /* Row 2: page navigation links, full-width, hidden by default */
-  .panel-nav__links {
-    display: none;
-    order: 3;
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-    padding: 4px 0 8px;
-    gap: 2px;
-    border-top: 1px solid var(--border);
-  }
-
-  .panel-nav__links--open {
     display: flex;
+    flex: 1;
+    order: 2;
   }
 
-  .panel-nav__link {
-    padding: 10px 12px;
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-  }
-
-  /* Row 3: the system control group, left-aligned under the brand */
+  /* Row 1: ON/OFF button on the right */
   .panel-nav__controls {
-    order: 4;
-    width: 100%;
-    justify-content: flex-start;
-    margin: 4px 0 8px;
-    gap: 10px;
+    order: 3;
+    width: auto;
+    justify-content: flex-end;
+    margin: 0;
+    gap: 4px;
   }
 
   .panel-nav__run-btn {
     width: 32px;
     height: 32px;
     font-size: 16px;
+  }
+
+  /* Hide the hamburger toggle on mobile since links are visible */
+  .panel-nav__toggle {
+    display: none;
+  }
+
+  /* Row 2: page navigation links, full-width, shown by default on mobile */
+  .panel-nav__links {
+    display: flex;
+    order: 4;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px 0 4px;
+    gap: 2px;
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+  }
+
+  .panel-nav__link {
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
   }
 
   .panel-nav__status {
