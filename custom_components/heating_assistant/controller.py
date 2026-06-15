@@ -1342,13 +1342,19 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         bid_mask: Optional[np.ndarray] = None,
         price_weight: float = 0.0,
         dt_h: float = 0.25,
+        l1_heat: Optional[np.ndarray] = None,
+        l1_cool: Optional[np.ndarray] = None,
     ):
         has_price = (
             price_seq is not None
             and price_weight > 0.0
             and elec_heat is not None
         )
-        # Fast path: no time-varying parameters, no u_ss correction, no price.
+        has_l1 = (
+            (l1_heat is not None and np.any(np.asarray(l1_heat) > 0.0))
+            or (l1_cool is not None and np.any(np.asarray(l1_cool) > 0.0))
+        )
+        # Fast path: no time-varying parameters, no u_ss correction, no price, no L1.
         if (
             (u_ss is None or np.allclose(u_ss, 0.0))
             and x_ref_dev_seq is None
@@ -1358,6 +1364,7 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             and u_min_seq is None
             and u_max_seq is None
             and not has_price
+            and not has_l1
         ):
             return super().solve(x0, D, x_ref, u_prev)
 
@@ -1538,97 +1545,112 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         lb = np.concatenate([u_min_tiled, np.zeros(n_eps)])
         ub = np.concatenate([u_max_tiled, np.full(n_eps, np.inf)])
 
-        # ── Price-aware linear cost term ──────────────────────────────────────
-        # For non-negative sources: add α·pₖ·cᵢ·Δtₕ directly to the gradient.
-        # For bidirectional sources: augment the decision vector with slack
-        # variables s⁺, s⁻ ≥ 0 satisfying u_abs = s⁺ − s⁻.
+        # ── Linear cost terms: price and L1 dead-zone penalty ────────────────
+        # For non-negative (unidirectional) sources both price and L1 can be
+        # added directly to the gradient because u ≥ 0 implies |u| = u.
         #
-        # Complementarity (s⁺·s⁻ = 0) is enforced by the price penalty alone:
-        # for any pₖ > 0, the linear cost α·pₖ·(c_heat·s⁺ + c_cool·s⁻) drives
-        # whichever slack is not needed to zero.  We do NOT add quadratic or
-        # linear penalties on (s⁺+s⁻) — those would be equivalent to penalising
-        # |u_abs| directly (an implicit energy cost that distorts the optimisation).
+        # For bidirectional sources (bid_mask=True) the gradient of |u| is
+        # sign(u), which is not representable in a QP.  Instead the decision
+        # vector is augmented with slack variables s⁺, s⁻ ≥ 0 satisfying
+        # u_abs = s⁺ − s⁻ (equality constraint).  The L1 and price costs then
+        # appear as constant and price-scaled coefficients on s⁺ and s⁻.
         #
-        # Upper bounds s⁺ ≤ u_max, s⁻ ≤ |u_min| bound the QP for pₖ = 0 (no
-        # gradient on slacks) without adding any energy-like penalty.
-        # Prices are clamped to ≥ 0; negative spot prices yield zero cost, letting
-        # comfort/tracking terms drive the decision (the controller can freely use
-        # electricity without it artificially increasing the objective).
+        # Complementarity (s⁺·s⁻ = 0) is enforced by the penalty terms:
+        # any positive cost on s⁺ and s⁻ drives the unused slack to zero.
+        # Upper bounds s⁺ ≤ u_max, s⁻ ≤ |u_min| keep the QP bounded even
+        # when there is no gradient pressure on the slacks (e.g. price = 0
+        # and l1 = 0, though in that case no augmentation is done).
+
+        # Identify bidirectional sources.
+        bid_list: List[int] = []
+        if bid_mask is not None:
+            bid_list = [i for i in range(nu) if bid_mask[i]]
+        bid_set = set(bid_list)
+        n_bid = len(bid_list)
+
+        l1_h = np.asarray(l1_heat, dtype=float) if l1_heat is not None else np.zeros(nu)
+        l1_c = np.asarray(l1_cool, dtype=float) if l1_cool is not None else np.zeros(nu)
+
+        # Unidirectional sources: apply L1 directly (u ≥ 0 so |u| = u).
+        for k in range(N):
+            for i in range(nu):
+                if i not in bid_set and l1_h[i] > 0.0:
+                    f[k * nu + i] += l1_h[i]
+
+        # Determine if augmentation is needed for bid sources.
+        has_l1_bid = n_bid > 0 and (
+            np.any(l1_h[[i for i in bid_list]] > 0.0)
+            or np.any(l1_c[[i for i in bid_list]] > 0.0)
+        ) if bid_list else False
+        needs_aug = (has_price and n_bid > 0) or has_l1_bid
+
         if has_price:
             price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
             n_price = len(price_arr)
-
-            bid_list: List[int] = []
-            if bid_mask is not None:
-                bid_list = [i for i in range(nu) if bid_mask[i]]
-            bid_set = set(bid_list)
-            n_bid = len(bid_list)
-
-            # Non-negative sources: direct linear term on u_dev.
+            # Apply price to unidirectional sources directly.
             for k in range(N):
                 p_k = float(price_arr[min(k, n_price - 1)])
                 for i in range(nu):
                     if i not in bid_set:
                         c_h = float(elec_heat[i])
                         f[k * nu + i] += price_weight * p_k * c_h * dt_h
+        else:
+            price_arr = np.zeros(N)
+            n_price = N
 
-            if n_bid == 0:
-                result = self._backend.solve(
-                    QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
-                )
-            else:
-                # Bidirectional sources: augment Z = [U; ε; S⁺; S⁻].
-                n_S = N * n_bid
-                n_Z_aug = n_U + n_eps + 2 * n_S
+        if needs_aug:
+            # Augmented decision vector Z = [U; ε; S⁺; S⁻].
+            n_S = N * n_bid
+            n_Z_aug = n_U + n_eps + 2 * n_S
 
-                # Augmented Hessian (no slack quadratic term — price alone drives complementarity)
-                H_aug = np.zeros((n_Z_aug, n_Z_aug))
-                H_aug[:n_Z, :n_Z] = H
+            H_aug = np.zeros((n_Z_aug, n_Z_aug))
+            H_aug[:n_Z, :n_Z] = H
 
-                # Augmented gradient
-                f_aug = np.zeros(n_Z_aug)
-                f_aug[:n_Z] = f
-                for k in range(N):
-                    p_k = float(price_arr[min(k, n_price - 1)])
-                    for jj, src_i in enumerate(bid_list):
+            f_aug = np.zeros(n_Z_aug)
+            f_aug[:n_Z] = f
+            for k in range(N):
+                p_k = float(price_arr[min(k, n_price - 1)])
+                for jj, src_i in enumerate(bid_list):
+                    sp = n_U + n_eps + k * n_bid + jj
+                    sm = n_U + n_eps + n_S + k * n_bid + jj
+                    # Price terms (per-step, elec-cost scaled).
+                    if has_price:
                         c_h = float(elec_heat[src_i]) * 1e-3
                         c_c = (float(elec_cool[src_i]) if elec_cool is not None
                                else float(elec_heat[src_i])) * 1e-3
-                        sp = n_U + n_eps + k * n_bid + jj
-                        sm = n_U + n_eps + n_S + k * n_bid + jj
                         f_aug[sp] += price_weight * p_k * c_h * dt_h
                         f_aug[sm] += price_weight * p_k * c_c * dt_h
+                    # Constant L1 dead-zone penalty (same every step).
+                    f_aug[sp] += l1_h[src_i]
+                    f_aug[sm] += l1_c[src_i]
 
-                # Augmented soft-output inequality (G_out extended to wider Z)
-                G_aug = np.zeros((2 * n_eps, n_Z_aug))
-                G_aug[:, :n_Z] = G_out
+            G_aug = np.zeros((2 * n_eps, n_Z_aug))
+            G_aug[:, :n_Z] = G_out
 
-                # Bounds: U, ε from before; s⁺/s⁻ ∈ [0, u_max/|u_min|]
-                s_plus_ub = np.zeros(n_S)
-                s_minus_ub = np.zeros(n_S)
-                for k in range(N):
-                    for jj, src_i in enumerate(bid_list):
-                        s_plus_ub[k * n_bid + jj] = float(u_max_np[src_i])
-                        s_minus_ub[k * n_bid + jj] = float(abs(u_min_np[src_i]))
-                lb_aug = np.concatenate([lb, np.zeros(2 * n_S)])
-                ub_aug = np.concatenate([ub, s_plus_ub, s_minus_ub])
+            s_plus_ub = np.zeros(n_S)
+            s_minus_ub = np.zeros(n_S)
+            for k in range(N):
+                for jj, src_i in enumerate(bid_list):
+                    s_plus_ub[k * n_bid + jj] = float(u_max_np[src_i])
+                    s_minus_ub[k * n_bid + jj] = float(abs(u_min_np[src_i]))
+            lb_aug = np.concatenate([lb, np.zeros(2 * n_S)])
+            ub_aug = np.concatenate([ub, s_plus_ub, s_minus_ub])
 
-                # Equality: u_dev[k,i] − s⁺[k,j] + s⁻[k,j] = −u_ss[i]
-                n_eq = N * n_bid
-                A_eq = np.zeros((n_eq, n_Z_aug))
-                b_eq = np.zeros(n_eq)
-                for k in range(N):
-                    for jj, src_i in enumerate(bid_list):
-                        row_eq = k * n_bid + jj
-                        A_eq[row_eq, k * nu + src_i] = 1.0
-                        A_eq[row_eq, n_U + n_eps + k * n_bid + jj] = -1.0
-                        A_eq[row_eq, n_U + n_eps + n_S + k * n_bid + jj] = 1.0
-                        b_eq[row_eq] = -(float(u_ss[src_i]) if u_ss is not None else 0.0)
+            n_eq = N * n_bid
+            A_eq = np.zeros((n_eq, n_Z_aug))
+            b_eq = np.zeros(n_eq)
+            for k in range(N):
+                for jj, src_i in enumerate(bid_list):
+                    row_eq = k * n_bid + jj
+                    A_eq[row_eq, k * nu + src_i] = 1.0
+                    A_eq[row_eq, n_U + n_eps + k * n_bid + jj] = -1.0
+                    A_eq[row_eq, n_U + n_eps + n_S + k * n_bid + jj] = 1.0
+                    b_eq[row_eq] = -(float(u_ss[src_i]) if u_ss is not None else 0.0)
 
-                result = self._backend.solve(
-                    QPProblem(P=H_aug, q=f_aug, lb=lb_aug, ub=ub_aug,
-                              G=G_aug, h=h_out, A=A_eq, b=b_eq)
-                )
+            result = self._backend.solve(
+                QPProblem(P=H_aug, q=f_aug, lb=lb_aug, ub=ub_aug,
+                          G=G_aug, h=h_out, A=A_eq, b=b_eq)
+            )
         else:
             result = self._backend.solve(
                 QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
@@ -1700,6 +1722,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
         bid_mask: Optional[np.ndarray] = None,
         price_weight: float = 0.0,
         dt_h: float = 0.25,
+        l1_heat: Optional[np.ndarray] = None,
+        l1_cool: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Run one MPC step.
 
@@ -1826,6 +1850,8 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
             bid_mask=bid_mask,
             price_weight=price_weight,
             dt_h=dt_h,
+            l1_heat=l1_heat,
+            l1_cool=l1_cool,
         )
 
         U_dev_np = np.asarray(U_dev, dtype=float).reshape(self._N, self._model.nu)
@@ -2726,6 +2752,23 @@ class HeatingMPCController:
                     raw, np.full(N - len(raw), raw[-1])
                 ])
 
+        # ── L1 dead-zone penalties for HP sources ─────────────────────────
+        # HP compressors have a minimum power: they either run at ≥ P_min
+        # or are off.  Penalising |u| proportionally to the dead-zone width
+        # (scaled by energy_weight so the penalty is commensurate with the
+        # quadratic energy cost) nudges the QP away from the dead zone
+        # without requiring integer variables.
+        l1_heat_np = np.array(
+            [self._energy_weight * src.min_active_u_heat(outdoor_temp)
+             for src in self._sources],
+            dtype=float,
+        )
+        l1_cool_np = np.array(
+            [self._energy_weight * abs(src.min_active_u_cool(outdoor_temp))
+             for src in self._sources],
+            dtype=float,
+        )
+
         # ── QP solve with disturbance forecast ───────────────────────────
         _t0 = time.perf_counter()
         u_abs, U_abs, X_abs = self._mpc.step(
@@ -2743,6 +2786,8 @@ class HeatingMPCController:
             bid_mask=self._bid_mask,
             price_weight=self._energy_price_weight,
             dt_h=self._dt_h,
+            l1_heat=l1_heat_np,
+            l1_cool=l1_cool_np,
         )
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1

@@ -368,38 +368,6 @@ class TestApplyActionsClimate:
         assert temp_call.args[2]["temperature"] == pytest.approx(hp.target_temperature(0.5, 22.0))
 
     @pytest.mark.asyncio
-    async def test_heat_pump_dead_zone_clips_to_off(self):
-        """Fraction in the dead zone (0 < u < u_min_heat) is clipped to zero."""
-        hp = HeatPump(
-            "hp1", "living_room", max_power=5000,
-            delta_sat=3.0, hvac_mode="heat",
-            min_power=1000.0,  # spec-sheet minimum heating power
-            heater_entity="climate.heat_pump",
-        )
-        # Find the minimum active fraction and choose a value inside the dead zone.
-        u_min = hp.min_active_u_heat(5.0)
-        assert u_min > 0.0, "test requires min_power to produce a dead zone"
-        dead_zone_fraction = u_min * 0.5  # halfway into the dead zone
-
-        hass, _coord = await _run_apply_actions(
-            heat_sources=[hp],
-            actions={"hp1": dead_zone_fraction},
-            entity_states={
-                "climate.heat_pump": {
-                    "state": "off",
-                    "attributes": {"current_temperature": 21.0},
-                },
-            },
-            room_setpoints={"living_room": 22.0},
-        )
-
-        calls = hass.services.async_call.call_args_list
-        assert len(calls) == 2
-        assert calls[0].args[2]["hvac_mode"] == "heat"
-        # Dead zone → clipped to zero → setpoint = internal_temp (no offset)
-        assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
-
-    @pytest.mark.asyncio
     async def test_non_heat_pump_climate_uses_internal_temp_plus_offset(self):
         """An ElectricHeater on a climate entity modulates from internal temp."""
         heater = ElectricHeater(

@@ -3895,24 +3895,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
                     attrs = getattr(state, "attributes", {})
 
-                    # Clip fractions that fall in the HP's dead zone: values
-                    # between zero and the minimum active fraction would
-                    # command less than the HP's minimum compressor output.
-                    # Round these to zero (off) and notify the EKF so it
-                    # does not accumulate a false applied-input error.
-                    if fraction != 0.0:
-                        u_dz_heat = src.min_active_u_heat(outdoor_temp)
-                        u_dz_cool = src.min_active_u_cool(outdoor_temp)
-                        in_dead_zone = (
-                            (0.0 < fraction < u_dz_heat)
-                            or (u_dz_cool < fraction < 0.0)
-                        )
-                        if in_dead_zone:
-                            fraction = 0.0
-                            src.set_power(0.0, outdoor_temp)
-                            if controller is not None:
-                                controller.notify_applied_u(src.name, 0.0)
-
                     # Read the HP's own temperature so the logit-based offset
                     # is applied relative to the current internal measurement.
                     hp_internal_temp: Optional[float] = None

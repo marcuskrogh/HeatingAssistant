@@ -324,6 +324,12 @@ class TestHeatPump:
                       min_cooling_power=700.0, hvac_mode="heat")
         assert hp.min_active_u_cool(20.0) == pytest.approx(0.0)
 
+    def test_base_class_min_active_returns_zero_for_electric_heater(self):
+        """ElectricHeater (base-class default) returns 0 for both dead-zone methods."""
+        heater = ElectricHeater("h1", "room", max_power=1000.0)
+        assert heater.min_active_u_heat(5.0) == pytest.approx(0.0)
+        assert heater.min_active_u_cool(5.0) == pytest.approx(0.0)
+
     # -- can_cool property -------------------------------------------------
 
     def test_can_cool_true_by_default(self):

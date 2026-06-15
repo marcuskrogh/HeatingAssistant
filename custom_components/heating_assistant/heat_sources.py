@@ -192,6 +192,24 @@ class HeatSource(ABC):
         """
         return 0.0
 
+    def min_active_u_heat(self, outdoor_temp: float) -> float:
+        """Minimum positive control fraction above the heating dead zone.
+
+        Returns 0.0 for sources with no minimum-power dead zone (e.g. electric
+        resistive heaters).  HeatPump overrides this to reflect the spec-sheet
+        minimum heating output.
+        """
+        return 0.0
+
+    def min_active_u_cool(self, outdoor_temp: float) -> float:
+        """Most-negative control fraction above the cooling dead zone.
+
+        Returns 0.0 for sources that cannot cool or have no minimum cooling
+        power.  HeatPump overrides this to reflect the spec-sheet minimum
+        cooling output.
+        """
+        return 0.0
+
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(name={self.name!r}, room={self.room!r}, "
@@ -532,9 +550,10 @@ class HeatPump(HeatSource):
     def min_active_u_heat(self, outdoor_temp: float) -> float:
         """Minimum positive control fraction that delivers at least ``min_power`` W.
 
-        Fractions in ``(0, min_active_u_heat)`` would command less than the
-        HP's minimum heating output; the coordinator clips them to zero.
-        Returns 0 when ``min_power`` is not set.
+        Fractions below this threshold would command less than the HP's minimum
+        compressor output.  The MPC penalises this region via an L1 cost term
+        proportional to the dead-zone width.  Returns 0 when ``min_power`` is
+        not set.
         """
         if self.min_power <= 0.0:
             return 0.0
@@ -548,9 +567,10 @@ class HeatPump(HeatSource):
     def min_active_u_cool(self, outdoor_temp: float) -> float:
         """Most-negative control fraction that delivers at least ``min_cooling_power`` W.
 
-        Fractions in ``(min_active_u_cool, 0)`` would command less than the
-        HP's minimum cooling output; the coordinator clips them to zero.
-        Returns 0 when ``min_cooling_power`` is not set or ``can_cool`` is False.
+        Fractions above this threshold (between it and 0) would command less
+        than the HP's minimum cooling output.  The MPC penalises this region
+        via an L1 cost term.  Returns 0 when ``min_cooling_power`` is not set
+        or ``can_cool`` is False.
         """
         if self.min_cooling_power <= 0.0 or not self.can_cool:
             return 0.0
