@@ -3937,9 +3937,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     else:
                         hvac_mode_str = "heat"
 
-                    # Proportional setpoint: base_temp + fraction × max_temp_offset.
-                    # fraction is already clamped to [u_min, u_max] by the controller.
-                    target_temp = src.target_temperature(fraction, base_temp)
+                    # Derive the climate-entity setpoint from the control fraction.
+                    # For can_cool HPs this uses the sigmoid-normalised gap so that
+                    # the HP delivers the same power the MPC model predicts; for
+                    # heating-only HPs it falls back to the simple linear offset.
+                    target_temp = src.target_temperature(fraction, base_temp, outdoor_temp)
 
                     await self.hass.services.async_call(
                         "climate",
