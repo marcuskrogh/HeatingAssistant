@@ -184,6 +184,14 @@ class HaIndustrialPanel extends HTMLElement {
             </svg>
             <span class="panel-nav__name">HEATING ASSISTANT</span>
           </div>
+          <div class="panel-nav__links" id="nav-links">
+            <a class="panel-nav__link" href="#overview">OVERVIEW</a>
+            <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
+            <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
+            <a class="panel-nav__link" href="#tuning">TUNING</a>
+            <a class="panel-nav__link" href="#config">CONFIGURATION</a>
+          </div>
+          <span class="panel-nav__fill"></span>
           <div class="panel-nav__controls">
             <button class="panel-nav__run-btn" id="run-btn" aria-label="Start or stop the heating assistant">
               <span class="panel-nav__run-btn-icon" id="run-btn-icon">&#9654;</span>
@@ -194,18 +202,10 @@ class HaIndustrialPanel extends HTMLElement {
               <span class="status-label" id="status-label">STOPPED</span>
             </span>
           </div>
-          <span class="panel-nav__fill"></span>
           <button class="panel-nav__toggle" id="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
             <span class="panel-nav__toggle-icon">&#9776;</span>
             <span class="panel-nav__toggle-label">PAGES</span>
           </button>
-          <div class="panel-nav__links" id="nav-links">
-            <a class="panel-nav__link" href="#overview">OVERVIEW</a>
-            <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
-            <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
-            <a class="panel-nav__link" href="#tuning">TUNING</a>
-            <a class="panel-nav__link" href="#config">CONFIGURATION</a>
-          </div>
         </nav>
         <main id="content" class="content">
           <div class="loading">INITIALIZING...</div>
