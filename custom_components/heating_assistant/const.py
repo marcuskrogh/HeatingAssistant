@@ -511,23 +511,36 @@ SCHEDULE_MODE_OFF = "off"              # disable heat sources for the room durin
 # Source types
 SOURCE_TYPE_ELECTRIC = "electric_heater"
 SOURCE_TYPE_HEAT_PUMP = "heat_pump"
+SOURCE_TYPE_GENERIC_THERMOSTAT = "generic_thermostat"
+SOURCE_TYPE_OIL_RADIATOR = "oil_radiator"
+SOURCE_TYPE_ELECTRIC_FLOOR = "electric_floor_heating"
+SOURCE_TYPE_GAS_HEATER = "gas_heater"
+
+# Default combustion efficiency for gas heaters (condensing ≈ 0.95; conventional ≈ 0.80–0.85).
+DEFAULT_GAS_EFFICIENCY = 0.90
 
 # Phase 1 B2 — typology defaults for the per-source emitter time
 # constant ``τ_em`` [s].  Applied in ``coordinator.build_heat_sources``
 # when the user hasn't explicitly set ``emitter_time_constant``:
 #
-# * electric_heater → 0 s.  Resistive coils heat in seconds; the
-#   commanded fraction reaches the air node essentially instantly.
-# * heat_pump       → 60 s.  Indoor unit + compressor + refrigerant
-#   loop have ~1 minute of thermal mass between commanded fraction
+# * electric_heater / generic_thermostat / gas_heater → 0 s.  The
+#   heat source itself delivers power almost instantly; thermal mass
+#   in the room is captured by the room model, not the source.
+# * heat_pump              → 60 s.  Indoor unit + compressor +
+#   refrigerant loop have ~1 min of lag between commanded fraction
 #   and delivered air-side power.
-#
-# Users running hydronic radiators driven by either source can
-# override with τ_em ≈ 600 s in the per-source YAML to capture the
-# water-loop and metal-mass lag.
+# * oil_radiator           → 1800 s.  Large oil reservoir acts as a
+#   slow thermal buffer (~30 min time constant).
+# * electric_floor_heating → 3600 s.  Concrete/screed slab stores
+#   energy over hours; the commanded fraction changes floor surface
+#   temperature very slowly.
 SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU: dict = {
     SOURCE_TYPE_ELECTRIC: 0.0,
     SOURCE_TYPE_HEAT_PUMP: 60.0,
+    SOURCE_TYPE_GENERIC_THERMOSTAT: 0.0,
+    SOURCE_TYPE_OIL_RADIATOR: 1800.0,
+    SOURCE_TYPE_ELECTRIC_FLOOR: 3600.0,
+    SOURCE_TYPE_GAS_HEATER: 0.0,
 }
 
 # Update interval (seconds)

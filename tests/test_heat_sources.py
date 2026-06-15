@@ -10,6 +10,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.heat_sources import (
     ElectricHeater,
+    GasHeater,
+    GenericThermostat,
     HeatPump,
     _cop_at_temp,
     _soft_ceiling,
@@ -541,3 +543,123 @@ class TestHeatPump:
     def test_soft_ceiling_zero_cap_returns_zero(self):
         """A zero cap should return 0 without division errors."""
         assert _soft_ceiling(5000.0, 0.0) == pytest.approx(0.0)
+
+
+class TestGenericThermostat:
+    def test_full_power(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        assert ht.thermal_power(1.0) == pytest.approx(1500.0)
+
+    def test_off(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        assert ht.thermal_power(0.0) == pytest.approx(0.0)
+
+    def test_partial_power(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        assert ht.thermal_power(0.5) == pytest.approx(750.0)
+
+    def test_outdoor_temp_ignored(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        assert ht.thermal_power(1.0, outdoor_temp=-20.0) == pytest.approx(
+            ht.thermal_power(1.0, outdoor_temp=20.0)
+        )
+
+    def test_elec_per_unit_heat_equals_max_power(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        assert ht.elec_per_unit_heat == pytest.approx(1500.0)
+
+    def test_elec_per_unit_heat_scales_with_power_scale(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0, power_scale=0.8)
+        assert ht.elec_per_unit_heat == pytest.approx(1200.0)
+
+    def test_power_scale_update_recomputes_gain(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        ht.power_scale = 0.75
+        assert ht.thermal_power(1.0) == pytest.approx(1125.0)
+
+    def test_set_power_clamps_fraction(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        ht.set_power(2.0)
+        assert ht.current_power == pytest.approx(1500.0)
+        ht.set_power(-1.0)
+        assert ht.current_power == pytest.approx(0.0)
+
+    def test_target_temperature(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0, max_temp_offset=4.0)
+        assert ht.target_temperature(0.5, 20.0) == pytest.approx(22.0)
+
+    def test_invalid_max_temp_offset(self):
+        with pytest.raises(ValueError):
+            GenericThermostat("ht1", "hall", max_power=1500.0, max_temp_offset=-1.0)
+
+    def test_cannot_cool(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        assert ht.can_cool is False
+
+    def test_control_bounds(self):
+        ht = GenericThermostat("ht1", "hall", max_power=1500.0)
+        assert ht.u_min == pytest.approx(0.0)
+        assert ht.u_max == pytest.approx(1.0)
+
+
+class TestGasHeater:
+    def test_full_power_default_efficiency(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0)
+        assert gh.thermal_power(1.0) == pytest.approx(3000.0 * 0.90)
+
+    def test_off(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0)
+        assert gh.thermal_power(0.0) == pytest.approx(0.0)
+
+    def test_partial_power(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0, efficiency=0.85)
+        assert gh.thermal_power(0.5) == pytest.approx(3000.0 * 0.85 * 0.5)
+
+    def test_condensing_efficiency(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0, efficiency=0.95)
+        assert gh.thermal_power(1.0) == pytest.approx(2850.0)
+
+    def test_elec_per_unit_heat_is_zero(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0)
+        assert gh.elec_per_unit_heat == pytest.approx(0.0)
+
+    def test_outdoor_temp_ignored(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0)
+        assert gh.thermal_power(1.0, outdoor_temp=-15.0) == pytest.approx(
+            gh.thermal_power(1.0, outdoor_temp=20.0)
+        )
+
+    def test_power_scale_update_recomputes_gain(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0, efficiency=0.90)
+        gh.power_scale = 0.80
+        assert gh.thermal_power(1.0) == pytest.approx(3000.0 * 0.90 * 0.80)
+
+    def test_set_power_clamps_fraction(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0)
+        gh.set_power(1.5)
+        assert gh.current_power == pytest.approx(3000.0 * 0.90)
+
+    def test_target_temperature(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0, max_temp_offset=6.0)
+        assert gh.target_temperature(1.0, 18.0) == pytest.approx(24.0)
+
+    def test_invalid_efficiency_too_high(self):
+        with pytest.raises(ValueError):
+            GasHeater("gh1", "kitchen", max_power=3000.0, efficiency=1.1)
+
+    def test_invalid_efficiency_zero(self):
+        with pytest.raises(ValueError):
+            GasHeater("gh1", "kitchen", max_power=3000.0, efficiency=0.0)
+
+    def test_invalid_max_temp_offset(self):
+        with pytest.raises(ValueError):
+            GasHeater("gh1", "kitchen", max_power=3000.0, max_temp_offset=-2.0)
+
+    def test_cannot_cool(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0)
+        assert gh.can_cool is False
+
+    def test_control_bounds(self):
+        gh = GasHeater("gh1", "kitchen", max_power=3000.0)
+        assert gh.u_min == pytest.approx(0.0)
+        assert gh.u_max == pytest.approx(1.0)
