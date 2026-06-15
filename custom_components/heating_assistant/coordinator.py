@@ -3928,14 +3928,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # For climate entities we need to ensure the heat pump
                 # actually modulates to the desired power output.
                 #
-                # Heat pumps regulate output based on the gap between
-                # their internal temperature reading and their setpoint.
-                # We read the heat pump's own temperature from the
-                # climate entity's ``current_temperature`` attribute and
-                # add an offset proportional to the desired power
-                # fraction so that the heat pump delivers the computed
-                # thermal output.
-                #
                 # Heat pump climate entities use a three-state strategy:
                 #   - fraction < 0  → cool mode (active cooling), with
                 #     "cool" preferred, then "dry", then "fan_only"
@@ -3958,16 +3950,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
                         continue
 
-                    # Read the HP's own internal temperature sensor.
-                    hp_internal_temp: Optional[float] = None
                     attrs = getattr(state, "attributes", {})
+
+                    # Read the HP's own temperature so the logit-based offset
+                    # is applied relative to the current internal measurement.
+                    hp_internal_temp: Optional[float] = None
                     raw = attrs.get("current_temperature")
                     if raw is not None:
                         try:
                             hp_internal_temp = float(raw)
                         except (ValueError, TypeError):
                             pass
-
                     base_temp = (
                         hp_internal_temp
                         if hp_internal_temp is not None
@@ -3994,9 +3987,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     else:
                         hvac_mode_str = "heat"
 
-                    # Proportional setpoint: base_temp + fraction × max_temp_offset.
-                    # fraction is already clamped to [u_min, u_max] by the controller.
-                    target_temp = src.target_temperature(fraction, base_temp)
+                    target_temp = src.target_temperature(fraction, base_temp, outdoor_temp)
 
                     await self.hass.services.async_call(
                         "climate",

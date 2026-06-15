@@ -144,39 +144,48 @@ class TestHeatPump:
     # -- target_temperature (offset-based heat pump control) ---------------
 
     def test_target_temperature_full_power(self):
-        """At fraction=1.0 the full max_temp_offset is added."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
-        assert hp.target_temperature(1.0, 23.0) == pytest.approx(28.0)
+        """At fraction=1.0 the offset saturates at delta_sat (logit → ∞, capped)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, delta_sat=3.0,
+                      hvac_mode="heat")
+        assert hp.target_temperature(1.0, 23.0) == pytest.approx(26.0)
 
     def test_target_temperature_zero(self):
-        """At fraction=0.0 the target equals the internal temperature."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0)
+        """At fraction=0.0 the target equals the internal temperature (no gap → idle)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
         assert hp.target_temperature(0.0, 23.0) == pytest.approx(23.0)
 
     def test_target_temperature_half_power(self):
-        """At fraction=0.5 half the max_temp_offset is added."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=4.0)
-        assert hp.target_temperature(0.5, 20.0) == pytest.approx(22.0)
+        """At fraction=0.5 the offset is delta_sat/2 (logit midpoint)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, delta_sat=3.0,
+                      hvac_mode="heat")
+        assert hp.target_temperature(0.5, 20.0) == pytest.approx(21.5)
 
     def test_target_temperature_clamps_fraction(self):
-        """Fractions outside [u_min, u_max] are clamped."""
+        """Fractions outside [u_min, u_max] are clamped before computing setpoint."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
                       hvac_mode="heat_cool")
-        # Above u_max=1: clamped to 1.0
-        assert hp.target_temperature(1.5, 20.0) == pytest.approx(25.0)
-        # Below u_min=-1: clamped to -1.0
-        assert hp.target_temperature(-1.5, 20.0) == pytest.approx(15.0)
+        # Verify clamping: out-of-range fractions give the same result as the limit.
+        assert hp.target_temperature(1.5, 20.0) == pytest.approx(
+            hp.target_temperature(1.0, 20.0)
+        )
+        assert hp.target_temperature(-1.5, 20.0) == pytest.approx(
+            hp.target_temperature(-1.0, 20.0)
+        )
 
     def test_max_temp_offset_default(self):
         """Default max_temp_offset should be 5.0 °C."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0)
         assert hp.max_temp_offset == 5.0
 
-    def test_custom_max_temp_offset(self):
-        """Custom max_temp_offset is stored correctly."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=8.0)
-        assert hp.max_temp_offset == 8.0
-        assert hp.target_temperature(1.0, 20.0) == pytest.approx(28.0)
+    def test_custom_delta_sat(self):
+        """Custom delta_sat controls the saturation offset of the logit mapping."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, delta_sat=4.0,
+                      hvac_mode="heat")
+        assert hp.delta_sat == 4.0
+        # At fraction=1.0 offset saturates at delta_sat=4.0
+        assert hp.target_temperature(1.0, 20.0) == pytest.approx(24.0)
+        # At fraction=0.5 offset is delta_sat/2 = 2.0
+        assert hp.target_temperature(0.5, 20.0) == pytest.approx(22.0)
 
     def test_hvac_mode_default(self):
         """Default hvac_mode should be 'heat_cool'."""
@@ -201,19 +210,22 @@ class TestHeatPump:
         assert hp.u_max == 1.0
 
     def test_target_temperature_negative_fraction(self):
-        """Negative fraction drives setpoint below internal temp (cooling)."""
+        """Negative fraction drives setpoint below base_temp: logit midpoint at f=0.5."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool",
-                      max_temp_offset=5.0)
-        assert hp.target_temperature(-0.5, 25.0) == pytest.approx(22.5)
+                      delta_sat=3.0)
+        # fraction=-0.5, heat_cool (u_range=1): f=0.5, logit=0, offset=delta_sat/2=1.5
+        result = hp.target_temperature(-0.5, 25.0)
+        assert result == pytest.approx(23.5)
 
     def test_target_temperature_clamped_to_u_max(self):
         """Fraction above u_max is clamped (heat mode: u_max=1)."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat",
-                      max_temp_offset=5.0)
-        assert hp.target_temperature(2.0, 20.0) == pytest.approx(25.0)
+                      delta_sat=3.0)
+        # clamped to 1.0 → offset saturates at delta_sat=3
+        assert hp.target_temperature(2.0, 20.0) == pytest.approx(23.0)
 
     def test_target_temperature_clamped_to_u_min_cool(self):
-        """In cool mode positive fractions are clamped to u_max=0."""
+        """In cool mode positive fractions are clamped to u_max=0 → idle setpoint."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="cool",
                       max_temp_offset=5.0)
         assert hp.target_temperature(0.5, 25.0) == pytest.approx(25.0)
@@ -271,6 +283,19 @@ class TestHeatPump:
         cooling = hp.cooling_power(outdoor_temp=20.0)
         assert cooling == pytest.approx(-(5000.0 / 3.5) * 2.5 * 0.5, rel=1e-3)
 
+    # -- delta_sat and dead-zone helpers -----------------------------------
+
+    def test_delta_sat_default(self):
+        """Default delta_sat should be 3.0 °C."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0)
+        assert hp.delta_sat == 3.0
+
+    def test_logit_midpoint_at_half_fraction(self):
+        """At fraction=0.5 the offset is always delta_sat/2 (logit midpoint)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, delta_sat=4.0,
+                      hvac_mode="heat")
+        assert hp.target_temperature(0.5, 20.0) == pytest.approx(22.0)
+
     # -- can_cool property -------------------------------------------------
 
     def test_can_cool_true_by_default(self):
@@ -301,22 +326,24 @@ class TestHeatPump:
     # -- target_temperature unified (heat_cool mode) -----------------------
 
     def test_target_temperature_full_cooling(self):
-        """fraction=-1.0 subtracts the full max_temp_offset."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
+        """fraction=-1.0: offset saturates at delta_sat → setpoint = base − delta_sat."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, delta_sat=3.0,
                       hvac_mode="heat_cool")
-        assert hp.target_temperature(-1.0, 23.0) == pytest.approx(18.0)
+        # offset capped at delta_sat=3 → 23 − 3 = 20
+        assert hp.target_temperature(-1.0, 23.0) == pytest.approx(20.0)
 
-    def test_target_temperature_zero_is_internal(self):
-        """fraction=0 → setpoint equals the internal temperature."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
+    def test_target_temperature_zero_is_base(self):
+        """fraction=0 → setpoint equals base_temp (HP idles, no offset)."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0,
                       hvac_mode="heat_cool")
         assert hp.target_temperature(0.0, 23.0) == pytest.approx(23.0)
 
     def test_target_temperature_half_cooling(self):
-        """fraction=-0.5 subtracts half the max_temp_offset."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=4.0,
+        """fraction=-0.5 (heat_cool): logit midpoint → offset = delta_sat/2."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, delta_sat=3.0,
                       hvac_mode="heat_cool")
-        assert hp.target_temperature(-0.5, 24.0) == pytest.approx(22.0)
+        # f=0.5, logit=0, offset=1.5 → 24 − 1.5 = 22.5
+        assert hp.target_temperature(-0.5, 24.0) == pytest.approx(22.5)
 
     # -- smooth_thermal_power ----------------------------------------------
 

@@ -502,6 +502,7 @@ class HeatPump(HeatSource):
         min_outdoor_temp: float = -20.0,
         min_power: float = 0.0,
         max_temp_offset: float = 5.0,
+        delta_sat: float = 3.0,
         hvac_mode: str = "heat_cool",
         heater_entity: Optional[str] = None,
         cooling_cop: float = 2.5,
@@ -526,6 +527,7 @@ class HeatPump(HeatSource):
         self.min_outdoor_temp = min_outdoor_temp
         self.min_power = min_power
         self.max_temp_offset = max_temp_offset
+        self.delta_sat = delta_sat
         self.hvac_mode = hvac_mode
         self.cooling_cop = cooling_cop
         self.cooling_efficiency = cooling_efficiency
@@ -650,19 +652,56 @@ class HeatPump(HeatSource):
             return 0.0
         return self._electric_max * self.cooling_cop * self.cooling_efficiency
 
-    def target_temperature(self, fraction: float, internal_temp: float) -> float:
+    def target_temperature(
+        self,
+        fraction: float,
+        base_temp: float,
+        outdoor_temp: float = 0.0,
+    ) -> float:
         """
         Compute the climate-entity setpoint from the control fraction.
 
-        T_target = T_internal + fraction × max_temp_offset
+        The HP's physical power output vs. setpoint offset is sigmoidal, not
+        linear: it reaches near-maximum output at a relatively small offset
+        (~``delta_sat`` °C) and has a dead band near zero.  A naive linear
+        mapping ``fraction × max_temp_offset`` would over-drive the HP at
+        intermediate fractions and starve it at low fractions.
 
-        fraction is clamped to [u_min, u_max]:
-          - positive → setpoint above internal → HP heats
-          - zero     → setpoint equals internal → HP idles
-          - negative → setpoint below internal → HP cools
+        Instead, the required offset is derived by inverting the HP's
+        approximate physical sigmoid::
+
+            P(Δ) ≈ P_max · σ(k · (2Δ/δ_sat − 1))
+
+        giving a smooth (C∞), monotone mapping::
+
+            Δ = (δ_sat / 2) · (1 + logit(f) / k)
+
+        where ``f = |fraction| / u_range`` is the normalised fraction,
+        ``δ_sat = delta_sat`` is the saturation offset (°C), and ``k = 5``
+        matches the sigmoid steepness used in the MPC model.  The result is
+        clamped to ``[0, delta_sat]`` to handle numerical edge cases.
+
+        Parameters
+        ----------
+        fraction : float
+            MPC control signal clamped to ``[u_min, u_max]``.
+            Positive → heating, negative → cooling, zero → idle.
+        base_temp : float
+            Current temperature reading from the HP's own sensor [°C].
+            The offset is added to this to form the physical setpoint.
+        outdoor_temp : float
+            Accepted for API compatibility; not used in this formula.
         """
         fraction = max(self.u_min, min(self.u_max, fraction))
-        return internal_temp + fraction * self.max_temp_offset
+        if abs(fraction) < 1e-9:
+            return base_temp
+        u_range = self.u_max if fraction > 0.0 else abs(self.u_min)
+        f = max(1e-4, min(1.0 - 1e-4, abs(fraction) / max(u_range, 1e-9)))
+        logit_f = math.log(f / (1.0 - f))
+        half_sat = self.delta_sat / 2.0
+        offset = half_sat * (1.0 + logit_f / 5.0)
+        offset = max(0.0, min(offset, self.delta_sat))
+        return base_temp + math.copysign(offset, fraction)
 
     def smooth_thermal_power(
         self, u: float, outdoor_temp: float, k_base: float = 5.0,

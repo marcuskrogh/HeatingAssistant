@@ -1538,6 +1538,10 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         lb = np.concatenate([u_min_tiled, np.zeros(n_eps)])
         ub = np.concatenate([u_max_tiled, np.full(n_eps, np.inf)])
 
+        # ── Linear cost terms: price and L1 dead-zone penalty ────────────────
+        # For non-negative (unidirectional) sources both price and L1 can be
+        # added directly to the gradient because u ≥ 0 implies |u| = u.
+        #
         # ── Price-aware linear cost term ──────────────────────────────────────
         # For non-negative sources: add α·pₖ·cᵢ·Δtₕ directly to the gradient.
         # For bidirectional sources: augment the decision vector with slack
