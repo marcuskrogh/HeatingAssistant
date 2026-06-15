@@ -293,43 +293,6 @@ class TestHeatPump:
                       hvac_mode="heat")
         assert hp.target_temperature(0.5, 20.0) == pytest.approx(22.0)
 
-    def test_min_active_u_heat_zero_when_min_power_unset(self):
-        """min_active_u_heat is 0 when min_power is not configured."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0)
-        assert hp.min_active_u_heat(7.0) == pytest.approx(0.0)
-
-    def test_min_active_u_heat_positive_when_min_power_set(self):
-        """min_active_u_heat returns a small positive fraction when min_power > 0."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0, min_power=1000.0)
-        u = hp.min_active_u_heat(7.0)
-        assert u > 0.0
-        assert u < 1.0
-
-    def test_min_active_u_cool_zero_when_min_cooling_power_unset(self):
-        """min_active_u_cool is 0 when min_cooling_power is not configured."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0)
-        assert hp.min_active_u_cool(20.0) == pytest.approx(0.0)
-
-    def test_min_active_u_cool_negative_when_min_cooling_power_set(self):
-        """min_active_u_cool returns a small negative fraction when min_cooling_power > 0."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0,
-                      min_cooling_power=700.0, hvac_mode="heat_cool")
-        u = hp.min_active_u_cool(20.0)
-        assert u < 0.0
-        assert u > -1.0
-
-    def test_min_active_u_cool_zero_when_not_can_cool(self):
-        """min_active_u_cool is 0 for heating-only HPs regardless of min_cooling_power."""
-        hp = HeatPump("hp1", "living_room", max_power=5000.0,
-                      min_cooling_power=700.0, hvac_mode="heat")
-        assert hp.min_active_u_cool(20.0) == pytest.approx(0.0)
-
-    def test_base_class_min_active_returns_zero_for_electric_heater(self):
-        """ElectricHeater (base-class default) returns 0 for both dead-zone methods."""
-        heater = ElectricHeater("h1", "room", max_power=1000.0)
-        assert heater.min_active_u_heat(5.0) == pytest.approx(0.0)
-        assert heater.min_active_u_cool(5.0) == pytest.approx(0.0)
-
     # -- can_cool property -------------------------------------------------
 
     def test_can_cool_true_by_default(self):

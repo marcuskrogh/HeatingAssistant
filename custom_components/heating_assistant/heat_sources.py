@@ -192,24 +192,6 @@ class HeatSource(ABC):
         """
         return 0.0
 
-    def min_active_u_heat(self, outdoor_temp: float) -> float:
-        """Minimum positive control fraction above the heating dead zone.
-
-        Returns 0.0 for sources with no minimum-power dead zone (e.g. electric
-        resistive heaters).  HeatPump overrides this to reflect the spec-sheet
-        minimum heating output.
-        """
-        return 0.0
-
-    def min_active_u_cool(self, outdoor_temp: float) -> float:
-        """Most-negative control fraction above the cooling dead zone.
-
-        Returns 0.0 for sources that cannot cool or have no minimum cooling
-        power.  HeatPump overrides this to reflect the spec-sheet minimum
-        cooling output.
-        """
-        return 0.0
-
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(name={self.name!r}, room={self.room!r}, "
@@ -343,7 +325,6 @@ class HeatPump(HeatSource):
         cop_temp_ref: float = 7.0,
         min_outdoor_temp: float = -20.0,
         min_power: float = 0.0,
-        min_cooling_power: float = 0.0,
         max_temp_offset: float = 5.0,
         delta_sat: float = 3.0,
         hvac_mode: str = "heat_cool",
@@ -369,7 +350,6 @@ class HeatPump(HeatSource):
         self.cop_temp_ref = cop_temp_ref
         self.min_outdoor_temp = min_outdoor_temp
         self.min_power = min_power
-        self.min_cooling_power = min_cooling_power
         self.max_temp_offset = max_temp_offset
         self.delta_sat = delta_sat
         self.hvac_mode = hvac_mode
@@ -546,40 +526,6 @@ class HeatPump(HeatSource):
         offset = half_sat * (1.0 + logit_f / 5.0)
         offset = max(0.0, min(offset, self.delta_sat))
         return base_temp + math.copysign(offset, fraction)
-
-    def min_active_u_heat(self, outdoor_temp: float) -> float:
-        """Minimum positive control fraction that delivers at least ``min_power`` W.
-
-        Fractions below this threshold would command less than the HP's minimum
-        compressor output.  The MPC penalises this region via an L1 cost term
-        proportional to the dead-zone width.  Returns 0 when ``min_power`` is
-        not set.
-        """
-        if self.min_power <= 0.0:
-            return 0.0
-        p_max = self.thermal_power(1.0, outdoor_temp)
-        if p_max <= 0.0:
-            return 0.0
-        return self.control_for_power_fraction(
-            min(self.min_power / p_max, 1.0), outdoor_temp
-        )
-
-    def min_active_u_cool(self, outdoor_temp: float) -> float:
-        """Most-negative control fraction that delivers at least ``min_cooling_power`` W.
-
-        Fractions above this threshold (between it and 0) would command less
-        than the HP's minimum cooling output.  The MPC penalises this region
-        via an L1 cost term.  Returns 0 when ``min_cooling_power`` is not set
-        or ``can_cool`` is False.
-        """
-        if self.min_cooling_power <= 0.0 or not self.can_cool:
-            return 0.0
-        q_cool = self._q_cool_const
-        if q_cool <= 0.0:
-            return 0.0
-        return self.control_for_power_fraction(
-            -min(self.min_cooling_power / q_cool, 1.0), outdoor_temp
-        )
 
     def smooth_thermal_power(
         self, u: float, outdoor_temp: float, k_base: float = 5.0,
