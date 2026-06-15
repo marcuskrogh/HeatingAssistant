@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '64';
+  return '65';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -194,13 +194,8 @@ class HaIndustrialPanel extends HTMLElement {
           <span class="panel-nav__fill"></span>
           <div class="panel-nav__controls">
             <button class="panel-nav__run-btn" id="run-btn" aria-label="Start or stop the heating assistant">
-              <span class="panel-nav__run-btn-icon" id="run-btn-icon">&#9654;</span>
-              <span class="panel-nav__run-btn-label">START</span>
+              ⏻
             </button>
-            <span class="panel-nav__status" id="system-status">
-              <span class="status-dot" id="status-dot"></span>
-              <span class="status-label" id="status-label">STOPPED</span>
-            </span>
           </div>
           <button class="panel-nav__toggle" id="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
             <span class="panel-nav__toggle-icon">&#9776;</span>
@@ -250,12 +245,8 @@ class HaIndustrialPanel extends HTMLElement {
 
   _updateRunButton() {
     const nav = this.shadowRoot.getElementById('panel-nav');
-    const dot = this.shadowRoot.getElementById('status-dot');
-    const label = this.shadowRoot.getElementById('status-label');
     const btn = this.shadowRoot.getElementById('run-btn');
-    const btnLabel = btn?.querySelector('.panel-nav__run-btn-label');
-    const btnIcon = btn?.querySelector('.panel-nav__run-btn-icon');
-    if (!dot || !label || !btn || !btnLabel || !btnIcon) return;
+    if (!btn) return;
 
     // The whole second bar signals system state: --live tints and animates the
     // bar when the controller is running, --stopped marks it dormant.
@@ -264,19 +255,7 @@ class HaIndustrialPanel extends HTMLElement {
       nav.classList.toggle('panel-nav--stopped', !this._systemRunning);
     }
 
-    if (this._systemRunning) {
-      dot.className = 'status-dot status-dot--live';
-      label.textContent = 'LIVE';
-      btn.classList.add('panel-nav__run-btn--running');
-      btnLabel.textContent = 'STOP';
-      btnIcon.innerHTML = '&#9632;'; // ■ stop
-    } else {
-      dot.className = 'status-dot';
-      label.textContent = 'STOPPED';
-      btn.classList.remove('panel-nav__run-btn--running');
-      btnLabel.textContent = 'START';
-      btnIcon.innerHTML = '&#9654;'; // ▶ play
-    }
+    btn.classList.toggle('panel-nav__run-btn--running', this._systemRunning);
   }
 
   async _toggleSystem() {
