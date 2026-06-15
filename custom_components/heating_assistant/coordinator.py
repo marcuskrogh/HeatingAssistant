@@ -168,10 +168,17 @@ from .const import (
     RUNTIME_STATE_SAVE_DELAY_S,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
+    SOURCE_TYPE_GENERIC_THERMOSTAT,
+    SOURCE_TYPE_OIL_RADIATOR,
+    SOURCE_TYPE_ELECTRIC_FLOOR,
+    SOURCE_TYPE_GAS_HEATER,
+    SOURCE_TYPE_HYDRONIC_RADIATOR,
+    SOURCE_TYPE_HYDRONIC_FLOOR,
+    DEFAULT_GAS_EFFICIENCY,
     SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
     UPDATE_INTERVAL,
 )
-from .heat_sources import ElectricHeater, HeatPump, HeatSource
+from .heat_sources import ElectricHeater, GasHeater, GenericThermostat, HeatPump, HeatSource, HydronicRadiator
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import HeatingMPCController
 from .ground_temp import ground_temperature
@@ -420,6 +427,56 @@ def build_heat_sources(
                     cooling_cop=sc.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP),
                     cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
                     heating_efficiency=sc.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY),
+                    heater_entity=entity,
+                    emitter_time_constant=tau_em,
+                )
+            )
+        elif src_type == SOURCE_TYPE_GENERIC_THERMOSTAT:
+            sources.append(
+                GenericThermostat(
+                    name=name,
+                    room=room,
+                    max_power=max_power,
+                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
+                    heater_entity=entity,
+                    emitter_time_constant=tau_em,
+                )
+            )
+        elif src_type in (SOURCE_TYPE_OIL_RADIATOR, SOURCE_TYPE_ELECTRIC_FLOOR):
+            # These are electric heaters with typology-specific emitter time constants
+            # defined in SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU; no separate class needed.
+            sources.append(
+                ElectricHeater(
+                    name=name,
+                    room=room,
+                    max_power=max_power,
+                    efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_EFFICIENCY),
+                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
+                    heater_entity=entity,
+                    emitter_time_constant=tau_em,
+                )
+            )
+        elif src_type == SOURCE_TYPE_GAS_HEATER:
+            sources.append(
+                GasHeater(
+                    name=name,
+                    room=room,
+                    max_power=max_power,
+                    efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_GAS_EFFICIENCY),
+                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
+                    heater_entity=entity,
+                    emitter_time_constant=tau_em,
+                )
+            )
+        elif src_type in (SOURCE_TYPE_HYDRONIC_RADIATOR, SOURCE_TYPE_HYDRONIC_FLOOR):
+            # hydronic_floor_heating is an alias with a longer default τ_em (3600 s vs 600 s),
+            # applied via SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU above.
+            sources.append(
+                HydronicRadiator(
+                    name=name,
+                    room=room,
+                    max_power=max_power,
+                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
                     heater_entity=entity,
                     emitter_time_constant=tau_em,
                 )
