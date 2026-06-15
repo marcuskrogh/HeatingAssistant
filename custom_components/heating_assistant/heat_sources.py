@@ -477,84 +477,37 @@ class HeatPump(HeatSource):
     def target_temperature(
         self,
         fraction: float,
-        internal_temp: float,
+        base_temp: float,
         outdoor_temp: float = 0.0,
-        k_sigmoid: float = 5.0,
     ) -> float:
         """
         Compute the climate-entity setpoint from the control fraction.
 
-        For **heating-only** heat pumps (``can_cool=False``) the mapping is
-        linear, matching the MPC's ``thermal_power`` model::
+        The setpoint is anchored to ``base_temp`` (the room's comfort
+        setpoint) rather than the HP's own internal temperature reading.
+        Anchoring to the comfort setpoint avoids the "chasing setpoint"
+        pathology where the setpoint rises together with the room temperature,
+        preventing the HP from ever closing the gap::
 
-            T_target = T_internal + fraction × max_temp_offset
+            T_target = base_temp + fraction × max_temp_offset
 
-        For **cooling-capable** heat pumps (``can_cool=True``) the MPC
-        predicts thermal output via the asymmetric sigmoid
-        ``smooth_thermal_power(u, T_out, k_sigmoid)``.  A naive linear gap
-        (``u × max_temp_offset``) is inconsistent with this prediction:
-        at mid-range fractions the sigmoid output can exceed the linear
-        prediction by 30–100 %, causing systematic over- or under-heating.
-
-        Instead the gap is derived by normalising the sigmoid's output by
-        the current capacity, so that a linearly-modulating HP delivers
-        exactly the power the MPC model predicts:
-
-          * heating (u > 0): ``gap = smooth_p / q_heat(T_out) × max_temp_offset``
-          * cooling (u < 0): ``gap = smooth_p / q_cool   × max_temp_offset``  (negative)
-          * idle   (u = 0):  ``gap = 0``  (setpoint equals internal → HP idles)
-
-        ``outdoor_temp < min_outdoor_temp`` is handled automatically:
-        ``smooth_thermal_power`` returns 0 in that case, giving a zero gap
-        and leaving the HP in an idle state.
+        Positive fractions push the setpoint above the comfort setpoint
+        (heating); negative fractions push it below (cooling); zero leaves
+        it at the comfort setpoint so the HP idles.
 
         Parameters
         ----------
         fraction : float
             Control signal clamped to ``[u_min, u_max]``.
             Positive → heating, negative → cooling, zero → idle.
-        internal_temp : float
-            Current temperature reading from the HP's own sensor [°C].
+        base_temp : float
+            Room comfort setpoint [°C]; the anchor for the offset.
         outdoor_temp : float
-            Outdoor temperature [°C]; used to compute the COP-adjusted
+            Accepted for API compatibility; not used in the formula.
             heating capacity ``q_heat(T_out)`` for gap normalisation.
-        k_sigmoid : float
-            Sigmoid sharpness; must match the value used by the MPC.
-            Defaults to 5.0 (the MPC's own default).
         """
         fraction = max(self.u_min, min(self.u_max, fraction))
-
-        if not self.can_cool:
-            # Heating-only: MPC uses thermal_power (linear in u).
-            # A linear temperature gap is therefore consistent.
-            return internal_temp + fraction * self.max_temp_offset
-
-        # can_cool HP: MPC uses smooth_thermal_power (asymmetric sigmoid).
-        # Derive the gap that makes a linearly-modulating HP deliver the
-        # same power the sigmoid predicts, so the coordinator and MPC model
-        # stay consistent across the full operating range.
-        smooth_p = self.smooth_thermal_power(fraction, outdoor_temp, k_sigmoid)
-
-        if smooth_p == 0.0:
-            return internal_temp  # idle: no gap → HP neither heats nor cools
-
-        cop_now = max(
-            1.0,
-            self._cop_scale * _T_SUPPLY_K
-            / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0),
-        )
-        q_heat = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max)
-        q_cool = self._q_cool_const
-
-        if smooth_p > 0.0:
-            gap_frac = (smooth_p / q_heat) if q_heat > 0.0 else 0.0
-            gap_frac = min(gap_frac, 1.0)
-        else:
-            # smooth_p < 0 (cooling); q_cool is a positive magnitude
-            gap_frac = (smooth_p / q_cool) if q_cool > 0.0 else 0.0
-            gap_frac = max(gap_frac, -1.0)
-
-        return internal_temp + gap_frac * self.max_temp_offset
+        return base_temp + fraction * self.max_temp_offset
 
     def smooth_thermal_power(
         self, u: float, outdoor_temp: float, k_base: float = 5.0,

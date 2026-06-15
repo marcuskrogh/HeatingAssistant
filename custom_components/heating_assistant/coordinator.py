@@ -3871,14 +3871,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 # For climate entities we need to ensure the heat pump
                 # actually modulates to the desired power output.
                 #
-                # Heat pumps regulate output based on the gap between
-                # their internal temperature reading and their setpoint.
-                # We read the heat pump's own temperature from the
-                # climate entity's ``current_temperature`` attribute and
-                # add an offset proportional to the desired power
-                # fraction so that the heat pump delivers the computed
-                # thermal output.
-                #
                 # Heat pump climate entities use a three-state strategy:
                 #   - fraction < 0  → cool mode (active cooling), with
                 #     "cool" preferred, then "dry", then "fan_only"
@@ -3901,21 +3893,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
                         continue
 
-                    # Read the HP's own internal temperature sensor.
-                    hp_internal_temp: Optional[float] = None
                     attrs = getattr(state, "attributes", {})
-                    raw = attrs.get("current_temperature")
-                    if raw is not None:
-                        try:
-                            hp_internal_temp = float(raw)
-                        except (ValueError, TypeError):
-                            pass
 
-                    base_temp = (
-                        hp_internal_temp
-                        if hp_internal_temp is not None
-                        else self.model.rooms[src.room].temperature
-                    )
+                    # Anchor the HP setpoint to the room's comfort setpoint
+                    # rather than the HP's own internal temperature reading.
+                    # Using the internal temperature creates a "chasing setpoint"
+                    # where the target rises as the room warms, preventing the HP
+                    # from reducing output as it approaches the desired temperature.
+                    room_setpoint = self.get_room_setpoint(src.room)
 
                     # Map the configured hvac_mode to the best HA mode string
                     # the entity actually supports.
@@ -3937,11 +3922,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     else:
                         hvac_mode_str = "heat"
 
-                    # Derive the climate-entity setpoint from the control fraction.
-                    # For can_cool HPs this uses the sigmoid-normalised gap so that
-                    # the HP delivers the same power the MPC model predicts; for
-                    # heating-only HPs it falls back to the simple linear offset.
-                    target_temp = src.target_temperature(fraction, base_temp, outdoor_temp)
+                    target_temp = src.target_temperature(fraction, room_setpoint, outdoor_temp)
 
                     await self.hass.services.async_call(
                         "climate",

@@ -94,8 +94,8 @@ class TestApplyActionsClimate:
     """climate.* entity handling with offset-based heat pump control."""
 
     @pytest.mark.asyncio
-    async def test_heat_pump_heat_mode_uses_internal_temp_plus_offset(self):
-        """hvac_mode='heat': setpoint = T_hp_internal + fraction × max_offset."""
+    async def test_heat_pump_heat_mode_uses_comfort_setpoint_plus_offset(self):
+        """hvac_mode='heat': setpoint = room_comfort_setpoint + fraction × max_offset."""
         hp = HeatPump(
             "hp1", "living_room", max_power=5000,
             max_temp_offset=5.0, hvac_mode="heat",
@@ -118,19 +118,13 @@ class TestApplyActionsClimate:
         assert len(calls) == 2
         assert calls[0].args[:2] == ("climate", "set_hvac_mode")
         assert calls[0].args[2]["hvac_mode"] == "heat"
-        # 23 + 0.6 × 5 = 26.0
+        # 25 (room_setpoint) + 0.6 × 5 = 28.0
         assert calls[1].args[:2] == ("climate", "set_temperature")
-        assert calls[1].args[2]["temperature"] == pytest.approx(26.0)
+        assert calls[1].args[2]["temperature"] == pytest.approx(28.0)
 
     @pytest.mark.asyncio
     async def test_heat_pump_heat_cool_mode_uses_heat_cool_string(self):
-        """hvac_mode='heat_cool': HA mode string 'heat_cool' when supported.
-
-        For can_cool HPs the setpoint gap is sigmoid-normalised (not the
-        naive linear fraction × max_temp_offset), so the expected temperature
-        is computed from HeatPump.target_temperature at the coordinator's
-        outdoor_temp (5.0 °C in this test harness).
-        """
+        """hvac_mode='heat_cool': HA mode string 'heat_cool' when supported."""
         hp = HeatPump(
             "hp1", "living_room", max_power=5000,
             max_temp_offset=5.0, hvac_mode="heat_cool",
@@ -153,10 +147,8 @@ class TestApplyActionsClimate:
 
         calls = hass.services.async_call.call_args_list
         assert calls[0].args[2]["hvac_mode"] == "heat_cool"
-        # Sigmoid-normalised gap: larger than linear (23 + 0.6×5=26 °C).
-        expected_temp = hp.target_temperature(0.6, 23.0, outdoor_temp=5.0)
-        assert calls[1].args[2]["temperature"] == pytest.approx(expected_temp)
-        assert expected_temp > 26.0  # sigmoid front-loads heating
+        # 25 (room_setpoint) + 0.6 × 5 = 28.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(28.0)
 
     @pytest.mark.asyncio
     async def test_heat_pump_heat_cool_falls_back_to_auto(self):
@@ -183,9 +175,8 @@ class TestApplyActionsClimate:
 
         calls = hass.services.async_call.call_args_list
         assert calls[0].args[2]["hvac_mode"] == "auto"
-        # Sigmoid-normalised gap (larger than linear 22 + 0.4×5 = 24 °C).
-        expected_temp = hp.target_temperature(0.4, 22.0, outdoor_temp=5.0)
-        assert calls[1].args[2]["temperature"] == pytest.approx(expected_temp)
+        # 25 (room_setpoint) + 0.4 × 5 = 27.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(27.0)
 
     @pytest.mark.asyncio
     async def test_heat_pump_heat_cool_negative_fraction_cools(self):
@@ -212,10 +203,8 @@ class TestApplyActionsClimate:
 
         calls = hass.services.async_call.call_args_list
         assert calls[0].args[2]["hvac_mode"] == "heat_cool"
-        # Sigmoid-normalised gap for cooling: more negative than linear (26 − 2.5 = 23.5 °C).
-        expected_temp = hp.target_temperature(-0.5, 26.0, outdoor_temp=5.0)
-        assert calls[1].args[2]["temperature"] == pytest.approx(expected_temp)
-        assert expected_temp < 23.5  # sigmoid front-loads cooling
+        # 22 (room_setpoint) + (-0.5) × 5 = 19.5
+        assert calls[1].args[2]["temperature"] == pytest.approx(19.5)
 
     @pytest.mark.asyncio
     async def test_heat_pump_heat_cool_zero_fraction_idles(self):
@@ -242,8 +231,8 @@ class TestApplyActionsClimate:
 
         calls = hass.services.async_call.call_args_list
         assert calls[0].args[2]["hvac_mode"] == "heat_cool"
-        # 24 + 0 × 5 = 24.0 (setpoint equals internal)
-        assert calls[1].args[2]["temperature"] == pytest.approx(24.0)
+        # 22 (room_setpoint) + 0 × 5 = 22.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(22.0)
 
     @pytest.mark.asyncio
     async def test_heat_pump_cool_mode_uses_cool_string(self):
@@ -270,9 +259,8 @@ class TestApplyActionsClimate:
 
         calls = hass.services.async_call.call_args_list
         assert calls[0].args[2]["hvac_mode"] == "cool"
-        # Sigmoid-normalised gap: deeper than linear (28 − 0.8×5 = 24 °C) for can_cool HP.
-        expected_temp = hp.target_temperature(-0.8, 28.0, outdoor_temp=5.0)
-        assert calls[1].args[2]["temperature"] == pytest.approx(expected_temp)
+        # 22 (room_setpoint) + (-0.8) × 5 = 18.0
+        assert calls[1].args[2]["temperature"] == pytest.approx(18.0)
 
     @pytest.mark.asyncio
     async def test_heat_pump_cool_mode_falls_back_to_dry(self):
@@ -347,12 +335,12 @@ class TestApplyActionsClimate:
         )
 
         temp_call = hass.services.async_call.call_args_list[1]
-        # 21 + 1.0 × 4 = 25.0
-        assert temp_call.args[2]["temperature"] == pytest.approx(25.0)
+        # 25 (room_setpoint) + 1.0 × 4 = 29.0
+        assert temp_call.args[2]["temperature"] == pytest.approx(29.0)
 
     @pytest.mark.asyncio
-    async def test_heat_pump_fallback_to_room_temp(self):
-        """When HP entity has no current_temperature, fall back to room temp."""
+    async def test_heat_pump_setpoint_ignores_entity_internal_temp(self):
+        """HP setpoint is always based on room_setpoint regardless of entity's current_temperature."""
         hp = HeatPump(
             "hp1", "living_room", max_power=5000,
             max_temp_offset=5.0, hvac_mode="heat",
@@ -364,7 +352,7 @@ class TestApplyActionsClimate:
             entity_states={
                 "climate.heat_pump": {
                     "state": "off",
-                    "attributes": {},
+                    "attributes": {},  # no current_temperature
                 },
             },
             room_setpoints={"living_room": 25.0},
@@ -372,8 +360,8 @@ class TestApplyActionsClimate:
         )
 
         temp_call = hass.services.async_call.call_args_list[1]
-        # 22 + 0.5 × 5 = 24.5
-        assert temp_call.args[2]["temperature"] == pytest.approx(24.5)
+        # 25 (room_setpoint) + 0.5 × 5 = 27.5
+        assert temp_call.args[2]["temperature"] == pytest.approx(27.5)
 
     @pytest.mark.asyncio
     async def test_non_heat_pump_climate_uses_internal_temp_plus_offset(self):

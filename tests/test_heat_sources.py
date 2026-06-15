@@ -14,7 +14,6 @@ from custom_components.heating_assistant.heat_sources import (
     _cop_at_temp,
     _soft_ceiling,
     _SOFT_CEIL_K,
-    _T_SUPPLY_K,
 )
 
 
@@ -205,28 +204,13 @@ class TestHeatPump:
         assert hp.u_max == 1.0
 
     def test_target_temperature_negative_fraction(self):
-        """Negative fraction drives setpoint below internal temp (cooling).
-
-        For can_cool HPs the gap is sigmoid-normalised, so the magnitude of
-        the cooling setpoint offset is larger than the naive linear gap
-        (fraction × max_temp_offset).  The exact value is derived from
-        smooth_thermal_power / q_cool × max_temp_offset.
-        """
+        """Negative fraction drives setpoint below base_temp (cooling): linear offset."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool",
                       max_temp_offset=5.0)
-        outdoor_temp = 0.0
         fraction = -0.5
-        result = hp.target_temperature(fraction, 25.0, outdoor_temp=outdoor_temp)
-        # Setpoint must be below internal temp (cooling direction).
-        assert result < 25.0
-        # Sigmoid front-loads cooling: gap should be larger than linear (−2.5 °C).
-        linear_gap = fraction * hp.max_temp_offset  # -2.5 °C
-        assert (result - 25.0) < linear_gap  # more negative than linear
-        # Verify consistency with smooth_thermal_power prediction.
-        smooth_p = hp.smooth_thermal_power(fraction, outdoor_temp)
-        expected_gap_frac = smooth_p / hp._q_cool_const  # negative
-        expected = 25.0 + expected_gap_frac * hp.max_temp_offset
-        assert result == pytest.approx(expected, rel=1e-6)
+        result = hp.target_temperature(fraction, 25.0)
+        # 25.0 + (-0.5) × 5 = 22.5
+        assert result == pytest.approx(22.5)
 
     def test_target_temperature_clamped_to_u_max(self):
         """Fraction above u_max is clamped (heat mode: u_max=1)."""
@@ -239,96 +223,6 @@ class TestHeatPump:
         hp = HeatPump("hp1", "living_room", max_power=5000.0, hvac_mode="cool",
                       max_temp_offset=5.0)
         assert hp.target_temperature(0.5, 25.0) == pytest.approx(25.0)
-
-    # -- sigmoid-normalised gap (can_cool HPs) ----------------------------
-
-    def test_target_temperature_can_cool_heating_sigmoid_consistent(self):
-        """For can_cool HPs, the heating gap is sigmoid-normalised so a
-        linearly-modulating HP delivers exactly what smooth_thermal_power predicts."""
-        hp = HeatPump(
-            "hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool",
-            max_temp_offset=5.0, cop_rated=3.5, cop_temp_ref=7.0, cooling_cop=2.5,
-        )
-        outdoor_temp = -5.0  # below rated: q_heat < q_heat_max (soft-ceiling inactive)
-        fraction = 0.5
-
-        target = hp.target_temperature(fraction, 20.0, outdoor_temp=outdoor_temp)
-        gap = target - 20.0
-
-        # Expected: gap / max_temp_offset × q_heat == smooth_thermal_power(u)
-        smooth_p = hp.smooth_thermal_power(fraction, outdoor_temp)
-        cop_now = max(
-            1.0,
-            hp._cop_scale * _T_SUPPLY_K
-            / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0),
-        )
-        q_heat = _soft_ceiling(hp._q_heat_base * cop_now, hp._q_heat_max)
-        delivered = (gap / hp.max_temp_offset) * q_heat
-        assert delivered == pytest.approx(smooth_p, rel=1e-6)
-
-        # Gap must be positive (heating) and GREATER than the naive linear gap
-        # (sigmoid is front-loaded for heating at intermediate fractions).
-        assert gap > 0.0
-        assert gap > fraction * hp.max_temp_offset
-
-    def test_target_temperature_can_cool_cooling_sigmoid_consistent(self):
-        """For can_cool HPs, the cooling gap is sigmoid-normalised so a
-        linearly-modulating HP delivers exactly what smooth_thermal_power predicts."""
-        hp = HeatPump(
-            "hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool",
-            max_temp_offset=5.0, cop_rated=3.5, cop_temp_ref=7.0, cooling_cop=2.5,
-        )
-        outdoor_temp = -5.0
-        fraction = -0.5
-
-        target = hp.target_temperature(fraction, 20.0, outdoor_temp=outdoor_temp)
-        gap = target - 20.0  # negative
-
-        # Expected: gap / max_temp_offset × q_cool == smooth_thermal_power(u) (negative)
-        smooth_p = hp.smooth_thermal_power(fraction, outdoor_temp)
-        delivered = (gap / hp.max_temp_offset) * hp._q_cool_const  # both negative
-        assert delivered == pytest.approx(smooth_p, rel=1e-6)
-
-        # Gap must be negative (cooling) with magnitude larger than naive linear.
-        assert gap < 0.0
-        assert gap < fraction * hp.max_temp_offset  # more negative than linear
-
-    def test_target_temperature_can_cool_outdoor_below_min(self):
-        """Below min_outdoor_temp, target equals internal (HP cannot operate)."""
-        hp = HeatPump(
-            "hp1", "living_room", max_power=5000.0, hvac_mode="heat_cool",
-            max_temp_offset=5.0, min_outdoor_temp=-15.0,
-        )
-        # smooth_thermal_power returns 0.0 below min_outdoor_temp → idle setpoint.
-        result = hp.target_temperature(1.0, 20.0, outdoor_temp=-20.0)
-        assert result == pytest.approx(20.0)
-
-    def test_target_temperature_heating_only_is_linear(self):
-        """Heating-only HPs keep the linear offset regardless of outdoor_temp."""
-        hp = HeatPump(
-            "hp1", "living_room", max_power=5000.0, hvac_mode="heat",
-            max_temp_offset=5.0,
-        )
-        # Linear: same at any outdoor temperature.
-        for outdoor in (-10.0, 0.0, 7.0, 15.0):
-            assert hp.target_temperature(0.5, 20.0, outdoor_temp=outdoor) == pytest.approx(22.5)
-
-    def test_target_temperature_can_cool_vs_heating_only_at_full_fraction(self):
-        """At fraction=1.0 both modes produce a gap close to max_temp_offset
-        (sigmoid saturation is >99% at k=5 for the heating side)."""
-        hp_heat = HeatPump(
-            "hp1", "living_room", max_power=5000.0, hvac_mode="heat",
-            max_temp_offset=5.0,
-        )
-        hp_hc = HeatPump(
-            "hp2", "living_room", max_power=5000.0, hvac_mode="heat_cool",
-            max_temp_offset=5.0,
-        )
-        outdoor_temp = -5.0
-        linear_target = hp_heat.target_temperature(1.0, 20.0, outdoor_temp=outdoor_temp)
-        sigmoid_target = hp_hc.target_temperature(1.0, 20.0, outdoor_temp=outdoor_temp)
-        # Sigmoid target is within 2% of the full linear offset at saturation.
-        assert sigmoid_target == pytest.approx(linear_target, rel=0.02)
 
     def test_cooling_power_default(self):
         """Cooling power = -(max_power / cop_rated) × cooling_cop × cooling_efficiency.
@@ -413,47 +307,24 @@ class TestHeatPump:
     # -- target_temperature unified (heat_cool mode) -----------------------
 
     def test_target_temperature_full_cooling(self):
-        """fraction=-1.0 gives a setpoint close to internal − max_temp_offset.
-
-        The sigmoid saturates at >98 % of q_cool at u=−1, so the gap is
-        within ~2 % of the full max_temp_offset magnitude.
-        """
+        """fraction=-1.0: setpoint = base_temp − max_temp_offset."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
                       hvac_mode="heat_cool")
-        result = hp.target_temperature(-1.0, 23.0)
-        # Direction: must be below internal.
-        assert result < 23.0
-        # Magnitude: within 2 % of the full offset (sigmoid saturation).
-        assert result == pytest.approx(18.0, rel=0.02)
-        # Consistency: gap produces sigmoid-predicted cooling.
-        gap = result - 23.0
-        smooth_p = hp.smooth_thermal_power(-1.0, 0.0)
-        expected_gap_frac = smooth_p / hp._q_cool_const
-        assert gap == pytest.approx(expected_gap_frac * hp.max_temp_offset, rel=1e-6)
+        # 23 + (-1.0) × 5 = 18.0
+        assert hp.target_temperature(-1.0, 23.0) == pytest.approx(18.0)
 
-    def test_target_temperature_zero_is_internal(self):
-        """fraction=0 → setpoint equals the internal temperature (idle, no gap)."""
+    def test_target_temperature_zero_is_base(self):
+        """fraction=0 → setpoint equals base_temp (comfort setpoint, HP idles)."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=5.0,
                       hvac_mode="heat_cool")
         assert hp.target_temperature(0.0, 23.0) == pytest.approx(23.0)
 
     def test_target_temperature_half_cooling(self):
-        """fraction=-0.5 gives a cooling setpoint consistent with smooth_thermal_power.
-
-        The sigmoid front-loads cooling, so the gap magnitude exceeds the
-        naive linear value (0.5 × max_temp_offset).
-        """
+        """fraction=-0.5: setpoint = base_temp − 0.5 × max_temp_offset (linear)."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0, max_temp_offset=4.0,
                       hvac_mode="heat_cool")
-        result = hp.target_temperature(-0.5, 24.0)
-        # Must be below internal (cooling) and below the linear result (22.0).
-        assert result < 24.0
-        assert result < 22.0  # deeper than linear 0.5 × 4 = 2 °C gap
-        # Verify sigmoid consistency.
-        gap = result - 24.0
-        smooth_p = hp.smooth_thermal_power(-0.5, 0.0)
-        expected_gap_frac = smooth_p / hp._q_cool_const
-        assert gap == pytest.approx(expected_gap_frac * hp.max_temp_offset, rel=1e-6)
+        # 24 + (-0.5) × 4 = 22.0
+        assert hp.target_temperature(-0.5, 24.0) == pytest.approx(22.0)
 
     # -- smooth_thermal_power ----------------------------------------------
 
