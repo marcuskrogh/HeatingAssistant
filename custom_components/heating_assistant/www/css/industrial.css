@@ -672,12 +672,12 @@
   .panel-nav {
     position: relative;
     flex-wrap: wrap;
-    padding: 0 12px;
+    padding: 8px 12px;
     gap: 0;
   }
 
   .panel-nav__brand {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     order: 1;
     padding-right: 12px;
   }
@@ -708,19 +708,17 @@
     font-size: 16px;
   }
 
-  /* Toggle button: full width, forces to next line on the left */
+  /* Toggle button: takes natural width, wraps to next line */
   .panel-nav__toggle {
     display: flex;
     order: 4;
-    flex-basis: 100%;
     margin: 6px 0;
   }
 
-  /* Page links below toggle, full width on the left */
+  /* Page links: full width on next line, hidden by default */
   .panel-nav__links {
     display: none;
     order: 5;
-    flex-basis: 100%;
     width: 100%;
     flex-direction: column;
     align-items: stretch;
