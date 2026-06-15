@@ -583,6 +583,11 @@ CONF_PERSISTED_SCHEDULES = "persisted_schedules"
 #: they survive a full Home Assistant restart, mirroring CONF_PERSISTED_SETPOINTS.
 CONF_PERSISTED_COMFORT_OFFSETS = "persisted_comfort_offsets"
 
+#: entry.data key that stores the per-room on/off toggle state set by the user
+#: so that rooms turned off (e.g. rooms without a heater) remain off after a
+#: full Home Assistant restart, mirroring CONF_PERSISTED_SETPOINTS.
+CONF_PERSISTED_ROOM_ENABLED = "persisted_room_enabled"
+
 # ---------------------------------------------------------------------------
 # System-identification experiments and stored datasets
 # ---------------------------------------------------------------------------
