@@ -532,14 +532,17 @@ function renderRoomList(container, connection, hass) {
     const grid = el('div', 'config-list-grid');
     list.forEach((room, i) => {
       const card = el('div', 'card card--clickable config-list-card');
-      const sources = (cfg.heat_sources || []).filter((s) => s.room === room.name).length;
+      const topLevelSources = (cfg.heat_sources || []).filter((s) => s.room === room.name).length;
+      const roomLevelSources = (room.heat_sources || []).length;
+      const sources = topLevelSources + roomLevelSources;
       const sensorCount = (room.temp_sensors || []).length || (room.temp_sensor ? 1 : 0);
+      const connectionCount = (room.connections || []).length;
       card.innerHTML = `
         <div class="config-list-card__name">${room.name || 'Room ' + (i + 1)}</div>
         <div class="config-list-card__meta">
-          <span>Setpoint ${fmt(room.setpoint, '°C', 22)}</span>
           <span>${sensorCount} sensor(s)</span>
           <span>${(room.windows || []).length} window(s)</span>
+          <span>${connectionCount} connection(s)</span>
           <span>${sources} heater(s)</span>
         </div>
         <div class="config-landing-card__chevron">›</div>
