@@ -296,9 +296,6 @@
   flex: none;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--text-dim);
-  border-radius: var(--radius-sm);
 }
 
 .live-dot {
@@ -312,7 +309,12 @@
 .live-dot--live {
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent);
-  animation: pulse 2s ease-in-out infinite;
+  animation: dot-pulse 2s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(0, 212, 170, 0.4); }
+  50%      { box-shadow: 0 0 8px rgba(0, 212, 170, 0.8), 0 0 14px rgba(0, 212, 170, 0.3); }
 }
 
 .live-dot--stopped {
@@ -837,9 +839,9 @@
   }
 
   .panel-nav__link {
-    padding: 8px 12px;
+    padding: 6px 10px;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .panel-nav__status {
