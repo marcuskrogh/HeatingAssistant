@@ -122,6 +122,8 @@
   padding-right: 20px;
   border-right: 1px solid var(--border);
   margin-right: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 /* Mobile hamburger toggle — hidden on desktop */
@@ -203,6 +205,7 @@
 /* Primary system control group — sits on the right side, after the fill */
 .panel-nav__controls {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 12px;
   padding-left: 4px;
@@ -290,12 +293,12 @@
 /* ── Live indicator (next to on/off button) ──────────────────────────── */
 .panel-nav__live-indicator {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--text-dim);
   border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
 }
 
 .live-dot {
@@ -726,11 +729,22 @@
     grid-template-columns: 1fr;
   }
 
-  /* Mobile navigation — grid layout for controlled row placement */
+  .tuning-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tuning-actions__btn {
+    width: 100%;
+  }
+}
+
+/* Navigation collapse — covers phones (portrait + landscape) and small tablets */
+@media (max-width: 1024px) {
   .panel-nav {
     position: relative;
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: 1fr auto;
     grid-template-rows: auto auto auto;
     align-items: center;
     padding: 8px 12px;
@@ -740,6 +754,7 @@
   .panel-nav__brand {
     grid-column: 1;
     grid-row: 1;
+    justify-self: start;
     padding-right: 12px;
     border-right: none;
     order: unset;
@@ -749,18 +764,15 @@
     font-size: 12px;
   }
 
-  /* Fill spacer — not needed in grid but keep for specificity */
   .panel-nav__fill {
-    grid-column: 2;
-    grid-row: 1;
-    display: block;
+    display: none;
     order: unset;
   }
 
-  /* ON/OFF button + live indicator on right of row 1 */
   .panel-nav__controls {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 1;
+    justify-self: end;
     width: auto;
     justify-content: flex-end;
     margin: 0;
@@ -782,17 +794,15 @@
     font-size: 16px;
   }
 
-  /* Toggle button: row 2, aligned left below brand */
   .panel-nav__toggle {
     display: inline-flex;
-    grid-column: 1 / -1;
+    grid-column: 1;
     grid-row: 2;
     justify-self: start;
     margin: 6px 0 0;
     order: unset;
   }
 
-  /* Page links: full width on row 3, hidden by default */
   .panel-nav__links {
     display: none;
     grid-column: 1 / -1;
@@ -821,15 +831,6 @@
 
   .panel-nav__status {
     margin: 0;
-  }
-
-  .tuning-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .tuning-actions__btn {
-    width: 100%;
   }
 }
 
