@@ -175,6 +175,13 @@ class HaIndustrialPanel extends HTMLElement {
       <div class="shell">
         <div id="top-bar"></div>
         <nav class="panel-nav" id="panel-nav">
+          <div class="panel-nav__links" id="nav-links">
+            <a class="panel-nav__link" href="#overview">OVERVIEW</a>
+            <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
+            <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
+            <a class="panel-nav__link" href="#tuning">TUNING</a>
+            <a class="panel-nav__link" href="#config">CONFIGURATION</a>
+          </div>
           <div class="panel-nav__brand">
             <svg class="panel-nav__logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
               <line x1="31" y1="52" x2="71" y2="52" stroke="#00d4aa" stroke-width="2.5" stroke-linecap="round" opacity="0.32"/>
@@ -184,15 +191,12 @@ class HaIndustrialPanel extends HTMLElement {
             </svg>
             <span class="panel-nav__name">HEATING ASSISTANT</span>
           </div>
-          <div class="panel-nav__links" id="nav-links">
-            <a class="panel-nav__link" href="#overview">OVERVIEW</a>
-            <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
-            <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
-            <a class="panel-nav__link" href="#tuning">TUNING</a>
-            <a class="panel-nav__link" href="#config">CONFIGURATION</a>
-          </div>
           <span class="panel-nav__fill"></span>
           <div class="panel-nav__controls">
+            <div class="panel-nav__live-indicator" id="live-indicator">
+              <span class="live-dot" id="live-dot"></span>
+              <span class="live-label" id="live-label">STOPPED</span>
+            </div>
             <button class="panel-nav__run-btn" id="run-btn" aria-label="Start or stop the heating assistant">
               ⏻
             </button>
@@ -256,6 +260,18 @@ class HaIndustrialPanel extends HTMLElement {
     }
 
     btn.classList.toggle('panel-nav__run-btn--running', this._systemRunning);
+
+    const dot = this.shadowRoot.getElementById('live-dot');
+    const label = this.shadowRoot.getElementById('live-label');
+    if (dot) {
+      dot.classList.toggle('live-dot--live', this._systemRunning);
+      dot.classList.toggle('live-dot--stopped', !this._systemRunning);
+    }
+    if (label) {
+      label.textContent = this._systemRunning ? 'LIVE' : 'STOPPED';
+      label.classList.toggle('live-label--live', this._systemRunning);
+      label.classList.toggle('live-label--stopped', !this._systemRunning);
+    }
   }
 
   async _toggleSystem() {
