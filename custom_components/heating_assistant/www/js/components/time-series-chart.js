@@ -15,7 +15,8 @@ const CHART_DEFAULTS = {
         padding: 12,
         usePointStyle: true,
         pointStyle: 'line',
-        filter: (item) => !item.text.startsWith('Above') && !item.text.startsWith('Below'),
+        filter: (item) => !item.text.startsWith('Above') && !item.text.startsWith('Below')
+          && !item.text.startsWith('Sensor Min'),
       },
     },
     tooltip: {
@@ -29,7 +30,8 @@ const CHART_DEFAULTS = {
       padding: 10,
       displayColors: true,
       boxPadding: 4,
-      filter: (item) => !item.dataset.label?.startsWith('Above') && !item.dataset.label?.startsWith('Below'),
+      filter: (item) => !item.dataset.label?.startsWith('Above') && !item.dataset.label?.startsWith('Below')
+        && !item.dataset.label?.startsWith('Sensor Min'),
     },
   },
   scales: {
@@ -324,6 +326,45 @@ export function makeDataset(label, data, color, options = {}) {
   if (options.segment) ds.segment = options.segment;
 
   return ds;
+}
+
+/** From multiple raw sensor histories, build min/max span points at every
+ *  timestamp where at least one sensor reports. Each sensor is forward-filled
+ *  so the band stays continuous between updates. */
+export function sensorHistoriesToMinMaxSpan(sensorSeries) {
+  if (!sensorSeries || sensorSeries.length === 0) return { min: [], max: [] };
+
+  const timeSet = new Set();
+  for (const series of sensorSeries) {
+    for (const p of series) {
+      if (p.y != null) timeSet.add(p.x);
+    }
+  }
+  const times = [...timeSet].sort((a, b) => a - b);
+  if (times.length === 0) return { min: [], max: [] };
+
+  const indices = sensorSeries.map(() => 0);
+  const lastValues = sensorSeries.map(() => null);
+  const min = [];
+  const max = [];
+
+  for (const t of times) {
+    const values = [];
+    for (let i = 0; i < sensorSeries.length; i++) {
+      const series = sensorSeries[i];
+      while (indices[i] < series.length && series[indices[i]].x <= t) {
+        if (series[indices[i]].y != null) lastValues[i] = series[indices[i]].y;
+        indices[i]++;
+      }
+      if (lastValues[i] != null) values.push(lastValues[i]);
+    }
+    if (values.length > 0) {
+      min.push({ x: t, y: Math.min(...values) });
+      max.push({ x: t, y: Math.max(...values) });
+    }
+  }
+
+  return { min, max };
 }
 
 export function historyToDataPoints(historyArray) {
