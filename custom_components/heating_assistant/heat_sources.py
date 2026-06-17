@@ -760,16 +760,18 @@ class HeatPump(HeatSource):
             # Degenerate case: fall back to linear heating-only model
             return q_heat * max(0.0, u)
 
-        # Adaptive sharpness: compensates for capacity asymmetry so that
-        # both u=+1 (heating) and u=-1 (cooling) saturate to ~σ(k_base)
-        # of their respective maximum capacities.
-        k = k_base + max(0.0, math.log(q_heat / q_cool))
-
-        # Offset that shifts the sigmoid so φ(0) = 0 exactly.
-        offset = math.log(q_cool / q_heat)
-
-        sigmoid_val = 1.0 / (1.0 + math.exp(-(k * u + offset)))
-        return (q_heat + q_cool) * sigmoid_val - q_cool
+        # Piecewise-linear power curve: heating delivers +q_heat·u for u ≥ 0 and
+        # cooling delivers q_cool·u (negative) for u < 0, with φ(0) = 0.
+        #
+        # This mirrors the linear heat-only model so that the *local* slope the
+        # MPC linearises around equals the *global* slope over the control
+        # range.  The previous logistic curve was steep near u = 0 and flat near
+        # the operating point, so its local tangent badly under-predicted the
+        # heat lost when the compressor was turned down — the linearised MPC
+        # then believed it could coast for free and rode the comfort boundary.
+        # ``k_base`` is retained for API compatibility but no longer shapes the
+        # curve.
+        return q_heat * u if u >= 0.0 else q_cool * u
 
     def control_for_power_fraction(
         self, power_fraction: float, outdoor_temp: float = 0.0, k_sigmoid: float = 5.0,
@@ -780,25 +782,12 @@ class HeatPump(HeatSource):
         ``power_fraction`` is the signed fraction of capacity: ``+pf`` →
         ``pf · Q_heat`` (heating), ``-pf`` → ``pf · Q_cool`` (cooling).  Returns
         the control input ``u`` (clamped to ``[u_min, u_max]``) that produces that
-        thermal power under the same sigmoid the controller uses.  Heat-only mode
-        (no cooling) keeps the linear identity of the base class.
+        thermal power under the same power curve the controller uses.
+
+        The power curve is now piecewise-linear (``φ(u) = q_heat·u`` for ``u ≥ 0``
+        and ``q_cool·u`` for ``u < 0``), so the control input that delivers a
+        signed fraction of capacity is simply that fraction — identical to the
+        linear heat-only identity.
         """
         pf = float(power_fraction)
-        if not self.can_cool:
-            return max(self.u_min, min(self.u_max, pf))
-        if pf == 0.0 or outdoor_temp < self.min_outdoor_temp:
-            return 0.0
-        cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
-        q_heat = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max)
-        q_cool = self._q_cool_const
-        if q_heat <= 0.0 or q_cool <= 0.0:
-            return max(self.u_min, min(self.u_max, pf))
-        # Target thermal power for the requested fraction of the relevant capacity.
-        target = pf * (q_heat if pf > 0.0 else q_cool)
-        k = k_sigmoid + max(0.0, math.log(q_heat / q_cool))
-        offset = math.log(q_cool / q_heat)
-        # Invert φ(u) = (q_heat + q_cool)·σ(k·u + offset) − q_cool.
-        s = (target + q_cool) / (q_heat + q_cool)
-        s = min(max(s, 1e-9), 1.0 - 1e-9)
-        u = (math.log(s / (1.0 - s)) - offset) / k
-        return max(self.u_min, min(self.u_max, u))
+        return max(self.u_min, min(self.u_max, pf))

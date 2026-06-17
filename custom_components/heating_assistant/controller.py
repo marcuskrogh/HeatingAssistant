@@ -913,13 +913,18 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                     q_heat = src.thermal_power(1.0, outdoor_temp)
                     q_cool = src._q_cool_const
                     if q_heat > 0.0 and q_cool > 0.0:
-                        k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
-                        offset_sig = math.log(q_cool / q_heat)
-                        sig_val = 1.0 / (1.0 + math.exp(-(k_sig * eff_u + offset_sig)))
-                        J[i, j] = (
-                            (q_heat + q_cool) * k_sig * sig_val * (1.0 - sig_val)
-                            * scale / self._C_cap[i]
-                        )
+                        # Piecewise-linear curve φ(u) = q_heat·u (u ≥ 0) /
+                        # q_cool·u (u < 0): the slope is constant in each region,
+                        # so the local linearisation matches the global behaviour.
+                        # At the u = 0 kink the analytic derivative is the
+                        # subgradient midpoint (matches a central difference).
+                        if eff_u > 0.0:
+                            slope = q_heat
+                        elif eff_u < 0.0:
+                            slope = q_cool
+                        else:
+                            slope = 0.5 * (q_heat + q_cool)
+                        J[i, j] = slope * scale / self._C_cap[i]
                     elif eff_u >= 0.0:
                         J[i, j] = src.thermal_power(1.0, outdoor_temp) * scale / self._C_cap[i]
                 else:
@@ -1242,13 +1247,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                 q_heat = src.thermal_power(1.0, outdoor_temp)
                 q_cool = src._q_cool_const
                 if q_heat > 0.0 and q_cool > 0.0:
-                    k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
-                    offset_sig = math.log(q_cool / q_heat)
-                    # Clamp to the feasible power range then invert the sigmoid.
-                    q_clamped = max(-q_cool, min(q_heat, q_req / scale))
-                    sig_target = (q_clamped + q_cool) / (q_heat + q_cool)
-                    sig_target = max(1e-9, min(1.0 - 1e-9, sig_target))
-                    eff_u_eq = (math.log(sig_target / (1.0 - sig_target)) - offset_sig) / k_sig
+                    # Invert the piecewise-linear curve: heating (q_req ≥ 0) uses
+                    # the q_heat slope, cooling (q_req < 0) uses the q_cool slope.
+                    if q_req >= 0.0:
+                        eff_u_eq = q_req / q_heat
+                    else:
+                        eff_u_eq = q_req / q_cool
                     u_eq[j] = max(-1.0, min(1.0, eff_u_eq / scale))
                 else:
                     # Degenerate: fall back to linear inverse.
