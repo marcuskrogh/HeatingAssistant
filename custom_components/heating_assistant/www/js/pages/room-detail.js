@@ -1,4 +1,4 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs } from '../components/time-series-chart.js';
+import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js';
 import { createGauge, updateGauge } from '../components/gauge.js';
 import { createClimateCard } from '../components/climate-card.js';
 import { createCountdown } from '../components/countdown.js';
@@ -438,9 +438,10 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     connection.getForecasts(forecastHours),
   ]);
 
-  // Fetch individual raw sensor histories when the room has multiple sensors.
+  // Fetch raw sensor histories and build a min/max span when the room has
+  // multiple configured temperature sensors.
   const slugify = (name) => (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-  let rawSensorDatasets = [];
+  let sensorSpan = null;
   try {
     const modelCfg = await connection.getModelConfig();
     const roomCfg = modelCfg?.rooms?.find((r) => slugify(r.name) === room.slug);
@@ -453,16 +454,17 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     }
     if (rawSensorEntities.length > 1) {
       const rawHistory = await connection.getHistory(rawSensorEntities, historyHours);
+      const sensorSeries = [];
       for (const entityId of rawSensorEntities) {
         const pts = historyToDataPoints(rawHistory[entityId]);
-        if (pts.length > 0) {
-          const label = entityId.replace(/^sensor\./, '').replace(/_/g, ' ');
-          rawSensorDatasets.push({ label, data: pts });
-        }
+        if (pts.length > 0) sensorSeries.push(pts);
+      }
+      if (sensorSeries.length > 0) {
+        sensorSpan = sensorHistoriesToMinMaxSpan(sensorSeries);
       }
     }
   } catch (e) {
-    // Graceful degradation: skip raw sensor dots if config fetch fails.
+    // Graceful degradation: skip the sensor span if config fetch fails.
   }
 
   // Seed lastRunTs so the first state-change event that matches the initial
@@ -532,7 +534,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     tempForecastNonlinear, tempForecastLinearised,
     constraintUpperHistory, constraintUpperForecast,
     constraintLowerHistory, constraintLowerForecast,
-    rawSensorDatasets,
+    sensorSpan,
   );
   buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
@@ -583,18 +585,18 @@ function buildTemperatureChart(
   forecastNonlinear, forecastLinearised,
   constraintUpperHistory, constraintUpperForecast,
   constraintLowerHistory, constraintLowerForecast,
-  rawSensorDatasets,
+  sensorSpan,
 ) {
   const combinedSetpoint = [...setpointHistory, ...setpointForecast];
   const combinedUpper = [...constraintUpperHistory, ...constraintUpperForecast];
   const combinedLower = [...constraintLowerHistory, ...constraintLowerForecast];
 
-  const rawPts = rawSensorDatasets ? rawSensorDatasets.map((r) => r.data) : [];
+  const spanPts = sensorSpan ? [sensorSpan.min, sensorSpan.max] : [];
   const allData = [
     filteredHistory, measuredHistory,
     combinedSetpoint, forecastNonlinear, forecastLinearised,
     combinedUpper, combinedLower,
-    ...rawPts,
+    ...spanPts,
   ];
   const { yMin, yMax } = computeYLimits(allData, []);
 
@@ -646,20 +648,19 @@ function buildTemperatureChart(
     );
   }
 
-  if (rawSensorDatasets && rawSensorDatasets.length > 0) {
-    for (const raw of rawSensorDatasets) {
-      datasets.push(
-        makeDataset(raw.label, raw.data, 'rgba(79, 195, 247, 0.35)', {
-          borderWidth: 0,
-          pointRadius: 2.5,
-          pointHoverRadius: 4,
-          pointBackgroundColor: 'rgba(79, 195, 247, 0.35)',
-          pointBorderColor: 'rgba(79, 195, 247, 0.35)',
-          showLine: false,
-          order: 10,
-        })
-      );
-    }
+  if (sensorSpan && sensorSpan.min.length > 0 && sensorSpan.max.length > 0) {
+    datasets.push(
+      makeDataset('Sensor Min', sensorSpan.min, 'transparent', {
+        borderWidth: 0, pointRadius: 0, order: 9,
+      }),
+      makeDataset('Sensor Range', sensorSpan.max, 'rgba(79, 195, 247, 0.35)', {
+        borderWidth: 0,
+        pointRadius: 0,
+        fill: '-1',
+        backgroundColor: 'rgba(79, 195, 247, 0.18)',
+        order: 9,
+      })
+    );
   }
 
   chart.render(datasets, { yMin, yMax });
