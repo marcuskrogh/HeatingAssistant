@@ -2918,11 +2918,12 @@ class HeatingMPCController:
     ) -> List[Dict[str, float]]:
         """Solar gain forecast using the geometric solar model.
 
-        Returns N+1 entries where solar_seq[k] = solar at now + k * dt
-        for k = 0, ..., N.
+        Returns N+1 entries where solar_seq[k] = solar gains computed with
+        sun position at now + k * dt, for k = 0, ..., N.
 
-        * k = 0 maps to the current solar gains.
-        * k = 1 ... N-1 supply the OCP horizon steps 1 ... N-1.
+        * k = 0 uses current measured GHI/cloud (ghi_now, cloud_cover_now).
+        * k >= 1 uses ghi_forecast[k-1] / cloud_forecast[k-1], which are
+          interpolated at now + k*dt, matching the sun position time.
         * k = N is one step beyond the OCP horizon for visualisation.
 
         Intensity per step follows a precedence: forecast GHI [W/m²] (decomposed
@@ -2934,8 +2935,12 @@ class HeatingMPCController:
         schedules = []
         for k in range(self._horizon + 1):  # N+1 entries: k = 0 ... N
             t = now + timedelta(seconds=self._dt * k)
-            g = select_ghi_for_step(ghi_forecast, k, fallback=ghi_now)
-            cc = _select_cloud_for_step(cloud_forecast, k, fallback=cloud_cover_now)
+            if k == 0:
+                g = ghi_now
+                cc = cloud_cover_now
+            else:
+                g = select_ghi_for_step(ghi_forecast, k - 1, fallback=ghi_now)
+                cc = _select_cloud_for_step(cloud_forecast, k - 1, fallback=cloud_cover_now)
             schedules.append({
                 name: self._room_gain(name, t, cc, g)
                 for name in self._system._room_list

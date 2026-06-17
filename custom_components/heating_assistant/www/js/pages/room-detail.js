@@ -438,6 +438,33 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     connection.getForecasts(forecastHours),
   ]);
 
+  // Fetch individual raw sensor histories when the room has multiple sensors.
+  const slugify = (name) => (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  let rawSensorDatasets = [];
+  try {
+    const modelCfg = await connection.getModelConfig();
+    const roomCfg = modelCfg?.rooms?.find((r) => slugify(r.name) === room.slug);
+    let rawSensorEntities = [];
+    if (roomCfg) {
+      rawSensorEntities = Array.isArray(roomCfg.temp_sensors) ? [...roomCfg.temp_sensors] : [];
+      if (roomCfg.temp_sensor && !rawSensorEntities.includes(roomCfg.temp_sensor)) {
+        rawSensorEntities.unshift(roomCfg.temp_sensor);
+      }
+    }
+    if (rawSensorEntities.length > 1) {
+      const rawHistory = await connection.getHistory(rawSensorEntities, historyHours);
+      for (const entityId of rawSensorEntities) {
+        const pts = historyToDataPoints(rawHistory[entityId]);
+        if (pts.length > 0) {
+          const label = entityId.replace(/^sensor\./, '').replace(/_/g, ' ');
+          rawSensorDatasets.push({ label, data: pts });
+        }
+      }
+    }
+  } catch (e) {
+    // Graceful degradation: skip raw sensor dots if config fetch fails.
+  }
+
   // Seed lastRunTs so the first state-change event that matches the initial
   // MPC timestamp is treated as a no-op rather than an immediate re-fetch.
   lastRunTs.value = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
@@ -505,6 +532,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     tempForecastNonlinear, tempForecastLinearised,
     constraintUpperHistory, constraintUpperForecast,
     constraintLowerHistory, constraintLowerForecast,
+    rawSensorDatasets,
   );
   buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
@@ -555,15 +583,18 @@ function buildTemperatureChart(
   forecastNonlinear, forecastLinearised,
   constraintUpperHistory, constraintUpperForecast,
   constraintLowerHistory, constraintLowerForecast,
+  rawSensorDatasets,
 ) {
   const combinedSetpoint = [...setpointHistory, ...setpointForecast];
   const combinedUpper = [...constraintUpperHistory, ...constraintUpperForecast];
   const combinedLower = [...constraintLowerHistory, ...constraintLowerForecast];
 
+  const rawPts = rawSensorDatasets ? rawSensorDatasets.map((r) => r.data) : [];
   const allData = [
     filteredHistory, measuredHistory,
     combinedSetpoint, forecastNonlinear, forecastLinearised,
     combinedUpper, combinedLower,
+    ...rawPts,
   ];
   const { yMin, yMax } = computeYLimits(allData, []);
 
@@ -613,6 +644,22 @@ function buildTemperatureChart(
         fill: { target: 'start', above: 'rgba(229,115,115,0.12)', below: 'transparent' },
       })
     );
+  }
+
+  if (rawSensorDatasets && rawSensorDatasets.length > 0) {
+    for (const raw of rawSensorDatasets) {
+      datasets.push(
+        makeDataset(raw.label, raw.data, 'rgba(79, 195, 247, 0.35)', {
+          borderWidth: 0,
+          pointRadius: 2.5,
+          pointHoverRadius: 4,
+          pointBackgroundColor: 'rgba(79, 195, 247, 0.35)',
+          pointBorderColor: 'rgba(79, 195, 247, 0.35)',
+          showLine: false,
+          order: 10,
+        })
+      );
+    }
   }
 
   chart.render(datasets, { yMin, yMax });

@@ -1843,7 +1843,9 @@ class TestSolarGhiThreading:
     def test_forecast_solar_per_step_fallback(self):
         ctrl = self._windowed_controller()
         now = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)
-        # Step 0 uses forecast GHI; later steps have None → fall back to cloud.
+        # k=0 uses ghi_now=500; k=1 uses ghi_forecast[0]=500 (same GHI, different
+        # sun position 15 min later); k=2 uses ghi_forecast[1]=None → falls back to
+        # cloud_cover_now via ghi_now fallback.
         schedules = ctrl._forecast_solar(
             now,
             cloud_forecast=[1.0, 1.0, 1.0, 1.0],
@@ -1851,8 +1853,11 @@ class TestSolarGhiThreading:
             ghi_forecast=[500.0, None, None, None],
             ghi_now=500.0,
         )
-        # k=0 GHI path vs k=1 heavy-cloud clear-sky path → different gains.
+        # k=0 and k=1 both use GHI=500 but differ by sun position (15 min apart).
         g0 = schedules[0]["living_room"]
         g1 = schedules[1]["living_room"]
-        assert g0 > 0.0 and g1 >= 0.0
+        # k=2 uses ghi_forecast[1]=None → fallback to ghi_now=500, still GHI path.
+        g2 = schedules[2]["living_room"]
+        assert g0 > 0.0 and g1 >= 0.0 and g2 >= 0.0
+        # All steps use GHI=500 but differ by sun position.
         assert abs(g0 - g1) > 1e-9
