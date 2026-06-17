@@ -913,13 +913,18 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                     q_heat = src.thermal_power(1.0, outdoor_temp)
                     q_cool = src._q_cool_const
                     if q_heat > 0.0 and q_cool > 0.0:
-                        k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
-                        offset_sig = math.log(q_cool / q_heat)
-                        sig_val = 1.0 / (1.0 + math.exp(-(k_sig * eff_u + offset_sig)))
-                        J[i, j] = (
-                            (q_heat + q_cool) * k_sig * sig_val * (1.0 - sig_val)
-                            * scale / self._C_cap[i]
-                        )
+                        # Piecewise-linear curve φ(u) = q_heat·u (u ≥ 0) /
+                        # q_cool·u (u < 0): the slope is constant in each region,
+                        # so the local linearisation matches the global behaviour.
+                        # At the u = 0 kink the analytic derivative is the
+                        # subgradient midpoint (matches a central difference).
+                        if eff_u > 0.0:
+                            slope = q_heat
+                        elif eff_u < 0.0:
+                            slope = q_cool
+                        else:
+                            slope = 0.5 * (q_heat + q_cool)
+                        J[i, j] = slope * scale / self._C_cap[i]
                     elif eff_u >= 0.0:
                         J[i, j] = src.thermal_power(1.0, outdoor_temp) * scale / self._C_cap[i]
                 else:
@@ -1242,13 +1247,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
                 q_heat = src.thermal_power(1.0, outdoor_temp)
                 q_cool = src._q_cool_const
                 if q_heat > 0.0 and q_cool > 0.0:
-                    k_sig = self._k_sigmoid + max(0.0, math.log(q_heat / q_cool))
-                    offset_sig = math.log(q_cool / q_heat)
-                    # Clamp to the feasible power range then invert the sigmoid.
-                    q_clamped = max(-q_cool, min(q_heat, q_req / scale))
-                    sig_target = (q_clamped + q_cool) / (q_heat + q_cool)
-                    sig_target = max(1e-9, min(1.0 - 1e-9, sig_target))
-                    eff_u_eq = (math.log(sig_target / (1.0 - sig_target)) - offset_sig) / k_sig
+                    # Invert the piecewise-linear curve: heating (q_req ≥ 0) uses
+                    # the q_heat slope, cooling (q_req < 0) uses the q_cool slope.
+                    if q_req >= 0.0:
+                        eff_u_eq = q_req / q_heat
+                    else:
+                        eff_u_eq = q_req / q_cool
                     u_eq[j] = max(-1.0, min(1.0, eff_u_eq / scale))
                 else:
                     # Degenerate: fall back to linear inverse.
@@ -1591,20 +1595,41 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             bid_set = set(bid_list)
             n_bid = len(bid_list)
 
-            # Unidirectional sources: linear term on absolute u.
+            # Non-bidirectional sources (pure heating-only or pure cooling-only):
+            # price the absolute draw directly on the input variable (with sign change
+            # for cooling-only so that more negative u increases the cost).
+            # Bidirectional sources must *not* receive a direct price term on their u;
+            # their electricity cost is applied exclusively via the slacks below.
             for k in range(N):
                 p_k = float(price_arr[min(k, n_price - 1)])
                 for i in range(nu):
                     if i not in bid_set:
-                        c_h = float(elec_heat[i]) * 1e-3  # W → kW for €/kWh pricing
-                        f[k * nu + i] += price_weight * p_k * c_h * dt_h
+                        # Recover physical limits to decide direction (u bounds here are
+                        # deviation; add u_ss to obtain physical actuator range).
+                        phys_u_max_i = float(u_max_np[i] + u_ss_vec[i])
+                        if phys_u_max_i > 0.0:
+                            # Positive commands (heating) consume elec_heat per +u
+                            c = float(elec_heat[i]) * 1e-3
+                            sign = +1.0
+                        else:
+                            # Negative commands (cooling) consume elec_cool per |u|
+                            # To charge cost when u becomes more negative, use negative gradient.
+                            c = (float(elec_cool[i]) if elec_cool is not None
+                                 else float(elec_heat[i])) * 1e-3
+                            sign = -1.0
+                        f[k * nu + i] += price_weight * p_k * (sign * c) * dt_h
 
             if n_bid == 0:
                 result = self._backend.solve(
                     QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
                 )
             else:
-                # Bidirectional sources: Z = [U_abs; ε; S⁺; S⁻].
+                # Bidirectional (heat+cool) sources: price is applied *exclusively* to the
+                # slack variables s⁺ (heating draw) and s⁻ (cooling draw).  Their u variable
+                # in the U block receives *no* direct electricity price term (the loop above
+                # skipped them).  The equality u = s⁺ − s⁻ makes the effective cost
+                # π · (c_h s⁺ + c_c s⁻) = π · c · |u| for the active direction.
+                # Pure uni sources were handled above and must not appear here.
                 n_S = N * n_bid
                 n_Z_aug = n_U + n_eps + 2 * n_S
 
@@ -2128,9 +2153,13 @@ class HeatingMPCController:
         self._elec_cool: np.ndarray = np.array(
             [src.elec_per_unit_cool for src in heat_sources], dtype=float
         )
-        # Bidirectional mask: sources whose u_min < 0 need slack vars.
+        # Bidirectional mask: sources that can act in *both* directions (u_min < 0 and u_max > 0).
+        # Only these require slack variables (s⁺, s⁻) so that a single u variable can represent
+        # either heating or cooling while electricity price is charged on the absolute draw via
+        # the slacks. Pure heating-only or cooling-only sources are priced directly on their
+        # (signed) input variable and must not appear in the slack price terms.
         self._bid_mask: np.ndarray = np.array(
-            [src.u_min < 0 for src in heat_sources], dtype=bool
+            [(src.u_min < 0 and src.u_max > 0) for src in heat_sources], dtype=bool
         )
 
         # ── Warm-start / bookkeeping ─────────────────────────────────────

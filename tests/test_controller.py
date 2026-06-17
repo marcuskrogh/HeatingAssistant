@@ -1218,12 +1218,16 @@ class TestHeatingMPCController:
             outdoor_temp=20.0, solar_gains={"living": 0.0}, now=now,
         )
 
-        # The MPC must substantially reduce cooling (action well above -0.5).
+        # The MPC must substantially reduce cooling from full power (-1.0).
         # The buggy transposed-Ad version returned -0.65 because it could not
         # see the filter state driving the temperature out of the comfort band.
-        assert actions["hp"] > -0.5, (
-            f"Expected cooling to be reduced when filter state drives temperature "
-            f"below comfort; got {actions['hp']:.4f} (buggy version: ~-0.65)"
+        # With the linear heat-pump power curve the cooling gain no longer
+        # saturates near u = -1, so the calibrated reduction settles a touch
+        # below -0.5 (≈45 % cut) rather than the sigmoid model's over-back-off.
+        assert actions["hp"] > -0.6, (
+            f"Expected cooling to be substantially reduced when filter state "
+            f"drives temperature below comfort; got {actions['hp']:.4f} "
+            f"(buggy version: ~-0.65)"
         )
 
 
@@ -2002,3 +2006,68 @@ class TestPriceAwareAbsoluteEnergyPricing:
         preds = ctrl.linearised_predictions
         assert actions["heater"] > 0.05
         assert preds[0]["living_room"] > 19.5
+
+
+class TestHeatPumpLinearPowerCurve:
+    """The heat-pump u→power curve is linear so the MPC linearisation is
+    consistent with the nonlinear plant (the old front-loaded sigmoid made the
+    linearised prediction diverge from reality and ride the comfort boundary)."""
+
+    def _make_ctrl(self, mode: str):
+        room = Room(
+            "living_room", 5_000_000.0, 0.03,
+            air_temperature=20.0, setpoint=21.0, comfort_offset=2.0,
+        )
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "living_room", max_power=3000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, cooling_cop=2.5, hvac_mode=mode,
+        )
+        return HeatingMPCController(
+            model, [hp], horizon=24, dt=900,
+            tracking_weight=0.0, energy_weight=0.0,
+            soft_constraint_weight=10.0, energy_price_weight=1.0,
+        )
+
+    def test_heat_cool_linear_and_nonlinear_predictions_agree(self):
+        """In heat/cool mode the linearised forecast the MPC optimises against
+        must track the nonlinear rollout.  The old sigmoid model made the
+        linear forecast claim the room held ~3 °C warmer than reality, so the
+        controller under-heated and the room rode/violated the lower bound."""
+        ctrl = self._make_ctrl("heat_cool")
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        prices = [round(0.30 + 0.001 * k, 4) for k in range(24)]
+        ctrl.compute(
+            outdoor_temp=-18.0, now=now,
+            outdoor_forecast=[-18.0] * 24, price_forecast=prices,
+        )
+        lin = [p["living_room"] for p in ctrl.linearised_predictions]
+        nl = [p["living_room"] for p in ctrl.predictions]
+        max_div = max(abs(a - b) for a, b in zip(lin, nl))
+        assert max_div < 0.3, (
+            f"linear vs nonlinear prediction diverged by {max_div:.2f} °C "
+            f"(heat/cool sigmoid bug); lin={[round(x,2) for x in lin[:6]]} "
+            f"nl={[round(x,2) for x in nl[:6]]}"
+        )
+
+    def test_heat_cool_matches_heat_only_under_cold_load(self):
+        """A heat/cool pump and a heat-only pump must plan the same first
+        action and forecast for an identical heating-only situation."""
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        prices = [round(0.30 + 0.001 * k, 4) for k in range(24)]
+        results = {}
+        for mode in ("heat", "heat_cool"):
+            ctrl = self._make_ctrl(mode)
+            actions = ctrl.compute(
+                outdoor_temp=-18.0, now=now,
+                outdoor_forecast=[-18.0] * 24, price_forecast=prices,
+            )
+            results[mode] = (
+                actions["hp"],
+                [p["living_room"] for p in ctrl.linearised_predictions],
+            )
+        u_heat, pred_heat = results["heat"]
+        u_cool, pred_cool = results["heat_cool"]
+        assert abs(u_heat - u_cool) < 0.05
+        max_div = max(abs(a - b) for a, b in zip(pred_heat, pred_cool))
+        assert max_div < 0.3, f"heat vs heat_cool forecast diverged {max_div:.2f} °C"
