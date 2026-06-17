@@ -182,10 +182,17 @@ function textField(obj, key, label, { hint = '', placeholder = '' } = {}) {
 function selectField(obj, key, label, options, { hint = '', def, onChange } = {}) {
   const group = el('div', 'form-group');
   const current = obj[key] != null ? obj[key] : def;
+  const values = options.map((o) => typeof o === 'object' ? o.value : o);
+  // If the stored value is stale (not in the options list), snap to the first
+  // valid option so the visible selection always reflects what will be saved.
+  const effectiveCurrent = values.length > 0 && !values.some((v) => String(v) === String(current))
+    ? values[0]
+    : current;
+  if (effectiveCurrent !== current) obj[key] = String(effectiveCurrent);
   const opts = options.map((o) => {
     const value = typeof o === 'object' ? o.value : o;
     const text = typeof o === 'object' ? o.label : prettify(o);
-    const sel = String(value) === String(current) ? ' selected' : '';
+    const sel = String(value) === String(effectiveCurrent) ? ' selected' : '';
     return `<option value="${value}"${sel}>${text}</option>`;
   }).join('');
   group.innerHTML = `

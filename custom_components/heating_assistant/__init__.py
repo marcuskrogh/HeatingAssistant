@@ -692,8 +692,7 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                 return data.get(key, default)
 
             rooms = _merged(CONF_ROOMS, []) or []
-            # Heat sources follow the coordinator's data-first precedence.
-            sources = data.get(CONF_HEAT_SOURCES) or options.get(CONF_HEAT_SOURCES) or []
+            sources = _merged(CONF_HEAT_SOURCES, []) or []
 
             system = {
                 CONF_OUTDOOR_TEMP_ENTITY: _merged(CONF_OUTDOOR_TEMP_ENTITY) or "",
@@ -2896,9 +2895,16 @@ def _register_services(hass: HomeAssistant) -> None:
                 exc_info=True,
             )
 
-        new_data = _migrate_room_name_data(
-            {**dict(entry.data), CONF_ROOMS: rooms}, renames
-        )
+        # Build migration bases.  Heat sources may live exclusively in
+        # entry.options (options-first write path), so promote them into the
+        # data dict before migration so CONF_HEAT_SOURCES links are always
+        # updated regardless of which store holds them.
+        data_base = dict(entry.data)
+        if CONF_HEAT_SOURCES not in data_base and CONF_HEAT_SOURCES in entry.options:
+            data_base[CONF_HEAT_SOURCES] = entry.options[CONF_HEAT_SOURCES]
+        data_base[CONF_ROOMS] = rooms
+
+        new_data = _migrate_room_name_data(data_base, renames)
         new_options = _migrate_room_name_data(
             {**dict(entry.options), CONF_ROOMS: rooms}, renames
         )
