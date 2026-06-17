@@ -1861,3 +1861,144 @@ class TestSolarGhiThreading:
         assert g0 > 0.0 and g1 >= 0.0 and g2 >= 0.0
         # All steps use GHI=500 but differ by sun position.
         assert abs(g0 - g1) > 1e-9
+
+
+class TestPriceAwareAbsoluteEnergyPricing:
+    """Price-aware MPC charges absolute electrical draw (u_abs), not u_dev."""
+
+    def _make_ctrl(self, room_temp: float, horizon: int = 16):
+        room = Room(
+            "living_room",
+            5_000_000.0,
+            0.05,
+            air_temperature=room_temp,
+            setpoint=21.0,
+            comfort_offset=2.0,
+        )
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "living_room", max_power=6000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, cooling_cop=2.5, hvac_mode="heat",
+        )
+        return HeatingMPCController(
+            model, [hp], horizon=horizon, dt=900,
+            tracking_weight=0.0,
+            energy_weight=0.0,
+            soft_constraint_weight=10.0,
+            energy_price_weight=1.0,
+        )
+
+    def test_cheap_tariff_triggers_proactive_heating_before_lower_bound(self):
+        """With cheap prices now and a cold forecast, the MPC should heat
+        proactively instead of coasting to the comfort lower bound."""
+        ctrl = self._make_ctrl(room_temp=19.1)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        outdoor_fc = [-8.0] * 16
+        prices = [0.05] * 8 + [0.50] * 8
+        actions = ctrl.compute(
+            outdoor_temp=-8.0, now=now,
+            outdoor_forecast=outdoor_fc, price_forecast=prices,
+        )
+        preds = ctrl.linearised_predictions
+        lower_bound = 19.0
+        # Proactive heating: first-step action is materially non-zero and the
+        # near-term prediction stays clearly inside the corridor.
+        assert actions["hp"] > 0.05
+        assert preds[0]["living_room"] > lower_bound + 0.5
+        assert all(p["living_room"] > lower_bound + 0.3 for p in preds[:4])
+
+    def test_rising_price_monotonic_fall_heats_early_not_at_boundary(self):
+        """User scenario: temperature falls toward the lower bound while
+        electricity prices rise monotonically.  The MPC must heat during the
+        cheap early steps and stay off the bound — not coast to the edge and
+        only heat once the constraint is reached at peak prices."""
+        room = Room(
+            "living_room", 5_000_000.0, 0.05,
+            air_temperature=20.5, setpoint=21.0, comfort_offset=2.0,
+        )
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "living_room", max_power=6000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, cooling_cop=2.5, hvac_mode="heat",
+        )
+        horizon = 24
+        ctrl = HeatingMPCController(
+            model, [hp], horizon=horizon, dt=900,
+            tracking_weight=0.0, energy_weight=0.0,
+            soft_constraint_weight=10.0, energy_price_weight=1.0,
+        )
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        outdoor_fc = [-6.0] * horizon
+        prices = [round(0.10 + 0.02 * k, 3) for k in range(horizon)]
+        actions = ctrl.compute(
+            outdoor_temp=-6.0, now=now,
+            outdoor_forecast=outdoor_fc, price_forecast=prices,
+        )
+        preds = ctrl.linearised_predictions
+        sched = ctrl.heating_schedule
+        lower_bound = 19.0
+        half = horizon // 2
+
+        # Heat immediately at the cheapest step, not only after hitting the bound.
+        assert actions["hp"] > 0.05
+        assert list(sched[0].values())[0] > 30.0
+
+        # First half of the horizon: stay clearly inside the corridor.
+        assert all(p["living_room"] > lower_bound + 0.2 for p in preds[:half])
+
+        # Boundary contact (if any) must come late, not around the midpoint.
+        first_at_bound = next(
+            (k for k, p in enumerate(preds) if p["living_room"] <= lower_bound + 0.03),
+            None,
+        )
+        if first_at_bound is not None:
+            assert first_at_bound > half
+
+    def test_no_price_preserves_boundary_riding_zone_control(self):
+        """Without price awareness the controller may ride the corridor edge."""
+        ctrl = self._make_ctrl(room_temp=19.1)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        outdoor_fc = [-8.0] * 16
+        ctrl.compute(
+            outdoor_temp=-8.0, now=now,
+            outdoor_forecast=outdoor_fc, price_forecast=None,
+        )
+        preds = ctrl.linearised_predictions
+        lower_bound = 19.0
+        # Zone control without price: minimal heating, temperature near bound.
+        assert ctrl._mpc_actions["hp"] < 0.05
+        assert preds[0]["living_room"] == pytest.approx(lower_bound, abs=0.05)
+
+    def test_centered_room_does_not_heat_under_cheap_tariff(self):
+        """Cheap prices alone must not trigger heating when the room is centred."""
+        ctrl = self._make_ctrl(room_temp=21.0)
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        prices = [0.05] * 16
+        actions = ctrl.compute(
+            outdoor_temp=-8.0, now=now,
+            outdoor_forecast=[-8.0] * 16, price_forecast=prices,
+        )
+        assert actions["hp"] == pytest.approx(0.0, abs=0.02)
+
+    def test_electric_heater_price_term_uses_kw_units(self):
+        """Non-bidirectional sources must scale elec_per_unit_heat W → kW."""
+        room = Room(
+            "living_room", 5_000_000.0, 0.05,
+            air_temperature=19.1, setpoint=21.0, comfort_offset=2.0,
+        )
+        model = HouseModel([room])
+        heater = ElectricHeater("heater", "living_room", max_power=2000.0)
+        ctrl = HeatingMPCController(
+            model, [heater], horizon=16, dt=900,
+            tracking_weight=0.0, energy_weight=0.0,
+            soft_constraint_weight=10.0, energy_price_weight=1.0,
+        )
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        prices = [0.05] * 8 + [0.50] * 8
+        actions = ctrl.compute(
+            outdoor_temp=-8.0, now=now,
+            outdoor_forecast=[-8.0] * 16, price_forecast=prices,
+        )
+        preds = ctrl.linearised_predictions
+        assert actions["heater"] > 0.05
+        assert preds[0]["living_room"] > 19.5
