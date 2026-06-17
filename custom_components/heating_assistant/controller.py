@@ -1595,20 +1595,41 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             bid_set = set(bid_list)
             n_bid = len(bid_list)
 
-            # Unidirectional sources: linear term on absolute u.
+            # Non-bidirectional sources (pure heating-only or pure cooling-only):
+            # price the absolute draw directly on the input variable (with sign change
+            # for cooling-only so that more negative u increases the cost).
+            # Bidirectional sources must *not* receive a direct price term on their u;
+            # their electricity cost is applied exclusively via the slacks below.
             for k in range(N):
                 p_k = float(price_arr[min(k, n_price - 1)])
                 for i in range(nu):
                     if i not in bid_set:
-                        c_h = float(elec_heat[i]) * 1e-3  # W → kW for €/kWh pricing
-                        f[k * nu + i] += price_weight * p_k * c_h * dt_h
+                        # Recover physical limits to decide direction (u bounds here are
+                        # deviation; add u_ss to obtain physical actuator range).
+                        phys_u_max_i = float(u_max_np[i] + u_ss_vec[i])
+                        if phys_u_max_i > 0.0:
+                            # Positive commands (heating) consume elec_heat per +u
+                            c = float(elec_heat[i]) * 1e-3
+                            sign = +1.0
+                        else:
+                            # Negative commands (cooling) consume elec_cool per |u|
+                            # To charge cost when u becomes more negative, use negative gradient.
+                            c = (float(elec_cool[i]) if elec_cool is not None
+                                 else float(elec_heat[i])) * 1e-3
+                            sign = -1.0
+                        f[k * nu + i] += price_weight * p_k * (sign * c) * dt_h
 
             if n_bid == 0:
                 result = self._backend.solve(
                     QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
                 )
             else:
-                # Bidirectional sources: Z = [U_abs; ε; S⁺; S⁻].
+                # Bidirectional (heat+cool) sources: price is applied *exclusively* to the
+                # slack variables s⁺ (heating draw) and s⁻ (cooling draw).  Their u variable
+                # in the U block receives *no* direct electricity price term (the loop above
+                # skipped them).  The equality u = s⁺ − s⁻ makes the effective cost
+                # π · (c_h s⁺ + c_c s⁻) = π · c · |u| for the active direction.
+                # Pure uni sources were handled above and must not appear here.
                 n_S = N * n_bid
                 n_Z_aug = n_U + n_eps + 2 * n_S
 
@@ -2132,9 +2153,13 @@ class HeatingMPCController:
         self._elec_cool: np.ndarray = np.array(
             [src.elec_per_unit_cool for src in heat_sources], dtype=float
         )
-        # Bidirectional mask: sources whose u_min < 0 need slack vars.
+        # Bidirectional mask: sources that can act in *both* directions (u_min < 0 and u_max > 0).
+        # Only these require slack variables (s⁺, s⁻) so that a single u variable can represent
+        # either heating or cooling while electricity price is charged on the absolute draw via
+        # the slacks. Pure heating-only or cooling-only sources are priced directly on their
+        # (signed) input variable and must not appear in the slack price terms.
         self._bid_mask: np.ndarray = np.array(
-            [src.u_min < 0 for src in heat_sources], dtype=bool
+            [(src.u_min < 0 and src.u_max > 0) for src in heat_sources], dtype=bool
         )
 
         # ── Warm-start / bookkeeping ─────────────────────────────────────
