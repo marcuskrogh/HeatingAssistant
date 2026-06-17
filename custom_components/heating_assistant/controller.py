@@ -103,6 +103,8 @@ from .mbc.control.ocp import OptimalControlProblem
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
+    DEFAULT_PRICE_ANTICIPATION_BUFFER_FRAC,
+    DEFAULT_PRICE_ANTICIPATION_TRIGGER_FRAC,
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
@@ -1306,6 +1308,90 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         return self.update(y, u, d, p, mask=mask)
 
 
+# ── Price-aware anticipatory corridor tightening ─────────────────────────────
+
+def _apply_price_anticipatory_corridor_tightening(
+    z_min_tiled: np.ndarray,
+    z_max_tiled: np.ndarray,
+    z_free: np.ndarray,
+    offset_arr: np.ndarray,
+    price_arr: np.ndarray,
+    *,
+    price_weight: float,
+    buffer_frac: float,
+    trigger_frac: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Tighten soft bounds at cheap-price steps before predicted boundary contact.
+
+    Pure zone control (Q = 0) treats the comfort-corridor edges as zero-cost:
+    the cheapest feasible trajectory coasts to ``z_min``/``z_max`` with
+    ``u = 0`` and only applies heat/cool once the no-input forecast would
+    violate the bound.  When a time-of-use tariff is active, that defers
+    mandatory actuation to higher-price steps even though earlier cheap steps
+    could have prevented the excursion entirely.
+
+    For each output, if the disturbance-only prediction approaches a bound at
+    step ``k*`` and step ``j ≤ k*`` has a lower electricity price, the
+    effective bound at ``j`` is tightened inward by an amount proportional to
+    the price differential.  The QP then prefers proactive heating/cooling
+    during cheap hours instead of boundary-riding followed by correction.
+    """
+    z_min = np.asarray(z_min_tiled, dtype=float).copy()
+    z_max = np.asarray(z_max_tiled, dtype=float).copy()
+    z_free = np.asarray(z_free, dtype=float).reshape(-1)
+    offset_arr = np.asarray(offset_arr, dtype=float)
+    price_arr = np.maximum(np.asarray(price_arr, dtype=float), 0.0)
+    N, nz = offset_arr.shape
+    p_span = max(float(np.max(price_arr) - np.min(price_arr)), 1e-9)
+    scale = min(1.0, float(price_weight))
+
+    for i in range(nz):
+        # Lower-bound approach: pre-heat during cheap steps before contact.
+        k_lo = None
+        for k in range(N):
+            off_k = float(offset_arr[k, i])
+            if off_k <= 0.0:
+                continue
+            clearance = z_free[k * nz + i] - z_min[k * nz + i]
+            if clearance < trigger_frac * off_k:
+                k_lo = k
+                break
+        if k_lo is not None:
+            p_at = float(price_arr[k_lo])
+            z_ref_lo = 0.5 * (z_min[k_lo * nz + i] + z_max[k_lo * nz + i])
+            for j in range(k_lo + 1):
+                if price_arr[j] >= p_at - 1e-12:
+                    continue
+                cheapness = (p_at - price_arr[j]) / p_span
+                off_j = float(offset_arr[j, i])
+                buffer = buffer_frac * off_j * cheapness * scale
+                z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
+                z_min[j * nz + i] = min(z_min[j * nz + i] + buffer, z_ref_j - 0.05)
+
+        # Upper-bound approach: pre-cool symmetrically.
+        k_hi = None
+        for k in range(N):
+            off_k = float(offset_arr[k, i])
+            if off_k <= 0.0:
+                continue
+            clearance = z_max[k * nz + i] - z_free[k * nz + i]
+            if clearance < trigger_frac * off_k:
+                k_hi = k
+                break
+        if k_hi is not None:
+            p_at = float(price_arr[k_hi])
+            for j in range(k_hi + 1):
+                if price_arr[j] >= p_at - 1e-12:
+                    continue
+                cheapness = (p_at - price_arr[j]) / p_span
+                off_j = float(offset_arr[j, i])
+                buffer = buffer_frac * off_j * cheapness * scale
+                z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
+                z_max[j * nz + i] = max(z_max[j * nz + i] - buffer, z_ref_j + 0.05)
+
+    return z_min, z_max
+
+
 # ── Absolute-input OCP ───────────────────────────────────────────────────────
 
 class _AbsoluteInputOCP(OptimalControlProblem):
@@ -1525,6 +1611,34 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             z_min_tiled = np.tile(z_ref_np - self._y_offset, N)
             z_max_tiled = np.tile(z_ref_np + self._y_offset, N)
 
+        # Price-aware anticipatory tightening: when the no-input forecast
+        # approaches a corridor bound and cheaper tariff steps precede the
+        # predicted contact, tighten the effective bounds at those cheap steps
+        # so the controller heats/cools proactively instead of coasting to the
+        # edge and correcting when prices are higher.
+        if has_price:
+            offset_arr = np.zeros((N, nz), dtype=float)
+            for k in range(N):
+                if offset_seq is not None:
+                    offset_arr[k] = np.asarray(offset_seq[k], dtype=float)
+                else:
+                    offset_arr[k] = np.full(nz, self._y_offset, dtype=float)
+            price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
+            if len(price_arr) < N:
+                price_arr = np.concatenate([
+                    price_arr, np.full(N - len(price_arr), price_arr[-1])
+                ])
+            z_min_tiled, z_max_tiled = _apply_price_anticipatory_corridor_tightening(
+                z_min_tiled,
+                z_max_tiled,
+                Z_free,
+                offset_arr,
+                price_arr[:N],
+                price_weight=price_weight,
+                buffer_frac=DEFAULT_PRICE_ANTICIPATION_BUFFER_FRAC,
+                trigger_frac=DEFAULT_PRICE_ANTICIPATION_TRIGGER_FRAC,
+            )
+
         # Soft output inequality constraints  G_out Z ≤ h_out:
         # -CG U - ε ≤ -z_min + Z_free  and  CG U - ε ≤ z_max - Z_free
         neg_I_eps = -np.eye(n_eps)
@@ -1573,7 +1687,7 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                 p_k = float(price_arr[min(k, n_price - 1)])
                 for i in range(nu):
                     if i not in bid_set:
-                        c_h = float(elec_heat[i])
+                        c_h = float(elec_heat[i]) * 1e-3  # W → kW for €/kWh pricing
                         f[k * nu + i] += price_weight * p_k * c_h * dt_h
 
             if n_bid == 0:

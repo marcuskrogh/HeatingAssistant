@@ -500,6 +500,12 @@ CONF_IDENTIFICATION_HORIZON_HOURS = "identification_horizon_hours"
 DEFAULT_IDENTIFICATION_HORIZON_HOURS = 6.0
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 DEFAULT_ENERGY_PRICE_WEIGHT = 1.0      # active out of the box when a price entity is configured
+# Price-aware anticipatory corridor tightening (see _AbsoluteInputOCP):
+# when the no-input forecast approaches a comfort bound and cheaper tariff
+# steps precede the predicted contact, the effective bound is tightened inward
+# so the MPC heats/cools proactively during low-price periods.
+DEFAULT_PRICE_ANTICIPATION_BUFFER_FRAC = 0.5   # max inward shift as fraction of corridor half-width
+DEFAULT_PRICE_ANTICIPATION_TRIGGER_FRAC = 0.8  # trigger when clearance < this × half-width
 DEFAULT_PRICE_NET_TARIFF = 0.0         # no tariff adder by default
 DEFAULT_PRICE_SPOT_SURCHARGE = 0.0     # no surcharge adder by default
 DEFAULT_FROST_PROTECTION = 12.0        # °C minimum room temperature enforced while a schedule period has mode=off
