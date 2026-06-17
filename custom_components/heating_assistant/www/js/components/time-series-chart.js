@@ -328,19 +328,16 @@ export function makeDataset(label, data, color, options = {}) {
   return ds;
 }
 
-/** From multiple raw sensor histories, build min/max span points at every
- *  timestamp where at least one sensor reports. Each sensor is forward-filled
- *  so the band stays continuous between updates. */
-export function sensorHistoriesToMinMaxSpan(sensorSeries) {
-  if (!sensorSeries || sensorSeries.length === 0) return { min: [], max: [] };
+/** From multiple raw sensor histories, build min/max span points aligned to a
+ *  reference timeline (typically the control measurement history). Each sensor
+ *  is forward-filled so the band is one continuous region along that path. */
+export function sensorHistoriesToMinMaxSpan(sensorSeries, referencePoints) {
+  if (!sensorSeries || sensorSeries.length < 2) return { min: [], max: [] };
 
-  const timeSet = new Set();
-  for (const series of sensorSeries) {
-    for (const p of series) {
-      if (p.y != null) timeSet.add(p.x);
-    }
-  }
-  const times = [...timeSet].sort((a, b) => a - b);
+  const times = (referencePoints || [])
+    .map((p) => (p && p.x != null ? p.x : p))
+    .filter((t) => t != null)
+    .sort((a, b) => a - b);
   if (times.length === 0) return { min: [], max: [] };
 
   const indices = sensorSeries.map(() => 0);
@@ -358,7 +355,7 @@ export function sensorHistoriesToMinMaxSpan(sensorSeries) {
       }
       if (lastValues[i] != null) values.push(lastValues[i]);
     }
-    if (values.length > 0) {
+    if (values.length >= 2) {
       min.push({ x: t, y: Math.min(...values) });
       max.push({ x: t, y: Math.max(...values) });
     }

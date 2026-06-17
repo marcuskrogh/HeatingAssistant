@@ -438,8 +438,11 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     connection.getForecasts(forecastHours),
   ]);
 
+  const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
+
   // Fetch raw sensor histories and build a min/max span when the room has
-  // multiple configured temperature sensors.
+  // multiple configured temperature sensors. Align the band to the control
+  // measurement timeline so it renders as one continuous shaded region.
   const slugify = (name) => (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   let sensorSpan = null;
   try {
@@ -452,15 +455,15 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
         rawSensorEntities.unshift(roomCfg.temp_sensor);
       }
     }
-    if (rawSensorEntities.length > 1) {
+    if (rawSensorEntities.length > 1 && measuredHistory.length > 0) {
       const rawHistory = await connection.getHistory(rawSensorEntities, historyHours);
       const sensorSeries = [];
       for (const entityId of rawSensorEntities) {
         const pts = historyToDataPoints(rawHistory[entityId]);
         if (pts.length > 0) sensorSeries.push(pts);
       }
-      if (sensorSeries.length > 0) {
-        sensorSpan = sensorHistoriesToMinMaxSpan(sensorSeries);
+      if (sensorSeries.length > 1) {
+        sensorSpan = sensorHistoriesToMinMaxSpan(sensorSeries, measuredHistory);
       }
     }
   } catch (e) {
@@ -500,7 +503,6 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   }
 
   const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
-  const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
   const setpointHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[setpointEntity])));
   const constraintUpperHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity])));
   const constraintLowerHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity])));
@@ -651,11 +653,12 @@ function buildTemperatureChart(
   if (sensorSpan && sensorSpan.min.length > 0 && sensorSpan.max.length > 0) {
     datasets.push(
       makeDataset('Sensor Min', sensorSpan.min, 'transparent', {
-        borderWidth: 0, pointRadius: 0, order: 9,
+        borderWidth: 0, pointRadius: 0, tension: 0, order: 9,
       }),
       makeDataset('Sensor Range', sensorSpan.max, 'rgba(79, 195, 247, 0.35)', {
         borderWidth: 0,
         pointRadius: 0,
+        tension: 0,
         fill: '-1',
         backgroundColor: 'rgba(79, 195, 247, 0.18)',
         order: 9,
