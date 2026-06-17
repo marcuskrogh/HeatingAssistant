@@ -1863,8 +1863,8 @@ class TestSolarGhiThreading:
         assert abs(g0 - g1) > 1e-9
 
 
-class TestPriceAwareAnticipatoryControl:
-    """Price-aware anticipatory corridor tightening in _AbsoluteInputOCP."""
+class TestPriceAwareAbsoluteEnergyPricing:
+    """Price-aware MPC charges absolute electrical draw (u_abs), not u_dev."""
 
     def _make_ctrl(self, room_temp: float, horizon: int = 16):
         room = Room(
@@ -1883,7 +1883,7 @@ class TestPriceAwareAnticipatoryControl:
         return HeatingMPCController(
             model, [hp], horizon=horizon, dt=900,
             tracking_weight=0.0,
-            energy_weight=0.01,
+            energy_weight=0.0,
             soft_constraint_weight=10.0,
             energy_price_weight=1.0,
         )
@@ -1924,7 +1924,7 @@ class TestPriceAwareAnticipatoryControl:
         horizon = 24
         ctrl = HeatingMPCController(
             model, [hp], horizon=horizon, dt=900,
-            tracking_weight=0.0, energy_weight=0.01,
+            tracking_weight=0.0, energy_weight=0.0,
             soft_constraint_weight=10.0, energy_price_weight=1.0,
         )
         now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
@@ -1990,7 +1990,7 @@ class TestPriceAwareAnticipatoryControl:
         heater = ElectricHeater("heater", "living_room", max_power=2000.0)
         ctrl = HeatingMPCController(
             model, [heater], horizon=16, dt=900,
-            tracking_weight=0.0, energy_weight=0.01,
+            tracking_weight=0.0, energy_weight=0.0,
             soft_constraint_weight=10.0, energy_price_weight=1.0,
         )
         now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)

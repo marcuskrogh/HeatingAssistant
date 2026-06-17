@@ -103,8 +103,6 @@ from .mbc.control.ocp import OptimalControlProblem
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
-    DEFAULT_PRICE_ANTICIPATION_BUFFER_FRAC,
-    DEFAULT_PRICE_ANTICIPATION_TRIGGER_FRAC,
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
@@ -1308,102 +1306,6 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         return self.update(y, u, d, p, mask=mask)
 
 
-# ── Price-aware anticipatory corridor tightening ─────────────────────────────
-
-def _apply_price_anticipatory_corridor_tightening(
-    z_min_tiled: np.ndarray,
-    z_max_tiled: np.ndarray,
-    z_coast: np.ndarray,
-    offset_arr: np.ndarray,
-    price_arr: np.ndarray,
-    *,
-    price_weight: float,
-    buffer_frac: float,
-    trigger_frac: float,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Tighten soft bounds at cheap-price steps before predicted boundary contact.
-
-    Pure zone control (Q = 0) treats the comfort-corridor edges as zero-cost:
-    the cheapest feasible trajectory coasts to ``z_min``/``z_max`` with
-    ``u_abs = 0`` and only applies heat/cool once that coast trajectory would
-    violate the bound.  When electricity prices rise through the horizon the
-    optimizer therefore waits until the predicted temperature reaches the
-    comfort edge, then heats at the most expensive steps — the opposite of
-    price-aware anticipatory control.
-
-    ``z_coast`` must be the output prediction with ``u_abs = 0`` held over the
-    horizon (not the QP's ``Z_free`` which assumes ``u_dev = 0``, i.e.
-    ``u_abs = u_ss``).  Using the equilibrium-input free response would
-    under-predict cooling shortfalls and never trigger early tightening.
-
-    For each horizon step ``j`` whose *remaining* coast forecast still
-    approaches a bound, compare the tariff at ``j`` against the peak tariff
-    over ``[j, N)``.  When ``j`` is cheaper than that deferred peak, tighten
-    the effective bound at ``j`` inward proportionally.  The tightening
-    magnitude also includes the predicted shortfall below the bound (for
-    heating) or above it (for cooling), so the controller must act early
-    enough to prevent the entire coast excursion — not just the first
-    contact point.
-    """
-    z_min = np.asarray(z_min_tiled, dtype=float).copy()
-    z_max = np.asarray(z_max_tiled, dtype=float).copy()
-    z_coast = np.asarray(z_coast, dtype=float).reshape(-1)
-    offset_arr = np.asarray(offset_arr, dtype=float)
-    price_arr = np.maximum(np.asarray(price_arr, dtype=float), 0.0)
-    N, nz = offset_arr.shape
-    p_span = max(float(np.max(price_arr) - np.min(price_arr)), 1e-9)
-    scale = min(1.0, float(price_weight))
-
-    for i in range(nz):
-        # Lower bound: pre-heat during cheap steps when a future fall is predicted.
-        for j in range(N):
-            off_j = float(offset_arr[j, i])
-            if off_j <= 0.0:
-                continue
-            future_clearance = min(
-                z_coast[k * nz + i] - z_min[k * nz + i]
-                for k in range(j, N)
-            )
-            if future_clearance >= trigger_frac * off_j:
-                continue
-            deficit = max(
-                0.0,
-                max(z_min[k * nz + i] - z_coast[k * nz + i] for k in range(j, N)),
-            )
-            p_defer = float(np.max(price_arr[j:]))
-            if price_arr[j] >= p_defer - 1e-12:
-                continue
-            cheapness = (p_defer - price_arr[j]) / p_span
-            buffer = (buffer_frac * off_j + deficit) * cheapness * scale
-            z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
-            z_min[j * nz + i] = min(z_min[j * nz + i] + buffer, z_ref_j - 0.05)
-
-        # Upper bound: pre-cool symmetrically when a future rise is predicted.
-        for j in range(N):
-            off_j = float(offset_arr[j, i])
-            if off_j <= 0.0:
-                continue
-            future_clearance = min(
-                z_max[k * nz + i] - z_coast[k * nz + i]
-                for k in range(j, N)
-            )
-            if future_clearance >= trigger_frac * off_j:
-                continue
-            deficit = max(
-                0.0,
-                max(z_coast[k * nz + i] - z_max[k * nz + i] for k in range(j, N)),
-            )
-            p_defer = float(np.max(price_arr[j:]))
-            if price_arr[j] >= p_defer - 1e-12:
-                continue
-            cheapness = (p_defer - price_arr[j]) / p_span
-            buffer = (buffer_frac * off_j + deficit) * cheapness * scale
-            z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
-            z_max[j * nz + i] = max(z_max[j * nz + i] - buffer, z_ref_j + 0.05)
-
-    return z_min, z_max
-
-
 # ── Absolute-input OCP ───────────────────────────────────────────────────────
 
 class _AbsoluteInputOCP(OptimalControlProblem):
@@ -1549,25 +1451,46 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         H_uu = CG.T @ Q_bar @ CG + R_bar
         f_u = CG.T @ Q_bar @ e_free
 
-        # Linear correction: penalise ‖u_dev + u_ss‖²_R instead of ‖u_dev‖²_R.
-        # Each nu-block of the gradient gets R[i,i] * r_scale[k] * u_ss[i].
-        if u_ss is not None and not np.allclose(u_ss, 0.0):
+        u_ss_vec = (
+            np.asarray(u_ss, dtype=float).reshape(-1)
+            if u_ss is not None
+            else np.zeros(nu, dtype=float)
+        )
+        u_ss_bar = np.tile(u_ss_vec, N)
+
+        # Price-aware solves optimise u_abs and charge real electricity on the
+        # absolute draw (u_abs = 0 ⇒ zero electrical cost).  Penalising u_dev
+        # instead would treat u_dev = 0 as free even though u_abs = u_ss.
+        use_abs_inputs = has_price
+
+        if use_abs_inputs:
+            cg_shift = CG @ u_ss_bar
+            e_free_abs = e_free - cg_shift
+            f_u = CG.T @ Q_bar @ e_free_abs
+        elif u_ss is not None and not np.allclose(u_ss, 0.0):
+            # Linear correction: penalise ‖u_dev + u_ss‖²_R instead of ‖u_dev‖²_R.
             for k in range(N):
                 for i in range(nu):
                     r_val = self._R[i, i]
                     if r_scale_seq is not None:
                         r_val *= float(r_scale_seq[k, i])
-                    f_u[k * nu + i] += r_val * u_ss[i]
+                    f_u[k * nu + i] += r_val * u_ss_vec[i]
 
         if self._S is not None:
             if u_prev is None:
-                u_prev = np.zeros(nu)
+                u_prev_eff = u_ss_vec if use_abs_inputs else np.zeros(nu)
+            else:
+                u_prev_arr = np.asarray(u_prev, dtype=float).reshape(-1)
+                u_prev_eff = (
+                    u_prev_arr + u_ss_vec if use_abs_inputs else u_prev_arr
+                )
             d0_shift = np.zeros(N * nu)
-            d0_shift[:nu] = -u_prev
+            d0_shift[:nu] = -u_prev_eff
             H_uu = H_uu + self._D_diff.T @ self._S_bar @ self._D_diff
             f_u = f_u + self._D_diff.T @ self._S_bar @ d0_shift
 
-        # Full QP decision variable Z = [U; ε]
+        # Full QP decision variable.  Price-aware solves use absolute inputs
+        # (u_abs) in the control block; comfort stays on the soft-slack path.
         n_U = N * nu
         n_eps = N * nz
         n_Z = n_U + n_eps
@@ -1582,23 +1505,36 @@ class _AbsoluteInputOCP(OptimalControlProblem):
         if self._rho_lin > 0.0:
             f[n_U:] = self._rho_lin
 
-        # Input box bounds.  ``self._model.u_bounds`` is in deviation coordinates
-        # (du = u_abs − u_ss); per-step absolute bounds are shifted by the same
-        # u_ss so a time-varying input corridor lines up with the static one.
+        # Input box bounds.  Deviation bounds are the model default; price-aware
+        # solves use absolute actuator fractions directly.
         u_min_np, u_max_np = self._model.u_bounds
         if u_min_seq is not None or u_max_seq is not None:
-            u_ss_row = np.asarray(self._model.u_ss, dtype=float).reshape(1, -1)
-            if u_min_seq is not None:
-                u_min_tiled = (np.asarray(u_min_seq, dtype=float) - u_ss_row).reshape(-1)
+            if use_abs_inputs:
+                if u_min_seq is not None:
+                    u_min_tiled = np.asarray(u_min_seq, dtype=float).reshape(-1)
+                else:
+                    u_min_tiled = np.tile((u_min_np + u_ss_vec).reshape(-1), N)
+                if u_max_seq is not None:
+                    u_max_tiled = np.asarray(u_max_seq, dtype=float).reshape(-1)
+                else:
+                    u_max_tiled = np.tile((u_max_np + u_ss_vec).reshape(-1), N)
+            else:
+                u_ss_row = np.asarray(self._model.u_ss, dtype=float).reshape(1, -1)
+                if u_min_seq is not None:
+                    u_min_tiled = (np.asarray(u_min_seq, dtype=float) - u_ss_row).reshape(-1)
+                else:
+                    u_min_tiled = np.tile(u_min_np.reshape(-1), N)
+                if u_max_seq is not None:
+                    u_max_tiled = (np.asarray(u_max_seq, dtype=float) - u_ss_row).reshape(-1)
+                else:
+                    u_max_tiled = np.tile(u_max_np.reshape(-1), N)
+        else:
+            if use_abs_inputs:
+                u_min_tiled = np.tile((u_min_np + u_ss_vec).reshape(-1), N)
+                u_max_tiled = np.tile((u_max_np + u_ss_vec).reshape(-1), N)
             else:
                 u_min_tiled = np.tile(u_min_np.reshape(-1), N)
-            if u_max_seq is not None:
-                u_max_tiled = (np.asarray(u_max_seq, dtype=float) - u_ss_row).reshape(-1)
-            else:
                 u_max_tiled = np.tile(u_max_np.reshape(-1), N)
-        else:
-            u_min_tiled = np.tile(u_min_np.reshape(-1), N)
-            u_max_tiled = np.tile(u_max_np.reshape(-1), N)
 
         # Soft output corridor bounds: time-varying when offset_seq/x_ref_dev_seq given.
         if has_varying:
@@ -1623,74 +1559,28 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             z_min_tiled = np.tile(z_ref_np - self._y_offset, N)
             z_max_tiled = np.tile(z_ref_np + self._y_offset, N)
 
-        # Price-aware anticipatory tightening: when the u_abs = 0 coast
-        # forecast approaches a corridor bound and cheaper tariff steps
-        # precede the predicted contact, tighten the effective bounds at
-        # those cheap steps so the controller heats/cools proactively
-        # instead of coasting to the edge and correcting when prices rise.
-        if has_price:
-            offset_arr = np.zeros((N, nz), dtype=float)
-            for k in range(N):
-                if offset_seq is not None:
-                    offset_arr[k] = np.asarray(offset_seq[k], dtype=float)
-                else:
-                    offset_arr[k] = np.full(nz, self._y_offset, dtype=float)
-            price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
-            if len(price_arr) < N:
-                price_arr = np.concatenate([
-                    price_arr, np.full(N - len(price_arr), price_arr[-1])
-                ])
-            # Zone control coasts at u_abs = 0, not at the equilibrium u_ss.
-            # Z_free assumes u_dev = 0 (u_abs = u_ss); shift to u_abs = 0.
-            if u_ss is not None and not np.allclose(u_ss, 0.0):
-                u_coast = np.tile(-np.asarray(u_ss, dtype=float).reshape(-1), N)
-                z_coast = Z_free + CG @ u_coast
-            else:
-                z_coast = Z_free
-            z_min_tiled, z_max_tiled = _apply_price_anticipatory_corridor_tightening(
-                z_min_tiled,
-                z_max_tiled,
-                z_coast,
-                offset_arr,
-                price_arr[:N],
-                price_weight=price_weight,
-                buffer_frac=DEFAULT_PRICE_ANTICIPATION_BUFFER_FRAC,
-                trigger_frac=DEFAULT_PRICE_ANTICIPATION_TRIGGER_FRAC,
-            )
-
-        # Soft output inequality constraints  G_out Z ≤ h_out:
-        # -CG U - ε ≤ -z_min + Z_free  and  CG U - ε ≤ z_max - Z_free
         neg_I_eps = -np.eye(n_eps)
         G_out = np.hstack([
             np.vstack([-CG, CG]),
             np.vstack([neg_I_eps, neg_I_eps]),
         ])
-        h_out = np.concatenate([-z_min_tiled + Z_free, z_max_tiled - Z_free])
+        if use_abs_inputs:
+            # Z = Z_free + CG·(U_abs − u_ss); shift the RHS accordingly.
+            cg_shift = CG @ u_ss_bar
+            h_out = np.concatenate([
+                -z_min_tiled + Z_free - cg_shift,
+                z_max_tiled - Z_free + cg_shift,
+            ])
+        else:
+            h_out = np.concatenate([-z_min_tiled + Z_free, z_max_tiled - Z_free])
 
-        # Box bounds: U ∈ [u_min, u_max], ε ≥ 0
         lb = np.concatenate([u_min_tiled, np.zeros(n_eps)])
         ub = np.concatenate([u_max_tiled, np.full(n_eps, np.inf)])
 
-        # ── Linear cost terms: price and L1 dead-zone penalty ────────────────
-        # For non-negative (unidirectional) sources both price and L1 can be
-        # added directly to the gradient because u ≥ 0 implies |u| = u.
-        #
-        # ── Price-aware linear cost term ──────────────────────────────────────
-        # For non-negative sources: add α·pₖ·cᵢ·Δtₕ directly to the gradient.
-        # For bidirectional sources: augment the decision vector with slack
-        # variables s⁺, s⁻ ≥ 0 satisfying u_abs = s⁺ − s⁻.
-        #
-        # Complementarity (s⁺·s⁻ = 0) is enforced by the price penalty alone:
-        # for any pₖ > 0, the linear cost α·pₖ·(c_heat·s⁺ + c_cool·s⁻) drives
-        # whichever slack is not needed to zero.  We do NOT add quadratic or
-        # linear penalties on (s⁺+s⁻) — those would be equivalent to penalising
-        # |u_abs| directly (an implicit energy cost that distorts the optimisation).
-        #
-        # Upper bounds s⁺ ≤ u_max, s⁻ ≤ |u_min| bound the QP for pₖ = 0 (no
-        # gradient on slacks) without adding any energy-like penalty.
-        # Prices are clamped to ≥ 0; negative spot prices yield zero cost, letting
-        # comfort/tracking terms drive the decision (the controller can freely use
-        # electricity without it artificially increasing the objective).
+        # ── Price-aware linear cost on absolute electrical draw ─────────────
+        # Minimise α·πₖ·Pᵉˡᵉᶜ·Δt·u_abs[k] (kW × h × €/kWh).  u_abs = 0 is zero
+        # cost; charging u_dev would incorrectly treat u_dev = 0 (u_abs = u_ss)
+        # as free electricity.
         if has_price:
             price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
             n_price = len(price_arr)
@@ -1701,7 +1591,7 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             bid_set = set(bid_list)
             n_bid = len(bid_list)
 
-            # Non-negative sources: direct linear term on u_dev.
+            # Unidirectional sources: linear term on absolute u.
             for k in range(N):
                 p_k = float(price_arr[min(k, n_price - 1)])
                 for i in range(nu):
@@ -1714,15 +1604,13 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                     QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
                 )
             else:
-                # Bidirectional sources: augment Z = [U; ε; S⁺; S⁻].
+                # Bidirectional sources: Z = [U_abs; ε; S⁺; S⁻].
                 n_S = N * n_bid
                 n_Z_aug = n_U + n_eps + 2 * n_S
 
-                # Augmented Hessian (no slack quadratic term — price alone drives complementarity)
                 H_aug = np.zeros((n_Z_aug, n_Z_aug))
                 H_aug[:n_Z, :n_Z] = H
 
-                # Augmented gradient
                 f_aug = np.zeros(n_Z_aug)
                 f_aug[:n_Z] = f
                 for k in range(N):
@@ -1736,7 +1624,6 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                         f_aug[sp] += price_weight * p_k * c_h * dt_h
                         f_aug[sm] += price_weight * p_k * c_c * dt_h
 
-                # Augmented soft-output inequality (G_out extended to wider Z)
                 G_aug = np.zeros((2 * n_eps, n_Z_aug))
                 G_aug[:, :n_Z] = G_out
 
@@ -1745,12 +1632,14 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                 s_minus_ub = np.zeros(n_S)
                 for k in range(N):
                     for jj, src_i in enumerate(bid_list):
-                        s_plus_ub[k * n_bid + jj] = float(u_max_np[src_i])
-                        s_minus_ub[k * n_bid + jj] = float(abs(u_min_np[src_i]))
+                        u_max_i = float(u_max_np[src_i] + u_ss_vec[src_i])
+                        u_min_i = float(u_min_np[src_i] + u_ss_vec[src_i])
+                        s_plus_ub[k * n_bid + jj] = u_max_i
+                        s_minus_ub[k * n_bid + jj] = abs(u_min_i)
                 lb_aug = np.concatenate([lb, np.zeros(2 * n_S)])
                 ub_aug = np.concatenate([ub, s_plus_ub, s_minus_ub])
 
-                # Equality: u_dev[k,i] − s⁺[k,j] + s⁻[k,j] = −u_ss[i]
+                # Equality: u_abs[k,i] − s⁺[k,j] + s⁻[k,j] = 0
                 n_eq = N * n_bid
                 A_eq = np.zeros((n_eq, n_Z_aug))
                 b_eq = np.zeros(n_eq)
@@ -1760,7 +1649,6 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                         A_eq[row_eq, k * nu + src_i] = 1.0
                         A_eq[row_eq, n_U + n_eps + k * n_bid + jj] = -1.0
                         A_eq[row_eq, n_U + n_eps + n_S + k * n_bid + jj] = 1.0
-                        b_eq[row_eq] = -(float(u_ss[src_i]) if u_ss is not None else 0.0)
 
                 result = self._backend.solve(
                     QPProblem(P=H_aug, q=f_aug, lb=lb_aug, ub=ub_aug,
@@ -1781,9 +1669,14 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             )
             U_flat = np.zeros(n_U)
         else:
-            U_flat = np.asarray(result.x[:n_U], dtype=float)
+            U_abs_flat = np.asarray(result.x[:n_U], dtype=float)
+            if use_abs_inputs:
+                U_flat = U_abs_flat - u_ss_bar
+            else:
+                U_flat = U_abs_flat
 
-        X_flat = Psi @ x0 + Gamma @ U_flat + Lambda @ D
+        U_dev_flat = U_flat
+        X_flat = Psi @ x0 + Gamma @ U_dev_flat + Lambda @ D
         return U_flat, X_flat
 
 
