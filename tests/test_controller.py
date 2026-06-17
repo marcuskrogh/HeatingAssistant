@@ -1907,6 +1907,53 @@ class TestPriceAwareAnticipatoryControl:
         assert preds[0]["living_room"] > lower_bound + 0.5
         assert all(p["living_room"] > lower_bound + 0.3 for p in preds[:4])
 
+    def test_rising_price_monotonic_fall_heats_early_not_at_boundary(self):
+        """User scenario: temperature falls toward the lower bound while
+        electricity prices rise monotonically.  The MPC must heat during the
+        cheap early steps and stay off the bound — not coast to the edge and
+        only heat once the constraint is reached at peak prices."""
+        room = Room(
+            "living_room", 5_000_000.0, 0.05,
+            air_temperature=20.5, setpoint=21.0, comfort_offset=2.0,
+        )
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "living_room", max_power=6000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, cooling_cop=2.5, hvac_mode="heat",
+        )
+        horizon = 24
+        ctrl = HeatingMPCController(
+            model, [hp], horizon=horizon, dt=900,
+            tracking_weight=0.0, energy_weight=0.01,
+            soft_constraint_weight=10.0, energy_price_weight=1.0,
+        )
+        now = datetime(2024, 1, 15, 6, 0, tzinfo=timezone.utc)
+        outdoor_fc = [-6.0] * horizon
+        prices = [round(0.10 + 0.02 * k, 3) for k in range(horizon)]
+        actions = ctrl.compute(
+            outdoor_temp=-6.0, now=now,
+            outdoor_forecast=outdoor_fc, price_forecast=prices,
+        )
+        preds = ctrl.linearised_predictions
+        sched = ctrl.heating_schedule
+        lower_bound = 19.0
+        half = horizon // 2
+
+        # Heat immediately at the cheapest step, not only after hitting the bound.
+        assert actions["hp"] > 0.05
+        assert list(sched[0].values())[0] > 30.0
+
+        # First half of the horizon: stay clearly inside the corridor.
+        assert all(p["living_room"] > lower_bound + 0.2 for p in preds[:half])
+
+        # Boundary contact (if any) must come late, not around the midpoint.
+        first_at_bound = next(
+            (k for k, p in enumerate(preds) if p["living_room"] <= lower_bound + 0.03),
+            None,
+        )
+        if first_at_bound is not None:
+            assert first_at_bound > half
+
     def test_no_price_preserves_boundary_riding_zone_control(self):
         """Without price awareness the controller may ride the corridor edge."""
         ctrl = self._make_ctrl(room_temp=19.1)

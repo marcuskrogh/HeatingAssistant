@@ -1313,7 +1313,7 @@ class _InnovationEKF(ContinuousDiscreteEKF):
 def _apply_price_anticipatory_corridor_tightening(
     z_min_tiled: np.ndarray,
     z_max_tiled: np.ndarray,
-    z_free: np.ndarray,
+    z_coast: np.ndarray,
     offset_arr: np.ndarray,
     price_arr: np.ndarray,
     *,
@@ -1325,20 +1325,29 @@ def _apply_price_anticipatory_corridor_tightening(
 
     Pure zone control (Q = 0) treats the comfort-corridor edges as zero-cost:
     the cheapest feasible trajectory coasts to ``z_min``/``z_max`` with
-    ``u = 0`` and only applies heat/cool once the no-input forecast would
-    violate the bound.  When a time-of-use tariff is active, that defers
-    mandatory actuation to higher-price steps even though earlier cheap steps
-    could have prevented the excursion entirely.
+    ``u_abs = 0`` and only applies heat/cool once that coast trajectory would
+    violate the bound.  When electricity prices rise through the horizon the
+    optimizer therefore waits until the predicted temperature reaches the
+    comfort edge, then heats at the most expensive steps — the opposite of
+    price-aware anticipatory control.
 
-    For each output, if the disturbance-only prediction approaches a bound at
-    step ``k*`` and step ``j ≤ k*`` has a lower electricity price, the
-    effective bound at ``j`` is tightened inward by an amount proportional to
-    the price differential.  The QP then prefers proactive heating/cooling
-    during cheap hours instead of boundary-riding followed by correction.
+    ``z_coast`` must be the output prediction with ``u_abs = 0`` held over the
+    horizon (not the QP's ``Z_free`` which assumes ``u_dev = 0``, i.e.
+    ``u_abs = u_ss``).  Using the equilibrium-input free response would
+    under-predict cooling shortfalls and never trigger early tightening.
+
+    For each horizon step ``j`` whose *remaining* coast forecast still
+    approaches a bound, compare the tariff at ``j`` against the peak tariff
+    over ``[j, N)``.  When ``j`` is cheaper than that deferred peak, tighten
+    the effective bound at ``j`` inward proportionally.  The tightening
+    magnitude also includes the predicted shortfall below the bound (for
+    heating) or above it (for cooling), so the controller must act early
+    enough to prevent the entire coast excursion — not just the first
+    contact point.
     """
     z_min = np.asarray(z_min_tiled, dtype=float).copy()
     z_max = np.asarray(z_max_tiled, dtype=float).copy()
-    z_free = np.asarray(z_free, dtype=float).reshape(-1)
+    z_coast = np.asarray(z_coast, dtype=float).reshape(-1)
     offset_arr = np.asarray(offset_arr, dtype=float)
     price_arr = np.maximum(np.asarray(price_arr, dtype=float), 0.0)
     N, nz = offset_arr.shape
@@ -1346,48 +1355,51 @@ def _apply_price_anticipatory_corridor_tightening(
     scale = min(1.0, float(price_weight))
 
     for i in range(nz):
-        # Lower-bound approach: pre-heat during cheap steps before contact.
-        k_lo = None
-        for k in range(N):
-            off_k = float(offset_arr[k, i])
-            if off_k <= 0.0:
+        # Lower bound: pre-heat during cheap steps when a future fall is predicted.
+        for j in range(N):
+            off_j = float(offset_arr[j, i])
+            if off_j <= 0.0:
                 continue
-            clearance = z_free[k * nz + i] - z_min[k * nz + i]
-            if clearance < trigger_frac * off_k:
-                k_lo = k
-                break
-        if k_lo is not None:
-            p_at = float(price_arr[k_lo])
-            z_ref_lo = 0.5 * (z_min[k_lo * nz + i] + z_max[k_lo * nz + i])
-            for j in range(k_lo + 1):
-                if price_arr[j] >= p_at - 1e-12:
-                    continue
-                cheapness = (p_at - price_arr[j]) / p_span
-                off_j = float(offset_arr[j, i])
-                buffer = buffer_frac * off_j * cheapness * scale
-                z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
-                z_min[j * nz + i] = min(z_min[j * nz + i] + buffer, z_ref_j - 0.05)
+            future_clearance = min(
+                z_coast[k * nz + i] - z_min[k * nz + i]
+                for k in range(j, N)
+            )
+            if future_clearance >= trigger_frac * off_j:
+                continue
+            deficit = max(
+                0.0,
+                max(z_min[k * nz + i] - z_coast[k * nz + i] for k in range(j, N)),
+            )
+            p_defer = float(np.max(price_arr[j:]))
+            if price_arr[j] >= p_defer - 1e-12:
+                continue
+            cheapness = (p_defer - price_arr[j]) / p_span
+            buffer = (buffer_frac * off_j + deficit) * cheapness * scale
+            z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
+            z_min[j * nz + i] = min(z_min[j * nz + i] + buffer, z_ref_j - 0.05)
 
-        # Upper-bound approach: pre-cool symmetrically.
-        k_hi = None
-        for k in range(N):
-            off_k = float(offset_arr[k, i])
-            if off_k <= 0.0:
+        # Upper bound: pre-cool symmetrically when a future rise is predicted.
+        for j in range(N):
+            off_j = float(offset_arr[j, i])
+            if off_j <= 0.0:
                 continue
-            clearance = z_max[k * nz + i] - z_free[k * nz + i]
-            if clearance < trigger_frac * off_k:
-                k_hi = k
-                break
-        if k_hi is not None:
-            p_at = float(price_arr[k_hi])
-            for j in range(k_hi + 1):
-                if price_arr[j] >= p_at - 1e-12:
-                    continue
-                cheapness = (p_at - price_arr[j]) / p_span
-                off_j = float(offset_arr[j, i])
-                buffer = buffer_frac * off_j * cheapness * scale
-                z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
-                z_max[j * nz + i] = max(z_max[j * nz + i] - buffer, z_ref_j + 0.05)
+            future_clearance = min(
+                z_max[k * nz + i] - z_coast[k * nz + i]
+                for k in range(j, N)
+            )
+            if future_clearance >= trigger_frac * off_j:
+                continue
+            deficit = max(
+                0.0,
+                max(z_coast[k * nz + i] - z_max[k * nz + i] for k in range(j, N)),
+            )
+            p_defer = float(np.max(price_arr[j:]))
+            if price_arr[j] >= p_defer - 1e-12:
+                continue
+            cheapness = (p_defer - price_arr[j]) / p_span
+            buffer = (buffer_frac * off_j + deficit) * cheapness * scale
+            z_ref_j = 0.5 * (z_min[j * nz + i] + z_max[j * nz + i])
+            z_max[j * nz + i] = max(z_max[j * nz + i] - buffer, z_ref_j + 0.05)
 
     return z_min, z_max
 
@@ -1611,11 +1623,11 @@ class _AbsoluteInputOCP(OptimalControlProblem):
             z_min_tiled = np.tile(z_ref_np - self._y_offset, N)
             z_max_tiled = np.tile(z_ref_np + self._y_offset, N)
 
-        # Price-aware anticipatory tightening: when the no-input forecast
-        # approaches a corridor bound and cheaper tariff steps precede the
-        # predicted contact, tighten the effective bounds at those cheap steps
-        # so the controller heats/cools proactively instead of coasting to the
-        # edge and correcting when prices are higher.
+        # Price-aware anticipatory tightening: when the u_abs = 0 coast
+        # forecast approaches a corridor bound and cheaper tariff steps
+        # precede the predicted contact, tighten the effective bounds at
+        # those cheap steps so the controller heats/cools proactively
+        # instead of coasting to the edge and correcting when prices rise.
         if has_price:
             offset_arr = np.zeros((N, nz), dtype=float)
             for k in range(N):
@@ -1628,10 +1640,17 @@ class _AbsoluteInputOCP(OptimalControlProblem):
                 price_arr = np.concatenate([
                     price_arr, np.full(N - len(price_arr), price_arr[-1])
                 ])
+            # Zone control coasts at u_abs = 0, not at the equilibrium u_ss.
+            # Z_free assumes u_dev = 0 (u_abs = u_ss); shift to u_abs = 0.
+            if u_ss is not None and not np.allclose(u_ss, 0.0):
+                u_coast = np.tile(-np.asarray(u_ss, dtype=float).reshape(-1), N)
+                z_coast = Z_free + CG @ u_coast
+            else:
+                z_coast = Z_free
             z_min_tiled, z_max_tiled = _apply_price_anticipatory_corridor_tightening(
                 z_min_tiled,
                 z_max_tiled,
-                Z_free,
+                z_coast,
                 offset_arr,
                 price_arr[:N],
                 price_weight=price_weight,
