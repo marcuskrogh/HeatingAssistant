@@ -502,7 +502,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   const setpointHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[setpointEntity])));
   const constraintUpperHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity])));
   const constraintLowerHistory = closeStepSegments(clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity])));
-  const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
+  const powerHistory = appendCurrentValue(historyToDataPoints(history[powerMeasuredEntity]), state, powerMeasuredEntity);
   const solarHistory = appendCurrentValue(historyToDataPoints(history[solarMeasuredEntity]), state, solarMeasuredEntity);
   const outdoorHistory = appendCurrentValue(historyToDataPoints(history[outdoorEntity]), state, outdoorEntity);
   const priceHistory = appendCurrentValue(historyToDataPoints(history[priceEntity]), state, priceEntity);
@@ -800,6 +800,21 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
     if (powerChart._chart) {
       const ds = powerChart._chart.data.datasets;
       if (ds[1]) ds[1].data = powerForecast;
+
+      // Extend the measured-power history to "now" so there is no visual gap
+      // between the last recorded point and the forecast start.
+      const measuredIdx = ds.findIndex((d) => d.label === 'Measured');
+      if (measuredIdx >= 0) {
+        const powerEntity = room.entities['heating_power_measured'];
+        const currentPower = entityValue(state, powerEntity);
+        if (currentPower !== null) {
+          const pts = ds[measuredIdx].data;
+          const now = Date.now();
+          if (pts.length === 0 || pts[pts.length - 1].x < now) {
+            pts.push({ x: now, y: currentPower });
+          }
+        }
+      }
 
       const priceIdx = ds.findIndex((d) => d.label === 'Price');
       const priceForecastIdx = ds.findIndex((d) => d.label === 'Price Forecast');
