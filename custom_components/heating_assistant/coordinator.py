@@ -3380,7 +3380,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 if not isinstance(entry, dict):
                     continue
                 start_str = entry.get("start")
-                v = entry.get("value") or entry.get("price") or entry.get("total")
+                v = None
+                for key in ("value", "price", "total"):
+                    if key in entry and entry[key] is not None:
+                        v = entry[key]
+                        break
                 if start_str is None or v is None:
                     continue
                 try:
@@ -3423,7 +3427,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if isinstance(entry, (int, float)):
                 today_prices.append(float(entry))
             elif isinstance(entry, dict):
-                v = entry.get("value") or entry.get("price") or entry.get("total")
+                v = None
+                for key in ("value", "price", "total"):
+                    if key in entry and entry[key] is not None:
+                        v = entry[key]
+                        break
                 if v is not None:
                     try:
                         today_prices.append(float(v))
@@ -3434,7 +3442,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             if isinstance(entry, (int, float)):
                 tomorrow_prices.append(float(entry))
             elif isinstance(entry, dict):
-                v = entry.get("value") or entry.get("price") or entry.get("total")
+                v = None
+                for key in ("value", "price", "total"):
+                    if key in entry and entry[key] is not None:
+                        v = entry[key]
+                        break
                 if v is not None:
                     try:
                         tomorrow_prices.append(float(v))
@@ -3952,20 +3964,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
                     attrs = getattr(state, "attributes", {})
 
-                    # Read the HP's own temperature so the logit-based offset
-                    # is applied relative to the current internal measurement.
-                    hp_internal_temp: Optional[float] = None
-                    raw = attrs.get("current_temperature")
-                    if raw is not None:
-                        try:
-                            hp_internal_temp = float(raw)
-                        except (ValueError, TypeError):
-                            pass
-                    base_temp = (
-                        hp_internal_temp
-                        if hp_internal_temp is not None
-                        else self.model.rooms[src.room].temperature
-                    )
+                    # Use the stable comfort setpoint as the base for the
+                    # logit offset, not the current temperature.  Using the
+                    # current temperature causes the setpoint to chase the room
+                    # upward every cycle as it warms toward the setpoint.
+                    base_temp = self.get_room_setpoint(src.room)
 
                     # Map the configured hvac_mode to the best HA mode string
                     # the entity actually supports.

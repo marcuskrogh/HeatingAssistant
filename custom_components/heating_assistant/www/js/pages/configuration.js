@@ -523,6 +523,8 @@ function renderRoomList(container, connection, hass) {
   });
 
   connection.getModelConfig().then((cfg) => {
+    console.log('[HA] getModelConfig rooms:', JSON.stringify(cfg && cfg.rooms));
+    console.log('[HA] getModelConfig heat_sources:', JSON.stringify(cfg && cfg.heat_sources));
     const list = (cfg && cfg.rooms) || [];
     body.innerHTML = '';
     if (list.length === 0) {

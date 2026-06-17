@@ -207,7 +207,13 @@ from .const import (
     SERVICE_SCHEDULE_EXPERIMENT,
     SERVICE_SET_SCHEDULE_ENABLED,
     SOURCE_TYPE_ELECTRIC,
+    SOURCE_TYPE_ELECTRIC_FLOOR,
+    SOURCE_TYPE_GAS_HEATER,
+    SOURCE_TYPE_GENERIC_THERMOSTAT,
     SOURCE_TYPE_HEAT_PUMP,
+    SOURCE_TYPE_HYDRONIC_FLOOR,
+    SOURCE_TYPE_HYDRONIC_RADIATOR,
+    SOURCE_TYPE_OIL_RADIATOR,
     UPDATE_INTERVAL,
     UI_REFRESH_INTERVAL,
 )
@@ -364,7 +370,16 @@ _SOURCE_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SOURCE_NAME): str,
         vol.Required(CONF_SOURCE_TYPE): vol.In(
-            [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP]
+            [
+                SOURCE_TYPE_ELECTRIC,
+                SOURCE_TYPE_ELECTRIC_FLOOR,
+                SOURCE_TYPE_GAS_HEATER,
+                SOURCE_TYPE_GENERIC_THERMOSTAT,
+                SOURCE_TYPE_HEAT_PUMP,
+                SOURCE_TYPE_HYDRONIC_FLOOR,
+                SOURCE_TYPE_HYDRONIC_RADIATOR,
+                SOURCE_TYPE_OIL_RADIATOR,
+            ]
         ),
         vol.Required(CONF_SOURCE_ROOM): str,
         vol.Required(CONF_SOURCE_MAX_POWER): vol.Coerce(float),
@@ -714,7 +729,16 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
                 "envelope_tightness_map": dict(
                     ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION
                 ),
-                "source_types": [SOURCE_TYPE_ELECTRIC, SOURCE_TYPE_HEAT_PUMP],
+                "source_types": [
+                    SOURCE_TYPE_ELECTRIC,
+                    SOURCE_TYPE_ELECTRIC_FLOOR,
+                    SOURCE_TYPE_GAS_HEATER,
+                    SOURCE_TYPE_GENERIC_THERMOSTAT,
+                    SOURCE_TYPE_HEAT_PUMP,
+                    SOURCE_TYPE_HYDRONIC_FLOOR,
+                    SOURCE_TYPE_HYDRONIC_RADIATOR,
+                    SOURCE_TYPE_OIL_RADIATOR,
+                ],
                 "hvac_modes": [
                     SOURCE_HVAC_MODE_HEAT,
                     SOURCE_HVAC_MODE_COOL,
