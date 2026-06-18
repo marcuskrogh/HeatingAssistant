@@ -25,7 +25,7 @@ import numpy as np
 
 from .._utils import _any_to_np1d
 from ..estimation import KalmanFilter
-from .mpc_forecast import ForecastAwareMPC
+from .mpc_forecast import HorizonProfileMPC
 from .ocp import StandardLinearDiscreteOCP, _shift_warm_start
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ class LinearDiscreteMPC(ABC):
         ----------
         ym : (nym,) array-like  — measurement ``ym[k]``.
         D  : (N · nd,) array-like, optional — stacked disturbance forecast.
-             When omitted, the forecast set via :meth:`set_disturbance_forecast`
+             When omitted, the profile set via :meth:`set_disturbance_profile`
              is used.
 
         Returns
@@ -61,13 +61,13 @@ class LinearDiscreteMPC(ABC):
         """
 
 
-class StandardLinearDiscreteMPC(ForecastAwareMPC, LinearDiscreteMPC):
+class StandardLinearDiscreteMPC(HorizonProfileMPC, LinearDiscreteMPC):
     """
     Standard MPC for a linear discrete-time plant, estimator, and discrete-time OCP.
 
     Composes a :class:`~mbc.estimation.KalmanFilter` with a
     :class:`StandardLinearDiscreteOCP`.  Horizon disturbance forecasts are
-    configured via :meth:`set_disturbance_forecast` before :meth:`step`.
+    configured via :meth:`set_disturbance_profile` before :meth:`step`.
     """
 
     def __init__(
@@ -77,7 +77,7 @@ class StandardLinearDiscreteMPC(ForecastAwareMPC, LinearDiscreteMPC):
         ocp: StandardLinearDiscreteOCP,
         warm_start: bool = False,
     ) -> None:
-        ForecastAwareMPC.__init__(self, ocp._N, model.nd)
+        HorizonProfileMPC.__init__(self, ocp._N, model.nd)
         self._model = model
         self._estimator = estimator
         self._ocp = ocp
@@ -119,15 +119,15 @@ class StandardLinearDiscreteMPC(ForecastAwareMPC, LinearDiscreteMPC):
         return u, U_seq, X_seq
 
     def _resolve_disturbance_forecast(self, D: Any | None) -> np.ndarray:
-        if self._forecast.disturbance_forecast is not None:
-            return np.asarray(self._forecast.disturbance_forecast, dtype=float).reshape(-1)
+        if self._horizon_profile.disturbance_profile is not None:
+            return np.asarray(self._horizon_profile.disturbance_profile, dtype=float).reshape(-1)
         if D is not None:
             return _any_to_np1d(D)
         if self._nd == 0:
             return np.zeros(self._N * self._nd, dtype=float)
         raise ValueError(
             "disturbance forecast required: pass D to step() or call "
-            "set_disturbance_forecast() first"
+            "set_disturbance_profile() first"
         )
 
 

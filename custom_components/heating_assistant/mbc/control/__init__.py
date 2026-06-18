@@ -6,7 +6,14 @@ from .ocp import (
     StandardDiscreteOCP,  # deprecated alias
     OptimalControlProblem,  # deprecated alias
 )
-from .mpc_forecast import ForecastAwareMPC, MPCForecast, MPCOperatingPoint
+from .mpc_forecast import (
+    HorizonProfileMPC,
+    MPCHorizonProfile,
+    MPCLinearisationPoint,
+    ForecastAwareMPC,  # deprecated alias
+    MPCForecast,  # deprecated alias
+    MPCOperatingPoint,  # deprecated alias
+)
 from .mpc import (
     LinearDiscreteMPC,
     StandardLinearDiscreteMPC,
@@ -91,10 +98,10 @@ __all__ = [
     "StandardLinearContinuousMPC",
     "StandardLinearisedContinuousMPC",
     "StandardNonlinearContinuousMPC",
-    # MPC forecast helpers
-    "ForecastAwareMPC",
-    "MPCForecast",
-    "MPCOperatingPoint",
+    # MPC horizon-profile helpers
+    "HorizonProfileMPC",
+    "MPCHorizonProfile",
+    "MPCLinearisationPoint",
     "linearize_discrete_model",
     "linearize_cd_model",
     "discretize_cd_linearization",
@@ -127,4 +134,8 @@ __all__ = [
     "EconomicOptimalControlProblem",
     "CDNMPCController",
     "ContinuousNMPCController",
+    # Deprecated horizon-profile aliases
+    "ForecastAwareMPC",
+    "MPCForecast",
+    "MPCOperatingPoint",
 ]

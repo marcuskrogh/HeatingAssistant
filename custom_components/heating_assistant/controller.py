@@ -1874,13 +1874,13 @@ class HeatingMPCController:
             return np.zeros(n)
         return x[:n].copy()
 
-    def _set_mpc_operating_point(
+    def _equilibrium_point(
         self,
         d_now: np.ndarray,
         p: np.ndarray,
         t: float,
-    ) -> None:
-        """Linearise the MPC around the comfort setpoint equilibrium."""
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Comfort-setpoint equilibrium used for MPC linearisation."""
         model = self._control_system
         n = model._n_rooms
         nx_phys = model._nx_phys
@@ -1891,7 +1891,56 @@ class HeatingMPCController:
             k_f = model._filter_idx_for_source[j]
             if k_f >= 0:
                 x_ss[nx_phys + k_f] = u_ss[j]
-        self._mpc.set_operating_point(x_ss, u_ss, d_now)
+        return x_ss, u_ss, d_now.copy()
+
+    def _build_input_linear_cost_profiles(
+        self,
+        price_seq: np.ndarray | None,
+        N: int,
+        u_ss: np.ndarray,
+    ) -> tuple[
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
+        np.ndarray | None,
+    ]:
+        """Map electricity-price forecast to generic linear input-cost profiles."""
+        if price_seq is None or self._energy_price_weight <= 0.0:
+            return None, None, None, None
+
+        nu = len(self._sources)
+        price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
+        coeff = np.zeros((N, nu), dtype=float)
+        slack_indices = [j for j in range(nu) if self._bid_mask[j]]
+        n_slack = len(slack_indices)
+        pos_profile = np.zeros((N, n_slack), dtype=float) if n_slack else None
+        neg_profile = np.zeros((N, n_slack), dtype=float) if n_slack else None
+        slack_set = set(slack_indices)
+        u_min_np, u_max_np = self._control_system.u_bounds
+
+        for k in range(N):
+            p_k = float(price_arr[min(k, len(price_arr) - 1)])
+            for j in range(nu):
+                if j in slack_set:
+                    continue
+                phys_u_max = float(u_max_np[j] + u_ss[j])
+                if phys_u_max > 0.0:
+                    c = float(self._elec_heat[j]) * 1e-3
+                    sign = 1.0
+                else:
+                    c = float(self._elec_cool[j]) * 1e-3
+                    sign = -1.0
+                coeff[k, j] = self._energy_price_weight * p_k * sign * c * self._dt_h
+            for jj, j in enumerate(slack_indices):
+                c_h = float(self._elec_heat[j]) * 1e-3
+                c_c = float(self._elec_cool[j]) * 1e-3
+                pos_profile[k, jj] = self._energy_price_weight * p_k * c_h * self._dt_h
+                neg_profile[k, jj] = self._energy_price_weight * p_k * c_c * self._dt_h
+
+        slack_idx_arr = (
+            None if n_slack == 0 else np.asarray(slack_indices, dtype=int)
+        )
+        return coeff, slack_idx_arr, pos_profile, neg_profile
 
     # ── Main entry point ─────────────────────────────────────────────────
 
@@ -2171,22 +2220,24 @@ class HeatingMPCController:
                     raw, np.full(N - len(raw), raw[-1])
                 ])
 
-        # ── QP solve with horizon forecast configured via MPC setters ────
-        self._mpc.set_disturbance_forecast(D_forecast)
-        self._mpc.set_reference_sequence(x_ref_abs_seq)
-        self._mpc.set_offset_sequence(offset_seq)
-        self._mpc.set_q_scale_sequence(q_scale_seq)
-        self._mpc.set_r_scale_sequence(r_scale_seq)
-        self._mpc.set_input_bounds_sequence(u_min_seq, u_max_seq)
-        self._mpc.set_price_forecast(
-            price_seq_np,
-            price_weight=self._energy_price_weight,
-            elec_heat=self._elec_heat,
-            elec_cool=self._elec_cool,
-            bid_mask=self._bid_mask,
-            dt_h=self._dt_h,
+        # ── QP solve with horizon profiles configured via MPC setters ─────
+        x_ss, u_ss, _ = self._equilibrium_point(d, p, 0.0)
+        self._mpc.set_linearisation_point(x_ss, u_ss, d)
+        linear_cost, slack_idx, pos_cost, neg_cost = self._build_input_linear_cost_profiles(
+            price_seq_np, N, u_ss,
         )
-        self._set_mpc_operating_point(d, p, 0.0)
+        self._mpc.set_disturbance_profile(D_forecast)
+        self._mpc.set_output_reference_profile(x_ref_abs_seq)
+        self._mpc.set_soft_output_band_half_width_profile(offset_seq)
+        self._mpc.set_output_tracking_weight_scale_profile(q_scale_seq)
+        self._mpc.set_input_regularisation_weight_scale_profile(r_scale_seq)
+        self._mpc.set_input_bound_profiles(u_min_seq, u_max_seq)
+        self._mpc.set_input_linear_cost_profile(
+            linear_cost,
+            slack_input_indices=slack_idx,
+            positive_slack_coefficient_profile=pos_cost,
+            negative_slack_coefficient_profile=neg_cost,
+        )
 
         _t0 = time.perf_counter()
         u_abs, U_abs, X_abs = self._mpc.step(y, d, p, 0.0)

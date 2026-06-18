@@ -16,7 +16,7 @@ import numpy as np
 
 from .._utils import _fd_jacobian, _zoh_full, _van_loan
 from ..models import LinearDiscreteModel, ContinuousDiscreteModel
-from .mpc_forecast import ForecastAwareMPC
+from .mpc_forecast import HorizonProfileMPC
 from .ocp import StandardLinearDiscreteOCP
 
 
@@ -258,14 +258,14 @@ class LinearisedContinuousMPC(ABC):
         """Execute one closed-loop step."""
 
 
-class StandardLinearisedContinuousMPC(ForecastAwareMPC, LinearisedContinuousMPC):
+class StandardLinearisedContinuousMPC(HorizonProfileMPC, LinearisedContinuousMPC):
     """
     Standard MPC for a linearised continuous-discrete plant, CD estimator, and discrete-time OCP.
 
     Successive linearisation of a nonlinear continuous-discrete model at each
     step, solved via :class:`StandardLinearDiscreteOCP` in deviation coordinates.
-    Horizon forecasts and an optional operating point are configured via the
-    :class:`ForecastAwareMPC` setters before each :meth:`step`.
+    Horizon forecasts and an optional linearisation point are configured via the
+    :class:`HorizonProfileMPC` setters before each :meth:`step`.
     """
 
     def __init__(
@@ -289,7 +289,7 @@ class StandardLinearisedContinuousMPC(ForecastAwareMPC, LinearisedContinuousMPC)
         penalise_absolute_input: bool = False,
         state_projection: Callable[[np.ndarray], np.ndarray] | None = None,
     ) -> None:
-        ForecastAwareMPC.__init__(self, N, model.nd)
+        HorizonProfileMPC.__init__(self, N, model.nd)
         self._model = model
         self._estimator = estimator
         self._dt = float(dt)
@@ -368,10 +368,10 @@ class StandardLinearisedContinuousMPC(ForecastAwareMPC, LinearisedContinuousMPC)
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
         x_hat = self._state_projection(est_out[0])
 
-        if self._operating_point is not None:
-            x_ss = self._operating_point.x_ss.copy()
-            u_ss = self._operating_point.u_ss.copy()
-            d_ss = self._operating_point.d_ss.copy()
+        if self._linearisation_point is not None:
+            x_ss = self._linearisation_point.state.copy()
+            u_ss = self._linearisation_point.input.copy()
+            d_ss = self._linearisation_point.disturbance.copy()
             x_ref_dev = np.zeros(self._model.nx, dtype=float)
             x0_dev = x_hat - x_ss
             u_prev_dev = self._u_prev - u_ss
@@ -403,34 +403,38 @@ class StandardLinearisedContinuousMPC(ForecastAwareMPC, LinearisedContinuousMPC)
         D_dev_np = self._disturbance_deviation_trajectory(d_ss)
         self._last_D_dev = D_dev_np.copy()
 
-        fc = self._forecast
-        x_ref_dev_seq = None
-        if fc.reference_sequence is not None:
+        hp = self._horizon_profile
+        output_reference_deviation_profile = None
+        if hp.output_reference_profile is not None:
             nz = self._model.nz
-            x_ref_dev_seq = (
-                np.asarray(fc.reference_sequence, dtype=float) - x_ss[:nz].reshape(1, -1)
+            output_reference_deviation_profile = (
+                np.asarray(hp.output_reference_profile, dtype=float) - x_ss[:nz].reshape(1, -1)
             )
 
-        u_ss_arg = self._resolve_u_ss_for_ocp(u_ss)
+        input_equilibrium = self._resolve_input_equilibrium_for_ocp(u_ss)
 
         U_dev, X_dev = self._ocp.solve(
             x0=x0_dev,
             D=D_dev_np.reshape(-1),
             x_ref=x_ref_dev,
             u_prev=u_prev_dev,
-            u_ss=u_ss_arg,
-            x_ref_dev_seq=x_ref_dev_seq,
-            offset_seq=fc.offset_sequence,
-            q_scale_seq=fc.q_scale_sequence,
-            r_scale_seq=fc.r_scale_sequence,
-            u_min_seq=fc.u_min_sequence,
-            u_max_seq=fc.u_max_sequence,
-            price_seq=fc.price_sequence,
-            elec_heat=fc.elec_heat,
-            elec_cool=fc.elec_cool,
-            bid_mask=fc.bid_mask,
-            price_weight=fc.price_weight,
-            dt_h=fc.dt_h,
+            input_equilibrium=input_equilibrium,
+            output_reference_deviation_profile=output_reference_deviation_profile,
+            soft_output_band_half_width_profile=hp.soft_output_band_half_width_profile,
+            output_tracking_weight_scale_profile=hp.output_tracking_weight_scale_profile,
+            input_regularisation_weight_scale_profile=(
+                hp.input_regularisation_weight_scale_profile
+            ),
+            input_lower_bound_profile=hp.input_lower_bound_profile,
+            input_upper_bound_profile=hp.input_upper_bound_profile,
+            input_linear_cost_coefficient_profile=hp.input_linear_cost_coefficient_profile,
+            input_linear_cost_slack_input_indices=hp.input_linear_cost_slack_input_indices,
+            input_linear_cost_positive_slack_coefficient_profile=(
+                hp.input_linear_cost_positive_slack_coefficient_profile
+            ),
+            input_linear_cost_negative_slack_coefficient_profile=(
+                hp.input_linear_cost_negative_slack_coefficient_profile
+            ),
         )
 
         U_dev_np = np.asarray(U_dev, dtype=float).reshape(self._N, self._model.nu)
@@ -467,14 +471,8 @@ class StandardLinearisedContinuousMPC(ForecastAwareMPC, LinearisedContinuousMPC)
         self._d_prev = d_now.copy()
         return x_hat
 
-    def _resolve_u_ss_for_ocp(self, u_ss: np.ndarray) -> np.ndarray | None:
-        fc = self._forecast
-        has_price = (
-            fc.price_sequence is not None
-            and fc.price_weight > 0.0
-            and fc.elec_heat is not None
-        )
-        if self._penalise_absolute_input or has_price:
+    def _resolve_input_equilibrium_for_ocp(self, u_ss: np.ndarray) -> np.ndarray | None:
+        if self._penalise_absolute_input or self._has_input_linear_cost():
             return u_ss
         return None
 

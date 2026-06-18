@@ -349,19 +349,17 @@ class StandardLinearDiscreteOCP(DiscreteOptimalControlProblem):
         u_prev: Any | None = None,
         warm_start: dict[str, np.ndarray] | None = None,
         *,
-        u_ss: Any | None = None,
-        x_ref_dev_seq: Any | None = None,
-        offset_seq: Any | None = None,
-        q_scale_seq: Any | None = None,
-        r_scale_seq: Any | None = None,
-        u_min_seq: Any | None = None,
-        u_max_seq: Any | None = None,
-        price_seq: Any | None = None,
-        elec_heat: Any | None = None,
-        elec_cool: Any | None = None,
-        bid_mask: Any | None = None,
-        price_weight: float = 0.0,
-        dt_h: float = 0.25,
+        input_equilibrium: Any | None = None,
+        output_reference_deviation_profile: Any | None = None,
+        soft_output_band_half_width_profile: Any | None = None,
+        output_tracking_weight_scale_profile: Any | None = None,
+        input_regularisation_weight_scale_profile: Any | None = None,
+        input_lower_bound_profile: Any | None = None,
+        input_upper_bound_profile: Any | None = None,
+        input_linear_cost_coefficient_profile: Any | None = None,
+        input_linear_cost_slack_input_indices: Any | None = None,
+        input_linear_cost_positive_slack_coefficient_profile: Any | None = None,
+        input_linear_cost_negative_slack_coefficient_profile: Any | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Solve the QP starting from state estimate ``x0``.
@@ -380,33 +378,38 @@ class StandardLinearDiscreteOCP(DiscreteOptimalControlProblem):
             ``{"U": (N·nu,), "X": (N·nx,)}`` primal warm-start trajectory
             (typically the previous solution shifted one step by
             :func:`_shift_warm_start`).  Ignored if the shapes do not match.
-        u_ss, x_ref_dev_seq, offset_seq, q_scale_seq, r_scale_seq,
-        u_min_seq, u_max_seq, price_seq, elec_heat, elec_cool, bid_mask,
-        price_weight, dt_h :
-            Optional time-varying horizon parameters.  When any are supplied the
-            condensed forecast QP path is used (see :func:`forecast_ocp.solve_forecast_qp`).
+        input_equilibrium, output_reference_deviation_profile,
+        soft_output_band_half_width_profile, output_tracking_weight_scale_profile,
+        input_regularisation_weight_scale_profile, input_lower_bound_profile,
+        input_upper_bound_profile, input_linear_cost_coefficient_profile,
+        input_linear_cost_slack_input_indices,
+        input_linear_cost_positive_slack_coefficient_profile,
+        input_linear_cost_negative_slack_coefficient_profile :
+            Optional time-varying horizon-profile parameters.  When any are
+            supplied the condensed profile QP path is used
+            (see :func:`forecast_ocp.solve_forecast_qp`).
 
         Returns
         -------
         U : (N · nu,) ndarray — optimal input sequence.
         X : (N · nx,) ndarray — predicted state trajectory ``[x[1]; …; x[N]]``.
         """
-        has_price = (
-            price_seq is not None
-            and price_weight > 0.0
-            and elec_heat is not None
+        has_input_linear_cost = (
+            input_linear_cost_coefficient_profile is not None
+            or input_linear_cost_positive_slack_coefficient_profile is not None
+            or input_linear_cost_negative_slack_coefficient_profile is not None
         )
-        has_forecast = (
-            (u_ss is not None and not np.allclose(u_ss, 0.0))
-            or x_ref_dev_seq is not None
-            or offset_seq is not None
-            or q_scale_seq is not None
-            or r_scale_seq is not None
-            or u_min_seq is not None
-            or u_max_seq is not None
-            or has_price
+        has_profile = (
+            (input_equilibrium is not None and not np.allclose(input_equilibrium, 0.0))
+            or output_reference_deviation_profile is not None
+            or soft_output_band_half_width_profile is not None
+            or output_tracking_weight_scale_profile is not None
+            or input_regularisation_weight_scale_profile is not None
+            or input_lower_bound_profile is not None
+            or input_upper_bound_profile is not None
+            or has_input_linear_cost
         )
-        if has_forecast:
+        if has_profile:
             from .forecast_ocp import solve_forecast_qp
 
             return solve_forecast_qp(
@@ -415,19 +418,23 @@ class StandardLinearDiscreteOCP(DiscreteOptimalControlProblem):
                 D,
                 x_ref,
                 u_prev,
-                u_ss=u_ss,
-                x_ref_dev_seq=x_ref_dev_seq,
-                offset_seq=offset_seq,
-                q_scale_seq=q_scale_seq,
-                r_scale_seq=r_scale_seq,
-                u_min_seq=u_min_seq,
-                u_max_seq=u_max_seq,
-                price_seq=price_seq,
-                elec_heat=elec_heat,
-                elec_cool=elec_cool,
-                bid_mask=bid_mask,
-                price_weight=price_weight,
-                dt_h=dt_h,
+                input_equilibrium=input_equilibrium,
+                output_reference_deviation_profile=output_reference_deviation_profile,
+                soft_output_band_half_width_profile=soft_output_band_half_width_profile,
+                output_tracking_weight_scale_profile=output_tracking_weight_scale_profile,
+                input_regularisation_weight_scale_profile=(
+                    input_regularisation_weight_scale_profile
+                ),
+                input_lower_bound_profile=input_lower_bound_profile,
+                input_upper_bound_profile=input_upper_bound_profile,
+                input_linear_cost_coefficient_profile=input_linear_cost_coefficient_profile,
+                input_linear_cost_slack_input_indices=input_linear_cost_slack_input_indices,
+                input_linear_cost_positive_slack_coefficient_profile=(
+                    input_linear_cost_positive_slack_coefficient_profile
+                ),
+                input_linear_cost_negative_slack_coefficient_profile=(
+                    input_linear_cost_negative_slack_coefficient_profile
+                ),
             )
 
         N = self._N

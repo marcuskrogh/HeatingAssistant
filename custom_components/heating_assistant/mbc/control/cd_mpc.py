@@ -33,7 +33,7 @@ import numpy as np
 from .._utils import _any_to_np1d
 from ..estimation.cd_kalman import CDKalmanFilter
 from .cd_ocp import StandardLinearContinuousDiscreteOCP
-from .mpc_forecast import ForecastAwareMPC
+from .mpc_forecast import HorizonProfileMPC
 from .ocp import _shift_warm_start
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ class LinearContinuousMPC(ABC):
         ----------
         ym : (nym,) array-like — measurement ``ym[k]``.
         D  : (N · nd,) array-like, optional — stacked disturbance forecast.
-             When omitted, the forecast set via :meth:`set_disturbance_forecast`
+             When omitted, the profile set via :meth:`set_disturbance_profile`
              is used.
 
         Returns
@@ -69,7 +69,7 @@ class LinearContinuousMPC(ABC):
         """
 
 
-class StandardLinearContinuousMPC(ForecastAwareMPC, LinearContinuousMPC):
+class StandardLinearContinuousMPC(HorizonProfileMPC, LinearContinuousMPC):
     """
     Standard MPC for a linear continuous-discrete plant, CD estimator, and discrete-time OCP.
 
@@ -84,7 +84,7 @@ class StandardLinearContinuousMPC(ForecastAwareMPC, LinearContinuousMPC):
         ocp: StandardLinearContinuousDiscreteOCP,
         warm_start: bool = False,
     ) -> None:
-        ForecastAwareMPC.__init__(self, ocp._N, model.nd)
+        HorizonProfileMPC.__init__(self, ocp._N, model.nd)
         self._model = model
         self._estimator = estimator
         self._ocp = ocp
@@ -126,15 +126,15 @@ class StandardLinearContinuousMPC(ForecastAwareMPC, LinearContinuousMPC):
         return u, U_seq, X_seq
 
     def _resolve_disturbance_forecast(self, D: Any | None) -> np.ndarray:
-        if self._forecast.disturbance_forecast is not None:
-            return np.asarray(self._forecast.disturbance_forecast, dtype=float).reshape(-1)
+        if self._horizon_profile.disturbance_profile is not None:
+            return np.asarray(self._horizon_profile.disturbance_profile, dtype=float).reshape(-1)
         if D is not None:
             return _any_to_np1d(D)
         if self._nd == 0:
             return np.zeros(self._N * self._nd, dtype=float)
         raise ValueError(
             "disturbance forecast required: pass D to step() or call "
-            "set_disturbance_forecast() first"
+            "set_disturbance_profile() first"
         )
 
 
