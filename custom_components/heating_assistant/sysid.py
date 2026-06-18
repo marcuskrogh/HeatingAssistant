@@ -39,15 +39,24 @@ _LOGGER = logging.getLogger(__name__)
 # during unit tests that monkey-patch run_sysid_ekf.
 _HouseThermalSDE = None
 _ContinuousDiscreteEKF = None
+_ContinuousDiscreteEKFParams = None
+_IntegrationScheme = None
 
 
 def _ensure_imports() -> None:
     global _HouseThermalSDE, _ContinuousDiscreteEKF
+    global _ContinuousDiscreteEKFParams, _IntegrationScheme
     if _HouseThermalSDE is None:
         from .controller import HouseThermalSDE  # noqa: PLC0415
-        from .mbc.estimation import ContinuousDiscreteEKF  # noqa: PLC0415
+        from mbc.estimation import (  # noqa: PLC0415
+            ContinuousDiscreteEKF,
+            ContinuousDiscreteEKFParams,
+            IntegrationScheme,
+        )
         _HouseThermalSDE = HouseThermalSDE
         _ContinuousDiscreteEKF = ContinuousDiscreteEKF
+        _ContinuousDiscreteEKFParams = ContinuousDiscreteEKFParams
+        _IntegrationScheme = IntegrationScheme
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +202,7 @@ def run_sysid_ekf(
             sim_model,
             heat_sources,
             dt,
+            ts=dt,
             sigma_w=sigma_w,
             sigma_v=sigma_v,
             augment_offsets=False,
@@ -315,11 +325,18 @@ def run_sysid_ekf(
         # n_steps scales with dt_step so the sub-step size stays ≤ dt/10
         # (same accuracy as the nominal filter).
         n_steps_step = max(1, min(200, round(dt_step * 10.0 / dt)))
-        ekf_step = _ContinuousDiscreteEKF(
-            sde, x_curr, P_curr, dt_step,
-            n_steps=n_steps_step,
-            scheme="implicit-euler",
-        )
+        prev_ts = sde._ts
+        sde._ts = dt_step
+        try:
+            ekf_step = _ContinuousDiscreteEKF(
+                sde, x_curr, P_curr,
+                params=_ContinuousDiscreteEKFParams(
+                    n_steps=n_steps_step,
+                    scheme=_IntegrationScheme.IMPLICIT_EULER,
+                ),
+            )
+        finally:
+            sde._ts = prev_ts
 
         # ---- Prediction step ----------------------------------------
         try:

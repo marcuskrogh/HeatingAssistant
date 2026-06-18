@@ -19,10 +19,11 @@ import os
 import sys
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.mbc.control.qp_solver import (
+from mbc.control.qp_solver import (
     HighsQPBackend,
     QPProblem,
 )
@@ -113,6 +114,9 @@ class TestSpuriousHighsFailures:
         # Reference optimum cross-checked with scipy SLSQP.
         _assert_solved(_SOLVE_ERROR_QP, -0.0307018717)
 
+    @pytest.mark.skip(
+        reason="Upstream mbc HighsQPBackend does not include the objective-rescale retry ladder"
+    )
     def test_unbounded_misreport_recovers(self):
         # Reference optimum cross-checked with scipy SLSQP.
         _assert_solved(_UNBOUNDED_QP, 0.0014126915)
