@@ -93,7 +93,7 @@ from scipy.linalg import block_diag as _scipy_block_diag
 from .mbc.models import ContinuousDiscreteModel
 from .mbc.estimation import ContinuousDiscreteEKF
 from .mbc.control import (
-    LinearisedContinuousMPC,
+    StandardLinearisedContinuousMPC,
     linearize_cd_model,
     discretize_cd_linearization,
     QPProblem,
@@ -1707,8 +1707,8 @@ class _AbsoluteInputOCP(StandardLinearDiscreteOCP):
 
 # ── Forecast-aware MPC controller ───────────────────────────────────────────
 
-class _ForecastAwareMPCController(LinearisedContinuousMPC):
-    """LinearisedContinuousMPC extended to accept a time-varying disturbance
+class _ForecastAwareMPCController(StandardLinearisedContinuousMPC):
+    """StandardLinearisedContinuousMPC extended to accept a time-varying disturbance
     forecast over the prediction horizon.
 
     When ``D_forecast`` (shape ``(N, nd)``) is passed to ``step()``, the

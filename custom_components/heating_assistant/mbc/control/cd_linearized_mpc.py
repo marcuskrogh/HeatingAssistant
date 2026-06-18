@@ -9,6 +9,7 @@ ZOH-discretises the local model, and solves the existing linear
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy as np
@@ -225,9 +226,40 @@ def discretize_cd_linearization(
     }
 
 
-class LinearisedContinuousMPC:
+class LinearisedContinuousMPC(ABC):
     """
-    MPC for a linearised continuous-discrete plant, CD estimator, and discrete-time OCP.
+    Abstract MPC for a linearised continuous-discrete plant, CD estimator, and discrete-time OCP.
+    """
+
+    @property
+    @abstractmethod
+    def x_ref(self) -> np.ndarray:
+        """Absolute state reference used for tracking."""
+
+    @x_ref.setter
+    @abstractmethod
+    def x_ref(self, val: np.ndarray) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def last_disturbance_deviation_trajectory(self) -> np.ndarray:
+        """Most recent disturbance trajectory in deviation coordinates."""
+
+    @abstractmethod
+    def step(
+        self,
+        y: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray | None = None,
+        t: float = 0.0,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Execute one closed-loop step."""
+
+
+class StandardLinearisedContinuousMPC(LinearisedContinuousMPC):
+    """
+    Standard MPC for a linearised continuous-discrete plant, CD estimator, and discrete-time OCP.
 
     Successive linearisation of a nonlinear continuous-discrete model at each
     step, solved via :class:`StandardLinearDiscreteOCP` in deviation coordinates.
@@ -382,5 +414,5 @@ class LinearisedContinuousMPC:
 
 
 # Backward-compatible aliases (deprecated).
-CDLinearizedMPCController = LinearisedContinuousMPC
-LinearizedContinuousMPCController = LinearisedContinuousMPC
+CDLinearizedMPCController = StandardLinearisedContinuousMPC
+LinearizedContinuousMPCController = StandardLinearisedContinuousMPC

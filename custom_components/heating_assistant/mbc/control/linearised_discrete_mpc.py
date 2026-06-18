@@ -8,6 +8,7 @@ discrete-time model at each sampling instant.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import Any, Protocol
 
 import numpy as np
@@ -70,9 +71,40 @@ def linearize_discrete_model(
     }
 
 
-class LinearisedDiscreteMPC:
+class LinearisedDiscreteMPC(ABC):
     """
-    MPC for a linearised discrete-time plant, discrete estimator, and discrete-time OCP.
+    Abstract MPC for a linearised discrete-time plant, discrete estimator, and discrete-time OCP.
+    """
+
+    @property
+    @abstractmethod
+    def x_ref(self) -> np.ndarray:
+        """Absolute state reference used for tracking."""
+
+    @x_ref.setter
+    @abstractmethod
+    def x_ref(self, val: np.ndarray) -> None:
+        ...
+
+    @property
+    @abstractmethod
+    def last_disturbance_deviation_trajectory(self) -> np.ndarray:
+        """Most recent disturbance trajectory in deviation coordinates."""
+
+    @abstractmethod
+    def step(
+        self,
+        y: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray | None = None,
+        t: float = 0.0,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Execute one closed-loop step."""
+
+
+class StandardLinearisedDiscreteMPC(LinearisedDiscreteMPC):
+    """
+    Standard MPC for a linearised discrete-time plant, discrete estimator, and discrete-time OCP.
 
     Successive linearisation of a nonlinear discrete-time model at each step,
     solved via :class:`StandardLinearDiscreteOCP` in deviation coordinates.

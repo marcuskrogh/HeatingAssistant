@@ -40,11 +40,16 @@ model-based control, estimation, identification, and simulation.
       * ``StandardLinearizedContinuousDiscreteOCP``    – standard linearised discrete OCP for nonlinear CD plants.
       * ``StandardContinuousOCP``                      – standard continuous OCP for nonlinear CD plants.
       * ``GeneralContinuousOCP``                       – general continuous OCP (Mayer/Lagrange NLP).
-      * ``LinearDiscreteMPC``                    – linear discrete plant + KF + discrete OCP.
-      * ``LinearisedDiscreteMPC``                – linearised discrete plant + estimator + discrete OCP.
-      * ``LinearContinuousMPC``                  – linear CD plant + CD-KF + discrete OCP.
-      * ``LinearisedContinuousMPC``              – linearised CD plant + CD estimator + discrete OCP.
-      * ``NonlinearContinuousMPC``               – nonlinear CD plant + CD estimator + continuous OCP.
+      * ``LinearDiscreteMPC``                    – abstract MPC for linear discrete plants.
+      * ``StandardLinearDiscreteMPC``            – standard linear discrete MPC (KF + discrete OCP).
+      * ``LinearisedDiscreteMPC``                – abstract MPC for linearised discrete plants.
+      * ``StandardLinearisedDiscreteMPC``        – standard linearised discrete MPC.
+      * ``LinearContinuousMPC``                  – abstract MPC for linear CD plants.
+      * ``StandardLinearContinuousMPC``          – standard linear CD MPC (CD-KF + discrete OCP).
+      * ``LinearisedContinuousMPC``              – abstract MPC for linearised CD plants.
+      * ``StandardLinearisedContinuousMPC``      – standard linearised CD MPC.
+      * ``NonlinearContinuousMPC``               – abstract MPC for nonlinear CD plants.
+      * ``StandardNonlinearContinuousMPC``       – standard nonlinear CD MPC (CD estimator + continuous OCP).
 
   mbc.identification
       System-identification / parameter-estimation utilities:
@@ -100,10 +105,15 @@ from .control import (
     StandardContinuousOCP,
     GeneralContinuousOCP,
     LinearDiscreteMPC,
+    StandardLinearDiscreteMPC,
     LinearisedDiscreteMPC,
+    StandardLinearisedDiscreteMPC,
     LinearContinuousMPC,
+    StandardLinearContinuousMPC,
     LinearisedContinuousMPC,
+    StandardLinearisedContinuousMPC,
     NonlinearContinuousMPC,
+    StandardNonlinearContinuousMPC,
     linearize_discrete_model,
     linearize_cd_model,
     discretize_cd_linearization,
@@ -164,6 +174,12 @@ __all__ = [
     "LinearContinuousMPC",
     "LinearisedContinuousMPC",
     "NonlinearContinuousMPC",
+    # Control — standard MPCs
+    "StandardLinearDiscreteMPC",
+    "StandardLinearisedDiscreteMPC",
+    "StandardLinearContinuousMPC",
+    "StandardLinearisedContinuousMPC",
+    "StandardNonlinearContinuousMPC",
     "linearize_discrete_model",
     "linearize_cd_model",
     "discretize_cd_linearization",

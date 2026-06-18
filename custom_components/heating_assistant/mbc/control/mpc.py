@@ -18,6 +18,7 @@ At each measurement time t_k:
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import Any, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -30,9 +31,37 @@ if TYPE_CHECKING:
     from ..models import LinearDiscreteModel
 
 
-class LinearDiscreteMPC:
+class LinearDiscreteMPC(ABC):
     """
-    MPC for a linear discrete-time plant, estimator, and discrete-time OCP.
+    Abstract MPC for a linear discrete-time plant, estimator, and discrete-time OCP.
+    """
+
+    @abstractmethod
+    def step(
+        self,
+        ym: Any,
+        D: Any,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Execute one closed-loop MPC step.
+
+        Parameters
+        ----------
+        ym : (nym,) array-like  — measurement ``ym[k]``.
+        D  : (N · nd,) array-like  — stacked disturbance forecast
+             ``[d[k]; d[k+1]; …; d[k + N − 1]]``.
+
+        Returns
+        -------
+        u     : (nu,) ndarray — optimal input ``u_k``.
+        U_seq : (N · nu,) ndarray — full optimal input sequence.
+        X_seq : (N · nx,) ndarray — predicted state trajectory.
+        """
+
+
+class StandardLinearDiscreteMPC(LinearDiscreteMPC):
+    """
+    Standard MPC for a linear discrete-time plant, estimator, and discrete-time OCP.
 
     Composes a :class:`~mbc.estimation.KalmanFilter` with a
     :class:`StandardLinearDiscreteOCP`.
@@ -61,21 +90,6 @@ class LinearDiscreteMPC:
         ym: Any,
         D: Any,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Execute one closed-loop MPC step.
-
-        Parameters
-        ----------
-        ym : (nym,) array-like  — measurement ``ym[k]``.
-        D  : (N · nd,) array-like  — stacked disturbance forecast
-             ``[d[k]; d[k+1]; …; d[k + N − 1]]``.
-
-        Returns
-        -------
-        u     : (nu,) ndarray — optimal input ``u_k``.
-        U_seq : (N · nu,) ndarray — full optimal input sequence.
-        X_seq : (N · nx,) ndarray — predicted state trajectory.
-        """
         nu = self._model.nu
         nd = self._model.nd
 
@@ -107,4 +121,4 @@ class LinearDiscreteMPC:
 
 
 # Backward-compatible alias (deprecated).
-MPCController = LinearDiscreteMPC
+MPCController = StandardLinearDiscreteMPC

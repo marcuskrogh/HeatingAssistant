@@ -1243,9 +1243,43 @@ class GeneralContinuousOCP(ContinuousOptimalControlProblem):
 # ── Generic continuous NMPC controller ───────────────────────────────────────
 
 
-class NonlinearContinuousMPC:
+class NonlinearContinuousMPC(ABC):
     """
-    MPC for a nonlinear continuous-discrete plant, CD estimator, and continuous-time OCP.
+    Abstract MPC for a nonlinear continuous-discrete plant, CD estimator, and continuous-time OCP.
+    """
+
+    @abstractmethod
+    def step(
+        self,
+        y: np.ndarray,
+        d_trajectory: np.ndarray,
+        p: np.ndarray | None = None,
+        t: float = 0.0,
+    ) -> np.ndarray:
+        """
+        Execute one closed-loop ENMPC step.
+
+        Parameters
+        ----------
+        y : (nym,) ndarray
+            Current measurement ``y^{m,s}_k``.
+        d_trajectory : (N, nd) ndarray
+            Disturbance forecast over the horizon; ``d_trajectory[0] = d_k``.
+        p : (nparams,) ndarray or None, optional
+            Parameter vector ``θ^c``.  ``None`` → empty vector.
+        t : float, optional
+            Current time ``t_k``.
+
+        Returns
+        -------
+        u_k : (nu,) ndarray
+            Optimal input ``u_k`` to apply over ``[t_k, t_{k+1}]``.
+        """
+
+
+class StandardNonlinearContinuousMPC(NonlinearContinuousMPC):
+    """
+    Standard MPC for a nonlinear continuous-discrete plant, CD estimator, and continuous-time OCP.
 
     Composes any continuous-discrete state estimator with a continuous-time OCP
     (typically :class:`StandardContinuousOCP` or :class:`GeneralContinuousOCP`).
@@ -1317,5 +1351,5 @@ class NonlinearContinuousMPC:
 
 # Backward-compatible aliases (deprecated).
 EconomicOptimalControlProblem = GeneralContinuousOCP
-CDNMPCController = NonlinearContinuousMPC
-ContinuousNMPCController = NonlinearContinuousMPC
+CDNMPCController = StandardNonlinearContinuousMPC
+ContinuousNMPCController = StandardNonlinearContinuousMPC

@@ -1,8 +1,9 @@
 """
 Model Predictive Controller for linear continuous-discrete systems.
 
-:class:`LinearContinuousMPC` composes a :class:`~mbc.estimation.CDKalmanFilter`
-and a :class:`~mbc.control.StandardLinearContinuousDiscreteOCP` and implements the
+:class:`StandardLinearContinuousMPC` composes a
+:class:`~mbc.estimation.CDKalmanFilter` and a
+:class:`~mbc.control.StandardLinearContinuousDiscreteOCP` and implements the
 receding-horizon policy described in ControlToolbox §EMPC —
 *ENMPC Algorithm*, specialised to the linear continuous-discrete case.
 
@@ -24,6 +25,7 @@ directly via ODE integration; the OCP uses ZOH-discretised matrices
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import Any, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -37,9 +39,37 @@ if TYPE_CHECKING:
     from ..models import LinearContinuousDiscreteModel
 
 
-class LinearContinuousMPC:
+class LinearContinuousMPC(ABC):
     """
-    MPC for a linear continuous-discrete plant, CD estimator, and discrete-time OCP.
+    Abstract MPC for a linear continuous-discrete plant, CD estimator, and discrete-time OCP.
+    """
+
+    @abstractmethod
+    def step(
+        self,
+        ym: Any,
+        D: Any,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Execute one closed-loop CD-MPC step.
+
+        Parameters
+        ----------
+        ym : (nym,) array-like — measurement ``ym[k]``.
+        D  : (N · nd,) array-like — stacked disturbance forecast
+             ``[d[k]; d[k+1]; …; d[k + N − 1]]``.
+
+        Returns
+        -------
+        u     : (nu,) ndarray — optimal input ``u_k``.
+        U_seq : (N · nu,) ndarray — full optimal input sequence.
+        X_seq : (N · nx,) ndarray — predicted state trajectory.
+        """
+
+
+class StandardLinearContinuousMPC(LinearContinuousMPC):
+    """
+    Standard MPC for a linear continuous-discrete plant, CD estimator, and discrete-time OCP.
 
     Composes a :class:`~mbc.estimation.CDKalmanFilter` with a
     :class:`~mbc.control.StandardLinearContinuousDiscreteOCP` (ZOH-discretised QP).
@@ -66,21 +96,6 @@ class LinearContinuousMPC:
         ym: Any,
         D: Any,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Execute one closed-loop CD-MPC step.
-
-        Parameters
-        ----------
-        ym : (nym,) array-like — measurement ``ym[k]``.
-        D  : (N · nd,) array-like — stacked disturbance forecast
-             ``[d[k]; d[k+1]; …; d[k + N − 1]]``.
-
-        Returns
-        -------
-        u     : (nu,) ndarray — optimal input ``u_k``.
-        U_seq : (N · nu,) ndarray — full optimal input sequence.
-        X_seq : (N · nx,) ndarray — predicted state trajectory.
-        """
         nu = self._model.nu
         nd = self._model.nd
 
@@ -112,5 +127,5 @@ class LinearContinuousMPC:
 
 
 # Backward-compatible aliases (deprecated).
-CDMPCController = LinearContinuousMPC
-LinearContinuousMPCController = LinearContinuousMPC
+CDMPCController = StandardLinearContinuousMPC
+LinearContinuousMPCController = StandardLinearContinuousMPC

@@ -6,9 +6,14 @@ from .ocp import (
     StandardDiscreteOCP,  # deprecated alias
     OptimalControlProblem,  # deprecated alias
 )
-from .mpc import LinearDiscreteMPC, MPCController  # deprecated
+from .mpc import (
+    LinearDiscreteMPC,
+    StandardLinearDiscreteMPC,
+    MPCController,  # deprecated
+)
 from .linearised_discrete_mpc import (
     LinearisedDiscreteMPC,
+    StandardLinearisedDiscreteMPC,
     linearize_discrete_model,
 )
 from .cd_ocp import (
@@ -18,7 +23,12 @@ from .cd_ocp import (
     LinearContinuousOCP,  # deprecated alias
     CDTrackingOptimalControlProblem,  # deprecated alias
 )
-from .cd_mpc import LinearContinuousMPC, CDMPCController, LinearContinuousMPCController  # deprecated
+from .cd_mpc import (
+    LinearContinuousMPC,
+    StandardLinearContinuousMPC,
+    CDMPCController,  # deprecated alias
+    LinearContinuousMPCController,  # deprecated alias
+)
 from .cd_linearized_ocp import (
     StandardLinearizedContinuousDiscreteOCP,
     CDLinearizedOptimalControlProblem,  # deprecated alias
@@ -26,6 +36,7 @@ from .cd_linearized_ocp import (
 )
 from .cd_linearized_mpc import (
     LinearisedContinuousMPC,
+    StandardLinearisedContinuousMPC,
     CDLinearizedMPCController,  # deprecated alias
     LinearizedContinuousMPCController,  # deprecated alias
     linearize_cd_model,
@@ -35,6 +46,7 @@ from .enmpc import (
     ContinuousOptimalControlProblem,
     GeneralContinuousOCP,
     NonlinearContinuousMPC,
+    StandardNonlinearContinuousMPC,
     EconomicOptimalControlProblem,  # deprecated alias
     CDNMPCController,  # deprecated alias
     ContinuousNMPCController,  # deprecated alias
@@ -72,6 +84,12 @@ __all__ = [
     "LinearContinuousMPC",
     "LinearisedContinuousMPC",
     "NonlinearContinuousMPC",
+    # Standard MPC implementations
+    "StandardLinearDiscreteMPC",
+    "StandardLinearisedDiscreteMPC",
+    "StandardLinearContinuousMPC",
+    "StandardLinearisedContinuousMPC",
+    "StandardNonlinearContinuousMPC",
     # Linearisation helpers
     "linearize_discrete_model",
     "linearize_cd_model",
