@@ -4,7 +4,7 @@ Successive-linearisation MPC for nonlinear continuous-discrete models.
 This module provides a linear-QP MPC controller that, at each control interval,
 linearises a nonlinear continuous-discrete model around an operating point,
 ZOH-discretises the local model, and solves the existing linear
-:class:`~mbc.control.StandardDiscreteOCP` in deviation coordinates.
+:class:`~mbc.control.StandardLinearDiscreteOCP` in deviation coordinates.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import numpy as np
 
 from .._utils import _fd_jacobian, _zoh_full, _van_loan
 from ..models import LinearDiscreteModel, ContinuousDiscreteModel
-from .ocp import StandardDiscreteOCP
+from .ocp import StandardLinearDiscreteOCP
 
 
 class _DeviationLinearDiscreteModel(LinearDiscreteModel):
@@ -225,13 +225,13 @@ def discretize_cd_linearization(
     }
 
 
-class LinearizedContinuousMPCController:
+class CDLinearizedMPCController:
     """
-    Successive-linearisation MPC for nonlinear continuous-time plants.
+    Successive-linearisation MPC for nonlinear continuous-discrete plants.
 
-    The controller keeps existing nonlinear estimators unchanged and reuses
-    :class:`StandardDiscreteOCP` by updating a mutable deviation linear model
-    at each sampling instant.
+    Composes a continuous-discrete state estimator with
+    :class:`StandardLinearDiscreteOCP` by updating a mutable deviation linear
+    model at each sampling instant.
     """
 
     def __init__(
@@ -274,7 +274,7 @@ class LinearizedContinuousMPCController:
             u_max_abs=np.asarray(u_max, dtype=float),
         )
 
-        self._ocp = StandardDiscreteOCP(
+        self._ocp = StandardLinearDiscreteOCP(
             model=self._lin_model,
             N=self._N,
             Q=Q,
@@ -383,4 +383,4 @@ class LinearizedContinuousMPCController:
 
 
 # Backward-compatible alias (deprecated).
-CDLinearizedMPCController = LinearizedContinuousMPCController
+LinearizedContinuousMPCController = CDLinearizedMPCController

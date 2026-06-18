@@ -1,13 +1,12 @@
 """
-One-shot linearised continuous-time OCP for nonlinear plants.
+Standard linearised discrete-time OCP for nonlinear continuous-discrete plants.
 
-:class:`LinearizedContinuousOCP` linearises a nonlinear
-:class:`~mbc.models.ContinuousDiscreteModel` around the current operating
-point, ZOH-discretises the local LTI model, and solves
-:class:`~mbc.control.StandardDiscreteOCP` in deviation coordinates.
+:class:`StandardLinearizedContinuousDiscreteOCP` linearises a nonlinear
+:class:`~mbc.models.ContinuousDiscreteModel` at the operating point,
+ZOH-discretises the local model, and solves
+:class:`~mbc.control.StandardLinearDiscreteOCP` in deviation coordinates.
 
-This is the open-loop OCP counterpart of
-:class:`~mbc.control.LinearizedContinuousMPCController`.
+Open-loop counterpart of :class:`~mbc.control.CDLinearizedMPCController`.
 """
 
 from __future__ import annotations
@@ -21,18 +20,16 @@ from .cd_linearized_mpc import (
     discretize_cd_linearization,
     linearize_cd_model,
 )
-from .ocp import StandardDiscreteOCP
+from .ocp import StandardLinearDiscreteOCP
 
 if TYPE_CHECKING:
     from ..models import ContinuousDiscreteModel
 
 
-class LinearizedContinuousOCP:
+class StandardLinearizedContinuousDiscreteOCP:
     """
-    Linearised continuous-time tracking OCP solved as a one-shot QP.
-
-    At each :meth:`solve` call the nonlinear plant is linearised at the
-  current state, ZOH-discretised, and optimised in deviation coordinates.
+    Standard linearised discrete-time tracking OCP for nonlinear
+    continuous-discrete plants.
     """
 
     def __init__(
@@ -83,7 +80,7 @@ class LinearizedContinuousOCP:
             u_max_abs=np.asarray(u_max, dtype=float),
         )
 
-        self._ocp = StandardDiscreteOCP(
+        self._ocp = StandardLinearDiscreteOCP(
             model=self._lin_model,
             N=self._N,
             Q=Q,
@@ -191,5 +188,6 @@ class LinearizedContinuousOCP:
         return np.linalg.lstsq(Cz, z_err, rcond=None)[0]
 
 
-# Backward-compatible alias (deprecated).
-CDLinearizedOptimalControlProblem = LinearizedContinuousOCP
+# Backward-compatible aliases (deprecated).
+CDLinearizedOptimalControlProblem = StandardLinearizedContinuousDiscreteOCP
+LinearizedContinuousOCP = StandardLinearizedContinuousDiscreteOCP

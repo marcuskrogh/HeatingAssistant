@@ -21,7 +21,7 @@ from custom_components.heating_assistant.mbc.models import ContinuousDiscreteMod
 from custom_components.heating_assistant.mbc.estimation import ContinuousDiscreteEKF
 from custom_components.heating_assistant.mbc.control import (
     StandardContinuousOCP,
-    LinearizedContinuousMPCController,
+    CDLinearizedMPCController,
 )
 from custom_components.heating_assistant.controller import (
     HouseThermalSDE,
@@ -1118,14 +1118,14 @@ class TestHeatingMPCController:
         assert ctrl.outdoor_forecast == forecast
 
     def test_uses_linearised_mpc(self):
-        """HeatingMPCController should use LinearizedContinuousMPCController internally."""
+        """HeatingMPCController should use CDLinearizedMPCController internally."""
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl._system, HouseThermalSDE)
         assert isinstance(ctrl._control_system, HouseThermalSDE)
         assert ctrl._control_system.nx == ctrl._system.nx
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
-        assert isinstance(ctrl._mpc, LinearizedContinuousMPCController)
+        assert isinstance(ctrl._mpc, CDLinearizedMPCController)
 
     def test_negative_smoothing_weight_raises(self):
         model, sources = _make_model_and_sources()
@@ -1358,7 +1358,7 @@ class TestSolarForecastIndexing:
     def test_setpoint_reference_updated_on_setpoint_change(self):
         """After compute(), the MPC x_ref must track the current setpoints.
 
-        LinearizedContinuousMPCController.x_ref is updated via the property setter
+        CDLinearizedMPCController.x_ref is updated via the property setter
         at the start of each compute() call so stage and terminal costs
         always use the latest setpoints.
         """

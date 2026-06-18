@@ -7,7 +7,7 @@ costs and box / soft-box constraints, the entire NLP reduces to a single
 finite-horizon **quadratic program** that is solved directly with a convex-QP
 backend (OSQP by default; HiGHS also available) — strictly more efficient than
 the implicit-Euler direct-simultaneous formulation used by
-:class:`~mbc.control.ContinuousOptimalControlProblem` for nonlinear plants.
+:class:`~mbc.control.GeneralContinuousOCP` for nonlinear plants.
 
 Plant model (ControlToolbox notation, discrete-time specialisation)
 -------------------------------------------------------------------
@@ -215,11 +215,11 @@ class DiscreteOptimalControlProblem(ABC):
         """Return optimal input and state trajectories over the horizon."""
 
 
-class StandardDiscreteOCP(DiscreteOptimalControlProblem):
+class StandardLinearDiscreteOCP(DiscreteOptimalControlProblem):
     """
-    Standard discrete-time tracking OCP solved as a convex QP.
+    Standard discrete-time tracking OCP for linear discrete-time plants.
 
-    Receding-horizon QP with hard input and soft output box constraints.
+    Solved as a convex QP with hard input and soft output box constraints.
 
     The OCP tracks the **output** ``z[k] = Cz x[k]`` against a constant
     reference ``z_ref``.  When ``Cz = Cm`` (the default of
@@ -413,7 +413,7 @@ class StandardDiscreteOCP(DiscreteOptimalControlProblem):
 
         if not result.success:
             warnings.warn(
-                f"StandardDiscreteOCP.solve: QP solver returned status "
+                f"StandardLinearDiscreteOCP.solve: QP solver returned status "
                 f"'{result.status}'; returning zero inputs as fallback.",
                 RuntimeWarning,
                 stacklevel=2,
@@ -718,5 +718,6 @@ class StandardDiscreteOCP(DiscreteOptimalControlProblem):
         )
 
 
-# Backward-compatible alias (deprecated).
-OptimalControlProblem = StandardDiscreteOCP
+# Backward-compatible aliases (deprecated).
+StandardDiscreteOCP = StandardLinearDiscreteOCP
+OptimalControlProblem = StandardLinearDiscreteOCP

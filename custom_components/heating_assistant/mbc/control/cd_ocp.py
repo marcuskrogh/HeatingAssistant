@@ -1,44 +1,13 @@
 """
-Continuous-time OCP specialisations for linear and tracking problems.
+Continuous-discrete plant specialisations of discrete- and continuous-time OCPs.
 
-``LinearContinuousOCP``
-    ZOH-discretised QP for :class:`~mbc.models.LinearContinuousDiscreteModel`
-    plants.  Inherits :class:`~mbc.control.StandardDiscreteOCP`.
+``StandardLinearContinuousDiscreteOCP``
+    Standard discrete-time tracking OCP for linear continuous-discrete plants.
+    ZOH-discretises the plant and inherits :class:`~mbc.control.StandardLinearDiscreteOCP`.
 
 ``StandardContinuousOCP``
-    Standard tracking OCP for nonlinear plants — thin wrapper around
-    :class:`~mbc.control.ContinuousOptimalControlProblem` with a
-    quadratic-tracking-friendly constructor (``Q``, ``R``, ``P``, ``S``, …).
-    The underlying NLP is a continuous-time direct-simultaneous formulation
-    (implicit Euler + right-rectangular Lagrange).
-
-Linear problem formulation (M.Sc. thesis, Ch. 5)
--------------------------------------------------
-Given the continuous-discrete model
-
-    dx = (A_c x + B_c u + E_c d) dt + G dw
-    y[k] = C x[k] + v[k]
-
-the controller operates on the ZOH-discretised prediction model
-
-    x[k+1] = A_d x[k] + B_d u[k] + E_d d[k]
-
-where (A_d, B_d, E_d) = ``model.discretize(d)``.
-
-The receding-horizon quadratic program over horizon N is:
-
-    min_{U}  J(U) = Σₖ₌₀ᴺ⁻¹ [ ‖y[k+1] − r‖²_Q  +  ‖u[k]‖²_R
-                               + ‖Δu[k]‖²_S ]
-                   + ‖y[N] − r‖²_P
-                   + ρ Σₖ₌₀ᴺ⁻¹ ‖ε[k+1]‖²
-
-    s.t.  x[k+1] = A_d x[k] + B_d u[k] + E_d d[k]
-          u_min ≤ u[k] ≤ u_max                        (hard input box)
-          y_min − ε[k+1] ≤ y[k+1] ≤ y_max + ε[k+1]   (soft output box)
-          ε[k+1] ≥ 0
-
-The lifted (batch) QP is solved through a pluggable convex-QP backend
-(OSQP by default; HiGHS available).
+    Standard continuous-time tracking OCP for nonlinear continuous-discrete
+    plants.  Thin wrapper around :class:`~mbc.control.GeneralContinuousOCP`.
 """
 
 from __future__ import annotations
@@ -47,7 +16,7 @@ from typing import Any, Tuple, TYPE_CHECKING
 
 import numpy as np
 
-from .ocp import StandardDiscreteOCP
+from .ocp import StandardLinearDiscreteOCP
 from .qp_solver import QPSolverBackend
 from .nlp_solver import NLPScalingPolicy, NLPSolverBackend
 
@@ -56,10 +25,7 @@ if TYPE_CHECKING:
 
 
 class _CDModelAdapter:
-    """
-    Thin adapter that wraps a ``LinearContinuousDiscreteModel`` and exposes
-    the numpy interface expected by ``StandardDiscreteOCP``.
-    """
+    """Adapter exposing ZOH-discretised matrices for ``StandardLinearDiscreteOCP``."""
 
     def __init__(self, model: "LinearContinuousDiscreteModel") -> None:
         self._m = model
@@ -67,9 +33,6 @@ class _CDModelAdapter:
         self._Ad_np, self._Bd_np, self._Ed_np = _zoh_full(
             model.A, model.B, model.E, model.dt
         )
-
-    def _ensure_discretized(self) -> None:
-        """No-op: matrices are computed in __init__."""
 
     @property
     def nx(self) -> int:
@@ -93,17 +56,14 @@ class _CDModelAdapter:
 
     @property
     def Ad(self) -> np.ndarray:
-        self._ensure_discretized()
         return self._Ad_np
 
     @property
     def Bd(self) -> np.ndarray:
-        self._ensure_discretized()
         return self._Bd_np
 
     @property
     def Ed(self) -> np.ndarray:
-        self._ensure_discretized()
         return self._Ed_np
 
     @property
@@ -111,13 +71,12 @@ class _CDModelAdapter:
         return self._m.u_bounds
 
 
-class LinearContinuousOCP(StandardDiscreteOCP):
+class StandardLinearContinuousDiscreteOCP(StandardLinearDiscreteOCP):
     """
-    Linear continuous-time tracking OCP solved as a ZOH-discretised QP.
+    Standard discrete-time tracking OCP for linear continuous-discrete plants.
 
-    Inherits :class:`~mbc.control.StandardDiscreteOCP`.  A ``_CDModelAdapter``
-    wraps a :class:`~mbc.models.LinearContinuousDiscreteModel`, computing
-    ZOH-discretised matrices at construction time.
+    The plant is ZOH-discretised once at construction; the resulting QP is
+    solved by :class:`~mbc.control.StandardLinearDiscreteOCP`.
     """
 
     def __init__(
@@ -156,11 +115,10 @@ class LinearContinuousOCP(StandardDiscreteOCP):
 
 class StandardContinuousOCP:
     """
-    Standard continuous-time tracking OCP for nonlinear plants.
+    Standard continuous-time tracking OCP for nonlinear continuous-discrete plants.
 
-    Thin wrapper around :class:`~mbc.control.ContinuousOptimalControlProblem`
-    that exposes a quadratic-tracking-friendly constructor (``Q``, ``R``,
-    ``P``, ``S``, ``c_u``).
+    Thin wrapper around :class:`~mbc.control.GeneralContinuousOCP` with a
+    quadratic-tracking-friendly constructor (``Q``, ``R``, ``P``, ``S``, ``c_u``).
     """
 
     def __init__(
@@ -189,7 +147,7 @@ class StandardContinuousOCP:
         solver_scaling: NLPScalingPolicy | dict | None = None,
         dt: float | None = None,
     ) -> None:
-        from .enmpc import ContinuousOptimalControlProblem
+        from .enmpc import GeneralContinuousOCP
 
         Q_arr = np.asarray(Q, dtype=float)
         R_arr = np.asarray(R, dtype=float)
@@ -243,7 +201,7 @@ class StandardContinuousOCP:
             _mayer = None
             _mayer_jac = None
 
-        self._ocp = ContinuousOptimalControlProblem(
+        self._ocp = GeneralContinuousOCP(
             model,
             N,
             lagrange=_lagrange,
@@ -313,5 +271,6 @@ class StandardContinuousOCP:
 
 
 # Backward-compatible aliases (deprecated).
-CDOptimalControlProblem = LinearContinuousOCP
+CDOptimalControlProblem = StandardLinearContinuousDiscreteOCP
+LinearContinuousOCP = StandardLinearContinuousDiscreteOCP
 CDTrackingOptimalControlProblem = StandardContinuousOCP

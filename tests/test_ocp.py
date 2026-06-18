@@ -13,10 +13,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from custom_components.heating_assistant.controller import HouseThermalSDE
 from custom_components.heating_assistant.heat_sources import ElectricHeater
 from custom_components.heating_assistant.mbc.control import (
-    LinearContinuousOCP,
-    LinearizedContinuousOCP,
+    StandardLinearContinuousDiscreteOCP,
+    StandardLinearizedContinuousDiscreteOCP,
     StandardContinuousOCP,
-    StandardDiscreteOCP,
+    StandardLinearDiscreteOCP,
 )
 from custom_components.heating_assistant.thermal_model import HouseModel, Room
 from tests.ocp_fixtures import FirstOrderCDModel, FirstOrderDiscreteModel
@@ -38,14 +38,14 @@ def _ocp_common_kwargs():
     )
 
 
-class TestDiscreteLinearOCP:
-    """StandardDiscreteOCP — discrete linear QP."""
+class TestStandardLinearDiscreteOCP:
+    """StandardLinearDiscreteOCP — discrete-time QP for linear discrete plants."""
 
     def _make_ocp(self, **kwargs):
         model = FirstOrderDiscreteModel(x0=18.0, x_ref=22.0)
         kw = _ocp_common_kwargs()
         kw.update(kwargs)
-        return StandardDiscreteOCP(model=model, **kw), model
+        return StandardLinearDiscreteOCP(model=model, **kw), model
 
     def test_setpoint_tracking_heats_when_cold(self):
         ocp, model = self._make_ocp()
@@ -99,14 +99,14 @@ class TestDiscreteLinearOCP:
         assert U[0] <= 0.1 + 1e-5
 
 
-class TestContinuousLinearOCP:
-    """LinearContinuousOCP — continuous linear ZOH-QP."""
+class TestStandardLinearContinuousDiscreteOCP:
+    """StandardLinearContinuousDiscreteOCP — discrete QP for linear CD plants."""
 
     def _make_ocp(self, **kwargs):
         model = FirstOrderCDModel(x0=18.0, x_ref=22.0, dt=900.0)
         kw = _ocp_common_kwargs()
         kw.update(kwargs)
-        return LinearContinuousOCP(model=model, **kw), model
+        return StandardLinearContinuousDiscreteOCP(model=model, **kw), model
 
     def test_setpoint_tracking(self):
         ocp, model = self._make_ocp()
@@ -136,8 +136,8 @@ class TestContinuousLinearOCP:
         assert U_pen[0] <= U_plain[0] + 1e-6
 
 
-class TestLinearizedContinuousOCP:
-    """LinearizedContinuousOCP — one-shot linearised QP."""
+class TestStandardLinearizedContinuousDiscreteOCP:
+    """StandardLinearizedContinuousDiscreteOCP — linearised discrete QP."""
 
     def _make_house_ocp(self, **kwargs):
         model, sources = _make_model_and_sources()
@@ -152,7 +152,7 @@ class TestLinearizedContinuousOCP:
             dt=900.0,
         )
         kw.update(kwargs)
-        return LinearizedContinuousOCP(sde, **kw), sde
+        return StandardLinearizedContinuousDiscreteOCP(sde, **kw), sde
 
     def test_solve_shapes(self):
         ocp, sde = self._make_house_ocp()
@@ -194,7 +194,7 @@ class TestLinearizedContinuousOCP:
 
 
 class TestStandardContinuousOCP:
-    """StandardContinuousOCP — continuous nonlinear NLP."""
+    """StandardContinuousOCP — continuous-time NLP for nonlinear CD plants."""
 
     def _make_ocp(self, **kwargs):
         model, sources = _make_model_and_sources()

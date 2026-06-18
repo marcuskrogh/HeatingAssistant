@@ -30,16 +30,20 @@ model-based control, estimation, identification, and simulation.
   mbc.control
       Optimal control algorithms:
 
-      * ``DiscreteOptimalControlProblem``    – abstract base for discrete-time OCPs.
-      * ``StandardDiscreteOCP``            – standard discrete tracking QP.
-      * ``MPCController``                  – KalmanFilter + StandardDiscreteOCP.
-      * ``LinearContinuousOCP``            – ZOH-discretised QP for linear CD plants.
-      * ``LinearContinuousMPCController``  – CDKalmanFilter + LinearContinuousOCP.
-      * ``StandardContinuousOCP``          – standard continuous-time tracking OCP (NLP).
-      * ``LinearizedContinuousOCP``        – one-shot linearised continuous tracking QP.
-      * ``ContinuousOptimalControlProblem`` – general continuous-time NLP OCP.
-      * ``ContinuousNMPCController``       – generic estimator + continuous OCP controller.
-      * ``LinearizedContinuousMPCController`` – successive-linearisation MPC (production path).
+      OCPs are discrete-time or continuous-time.  MPC controllers pair an OCP
+      with a state estimator matched to the plant model type.
+
+      * ``DiscreteOptimalControlProblem``              – abstract discrete-time OCP base.
+      * ``ContinuousOptimalControlProblem``            – abstract continuous-time OCP base.
+      * ``StandardLinearDiscreteOCP``                  – standard discrete OCP for linear discrete plants.
+      * ``StandardLinearContinuousDiscreteOCP``        – standard discrete OCP for linear CD plants.
+      * ``StandardLinearizedContinuousDiscreteOCP``    – standard linearised discrete OCP for nonlinear CD plants.
+      * ``StandardContinuousOCP``                      – standard continuous OCP for nonlinear CD plants.
+      * ``GeneralContinuousOCP``                       – general continuous OCP (Mayer/Lagrange NLP).
+      * ``MPCController``                              – KalmanFilter + discrete OCP (discrete plants).
+      * ``CDMPCController``                            – CDKalmanFilter + discrete OCP (linear CD plants).
+      * ``CDLinearizedMPCController``                  – CD estimator + linearised discrete OCP (nonlinear CD).
+      * ``CDNMPCController``                           – CD estimator + continuous OCP (nonlinear CD).
 
   mbc.identification
       System-identification / parameter-estimation utilities:
@@ -88,23 +92,28 @@ from .estimation import (
 )
 from .control import (
     DiscreteOptimalControlProblem,
-    StandardDiscreteOCP,
-    MPCController,
-    LinearContinuousOCP,
-    StandardContinuousOCP,
-    LinearContinuousMPCController,
-    LinearizedContinuousOCP,
-    LinearizedContinuousMPCController,
     ContinuousOptimalControlProblem,
-    ContinuousNMPCController,
+    StandardLinearDiscreteOCP,
+    StandardLinearContinuousDiscreteOCP,
+    StandardLinearizedContinuousDiscreteOCP,
+    StandardContinuousOCP,
+    GeneralContinuousOCP,
+    MPCController,
+    CDMPCController,
+    CDLinearizedMPCController,
+    CDNMPCController,
     # Deprecated aliases
+    StandardDiscreteOCP,
     OptimalControlProblem,
+    LinearContinuousOCP,
+    LinearizedContinuousOCP,
+    LinearContinuousMPCController,
+    LinearizedContinuousMPCController,
+    ContinuousNMPCController,
     CDOptimalControlProblem,
     CDTrackingOptimalControlProblem,
-    CDMPCController,
     CDLinearizedOptimalControlProblem,
     EconomicOptimalControlProblem,
-    CDNMPCController,
 )
 from .identification.estimator import ParameterEstimator, CDParameterEstimator, EstimationResult
 from .identification.likelihood import (
@@ -131,25 +140,32 @@ __all__ = [
     "ContinuousDiscreteEnKF",
     "ContinuousDiscreteParticleFilter",
     "ContinuousDiscreteDAEEKF",
-    # Control
+    # Control — OCP bases
     "DiscreteOptimalControlProblem",
-    "StandardDiscreteOCP",
-    "MPCController",
-    "LinearContinuousOCP",
-    "StandardContinuousOCP",
-    "LinearContinuousMPCController",
-    "LinearizedContinuousOCP",
-    "LinearizedContinuousMPCController",
     "ContinuousOptimalControlProblem",
-    "ContinuousNMPCController",
+    # Control — standard OCPs
+    "StandardLinearDiscreteOCP",
+    "StandardLinearContinuousDiscreteOCP",
+    "StandardLinearizedContinuousDiscreteOCP",
+    "StandardContinuousOCP",
+    "GeneralContinuousOCP",
+    # Control — MPC
+    "MPCController",
+    "CDMPCController",
+    "CDLinearizedMPCController",
+    "CDNMPCController",
     # Deprecated aliases
+    "StandardDiscreteOCP",
     "OptimalControlProblem",
+    "LinearContinuousOCP",
+    "LinearizedContinuousOCP",
+    "LinearContinuousMPCController",
+    "LinearizedContinuousMPCController",
+    "ContinuousNMPCController",
     "CDOptimalControlProblem",
     "CDTrackingOptimalControlProblem",
-    "CDMPCController",
     "CDLinearizedOptimalControlProblem",
     "EconomicOptimalControlProblem",
-    "CDNMPCController",
     # Identification
     "ParameterEstimator",
     "CDParameterEstimator",

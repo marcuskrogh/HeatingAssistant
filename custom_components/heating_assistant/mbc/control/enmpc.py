@@ -75,14 +75,15 @@ at each sampling time.
 
 This module exposes:
 
-* :class:`ContinuousOptimalControlProblem` — the continuous-time NLP OCP.
-* :class:`ContinuousNMPCController` — closed-loop receding-horizon controller
+* :class:`GeneralContinuousOCP` — general continuous-time NLP OCP.
+* :class:`CDNMPCController` — closed-loop receding-horizon controller
   composing any continuous-discrete state estimator with this OCP.
 """
 
 from __future__ import annotations
 
 import numpy as np
+from abc import ABC, abstractmethod
 
 from ..models import ContinuousDiscreteDAEModel, ContinuousDiscreteModel
 from .nlp_solver import (
@@ -184,13 +185,61 @@ class _DecisionLayout:
         return z[self.pz_off:self.pz_off + self.pz_size].reshape(self.M + 1, self.nz)
 
 
-# ── Continuous-time Optimal Control Problem ─────────────────────────────────
+# ── Continuous-time OCP base and general NLP implementation ─────────────────
 
 
-class ContinuousOptimalControlProblem:
+class ContinuousOptimalControlProblem(ABC):
     """
-    Continuous-time optimal control problem for nonlinear
-    SDE / SDAE systems (ControlToolbox §EMPC).
+    Abstract base for continuous-time horizon optimal control problems.
+
+    Continuous-time OCPs discretise the plant dynamics inside the optimiser
+    (direct simultaneous formulation).  They are distinct from discrete-time
+    OCPs, which optimise directly over a discrete prediction model.
+    """
+
+    @property
+    @abstractmethod
+    def N(self) -> int:
+        """Prediction horizon (number of control intervals)."""
+
+    @property
+    @abstractmethod
+    def nu(self) -> int:
+        """Input dimension."""
+
+    @abstractmethod
+    def solve(
+        self,
+        x0: np.ndarray,
+        d_trajectory: np.ndarray,
+        u_prev: np.ndarray | None = None,
+        x_prev: np.ndarray | None = None,
+        y_prev: np.ndarray | None = None,
+        p: np.ndarray | None = None,
+        t0: float = 0.0,
+    ) -> tuple[np.ndarray, float, dict]:
+        """Solve the OCP and return ``(U, cost, info)``."""
+
+    @abstractmethod
+    def step(
+        self,
+        x0: np.ndarray,
+        d_trajectory: np.ndarray,
+        u_prev: np.ndarray | None = None,
+        x_prev: np.ndarray | None = None,
+        y_prev: np.ndarray | None = None,
+        p: np.ndarray | None = None,
+        t0: float = 0.0,
+    ) -> np.ndarray:
+        """Solve and return the first optimal control action."""
+
+
+class GeneralContinuousOCP(ContinuousOptimalControlProblem):
+    """
+    General continuous-time OCP for nonlinear continuous-discrete plants.
+
+    Direct-simultaneous NLP with implicit-Euler dynamics and configurable
+    Mayer / Lagrange terms (ControlToolbox §EMPC).
 
     Direct simultaneous formulation: implicit-Euler dynamics, right-
     rectangular Lagrange.  Decision variables are the inputs
@@ -1194,9 +1243,9 @@ class ContinuousOptimalControlProblem:
 # ── Generic continuous NMPC controller ───────────────────────────────────────
 
 
-class ContinuousNMPCController:
+class CDNMPCController:
     """
-    Closed-loop continuous-time NMPC controller (ControlToolbox §EMPC —
+    Closed-loop continuous-discrete NMPC controller (ControlToolbox §EMPC —
     *ENMPC Algorithm*).
 
     Composes any continuous-discrete state estimator with any OCP that
@@ -1217,8 +1266,7 @@ class ContinuousNMPCController:
         Continuous-discrete state estimator.
     ocp : object with ``solve``, ``N``, ``nu``
         Optimal control problem (NLP solver) — typically a
-        :class:`ContinuousOptimalControlProblem` or
-        :class:`StandardContinuousOCP`.
+        :class:`GeneralContinuousOCP` or :class:`StandardContinuousOCP`.
     """
 
     def __init__(self, estimator, ocp) -> None:
@@ -1286,5 +1334,5 @@ class ContinuousNMPCController:
 
 
 # Backward-compatible aliases (deprecated).
-EconomicOptimalControlProblem = ContinuousOptimalControlProblem
-CDNMPCController = ContinuousNMPCController
+EconomicOptimalControlProblem = GeneralContinuousOCP
+ContinuousNMPCController = CDNMPCController

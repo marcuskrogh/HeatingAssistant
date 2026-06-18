@@ -308,7 +308,7 @@ class OSQPBackend:
     OSQP is a sparse first-order (ADMM) solver that exploits the banded KKT
     structure of the *simultaneous* MPC formulation and supports primal/dual
     warm-starting, so it is the natural partner for
-    ``StandardDiscreteOCP(formulation="sparse", ...)`` in a receding-horizon
+    ``StandardLinearDiscreteOCP(formulation="sparse", ...)`` in a receding-horizon
     loop.
 
     Parameters

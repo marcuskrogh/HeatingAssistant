@@ -4,7 +4,7 @@ Model Predictive Controller — House-Heating Application (Linearised CD-MPC).
 The house thermal model is formulated as a nonlinear continuous-discrete SDE.
 At each control interval the model is linearised around the current operating
 point (estimated by a CD-EKF), the local linear model is ZOH-discretised, and
-a convex QP is solved via LinearizedContinuousMPCController from the ``mbc`` toolbox.
+a convex QP is solved via CDLinearizedMPCController from the ``mbc`` toolbox.
 
 House-Heating Application
 --------------------------
@@ -35,7 +35,7 @@ HouseThermalSDE(ContinuousDiscreteModel)
 
 HeatingMPCController
     Application facade: builds HouseThermalSDE + _InnovationEKF (CD-EKF) +
-    LinearizedContinuousMPCController, adds solar/outdoor forecasting, applies
+    CDLinearizedMPCController, adds solar/outdoor forecasting, applies
     source set-points, and exposes the visualisation properties consumed by
     the coordinator.
 
@@ -93,13 +93,13 @@ from scipy.linalg import block_diag as _scipy_block_diag
 from .mbc.models import ContinuousDiscreteModel
 from .mbc.estimation import ContinuousDiscreteEKF
 from .mbc.control import (
-    LinearizedContinuousMPCController,
+    CDLinearizedMPCController,
     linearize_cd_model,
     discretize_cd_linearization,
     QPProblem,
     make_qp_backend,
 )
-from .mbc.control.ocp import StandardDiscreteOCP
+from .mbc.control.ocp import StandardLinearDiscreteOCP
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -1279,7 +1279,7 @@ def _diag_np(n: int, v: float) -> np.ndarray:
 class _InnovationEKF(ContinuousDiscreteEKF):
     """CD-EKF that records the Kalman innovation after each measurement fusion.
 
-    LinearizedContinuousMPCController calls ``estimator.step(y, u_prev, d_prev, p, t)``
+    CDLinearizedMPCController calls ``estimator.step(y, u_prev, d_prev, p, t)``
     which combines predict + update.  This subclass intercepts that call to
     compute and store ``ν = y − hm(x̂⁻)`` between the two phases, making the
     innovation available via the ``last_innovation`` property after each step.
@@ -1312,7 +1312,7 @@ class _InnovationEKF(ContinuousDiscreteEKF):
 
 # ── Absolute-input OCP ───────────────────────────────────────────────────────
 
-class _AbsoluteInputOCP(StandardDiscreteOCP):
+class _AbsoluteInputOCP(StandardLinearDiscreteOCP):
     """OCP that penalises the absolute input ‖u_abs‖²_R instead of ‖u_dev‖²_R.
 
     In deviation coordinates u_dev = u_abs − u_ss, the cost term
@@ -1707,8 +1707,8 @@ class _AbsoluteInputOCP(StandardDiscreteOCP):
 
 # ── Forecast-aware MPC controller ───────────────────────────────────────────
 
-class _ForecastAwareMPCController(LinearizedContinuousMPCController):
-    """LinearizedContinuousMPCController extended to accept a time-varying disturbance
+class _ForecastAwareMPCController(CDLinearizedMPCController):
+    """CDLinearizedMPCController extended to accept a time-varying disturbance
     forecast over the prediction horizon.
 
     When ``D_forecast`` (shape ``(N, nd)``) is passed to ``step()``, the
@@ -1951,12 +1951,12 @@ class HeatingMPCController:
     Application facade for house-heating linearised CD-MPC.
 
     Builds a HouseThermalSDE, _InnovationEKF (CD-EKF), and
-    LinearizedContinuousMPCController, then provides the coordinator-facing API:
+    CDLinearizedMPCController, then provides the coordinator-facing API:
 
       actions = controller.compute(outdoor_temp, solar_gains, now, outdoor_forecast)
 
     The control loop at each step:
-      1. LinearizedContinuousMPCController.step(): runs EKF predict+update, linearises
+      1. CDLinearizedMPCController.step(): runs EKF predict+update, linearises
          the model around the current operating point, ZOH-discretises, and
          solves a convex QP via OSQP/HiGHS.
       2. Apply the first optimal action to all heat sources.
