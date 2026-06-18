@@ -38,6 +38,8 @@ model-based control, estimation, identification, and simulation.
                                              (NLP; input/state/output constraints,
                                              ROM penalty + constraints, linear input
                                              penalty).
+      * ``CDLinearizedOptimalControlProblem`` – one-shot linearised tracking OCP
+                                               (QP on local LTI model).
       * ``EconomicOptimalControlProblem`` – economic nonlinear OCP (Ph.D. Ch. 9).
                                            Accepts Mayer + Lagrange functions and
                                            the same constraint set as the tracking OCP.
@@ -95,6 +97,7 @@ from .control import (
     CDOptimalControlProblem,
     CDTrackingOptimalControlProblem,
     CDMPCController,
+    CDLinearizedOptimalControlProblem,
     EconomicOptimalControlProblem,
     CDNMPCController,
 )
@@ -129,6 +132,7 @@ __all__ = [
     "CDOptimalControlProblem",
     "CDTrackingOptimalControlProblem",
     "CDMPCController",
+    "CDLinearizedOptimalControlProblem",
     "EconomicOptimalControlProblem",
     "CDNMPCController",
     # Identification

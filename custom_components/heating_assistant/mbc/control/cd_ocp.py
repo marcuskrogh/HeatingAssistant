@@ -169,6 +169,8 @@ class CDOptimalControlProblem(OptimalControlProblem):
         Terminal output tracking cost.  Default: Q.
     S : (nu, nu) array-like, optional
         Input rate-of-movement cost  ‖Δu‖²_S.  ``None`` → disabled.
+    du_min, du_max : (nu,) array-like, optional
+        Hard input rate-of-movement box on ``Δu[k] = u[k] − u[k−1]``.
     rho : float, optional
         Penalty weight on soft output constraint violation.  Default: 1e4.
     y_offset : float, optional
@@ -189,6 +191,8 @@ class CDOptimalControlProblem(OptimalControlProblem):
         R: Any,
         P: Any | None = None,
         S: Any | None = None,
+        du_min: Any | None = None,
+        du_max: Any | None = None,
         rho: float = 1e4,
         y_offset: float = 2.0,
         solver: str | QPSolverBackend = "highs",
@@ -207,6 +211,8 @@ class CDOptimalControlProblem(OptimalControlProblem):
             R=R,
             P=P,
             S=S,
+            du_min=du_min,
+            du_max=du_max,
             rho=rho,
             y_offset=y_offset,
             solver=solver,

@@ -4,6 +4,7 @@ from .ocp import OptimalControlProblem
 from .mpc import MPCController
 from .cd_ocp import CDOptimalControlProblem, CDTrackingOptimalControlProblem
 from .cd_mpc import CDMPCController
+from .cd_linearized_ocp import CDLinearizedOptimalControlProblem
 from .cd_linearized_mpc import (
     CDLinearizedMPCController,
     linearize_cd_model,
@@ -36,6 +37,7 @@ __all__ = [
     "CDOptimalControlProblem",
     "CDTrackingOptimalControlProblem",
     "CDMPCController",
+    "CDLinearizedOptimalControlProblem",
     "CDLinearizedMPCController",
     "linearize_cd_model",
     "discretize_cd_linearization",

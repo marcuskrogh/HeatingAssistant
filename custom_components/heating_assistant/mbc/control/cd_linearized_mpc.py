@@ -247,6 +247,8 @@ class CDLinearizedMPCController:
         x_ref: np.ndarray | None = None,
         P: Any | None = None,
         S: Any | None = None,
+        du_min: Any | None = None,
+        du_max: Any | None = None,
         rho: float = 1e4,
         rho_lin: float = 0.0,
         y_offset: float = 2.0,

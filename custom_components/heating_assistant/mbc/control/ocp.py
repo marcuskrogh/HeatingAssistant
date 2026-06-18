@@ -34,6 +34,7 @@ Constraints
 -----------
     x[k+1] = Ad x[k] + Bd u[k] + Ed d[k]                (deterministic dynamics)
     u_min ≤ u[k] ≤ u_max                                  (hard input box)
+    du_min ≤ u[k] − u[k−1] ≤ du_max                       (hard input ROM box, optional)
     z_ref − δ − ε[k+1] ≤ Cz x[k+1] ≤ z_ref + δ + ε[k+1]  (soft output box)
     ε[k+1] ≥ 0                                            (slack non-negativity)
 
@@ -93,6 +94,55 @@ if TYPE_CHECKING:
 
 
 # ── First-difference operator ────────────────────────────────────────────
+
+
+def _build_rate_inequalities(
+    nu: int,
+    N: int,
+    u_prev: np.ndarray,
+    du_min: np.ndarray | None,
+    du_max: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """
+    Build linear inequalities ``G_rate @ U ≤ h_rate`` for hard input ROM box.
+
+    For each step ``k`` and input component ``i``:
+
+        du_min[i] ≤ u[k, i] − u[k−1, i] ≤ du_max[i]
+
+    with ``u[−1] = u_prev``.  Either bound may be omitted (``None``).
+    """
+    if du_min is None and du_max is None:
+        return None, None
+
+    u_prev = np.asarray(u_prev, dtype=float).reshape(nu)
+    n_rows = N * nu * (int(du_max is not None) + int(du_min is not None))
+    G = np.zeros((n_rows, N * nu))
+    h = np.zeros(n_rows)
+    row = 0
+    for k in range(N):
+        for i in range(nu):
+            col_k = k * nu + i
+            u_prev_i = u_prev[i] if k == 0 else None
+            if du_max is not None:
+                # u[k,i] − u[k−1,i] ≤ du_max
+                G[row, col_k] = 1.0
+                if k > 0:
+                    G[row, (k - 1) * nu + i] = -1.0
+                    h[row] = du_max[i]
+                else:
+                    h[row] = du_max[i] + u_prev_i
+                row += 1
+            if du_min is not None:
+                # u[k,i] − u[k−1,i] ≥ du_min  →  −u[k,i] + u[k−1,i] ≤ −du_min
+                G[row, col_k] = -1.0
+                if k > 0:
+                    G[row, (k - 1) * nu + i] = 1.0
+                    h[row] = -du_min[i]
+                else:
+                    h[row] = -du_min[i] - u_prev_i
+                row += 1
+    return G, h
 
 
 def _build_D_diff(nu: int, N: int) -> np.ndarray:
@@ -168,6 +218,9 @@ class OptimalControlProblem:
         Terminal tracking cost ``‖z[N] − z_ref‖²_P``.  Default: ``Q``.
     S : (nu, nu) array-like, optional
         Input rate-of-movement cost ``‖Δu‖²_S``.  ``None`` disables.
+    du_min, du_max : (nu,) array-like, optional
+        Hard input rate-of-movement box on ``Δu[k] = u[k] − u[k−1]``.
+        ``None`` disables the corresponding bound.
     rho : float, optional
         Quadratic penalty on the soft-output slack variable ``ε``.
         Default: 1e4.
@@ -198,6 +251,8 @@ class OptimalControlProblem:
         R: Any,
         P: Any | None = None,
         S: Any | None = None,
+        du_min: Any | None = None,
+        du_max: Any | None = None,
         rho: float = 1e4,
         rho_lin: float = 0.0,
         y_offset: float = 2.0,
@@ -216,6 +271,20 @@ class OptimalControlProblem:
         self._R = _any_to_np2d(R)
         self._P = _any_to_np2d(P) if P is not None else self._Q.copy()
         self._S = _any_to_np2d(S) if S is not None else None
+        self._du_min = (
+            _any_to_np1d(du_min).reshape(-1) if du_min is not None else None
+        )
+        self._du_max = (
+            _any_to_np1d(du_max).reshape(-1) if du_max is not None else None
+        )
+        if self._du_min is not None and self._du_min.shape[0] != model.nu:
+            raise ValueError(
+                f"du_min must have length {model.nu}; got {self._du_min.shape[0]}."
+            )
+        if self._du_max is not None and self._du_max.shape[0] != model.nu:
+            raise ValueError(
+                f"du_max must have length {model.nu}; got {self._du_max.shape[0]}."
+            )
         self._rho = rho
         self._rho_lin = rho_lin
         self._y_offset = y_offset
@@ -296,8 +365,8 @@ class OptimalControlProblem:
         Bd = _any_to_np2d(self._model.Bd)
         Ed = _any_to_np2d(self._model.Ed)
 
-        # Rate-of-movement reference input
-        if self._S is not None:
+        # Rate-of-movement reference input (penalty and/or hard ROM box)
+        if self._S is not None or self._du_min is not None or self._du_max is not None:
             u_prev_np = (
                 np.zeros(nu) if u_prev is None
                 else _any_to_np1d(u_prev).reshape(-1)
@@ -461,6 +530,16 @@ class OptimalControlProblem:
         G = np.vstack([np.hstack([-CG, neg_I]), np.hstack([CG, neg_I])])
         h = np.concatenate([-z_min_t + Z_free, z_max_t - Z_free])
 
+        if u_prev_np is not None and (
+            self._du_min is not None or self._du_max is not None
+        ):
+            G_rate, h_rate = _build_rate_inequalities(
+                nu, N, u_prev_np, self._du_min, self._du_max
+            )
+            if G_rate is not None:
+                G = np.vstack([G, np.hstack([G_rate, np.zeros((G_rate.shape[0], n_eps))])])
+                h = np.concatenate([h, h_rate])
+
         def extract(z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             U_flat = z[:n_U]
             X_flat = Psi @ x0 + Gamma @ U_flat + Lambda @ D
@@ -579,6 +658,31 @@ class OptimalControlProblem:
             _add_g(r_lo, es, neg_eye_nz)
             h[r_lo:r_lo + nz] = -z_min
         G = sp.csc_matrix((g_vals, (g_rows, g_cols)), shape=(2 * n_eps, n_Z))
+
+        if u_prev_np is not None and (
+            self._du_min is not None or self._du_max is not None
+        ):
+            G_rate, h_rate = _build_rate_inequalities(
+                nu, N, u_prev_np, self._du_min, self._du_max
+            )
+            if G_rate is not None:
+                n_rate = G_rate.shape[0]
+                rate_rows: list[int] = []
+                rate_cols: list[int] = []
+                rate_vals: list[float] = []
+                for ri in range(n_rate):
+                    for ci in range(G_rate.shape[1]):
+                        v = G_rate[ri, ci]
+                        if v != 0.0:
+                            rate_rows.append(ri)
+                            rate_cols.append(oU + ci)
+                            rate_vals.append(v)
+                G_rate_sp = sp.csc_matrix(
+                    (rate_vals, (rate_rows, rate_cols)),
+                    shape=(n_rate, n_Z),
+                )
+                G = sp.vstack([G, G_rate_sp], format="csc")
+                h = np.concatenate([h, h_rate])
 
         def extract(z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             X_flat = z[:n_X]
