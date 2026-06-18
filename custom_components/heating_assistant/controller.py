@@ -90,16 +90,19 @@ from .const import MPC_STATS_BUFFER_SIZE
 
 # ── Import model-based control components from mbc ────────────────────────────
 from scipy.linalg import block_diag as _scipy_block_diag
-from .mbc.models import ContinuousDiscreteModel
-from .mbc.estimation import ContinuousDiscreteEKF
-from .mbc.control import (
-    CDLinearizedMPCController,
+from mbc.models import ContinuousDiscreteSDE
+from mbc.estimation import (
+    ContinuousDiscreteEKF,
+    ContinuousDiscreteEKFParams,
+    IntegrationScheme,
+)
+from mbc.control import (
+    StandardLinearDiscreteOCP,
     linearize_cd_model,
     discretize_cd_linearization,
     QPProblem,
-    make_qp_backend,
 )
-from .mbc.control.ocp import OptimalControlProblem
+from mbc.control.cd_linearized_mpc import _DeviationDiscreteLinearSDE
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -118,7 +121,7 @@ _LOGGER = logging.getLogger(__name__)
 # House-heating SDE model
 # ============================================================
 
-class HouseThermalSDE(ContinuousDiscreteModel):
+class HouseThermalSDE(ContinuousDiscreteSDE):
     """
     House thermal model as a nonlinear continuous-discrete SDE.
 
@@ -184,10 +187,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         identifiable_sources: Optional[List[int]] = None,
         theta: Optional[np.ndarray] = None,
         k_sigmoid: float = 5.0,
+        ts: Optional[float] = None,
     ) -> None:
         self._model = model
         self._sources = sources
         self._dt = dt
+        self._ts = float(ts if ts is not None else dt)
         self._sigma_w = sigma_w
         self._sigma_v = sigma_v
         self._sigma_b = sigma_b
@@ -385,7 +390,12 @@ class HouseThermalSDE(ContinuousDiscreteModel):
         # Precomputed diffusion matrix σ (rebuilt when Q scales change)
         self._sigma_matrix: np.ndarray = self._build_sigma_matrix()
 
-    # ── ContinuousDiscreteModel abstract dimensions ───────────────────────
+    # ── ContinuousDiscreteSDE abstract dimensions ─────────────────────────
+
+    @property
+    def Ts(self) -> float:
+        """EKF / measurement sampling interval [s]."""
+        return self._ts
 
     @property
     def nx(self) -> int:
@@ -1304,7 +1314,7 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         mask: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         self.predict(u, d, p, t)
-        x_prior = self._x_np.copy()
+        x_prior = self._x.copy()
         y_hat = self._model.hm(x_prior, u, d, p, 0.0)
         self._last_innovation = (np.asarray(y, dtype=float) - y_hat).tolist()
         return self.update(y, u, d, p, mask=mask)
@@ -1312,7 +1322,7 @@ class _InnovationEKF(ContinuousDiscreteEKF):
 
 # ── Absolute-input OCP ───────────────────────────────────────────────────────
 
-class _AbsoluteInputOCP(OptimalControlProblem):
+class _AbsoluteInputOCP(StandardLinearDiscreteOCP):
     """OCP that penalises the absolute input ‖u_abs‖²_R instead of ‖u_dev‖²_R.
 
     In deviation coordinates u_dev = u_abs − u_ss, the cost term
@@ -1326,6 +1336,36 @@ class _AbsoluteInputOCP(OptimalControlProblem):
     preserved.  Pass ``u_ss`` to :meth:`solve`; if omitted the call falls
     back to the standard parent behaviour.
     """
+
+    def __init__(
+        self,
+        model: _DeviationDiscreteLinearSDE,
+        N: int,
+        Q: Any,
+        R: Any,
+        P: Any | None = None,
+        S: Any | None = None,
+        rho: float = 1e4,
+        rho_lin: float = 0.0,
+        y_offset: float = 2.0,
+        solver: str = "highs",
+        solver_options: Optional[Dict[str, Any]] = None,
+        formulation: str = "auto",
+    ) -> None:
+        super().__init__(
+            model=model,
+            N=N,
+            Q=Q,
+            R=R,
+            P=P,
+            S=S,
+            rho=rho,
+            y_offset=y_offset,
+            solver=solver,
+            solver_options=solver_options,
+            formulation=formulation,
+        )
+        self._rho_lin = rho_lin
 
     def solve(
         self,
@@ -1707,8 +1747,8 @@ class _AbsoluteInputOCP(OptimalControlProblem):
 
 # ── Forecast-aware MPC controller ───────────────────────────────────────────
 
-class _ForecastAwareMPCController(CDLinearizedMPCController):
-    """CDLinearizedMPCController extended to accept a time-varying disturbance
+class _ForecastAwareMPCController:
+    """Linearised CD-MPC extended to accept a time-varying disturbance
     forecast over the prediction horizon.
 
     When ``D_forecast`` (shape ``(N, nd)``) is passed to ``step()``, the
@@ -1721,20 +1761,73 @@ class _ForecastAwareMPCController(CDLinearizedMPCController):
     u_abs = 0 (no heating or cooling).
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        ocp = self._ocp
+    def __init__(
+        self,
+        model: ContinuousDiscreteSDE,
+        estimator: Any,
+        N: int,
+        Q: Any,
+        R: Any,
+        dt: float,
+        u_min: np.ndarray,
+        u_max: np.ndarray,
+        x_ref: np.ndarray | None = None,
+        P: Any | None = None,
+        S: Any | None = None,
+        rho: float = 1e4,
+        rho_lin: float = 0.0,
+        y_offset: float = 2.0,
+    ) -> None:
+        self._model = model
+        self._estimator = estimator
+        self._N = int(N)
+        self._dt = float(dt)
+
+        self._x_ref_abs = (
+            np.zeros(model.nx, dtype=float)
+            if x_ref is None
+            else np.asarray(x_ref, dtype=float).reshape(model.nx)
+        )
+
+        self._lin_model = _DeviationDiscreteLinearSDE(
+            nx=model.nx,
+            nu=model.nu,
+            nd=model.nd,
+            nym=model.nym,
+            nz=model.nz,
+            u_min_abs=np.asarray(u_min, dtype=float),
+            u_max_abs=np.asarray(u_max, dtype=float),
+        )
+
         self._ocp = _AbsoluteInputOCP(
             model=self._lin_model,
             N=self._N,
-            Q=ocp._Q,
-            R=ocp._R,
-            P=ocp._P,
-            S=ocp._S,
-            rho=ocp._rho,
-            rho_lin=ocp._rho_lin,
-            y_offset=ocp._y_offset,
+            Q=Q,
+            R=R,
+            P=P,
+            S=S,
+            rho=rho,
+            rho_lin=rho_lin,
+            y_offset=y_offset,
         )
+
+        self._u_prev = np.zeros(model.nu, dtype=float)
+        self._d_prev = np.zeros(model.nd, dtype=float)
+        self._last_D_dev = np.zeros((self._N, model.nd), dtype=float)
+
+    @property
+    def x_ref(self) -> np.ndarray:
+        """Absolute state reference used for tracking."""
+        return self._x_ref_abs.copy()
+
+    @x_ref.setter
+    def x_ref(self, val: np.ndarray) -> None:
+        self._x_ref_abs = np.asarray(val, dtype=float).reshape(self._model.nx)
+
+    @property
+    def last_disturbance_deviation_trajectory(self) -> np.ndarray:
+        """Most recent disturbance trajectory in deviation coordinates."""
+        return self._last_D_dev.copy()
 
     def step(
         self,
@@ -2057,6 +2150,7 @@ class HeatingMPCController:
         # dimensions small.
         self._system = HouseThermalSDE(
             model, heat_sources, dt,
+            ts=ekf_dt,
             sigma_w=sigma_w, sigma_v=sigma_v,
             sigma_b=sigma_b,
             augment_offsets=False,
@@ -2085,8 +2179,11 @@ class HeatingMPCController:
         for i in range(n_rooms):
             P0[n_rooms + i, n_rooms + i] = 4.0
         self._ekf = _InnovationEKF(
-            self._system, x0, P0, ekf_dt,
-            n_steps=n_int_steps, scheme="implicit-euler",
+            self._system, x0, P0,
+            params=ContinuousDiscreteEKFParams(
+                n_steps=n_int_steps,
+                scheme=IntegrationScheme.IMPLICIT_EULER,
+            ),
         )
 
         # ── OCP cost matrices ────────────────────────────────────────────
@@ -2432,11 +2529,11 @@ class HeatingMPCController:
         """
         x_hat = np.asarray(x_hat, dtype=float)
         P = np.asarray(P, dtype=float)
-        n_x = self._ekf._x_np.shape[0]
+        n_x = self._ekf._x.shape[0]
         if x_hat.shape != (n_x,) or P.shape != (n_x, n_x):
             return False
-        self._ekf._x_np = x_hat.copy()
-        self._ekf._P_np = P.copy()
+        self._ekf._x = x_hat.copy()
+        self._ekf._P = P.copy()
         return True
 
     def propagate_ekf(self, u_seq: np.ndarray, d: np.ndarray) -> None:

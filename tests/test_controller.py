@@ -17,12 +17,16 @@ from custom_components.heating_assistant.thermal_model import (
     Window,
 )
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
-from custom_components.heating_assistant.mbc.models import ContinuousDiscreteModel
-from custom_components.heating_assistant.mbc.estimation import ContinuousDiscreteEKF
-from custom_components.heating_assistant.mbc.control import CDTrackingOptimalControlProblem, CDLinearizedMPCController
+from mbc.models import ContinuousDiscreteSDE
+from mbc.estimation import (
+    ContinuousDiscreteEKF,
+    ContinuousDiscreteEKFParams,
+    IntegrationScheme,
+)
 from custom_components.heating_assistant.controller import (
     HouseThermalSDE,
     HeatingMPCController,
+    _ForecastAwareMPCController,
 )
 
 
@@ -100,12 +104,12 @@ def _central_difference_jacobian(
 # -- HouseThermalSDE tests ----------------------------------------------------
 
 class TestHouseThermalSDE:
-    """Tests for HouseThermalSDE as a ContinuousDiscreteModel implementation."""
+    """Tests for HouseThermalSDE as a ContinuousDiscreteSDE implementation."""
 
     def test_is_continuous_discrete_model(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        assert isinstance(sde, ContinuousDiscreteModel)
+        assert isinstance(sde, ContinuousDiscreteSDE)
 
     def test_dimensions(self):
         model, sources = _make_model_and_sources()
@@ -589,7 +593,13 @@ class TestContinuousDiscreteEKF:
             sde = HouseThermalSDE(model, sources, dt=900.0)
         x0 = np.array(sde.x)
         P0 = np.eye(sde.nx)
-        return ContinuousDiscreteEKF(sde, x0, P0, dt=900.0, n_steps=5), sde
+        return ContinuousDiscreteEKF(
+            sde, x0, P0,
+            params=ContinuousDiscreteEKFParams(
+                n_steps=5,
+                scheme=IntegrationScheme.IMPLICIT_EULER,
+            ),
+        ), sde
 
     def test_initial_state(self):
         ekf, sde = self._make_ekf()
@@ -646,7 +656,9 @@ class TestContinuousDiscreteEKF:
 
 
 # -- CDTrackingOptimalControlProblem tests ------------------------------------
+# Removed from upstream mbc; HeatingAssistant uses linearised CD-MPC instead.
 
+@pytest.mark.skip(reason="CDTrackingOptimalControlProblem was removed from upstream mbc")
 class TestCDTrackingOCP:
     """Tests for CDTrackingOptimalControlProblem with HouseThermalSDE."""
 
@@ -934,7 +946,7 @@ class TestHeatingMPCController:
             horizon=2,
             dt=900,
         )
-        ctrl._ekf._x_np = np.array([20.0, 20.0, 20.0], dtype=float)
+        ctrl._ekf._x = np.array([20.0, 20.0, 20.0], dtype=float)
 
         assert ctrl.filtered_temperatures["living_room"] == pytest.approx(20.0)
 
@@ -1115,14 +1127,14 @@ class TestHeatingMPCController:
         assert ctrl.outdoor_forecast == forecast
 
     def test_uses_linearised_mpc(self):
-        """HeatingMPCController should use CDLinearizedMPCController internally."""
+        """HeatingMPCController should use the forecast-aware linearised MPC."""
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl._system, HouseThermalSDE)
         assert isinstance(ctrl._control_system, HouseThermalSDE)
         assert ctrl._control_system.nx == ctrl._system.nx
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
-        assert isinstance(ctrl._mpc, CDLinearizedMPCController)
+        assert isinstance(ctrl._mpc, _ForecastAwareMPCController)
 
     def test_negative_smoothing_weight_raises(self):
         model, sources = _make_model_and_sources()
@@ -1210,7 +1222,7 @@ class TestHeatingMPCController:
         # below comfort [19, 23] °C over the next few steps.
         # 2R2C state layout for 1 room + 1 filtered source:
         # [T_a(1), T_w(1), phi(1)] = length 3.
-        ctrl._ekf._x_np = np.array([21.0, 21.0, -1.0])
+        ctrl._ekf._x = np.array([21.0, 21.0, -1.0])
         ctrl._mpc._u_prev = np.array([-1.0])
 
         now = datetime(2024, 7, 1, 14, 0, tzinfo=timezone.utc)
@@ -1355,7 +1367,7 @@ class TestSolarForecastIndexing:
     def test_setpoint_reference_updated_on_setpoint_change(self):
         """After compute(), the MPC x_ref must track the current setpoints.
 
-        CDLinearizedMPCController.x_ref is updated via the property setter
+        _ForecastAwareMPCController.x_ref is updated via the property setter
         at the start of each compute() call so stage and terminal costs
         always use the latest setpoints.
         """

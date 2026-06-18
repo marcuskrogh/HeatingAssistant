@@ -400,21 +400,3 @@ _vol.REMOVE_EXTRA = "REMOVE_EXTRA"  # type: ignore[attr-defined]
 _vol.ALLOW_EXTRA = "ALLOW_EXTRA"  # type: ignore[attr-defined]
 _vol.PREVENT_EXTRA = "PREVENT_EXTRA"  # type: ignore[attr-defined]
 
-# ── Register vendored mbc under top-level "mbc.*" namespace ───────────────
-# The mbc library is vendored at custom_components/heating_assistant/mbc/.
-# Register it in sys.modules so any code referencing the top-level "mbc"
-# namespace (e.g. in tests) resolves to the vendored copy.
-
-import custom_components.heating_assistant.mbc as _vendored_mbc  # noqa: E402
-import custom_components.heating_assistant.mbc.models as _vendored_mbc_models  # noqa: E402
-import custom_components.heating_assistant.mbc.estimation as _vendored_mbc_estimation  # noqa: E402
-import custom_components.heating_assistant.mbc.control as _vendored_mbc_control  # noqa: E402
-import custom_components.heating_assistant.mbc.control.ocp as _vendored_mbc_control_ocp  # noqa: E402
-import custom_components.heating_assistant.mbc.identification as _vendored_mbc_identification  # noqa: E402
-
-sys.modules.setdefault("mbc", _vendored_mbc)
-sys.modules.setdefault("mbc.models", _vendored_mbc_models)
-sys.modules.setdefault("mbc.estimation", _vendored_mbc_estimation)
-sys.modules.setdefault("mbc.control", _vendored_mbc_control)
-sys.modules.setdefault("mbc.control.ocp", _vendored_mbc_control_ocp)
-sys.modules.setdefault("mbc.identification", _vendored_mbc_identification)

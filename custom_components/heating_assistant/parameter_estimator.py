@@ -56,9 +56,9 @@ import numpy as np
 from .controller import HouseThermalSDE as HouseThermalSystem
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
-from .mbc.control import IpoptNLPBackend, NLPProblem, ScipyNLPBackend
-from .mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
-from .mbc.identification import nelder_mead as _nelder_mead  # for test compatibility
+from mbc.control import IpoptNLPBackend, NLPProblem, ScipyNLPBackend
+from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
+from mbc.identification import nelder_mead as _nelder_mead  # for test compatibility
 
 _LOGGER = logging.getLogger(__name__)
 
