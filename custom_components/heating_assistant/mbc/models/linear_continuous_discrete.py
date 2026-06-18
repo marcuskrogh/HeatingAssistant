@@ -300,7 +300,7 @@ class LinearContinuousDiscreteModel(ContinuousDiscreteModel):
             = [Ad | Bd | Ed]
 
         The ``d`` argument is accepted for interface compatibility with
-        ``OptimalControlProblem`` (LPV sub-classes may override this method
+        ``StandardDiscreteOCP`` (LPV sub-classes may override this method
         to schedule matrices on the current disturbance); the default LTI
         implementation ignores it.
 

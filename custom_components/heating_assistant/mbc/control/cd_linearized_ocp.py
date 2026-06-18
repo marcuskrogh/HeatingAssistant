@@ -1,20 +1,13 @@
 """
-One-shot successive-linearisation OCP for nonlinear continuous-discrete models.
+One-shot linearised continuous-time OCP for nonlinear plants.
 
-:class:`CDLinearizedOptimalControlProblem` linearises a nonlinear
+:class:`LinearizedContinuousOCP` linearises a nonlinear
 :class:`~mbc.models.ContinuousDiscreteModel` around the current operating
-point, ZOH-discretises the local LTI model, and solves the standard
-:class:`~mbc.control.OptimalControlProblem` QP in deviation coordinates.
+point, ZOH-discretises the local LTI model, and solves
+:class:`~mbc.control.StandardDiscreteOCP` in deviation coordinates.
 
 This is the open-loop OCP counterpart of
-:class:`~mbc.control.CDLinearizedMPCController` (which closes the loop with
-an estimator).  It exposes the same tracking / constraint vocabulary as the
-other OCP classes:
-
-* setpoint tracking via ``Q``, ``P``, and ``z_ref``
-* hard input box ``u_min`` / ``u_max``
-* soft output box via ``y_offset`` and ``rho``
-* input ROM penalty ``S`` and hard ROM box ``du_min`` / ``du_max``
+:class:`~mbc.control.LinearizedContinuousMPCController`.
 """
 
 from __future__ import annotations
@@ -28,35 +21,19 @@ from .cd_linearized_mpc import (
     discretize_cd_linearization,
     linearize_cd_model,
 )
-from .ocp import OptimalControlProblem
+from .ocp import StandardDiscreteOCP
 
 if TYPE_CHECKING:
     from ..models import ContinuousDiscreteModel
 
 
-class CDLinearizedOptimalControlProblem:
+class LinearizedContinuousOCP:
     """
-    Discrete linearised tracking OCP for a nonlinear CD plant.
+    Linearised continuous-time tracking OCP solved as a one-shot QP.
 
-  Parameters
-  ----------
-  model : ContinuousDiscreteModel
-      Nonlinear plant to linearise at each solve.
-  N : int
-      Prediction horizon.
-  Q, R, P, S : array-like
-      Quadratic stage / terminal / ROM costs (deviation coordinates).
-  z_ref : (nz,) array-like, optional
-      Output setpoint.  ``None`` → zeros.
-  u_min, u_max : (nu,) array-like
-      Hard absolute input bounds.
-  du_min, du_max : (nu,) array-like, optional
-      Hard input ROM bounds on ``Δu``.
-  rho, y_offset : float
-      Soft output constraint penalty and half-width.
-  dt : float, optional
-      Sampling interval.  ``None`` → ``model.dt`` if present else ``1.0``.
-  """
+    At each :meth:`solve` call the nonlinear plant is linearised at the
+  current state, ZOH-discretised, and optimised in deviation coordinates.
+    """
 
     def __init__(
         self,
@@ -106,7 +83,7 @@ class CDLinearizedOptimalControlProblem:
             u_max_abs=np.asarray(u_max, dtype=float),
         )
 
-        self._ocp = OptimalControlProblem(
+        self._ocp = StandardDiscreteOCP(
             model=self._lin_model,
             N=self._N,
             Q=Q,
@@ -140,28 +117,6 @@ class CDLinearizedOptimalControlProblem:
         t: float = 0.0,
         z_ref: Any | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Linearise at ``x0``, solve the deviation QP, return absolute trajectories.
-
-        Parameters
-        ----------
-        x0 : (nx,) array-like
-            Current state (linearisation point).
-        D : (N·nd,) array-like
-            Stacked disturbance forecast.
-        u_prev : (nu,) array-like, optional
-            Previously applied input (absolute).
-        p : parameter vector, optional
-        t : float
-            Time stamp for Jacobians.
-        z_ref : (nz,) array-like, optional
-            Override output setpoint for this solve.
-
-        Returns
-        -------
-        U : (N·nu,) ndarray — absolute optimal input sequence.
-        X : (N·nx,) ndarray — absolute predicted state trajectory.
-        """
         x0 = np.asarray(x0, dtype=float).reshape(self._model.nx)
         p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
         u_prev_abs = (
@@ -170,10 +125,11 @@ class CDLinearizedOptimalControlProblem:
             else np.asarray(u_prev, dtype=float).reshape(self._model.nu)
         )
 
-        if z_ref is not None:
-            z_ref_use = np.asarray(z_ref, dtype=float).reshape(self._model.nz)
-        else:
-            z_ref_use = self._z_ref
+        z_ref_use = (
+            self._z_ref
+            if z_ref is None
+            else np.asarray(z_ref, dtype=float).reshape(self._model.nz)
+        )
 
         x_ss = x0.copy()
         u_ss = u_prev_abs.copy()
@@ -186,7 +142,6 @@ class CDLinearizedOptimalControlProblem:
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
         disc = discretize_cd_linearization(lin, self._dt)
         Cz = disc["Cz"]
-
         x_ref_dev = self._x_ref_dev_from_z(z_ref_use, x_ss, Cz)
 
         self._lin_model.update(
@@ -234,3 +189,7 @@ class CDLinearizedOptimalControlProblem:
             except np.linalg.LinAlgError:
                 pass
         return np.linalg.lstsq(Cz, z_err, rcond=None)[0]
+
+
+# Backward-compatible alias (deprecated).
+CDLinearizedOptimalControlProblem = LinearizedContinuousOCP

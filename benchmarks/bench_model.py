@@ -64,8 +64,8 @@ except ImportError:
     _me = sys.modules["mbc.estimation"]
     _me.ContinuousDiscreteEKF = object; _me.KalmanFilter = object
     _mc = sys.modules["mbc.control"]
-    _mc.CDTrackingOptimalControlProblem = object
-    _mc.CDNMPCController = object; _mc.NLPScalingPolicy = object
+    _mc.StandardContinuousOCP = object
+    _mc.ContinuousNMPCController = object; _mc.NLPScalingPolicy = object
 
 _integ_mod  = _load("heating_assistant.integrator",  "integrator.py")
 _ctrl_mod   = _load("heating_assistant.controller",  "controller.py")

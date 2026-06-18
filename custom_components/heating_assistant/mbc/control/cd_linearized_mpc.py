@@ -4,7 +4,7 @@ Successive-linearisation MPC for nonlinear continuous-discrete models.
 This module provides a linear-QP MPC controller that, at each control interval,
 linearises a nonlinear continuous-discrete model around an operating point,
 ZOH-discretises the local model, and solves the existing linear
-:class:`~mbc.control.OptimalControlProblem` in deviation coordinates.
+:class:`~mbc.control.StandardDiscreteOCP` in deviation coordinates.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import numpy as np
 
 from .._utils import _fd_jacobian, _zoh_full, _van_loan
 from ..models import LinearDiscreteModel, ContinuousDiscreteModel
-from .ocp import OptimalControlProblem
+from .ocp import StandardDiscreteOCP
 
 
 class _DeviationLinearDiscreteModel(LinearDiscreteModel):
@@ -225,12 +225,12 @@ def discretize_cd_linearization(
     }
 
 
-class CDLinearizedMPCController:
+class LinearizedContinuousMPCController:
     """
-    Successive-linearisation MPC for nonlinear continuous-discrete models.
+    Successive-linearisation MPC for nonlinear continuous-time plants.
 
     The controller keeps existing nonlinear estimators unchanged and reuses
-    :class:`OptimalControlProblem` by updating a mutable deviation linear model
+    :class:`StandardDiscreteOCP` by updating a mutable deviation linear model
     at each sampling instant.
     """
 
@@ -274,7 +274,7 @@ class CDLinearizedMPCController:
             u_max_abs=np.asarray(u_max, dtype=float),
         )
 
-        self._ocp = OptimalControlProblem(
+        self._ocp = StandardDiscreteOCP(
             model=self._lin_model,
             N=self._N,
             Q=Q,
@@ -380,3 +380,7 @@ class CDLinearizedMPCController:
         self._d_prev = d_now.copy()
 
         return u_abs, U_abs, X_abs
+
+
+# Backward-compatible alias (deprecated).
+CDLinearizedMPCController = LinearizedContinuousMPCController

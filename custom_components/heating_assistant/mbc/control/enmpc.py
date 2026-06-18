@@ -75,8 +75,8 @@ at each sampling time.
 
 This module exposes:
 
-* :class:`EconomicOptimalControlProblem` — the EOCP/NLP solver.
-* :class:`CDNMPCController` — closed-loop receding-horizon controller
+* :class:`ContinuousOptimalControlProblem` — the continuous-time NLP OCP.
+* :class:`ContinuousNMPCController` — closed-loop receding-horizon controller
   composing any continuous-discrete state estimator with this OCP.
 """
 
@@ -184,12 +184,12 @@ class _DecisionLayout:
         return z[self.pz_off:self.pz_off + self.pz_size].reshape(self.M + 1, self.nz)
 
 
-# ── Economic Optimal Control Problem ─────────────────────────────────────────
+# ── Continuous-time Optimal Control Problem ─────────────────────────────────
 
 
-class EconomicOptimalControlProblem:
+class ContinuousOptimalControlProblem:
     """
-    Economic Optimal Control Problem for continuous-discrete nonlinear
+    Continuous-time optimal control problem for nonlinear
     SDE / SDAE systems (ControlToolbox §EMPC).
 
     Direct simultaneous formulation: implicit-Euler dynamics, right-
@@ -1052,7 +1052,7 @@ class EconomicOptimalControlProblem:
         t0: float = 0.0,
     ) -> tuple[np.ndarray, float, dict]:
         """
-        Solve the EOCP from initial state ``x0``.
+        Solve the continuous-time OCP from initial state ``x0``.
 
         Parameters
         ----------
@@ -1191,12 +1191,12 @@ class EconomicOptimalControlProblem:
         return u_opt[0]
 
 
-# ── Generic CD-NMPC Controller ───────────────────────────────────────────────
+# ── Generic continuous NMPC controller ───────────────────────────────────────
 
 
-class CDNMPCController:
+class ContinuousNMPCController:
     """
-    Closed-loop continuous-discrete NMPC controller (ControlToolbox §EMPC —
+    Closed-loop continuous-time NMPC controller (ControlToolbox §EMPC —
     *ENMPC Algorithm*).
 
     Composes any continuous-discrete state estimator with any OCP that
@@ -1216,8 +1216,9 @@ class CDNMPCController:
     estimator : object with ``step(ym, u, d, p, t) → (x_hat, P)`` (or ``(x_hat, y_hat, P)`` for SDAEs)
         Continuous-discrete state estimator.
     ocp : object with ``solve``, ``N``, ``nu``
-        Optimal control problem (NLP solver) — typically an
-        :class:`EconomicOptimalControlProblem`.
+        Optimal control problem (NLP solver) — typically a
+        :class:`ContinuousOptimalControlProblem` or
+        :class:`StandardContinuousOCP`.
     """
 
     def __init__(self, estimator, ocp) -> None:
@@ -1282,3 +1283,8 @@ class CDNMPCController:
 
         # 4. Apply (return to caller)
         return u_k
+
+
+# Backward-compatible aliases (deprecated).
+EconomicOptimalControlProblem = ContinuousOptimalControlProblem
+CDNMPCController = ContinuousNMPCController

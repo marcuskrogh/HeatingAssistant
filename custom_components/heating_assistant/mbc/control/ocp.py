@@ -7,7 +7,7 @@ costs and box / soft-box constraints, the entire NLP reduces to a single
 finite-horizon **quadratic program** that is solved directly with a convex-QP
 backend (OSQP by default; HiGHS also available) — strictly more efficient than
 the implicit-Euler direct-simultaneous formulation used by
-:class:`~mbc.control.EconomicOptimalControlProblem` for nonlinear plants.
+:class:`~mbc.control.ContinuousOptimalControlProblem` for nonlinear plants.
 
 Plant model (ControlToolbox notation, discrete-time specialisation)
 -------------------------------------------------------------------
@@ -81,6 +81,7 @@ Notation
 from __future__ import annotations
 
 import warnings
+from abc import ABC, abstractmethod
 from typing import Any, Callable, TYPE_CHECKING
 
 import numpy as np
@@ -191,11 +192,33 @@ def _shift_warm_start(
     return {"U": U_warm.reshape(-1), "X": X_warm.reshape(-1)}
 
 
-# ── Optimal Control Problem ─────────────────────────────────────────────
+# ── Discrete OCP base and standard QP implementation ─────────────────────
 
 
-class OptimalControlProblem:
+class DiscreteOptimalControlProblem(ABC):
     """
+    Abstract base for discrete-time horizon optimal control problems.
+
+    Concrete subclasses implement :meth:`solve` for a fixed prediction
+    horizon ``N`` and expose the plant dimensions via the wrapped model.
+    """
+
+    @abstractmethod
+    def solve(
+        self,
+        x0: Any,
+        D: Any,
+        x_ref: Any,
+        u_prev: Any | None = None,
+        warm_start: dict[str, np.ndarray] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return optimal input and state trajectories over the horizon."""
+
+
+class StandardDiscreteOCP(DiscreteOptimalControlProblem):
+    """
+    Standard discrete-time tracking OCP solved as a convex QP.
+
     Receding-horizon QP with hard input and soft output box constraints.
 
     The OCP tracks the **output** ``z[k] = Cz x[k]`` against a constant
@@ -390,7 +413,7 @@ class OptimalControlProblem:
 
         if not result.success:
             warnings.warn(
-                f"OptimalControlProblem.solve: QP solver returned status "
+                f"StandardDiscreteOCP.solve: QP solver returned status "
                 f"'{result.status}'; returning zero inputs as fallback.",
                 RuntimeWarning,
                 stacklevel=2,
@@ -693,3 +716,7 @@ class OptimalControlProblem:
             {"P": H, "q": f, "lb": lb, "ub": ub, "G": G, "h": h, "A": A_eq, "b": b_eq},
             extract,
         )
+
+
+# Backward-compatible alias (deprecated).
+OptimalControlProblem = StandardDiscreteOCP

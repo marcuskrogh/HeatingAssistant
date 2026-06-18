@@ -1,18 +1,33 @@
 """Optimal control sub-package for mbc."""
 
-from .ocp import OptimalControlProblem
+from .ocp import (
+    DiscreteOptimalControlProblem,
+    StandardDiscreteOCP,
+    OptimalControlProblem,  # deprecated alias
+)
 from .mpc import MPCController
-from .cd_ocp import CDOptimalControlProblem, CDTrackingOptimalControlProblem
-from .cd_mpc import CDMPCController
-from .cd_linearized_ocp import CDLinearizedOptimalControlProblem
+from .cd_ocp import (
+    LinearContinuousOCP,
+    StandardContinuousOCP,
+    CDOptimalControlProblem,  # deprecated alias
+    CDTrackingOptimalControlProblem,  # deprecated alias
+)
+from .cd_mpc import LinearContinuousMPCController, CDMPCController  # deprecated
+from .cd_linearized_ocp import (
+    LinearizedContinuousOCP,
+    CDLinearizedOptimalControlProblem,  # deprecated alias
+)
 from .cd_linearized_mpc import (
-    CDLinearizedMPCController,
+    LinearizedContinuousMPCController,
+    CDLinearizedMPCController,  # deprecated alias
     linearize_cd_model,
     discretize_cd_linearization,
 )
 from .enmpc import (
-    EconomicOptimalControlProblem,
-    CDNMPCController,
+    ContinuousOptimalControlProblem,
+    ContinuousNMPCController,
+    EconomicOptimalControlProblem,  # deprecated alias
+    CDNMPCController,  # deprecated alias
 )
 from .nlp_solver import (
     NLPConstraint,
@@ -32,17 +47,31 @@ from .qp_solver import (
 )
 
 __all__ = [
-    "OptimalControlProblem",
+    # Discrete OCP
+    "DiscreteOptimalControlProblem",
+    "StandardDiscreteOCP",
+    # Continuous OCP
+    "ContinuousOptimalControlProblem",
+    "StandardContinuousOCP",
+    "LinearContinuousOCP",
+    "LinearizedContinuousOCP",
+    # MPC controllers
     "MPCController",
-    "CDOptimalControlProblem",
-    "CDTrackingOptimalControlProblem",
-    "CDMPCController",
-    "CDLinearizedOptimalControlProblem",
-    "CDLinearizedMPCController",
+    "LinearContinuousMPCController",
+    "LinearizedContinuousMPCController",
+    "ContinuousNMPCController",
+    # Linearisation helpers
     "linearize_cd_model",
     "discretize_cd_linearization",
+    # NLP / QP solvers
     "EconomicOptimalControlProblem",
     "CDNMPCController",
+    "CDOptimalControlProblem",
+    "CDTrackingOptimalControlProblem",
+    "CDLinearizedOptimalControlProblem",
+    "CDMPCController",
+    "CDLinearizedMPCController",
+    "OptimalControlProblem",
     "NLPConstraint",
     "NLPProblem",
     "NLPScalingPolicy",

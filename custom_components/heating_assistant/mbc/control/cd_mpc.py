@@ -1,8 +1,8 @@
 """
 Model Predictive Controller for linear continuous-discrete systems.
 
-:class:`CDMPCController` composes a :class:`~mbc.estimation.CDKalmanFilter`
-and a :class:`~mbc.control.CDOptimalControlProblem` and implements the
+:class:`LinearContinuousMPCController` composes a :class:`~mbc.estimation.CDKalmanFilter`
+and a :class:`~mbc.control.LinearContinuousOCP` and implements the
 receding-horizon policy described in ControlToolbox §EMPC —
 *ENMPC Algorithm*, specialised to the linear continuous-discrete case.
 
@@ -19,7 +19,7 @@ At each measurement time t_k:
 The estimator integrates the continuous-time matrices ``A``, ``B``, ``E``
 directly via ODE integration; the OCP uses ZOH-discretised matrices
 ``(Ad, Bd, Ed)`` computed once at construction time inside
-:class:`CDOptimalControlProblem`.
+:class:`LinearContinuousOCP`.
 """
 
 from __future__ import annotations
@@ -30,19 +30,19 @@ import numpy as np
 
 from .._utils import _any_to_np1d
 from ..estimation.cd_kalman import CDKalmanFilter
-from .cd_ocp import CDOptimalControlProblem
+from .cd_ocp import LinearContinuousOCP
 from .ocp import _shift_warm_start
 
 if TYPE_CHECKING:
     from ..models import LinearContinuousDiscreteModel
 
 
-class CDMPCController:
+class LinearContinuousMPCController:
     """
-    MPC controller for a linear continuous-discrete plant.
+    MPC controller for a linear continuous-time plant.
 
     Composes a :class:`~mbc.estimation.CDKalmanFilter` and a
-    :class:`~mbc.control.CDOptimalControlProblem` into a single
+    :class:`~mbc.control.LinearContinuousOCP` into a single
     receding-horizon controller.  The previously-applied ``(u, d)`` are
     tracked internally so that the estimator's predict step has the
     correct ZOH inputs over the just-completed interval.
@@ -54,7 +54,7 @@ class CDMPCController:
         and ``discretize_noise``.
     estimator : CDKalmanFilter
         State estimator (continuous ODE integration internally).
-    ocp       : CDOptimalControlProblem
+    ocp       : LinearContinuousOCP
         Optimal control problem (lifted-batch QP on ZOH-discretised matrices).
     """
 
@@ -62,7 +62,7 @@ class CDMPCController:
         self,
         model: "LinearContinuousDiscreteModel",
         estimator: CDKalmanFilter,
-        ocp: CDOptimalControlProblem,
+        ocp: LinearContinuousOCP,
         warm_start: bool = False,
     ) -> None:
         self._model = model
@@ -122,3 +122,7 @@ class CDMPCController:
         self._prev_U, self._prev_X = U_seq, X_seq
 
         return u, U_seq, X_seq
+
+
+# Backward-compatible alias (deprecated).
+CDMPCController = LinearContinuousMPCController

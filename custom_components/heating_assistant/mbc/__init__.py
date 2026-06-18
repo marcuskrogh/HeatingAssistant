@@ -30,21 +30,16 @@ model-based control, estimation, identification, and simulation.
   mbc.control
       Optimal control algorithms:
 
-      * ``OptimalControlProblem``         – receding-horizon QP (tracking MPC, discrete).
-      * ``MPCController``                 – KalmanFilter + OptimalControlProblem.
-      * ``CDOptimalControlProblem``       – receding-horizon QP for linear CD systems.
-      * ``CDMPCController``               – CDKalmanFilter + CDOptimalControlProblem.
-      * ``CDTrackingOptimalControlProblem`` – nonlinear tracking OCP for CD systems
-                                             (NLP; input/state/output constraints,
-                                             ROM penalty + constraints, linear input
-                                             penalty).
-      * ``CDLinearizedOptimalControlProblem`` – one-shot linearised tracking OCP
-                                               (QP on local LTI model).
-      * ``EconomicOptimalControlProblem`` – economic nonlinear OCP (Ph.D. Ch. 9).
-                                           Accepts Mayer + Lagrange functions and
-                                           the same constraint set as the tracking OCP.
-      * ``CDNMPCController``              – generic estimator + OCP controller
-                                           (works with any CD estimator and any OCP).
+      * ``DiscreteOptimalControlProblem``    – abstract base for discrete-time OCPs.
+      * ``StandardDiscreteOCP``            – standard discrete tracking QP.
+      * ``MPCController``                  – KalmanFilter + StandardDiscreteOCP.
+      * ``LinearContinuousOCP``            – ZOH-discretised QP for linear CD plants.
+      * ``LinearContinuousMPCController``  – CDKalmanFilter + LinearContinuousOCP.
+      * ``StandardContinuousOCP``          – standard continuous-time tracking OCP (NLP).
+      * ``LinearizedContinuousOCP``        – one-shot linearised continuous tracking QP.
+      * ``ContinuousOptimalControlProblem`` – general continuous-time NLP OCP.
+      * ``ContinuousNMPCController``       – generic estimator + continuous OCP controller.
+      * ``LinearizedContinuousMPCController`` – successive-linearisation MPC (production path).
 
   mbc.identification
       System-identification / parameter-estimation utilities:
@@ -92,8 +87,18 @@ from .estimation import (
     ContinuousDiscreteDAEEKF,
 )
 from .control import (
-    OptimalControlProblem,
+    DiscreteOptimalControlProblem,
+    StandardDiscreteOCP,
     MPCController,
+    LinearContinuousOCP,
+    StandardContinuousOCP,
+    LinearContinuousMPCController,
+    LinearizedContinuousOCP,
+    LinearizedContinuousMPCController,
+    ContinuousOptimalControlProblem,
+    ContinuousNMPCController,
+    # Deprecated aliases
+    OptimalControlProblem,
     CDOptimalControlProblem,
     CDTrackingOptimalControlProblem,
     CDMPCController,
@@ -127,8 +132,18 @@ __all__ = [
     "ContinuousDiscreteParticleFilter",
     "ContinuousDiscreteDAEEKF",
     # Control
-    "OptimalControlProblem",
+    "DiscreteOptimalControlProblem",
+    "StandardDiscreteOCP",
     "MPCController",
+    "LinearContinuousOCP",
+    "StandardContinuousOCP",
+    "LinearContinuousMPCController",
+    "LinearizedContinuousOCP",
+    "LinearizedContinuousMPCController",
+    "ContinuousOptimalControlProblem",
+    "ContinuousNMPCController",
+    # Deprecated aliases
+    "OptimalControlProblem",
     "CDOptimalControlProblem",
     "CDTrackingOptimalControlProblem",
     "CDMPCController",

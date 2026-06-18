@@ -19,7 +19,10 @@ from custom_components.heating_assistant.thermal_model import (
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
 from custom_components.heating_assistant.mbc.models import ContinuousDiscreteModel
 from custom_components.heating_assistant.mbc.estimation import ContinuousDiscreteEKF
-from custom_components.heating_assistant.mbc.control import CDTrackingOptimalControlProblem, CDLinearizedMPCController
+from custom_components.heating_assistant.mbc.control import (
+    StandardContinuousOCP,
+    LinearizedContinuousMPCController,
+)
 from custom_components.heating_assistant.controller import (
     HouseThermalSDE,
     HeatingMPCController,
@@ -645,10 +648,10 @@ class TestContinuousDiscreteEKF:
         assert np.all(eigvals >= -1e-10)
 
 
-# -- CDTrackingOptimalControlProblem tests ------------------------------------
+# -- StandardContinuousOCP tests -----------------------------------------------
 
-class TestCDTrackingOCP:
-    """Tests for CDTrackingOptimalControlProblem with HouseThermalSDE."""
+class TestStandardContinuousOCP:
+    """Tests for StandardContinuousOCP with HouseThermalSDE."""
 
     def _make_ocp(self, horizon=3):
         model, sources = _make_model_and_sources()
@@ -658,7 +661,7 @@ class TestCDTrackingOCP:
         R = 0.01 * np.eye(n_u)
         z_ref = sde.x_ref
         u_min, u_max = sde.u_bounds
-        ocp = CDTrackingOptimalControlProblem(
+        ocp = StandardContinuousOCP(
             sde, N=horizon, Q=Q, R=R,
             z_ref=z_ref,
             u_min=u_min, u_max=u_max,
@@ -703,7 +706,7 @@ class TestCDTrackingOCP:
             ElectricHeater("br_heater", "bedroom", max_power=1500.0),
         ]
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        ocp = CDTrackingOptimalControlProblem(
+        ocp = StandardContinuousOCP(
             sde, N=3, Q=np.eye(sde.nz), R=0.001 * np.eye(2),
             z_ref=sde.x_ref, u_min=np.zeros(2), u_max=np.ones(2),
             dt=900.0, n_steps=5,
@@ -1115,14 +1118,14 @@ class TestHeatingMPCController:
         assert ctrl.outdoor_forecast == forecast
 
     def test_uses_linearised_mpc(self):
-        """HeatingMPCController should use CDLinearizedMPCController internally."""
+        """HeatingMPCController should use LinearizedContinuousMPCController internally."""
         model, sources = _make_model_and_sources()
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl._system, HouseThermalSDE)
         assert isinstance(ctrl._control_system, HouseThermalSDE)
         assert ctrl._control_system.nx == ctrl._system.nx
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
-        assert isinstance(ctrl._mpc, CDLinearizedMPCController)
+        assert isinstance(ctrl._mpc, LinearizedContinuousMPCController)
 
     def test_negative_smoothing_weight_raises(self):
         model, sources = _make_model_and_sources()
@@ -1355,7 +1358,7 @@ class TestSolarForecastIndexing:
     def test_setpoint_reference_updated_on_setpoint_change(self):
         """After compute(), the MPC x_ref must track the current setpoints.
 
-        CDLinearizedMPCController.x_ref is updated via the property setter
+        LinearizedContinuousMPCController.x_ref is updated via the property setter
         at the start of each compute() call so stage and terminal costs
         always use the latest setpoints.
         """

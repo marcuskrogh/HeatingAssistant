@@ -13,10 +13,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from custom_components.heating_assistant.controller import HouseThermalSDE
 from custom_components.heating_assistant.heat_sources import ElectricHeater
 from custom_components.heating_assistant.mbc.control import (
-    CDOptimalControlProblem,
-    CDLinearizedOptimalControlProblem,
-    CDTrackingOptimalControlProblem,
-    OptimalControlProblem,
+    LinearContinuousOCP,
+    LinearizedContinuousOCP,
+    StandardContinuousOCP,
+    StandardDiscreteOCP,
 )
 from custom_components.heating_assistant.thermal_model import HouseModel, Room
 from tests.ocp_fixtures import FirstOrderCDModel, FirstOrderDiscreteModel
@@ -39,13 +39,13 @@ def _ocp_common_kwargs():
 
 
 class TestDiscreteLinearOCP:
-    """OptimalControlProblem — discrete linear QP."""
+    """StandardDiscreteOCP — discrete linear QP."""
 
     def _make_ocp(self, **kwargs):
         model = FirstOrderDiscreteModel(x0=18.0, x_ref=22.0)
         kw = _ocp_common_kwargs()
         kw.update(kwargs)
-        return OptimalControlProblem(model=model, **kw), model
+        return StandardDiscreteOCP(model=model, **kw), model
 
     def test_setpoint_tracking_heats_when_cold(self):
         ocp, model = self._make_ocp()
@@ -61,7 +61,6 @@ class TestDiscreteLinearOCP:
         assert np.all(U <= 1.0 + 1e-9)
 
     def test_soft_output_tighter_band_increases_heating(self):
-        """Tighter soft output band (higher rho) drives more heating when below setpoint."""
         ocp_loose, model = self._make_ocp(y_offset=5.0, rho=1e3)
         ocp_tight, _ = self._make_ocp(y_offset=0.5, rho=1e5)
         D = _stack_disturbance(5.0, ocp_loose._N)
@@ -101,13 +100,13 @@ class TestDiscreteLinearOCP:
 
 
 class TestContinuousLinearOCP:
-    """CDOptimalControlProblem — continuous linear ZOH-QP."""
+    """LinearContinuousOCP — continuous linear ZOH-QP."""
 
     def _make_ocp(self, **kwargs):
         model = FirstOrderCDModel(x0=18.0, x_ref=22.0, dt=900.0)
         kw = _ocp_common_kwargs()
         kw.update(kwargs)
-        return CDOptimalControlProblem(model=model, **kw), model
+        return LinearContinuousOCP(model=model, **kw), model
 
     def test_setpoint_tracking(self):
         ocp, model = self._make_ocp()
@@ -137,8 +136,8 @@ class TestContinuousLinearOCP:
         assert U_pen[0] <= U_plain[0] + 1e-6
 
 
-class TestDiscreteLinearizedOCP:
-    """CDLinearizedOptimalControlProblem — one-shot linearised QP."""
+class TestLinearizedContinuousOCP:
+    """LinearizedContinuousOCP — one-shot linearised QP."""
 
     def _make_house_ocp(self, **kwargs):
         model, sources = _make_model_and_sources()
@@ -153,7 +152,7 @@ class TestDiscreteLinearizedOCP:
             dt=900.0,
         )
         kw.update(kwargs)
-        return CDLinearizedOptimalControlProblem(sde, **kw), sde
+        return LinearizedContinuousOCP(sde, **kw), sde
 
     def test_solve_shapes(self):
         ocp, sde = self._make_house_ocp()
@@ -194,8 +193,8 @@ class TestDiscreteLinearizedOCP:
         )
 
 
-class TestContinuousNonlinearOCP:
-    """CDTrackingOptimalControlProblem — nonlinear NLP."""
+class TestStandardContinuousOCP:
+    """StandardContinuousOCP — continuous nonlinear NLP."""
 
     def _make_ocp(self, **kwargs):
         model, sources = _make_model_and_sources()
@@ -211,7 +210,7 @@ class TestContinuousNonlinearOCP:
             n_steps=5,
         )
         kw.update(kwargs)
-        return CDTrackingOptimalControlProblem(sde, **kw), sde
+        return StandardContinuousOCP(sde, **kw), sde
 
     def test_setpoint_tracking(self):
         ocp, sde = self._make_ocp()
@@ -231,7 +230,7 @@ class TestContinuousNonlinearOCP:
     def test_hard_rate_constraints(self):
         model, sources = _make_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
-        ocp = CDTrackingOptimalControlProblem(
+        ocp = StandardContinuousOCP(
             sde,
             N=3,
             Q=np.eye(sde.nz),
@@ -261,7 +260,7 @@ class TestContinuousNonlinearOCP:
         sde = HouseThermalSDE(model, sources, dt=900.0)
         z_ref = sde.x_ref
         half = 1.0
-        ocp = CDTrackingOptimalControlProblem(
+        ocp = StandardContinuousOCP(
             sde,
             N=3,
             Q=np.eye(sde.nz),
