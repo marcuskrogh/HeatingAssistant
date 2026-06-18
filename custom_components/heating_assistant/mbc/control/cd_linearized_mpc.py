@@ -281,6 +281,8 @@ class CDLinearizedMPCController:
             R=R,
             P=P,
             S=S,
+            du_min=du_min,
+            du_max=du_max,
             rho=rho,
             rho_lin=rho_lin,
             y_offset=y_offset,
