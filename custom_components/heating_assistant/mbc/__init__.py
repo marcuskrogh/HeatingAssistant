@@ -40,10 +40,11 @@ model-based control, estimation, identification, and simulation.
       * ``StandardLinearizedContinuousDiscreteOCP``    – standard linearised discrete OCP for nonlinear CD plants.
       * ``StandardContinuousOCP``                      – standard continuous OCP for nonlinear CD plants.
       * ``GeneralContinuousOCP``                       – general continuous OCP (Mayer/Lagrange NLP).
-      * ``MPCController``                              – KalmanFilter + discrete OCP (discrete plants).
-      * ``CDMPCController``                            – CDKalmanFilter + discrete OCP (linear CD plants).
-      * ``CDLinearizedMPCController``                  – CD estimator + linearised discrete OCP (nonlinear CD).
-      * ``CDNMPCController``                           – CD estimator + continuous OCP (nonlinear CD).
+      * ``LinearDiscreteMPC``                    – linear discrete plant + KF + discrete OCP.
+      * ``LinearisedDiscreteMPC``                – linearised discrete plant + estimator + discrete OCP.
+      * ``LinearContinuousMPC``                  – linear CD plant + CD-KF + discrete OCP.
+      * ``LinearisedContinuousMPC``              – linearised CD plant + CD estimator + discrete OCP.
+      * ``NonlinearContinuousMPC``               – nonlinear CD plant + CD estimator + continuous OCP.
 
   mbc.identification
       System-identification / parameter-estimation utilities:
@@ -98,15 +99,23 @@ from .control import (
     StandardLinearizedContinuousDiscreteOCP,
     StandardContinuousOCP,
     GeneralContinuousOCP,
-    MPCController,
-    CDMPCController,
-    CDLinearizedMPCController,
-    CDNMPCController,
+    LinearDiscreteMPC,
+    LinearisedDiscreteMPC,
+    LinearContinuousMPC,
+    LinearisedContinuousMPC,
+    NonlinearContinuousMPC,
+    linearize_discrete_model,
+    linearize_cd_model,
+    discretize_cd_linearization,
     # Deprecated aliases
     StandardDiscreteOCP,
     OptimalControlProblem,
     LinearContinuousOCP,
     LinearizedContinuousOCP,
+    MPCController,
+    CDMPCController,
+    CDLinearizedMPCController,
+    CDNMPCController,
     LinearContinuousMPCController,
     LinearizedContinuousMPCController,
     ContinuousNMPCController,
@@ -149,7 +158,16 @@ __all__ = [
     "StandardLinearizedContinuousDiscreteOCP",
     "StandardContinuousOCP",
     "GeneralContinuousOCP",
-    # Control — MPC
+    # Control — MPC abstractions
+    "LinearDiscreteMPC",
+    "LinearisedDiscreteMPC",
+    "LinearContinuousMPC",
+    "LinearisedContinuousMPC",
+    "NonlinearContinuousMPC",
+    "linearize_discrete_model",
+    "linearize_cd_model",
+    "discretize_cd_linearization",
+    # Deprecated aliases
     "MPCController",
     "CDMPCController",
     "CDLinearizedMPCController",

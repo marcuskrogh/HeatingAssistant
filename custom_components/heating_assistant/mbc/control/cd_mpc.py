@@ -1,7 +1,7 @@
 """
 Model Predictive Controller for linear continuous-discrete systems.
 
-:class:`CDMPCController` composes a :class:`~mbc.estimation.CDKalmanFilter`
+:class:`LinearContinuousMPC` composes a :class:`~mbc.estimation.CDKalmanFilter`
 and a :class:`~mbc.control.StandardLinearContinuousDiscreteOCP` and implements the
 receding-horizon policy described in ControlToolbox §EMPC —
 *ENMPC Algorithm*, specialised to the linear continuous-discrete case.
@@ -37,25 +37,12 @@ if TYPE_CHECKING:
     from ..models import LinearContinuousDiscreteModel
 
 
-class CDMPCController:
+class LinearContinuousMPC:
     """
-    MPC controller for a linear continuous-discrete plant.
+    MPC for a linear continuous-discrete plant, CD estimator, and discrete-time OCP.
 
-    Composes a :class:`~mbc.estimation.CDKalmanFilter` and a
-    :class:`~mbc.control.StandardLinearContinuousDiscreteOCP` into a single
-    receding-horizon controller.  The previously-applied ``(u, d)`` are
-    tracked internally so that the estimator's predict step has the
-    correct ZOH inputs over the just-completed interval.
-
-    Parameters
-    ----------
-    model     : LinearContinuousDiscreteModel
-        Plant model providing ``nu``, ``nd``, ``x_ref``, ``discretize``,
-        and ``discretize_noise``.
-    estimator : CDKalmanFilter
-        State estimator (continuous ODE integration internally).
-    ocp       : StandardLinearContinuousDiscreteOCP
-        Optimal control problem (lifted-batch QP on ZOH-discretised matrices).
+    Composes a :class:`~mbc.estimation.CDKalmanFilter` with a
+    :class:`~mbc.control.StandardLinearContinuousDiscreteOCP` (ZOH-discretised QP).
     """
 
     def __init__(
@@ -124,5 +111,6 @@ class CDMPCController:
         return u, U_seq, X_seq
 
 
-# Backward-compatible alias (deprecated).
-LinearContinuousMPCController = CDMPCController
+# Backward-compatible aliases (deprecated).
+CDMPCController = LinearContinuousMPC
+LinearContinuousMPCController = LinearContinuousMPC

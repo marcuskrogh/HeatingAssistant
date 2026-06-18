@@ -6,7 +6,11 @@ from .ocp import (
     StandardDiscreteOCP,  # deprecated alias
     OptimalControlProblem,  # deprecated alias
 )
-from .mpc import MPCController
+from .mpc import LinearDiscreteMPC, MPCController  # deprecated
+from .linearised_discrete_mpc import (
+    LinearisedDiscreteMPC,
+    linearize_discrete_model,
+)
 from .cd_ocp import (
     StandardLinearContinuousDiscreteOCP,
     StandardContinuousOCP,
@@ -14,14 +18,15 @@ from .cd_ocp import (
     LinearContinuousOCP,  # deprecated alias
     CDTrackingOptimalControlProblem,  # deprecated alias
 )
-from .cd_mpc import CDMPCController, LinearContinuousMPCController  # deprecated
+from .cd_mpc import LinearContinuousMPC, CDMPCController, LinearContinuousMPCController  # deprecated
 from .cd_linearized_ocp import (
     StandardLinearizedContinuousDiscreteOCP,
     CDLinearizedOptimalControlProblem,  # deprecated alias
     LinearizedContinuousOCP,  # deprecated alias
 )
 from .cd_linearized_mpc import (
-    CDLinearizedMPCController,
+    LinearisedContinuousMPC,
+    CDLinearizedMPCController,  # deprecated alias
     LinearizedContinuousMPCController,  # deprecated alias
     linearize_cd_model,
     discretize_cd_linearization,
@@ -29,8 +34,9 @@ from .cd_linearized_mpc import (
 from .enmpc import (
     ContinuousOptimalControlProblem,
     GeneralContinuousOCP,
-    CDNMPCController,
+    NonlinearContinuousMPC,
     EconomicOptimalControlProblem,  # deprecated alias
+    CDNMPCController,  # deprecated alias
     ContinuousNMPCController,  # deprecated alias
 )
 from .nlp_solver import (
@@ -59,14 +65,15 @@ __all__ = [
     "StandardLinearContinuousDiscreteOCP",
     "StandardLinearizedContinuousDiscreteOCP",
     "StandardContinuousOCP",
-    # General continuous OCP
     "GeneralContinuousOCP",
-    # MPC controllers (estimator pairing reflects model type)
-    "MPCController",
-    "CDMPCController",
-    "CDLinearizedMPCController",
-    "CDNMPCController",
+    # MPC abstractions
+    "LinearDiscreteMPC",
+    "LinearisedDiscreteMPC",
+    "LinearContinuousMPC",
+    "LinearisedContinuousMPC",
+    "NonlinearContinuousMPC",
     # Linearisation helpers
+    "linearize_discrete_model",
     "linearize_cd_model",
     "discretize_cd_linearization",
     # NLP / QP solvers
@@ -83,6 +90,7 @@ __all__ = [
     "OSQPBackend",
     "make_qp_backend",
     # Deprecated aliases
+    "MPCController",
     "StandardDiscreteOCP",
     "OptimalControlProblem",
     "CDOptimalControlProblem",
@@ -90,8 +98,11 @@ __all__ = [
     "CDTrackingOptimalControlProblem",
     "CDLinearizedOptimalControlProblem",
     "LinearizedContinuousOCP",
+    "CDMPCController",
     "LinearContinuousMPCController",
+    "CDLinearizedMPCController",
     "LinearizedContinuousMPCController",
     "EconomicOptimalControlProblem",
+    "CDNMPCController",
     "ContinuousNMPCController",
 ]

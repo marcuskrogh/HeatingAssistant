@@ -6,7 +6,7 @@ Standard linearised discrete-time OCP for nonlinear continuous-discrete plants.
 ZOH-discretises the local model, and solves
 :class:`~mbc.control.StandardLinearDiscreteOCP` in deviation coordinates.
 
-Open-loop counterpart of :class:`~mbc.control.CDLinearizedMPCController`.
+Open-loop counterpart of :class:`~mbc.control.LinearisedContinuousMPC`.
 """
 
 from __future__ import annotations

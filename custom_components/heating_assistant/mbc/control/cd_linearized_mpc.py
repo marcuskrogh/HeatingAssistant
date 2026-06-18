@@ -225,13 +225,12 @@ def discretize_cd_linearization(
     }
 
 
-class CDLinearizedMPCController:
+class LinearisedContinuousMPC:
     """
-    Successive-linearisation MPC for nonlinear continuous-discrete plants.
+    MPC for a linearised continuous-discrete plant, CD estimator, and discrete-time OCP.
 
-    Composes a continuous-discrete state estimator with
-    :class:`StandardLinearDiscreteOCP` by updating a mutable deviation linear
-    model at each sampling instant.
+    Successive linearisation of a nonlinear continuous-discrete model at each
+    step, solved via :class:`StandardLinearDiscreteOCP` in deviation coordinates.
     """
 
     def __init__(
@@ -382,5 +381,6 @@ class CDLinearizedMPCController:
         return u_abs, U_abs, X_abs
 
 
-# Backward-compatible alias (deprecated).
-LinearizedContinuousMPCController = CDLinearizedMPCController
+# Backward-compatible aliases (deprecated).
+CDLinearizedMPCController = LinearisedContinuousMPC
+LinearizedContinuousMPCController = LinearisedContinuousMPC

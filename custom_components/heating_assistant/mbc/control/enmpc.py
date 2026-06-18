@@ -76,7 +76,7 @@ at each sampling time.
 This module exposes:
 
 * :class:`GeneralContinuousOCP` — general continuous-time NLP OCP.
-* :class:`CDNMPCController` — closed-loop receding-horizon controller
+* :class:`NonlinearContinuousMPC` — closed-loop receding-horizon controller
   composing any continuous-discrete state estimator with this OCP.
 """
 
@@ -1243,30 +1243,12 @@ class GeneralContinuousOCP(ContinuousOptimalControlProblem):
 # ── Generic continuous NMPC controller ───────────────────────────────────────
 
 
-class CDNMPCController:
+class NonlinearContinuousMPC:
     """
-    Closed-loop continuous-discrete NMPC controller (ControlToolbox §EMPC —
-    *ENMPC Algorithm*).
+    MPC for a nonlinear continuous-discrete plant, CD estimator, and continuous-time OCP.
 
-    Composes any continuous-discrete state estimator with any OCP that
-    exposes ``solve(x0, d_trajectory, …) → (u_opt, cost, info)`` (or the
-    legacy two-tuple ``(u_opt, cost)``) into a receding-horizon controller.
-
-    At each measurement time t_k:
-
-      1. **Measure**   y^{m,s}_k  (passed in via :meth:`step`)
-      2. **Estimate**  z^c_k = κ(z^c_{k−1}, u_{k−1}, d_{k−1}, y^{m,s}_k, θ^c)
-                       (delegated to ``estimator.step``)
-      3. **Optimise**  u_k = λ(z^c_k, θ^c)  (delegated to ``ocp.solve``)
-      4. **Apply**     return ``u_k`` to the caller, who advances the plant.
-
-    Parameters
-    ----------
-    estimator : object with ``step(ym, u, d, p, t) → (x_hat, P)`` (or ``(x_hat, y_hat, P)`` for SDAEs)
-        Continuous-discrete state estimator.
-    ocp : object with ``solve``, ``N``, ``nu``
-        Optimal control problem (NLP solver) — typically a
-        :class:`GeneralContinuousOCP` or :class:`StandardContinuousOCP`.
+    Composes any continuous-discrete state estimator with a continuous-time OCP
+    (typically :class:`StandardContinuousOCP` or :class:`GeneralContinuousOCP`).
     """
 
     def __init__(self, estimator, ocp) -> None:
@@ -1335,4 +1317,5 @@ class CDNMPCController:
 
 # Backward-compatible aliases (deprecated).
 EconomicOptimalControlProblem = GeneralContinuousOCP
-ContinuousNMPCController = CDNMPCController
+CDNMPCController = NonlinearContinuousMPC
+ContinuousNMPCController = NonlinearContinuousMPC

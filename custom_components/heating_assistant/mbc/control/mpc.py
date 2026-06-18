@@ -30,31 +30,12 @@ if TYPE_CHECKING:
     from ..models import LinearDiscreteModel
 
 
-class MPCController:
+class LinearDiscreteMPC:
     """
-    Model predictive controller for a linear discrete-time plant.
+    MPC for a linear discrete-time plant, estimator, and discrete-time OCP.
 
-    Combines a :class:`~mbc.estimation.KalmanFilter` (estimator) and an
-    :class:`StandardLinearDiscreteOCP` (OCP) into a closed-loop controller.
-
-    The previously-applied input ``u_{k-1}`` and disturbance ``d_{k-1}``
-    are tracked internally so that the estimator's predict step has the
-    correct ZOH inputs over the just-completed interval.
-
-    Parameters
-    ----------
-    model     : LinearDiscreteModel
-    estimator : KalmanFilter
-    ocp       : StandardLinearDiscreteOCP
-    warm_start : bool, optional
-        Re-use the previous horizon solution (shifted one step) as the QP
-        warm start on each call.  Default: ``False``.  Warm-starting never
-        changes the optimiser; it only seeds the solver's initial iterate.
-        With the current per-solve setup it gives little measurable speedup
-        (the primal-only start is rebuilt each step); substantial
-        receding-horizon gains require solver-level factorisation reuse
-        (persistent OSQP ``update`` with primal+dual starts) — planned future
-        work.  Left available and correct for that path and for HiGHS.
+    Composes a :class:`~mbc.estimation.KalmanFilter` with a
+    :class:`StandardLinearDiscreteOCP`.
     """
 
     def __init__(
@@ -123,3 +104,7 @@ class MPCController:
         self._prev_U, self._prev_X = U_seq, X_seq
 
         return u, U_seq, X_seq
+
+
+# Backward-compatible alias (deprecated).
+MPCController = LinearDiscreteMPC
