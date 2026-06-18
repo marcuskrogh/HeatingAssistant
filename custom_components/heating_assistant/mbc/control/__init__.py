@@ -6,6 +6,7 @@ from .ocp import (
     StandardDiscreteOCP,  # deprecated alias
     OptimalControlProblem,  # deprecated alias
 )
+from .mpc_forecast import ForecastAwareMPC, MPCForecast, MPCOperatingPoint
 from .mpc import (
     LinearDiscreteMPC,
     StandardLinearDiscreteMPC,
@@ -90,7 +91,10 @@ __all__ = [
     "StandardLinearContinuousMPC",
     "StandardLinearisedContinuousMPC",
     "StandardNonlinearContinuousMPC",
-    # Linearisation helpers
+    # MPC forecast helpers
+    "ForecastAwareMPC",
+    "MPCForecast",
+    "MPCOperatingPoint",
     "linearize_discrete_model",
     "linearize_cd_model",
     "discretize_cd_linearization",

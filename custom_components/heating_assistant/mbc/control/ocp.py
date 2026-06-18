@@ -348,6 +348,20 @@ class StandardLinearDiscreteOCP(DiscreteOptimalControlProblem):
         x_ref: Any,
         u_prev: Any | None = None,
         warm_start: dict[str, np.ndarray] | None = None,
+        *,
+        u_ss: Any | None = None,
+        x_ref_dev_seq: Any | None = None,
+        offset_seq: Any | None = None,
+        q_scale_seq: Any | None = None,
+        r_scale_seq: Any | None = None,
+        u_min_seq: Any | None = None,
+        u_max_seq: Any | None = None,
+        price_seq: Any | None = None,
+        elec_heat: Any | None = None,
+        elec_cool: Any | None = None,
+        bid_mask: Any | None = None,
+        price_weight: float = 0.0,
+        dt_h: float = 0.25,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Solve the QP starting from state estimate ``x0``.
@@ -366,12 +380,56 @@ class StandardLinearDiscreteOCP(DiscreteOptimalControlProblem):
             ``{"U": (N·nu,), "X": (N·nx,)}`` primal warm-start trajectory
             (typically the previous solution shifted one step by
             :func:`_shift_warm_start`).  Ignored if the shapes do not match.
+        u_ss, x_ref_dev_seq, offset_seq, q_scale_seq, r_scale_seq,
+        u_min_seq, u_max_seq, price_seq, elec_heat, elec_cool, bid_mask,
+        price_weight, dt_h :
+            Optional time-varying horizon parameters.  When any are supplied the
+            condensed forecast QP path is used (see :func:`forecast_ocp.solve_forecast_qp`).
 
         Returns
         -------
         U : (N · nu,) ndarray — optimal input sequence.
         X : (N · nx,) ndarray — predicted state trajectory ``[x[1]; …; x[N]]``.
         """
+        has_price = (
+            price_seq is not None
+            and price_weight > 0.0
+            and elec_heat is not None
+        )
+        has_forecast = (
+            (u_ss is not None and not np.allclose(u_ss, 0.0))
+            or x_ref_dev_seq is not None
+            or offset_seq is not None
+            or q_scale_seq is not None
+            or r_scale_seq is not None
+            or u_min_seq is not None
+            or u_max_seq is not None
+            or has_price
+        )
+        if has_forecast:
+            from .forecast_ocp import solve_forecast_qp
+
+            return solve_forecast_qp(
+                self,
+                x0,
+                D,
+                x_ref,
+                u_prev,
+                u_ss=u_ss,
+                x_ref_dev_seq=x_ref_dev_seq,
+                offset_seq=offset_seq,
+                q_scale_seq=q_scale_seq,
+                r_scale_seq=r_scale_seq,
+                u_min_seq=u_min_seq,
+                u_max_seq=u_max_seq,
+                price_seq=price_seq,
+                elec_heat=elec_heat,
+                elec_cool=elec_cool,
+                bid_mask=bid_mask,
+                price_weight=price_weight,
+                dt_h=dt_h,
+            )
+
         N = self._N
         nx = self._model.nx
         nu = self._model.nu

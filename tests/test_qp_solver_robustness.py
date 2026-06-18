@@ -2,11 +2,11 @@
 
 HiGHS's active-set QP solver (observed up to 1.14) can return "Solve error"
 or "Unbounded" on well-posed strictly convex QPs.  Both failure modes were
-captured from real MPC solves of :class:`_AbsoluteInputOCP` (single room,
+captured from real MPC solves of :class:`~mbc.control.StandardLinearDiscreteOCP` (single room,
 single source): the QP minimises input effort plus soft comfort-corridor
 slack, with the slack columns unbounded above.
 
-When the backend silently fails, ``_AbsoluteInputOCP.solve`` falls back to
+When the backend silently fails, ``StandardLinearDiscreteOCP.solve`` falls back to
 ``U_dev = 0``, i.e. a constant ``u_ss`` plan over the whole horizon that sits
 strictly inside the input bounds — the controller "runs and finishes" but
 never actually optimises.  These tests pin the retry ladder in
@@ -29,7 +29,7 @@ from custom_components.heating_assistant.mbc.control.qp_solver import (
 
 
 def _mpc_qp(imp, r_diag, q_u, lb_u, ub_u, h_vec):
-    """Rebuild a captured `_AbsoluteInputOCP` QP from its generating data.
+    """Rebuild a captured forecast-aware linear discrete OCP QP from its generating data.
 
     Decision vector is ``[U (N); ε (N)]``.  ``imp`` is the first column of
     the lower-triangular Toeplitz input-to-output map CG (impulse response),

@@ -89,7 +89,6 @@ def _select_cloud_for_step(
 from .const import MPC_STATS_BUFFER_SIZE
 
 # ── Import model-based control components from mbc ────────────────────────────
-from scipy.linalg import block_diag as _scipy_block_diag
 from .mbc.models import ContinuousDiscreteModel
 from .mbc.estimation import ContinuousDiscreteEKF
 from .mbc.control import (
@@ -99,7 +98,6 @@ from .mbc.control import (
     QPProblem,
     make_qp_backend,
 )
-from .mbc.control.ocp import StandardLinearDiscreteOCP
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
@@ -1309,639 +1307,6 @@ class _InnovationEKF(ContinuousDiscreteEKF):
         self._last_innovation = (np.asarray(y, dtype=float) - y_hat).tolist()
         return self.update(y, u, d, p, mask=mask)
 
-
-# ── Absolute-input OCP ───────────────────────────────────────────────────────
-
-class _AbsoluteInputOCP(StandardLinearDiscreteOCP):
-    """OCP that penalises the absolute input ‖u_abs‖²_R instead of ‖u_dev‖²_R.
-
-    In deviation coordinates u_dev = u_abs − u_ss, the cost term
-    ‖u_dev + u_ss‖²_R = ‖u_abs‖²_R expands to
-
-        ‖u_dev‖²_R  +  2·u_ss'·R·u_dev  +  ‖u_ss‖²_R
-
-    The Hessian (R_bar) is unchanged.  The linear correction
-    ``R_bar · tile(u_ss, N)`` is added to the QP gradient f_u before
-    solving so the dynamics linearisation at (x_ss, u_ss, d_ss) is fully
-    preserved.  Pass ``u_ss`` to :meth:`solve`; if omitted the call falls
-    back to the standard parent behaviour.
-    """
-
-    def solve(
-        self,
-        x0,
-        D,
-        x_ref,
-        u_prev=None,
-        u_ss: Optional[np.ndarray] = None,
-        x_ref_dev_seq: Optional[np.ndarray] = None,
-        offset_seq: Optional[np.ndarray] = None,
-        q_scale_seq: Optional[np.ndarray] = None,
-        r_scale_seq: Optional[np.ndarray] = None,
-        u_min_seq: Optional[np.ndarray] = None,
-        u_max_seq: Optional[np.ndarray] = None,
-        price_seq: Optional[np.ndarray] = None,
-        elec_heat: Optional[np.ndarray] = None,
-        elec_cool: Optional[np.ndarray] = None,
-        bid_mask: Optional[np.ndarray] = None,
-        price_weight: float = 0.0,
-        dt_h: float = 0.25,
-    ):
-        has_price = (
-            price_seq is not None
-            and price_weight > 0.0
-            and elec_heat is not None
-        )
-        # Fast path: no time-varying parameters, no u_ss correction, no price.
-        if (
-            (u_ss is None or np.allclose(u_ss, 0.0))
-            and x_ref_dev_seq is None
-            and offset_seq is None
-            and q_scale_seq is None
-            and r_scale_seq is None
-            and u_min_seq is None
-            and u_max_seq is None
-            and not has_price
-        ):
-            return super().solve(x0, D, x_ref, u_prev)
-
-        N = self._N
-        nx = self._model.nx
-        nu = self._model.nu
-        nd = self._model.nd
-        Cz = np.asarray(self._model.Cz, dtype=float)
-        nz = Cz.shape[0]
-
-        # Coerce inputs to numpy 1D
-        x0 = np.asarray(x0, dtype=float).reshape(-1)
-        x_ref = np.asarray(x_ref, dtype=float).reshape(-1)
-        D = np.asarray(D, dtype=float).reshape(-1) if D is not None else np.zeros(N * nd)
-        if u_prev is not None:
-            u_prev = np.asarray(u_prev, dtype=float).reshape(-1)
-
-        Ad = np.asarray(self._model.Ad, dtype=float)
-        Bd = np.asarray(self._model.Bd, dtype=float)
-        Ed = np.asarray(self._model.Ed, dtype=float)
-
-        # State-prediction matrices  X = Ψ x₀ + Γ U + Λ D
-        Ad_pow = [np.eye(nx)]
-        for _ in range(N):
-            Ad_pow.append(Ad @ Ad_pow[-1])
-
-        Psi = np.zeros((N * nx, nx))
-        Gamma = np.zeros((N * nx, N * nu))
-        Lambda = np.zeros((N * nx, N * nd))
-
-        for k in range(N):
-            Psi[k * nx:(k + 1) * nx, :] = Ad_pow[k + 1]
-            for j in range(k + 1):
-                Ak = Ad_pow[k - j]
-                Gamma[k * nx:(k + 1) * nx, j * nu:(j + 1) * nu] = Ak @ Bd
-                Lambda[k * nx:(k + 1) * nx, j * nd:(j + 1) * nd] = Ak @ Ed
-
-        Cz_bar = np.kron(np.eye(N), Cz)
-        CG = Cz_bar @ Gamma    # (N·nz) × (N·nu)
-        CP = Cz_bar @ Psi      # (N·nz) × nx
-        CL = Cz_bar @ Lambda   # (N·nz) × (N·nd)
-
-        z_ref_np = Cz @ x_ref  # (nz,) baseline output reference
-
-        # ── Time-varying cost matrices ────────────────────────────────────
-        # Build Q_bar, R_bar, z_ref_bar, z_min_tiled, z_max_tiled for the QP.
-        # When no time-varying parameters are provided these collapse to the
-        # same result as the original static helpers, preserving correctness
-        # and backward compatibility.
-        has_varying = (
-            x_ref_dev_seq is not None
-            or offset_seq is not None
-            or q_scale_seq is not None
-            or r_scale_seq is not None
-        )
-
-        if has_varying:
-            # Q_bar: block-diagonal with per-step, per-output Q weights.
-            # Terminal step uses P = terminal_weight × Q_base per element.
-            Q_bar = np.zeros((N * nz, N * nz))
-            for k in range(N):
-                base_diag = self._P if k == N - 1 else self._Q
-                for i in range(nz):
-                    val = base_diag[i, i]
-                    if q_scale_seq is not None:
-                        val *= float(q_scale_seq[k, i])
-                    Q_bar[k * nz + i, k * nz + i] = val
-
-            # R_bar: block-diagonal with per-step, per-source R weights.
-            R_bar = np.zeros((N * nu, N * nu))
-            for k in range(N):
-                for i in range(nu):
-                    val = self._R[i, i]
-                    if r_scale_seq is not None:
-                        val *= float(r_scale_seq[k, i])
-                    R_bar[k * nu + i, k * nu + i] = val
-
-            # z_ref_bar: stacked per-step reference in deviation coordinates.
-            if x_ref_dev_seq is not None:
-                z_ref_bar = np.asarray(x_ref_dev_seq, dtype=float).reshape(-1)
-            else:
-                z_ref_bar = np.tile(z_ref_np, N)
-        else:
-            Q_bar = _scipy_block_diag(*([self._Q] * (N - 1) + [self._P])) if N > 1 else self._P.copy()
-            R_bar = _scipy_block_diag(*([self._R] * N))
-            z_ref_bar = np.tile(z_ref_np, N)
-
-        Z_free = CP @ x0 + CL @ D
-        e_free = Z_free - z_ref_bar
-
-        H_uu = CG.T @ Q_bar @ CG + R_bar
-        f_u = CG.T @ Q_bar @ e_free
-
-        u_ss_vec = (
-            np.asarray(u_ss, dtype=float).reshape(-1)
-            if u_ss is not None
-            else np.zeros(nu, dtype=float)
-        )
-        u_ss_bar = np.tile(u_ss_vec, N)
-
-        # Price-aware solves optimise u_abs and charge real electricity on the
-        # absolute draw (u_abs = 0 ⇒ zero electrical cost).  Penalising u_dev
-        # instead would treat u_dev = 0 as free even though u_abs = u_ss.
-        use_abs_inputs = has_price
-
-        if use_abs_inputs:
-            cg_shift = CG @ u_ss_bar
-            e_free_abs = e_free - cg_shift
-            f_u = CG.T @ Q_bar @ e_free_abs
-        elif u_ss is not None and not np.allclose(u_ss, 0.0):
-            # Linear correction: penalise ‖u_dev + u_ss‖²_R instead of ‖u_dev‖²_R.
-            for k in range(N):
-                for i in range(nu):
-                    r_val = self._R[i, i]
-                    if r_scale_seq is not None:
-                        r_val *= float(r_scale_seq[k, i])
-                    f_u[k * nu + i] += r_val * u_ss_vec[i]
-
-        if self._S is not None:
-            if u_prev is None:
-                u_prev_eff = u_ss_vec if use_abs_inputs else np.zeros(nu)
-            else:
-                u_prev_arr = np.asarray(u_prev, dtype=float).reshape(-1)
-                u_prev_eff = (
-                    u_prev_arr + u_ss_vec if use_abs_inputs else u_prev_arr
-                )
-            d0_shift = np.zeros(N * nu)
-            d0_shift[:nu] = -u_prev_eff
-            H_uu = H_uu + self._D_diff.T @ self._S_bar @ self._D_diff
-            f_u = f_u + self._D_diff.T @ self._S_bar @ d0_shift
-
-        # Full QP decision variable.  Price-aware solves use absolute inputs
-        # (u_abs) in the control block; comfort stays on the soft-slack path.
-        n_U = N * nu
-        n_eps = N * nz
-        n_Z = n_U + n_eps
-
-        H = np.zeros((n_Z, n_Z))
-        H[:n_U, :n_U] = H_uu
-        np.fill_diagonal(H[n_U:, n_U:], self._rho)
-        H = 0.5 * (H + H.T)
-
-        f = np.zeros(n_Z)
-        f[:n_U] = f_u
-        if self._rho_lin > 0.0:
-            f[n_U:] = self._rho_lin
-
-        # Input box bounds.  Deviation bounds are the model default; price-aware
-        # solves use absolute actuator fractions directly.
-        u_min_np, u_max_np = self._model.u_bounds
-        if u_min_seq is not None or u_max_seq is not None:
-            if use_abs_inputs:
-                if u_min_seq is not None:
-                    u_min_tiled = np.asarray(u_min_seq, dtype=float).reshape(-1)
-                else:
-                    u_min_tiled = np.tile((u_min_np + u_ss_vec).reshape(-1), N)
-                if u_max_seq is not None:
-                    u_max_tiled = np.asarray(u_max_seq, dtype=float).reshape(-1)
-                else:
-                    u_max_tiled = np.tile((u_max_np + u_ss_vec).reshape(-1), N)
-            else:
-                u_ss_row = np.asarray(self._model.u_ss, dtype=float).reshape(1, -1)
-                if u_min_seq is not None:
-                    u_min_tiled = (np.asarray(u_min_seq, dtype=float) - u_ss_row).reshape(-1)
-                else:
-                    u_min_tiled = np.tile(u_min_np.reshape(-1), N)
-                if u_max_seq is not None:
-                    u_max_tiled = (np.asarray(u_max_seq, dtype=float) - u_ss_row).reshape(-1)
-                else:
-                    u_max_tiled = np.tile(u_max_np.reshape(-1), N)
-        else:
-            if use_abs_inputs:
-                u_min_tiled = np.tile((u_min_np + u_ss_vec).reshape(-1), N)
-                u_max_tiled = np.tile((u_max_np + u_ss_vec).reshape(-1), N)
-            else:
-                u_min_tiled = np.tile(u_min_np.reshape(-1), N)
-                u_max_tiled = np.tile(u_max_np.reshape(-1), N)
-
-        # Soft output corridor bounds: time-varying when offset_seq/x_ref_dev_seq given.
-        if has_varying:
-            z_min_parts: List[np.ndarray] = []
-            z_max_parts: List[np.ndarray] = []
-            for k in range(N):
-                z_ref_k = (
-                    np.asarray(x_ref_dev_seq[k], dtype=float)
-                    if x_ref_dev_seq is not None
-                    else z_ref_np
-                )
-                off_k = (
-                    np.asarray(offset_seq[k], dtype=float)
-                    if offset_seq is not None
-                    else np.full(nz, self._y_offset, dtype=float)
-                )
-                z_min_parts.append(z_ref_k - off_k)
-                z_max_parts.append(z_ref_k + off_k)
-            z_min_tiled = np.concatenate(z_min_parts)
-            z_max_tiled = np.concatenate(z_max_parts)
-        else:
-            z_min_tiled = np.tile(z_ref_np - self._y_offset, N)
-            z_max_tiled = np.tile(z_ref_np + self._y_offset, N)
-
-        neg_I_eps = -np.eye(n_eps)
-        G_out = np.hstack([
-            np.vstack([-CG, CG]),
-            np.vstack([neg_I_eps, neg_I_eps]),
-        ])
-        if use_abs_inputs:
-            # Z = Z_free + CG·(U_abs − u_ss); shift the RHS accordingly.
-            cg_shift = CG @ u_ss_bar
-            h_out = np.concatenate([
-                -z_min_tiled + Z_free - cg_shift,
-                z_max_tiled - Z_free + cg_shift,
-            ])
-        else:
-            h_out = np.concatenate([-z_min_tiled + Z_free, z_max_tiled - Z_free])
-
-        lb = np.concatenate([u_min_tiled, np.zeros(n_eps)])
-        ub = np.concatenate([u_max_tiled, np.full(n_eps, np.inf)])
-
-        # ── Price-aware linear cost on absolute electrical draw ─────────────
-        # Minimise α·πₖ·Pᵉˡᵉᶜ·Δt·u_abs[k] (kW × h × €/kWh).  u_abs = 0 is zero
-        # cost; charging u_dev would incorrectly treat u_dev = 0 (u_abs = u_ss)
-        # as free electricity.
-        if has_price:
-            price_arr = np.maximum(np.asarray(price_seq, dtype=float), 0.0)
-            n_price = len(price_arr)
-
-            bid_list: List[int] = []
-            if bid_mask is not None:
-                bid_list = [i for i in range(nu) if bid_mask[i]]
-            bid_set = set(bid_list)
-            n_bid = len(bid_list)
-
-            # Non-bidirectional sources (pure heating-only or pure cooling-only):
-            # price the absolute draw directly on the input variable (with sign change
-            # for cooling-only so that more negative u increases the cost).
-            # Bidirectional sources must *not* receive a direct price term on their u;
-            # their electricity cost is applied exclusively via the slacks below.
-            for k in range(N):
-                p_k = float(price_arr[min(k, n_price - 1)])
-                for i in range(nu):
-                    if i not in bid_set:
-                        # Recover physical limits to decide direction (u bounds here are
-                        # deviation; add u_ss to obtain physical actuator range).
-                        phys_u_max_i = float(u_max_np[i] + u_ss_vec[i])
-                        if phys_u_max_i > 0.0:
-                            # Positive commands (heating) consume elec_heat per +u
-                            c = float(elec_heat[i]) * 1e-3
-                            sign = +1.0
-                        else:
-                            # Negative commands (cooling) consume elec_cool per |u|
-                            # To charge cost when u becomes more negative, use negative gradient.
-                            c = (float(elec_cool[i]) if elec_cool is not None
-                                 else float(elec_heat[i])) * 1e-3
-                            sign = -1.0
-                        f[k * nu + i] += price_weight * p_k * (sign * c) * dt_h
-
-            if n_bid == 0:
-                result = self._backend.solve(
-                    QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
-                )
-            else:
-                # Bidirectional (heat+cool) sources: price is applied *exclusively* to the
-                # slack variables s⁺ (heating draw) and s⁻ (cooling draw).  Their u variable
-                # in the U block receives *no* direct electricity price term (the loop above
-                # skipped them).  The equality u = s⁺ − s⁻ makes the effective cost
-                # π · (c_h s⁺ + c_c s⁻) = π · c · |u| for the active direction.
-                # Pure uni sources were handled above and must not appear here.
-                n_S = N * n_bid
-                n_Z_aug = n_U + n_eps + 2 * n_S
-
-                H_aug = np.zeros((n_Z_aug, n_Z_aug))
-                H_aug[:n_Z, :n_Z] = H
-
-                f_aug = np.zeros(n_Z_aug)
-                f_aug[:n_Z] = f
-                for k in range(N):
-                    p_k = float(price_arr[min(k, n_price - 1)])
-                    for jj, src_i in enumerate(bid_list):
-                        c_h = float(elec_heat[src_i]) * 1e-3
-                        c_c = (float(elec_cool[src_i]) if elec_cool is not None
-                               else float(elec_heat[src_i])) * 1e-3
-                        sp = n_U + n_eps + k * n_bid + jj
-                        sm = n_U + n_eps + n_S + k * n_bid + jj
-                        f_aug[sp] += price_weight * p_k * c_h * dt_h
-                        f_aug[sm] += price_weight * p_k * c_c * dt_h
-
-                G_aug = np.zeros((2 * n_eps, n_Z_aug))
-                G_aug[:, :n_Z] = G_out
-
-                # Bounds: U, ε from before; s⁺/s⁻ ∈ [0, u_max/|u_min|]
-                s_plus_ub = np.zeros(n_S)
-                s_minus_ub = np.zeros(n_S)
-                for k in range(N):
-                    for jj, src_i in enumerate(bid_list):
-                        u_max_i = float(u_max_np[src_i] + u_ss_vec[src_i])
-                        u_min_i = float(u_min_np[src_i] + u_ss_vec[src_i])
-                        s_plus_ub[k * n_bid + jj] = u_max_i
-                        s_minus_ub[k * n_bid + jj] = abs(u_min_i)
-                lb_aug = np.concatenate([lb, np.zeros(2 * n_S)])
-                ub_aug = np.concatenate([ub, s_plus_ub, s_minus_ub])
-
-                # Equality: u_abs[k,i] − s⁺[k,j] + s⁻[k,j] = 0
-                n_eq = N * n_bid
-                A_eq = np.zeros((n_eq, n_Z_aug))
-                b_eq = np.zeros(n_eq)
-                for k in range(N):
-                    for jj, src_i in enumerate(bid_list):
-                        row_eq = k * n_bid + jj
-                        A_eq[row_eq, k * nu + src_i] = 1.0
-                        A_eq[row_eq, n_U + n_eps + k * n_bid + jj] = -1.0
-                        A_eq[row_eq, n_U + n_eps + n_S + k * n_bid + jj] = 1.0
-
-                result = self._backend.solve(
-                    QPProblem(P=H_aug, q=f_aug, lb=lb_aug, ub=ub_aug,
-                              G=G_aug, h=h_out, A=A_eq, b=b_eq)
-                )
-        else:
-            result = self._backend.solve(
-                QPProblem(P=H, q=f, lb=lb, ub=ub, G=G_out, h=h_out)
-            )
-
-        if not result.success:
-            import warnings
-            warnings.warn(
-                f"_AbsoluteInputOCP.solve: QP solver returned status "
-                f"'{result.status}'; returning zero inputs as fallback.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-            U_flat = np.zeros(n_U)
-        else:
-            U_abs_flat = np.asarray(result.x[:n_U], dtype=float)
-            if use_abs_inputs:
-                U_flat = U_abs_flat - u_ss_bar
-            else:
-                U_flat = U_abs_flat
-
-        U_dev_flat = U_flat
-        X_flat = Psi @ x0 + Gamma @ U_dev_flat + Lambda @ D
-        return U_flat, X_flat
-
-
-# ── Forecast-aware MPC controller ───────────────────────────────────────────
-
-class _ForecastAwareMPCController(StandardLinearisedContinuousMPC):
-    """StandardLinearisedContinuousMPC extended to accept a time-varying disturbance
-    forecast over the prediction horizon.
-
-    When ``D_forecast`` (shape ``(N, nd)``) is passed to ``step()``, the
-    deviation disturbance fed to the QP is ``D_dev[k] = D_forecast[k] - d_ss``
-    instead of the constant-hold zero vector.
-
-    Uses ``_AbsoluteInputOCP`` so the R-cost penalises the absolute input
-    ``‖u_abs‖²_R`` rather than the deviation ``‖u_dev‖²_R``.  With Q = 0 this
-    gives pure zone control: the minimum-cost inside the comfort corridor is
-    u_abs = 0 (no heating or cooling).
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        ocp = self._ocp
-        self._ocp = _AbsoluteInputOCP(
-            model=self._lin_model,
-            N=self._N,
-            Q=ocp._Q,
-            R=ocp._R,
-            P=ocp._P,
-            S=ocp._S,
-            rho=ocp._rho,
-            rho_lin=ocp._rho_lin,
-            y_offset=ocp._y_offset,
-        )
-
-    def step(
-        self,
-        y: np.ndarray,
-        d: np.ndarray,
-        p: Optional[np.ndarray] = None,
-        t: float = 0.0,
-        D_forecast: Optional[np.ndarray] = None,
-        x_ref_abs_seq: Optional[np.ndarray] = None,
-        offset_seq: Optional[np.ndarray] = None,
-        q_scale_seq: Optional[np.ndarray] = None,
-        r_scale_seq: Optional[np.ndarray] = None,
-        u_min_seq: Optional[np.ndarray] = None,
-        u_max_seq: Optional[np.ndarray] = None,
-        price_seq: Optional[np.ndarray] = None,
-        elec_heat: Optional[np.ndarray] = None,
-        elec_cool: Optional[np.ndarray] = None,
-        bid_mask: Optional[np.ndarray] = None,
-        price_weight: float = 0.0,
-        dt_h: float = 0.25,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Run one MPC step.
-
-        Parameters
-        ----------
-        x_ref_abs_seq : (N, n_rooms) ndarray, optional
-            Absolute setpoint for each room at each horizon step.  When
-            provided the QP uses a time-varying reference instead of the
-            static ``x_ref_abs``.  ``None`` falls back to static behaviour.
-        offset_seq : (N, n_rooms) ndarray, optional
-            Comfort corridor half-width [°C] for each room at each step.
-        q_scale_seq : (N, n_rooms) ndarray, optional
-            Per-step multiplier applied to the global Q diagonal per room.
-        r_scale_seq : (N, n_sources) ndarray, optional
-            Per-step multiplier applied to the global R diagonal per source.
-        u_min_seq, u_max_seq : (N, nu) ndarray, optional
-            Per-step *absolute* input box bounds.  When given they replace the
-            static ``[u_min, u_max]`` corridor with a time-varying one (shifted
-            into deviation coordinates by ``u_ss`` inside the OCP), allowing a
-            source to be pinned to a prescribed signal over the horizon.
-        price_seq : (N,) ndarray, optional
-            Forecasted electricity price at each horizon step [currency/kWh].
-        elec_heat : (nu,) ndarray, optional
-            Electrical power drawn per unit of positive input [W/unit] per source.
-        elec_cool : (nu,) ndarray, optional
-            Electrical power drawn per unit of |negative input| [W/unit] per source.
-        bid_mask : (nu,) bool ndarray, optional
-            True for sources that can take negative inputs (bidirectional).
-        price_weight : float
-            Dimensionless scaling factor α for the price term.
-        dt_h : float
-            OCP time step in hours (dt / 3600).
-        """
-        y = np.asarray(y, dtype=float).reshape(self._model.nym)
-        d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
-        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
-
-        est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
-        x_hat = self._adopt_estimate(est_out[0])
-
-        # Linearise at the equilibrium (x_ss = setpoint, u_ss = u_eq, d_ss = d_now)
-        # so the Jacobians are accurate during transients.  _AbsoluteInputOCP adds
-        # the linear correction R·u_ss to the QP gradient so the R-cost penalises
-        # ‖u_dev + u_ss‖²_R = ‖u_abs‖²_R instead of ‖u_dev‖²_R (which would
-        # drive u_abs → u_ss, not zero).  With Q = 0 this gives pure zone control.
-        n = self._model._n_rooms
-        nx_phys = self._model._nx_phys
-        x_ss = self._x_ref_abs.copy()          # setpoint air temperatures
-        # Wall nodes at their steady-state values for the setpoint air
-        # temperatures and current outdoor temperature — linearising around
-        # an inconsistent wall state would mis-scale u_eq and the Jacobians.
-        x_ss[n:nx_phys] = self._model.wall_equilibrium(x_ss[:n], float(d_now[0]))
-        u_ss = self._model.compute_u_eq(x_ss, d_now, p_, t)
-        # At equilibrium each filtered source's lag state equals u_eq[j].
-        for j in range(self._model.nu):
-            k_f = self._model._filter_idx_for_source[j]
-            if k_f >= 0:
-                x_ss[nx_phys + k_f] = u_ss[j]
-        d_ss = d_now.copy()
-
-        lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
-        disc = discretize_cd_linearization(lin, self._dt)
-
-        # x_ss IS the current setpoint; driving deviation to zero is identical
-        # to tracking x_ref_abs in absolute coordinates.
-        x_ref_dev = np.zeros(self._model.nx, dtype=float)
-        self._lin_model.update(
-            Ad=disc["Ad"],
-            Bd=disc["Bd"],
-            Ed=disc["Ed"],
-            Cm=disc["Cm"],
-            Cz=disc["Cz"],
-            Qd=disc["Qd"],
-            Rm=np.asarray(self._model.Rm, dtype=float),
-            x_ss=x_ss,
-            u_ss=u_ss,
-            d_ss=d_ss,
-            x_ref=x_ref_dev,
-        )
-
-        if D_forecast is not None:
-            D_abs = np.asarray(D_forecast, dtype=float).reshape(self._N, self._model.nd)
-            D_dev_np = D_abs - d_ss.reshape(1, -1)
-        else:
-            D_dev_np = np.zeros((self._N, self._model.nd), dtype=float)
-
-        self._last_D_dev = D_dev_np.copy()
-        D_dev = D_dev_np.reshape(-1)
-
-        # Non-zero initial condition: the full tracking error from the setpoint.
-        # Combined with x_ref_dev = 0, the QP drives x_hat toward x_ss over
-        # the horizon.  u_prev_dev = u_prev − u_ss converts the previous
-        # absolute action to deviation coordinates for the S-penalty.
-        x0_dev = (x_hat - x_ss).astype(float)
-        u_prev_dev_np = self._u_prev - u_ss
-        u_prev_dev = u_prev_dev_np
-
-        # Convert absolute time-varying setpoints to deviation coordinates so
-        # the QP sees them relative to the linearisation point x_ss.
-        # x_ref_dev_seq[k] = x_ref_abs_seq[k, :nz] − x_ss[:nz]
-        if x_ref_abs_seq is not None:
-            nz = self._model.nz
-            x_ref_dev_seq = (
-                np.asarray(x_ref_abs_seq, dtype=float) - x_ss[:nz].reshape(1, -1)
-            )
-        else:
-            x_ref_dev_seq = None
-
-        U_dev, X_dev = self._ocp.solve(
-            x0=x0_dev,
-            D=D_dev,
-            x_ref=x_ref_dev,
-            u_prev=u_prev_dev,
-            u_ss=u_ss,
-            x_ref_dev_seq=x_ref_dev_seq,
-            offset_seq=offset_seq,
-            q_scale_seq=q_scale_seq,
-            r_scale_seq=r_scale_seq,
-            u_min_seq=u_min_seq,
-            u_max_seq=u_max_seq,
-            price_seq=price_seq,
-            elec_heat=elec_heat,
-            elec_cool=elec_cool,
-            bid_mask=bid_mask,
-            price_weight=price_weight,
-            dt_h=dt_h,
-        )
-
-        U_dev_np = np.asarray(U_dev, dtype=float).reshape(self._N, self._model.nu)
-        X_dev_np = np.asarray(X_dev, dtype=float).reshape(self._N, self._model.nx)
-
-        U_abs = U_dev_np + u_ss.reshape(1, -1)
-        X_abs = X_dev_np + x_ss.reshape(1, -1)
-
-        # Safety clip: QP enforces deviation bounds shifted by u_ss; clamp with
-        # absolute physical limits as a guard against numerical drift.
-        u_min_arr, u_max_arr = self._model.u_bounds
-        U_abs = np.clip(U_abs, u_min_arr.reshape(1, -1), u_max_arr.reshape(1, -1))
-        u_abs = U_abs[0].copy()
-
-        self._u_prev = u_abs.copy()
-        self._d_prev = d_now.copy()
-
-        return u_abs, U_abs, X_abs
-
-    def estimate_only(
-        self,
-        y: np.ndarray,
-        d: np.ndarray,
-        p: Optional[np.ndarray] = None,
-        t: float = 0.0,
-    ) -> np.ndarray:
-        """Run the CD-EKF predict+update without solving the OCP.
-
-        Used when the controller is stopped: state estimation and innovation
-        logging must keep running so the filtered temperatures stay grounded in
-        reality, but the (expensive) MPC optimisation — QP solve, linearisation
-        and prediction rollout — is skipped entirely.
-
-        ``self._u_prev`` is left untouched so the coordinator can correct it to
-        the actually-delivered input via ``notify_applied_u`` before the next
-        cycle, exactly as in the normal path.  ``self._d_prev`` is advanced so
-        the next EKF prediction integrates from the current disturbance.
-
-        Returns the filtered state estimate ``x_hat``.
-        """
-        y = np.asarray(y, dtype=float).reshape(self._model.nym)
-        d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
-        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
-
-        est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
-        x_hat = self._adopt_estimate(est_out[0])
-
-        self._d_prev = d_now.copy()
-        return x_hat
-
-    def _adopt_estimate(self, x_hat_full: np.ndarray) -> np.ndarray:
-        """Adopt the EKF estimate for the control model.
-
-        The estimation and control models share the same state space, so the
-        estimate is returned truncated to the control-model dimension (a no-op
-        when the dimensions match) to keep the QP's size predictable.
-        """
-        x_full = np.asarray(x_hat_full, dtype=float).ravel()
-        return x_full[: self._model.nx]
-
-
 # ============================================================
 # House-heating linearised MPC facade
 # ============================================================
@@ -2118,8 +1483,8 @@ class HeatingMPCController:
         x_ref = np.zeros(n_x_ctrl)
         x_ref[:n_rooms] = [model.rooms[name].setpoint for name in room_list]
 
-        # ── MPC controller (forecast-aware variant) ──────────────────────
-        self._mpc = _ForecastAwareMPCController(
+        # ── MPC controller ─────────────────────────────────────────────
+        self._mpc = StandardLinearisedContinuousMPC(
             model=self._control_system,
             estimator=self._ekf,
             N=horizon,
@@ -2134,6 +1499,8 @@ class HeatingMPCController:
             rho=rho,
             rho_lin=rho_lin,
             y_offset=y_offset,
+            penalise_absolute_input=True,
+            state_projection=lambda x, n=n_x_ctrl: np.asarray(x, dtype=float).ravel()[:n],
         )
 
         # Store global cost weights so the trajectory builder can use them
@@ -2507,6 +1874,25 @@ class HeatingMPCController:
             return np.zeros(n)
         return x[:n].copy()
 
+    def _set_mpc_operating_point(
+        self,
+        d_now: np.ndarray,
+        p: np.ndarray,
+        t: float,
+    ) -> None:
+        """Linearise the MPC around the comfort setpoint equilibrium."""
+        model = self._control_system
+        n = model._n_rooms
+        nx_phys = model._nx_phys
+        x_ss = self._mpc.x_ref.copy()
+        x_ss[n:nx_phys] = model.wall_equilibrium(x_ss[:n], float(d_now[0]))
+        u_ss = model.compute_u_eq(x_ss, d_now, p, t)
+        for j in range(model.nu):
+            k_f = model._filter_idx_for_source[j]
+            if k_f >= 0:
+                x_ss[nx_phys + k_f] = u_ss[j]
+        self._mpc.set_operating_point(x_ss, u_ss, d_now)
+
     # ── Main entry point ─────────────────────────────────────────────────
 
     def compute(
@@ -2785,24 +2171,25 @@ class HeatingMPCController:
                     raw, np.full(N - len(raw), raw[-1])
                 ])
 
-        # ── QP solve with disturbance forecast ───────────────────────────
-        _t0 = time.perf_counter()
-        u_abs, U_abs, X_abs = self._mpc.step(
-            y, d, p, 0.0,
-            D_forecast=D_forecast,
-            x_ref_abs_seq=x_ref_abs_seq,
-            offset_seq=offset_seq,
-            q_scale_seq=q_scale_seq,
-            r_scale_seq=r_scale_seq,
-            u_min_seq=u_min_seq,
-            u_max_seq=u_max_seq,
-            price_seq=price_seq_np,
+        # ── QP solve with horizon forecast configured via MPC setters ────
+        self._mpc.set_disturbance_forecast(D_forecast)
+        self._mpc.set_reference_sequence(x_ref_abs_seq)
+        self._mpc.set_offset_sequence(offset_seq)
+        self._mpc.set_q_scale_sequence(q_scale_seq)
+        self._mpc.set_r_scale_sequence(r_scale_seq)
+        self._mpc.set_input_bounds_sequence(u_min_seq, u_max_seq)
+        self._mpc.set_price_forecast(
+            price_seq_np,
+            price_weight=self._energy_price_weight,
             elec_heat=self._elec_heat,
             elec_cool=self._elec_cool,
             bid_mask=self._bid_mask,
-            price_weight=self._energy_price_weight,
             dt_h=self._dt_h,
         )
+        self._set_mpc_operating_point(d, p, 0.0)
+
+        _t0 = time.perf_counter()
+        u_abs, U_abs, X_abs = self._mpc.step(y, d, p, 0.0)
         self._solve_times.append(time.perf_counter() - _t0)
         self._total_computes += 1
 

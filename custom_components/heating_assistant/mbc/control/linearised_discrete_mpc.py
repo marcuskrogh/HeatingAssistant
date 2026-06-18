@@ -9,11 +9,12 @@ discrete-time model at each sampling instant.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 import numpy as np
 
 from .cd_linearized_mpc import _DeviationLinearDiscreteModel
+from .mpc_forecast import ForecastAwareMPC
 from .ocp import StandardLinearDiscreteOCP
 
 
@@ -102,12 +103,13 @@ class LinearisedDiscreteMPC(ABC):
         """Execute one closed-loop step."""
 
 
-class StandardLinearisedDiscreteMPC(LinearisedDiscreteMPC):
+class StandardLinearisedDiscreteMPC(ForecastAwareMPC, LinearisedDiscreteMPC):
     """
     Standard MPC for a linearised discrete-time plant, discrete estimator, and discrete-time OCP.
 
     Successive linearisation of a nonlinear discrete-time model at each step,
     solved via :class:`StandardLinearDiscreteOCP` in deviation coordinates.
+    Horizon forecasts are configured via the :class:`ForecastAwareMPC` setters.
     """
 
     def __init__(
@@ -127,10 +129,12 @@ class StandardLinearisedDiscreteMPC(LinearisedDiscreteMPC):
         rho: float = 1e4,
         rho_lin: float = 0.0,
         y_offset: float = 2.0,
+        state_projection: Callable[[np.ndarray], np.ndarray] | None = None,
     ) -> None:
+        ForecastAwareMPC.__init__(self, N, model.nd)
         self._model = model
         self._estimator = estimator
-        self._N = int(N)
+        self._state_projection = state_projection or (lambda x: np.asarray(x, dtype=float).reshape(model.nx))
 
         self._x_ref_abs = (
             np.zeros(model.nx, dtype=float)
@@ -190,14 +194,24 @@ class StandardLinearisedDiscreteMPC(LinearisedDiscreteMPC):
         p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
 
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
-        x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
+        x_hat = self._state_projection(est_out[0])
 
-        x_ss = x_hat.copy()
-        u_ss = self._u_prev.copy()
-        d_ss = d_now.copy()
+        if self._operating_point is not None:
+            x_ss = self._operating_point.x_ss.copy()
+            u_ss = self._operating_point.u_ss.copy()
+            d_ss = self._operating_point.d_ss.copy()
+            x_ref_dev = np.zeros(self._model.nx, dtype=float)
+            x0_dev = x_hat - x_ss
+            u_prev_dev = self._u_prev - u_ss
+        else:
+            x_ss = x_hat.copy()
+            u_ss = self._u_prev.copy()
+            d_ss = d_now.copy()
+            x_ref_dev = self._x_ref_abs - x_ss
+            x0_dev = np.zeros(self._model.nx, dtype=float)
+            u_prev_dev = np.zeros(self._model.nu, dtype=float)
 
         disc = linearize_discrete_model(self._model, x_ss, u_ss, d_ss, p_, t)
-        x_ref_dev = self._x_ref_abs - x_ss
         self._lin_model.update(
             Ad=disc["Ad"],
             Bd=disc["Bd"],
@@ -212,15 +226,34 @@ class StandardLinearisedDiscreteMPC(LinearisedDiscreteMPC):
             x_ref=x_ref_dev,
         )
 
-        D_dev_np = np.zeros((self._N, self._model.nd), dtype=float)
+        D_dev_np = self._disturbance_deviation_trajectory(d_ss)
         self._last_D_dev = D_dev_np.copy()
-        D_dev = D_dev_np.reshape(-1)
+
+        fc = self._forecast
+        x_ref_dev_seq = None
+        if fc.reference_sequence is not None:
+            nz = self._model.nz
+            x_ref_dev_seq = (
+                np.asarray(fc.reference_sequence, dtype=float) - x_ss[:nz].reshape(1, -1)
+            )
 
         U_dev, X_dev = self._ocp.solve(
-            x0=np.zeros(self._model.nx, dtype=float),
-            D=D_dev,
+            x0=x0_dev,
+            D=D_dev_np.reshape(-1),
             x_ref=x_ref_dev,
-            u_prev=np.zeros(self._model.nu, dtype=float),
+            u_prev=u_prev_dev,
+            x_ref_dev_seq=x_ref_dev_seq,
+            offset_seq=fc.offset_sequence,
+            q_scale_seq=fc.q_scale_sequence,
+            r_scale_seq=fc.r_scale_sequence,
+            u_min_seq=fc.u_min_sequence,
+            u_max_seq=fc.u_max_sequence,
+            price_seq=fc.price_sequence,
+            elec_heat=fc.elec_heat,
+            elec_cool=fc.elec_cool,
+            bid_mask=fc.bid_mask,
+            price_weight=fc.price_weight,
+            dt_h=fc.dt_h,
         )
 
         U_dev_np = np.asarray(U_dev, dtype=float).reshape(self._N, self._model.nu)

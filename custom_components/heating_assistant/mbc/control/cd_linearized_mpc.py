@@ -10,12 +10,13 @@ ZOH-discretises the local model, and solves the existing linear
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
 from .._utils import _fd_jacobian, _zoh_full, _van_loan
 from ..models import LinearDiscreteModel, ContinuousDiscreteModel
+from .mpc_forecast import ForecastAwareMPC
 from .ocp import StandardLinearDiscreteOCP
 
 
@@ -257,12 +258,14 @@ class LinearisedContinuousMPC(ABC):
         """Execute one closed-loop step."""
 
 
-class StandardLinearisedContinuousMPC(LinearisedContinuousMPC):
+class StandardLinearisedContinuousMPC(ForecastAwareMPC, LinearisedContinuousMPC):
     """
     Standard MPC for a linearised continuous-discrete plant, CD estimator, and discrete-time OCP.
 
     Successive linearisation of a nonlinear continuous-discrete model at each
     step, solved via :class:`StandardLinearDiscreteOCP` in deviation coordinates.
+    Horizon forecasts and an optional operating point are configured via the
+    :class:`ForecastAwareMPC` setters before each :meth:`step`.
     """
 
     def __init__(
@@ -283,11 +286,18 @@ class StandardLinearisedContinuousMPC(LinearisedContinuousMPC):
         rho: float = 1e4,
         rho_lin: float = 0.0,
         y_offset: float = 2.0,
+        penalise_absolute_input: bool = False,
+        state_projection: Callable[[np.ndarray], np.ndarray] | None = None,
     ) -> None:
+        ForecastAwareMPC.__init__(self, N, model.nd)
         self._model = model
         self._estimator = estimator
-        self._N = int(N)
         self._dt = float(dt)
+        self._penalise_absolute_input = bool(penalise_absolute_input)
+        self._state_projection = (
+            state_projection
+            or (lambda x: np.asarray(x, dtype=float).reshape(model.nx))
+        )
 
         self._x_ref_abs = (
             np.zeros(model.nx, dtype=float)
@@ -345,27 +355,37 @@ class StandardLinearisedContinuousMPC(LinearisedContinuousMPC):
         t: float = 0.0,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Execute one closed-loop step.
+        Execute one closed-loop step using the configured horizon forecast.
 
-        Disturbance-hold assumption: the measured disturbance at the current
-        interval start is used as operating disturbance (`d_ss`) and held
-        constant over the horizon in the local linear MPC problem.
+        When no disturbance forecast has been set, the measured disturbance at
+        the current interval is held constant over the horizon in deviation
+        coordinates (``dd[k] = 0``).
         """
         y = np.asarray(y, dtype=float).reshape(self._model.nym)
         d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
         p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
 
         est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
-        x_hat = np.asarray(est_out[0], dtype=float).reshape(self._model.nx)
+        x_hat = self._state_projection(est_out[0])
 
-        x_ss = x_hat.copy()
-        u_ss = self._u_prev.copy()
-        d_ss = d_now.copy()
+        if self._operating_point is not None:
+            x_ss = self._operating_point.x_ss.copy()
+            u_ss = self._operating_point.u_ss.copy()
+            d_ss = self._operating_point.d_ss.copy()
+            x_ref_dev = np.zeros(self._model.nx, dtype=float)
+            x0_dev = x_hat - x_ss
+            u_prev_dev = self._u_prev - u_ss
+        else:
+            x_ss = x_hat.copy()
+            u_ss = self._u_prev.copy()
+            d_ss = d_now.copy()
+            x_ref_dev = self._x_ref_abs - x_ss
+            x0_dev = np.zeros(self._model.nx, dtype=float)
+            u_prev_dev = np.zeros(self._model.nu, dtype=float)
 
         lin = linearize_cd_model(self._model, x_ss, u_ss, d_ss, p_, t)
         disc = discretize_cd_linearization(lin, self._dt)
 
-        x_ref_dev = self._x_ref_abs - x_ss
         self._lin_model.update(
             Ad=disc["Ad"],
             Bd=disc["Bd"],
@@ -380,19 +400,37 @@ class StandardLinearisedContinuousMPC(LinearisedContinuousMPC):
             x_ref=x_ref_dev,
         )
 
-        # Deviation MPC uses constant disturbance over the horizon: dd[k] = 0.
-        D_dev_np = np.zeros((self._N, self._model.nd), dtype=float)
+        D_dev_np = self._disturbance_deviation_trajectory(d_ss)
         self._last_D_dev = D_dev_np.copy()
-        D_dev = D_dev_np.reshape(-1)
 
-        x0_dev = np.zeros(self._model.nx, dtype=float)
-        u_prev_dev = np.zeros(self._model.nu, dtype=float)
+        fc = self._forecast
+        x_ref_dev_seq = None
+        if fc.reference_sequence is not None:
+            nz = self._model.nz
+            x_ref_dev_seq = (
+                np.asarray(fc.reference_sequence, dtype=float) - x_ss[:nz].reshape(1, -1)
+            )
+
+        u_ss_arg = self._resolve_u_ss_for_ocp(u_ss)
 
         U_dev, X_dev = self._ocp.solve(
             x0=x0_dev,
-            D=D_dev,
+            D=D_dev_np.reshape(-1),
             x_ref=x_ref_dev,
             u_prev=u_prev_dev,
+            u_ss=u_ss_arg,
+            x_ref_dev_seq=x_ref_dev_seq,
+            offset_seq=fc.offset_sequence,
+            q_scale_seq=fc.q_scale_sequence,
+            r_scale_seq=fc.r_scale_sequence,
+            u_min_seq=fc.u_min_sequence,
+            u_max_seq=fc.u_max_sequence,
+            price_seq=fc.price_sequence,
+            elec_heat=fc.elec_heat,
+            elec_cool=fc.elec_cool,
+            bid_mask=fc.bid_mask,
+            price_weight=fc.price_weight,
+            dt_h=fc.dt_h,
         )
 
         U_dev_np = np.asarray(U_dev, dtype=float).reshape(self._N, self._model.nu)
@@ -402,7 +440,6 @@ class StandardLinearisedContinuousMPC(LinearisedContinuousMPC):
         X_abs = X_dev_np + x_ss.reshape(1, -1)
         u_abs = U_abs[0].copy()
 
-        # Numerical safety against tiny solver tolerances beyond box constraints.
         u_min_abs, u_max_abs = self._lin_model.abs_u_bounds
         u_abs = np.minimum(np.maximum(u_abs, u_min_abs), u_max_abs)
         U_abs[0] = u_abs
@@ -411,6 +448,35 @@ class StandardLinearisedContinuousMPC(LinearisedContinuousMPC):
         self._d_prev = d_now.copy()
 
         return u_abs, U_abs, X_abs
+
+    def estimate_only(
+        self,
+        y: np.ndarray,
+        d: np.ndarray,
+        p: np.ndarray | None = None,
+        t: float = 0.0,
+    ) -> np.ndarray:
+        """Run the estimator predict+update without solving the OCP."""
+        y = np.asarray(y, dtype=float).reshape(self._model.nym)
+        d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
+        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
+
+        est_out = self._estimator.step(y, self._u_prev, self._d_prev, p_, t)
+        x_hat = self._state_projection(est_out[0])
+
+        self._d_prev = d_now.copy()
+        return x_hat
+
+    def _resolve_u_ss_for_ocp(self, u_ss: np.ndarray) -> np.ndarray | None:
+        fc = self._forecast
+        has_price = (
+            fc.price_sequence is not None
+            and fc.price_weight > 0.0
+            and fc.elec_heat is not None
+        )
+        if self._penalise_absolute_input or has_price:
+            return u_ss
+        return None
 
 
 # Backward-compatible aliases (deprecated).

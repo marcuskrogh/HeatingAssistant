@@ -33,6 +33,7 @@ import numpy as np
 from .._utils import _any_to_np1d
 from ..estimation.cd_kalman import CDKalmanFilter
 from .cd_ocp import StandardLinearContinuousDiscreteOCP
+from .mpc_forecast import ForecastAwareMPC
 from .ocp import _shift_warm_start
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class LinearContinuousMPC(ABC):
     def step(
         self,
         ym: Any,
-        D: Any,
+        D: Any | None = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Execute one closed-loop CD-MPC step.
@@ -56,8 +57,9 @@ class LinearContinuousMPC(ABC):
         Parameters
         ----------
         ym : (nym,) array-like — measurement ``ym[k]``.
-        D  : (N · nd,) array-like — stacked disturbance forecast
-             ``[d[k]; d[k+1]; …; d[k + N − 1]]``.
+        D  : (N · nd,) array-like, optional — stacked disturbance forecast.
+             When omitted, the forecast set via :meth:`set_disturbance_forecast`
+             is used.
 
         Returns
         -------
@@ -67,7 +69,7 @@ class LinearContinuousMPC(ABC):
         """
 
 
-class StandardLinearContinuousMPC(LinearContinuousMPC):
+class StandardLinearContinuousMPC(ForecastAwareMPC, LinearContinuousMPC):
     """
     Standard MPC for a linear continuous-discrete plant, CD estimator, and discrete-time OCP.
 
@@ -82,6 +84,7 @@ class StandardLinearContinuousMPC(LinearContinuousMPC):
         ocp: StandardLinearContinuousDiscreteOCP,
         warm_start: bool = False,
     ) -> None:
+        ForecastAwareMPC.__init__(self, ocp._N, model.nd)
         self._model = model
         self._estimator = estimator
         self._ocp = ocp
@@ -94,19 +97,17 @@ class StandardLinearContinuousMPC(LinearContinuousMPC):
     def step(
         self,
         ym: Any,
-        D: Any,
+        D: Any | None = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         nu = self._model.nu
         nd = self._model.nd
 
-        # Step 2: estimate using the previously-applied (u, d)
         ym_np = _any_to_np1d(ym)
         x_hat_np, _ = self._estimator.step(
             ym_np, self._u_prev_np, self._d_prev_np,
         )
 
-        # Step 3: optimise (OCP returns numpy 1-D arrays)
-        D_np = _any_to_np1d(D)
+        D_np = self._resolve_disturbance_forecast(D)
         x_ref_np = np.asarray(self._model.x_ref, dtype=float).reshape(-1)
         warm = None
         if self._warm_start and self._prev_U is not None:
@@ -117,13 +118,24 @@ class StandardLinearContinuousMPC(LinearContinuousMPC):
             x_hat_np, D_np, x_ref_np, u_prev=self._u_prev_np, warm_start=warm,
         )
 
-        # Step 4: cache state for the next step
         u = U_seq[:nu]
         self._u_prev_np = np.asarray(u, dtype=float).copy()
         self._d_prev_np = D_np[:nd].copy()
         self._prev_U, self._prev_X = U_seq, X_seq
 
         return u, U_seq, X_seq
+
+    def _resolve_disturbance_forecast(self, D: Any | None) -> np.ndarray:
+        if self._forecast.disturbance_forecast is not None:
+            return np.asarray(self._forecast.disturbance_forecast, dtype=float).reshape(-1)
+        if D is not None:
+            return _any_to_np1d(D)
+        if self._nd == 0:
+            return np.zeros(self._N * self._nd, dtype=float)
+        raise ValueError(
+            "disturbance forecast required: pass D to step() or call "
+            "set_disturbance_forecast() first"
+        )
 
 
 # Backward-compatible aliases (deprecated).
