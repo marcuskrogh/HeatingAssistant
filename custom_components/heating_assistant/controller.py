@@ -99,6 +99,7 @@ from mbc.control import StandardLinearisedContinuousMPC
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
@@ -917,16 +918,20 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
                     q_cool = src._q_cool_const
                     if q_heat > 0.0 and q_cool > 0.0:
                         # Piecewise-linear curve φ(u) = q_heat·u (u ≥ 0) /
-                        # q_cool·u (u < 0): the slope is constant in each region,
-                        # so the local linearisation matches the global behaviour.
-                        # At the u = 0 kink the analytic derivative is the
-                        # subgradient midpoint (matches a central difference).
-                        if eff_u > 0.0:
+                        # q_cool·u (u < 0) has a kink at u = 0.  A hard switch
+                        # in the Jacobian at eff_u = 0 causes the linearisation
+                        # point u_ss to flip the B matrix discontinuously when
+                        # the equilibrium input crosses zero, producing jitter.
+                        # Smooth the transition over ±_KINK_BLEND so the Jacobian
+                        # is continuous in u_ss across mild-weather transitions.
+                        _KINK_BLEND = 0.025
+                        if abs(eff_u) < _KINK_BLEND:
+                            t_blend = eff_u / _KINK_BLEND  # in (−1, 1)
+                            slope = 0.5 * ((1.0 + t_blend) * q_heat + (1.0 - t_blend) * q_cool)
+                        elif eff_u > 0.0:
                             slope = q_heat
-                        elif eff_u < 0.0:
-                            slope = q_cool
                         else:
-                            slope = 0.5 * (q_heat + q_cool)
+                            slope = q_cool
                         J[i, j] = slope * scale / self._C_cap[i]
                     elif eff_u >= 0.0:
                         J[i, j] = src.thermal_power(1.0, outdoor_temp) * scale / self._C_cap[i]
@@ -1416,6 +1421,23 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
             self.set_soft_output_band_half_width_profile(
                 np.asarray(offset_seq, dtype=float)
             )
+        else:
+            # Always set per-room comfort offsets from the model so each room
+            # uses its own configured offset rather than the global maximum
+            # that was baked in at construction time.
+            room_offsets = np.array(
+                [
+                    float(
+                        getattr(self._model._model.rooms[name], "comfort_offset", 2.0)
+                        or 2.0
+                    )
+                    for name in self._model._room_list
+                ],
+                dtype=float,
+            )
+            self.set_soft_output_band_half_width_profile(
+                np.tile(room_offsets.reshape(1, -1), (self._N, 1))
+            )
 
         if q_scale_seq is not None:
             self.set_output_tracking_weight_scale_profile(
@@ -1606,7 +1628,7 @@ class HeatingMPCController:
         tracking_weight: float = DEFAULT_SETPOINT_PULL_WEIGHT,
         energy_weight: float = 0.01,
         smoothing_weight: float = 0.1,
-        soft_constraint_weight: float = 10.0,
+        soft_constraint_weight: float = DEFAULT_SOFT_CONSTRAINT_WEIGHT,
         soft_constraint_linear_weight: float = 0.0,
         terminal_weight: float = 100.0,
         sigma_w: float = 0.1,

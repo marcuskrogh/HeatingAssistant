@@ -2079,3 +2079,176 @@ class TestHeatPumpLinearPowerCurve:
         assert abs(u_heat - u_cool) < 0.05
         max_div = max(abs(a - b) for a, b in zip(pred_heat, pred_cool))
         assert max_div < 0.3, f"heat vs heat_cool forecast diverged {max_div:.2f} °C"
+
+
+# ── Regression tests for native MBC controller issues ─────────────────────────
+
+
+class TestBidirectionalJacobianSmoothBlend:
+    """Bug 1: dfdu() kink at u=0 for bidirectional heat pumps caused jitter.
+
+    The piecewise-linear power curve φ(u) = q_heat·u (u≥0) / q_cool·u (u<0)
+    has a slope discontinuity at u=0.  When the equilibrium input u_ss crosses
+    zero between consecutive solve steps (mild weather), the B matrix changed
+    abruptly, producing oscillating controller outputs (jitter).
+
+    The fix introduces a linear blend in the ±_KINK_BLEND neighbourhood around
+    u=0 so the Jacobian is a continuous function of the operating point.
+    """
+
+    def _make_ctrl(self):
+        room = Room("lr", 5_000_000.0, 0.05, temperature=21.0, setpoint=21.0)
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "lr", max_power=3000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, cooling_cop=2.5, hvac_mode="heat_cool",
+        )
+        return HeatingMPCController(
+            model, [hp], horizon=6, dt=900,
+            tracking_weight=0.0, energy_weight=0.01,
+            soft_constraint_weight=100.0,
+        )
+
+    def test_dfdu_continuous_near_zero(self):
+        """Jacobian slope must be continuous across the u=0 boundary for a
+        bidirectional heat pump; adjacent values should not differ more than
+        the heating/cooling slope difference."""
+        room = Room("lr", 5_000_000.0, 0.05, temperature=21.0, setpoint=21.0)
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "lr", max_power=3000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, cooling_cop=2.5, hvac_mode="heat_cool",
+        )
+        sde = HouseThermalSDE(model, [hp], dt=900.0)
+
+        x = np.array(sde.x)
+        d = np.array([5.0])  # mild outdoor temperature
+        p = np.array([])
+        t = 0.0
+
+        eps_vals = np.linspace(-0.05, 0.05, 201)
+        slopes = []
+        for eff_u in eps_vals:
+            u = np.array([eff_u])
+            J = sde.dfdu(x, u, d, p, t)
+            slopes.append(float(J[0, 0]))
+
+        # Slope must change smoothly; max step between adjacent samples < slope gap
+        max_step = max(abs(slopes[i+1] - slopes[i]) for i in range(len(slopes) - 1))
+        q_heat = hp.thermal_power(1.0, 5.0)
+        slope_gap = abs(q_heat - hp._q_cool_const) / sde._C_cap[0]
+        assert max_step < slope_gap, (
+            f"dfdu has a discontinuity near u=0: max step={max_step:.4g}, "
+            f"slope gap={slope_gap:.4g}"
+        )
+
+    def test_consecutive_solves_stable_near_zero_equilibrium(self):
+        """Controller output must not jitter when u_ss is near zero (mild weather)."""
+        ctrl = self._make_ctrl()
+        now = datetime(2024, 3, 20, 12, 0, tzinfo=timezone.utc)
+        # Mild outdoor temperature where equilibrium input is near zero
+        outdoor = 18.0
+        actions = []
+        for _ in range(4):
+            a = ctrl.compute(outdoor_temp=outdoor, now=now)
+            actions.append(a["hp"])
+        # All four consecutive solves should agree within 0.05
+        assert max(actions) - min(actions) < 0.05, (
+            f"Jitter detected in consecutive solves at mild temperature: {actions}"
+        )
+
+
+class TestPerRoomComfortOffsets:
+    """Bug 2a: comfort band used max(offset) for ALL rooms instead of per-room offsets.
+
+    When rooms have different comfort_offset values, the MPC used the maximum
+    offset for every room, allowing rooms with smaller offsets to be heated past
+    their configured comfort maximum without penalty.
+
+    The fix reads per-room offsets from the model and sets them as a (N, nz)
+    profile on every solve.
+    """
+
+    def test_room_with_small_offset_respects_its_own_bound(self):
+        """A room with comfort_offset=0.5 must not be heated above setpoint+0.5
+        even when another room in the house has a larger comfort_offset."""
+        tight_room = Room(
+            "tight", 5_000_000.0, 0.05,
+            temperature=20.5, setpoint=21.0, comfort_offset=0.5,
+        )
+        loose_room = Room(
+            "loose", 5_000_000.0, 0.05,
+            temperature=18.0, setpoint=21.0, comfort_offset=3.0,
+        )
+        model = HouseModel([tight_room, loose_room])
+        heater_tight = ElectricHeater("h_tight", "tight", max_power=2000.0)
+        heater_loose = ElectricHeater("h_loose", "loose", max_power=2000.0)
+
+        # Use a high soft constraint weight so violations are strongly penalised
+        ctrl = HeatingMPCController(
+            model, [heater_tight, heater_loose],
+            horizon=6, dt=900,
+            tracking_weight=0.0, energy_weight=0.01,
+            soft_constraint_weight=1000.0,
+        )
+
+        now = datetime(2024, 6, 1, 12, 0, tzinfo=timezone.utc)
+        ctrl.compute(outdoor_temp=20.0, now=now)
+
+        # The tight room's linearised predictions must stay within its own offset
+        tight_preds = [p["tight"] for p in ctrl.linearised_predictions]
+        comfort_max = tight_room.setpoint + tight_room.comfort_offset  # 21.5
+        violations = [t for t in tight_preds if t > comfort_max + 0.1]
+        assert not violations, (
+            f"Tight room (offset=0.5) heated above {comfort_max}°C: {tight_preds}"
+        )
+
+
+class TestNoHeatingAboveComfortMax:
+    """Bug 2b: soft constraint weight too low — price incentive outweighed the
+    comfort penalty, allowing the controller to heat above the comfort maximum.
+
+    With tracking_weight=0 and rho=10, the quadratic penalty gradient is zero
+    at eps=0 (room exactly at comfort max), giving no resistance to the price
+    incentive.  The fix raises the default rho to 1000.
+
+    Regression: with the default rho, a room already at the comfort maximum
+    must not be heated further even when electricity prices are favourable.
+    """
+
+    def test_no_heat_above_comfort_max_with_price(self):
+        """Room at setpoint + comfort_offset (= comfort max) must not receive
+        additional heating when energy price is positive (no rho=10 under-penalty)."""
+        comfort_offset = 2.0
+        setpoint = 21.0
+        comfort_max = setpoint + comfort_offset  # 23.0
+
+        room = Room(
+            "lr", 5_000_000.0, 0.03,
+            temperature=comfort_max,  # room already at comfort max
+            setpoint=setpoint, comfort_offset=comfort_offset,
+        )
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "lr", max_power=3000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, hvac_mode="heat",
+        )
+        # Use the DEFAULT soft_constraint_weight (was 10, fixed to 1000)
+        ctrl = HeatingMPCController(
+            model, [hp], horizon=6, dt=900,
+            tracking_weight=0.0, energy_weight=0.0,
+            energy_price_weight=1.0,
+        )
+
+        now = datetime(2024, 1, 15, 8, 0, tzinfo=timezone.utc)
+        prices = [0.10] * 24  # low, constant price — creates price incentive to heat
+        actions = ctrl.compute(
+            outdoor_temp=-5.0, now=now,
+            outdoor_forecast=[-5.0] * 24,
+            price_forecast=prices,
+        )
+        u_applied = actions["hp"]
+        assert u_applied < 0.05, (
+            f"Controller heated at u={u_applied:.3f} when room was already at "
+            f"comfort max ({comfort_max}°C); soft constraint weight is too low."
+        )
