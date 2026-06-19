@@ -260,8 +260,18 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   }
 
   function onForecast(forecasts) {
-    latestForecastRoom = forecasts?.rooms?.[roomSlug] || null;
+    const roomForecast = forecasts?.rooms?.[roomSlug] || null;
+    latestForecastRoom = roomForecast;
     applyExperimentBands();
+    // Keep the power gauge and chart corridor aligned with the refreshed
+    // achievable capacity whenever the MPC publishes a new forecast.
+    if (roomForecast) {
+      const gaugeMax = roomForecast.current_max_power ?? roomForecast.max_power;
+      if (gaugeMax != null) powerBounds.max = gaugeMax;
+      const gaugeMin = roomForecast.current_max_cooling_power ?? roomForecast.max_cooling_power;
+      if (gaugeMin != null) powerBounds.min = -gaugeMin;
+      paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']));
+    }
   }
 
   function refreshExperiment() {
@@ -669,12 +679,55 @@ function buildTemperatureChart(
   chart.render(datasets, { yMin, yMax });
 }
 
+/** Refresh the power-chart Y limits and red corridor shading after a forecast update. */
+function updatePowerChartBounds(chart, roomForecast) {
+  if (!chart._chart || !roomForecast) return;
+
+  const maxPower = roomForecast.current_max_power ?? roomForecast.max_power ?? null;
+  const maxCoolingPower = roomForecast.current_max_cooling_power ?? roomForecast.max_cooling_power ?? null;
+  const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
+
+  const ds = chart._chart.data.datasets;
+  const measuredIdx = ds.findIndex((d) => d.label === 'Measured');
+  const plannedIdx = ds.findIndex((d) => d.label === 'Planned');
+  const powerSeries = [
+    measuredIdx >= 0 ? ds[measuredIdx].data : [],
+    plannedIdx >= 0 ? ds[plannedIdx].data : [],
+  ];
+  const boundsArr = [maxPower, minPower, 0];
+  const { yMin, yMax } = computeYLimits(powerSeries, boundsArr);
+
+  if (chart._chart.options?.scales?.y) {
+    chart._chart.options.scales.y.min = yMin;
+    chart._chart.options.scales.y.max = yMax;
+  }
+
+  const aboveIdx = ds.findIndex((d) => d.label === 'Above Max');
+  if (aboveIdx >= 0 && maxPower !== null) {
+    ds[aboveIdx].fill = {
+      target: { value: maxPower },
+      above: 'rgba(229,115,115,0.12)',
+      below: 'transparent',
+    };
+  }
+  const belowIdx = ds.findIndex((d) => d.label === 'Below Min');
+  if (belowIdx >= 0 && maxCoolingPower !== null) {
+    ds[belowIdx].fill = {
+      target: { value: minPower },
+      above: 'transparent',
+      below: 'rgba(229,115,115,0.12)',
+    };
+  }
+
+  chart._chart.update('none');
+}
+
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
-  const maxPower = roomForecast?.max_power ?? null;
-  // Cooling capacity is asymmetric to heating: use the backend-provided
-  // max_cooling_power (magnitude) for the lower bound, defaulting to 0 (no
-  // cooling) rather than a mirror of the heating limit.
-  const maxCoolingPower = roomForecast?.max_cooling_power ?? null;
+  // Use the achievable capacity (outdoor COP + identified power_scale) for the
+  // plot corridor so measured/planned traces can reach the shaded bounds at
+  // full command.  Fall back to the rated configured capacity for older payloads.
+  const maxPower = roomForecast?.current_max_power ?? roomForecast?.max_power ?? null;
+  const maxCoolingPower = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power ?? null;
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const allPower = [powerHistory, powerForecast];
@@ -834,7 +887,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
         powerChart._chart.options.scales.y2.max = priceMax;
       }
 
-      powerChart._chart.update('none');
+      updatePowerChartBounds(powerChart, forecasts.rooms?.[room.slug]);
     }
 
     if (disturbChart._chart) {

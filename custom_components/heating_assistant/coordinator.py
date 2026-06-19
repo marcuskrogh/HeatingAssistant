@@ -3718,21 +3718,36 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         target = _coerce_opt_float(attrs.get("temperature"))
         current = _coerce_opt_float(attrs.get("current_temperature"))
-        offset = float(getattr(src, "max_temp_offset", 0.0) or 0.0)
-        gap: Optional[float] = None
-        if target is not None and current is not None and offset > 0.0:
-            gap = (target - current) / offset
+
+        # Heat pumps command a logit offset from the room comfort setpoint, not
+        # a linear offset from the entity's internal temperature.  Invert that
+        # mapping so readback reaches ±1 at saturation instead of capping at
+        # delta_sat / max_temp_offset (≈ 0.6 with the defaults).
+        if isinstance(src, HeatPump):
+            base_temp: Optional[float] = None
+            if hasattr(self, "model") and src.room in getattr(self.model, "rooms", {}):
+                base_temp = self.get_room_setpoint(src.room)
+            elif current is not None:
+                base_temp = current
+            if target is not None and base_temp is not None:
+                gap = src.fraction_from_setpoint_offset(target - base_temp)
+            else:
+                gap = None
+        else:
+            offset = float(getattr(src, "max_temp_offset", 0.0) or 0.0)
+            gap = None
+            if target is not None and current is not None and offset > 0.0:
+                gap = (target - current) / offset
 
         # Cooling: only meaningful for sources that can actively cool.
         if action == "cooling" or (gap is not None and gap < 0.0):
             if getattr(src, "can_cool", False):
-                mag = abs(gap) if gap is not None else 1.0
-                return -max(0.0, min(1.0, mag))
+                return gap if gap is not None else -1.0
             return 0.0
 
         # Heating.
         if gap is not None:
-            return max(0.0, min(1.0, gap))
+            return max(0.0, min(1.0, gap)) if not isinstance(src, HeatPump) else max(0.0, gap)
         # No usable temperature telemetry: trust hvac_action if it reports the
         # unit is heating, otherwise assume it is delivering nothing.
         return 1.0 if action == "heating" else 0.0

@@ -701,6 +701,29 @@ class HeatPump(HeatSource):
         offset = max(0.0, min(offset, self.delta_sat))
         return base_temp + math.copysign(offset, fraction)
 
+    def fraction_from_setpoint_offset(self, offset: float) -> float:
+        """Invert :meth:`target_temperature` for climate readback.
+
+        ``offset`` is the signed gap between the commanded setpoint and the
+        comfort setpoint base the integration used when writing the command
+        (``target − base``).  Returns the control fraction in
+        ``[u_min, u_max]``.
+        """
+        if abs(offset) < 1e-9:
+            return 0.0
+        sign = 1.0 if offset > 0.0 else -1.0
+        u_range = self.u_max if sign > 0.0 else abs(self.u_min)
+        if u_range <= 0.0:
+            return 0.0
+        half_sat = self.delta_sat / 2.0
+        if half_sat <= 0.0:
+            return 0.0
+        offset_mag = min(abs(offset), self.delta_sat)
+        # Inverse of offset = half_sat · (1 + logit(f) / 5).
+        logit_f = 5.0 * (offset_mag / half_sat - 1.0)
+        f = 1.0 / (1.0 + math.exp(-logit_f))
+        return sign * f * u_range
+
     def smooth_thermal_power(
         self, u: float, outdoor_temp: float, k_base: float = 5.0,
     ) -> float:
