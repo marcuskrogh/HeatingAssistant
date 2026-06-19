@@ -14,4 +14,4 @@
 numpy
 scipy
 highspy
-mbc@https://github.com/marcuskrogh/mbc/archive/6e1dd0daebb54608a70821faa10a3364d22d7dd7.zip
+mbc@https://github.com/marcuskrogh/mbc/archive/5b0a7098d403d35eac0d97092ef21437573ab94f.zip
