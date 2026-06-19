@@ -4,7 +4,14 @@
 # model abstractions, state estimation (CD-EKF), and optimal control
 # algorithms used by the MPC controller.
 #
+# Pinned to a specific mbc commit (not refs/heads/main): Home Assistant
+# installs a github-archive requirement once and caches it, never
+# reinstalling while the URL string is unchanged.  A floating main.zip URL
+# therefore freezes whatever mbc happened to be current at first install,
+# causing version skew with the controller (e.g. a missing rho_lin /
+# propagate API).  Bump this SHA whenever the controller needs newer mbc.
+#
 numpy
 scipy
 highspy
-mbc@https://github.com/marcuskrogh/mbc/archive/refs/heads/main.zip
+mbc@https://github.com/marcuskrogh/mbc/archive/6e1dd0daebb54608a70821faa10a3364d22d7dd7.zip
