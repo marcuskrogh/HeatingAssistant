@@ -26,7 +26,7 @@ from mbc.estimation import (
 from custom_components.heating_assistant.controller import (
     HouseThermalSDE,
     HeatingMPCController,
-    _ForecastAwareMPCController,
+    HeatingLinearisedMPC,
 )
 
 
@@ -1134,7 +1134,7 @@ class TestHeatingMPCController:
         assert isinstance(ctrl._control_system, HouseThermalSDE)
         assert ctrl._control_system.nx == ctrl._system.nx
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
-        assert isinstance(ctrl._mpc, _ForecastAwareMPCController)
+        assert isinstance(ctrl._mpc, HeatingLinearisedMPC)
 
     def test_negative_smoothing_weight_raises(self):
         model, sources = _make_model_and_sources()
@@ -1367,7 +1367,7 @@ class TestSolarForecastIndexing:
     def test_setpoint_reference_updated_on_setpoint_change(self):
         """After compute(), the MPC x_ref must track the current setpoints.
 
-        _ForecastAwareMPCController.x_ref is updated via the property setter
+        HeatingLinearisedMPC.x_ref is updated via the property setter
         at the start of each compute() call so stage and terminal costs
         always use the latest setpoints.
         """
