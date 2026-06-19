@@ -1937,9 +1937,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 for s in room_sources
                 if getattr(s, "can_cool", False) and hasattr(s, "rated_cooling_power")
             )
-            # Current cooling capacity (with power_scale) — used for the power
-            # gauge so it reads 100 % when the heat pump is at the identified
-            # cooling limit (mirrors current_max_power for the heating side).
+            # Current cooling capacity — mirrors ``-cooling_power()`` (rated
+            # configuration × cooling_efficiency, without ``power_scale``).
             current_max_cooling_power = sum(
                 -s.cooling_power(outdoor_now)
                 for s in room_sources

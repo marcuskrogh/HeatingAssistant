@@ -338,9 +338,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const onChartsReady = (roomForecast, priceForecast) => {
     // The forecast carries this room's heating/cooling capacity — use it to
     // scale the power gauge so the bar reflects power as a fraction of capacity.
-    // "current_*" fields carry the identified-scale capacity (power_scale applied)
-    // so the gauge reads 100 % when at the limit the unit can actually deliver;
-    // fall back to the rated field when the current-capacity field is absent.
+    // "current_*" fields carry the outdoor-COP heating capacity (and cooling
+    // rated capacity) so the gauge reads 100 % at the limit the unit can
+    // deliver; fall back to the rated field when the current-capacity field is absent.
     const gaugeMax = roomForecast?.current_max_power ?? roomForecast?.max_power;
     if (gaugeMax != null) powerBounds.max = gaugeMax;
     const gaugeMin = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power;
@@ -683,8 +683,8 @@ function buildTemperatureChart(
 function updatePowerChartBounds(chart, roomForecast) {
   if (!chart._chart || !roomForecast) return;
 
-  const maxPower = roomForecast.current_max_power ?? roomForecast.max_power ?? null;
-  const maxCoolingPower = roomForecast.current_max_cooling_power ?? roomForecast.max_cooling_power ?? null;
+  const maxPower = roomForecast.max_power ?? roomForecast.current_max_power ?? null;
+  const maxCoolingPower = roomForecast.max_cooling_power ?? roomForecast.current_max_cooling_power ?? null;
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const ds = chart._chart.data.datasets;
@@ -723,11 +723,12 @@ function updatePowerChartBounds(chart, roomForecast) {
 }
 
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
-  // Use the achievable capacity (outdoor COP + identified power_scale) for the
-  // plot corridor so measured/planned traces can reach the shaded bounds at
-  // full command.  Fall back to the rated configured capacity for older payloads.
-  const maxPower = roomForecast?.current_max_power ?? roomForecast?.max_power ?? null;
-  const maxCoolingPower = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power ?? null;
+  // Plot corridor uses the configured rated capacity (max_power /
+  // max_cooling_power) so the shaded bounds match the assigned heater limits.
+  // The gauge uses current_* fields for achievable capacity at the present
+  // outdoor temperature and identified heating scale.
+  const maxPower = roomForecast?.max_power ?? roomForecast?.current_max_power ?? null;
+  const maxCoolingPower = roomForecast?.max_cooling_power ?? roomForecast?.current_max_cooling_power ?? null;
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const allPower = [powerHistory, powerForecast];

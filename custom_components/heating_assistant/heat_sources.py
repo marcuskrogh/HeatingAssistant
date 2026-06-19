@@ -548,9 +548,13 @@ class HeatPump(HeatSource):
 
     def _recompute_power_scaled_gains(self) -> None:
         """Re-derive cached thermal-output constants after a scale change."""
+        # Cooling capacity follows the configured EER (cooling_cop × electrical
+        # input).  Do not apply ``power_scale`` here: that factor is identified
+        # from heating experiments and must not shrink the user-assigned cooling
+        # minimum below ``rated_cooling_power``.
         self._q_cool_const: float = (
             self._electric_max * self.cooling_cop
-            * self.cooling_efficiency * self._power_scale
+            * self.cooling_efficiency
         )
         # Base thermal output at COP=1 (used in thermal_power / smooth_thermal_power)
         self._q_heat_base: float = (
@@ -577,10 +581,9 @@ class HeatPump(HeatSource):
     def elec_per_unit_cool(self) -> float:
         if not self.can_cool:
             return 0.0
-        # Q_cool = electric_max * cooling_cop * cooling_efficiency * power_scale
-        # P_elec_cool = Q_cool / cooling_cop = electric_max * cooling_efficiency * power_scale
+        # P_elec_cool = Q_cool / cooling_cop = electric_max * cooling_efficiency
         electric_max = self.max_power / self.cop_rated if self.cop_rated > 0 else 0.0
-        return electric_max * self.cooling_efficiency * self.power_scale
+        return electric_max * self.cooling_efficiency
 
     @property
     def u_min(self) -> float:
@@ -643,8 +646,8 @@ class HeatPump(HeatSource):
 
         Analogous to ``max_power`` for heating: reflects the values the user
         configured (electric_max × cooling_cop × cooling_efficiency) rather than
-        the runtime-scaled ``_q_cool_const``.  Use this for stable plot bounds;
-        use ``-cooling_power()`` for the gauge where the identified scale matters.
+        a runtime ``power_scale`` adjustment.  Use this for plot bounds;
+        use ``-cooling_power()`` for the gauge (includes ``cooling_efficiency``).
         """
         if not self.can_cool or self.cop_rated <= 0:
             return 0.0

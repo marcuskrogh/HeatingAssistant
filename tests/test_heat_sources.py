@@ -270,14 +270,24 @@ class TestHeatPump:
         # And should equal -(electric_max × cooling_cop)
         assert cooling == pytest.approx(-(6600.0 / 3.5) * 2.5, rel=1e-3)
 
-    def test_cooling_power_respects_power_scale(self):
-        """``power_scale`` applies to cooling capacity as well as heating."""
-        hp = HeatPump(
+    def test_cooling_power_ignores_power_scale(self):
+        """Cooling capacity follows the configured EER, not ``power_scale``.
+
+        ``power_scale`` is identified from heating delivery and must not shrink
+        the user-assigned cooling minimum below ``rated_cooling_power``.
+        """
+        hp_base = HeatPump(
+            "hp1", "living_room", max_power=5000.0,
+            cooling_cop=2.5, power_scale=1.0,
+        )
+        hp_scaled = HeatPump(
             "hp1", "living_room", max_power=5000.0,
             cooling_cop=2.5, power_scale=0.5,
         )
-        cooling = hp.cooling_power(outdoor_temp=20.0)
-        assert cooling == pytest.approx(-(5000.0 / 3.5) * 2.5 * 0.5, rel=1e-3)
+        assert hp_base.cooling_power() == pytest.approx(hp_scaled.cooling_power(), rel=1e-6)
+        assert hp_base.rated_cooling_power == pytest.approx(
+            (5000.0 / 3.5) * 2.5, rel=1e-3,
+        )
 
     # -- delta_sat and dead-zone helpers -----------------------------------
 

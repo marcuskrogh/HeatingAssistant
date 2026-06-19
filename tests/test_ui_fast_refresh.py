@@ -282,6 +282,32 @@ def _make_forecast_coord() -> HeatingAssistantCoordinator:
     return coord
 
 
+def test_build_forecast_payload_cooling_bound_uses_rated_eer():
+    """Cooling plot bound must be electric_input × cooling_cop, not electric alone."""
+    from custom_components.heating_assistant.heat_sources import HeatPump
+
+    coord = _make_forecast_coord()
+    hp = HeatPump(
+        "hp1", "living_room",
+        max_power=5650.0, cop_rated=3.5, cooling_cop=2.17,
+        hvac_mode="heat_cool", power_scale=0.46,
+    )
+    coord.heat_sources = [hp]
+    coord._sources_by_room = {"living_room": [hp]}
+    coord._room_enabled = {"living_room": True}
+    coord._schedule_disabled = {}
+    coord.sources_for_room = lambda room: coord._sources_by_room.get(room, [])
+
+    payload = coord.build_forecast_payload()
+    room_fc = payload["rooms"]["living_room"]
+
+    rated_cool = (5650.0 / 3.5) * 2.17
+    assert room_fc["max_cooling_power"] == pytest.approx(rated_cool, rel=1e-3)
+    assert room_fc["current_max_cooling_power"] == pytest.approx(rated_cool, rel=1e-3)
+    # Must not collapse to the electrical input (≈ 1614 W) when power_scale < 1.
+    assert room_fc["max_cooling_power"] > 3000.0
+
+
 def test_build_forecast_payload_structure():
     coord = _make_forecast_coord()
 
