@@ -7,4 +7,4 @@
 numpy
 scipy
 highspy
-mbc @ git+https://github.com/marcuskrogh/mbc.git
+mbc@git+https://github.com/marcuskrogh/mbc.git@main
