@@ -173,6 +173,16 @@ class TestHeatPump:
         # At fraction=0.5 offset is delta_sat/2 = 2.0
         assert hp.target_temperature(0.5, 20.0) == pytest.approx(22.0)
 
+    def test_fraction_from_setpoint_offset_inverts_target_temperature(self):
+        """Readback inverse must recover the commanded fraction."""
+        hp = HeatPump("hp1", "living_room", max_power=5000.0, delta_sat=3.0,
+                      hvac_mode="heat_cool")
+        base = 22.0
+        for fraction in (-1.0, -0.5, 0.0, 0.5, 1.0):
+            target = hp.target_temperature(fraction, base)
+            recovered = hp.fraction_from_setpoint_offset(target - base)
+            assert recovered == pytest.approx(fraction, abs=0.02)
+
     def test_hvac_mode_default(self):
         """Default hvac_mode should be 'heat_cool'."""
         hp = HeatPump("hp1", "living_room", max_power=5000.0)

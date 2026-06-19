@@ -780,7 +780,7 @@ class TestScaledIdleOffsetNonHP:
 # ---------------------------------------------------------------------------
 
 
-def _make_readback_coord(heat_sources, entity_states, controller=None):
+def _make_readback_coord(heat_sources, entity_states, controller=None, room_setpoints=None):
     """Bare coordinator wired only for the delivered-power read-back helpers."""
     from custom_components.heating_assistant.coordinator import (
         HeatingAssistantCoordinator,
@@ -790,6 +790,18 @@ def _make_readback_coord(heat_sources, entity_states, controller=None):
     coord.hass = _make_fake_hass(entity_states)
     coord.heat_sources = heat_sources
     coord.controller = controller
+    if room_setpoints:
+        class _Room:
+            def __init__(self, setpoint: float) -> None:
+                self.setpoint = setpoint
+
+        class _Model:
+            def __init__(self, rooms: dict) -> None:
+                self.rooms = rooms
+
+        coord.model = _Model(
+            {name: _Room(sp) for name, sp in room_setpoints.items()}
+        )
     return coord
 
 
@@ -870,9 +882,26 @@ class TestReadDeliveredFractionClimate:
                 "temperature": 24.0,
                 "current_temperature": 22.0,
             }}},
+            room_setpoints={"living_room": 22.0},
         )
-        # gap = (24 - 22) / 5 = 0.4
-        assert coord._read_delivered_fraction(hp) == pytest.approx(0.4)
+        # Offset from comfort setpoint: 24 − 22 = 2 °C → logit inverse.
+        expected = hp.fraction_from_setpoint_offset(2.0)
+        assert coord._read_delivered_fraction(hp) == pytest.approx(expected)
+
+    def test_heating_full_offset_reads_one(self):
+        """Saturating offset (delta_sat) must read back as fraction ≈ 1."""
+        hp = self._hp()
+        coord = _make_readback_coord(
+            [hp],
+            {"climate.hp": {"state": "heat", "attributes": {
+                "hvac_action": "heating",
+                "temperature": 25.0,
+                "current_temperature": 23.0,
+            }}},
+            room_setpoints={"living_room": 22.0},
+        )
+        # target − setpoint = +3 °C = delta_sat → full heating.
+        assert coord._read_delivered_fraction(hp) == pytest.approx(1.0, abs=0.02)
 
     def test_heating_no_telemetry_assumes_full(self):
         hp = self._hp()
@@ -898,9 +927,24 @@ class TestReadDeliveredFractionClimate:
                 "temperature": 20.0,
                 "current_temperature": 24.0,
             }}},
+            room_setpoints={"living_room": 22.0},
         )
-        # gap = (20 - 24) / 5 = -0.8 → cooling
-        assert coord._read_delivered_fraction(hp) == pytest.approx(-0.8)
+        # Offset from comfort setpoint: 20 − 22 = −2 °C → negative logit inverse.
+        expected = hp.fraction_from_setpoint_offset(-2.0)
+        assert coord._read_delivered_fraction(hp) == pytest.approx(expected)
+
+    def test_cooling_full_offset_reads_minus_one(self):
+        hp = self._hp(mode="heat_cool")
+        coord = _make_readback_coord(
+            [hp],
+            {"climate.hp": {"state": "cool", "attributes": {
+                "hvac_action": "cooling",
+                "temperature": 19.0,
+                "current_temperature": 24.0,
+            }}},
+            room_setpoints={"living_room": 22.0},
+        )
+        assert coord._read_delivered_fraction(hp) == pytest.approx(-1.0, abs=0.02)
 
     def test_cooling_on_heating_only_source_reads_zero(self):
         heater = ElectricHeater(
