@@ -525,6 +525,9 @@ class HeatPump(HeatSource):
         self.cop_rated = cop_rated
         self.cop_temp_ref = cop_temp_ref
         self.min_outdoor_temp = min_outdoor_temp
+        # Deprecated, inert: the min-power output deadband was removed (it forced
+        # sub-threshold outputs to zero, which interfered with the MPC).  The
+        # attribute is retained so existing configs / sensors keep loading.
         self.min_power = min_power
         self.max_temp_offset = max_temp_offset
         self.delta_sat = delta_sat
@@ -600,16 +603,11 @@ class HeatPump(HeatSource):
         The heat pump's *rated* electrical input power is ``max_power / cop_rated``.
         The actual thermal output depends on the actual COP at the current
         outdoor temperature.
-
-        If the computed output is positive but below ``min_power`` the heat
-        pump cannot operate and the method returns 0.
         """
         if outdoor_temp < self.min_outdoor_temp:
             return 0.0
         cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
         power = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max) * setpoint_fraction
-        if 0.0 < power < self.min_power:
-            return 0.0
         return power
 
     def cooling_power(self, outdoor_temp: float = 0.0) -> float:
