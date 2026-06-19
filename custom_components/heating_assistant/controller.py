@@ -1397,11 +1397,7 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
         d_ss = d_now.copy()
 
         # ── Configure the native horizon profile for this solve ──────────────
-        # clear_horizon_profile() rebinds a fresh profile object, so re-share it
-        # with the wrapped OCP; otherwise the per-step settings below would be
-        # written to an object the OCP never reads.
         self.clear_horizon_profile()
-        self._bind_ocp(self._ocp)
         self.set_linearisation_point(x_ss, u_ss, d_ss)
 
         if D_forecast is not None:
