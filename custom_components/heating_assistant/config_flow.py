@@ -286,6 +286,49 @@ def _normalise_time_string(value: str) -> str:
     return value
 
 
+def _build_period_dict(
+    user_input: Dict[str, Any],
+    room_setpoint: float,
+    room_comfort_offset: float,
+) -> Dict[str, Any]:
+    """Build a period dict from form input, omitting optional fields that match defaults."""
+    period: Dict[str, Any] = {
+        CONF_SCHEDULE_NAME: user_input[CONF_SCHEDULE_NAME],
+        CONF_SCHEDULE_MODE: user_input[CONF_SCHEDULE_MODE],
+        CONF_SCHEDULE_START: _normalise_time_string(user_input[CONF_SCHEDULE_START]),
+        CONF_SCHEDULE_END: _normalise_time_string(user_input[CONF_SCHEDULE_END]),
+        CONF_SCHEDULE_FROST_PROTECTION: float(
+            user_input.get(CONF_SCHEDULE_FROST_PROTECTION, 12.0)
+        ),
+    }
+    # Optional days — omit if empty (all days)
+    days = user_input.get(CONF_SCHEDULE_DAYS) or []
+    if days:
+        period[CONF_SCHEDULE_DAYS] = list(days)
+
+    # Optional setpoint — omit if equal to room setpoint
+    setpoint = user_input.get(CONF_SCHEDULE_SETPOINT)
+    if setpoint is not None and float(setpoint) != room_setpoint:
+        period[CONF_SCHEDULE_SETPOINT] = float(setpoint)
+
+    # Optional comfort_offset — omit if equal to room comfort_offset
+    comfort_offset = user_input.get(CONF_SCHEDULE_COMFORT_OFFSET)
+    if comfort_offset is not None and float(comfort_offset) != room_comfort_offset:
+        period[CONF_SCHEDULE_COMFORT_OFFSET] = float(comfort_offset)
+
+    # Optional tracking_weight — omit if equal to 1.0
+    tracking_weight = user_input.get(CONF_SCHEDULE_TRACKING_WEIGHT)
+    if tracking_weight is not None and float(tracking_weight) != 1.0:
+        period[CONF_SCHEDULE_TRACKING_WEIGHT] = float(tracking_weight)
+
+    # Optional energy_weight — omit if equal to 1.0
+    energy_weight = user_input.get(CONF_SCHEDULE_ENERGY_WEIGHT)
+    if energy_weight is not None and float(energy_weight) != 1.0:
+        period[CONF_SCHEDULE_ENERGY_WEIGHT] = float(energy_weight)
+
+    return period
+
+
 # ---------------------------------------------------------------------------
 # Selector helpers
 # ---------------------------------------------------------------------------
