@@ -7,5 +7,4 @@
 numpy
 scipy
 highspy
-osqp>=1.0
 mbc@https://github.com/marcuskrogh/mbc/archive/refs/heads/main.zip
