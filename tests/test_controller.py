@@ -2252,3 +2252,44 @@ class TestNoHeatingAboveComfortMax:
             f"Controller heated at u={u_applied:.3f} when room was already at "
             f"comfort max ({comfort_max}°C); soft constraint weight is too low."
         )
+
+
+class TestInfeasibleSetpoint:
+    """When the HP cannot maintain the setpoint at full power, the linearisation
+    point must be corrected so the MPC sees the room dropping and heats at max.
+
+    Without the Newton correction, the deviation model assumes (x_ss=setpoint,
+    u_ss=u_max) is an equilibrium and predicts stable temperatures.  The energy
+    cost then dominates and the controller reduces actuation to ~25% even though
+    full heating is needed.
+    """
+
+    def test_max_heating_when_setpoint_physically_infeasible(self):
+        """Poorly insulated room at outdoor=-10°C: setpoint cannot be maintained.
+        Controller must output full heating to minimise comfort violations."""
+        room = Room(
+            "lr", 5_000_000.0, 0.003,
+            temperature=19.0, setpoint=21.0, comfort_offset=2.0,
+        )
+        model = HouseModel([room])
+        hp = HeatPump(
+            "hp", "lr", max_power=5000.0, cop_rated=3.5,
+            cop_temp_ref=7.0, cooling_cop=2.5, hvac_mode="heat_cool",
+        )
+        ctrl = HeatingMPCController(
+            model, [hp], horizon=12, dt=900,
+            tracking_weight=0.0, energy_weight=0.01,
+            energy_price_weight=1.0, soft_constraint_weight=1000.0,
+        )
+        now = datetime(2024, 1, 15, 14, 0, tzinfo=timezone.utc)
+        actions = ctrl.compute(
+            outdoor_temp=-10.0, now=now,
+            outdoor_forecast=[-10.0] * 24,
+            price_forecast=[0.20] * 24,
+        )
+        u_applied = actions["hp"]
+        assert u_applied > 0.9, (
+            f"Expected near-maximum heating (u > 0.9) when setpoint is "
+            f"physically infeasible; got u = {u_applied:.4f}.  "
+            f"Likely caused by inconsistent linearisation point."
+        )
