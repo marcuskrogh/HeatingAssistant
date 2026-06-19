@@ -9,7 +9,8 @@
 # reinstalling while the URL string is unchanged.  A floating main.zip URL
 # therefore freezes whatever mbc happened to be current at first install,
 # causing version skew with the controller (e.g. a missing rho_lin /
-# propagate API).  Bump this SHA whenever the controller needs newer mbc.
+# propagate API).  Bump this SHA whenever the controller needs newer mbc
+# (latest: 5b0a709 — linearised CD-OCP deviation input-bound fix).
 #
 numpy
 scipy
