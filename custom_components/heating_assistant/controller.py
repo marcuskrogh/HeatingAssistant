@@ -2476,12 +2476,6 @@ class HeatingMPCController:
                 p_smooth = src.smooth_thermal_power(
                     eff_frac, outdoor_temp, self._system._k_sigmoid,
                 )
-                # Apply the source's min_power clamp: a positive output below
-                # min_power is reported as zero (hardware cannot deliver it).
-                # Cooling power (negative) is left unclamped.
-                min_power = float(getattr(src, "min_power", 0.0) or 0.0)
-                if 0.0 < p_smooth < min_power:
-                    p_smooth = 0.0
                 src._current_power = p_smooth
             else:
                 src.set_power(eff_frac, outdoor_temp)
