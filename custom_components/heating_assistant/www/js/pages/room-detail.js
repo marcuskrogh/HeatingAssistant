@@ -679,12 +679,43 @@ function buildTemperatureChart(
   chart.render(datasets, { yMin, yMax });
 }
 
-/** Refresh the power-chart Y limits and red corridor shading after a forecast update. */
+/**
+ * Build time-series points for the dynamic capacity corridor.
+ *
+ * Returns two arrays of {x, y} points:
+ *   heating — per-step achievable heating capacity (COP-limited)
+ *   cooling — per-step achievable cooling capacity, negated to a negative y value
+ *
+ * The historical window (from `past` to the first forecast entry) is held flat
+ * at the current-snapshot capacity; the forecast window uses per-step values
+ * computed from the outdoor-temperature forecast so the corridor visibly moves
+ * with outdoor temperature.
+ */
+function buildCapacityPoints(roomForecast, past) {
+  const currentHeat = roomForecast?.current_max_power ?? roomForecast?.max_power ?? null;
+  const currentCool = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power ?? null;
+
+  const heating = [];
+  const cooling = [];
+
+  if (currentHeat != null) heating.push({ x: past, y: currentHeat });
+  if (currentCool != null) cooling.push({ x: past, y: -currentCool });
+
+  for (const entry of (roomForecast?.forecast ?? [])) {
+    const t = new Date(entry.time).getTime();
+    if (entry.heating_capacity != null) heating.push({ x: t, y: entry.heating_capacity });
+    if (entry.cooling_capacity != null) cooling.push({ x: t, y: -entry.cooling_capacity });
+  }
+
+  return { heating, cooling };
+}
+
+/** Refresh the power-chart Y limits and dynamic capacity corridor after a forecast update. */
 function updatePowerChartBounds(chart, roomForecast) {
   if (!chart._chart || !roomForecast) return;
 
-  const maxPower = roomForecast.current_max_power ?? roomForecast.max_power ?? null;
-  const maxCoolingPower = roomForecast.current_max_cooling_power ?? roomForecast.max_cooling_power ?? null;
+  const maxPower = roomForecast.max_power ?? null;
+  const maxCoolingPower = roomForecast.max_cooling_power ?? null;
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const ds = chart._chart.data.datasets;
@@ -702,32 +733,21 @@ function updatePowerChartBounds(chart, roomForecast) {
     chart._chart.options.scales.y.max = yMax;
   }
 
-  const aboveIdx = ds.findIndex((d) => d.label === 'Above Max');
-  if (aboveIdx >= 0 && maxPower !== null) {
-    ds[aboveIdx].fill = {
-      target: { value: maxPower },
-      above: 'rgba(229,115,115,0.12)',
-      below: 'transparent',
-    };
-  }
-  const belowIdx = ds.findIndex((d) => d.label === 'Below Min');
-  if (belowIdx >= 0 && maxCoolingPower !== null) {
-    ds[belowIdx].fill = {
-      target: { value: minPower },
-      above: 'transparent',
-      below: 'rgba(229,115,115,0.12)',
-    };
-  }
+  const past = Date.now() - 13 * 3600 * 1000;
+  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, past);
+
+  const heatCapIdx = ds.findIndex((d) => d.label === 'Heating Capacity');
+  if (heatCapIdx >= 0) ds[heatCapIdx].data = heatingCapPts;
+
+  const coolCapIdx = ds.findIndex((d) => d.label === 'Cooling Capacity');
+  if (coolCapIdx >= 0) ds[coolCapIdx].data = coolingCapPts;
 
   chart._chart.update('none');
 }
 
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
-  // Use the achievable capacity (outdoor COP + identified power_scale) for the
-  // plot corridor so measured/planned traces can reach the shaded bounds at
-  // full command.  Fall back to the rated configured capacity for older payloads.
-  const maxPower = roomForecast?.current_max_power ?? roomForecast?.max_power ?? null;
-  const maxCoolingPower = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power ?? null;
+  const maxPower = roomForecast?.max_power ?? null;
+  const maxCoolingPower = roomForecast?.max_cooling_power ?? null;
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const allPower = [powerHistory, powerForecast];
@@ -753,32 +773,36 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
     }),
   ];
 
-  if (maxPower !== null || maxCoolingPower !== null) {
-    const now = Date.now();
-    const past = now - 13 * 3600 * 1000;
-    const lastTime = powerForecast.length > 0
-      ? powerForecast[powerForecast.length - 1].x
-      : now + 3 * 3600 * 1000;
-    const boundTimes = [past, now, lastTime];
+  // Dynamic capacity corridor: dashed lines that follow the COP-limited capacity
+  // as it changes with the outdoor-temperature forecast.  The red fill extends
+  // from the line to the axis edge so the infeasible region is clearly shaded.
+  const past = Date.now() - 13 * 3600 * 1000;
+  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, past);
 
-    if (maxPower !== null) {
-      datasets.push(
-        makeDataset('Above Max', boundTimes.map((t) => ({ x: t, y: yMax + 1000 })), 'transparent', {
-          fill: { target: { value: maxPower }, above: 'rgba(229,115,115,0.12)', below: 'transparent' },
-          borderWidth: 0, pointRadius: 0, showLine: true,
-        })
-      );
-    }
-    // Only shade the cooling bound when the room actually has cooling capacity;
-    // a heating-only room has no negative-power limit to draw.
-    if (maxCoolingPower !== null) {
-      datasets.push(
-        makeDataset('Below Min', boundTimes.map((t) => ({ x: t, y: yMin - 1000 })), 'transparent', {
-          fill: { target: { value: minPower }, above: 'transparent', below: 'rgba(229,115,115,0.12)' },
-          borderWidth: 0, pointRadius: 0, showLine: true,
-        })
-      );
-    }
+  if (heatingCapPts.length > 0) {
+    datasets.push(makeDataset('Heating Capacity', heatingCapPts, 'rgba(229,115,115,0.5)', {
+      fill: 'end',
+      backgroundColor: 'rgba(229,115,115,0.12)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+      pointRadius: 0,
+      tension: 0,
+      stepped: 'before',
+      order: 10,
+    }));
+  }
+  // Only shade the cooling bound when the room has cooling capacity.
+  if (coolingCapPts.length > 0) {
+    datasets.push(makeDataset('Cooling Capacity', coolingCapPts, 'rgba(229,115,115,0.5)', {
+      fill: 'start',
+      backgroundColor: 'rgba(229,115,115,0.12)',
+      borderWidth: 1,
+      borderDash: [4, 4],
+      pointRadius: 0,
+      tension: 0,
+      stepped: 'before',
+      order: 10,
+    }));
   }
 
   chart.render(datasets, { yMin, yMax, y2Min: priceMin, y2Max: priceMax });

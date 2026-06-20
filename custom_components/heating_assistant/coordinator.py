@@ -1771,9 +1771,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # grid the actuator signal is drawn on.
             exp_steps = getattr(self, "_experiment_horizon_steps", {}).get(room_name)
 
+            room_sources = self.sources_for_room(room_name)
+            outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
+
+            def _heat_cap(t_out: float, _src=room_sources) -> float:
+                return round(sum(s.thermal_power(1.0, t_out) for s in _src), 1)
+
+            def _cool_cap(t_out: float, _src=room_sources) -> float:
+                return round(sum(
+                    -s.cooling_power(t_out)
+                    for s in _src
+                    if getattr(s, "can_cool", False) and hasattr(s, "cooling_power")
+                ), 1)
+
             current_heating = sum(
                 getattr(s, "current_power", 0.0)
-                for s in self.sources_for_room(room_name)
+                for s in room_sources
             )
             current_solar = self.solar_gains.get(room_name, 0.0)
             filtered_now = self.filtered_temperatures.get(room_name)
@@ -1785,6 +1798,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             now_sp = round(float(room.setpoint), 2)
             now_enabled = self.is_room_enabled(room_name)
 
+            _now_heat_cap = _heat_cap(outdoor_now)
+            _now_cool_cap = _cool_cap(outdoor_now)
             forecast: List[Dict[str, Any]] = [{
                 "time": now.isoformat(),
                 "temperature": now_temp,
@@ -1794,6 +1809,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     None if self.outdoor_temp is None
                     else round(self.outdoor_temp, 2)
                 ),
+                "heating_capacity": _now_heat_cap,
+                **( {"cooling_capacity": _now_cool_cap} if _now_cool_cap > 0 else {} ),
                 "setpoint": now_sp if now_enabled else None,
                 "constraint_upper": round(now_sp + comfort_offset, 2) if now_enabled else None,
                 "constraint_lower": round(now_sp - comfort_offset, 2) if now_enabled else None,
@@ -1853,7 +1870,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         solar_forecast[i].get(room_name, 0.0), 1
                     )
                 if i < n_outdoor:
-                    entry["outdoor_temp"] = round(outdoor_forecast[i], 2)
+                    _t_out_i = outdoor_forecast[i]
+                    entry["outdoor_temp"] = round(_t_out_i, 2)
+                    entry["heating_capacity"] = _heat_cap(_t_out_i)
+                    _cc_i = _cool_cap(_t_out_i)
+                    if _cc_i > 0:
+                        entry["cooling_capacity"] = _cc_i
                 if i < n_lin:
                     lin_temp = linearised_predictions[i].get(room_name)
                     if lin_temp is not None:
@@ -1904,22 +1926,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         entry["heating_power"] = last_power
                     entry["solar_gain"] = last_solar_room
                     if k < len(outdoor_ext):
-                        entry["outdoor_temp"] = round(outdoor_ext[k], 2)
+                        _t_out_k = outdoor_ext[k]
+                        entry["outdoor_temp"] = round(_t_out_k, 2)
+                        entry["heating_capacity"] = _heat_cap(_t_out_k)
+                        _cc_k = _cool_cap(_t_out_k)
+                        if _cc_k > 0:
+                            entry["cooling_capacity"] = _cc_k
                     forecast.append(entry)
 
-            # Heating and cooling bounds are asymmetric: a heat pump's cooling
-            # capacity is derived from its electrical input × cooling COP, which
-            # differs from the rated thermal heating output.  Expose both so the
-            # power chart can draw the true (non-symmetric) corridor.
-            # Two capacity values are exposed:
-            #   max_power         — rated (configured) output, used as the
-            #                       stable Y-axis corridor on the power plot.
-            #   current_max_power — capacity at the present outdoor temperature,
-            #                       used by the power gauge so it reads 100 % when
-            #                       the heater is at the limit it can currently
-            #                       deliver (COP drops at cold outdoor temps).
-            room_sources = self.sources_for_room(room_name)
-            outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
+            # Scalar capacity summary exposed as room-level fields.
+            # max_power / max_cooling_power: rated (configured) output — used to
+            #   anchor the Y-axis scale regardless of outdoor temperature.
+            # current_max_power / current_max_cooling_power: COP-limited capacity
+            #   at the present outdoor temperature — used by the power gauge so the
+            #   bar reads 100 % at the limit the unit can currently deliver.
+            # Per-step heating_capacity / cooling_capacity in each forecast entry
+            #   let the frontend draw a dynamic corridor that moves with the outdoor
+            #   temperature forecast.
             # Rated capacity — used for the power-chart Y-axis corridor so the
             # plot scale matches the configured heater bounds regardless of the
             # current outdoor temperature.
