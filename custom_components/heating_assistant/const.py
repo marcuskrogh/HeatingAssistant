@@ -485,7 +485,7 @@ DEFAULT_HEATING_EFFICIENCY = 1.0       # fraction of max heating capacity used (
 DEFAULT_COMFORT_OFFSET = 2.0           # °C symmetric comfort region offset from setpoint (per-room)
 DEFAULT_ENERGY_WEIGHT = 0.01           # weight on ‖u‖² (input regularisation)
 DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-movement damping)
-DEFAULT_SOFT_CONSTRAINT_WEIGHT = 10.0         # quadratic soft output-bound violation penalty ρ (ρ·ε²)
+DEFAULT_SOFT_CONSTRAINT_WEIGHT = 1000.0       # quadratic soft output-bound violation penalty ρ (ρ·ε²)
 DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT = 0.0   # linear soft output-bound violation penalty ρ_lin (ρ_lin·ε); 0 = disabled
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
 DEFAULT_MPC_SOLVER = "qp"              # QP backend; legacy "ipopt"/"slsqp" values accepted but ignored

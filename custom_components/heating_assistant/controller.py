@@ -99,6 +99,7 @@ from mbc.control import StandardLinearisedContinuousMPC
 
 from .const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
+    DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
@@ -917,16 +918,20 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
                     q_cool = src._q_cool_const
                     if q_heat > 0.0 and q_cool > 0.0:
                         # Piecewise-linear curve φ(u) = q_heat·u (u ≥ 0) /
-                        # q_cool·u (u < 0): the slope is constant in each region,
-                        # so the local linearisation matches the global behaviour.
-                        # At the u = 0 kink the analytic derivative is the
-                        # subgradient midpoint (matches a central difference).
-                        if eff_u > 0.0:
+                        # q_cool·u (u < 0) has a kink at u = 0.  A hard switch
+                        # in the Jacobian at eff_u = 0 causes the linearisation
+                        # point u_ss to flip the B matrix discontinuously when
+                        # the equilibrium input crosses zero, producing jitter.
+                        # Smooth the transition over ±_KINK_BLEND so the Jacobian
+                        # is continuous in u_ss across mild-weather transitions.
+                        _KINK_BLEND = 0.025
+                        if abs(eff_u) < _KINK_BLEND:
+                            t_blend = eff_u / _KINK_BLEND  # in (−1, 1)
+                            slope = 0.5 * ((1.0 + t_blend) * q_heat + (1.0 - t_blend) * q_cool)
+                        elif eff_u > 0.0:
                             slope = q_heat
-                        elif eff_u < 0.0:
-                            slope = q_cool
                         else:
-                            slope = 0.5 * (q_heat + q_cool)
+                            slope = q_cool
                         J[i, j] = slope * scale / self._C_cap[i]
                     elif eff_u >= 0.0:
                         J[i, j] = src.thermal_power(1.0, outdoor_temp) * scale / self._C_cap[i]
@@ -1383,10 +1388,9 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
         p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
 
         # ── Linearisation point: the comfort-setpoint equilibrium ────────────
-        # x_ss = setpoint air temperatures, walls at their steady state for the
-        # setpoint and the current outdoor temperature, emitter-filter states at
-        # u_eq.  Linearising around an inconsistent wall/filter state would
-        # mis-scale u_eq and the Jacobians.
+        # Air states are set to the room setpoints and wall states to their
+        # steady-state values, giving a consistent (x_ss, u_ss) equilibrium
+        # pair when the setpoint is feasible.
         x_ss = self._x_ref_abs.copy()
         x_ss[n:nx_phys] = model.wall_equilibrium(x_ss[:n], float(d_now[0]))
         u_ss = model.compute_u_eq(x_ss, d_now, p_, t)
@@ -1394,6 +1398,34 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
             k_f = model._filter_idx_for_source[j]
             if k_f >= 0:
                 x_ss[nx_phys + k_f] = u_ss[j]
+
+        # ── Infeasibility correction ──────────────────────────────────────────
+        # When the HP cannot maintain the setpoint at full output, compute_u_eq
+        # clips u_ss to u_max and (x_ss=[setpoint], u_ss=u_max) is NOT a true
+        # equilibrium: the room actually cools even at max input.  The mbc
+        # deviation model assumes equilibrium and predicts stable temperatures,
+        # so the MPC never sees the room drop and suppresses actuation.
+        # One Newton step on the air-temperature drift finds the achievable
+        # equilibrium temperature, making (x_ss_corrected, u_ss) consistent.
+        air_drift = model.f(x_ss, u_ss, d_now, p_, t)[:n]
+        if np.any(air_drift < -1e-6):
+            J = model.dfdx(x_ss, u_ss, d_now, p_, t)
+            rho = model._wall_eq_ratio          # (n,) per-room wall-to-air ratio
+            F_eff = J[:n, :n] + J[:n, n:2 * n] * rho.reshape(1, -1)
+            try:
+                delta_air = np.linalg.solve(F_eff, -air_drift)
+                x_ss_air_orig = x_ss[:n].copy()
+                # Correction moves setpoint down; clip to [T_outdoor, setpoint].
+                x_ss[:n] = np.clip(x_ss[:n] + delta_air, float(d_now[0]), x_ss_air_orig)
+                x_ss[n:nx_phys] = model.wall_equilibrium(x_ss[:n], float(d_now[0]))
+                u_ss = model.compute_u_eq(x_ss, d_now, p_, t)
+                for j in range(nu):
+                    k_f = model._filter_idx_for_source[j]
+                    if k_f >= 0:
+                        x_ss[nx_phys + k_f] = u_ss[j]
+            except np.linalg.LinAlgError:
+                pass
+
         d_ss = d_now.copy()
 
         # ── Configure the native horizon profile for this solve ──────────────
@@ -1415,6 +1447,23 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
         if offset_seq is not None:
             self.set_soft_output_band_half_width_profile(
                 np.asarray(offset_seq, dtype=float)
+            )
+        else:
+            # Always set per-room comfort offsets from the model so each room
+            # uses its own configured offset rather than the global maximum
+            # that was baked in at construction time.
+            room_offsets = np.array(
+                [
+                    float(
+                        getattr(self._model._model.rooms[name], "comfort_offset", 2.0)
+                        or 2.0
+                    )
+                    for name in self._model._room_list
+                ],
+                dtype=float,
+            )
+            self.set_soft_output_band_half_width_profile(
+                np.tile(room_offsets.reshape(1, -1), (self._N, 1))
             )
 
         if q_scale_seq is not None:
@@ -1606,7 +1655,7 @@ class HeatingMPCController:
         tracking_weight: float = DEFAULT_SETPOINT_PULL_WEIGHT,
         energy_weight: float = 0.01,
         smoothing_weight: float = 0.1,
-        soft_constraint_weight: float = 10.0,
+        soft_constraint_weight: float = DEFAULT_SOFT_CONSTRAINT_WEIGHT,
         soft_constraint_linear_weight: float = 0.0,
         terminal_weight: float = 100.0,
         sigma_w: float = 0.1,
