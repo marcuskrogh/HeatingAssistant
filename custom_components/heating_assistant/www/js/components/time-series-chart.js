@@ -1,3 +1,12 @@
+/** Dataset labels used only for shaded regions — hidden from legend and tooltip. */
+export const SHADING_DATASET_LABELS = new Set([
+  'Constraint Upper',
+  'Constraint Lower',
+  'Sensor Min',
+  'Heating Capacity',
+  'Cooling Capacity',
+]);
+
 const CHART_DEFAULTS = {
   responsive: true,
   maintainAspectRatio: false,
@@ -16,7 +25,7 @@ const CHART_DEFAULTS = {
         usePointStyle: true,
         pointStyle: 'line',
         filter: (item) => !item.text.startsWith('Above') && !item.text.startsWith('Below')
-          && !item.text.startsWith('Sensor Min'),
+          && !SHADING_DATASET_LABELS.has(item.text),
       },
     },
     tooltip: {
@@ -31,7 +40,7 @@ const CHART_DEFAULTS = {
       displayColors: true,
       boxPadding: 4,
       filter: (item) => !item.dataset.label?.startsWith('Above') && !item.dataset.label?.startsWith('Below')
-        && !item.dataset.label?.startsWith('Sensor Min'),
+        && !SHADING_DATASET_LABELS.has(item.dataset.label),
     },
   },
   scales: {

@@ -896,3 +896,74 @@ def test_room_detail_js_price_series_use_stepped_before():
         assert "stepped" in block and "'before'" in block, (
             f"makeDataset block for price series is missing stepped: 'before':\n{block}"
         )
+
+
+def test_room_detail_js_shading_datasets_hide_reference_lines():
+    """Shaded comfort/capacity/sensor-anchor datasets must not draw dashed
+    reference lines or appear in the legend."""
+    js_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "custom_components",
+        "heating_assistant",
+        "www",
+        "js",
+        "pages",
+        "room-detail.js",
+    )
+    chart_js_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "custom_components",
+        "heating_assistant",
+        "www",
+        "js",
+        "components",
+        "time-series-chart.js",
+    )
+    with open(js_path) as fh:
+        room_detail = fh.read()
+    with open(chart_js_path) as fh:
+        chart_js = fh.read()
+
+    import re
+
+    def dataset_block(source: str, label: str) -> str:
+        marker = f"makeDataset('{label}'"
+        start = source.index(marker)
+        depth = 0
+        for i in range(start, len(source)):
+            ch = source[i]
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+                if depth == 0:
+                    return source[start:i + 1]
+        raise AssertionError(f"Could not parse makeDataset block for {label!r}")
+
+    for label in ("Constraint Upper", "Constraint Lower", "Heating Capacity", "Cooling Capacity"):
+        block = dataset_block(room_detail, label)
+        assert "'transparent'" in block, f"{label} should use a transparent stroke"
+        assert "borderWidth: 0" in block, f"{label} should hide its boundary line"
+        assert "borderDash" not in block and "dashed: true" not in block, (
+            f"{label} should not render a dashed reference line:\n{block}"
+        )
+
+    sensor_range_block = dataset_block(room_detail, "Sensor Range")
+    assert "'transparent'" in sensor_range_block
+
+    for label in (
+        "Constraint Upper",
+        "Constraint Lower",
+        "Sensor Min",
+        "Heating Capacity",
+        "Cooling Capacity",
+    ):
+        assert f"'{label}'" in chart_js, f"SHADING_DATASET_LABELS should include {label!r}"
+
+    assert "13 * 3600 * 1000" not in room_detail, (
+        "Capacity shading must follow the configured history window, not a hardcoded 13 h offset"
+    )
+    assert "buildCapacityPoints(roomForecast, windowStart)" in room_detail
+    assert "buildPowerChart(powerChart" in room_detail and "windowStart" in room_detail
