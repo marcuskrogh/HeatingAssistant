@@ -68,6 +68,9 @@ def test_forecast_heating_capacity_matches_rated_at_each_step():
         coord, room_names=["living_room"],
     )
     room = payload["rooms"]["living_room"]
+    assert room["current_max_power"] == pytest.approx(
+        room["current_rated_max_power"], rel=0.01,
+    )
     assert room["forecast"][0]["heating_capacity"] == pytest.approx(
         hp.rated_heating_capacity(-5.0), rel=0.01,
     )

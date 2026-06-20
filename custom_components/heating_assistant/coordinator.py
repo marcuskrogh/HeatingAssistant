@@ -1783,8 +1783,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 return float(getattr(src, "max_power", 0.0) or 0.0)
 
             def _delivered_heat_cap(src: Any, t_out: float) -> float:
-                if hasattr(src, "thermal_power"):
-                    return float(src.thermal_power(1.0, t_out))
                 return _rated_heat_cap(src, t_out)
 
             def _heat_cap(t_out: float, _src=room_sources) -> float:
@@ -1958,9 +1956,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #   let the frontend draw a dynamic corridor that moves with the outdoor
             #   temperature forecast.  These use rated_heating_capacity /
             #   rated_cooling_power (configured datasheet limits, no identified
-            #   power_scale) so the bound reflects what COP allows rather than an
-            #   extra sysid scale factor.  current_max_power / current_max_cooling_power
-            #   still carry the identified-scale achievable limits for the gauge.
+            #   power_scale) so the bound reflects what COP allows.
+            # current_max_power / current_rated_max_power: COP-limited rated
+            #   capacity at the present outdoor temperature for the power gauge
+            #   and chart Y-axis (heater scale is MPC-internal only).
             # Rated capacity — configured datasheet maximum at the rated COP
             # point (independent of current outdoor temperature).
             max_power = sum(s.max_power for s in room_sources)
@@ -1968,6 +1967,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # power gauge so the bar reads 100 % when the heater is at the limit
             # it can actually deliver right now (a heat pump's output drops at
             # cold outdoor temps because COP falls with the temperature delta).
+            # current_max_power / current_max_cooling_power: COP-limited rated
+            # capacity at the present outdoor temperature (no power_scale) for
+            # the power gauge and plot scale — heater scale is internal to the
+            # MPC model only and must not cap what the UI shows.
             current_max_power = sum(
                 _delivered_heat_cap(s, outdoor_now) for s in room_sources
             )
@@ -1986,13 +1989,12 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 for s in room_sources
                 if getattr(s, "can_cool", False) and hasattr(s, "rated_cooling_power")
             )
-            # Current cooling capacity (with power_scale) — used for the power
-            # gauge so it reads 100 % when the heat pump is at the identified
-            # cooling limit (mirrors current_max_power for the heating side).
+            # Current cooling capacity (rated, no power_scale) — mirrors heating.
             current_max_cooling_power = sum(
-                -s.cooling_power(outdoor_now)
+                s.rated_cooling_power
                 for s in room_sources
-                if getattr(s, "can_cool", False) and hasattr(s, "cooling_power")
+                if getattr(s, "can_cool", False)
+                and hasattr(s, "rated_cooling_power")
             )
 
             rooms_payload[_slugify(room_name)] = {
@@ -3809,10 +3811,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Set ``src.current_power`` from a delivered fraction in ``[-1, 1]``."""
         if frac >= 0.0:
-            # set_power clamps to [0, 1] and stores thermal_power as current.
             src.set_power(frac, outdoor_temp)
-        elif hasattr(src, "cooling_power"):
-            src._current_power = src.cooling_power(outdoor_temp) * min(1.0, abs(frac))
+        elif getattr(src, "can_cool", False) and hasattr(
+            src, "display_smooth_thermal_power"
+        ):
+            src._current_power = src.display_smooth_thermal_power(
+                frac, outdoor_temp,
+            )
         else:
             src._current_power = 0.0
 

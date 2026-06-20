@@ -1176,12 +1176,36 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
             for i, name in enumerate(self._room_list)
         }
 
+    def display_heating_powers(
+        self,
+        u_vec: np.ndarray,
+        outdoor_temp: float,
+    ) -> Dict[str, float]:
+        """Convert fractions u to per-room display thermal power [W].
+
+        Uses configured rated capacities and ignores identified ``power_scale``
+        so room-view plots and sensors reflect heater configuration.
+        """
+        powers: Dict[str, float] = {name: 0.0 for name in self._room_list}
+        for j, src in enumerate(self._sources):
+            u_j = float(u_vec[j])
+            if src.can_cool:
+                powers[src.room] += src.display_smooth_thermal_power(
+                    u_j, outdoor_temp, self._k_sigmoid,
+                )
+            else:
+                powers[src.room] += src.display_thermal_power(u_j, outdoor_temp)
+        return powers
+
     def heating_powers(
         self,
         u_vec: np.ndarray,
         outdoor_temp: float,
     ) -> Dict[str, float]:
-        """Convert fractions u to per-room total thermal power [W].
+        """Convert fractions u to per-room model thermal power [W].
+
+        Includes identified ``power_scale`` — for plots use
+        :meth:`display_heating_powers`.
 
         Cooling-capable sources use ``smooth_thermal_power`` (same as
         ``f()``); heating-only sources use the linear ``thermal_power``.
@@ -2316,7 +2340,7 @@ class HeatingMPCController:
                     continue
                 eff_frac = float(np.clip(_x_hat[_nx_phys + k], src.u_min, src.u_max))
                 if src.can_cool:
-                    src._current_power = src.smooth_thermal_power(
+                    src._current_power = src.display_smooth_thermal_power(
                         eff_frac, outdoor_temp, self._system._k_sigmoid,
                     )
                 else:
@@ -2513,12 +2537,9 @@ class HeatingMPCController:
             )
 
             if src.can_cool:
-                # Track smooth_thermal_power so sensors and the EKF are
-                # consistent with the model function f().
-                p_smooth = src.smooth_thermal_power(
+                src._current_power = src.display_smooth_thermal_power(
                     eff_frac, outdoor_temp, self._system._k_sigmoid,
                 )
-                src._current_power = p_smooth
             else:
                 src.set_power(eff_frac, outdoor_temp)
 
@@ -2535,7 +2556,7 @@ class HeatingMPCController:
 
         # ── Heating schedule ─────────────────────────────────────────────
         self._heating_schedule = [
-            self._system.heating_powers(U_abs[k], outdoor_seq[k])
+            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
             for k in range(N)
         ]
 

@@ -271,13 +271,16 @@ class TestHeatPump:
         assert cooling == pytest.approx(-(6600.0 / 3.5) * 2.5, rel=1e-3)
 
     def test_cooling_power_respects_power_scale(self):
-        """``power_scale`` applies to cooling capacity as well as heating."""
+        """``power_scale`` applies to the MPC plant model, not display power."""
         hp = HeatPump(
             "hp1", "living_room", max_power=5000.0,
             cooling_cop=2.5, power_scale=0.5,
         )
         cooling = hp.cooling_power(outdoor_temp=20.0)
         assert cooling == pytest.approx(-(5000.0 / 3.5) * 2.5 * 0.5, rel=1e-3)
+        assert hp.display_smooth_thermal_power(-1.0, 20.0) == pytest.approx(
+            -hp.rated_cooling_power, rel=1e-3,
+        )
 
     # -- delta_sat and dead-zone helpers -----------------------------------
 
@@ -542,8 +545,27 @@ class TestHeatPump:
         )
         rated = hp.rated_heating_capacity(outdoor_temp=7.0)
         scaled = hp.thermal_power(1.0, outdoor_temp=7.0)
+        displayed = hp.display_thermal_power(1.0, outdoor_temp=7.0)
         assert rated == pytest.approx(6000.0, rel=0.02)
         assert scaled == pytest.approx(0.6 * rated, rel=0.02)
+        assert displayed == pytest.approx(rated, rel=0.02)
+
+    def test_display_smooth_thermal_power_ignores_power_scale(self):
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0, cooling_cop=2.5,
+            hvac_mode="heat_cool", power_scale=0.5,
+        )
+        outdoor = 7.0
+        assert hp.display_smooth_thermal_power(1.0, outdoor) == pytest.approx(
+            hp.rated_heating_capacity(outdoor), rel=0.02,
+        )
+        assert hp.smooth_thermal_power(1.0, outdoor) == pytest.approx(
+            0.5 * hp.rated_heating_capacity(outdoor), rel=0.02,
+        )
+        assert hp.display_smooth_thermal_power(-1.0, outdoor) == pytest.approx(
+            -hp.rated_cooling_power, rel=0.02,
+        )
 
     def test_rated_heating_capacity_follows_outdoor_cop(self):
         """Rated capacity must rise with outdoor temperature via COP."""
@@ -625,9 +647,10 @@ class TestGenericThermostat:
         ht = GenericThermostat("ht1", "hall", max_power=1500.0)
         assert ht.elec_per_unit_heat == pytest.approx(1500.0)
 
-    def test_elec_per_unit_heat_scales_with_power_scale(self):
+    def test_elec_per_unit_heat_ignores_power_scale(self):
+        """Electrical draw is based on configured capacity, not sysid scale."""
         ht = GenericThermostat("ht1", "hall", max_power=1500.0, power_scale=0.8)
-        assert ht.elec_per_unit_heat == pytest.approx(1200.0)
+        assert ht.elec_per_unit_heat == pytest.approx(1500.0)
 
     def test_power_scale_update_recomputes_gain(self):
         ht = GenericThermostat("ht1", "hall", max_power=1500.0)
