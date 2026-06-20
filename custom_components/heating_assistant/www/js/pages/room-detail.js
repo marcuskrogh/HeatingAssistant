@@ -683,8 +683,8 @@ function buildTemperatureChart(
 function updatePowerChartBounds(chart, roomForecast) {
   if (!chart._chart || !roomForecast) return;
 
-  const maxPower = roomForecast.current_max_power ?? roomForecast.max_power ?? null;
-  const maxCoolingPower = roomForecast.current_max_cooling_power ?? roomForecast.max_cooling_power ?? null;
+  const maxPower = roomForecast.max_power ?? null;
+  const maxCoolingPower = roomForecast.max_cooling_power ?? null;
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const ds = chart._chart.data.datasets;
@@ -723,11 +723,8 @@ function updatePowerChartBounds(chart, roomForecast) {
 }
 
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
-  // Use the achievable capacity (outdoor COP + identified power_scale) for the
-  // plot corridor so measured/planned traces can reach the shaded bounds at
-  // full command.  Fall back to the rated configured capacity for older payloads.
-  const maxPower = roomForecast?.current_max_power ?? roomForecast?.max_power ?? null;
-  const maxCoolingPower = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power ?? null;
+  const maxPower = roomForecast?.max_power ?? null;
+  const maxCoolingPower = roomForecast?.max_cooling_power ?? null;
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const allPower = [powerHistory, powerForecast];
