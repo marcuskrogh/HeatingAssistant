@@ -147,18 +147,32 @@ class HeatSource(ABC):
         Mirrors :meth:`rated_cooling_power` on the heating side: reflects the
         configured datasheet capacity (including outdoor-temperature-dependent
         COP for heat pumps) rather than the runtime ``power_scale`` correction
-        identified by sysid.  Use this for plot actuation bounds; use
-        :meth:`thermal_power` for model/MPC delivery and the power gauge.
+        identified by sysid.  Use this for plot bounds and
+        :meth:`display_thermal_power`; use :meth:`thermal_power` for the MPC
+        plant model only.
         """
         return self.max_power
+
+    def display_thermal_power(
+        self, setpoint_fraction: float, outdoor_temp: float = 0.0,
+    ) -> float:
+        """Configured thermal output [W] for sensors and plots.
+
+        Ignores the identified ``power_scale`` factor, which only adjusts how
+        strongly the heater couples into the MPC/EKF room model (often
+        compensating for room thermal-mass error rather than a true change in
+        delivered wattage).
+        """
+        fraction = max(0.0, min(1.0, float(setpoint_fraction)))
+        return self.rated_heating_capacity(outdoor_temp) * fraction
 
     def set_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """
         Apply a control set-point, update internal state, and return the
-        resulting thermal power output [W].
+        resulting thermal power output [W] shown on sensors and plots.
         """
         setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
-        power = self.thermal_power(setpoint_fraction, outdoor_temp)
+        power = self.display_thermal_power(setpoint_fraction, outdoor_temp)
         self._current_power = power
         return power
 
@@ -270,7 +284,7 @@ class ElectricHeater(HeatSource):
 
     @property
     def elec_per_unit_heat(self) -> float:
-        return self.max_power * self.efficiency * self.power_scale
+        return self.max_power * self.efficiency
 
     def target_temperature(self, setpoint_fraction: float, internal_temp: float) -> float:
         """Target setpoint = internal_temp + fraction × max_temp_offset."""
@@ -326,7 +340,7 @@ class GenericThermostat(HeatSource):
 
     @property
     def elec_per_unit_heat(self) -> float:
-        return self.max_power * self.power_scale
+        return self.max_power
 
     def target_temperature(self, setpoint_fraction: float, internal_temp: float) -> float:
         setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
@@ -599,19 +613,16 @@ class HeatPump(HeatSource):
 
     @property
     def elec_per_unit_heat(self) -> float:
-        # COP cancels: P_elec = thermal(u) / COP = _q_heat_base * u / COP * COP = _q_heat_base * u
-        # Recompute from current power_scale to stay consistent after power_scale updates.
+        # COP cancels: P_elec = configured thermal / COP at full command.
         electric_max = self.max_power / self.cop_rated if self.cop_rated > 0 else 0.0
-        return electric_max * self.heating_efficiency * self.power_scale
+        return electric_max * self.heating_efficiency
 
     @property
     def elec_per_unit_cool(self) -> float:
         if not self.can_cool:
             return 0.0
-        # Q_cool = electric_max * cooling_cop * cooling_efficiency * power_scale
-        # P_elec_cool = Q_cool / cooling_cop = electric_max * cooling_efficiency * power_scale
         electric_max = self.max_power / self.cop_rated if self.cop_rated > 0 else 0.0
-        return electric_max * self.cooling_efficiency * self.power_scale
+        return electric_max * self.cooling_efficiency
 
     @property
     def u_min(self) -> float:
@@ -629,11 +640,10 @@ class HeatPump(HeatSource):
 
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """
-        Thermal power output [W].
+        Model thermal power [W] including the identified ``power_scale``.
 
-        The heat pump's *rated* electrical input power is ``max_power / cop_rated``.
-        The actual thermal output depends on the actual COP at the current
-        outdoor temperature.
+        Used by the MPC/EKF plant model only.  For sensors and plots use
+        :meth:`display_thermal_power` instead.
         """
         if outdoor_temp < self.min_outdoor_temp:
             return 0.0
@@ -687,12 +697,40 @@ class HeatPump(HeatSource):
 
         Analogous to ``max_power`` for heating: reflects the values the user
         configured (electric_max × cooling_cop × cooling_efficiency) rather than
-        the runtime-scaled ``_q_cool_const``.  Use this for stable plot bounds;
-        use ``-cooling_power()`` for the gauge where the identified scale matters.
+        the runtime-scaled ``_q_cool_const``.  Use for plot bounds and
+        :meth:`display_smooth_thermal_power`; use :meth:`cooling_power` for the
+        MPC plant model only.
         """
         if not self.can_cool or self.cop_rated <= 0:
             return 0.0
         return self._electric_max * self.cooling_cop * self.cooling_efficiency
+
+    def display_thermal_power(
+        self, setpoint_fraction: float, outdoor_temp: float = 0.0,
+    ) -> float:
+        """Configured thermal output for sensors/plots (ignores ``power_scale``)."""
+        if self.can_cool:
+            return self.display_smooth_thermal_power(
+                float(setpoint_fraction), outdoor_temp,
+            )
+        return super().display_thermal_power(setpoint_fraction, outdoor_temp)
+
+    def display_smooth_thermal_power(
+        self, u: float, outdoor_temp: float, k_base: float = 5.0,
+    ) -> float:
+        """Piecewise-linear display power [W] at control input *u* (no ``power_scale``).
+
+        Same shape as :meth:`smooth_thermal_power` but uses configured rated
+        capacities so room-view plots reflect heater configuration rather than
+        the internal sysid scale factor.
+        """
+        if outdoor_temp < self.min_outdoor_temp:
+            return 0.0
+        q_heat = self.rated_heating_capacity(outdoor_temp)
+        q_cool = self.rated_cooling_power
+        if q_heat <= 0.0 or q_cool <= 0.0:
+            return q_heat * max(0.0, u)
+        return q_heat * u if u >= 0.0 else q_cool * u
 
     def target_temperature(
         self,
@@ -772,30 +810,22 @@ class HeatPump(HeatSource):
         self, u: float, outdoor_temp: float, k_base: float = 5.0,
     ) -> float:
         """
-        Smooth, asymmetric sigmoid mapping of the MPC control input
-        *u* ∈ [−1, 1] to instantaneous thermal power [W].
+        Model piecewise-linear power [W] including ``power_scale``.
 
-        The function is the unique shifted logistic that satisfies:
+        Used by the MPC/EKF plant model only.  For sensors and plots use
+        :meth:`display_smooth_thermal_power` instead.
 
-        * φ(0) = 0  (zero control → zero power)
-        * φ(u) → +Q_heat  as u → +1  (positive control → heating)
-        * φ(u) → −Q_cool  as u → −1  (negative control → cooling)
+        * φ(u) = Q_heat · u  for u ≥ 0  (heating)
+        * φ(u) = Q_cool · u  for u < 0  (cooling; Q_cool > 0 ⇒ negative power)
 
-        Concretely::
+        with φ(0) = 0, φ(+1) = +Q_heat, and φ(−1) = −Q_cool where::
 
-            Q_heat = thermal_power(1, T_out)       # max heating capacity [W]
-            Q_cool = |cooling_power(T_out)|        # max cooling capacity [W]
-            offset = ln(Q_cool / Q_heat)           # ensures φ(0) = 0
-            k      = k_base + max(0, ln(Q_heat / Q_cool))
-                    # adaptive sharpness: guarantees ≥ σ(k_base) saturation
-                    # (≈ 99 % for k_base = 5) at u = ±1
-            φ(u)   = (Q_heat + Q_cool) · σ(k · u + offset) − Q_cool
+            Q_heat = thermal_power(1, T_out)   # COP-limited heating capacity [W]
+            Q_cool = |cooling_power(T_out)|    # rated cooling capacity [W]
 
-        where σ is the standard logistic sigmoid.
-
-        The function is smooth (C∞) everywhere and has continuous gradients
-        that the L-BFGS-B optimiser can exploit without needing to handle
-        a non-differentiable kink at u = 0.
+        ``k_base`` is retained for API compatibility but no longer shapes the
+        curve (the previous logistic sigmoid under-predicted delivery when the
+        linearised MPC turned the compressor down).
 
         Parameters
         ----------
@@ -804,10 +834,7 @@ class HeatPump(HeatSource):
         outdoor_temp : float
             Current outdoor temperature [°C] for COP calculation.
         k_base : float, optional
-            Base sharpness parameter.  The effective sharpness is automatically
-            increased to compensate for asymmetric heating/cooling capacities so
-            that both extremes saturate to ≥ σ(k_base) of their capacity within
-            u ∈ [−1, 1].  Default is 5.0.
+            Unused; kept for backward compatibility.  Default is 5.0.
 
         Returns
         -------

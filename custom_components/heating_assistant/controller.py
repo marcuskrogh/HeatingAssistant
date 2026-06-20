@@ -139,10 +139,8 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
     thermal power depends on the outdoor temperature through the COP.
 
     For cooling-capable heat pumps, the thermal contribution is computed via
-    a smooth, asymmetric sigmoid (see ``HeatPump.smooth_thermal_power``) that
-    maps u ∈ [−1, 1] continuously to the range [−Q_cool_max, +Q_heat_max].
-    This eliminates the non-differentiable kink at u = 0 that a piecewise
-    model would produce, giving the NLP optimiser smooth gradients.
+    the piecewise-linear map in ``HeatPump.smooth_thermal_power`` that
+    delivers Q_heat·u (u ≥ 0) and Q_cool·u (u < 0).
 
     Parameters
     ----------
@@ -553,9 +551,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         Heat-source dispatch:
 
-        * **Cooling-capable** (``src.can_cool``): smooth asymmetric
-          shifted-logistic sigmoid mapping u ∈ [−1, 1] → [−Q_cool_max,
-          +Q_heat_max].  C∞ everywhere for gradient-friendly NLP solves.
+        * **Cooling-capable** (``src.can_cool``): piecewise-linear map
+          u ∈ [−1, 1] → [−Q_cool_max, +Q_heat_max] via
+          ``smooth_thermal_power``.
         * **Heating-only**: linear ``thermal_power(max(0, u), T_out)``.
 
         Parameter vector ``p`` (or ``self._theta`` when ``p`` is empty)
@@ -889,10 +887,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         (u ≥ 0 is guaranteed by the box constraint u_min = 0, so
         max(0, u·scale) is differentiable everywhere in the feasible region.)
 
-        For **cooling-capable** (heat-pump) sources the derivative of the
-        smooth sigmoid is::
-
-            ∂f[target] / ∂u_j = (Q_heat + Q_cool) · k · σ(1−σ) · scale_j / C_cap[target]
+        For **cooling-capable** (heat-pump) sources the derivative follows the
+        piecewise-linear power curve (with a small blend around u = 0 to avoid
+        a discontinuous Jacobian when the equilibrium input crosses zero)::
 
         For **filtered** sources (emitter lag τ > 0)::
 
@@ -1179,14 +1176,38 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
             for i, name in enumerate(self._room_list)
         }
 
+    def display_heating_powers(
+        self,
+        u_vec: np.ndarray,
+        outdoor_temp: float,
+    ) -> Dict[str, float]:
+        """Convert fractions u to per-room display thermal power [W].
+
+        Uses configured rated capacities and ignores identified ``power_scale``
+        so room-view plots and sensors reflect heater configuration.
+        """
+        powers: Dict[str, float] = {name: 0.0 for name in self._room_list}
+        for j, src in enumerate(self._sources):
+            u_j = float(u_vec[j])
+            if src.can_cool:
+                powers[src.room] += src.display_smooth_thermal_power(
+                    u_j, outdoor_temp, self._k_sigmoid,
+                )
+            else:
+                powers[src.room] += src.display_thermal_power(u_j, outdoor_temp)
+        return powers
+
     def heating_powers(
         self,
         u_vec: np.ndarray,
         outdoor_temp: float,
     ) -> Dict[str, float]:
-        """Convert fractions u to per-room total thermal power [W].
+        """Convert fractions u to per-room model thermal power [W].
 
-        Cooling-capable sources use the smooth asymmetric sigmoid (same as
+        Includes identified ``power_scale`` — for plots use
+        :meth:`display_heating_powers`.
+
+        Cooling-capable sources use ``smooth_thermal_power`` (same as
         ``f()``); heating-only sources use the linear ``thermal_power``.
         Negative power values represent active heat removal (cooling).
         """
@@ -1212,7 +1233,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         Solves f_T(x, u_eq, d) = 0 for the temperature block by inverting
         each source's power function exactly:
-        - Cooling-capable sources: closed-form sigmoid inverse.
+        - Cooling-capable sources: closed-form piecewise-linear inverse.
         - Heating-only sources: linear inverse.
 
         The result is clipped to each source's [u_min, u_max].
@@ -1224,9 +1245,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         Callers that build the operating-point state x_ss should set
         x_ss[n + k_filter] = u_eq[j] for each filtered source j.
 
-        This is used as the QP linearisation point so that the sigmoid's
-        local gradient matches the expected operating region, reducing model
-        mismatch during large transients.
+        This is used as the QP linearisation point so the local power slope
+        matches the expected operating region, reducing model mismatch during
+        large transients.
         """
         # Temperature tendency at zero commanded input captures net heat loss
         # (structural exchange + disturbances, no heat-source contribution).
@@ -2319,7 +2340,7 @@ class HeatingMPCController:
                     continue
                 eff_frac = float(np.clip(_x_hat[_nx_phys + k], src.u_min, src.u_max))
                 if src.can_cool:
-                    src._current_power = src.smooth_thermal_power(
+                    src._current_power = src.display_smooth_thermal_power(
                         eff_frac, outdoor_temp, self._system._k_sigmoid,
                     )
                 else:
@@ -2516,12 +2537,9 @@ class HeatingMPCController:
             )
 
             if src.can_cool:
-                # Track the smooth-sigmoid power so sensors and the EKF are
-                # consistent with the model function f().
-                p_smooth = src.smooth_thermal_power(
+                src._current_power = src.display_smooth_thermal_power(
                     eff_frac, outdoor_temp, self._system._k_sigmoid,
                 )
-                src._current_power = p_smooth
             else:
                 src.set_power(eff_frac, outdoor_temp)
 
@@ -2538,7 +2556,7 @@ class HeatingMPCController:
 
         # ── Heating schedule ─────────────────────────────────────────────
         self._heating_schedule = [
-            self._system.heating_powers(U_abs[k], outdoor_seq[k])
+            self._system.display_heating_powers(U_abs[k], outdoor_seq[k])
             for k in range(N)
         ]
 

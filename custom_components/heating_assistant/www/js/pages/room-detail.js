@@ -267,11 +267,12 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     latestForecastRoom = roomForecast;
     applyExperimentBands();
     // Keep the power gauge and chart corridor aligned with the refreshed
-    // achievable capacity whenever the MPC publishes a new forecast.
+    // rated capacity whenever the MPC publishes a new forecast.
     if (roomForecast) {
-      const gaugeMax = roomForecast.current_max_power ?? roomForecast.max_power;
+      const gaugeMax = roomForecast.current_rated_max_power ?? roomForecast.max_power;
       if (gaugeMax != null) powerBounds.max = gaugeMax;
-      const gaugeMin = roomForecast.current_max_cooling_power ?? roomForecast.max_cooling_power;
+      const gaugeMin = roomForecast.max_cooling_power
+        ?? roomForecast.current_max_cooling_power;
       if (gaugeMin != null) powerBounds.min = -gaugeMin;
       paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']));
     }
@@ -343,14 +344,11 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // forecast data is available and re-fetch via the WS endpoint.
   const lastRunTs = { value: null };
   const onChartsReady = (roomForecast, priceForecast) => {
-    // The forecast carries this room's heating/cooling capacity — use it to
-    // scale the power gauge so the bar reflects power as a fraction of capacity.
-    // "current_*" fields carry the identified-scale capacity (power_scale applied)
-    // so the gauge reads 100 % when at the limit the unit can actually deliver;
-    // fall back to the rated field when the current-capacity field is absent.
-    const gaugeMax = roomForecast?.current_max_power ?? roomForecast?.max_power;
+    // Scale the power gauge to rated heating/cooling capacity (no sysid scale).
+    const gaugeMax = roomForecast?.current_rated_max_power ?? roomForecast?.max_power;
     if (gaugeMax != null) powerBounds.max = gaugeMax;
-    const gaugeMin = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power;
+    const gaugeMin = roomForecast?.max_cooling_power
+      ?? roomForecast?.current_max_cooling_power;
     if (gaugeMin != null) powerBounds.min = -gaugeMin;
     // Same forecast block feeds the experiment-band grid alignment.
     latestForecastRoom = roomForecast || null;
@@ -726,11 +724,28 @@ function buildCapacityPoints(roomForecast, past) {
   return { heating, cooling };
 }
 
+/**
+ * Heating-side Y-axis anchor for the power chart [kW].
+ *
+ * Prefer the COP-limited rated capacity at the present outdoor temperature
+ * (``current_rated_max_power``) so full command fills the scale.  Raw
+ * ``max_power`` is the configured datasheet maximum at the rated COP point
+ * and can be much higher than what a heat pump can deliver in cold weather,
+ * which makes traces look capped around half the axis even at u = 1.
+ */
+function resolveHeatingPlotMaxKw(roomForecast) {
+  return wattsToKw(
+    roomForecast?.current_rated_max_power
+    ?? roomForecast?.max_power
+    ?? null,
+  );
+}
+
 /** Refresh the power-chart Y limits and dynamic capacity corridor after a forecast update. */
 function updatePowerChartBounds(chart, roomForecast) {
   if (!chart._chart || !roomForecast) return;
 
-  const maxPower = wattsToKw(roomForecast?.max_power ?? null);
+  const maxPower = resolveHeatingPlotMaxKw(roomForecast);
   const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
@@ -762,7 +777,7 @@ function updatePowerChartBounds(chart, roomForecast) {
 }
 
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
-  const maxPower = wattsToKw(roomForecast?.max_power ?? null);
+  const maxPower = resolveHeatingPlotMaxKw(roomForecast);
   const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
