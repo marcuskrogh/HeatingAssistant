@@ -553,7 +553,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
     constraintLowerHistory, constraintLowerForecast,
     sensorSpan,
   );
-  buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast);
+  buildPowerChart(powerChart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast, windowStart);
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
 }
 
@@ -670,7 +670,7 @@ function buildTemperatureChart(
       makeDataset('Sensor Min', sensorSpan.min, 'transparent', {
         borderWidth: 0, pointRadius: 0, tension: 0, order: 9,
       }),
-      makeDataset('Sensor Range', sensorSpan.max, 'rgba(79, 195, 247, 0.35)', {
+      makeDataset('Sensor Range', sensorSpan.max, 'transparent', {
         borderWidth: 0,
         pointRadius: 0,
         tension: 0,
@@ -691,12 +691,12 @@ function buildTemperatureChart(
  *   heating — per-step COP-limited rated heating capacity (no power_scale)
  *   cooling — per-step rated cooling capacity, negated to a negative y value
  *
- * The historical window (from `past` to the first forecast entry) is held flat
- * at the current-snapshot capacity; the forecast window uses per-step values
+ * The historical window (from `windowStart` to the first forecast entry) is held
+ * flat at the current-snapshot capacity; the forecast window uses per-step values
  * computed from the outdoor-temperature forecast so the corridor visibly moves
  * with outdoor temperature.
  */
-function buildCapacityPoints(roomForecast, past) {
+function buildCapacityPoints(roomForecast, windowStart) {
   const currentHeat = (
     roomForecast?.current_rated_max_power
     ?? roomForecast?.current_max_power
@@ -712,8 +712,8 @@ function buildCapacityPoints(roomForecast, past) {
   const heating = [];
   const cooling = [];
 
-  if (currentHeat != null) heating.push({ x: past, y: wattsToKw(currentHeat) });
-  if (currentCool != null) cooling.push({ x: past, y: -wattsToKw(currentCool) });
+  if (currentHeat != null) heating.push({ x: windowStart, y: wattsToKw(currentHeat) });
+  if (currentCool != null) cooling.push({ x: windowStart, y: -wattsToKw(currentCool) });
 
   for (const entry of (roomForecast?.forecast ?? [])) {
     const t = new Date(entry.time).getTime();
@@ -742,7 +742,7 @@ function resolveHeatingPlotMaxKw(roomForecast) {
 }
 
 /** Refresh the power-chart Y limits and dynamic capacity corridor after a forecast update. */
-function updatePowerChartBounds(chart, roomForecast) {
+function updatePowerChartBounds(chart, roomForecast, windowStart) {
   if (!chart._chart || !roomForecast) return;
 
   const maxPower = resolveHeatingPlotMaxKw(roomForecast);
@@ -764,8 +764,8 @@ function updatePowerChartBounds(chart, roomForecast) {
     chart._chart.options.scales.y.max = yMax;
   }
 
-  const past = Date.now() - 13 * 3600 * 1000;
-  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, past);
+  const historyStart = windowStart ?? chart._historyWindowStart ?? (Date.now() - 12 * 3600 * 1000);
+  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, historyStart);
 
   const heatCapIdx = ds.findIndex((d) => d.label === 'Heating Capacity');
   if (heatCapIdx >= 0) ds[heatCapIdx].data = heatingCapPts;
@@ -776,7 +776,7 @@ function updatePowerChartBounds(chart, roomForecast) {
   chart._chart.update('none');
 }
 
-function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
+function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast, windowStart) {
   const maxPower = resolveHeatingPlotMaxKw(roomForecast);
   const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
@@ -806,20 +806,17 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
     }),
   ];
 
-  // Dynamic capacity corridor: dashed lines that follow the COP-limited rated
-  // capacity as it changes with the outdoor-temperature forecast.  The bound
-  // uses configured datasheet limits (no identified power_scale) so it reflects
-  // what COP allows rather than an extra sysid correction.  The red fill extends
-  // from the line to the axis edge so the infeasible region is clearly shaded.
-  const past = Date.now() - 13 * 3600 * 1000;
-  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, past);
+  // Dynamic capacity corridor: invisible boundary datasets whose fill extends to
+  // the axis edge so infeasible regions are shaded without dashed reference lines.
+  const historyStart = windowStart ?? (Date.now() - 12 * 3600 * 1000);
+  chart._historyWindowStart = historyStart;
+  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, historyStart);
 
   if (heatingCapPts.length > 0) {
-    datasets.push(makeDataset('Heating Capacity', heatingCapPts, 'rgba(229,115,115,0.5)', {
+    datasets.push(makeDataset('Heating Capacity', heatingCapPts, 'transparent', {
       fill: 'end',
       backgroundColor: 'rgba(229,115,115,0.12)',
-      borderWidth: 1,
-      borderDash: [4, 4],
+      borderWidth: 0,
       pointRadius: 0,
       tension: 0,
       stepped: 'before',
@@ -828,11 +825,10 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
   }
   // Only shade the cooling bound when the room has cooling capacity.
   if (coolingCapPts.length > 0) {
-    datasets.push(makeDataset('Cooling Capacity', coolingCapPts, 'rgba(229,115,115,0.5)', {
+    datasets.push(makeDataset('Cooling Capacity', coolingCapPts, 'transparent', {
       fill: 'start',
       backgroundColor: 'rgba(229,115,115,0.12)',
-      borderWidth: 1,
-      borderDash: [4, 4],
+      borderWidth: 0,
       pointRadius: 0,
       tension: 0,
       stepped: 'before',
@@ -948,7 +944,9 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
         powerChart._chart.options.scales.y2.max = priceMax;
       }
 
-      updatePowerChartBounds(powerChart, forecasts.rooms?.[room.slug]);
+      const historyHours = (plotSettings && plotSettings.historyHours) || 12;
+      const historyWindowStart = Date.now() - historyHours * 3600 * 1000;
+      updatePowerChartBounds(powerChart, forecasts.rooms?.[room.slug], historyWindowStart);
     }
 
     if (disturbChart._chart) {
