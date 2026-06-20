@@ -6,8 +6,9 @@ import { createScheduleOverview } from '../components/schedule-overview.js';
 import { getRoomScheduleData } from '../schedule-utils.js';
 import { findActiveExperiment, experimentBands } from '../experiment-utils.js';
 import {
-  formatPower, formatTemperature, formatPrice,
+  formatPower, formatPowerKw, formatTemperature, formatPrice,
   entityValue, entityAttr, systemEntity,
+  wattsToKw, wattsToKwPoints,
 } from '../utils.js';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
@@ -18,6 +19,8 @@ const DEFAULT_MAX_POWER = 2000;
 const OUTDOOR_SEVERITY = { good: 5, warning: -5, alarm: -15 };
 // Per-room solar-gain gauge span [W]; typical sunlit windows land well within.
 const DEFAULT_MAX_SOLAR = 1000;
+// Compact kW axis/tooltip formatting for power plots (values already in kW).
+const POWER_KW_TICK = (v) => Number(v).toFixed(1);
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -306,7 +309,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   const powerChart = new TimeSeriesChart(powerChartEl, {
     title: 'HEATING POWER & PRICE',
-    yLabel: 'W',
+    yLabel: 'kW',
+    yTickFormat: POWER_KW_TICK,
+    yValueFormat: formatPowerKw,
     y2: true,
     y2Label: 'Price',
     height: 200,
@@ -316,7 +321,9 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     title: 'DISTURBANCES',
     yLabel: '\u00b0C',
     y2: true,
-    y2Label: 'W',
+    y2Label: 'kW',
+    y2TickFormat: POWER_KW_TICK,
+    y2ValueFormat: formatPowerKw,
     height: 200,
   });
 
@@ -707,13 +714,13 @@ function buildCapacityPoints(roomForecast, past) {
   const heating = [];
   const cooling = [];
 
-  if (currentHeat != null) heating.push({ x: past, y: currentHeat });
-  if (currentCool != null) cooling.push({ x: past, y: -currentCool });
+  if (currentHeat != null) heating.push({ x: past, y: wattsToKw(currentHeat) });
+  if (currentCool != null) cooling.push({ x: past, y: -wattsToKw(currentCool) });
 
   for (const entry of (roomForecast?.forecast ?? [])) {
     const t = new Date(entry.time).getTime();
-    if (entry.heating_capacity != null) heating.push({ x: t, y: entry.heating_capacity });
-    if (entry.cooling_capacity != null) cooling.push({ x: t, y: -entry.cooling_capacity });
+    if (entry.heating_capacity != null) heating.push({ x: t, y: wattsToKw(entry.heating_capacity) });
+    if (entry.cooling_capacity != null) cooling.push({ x: t, y: -wattsToKw(entry.cooling_capacity) });
   }
 
   return { heating, cooling };
@@ -723,8 +730,8 @@ function buildCapacityPoints(roomForecast, past) {
 function updatePowerChartBounds(chart, roomForecast) {
   if (!chart._chart || !roomForecast) return;
 
-  const maxPower = roomForecast.max_power ?? null;
-  const maxCoolingPower = roomForecast.max_cooling_power ?? null;
+  const maxPower = wattsToKw(roomForecast?.max_power ?? null);
+  const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const ds = chart._chart.data.datasets;
@@ -755,11 +762,13 @@ function updatePowerChartBounds(chart, roomForecast) {
 }
 
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
-  const maxPower = roomForecast?.max_power ?? null;
-  const maxCoolingPower = roomForecast?.max_cooling_power ?? null;
+  const maxPower = wattsToKw(roomForecast?.max_power ?? null);
+  const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
-  const allPower = [powerHistory, powerForecast];
+  const powerHistoryKw = wattsToKwPoints(powerHistory);
+  const powerForecastKw = wattsToKwPoints(powerForecast);
+  const allPower = [powerHistoryKw, powerForecastKw];
   const boundsArr = [maxPower, minPower, 0];
   const { yMin, yMax } = computeYLimits(allPower, boundsArr);
 
@@ -767,11 +776,11 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
   const { yMin: priceMin, yMax: priceMax } = computeYLimits([allPrice], [0]);
 
   const datasets = [
-    makeDataset('Measured', powerHistory, '#ffb74d', {
+    makeDataset('Measured', powerHistoryKw, '#ffb74d', {
       borderWidth: 2, stepped: 'before',
       fill: true, backgroundColor: 'rgba(255,183,77,0.08)',
     }),
-    makeDataset('Planned', powerForecast, '#ffb74d', {
+    makeDataset('Planned', powerForecastKw, '#ffb74d', {
       dashed: true, borderWidth: 2, stepped: 'before',
     }),
     makeDataset('Price', priceHistory, '#81c784', {
@@ -821,7 +830,9 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
 
 function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHistory, solarForecast) {
   const allOutdoor = [...outdoorHistory, ...outdoorForecast];
-  const allSolar = [...solarHistory, ...solarForecast];
+  const solarHistoryKw = wattsToKwPoints(solarHistory);
+  const solarForecastKw = wattsToKwPoints(solarForecast);
+  const allSolar = [...solarHistoryKw, ...solarForecastKw];
 
   const { yMin: outdoorMin, yMax: outdoorMax } = computeYLimits([allOutdoor], []);
   const { yMin: solarMin, yMax: solarMax } = computeYLimits([allSolar], [0]);
@@ -829,11 +840,11 @@ function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHist
   const datasets = [
     makeDataset('Outdoor Temp', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
     makeDataset('Outdoor Forecast', outdoorForecast, '#90a4ae', { dashed: true, borderWidth: 1.5 }),
-    makeDataset('Solar Gain', solarHistory, '#ffd54f', {
+    makeDataset('Solar Gain', solarHistoryKw, '#ffd54f', {
       borderWidth: 2, yAxisID: 'y2',
       fill: true, backgroundColor: 'rgba(255,213,79,0.08)',
     }),
-    makeDataset('Solar Forecast', solarForecast, '#ffd54f', {
+    makeDataset('Solar Forecast', solarForecastKw, '#ffd54f', {
       dashed: true, borderWidth: 1.5, yAxisID: 'y2',
     }),
   ];
@@ -891,7 +902,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
     if (powerChart._chart) {
       const ds = powerChart._chart.data.datasets;
-      if (ds[1]) ds[1].data = powerForecast;
+      if (ds[1]) ds[1].data = wattsToKwPoints(powerForecast);
 
       // Extend the measured-power history to "now" so there is no visual gap
       // between the last recorded point and the forecast start.
@@ -903,7 +914,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
           const pts = ds[measuredIdx].data;
           const now = Date.now();
           if (pts.length === 0 || pts[pts.length - 1].x < now) {
-            pts.push({ x: now, y: currentPower });
+            pts.push({ x: now, y: wattsToKw(currentPower) });
           }
         }
       }
@@ -928,7 +939,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
     if (disturbChart._chart) {
       const ds = disturbChart._chart.data.datasets;
       if (ds[1]) ds[1].data = outdoorForecast;
-      if (ds[3]) ds[3].data = solarForecast;
+      if (ds[3]) ds[3].data = wattsToKwPoints(solarForecast);
       disturbChart._chart.update('none');
     }
   });

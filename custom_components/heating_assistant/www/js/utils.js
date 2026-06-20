@@ -11,6 +11,28 @@ export function formatPower(value) {
   return num.toFixed(0) + ' W';
 }
 
+/** Format a power value already expressed in kW (one decimal place). */
+export function formatPowerKw(value) {
+  const num = parseFloat(value);
+  if (isNaN(num)) return '—';
+  return num.toFixed(1) + ' kW';
+}
+
+/** Convert chart data points from watts to kilowatts for display. */
+export function wattsToKwPoints(points) {
+  if (!points) return [];
+  return points.map((p) => (
+    p.y == null ? { ...p, y: null } : { ...p, y: p.y / 1000 }
+  ));
+}
+
+/** Convert an optional watt bound to kW for chart axis limits. */
+export function wattsToKw(value) {
+  const num = parseFloat(value);
+  if (isNaN(num)) return null;
+  return num / 1000;
+}
+
 export function formatEnergy(value) {
   const num = parseFloat(value);
   if (isNaN(num)) return '—';
