@@ -683,8 +683,8 @@ function buildTemperatureChart(
  * Build time-series points for the dynamic capacity corridor.
  *
  * Returns two arrays of {x, y} points:
- *   heating — per-step achievable heating capacity (COP-limited)
- *   cooling — per-step achievable cooling capacity, negated to a negative y value
+ *   heating — per-step COP-limited rated heating capacity (no power_scale)
+ *   cooling — per-step rated cooling capacity, negated to a negative y value
  *
  * The historical window (from `past` to the first forecast entry) is held flat
  * at the current-snapshot capacity; the forecast window uses per-step values
@@ -692,8 +692,17 @@ function buildTemperatureChart(
  * with outdoor temperature.
  */
 function buildCapacityPoints(roomForecast, past) {
-  const currentHeat = roomForecast?.current_max_power ?? roomForecast?.max_power ?? null;
-  const currentCool = roomForecast?.current_max_cooling_power ?? roomForecast?.max_cooling_power ?? null;
+  const currentHeat = (
+    roomForecast?.current_rated_max_power
+    ?? roomForecast?.current_max_power
+    ?? roomForecast?.max_power
+    ?? null
+  );
+  const currentCool = (
+    roomForecast?.max_cooling_power
+    ?? roomForecast?.current_max_cooling_power
+    ?? null
+  );
 
   const heating = [];
   const cooling = [];
@@ -773,8 +782,10 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
     }),
   ];
 
-  // Dynamic capacity corridor: dashed lines that follow the COP-limited capacity
-  // as it changes with the outdoor-temperature forecast.  The red fill extends
+  // Dynamic capacity corridor: dashed lines that follow the COP-limited rated
+  // capacity as it changes with the outdoor-temperature forecast.  The bound
+  // uses configured datasheet limits (no identified power_scale) so it reflects
+  // what COP allows rather than an extra sysid correction.  The red fill extends
   // from the line to the axis edge so the infeasible region is clearly shaded.
   const past = Date.now() - 13 * 3600 * 1000;
   const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, past);
