@@ -636,6 +636,91 @@ def _register_websocket_api(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, ws_get_forecasts)
 
+    _PREVIEW_TUNING_SCHEMA = {
+        vol.Required("type"): "heating_assistant/preview_tuning_forecast",
+        vol.Optional("plot_forecast_hours"): vol.Coerce(float),
+        vol.Optional(CONF_TRACKING_WEIGHT): vol.Coerce(float),
+        vol.Optional(CONF_ENERGY_WEIGHT): vol.Coerce(float),
+        vol.Optional(CONF_ENERGY_PRICE_WEIGHT): vol.Coerce(float),
+        vol.Optional(CONF_SMOOTHING_WEIGHT): vol.Coerce(float),
+        vol.Optional(CONF_SOFT_CONSTRAINT_WEIGHT): vol.Coerce(float),
+        vol.Optional(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT): vol.Coerce(float),
+        vol.Optional(CONF_TERMINAL_WEIGHT): vol.Coerce(float),
+        vol.Optional(CONF_HORIZON): vol.Coerce(int),
+        vol.Optional(CONF_UPDATE_INTERVAL): vol.Coerce(int),
+        vol.Optional(CONF_COMFORT_OFFSET): vol.Coerce(float),
+    }
+    _PREVIEW_TUNING_KEYS = {
+        CONF_TRACKING_WEIGHT, CONF_ENERGY_WEIGHT, CONF_ENERGY_PRICE_WEIGHT,
+        CONF_SMOOTHING_WEIGHT, CONF_SOFT_CONSTRAINT_WEIGHT,
+        CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, CONF_TERMINAL_WEIGHT,
+        CONF_HORIZON, CONF_UPDATE_INTERVAL, CONF_COMFORT_OFFSET,
+    }
+
+    @websocket_api.websocket_command(_PREVIEW_TUNING_SCHEMA)
+    @websocket_api.async_response
+    async def ws_preview_tuning_forecast(
+        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+    ) -> None:
+        """Run a one-off MPC solve with proposed tuning and return forecast plots."""
+        import math
+        from datetime import datetime, timezone
+
+        try:
+            coordinator = _get_coordinator(hass)
+            tuning = {
+                k: msg[k] for k in _PREVIEW_TUNING_KEYS if k in msg
+            }
+            plot_hours = msg.get("plot_forecast_hours")
+            plot_steps: Optional[int] = None
+            if plot_hours is not None and float(plot_hours) > 0:
+                preview_dt = float(
+                    tuning.get(CONF_UPDATE_INTERVAL, coordinator._update_interval_s)
+                )
+                plot_steps = max(
+                    1, math.ceil(float(plot_hours) * 3600.0 / preview_dt)
+                )
+
+            now = getattr(coordinator, "now_utc", None) or datetime.now(
+                tz=timezone.utc
+            )
+            cloud_cover_raw = coordinator._read_cloud_cover_now()
+            cloud_cover_now = coordinator._smooth_cloud_cover(cloud_cover_raw)
+            cloud_forecast = await coordinator._async_read_cloud_forecast(
+                cloud_cover_now=cloud_cover_now
+            )
+            wind_forecast = await coordinator._async_read_wind_forecast(
+                coordinator._read_wind_speed_now()
+            )
+            ghi_now, ghi_forecast = coordinator._read_ghi(now)
+            if cloud_cover_now is None and cloud_forecast:
+                cloud_cover_now = max(0.0, min(1.0, float(cloud_forecast[0])))
+
+            weather = {
+                "cloud_forecast": cloud_forecast,
+                "cloud_cover_now": cloud_cover_now,
+                "ghi_now": ghi_now,
+                "ghi_forecast": ghi_forecast,
+                "wind_forecast": wind_forecast,
+            }
+
+            payload = await hass.async_add_executor_job(
+                coordinator.preview_tuning_forecast,
+                tuning,
+                plot_steps,
+                weather,
+            )
+            connection.send_result(msg["id"], payload)
+        except Exception as err:
+            _LOGGER.error(
+                "Heating Assistant: preview_tuning_forecast WS failed: %s", err
+            )
+            connection.send_error(
+                msg["id"], "preview_tuning_failed", str(err)
+            )
+
+    websocket_api.async_register_command(hass, ws_preview_tuning_forecast)
+
     @websocket_api.websocket_command(
         {vol.Required("type"): "heating_assistant/get_ui_settings"}
     )

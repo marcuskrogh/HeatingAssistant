@@ -1678,6 +1678,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self,
         room_names: Optional[List[str]] = None,
         plot_forecast_steps: Optional[int] = None,
+        *,
+        predictions: Optional[list] = None,
+        linearised_predictions: Optional[list] = None,
+        heating_schedule: Optional[list] = None,
+        outdoor_forecast: Optional[List[float]] = None,
+        solar_forecast: Optional[list] = None,
+        price_forecast: Optional[List[float]] = None,
+        control_trajectory: Optional["ControlTrajectory"] = None,
+        step_dt: Optional[float] = None,
     ) -> dict:
         """Build the full forecast payload for WebSocket delivery.
 
@@ -1697,6 +1706,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
           **holding the final actuation flat** and simulating the thermal
           model forward, so the plotted trajectory continues smoothly.  The
           extended steps are flagged with ``"extended": True``.
+
+        Optional keyword overrides let :meth:`preview_tuning_forecast` build a
+        payload from a one-off MPC solve without mutating the live coordinator
+        state.
         """
         from .dashboard import slugify as _slugify
 
@@ -1704,14 +1717,29 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             room_names = self.model.room_names
 
         now = getattr(self, "now_utc", None) or datetime.now(tz=timezone.utc)
-        dt = self.dt
-        predictions = self.predictions
-        outdoor_forecast = self.outdoor_forecast
-        solar_forecast = self.solar_forecast
-        heating_schedule = self.heating_schedule
-        linearised_predictions = self.linearised_predictions
-        price_forecast = self.price_forecast or []
-        traj = getattr(self, "_control_trajectory", None)
+        dt = float(step_dt if step_dt is not None else self.dt)
+        predictions = self.predictions if predictions is None else predictions
+        outdoor_forecast = (
+            self.outdoor_forecast if outdoor_forecast is None else outdoor_forecast
+        )
+        solar_forecast = (
+            self.solar_forecast if solar_forecast is None else solar_forecast
+        )
+        heating_schedule = (
+            self.heating_schedule if heating_schedule is None else heating_schedule
+        )
+        linearised_predictions = (
+            self.linearised_predictions
+            if linearised_predictions is None
+            else linearised_predictions
+        )
+        if price_forecast is None:
+            price_forecast = self.price_forecast or []
+        traj = (
+            getattr(self, "_control_trajectory", None)
+            if control_trajectory is None
+            else control_trajectory
+        )
 
         # Resolve the requested display horizon and precompute the (house-wide)
         # forward simulation used to extend the plot beyond the MPC horizon.
@@ -2070,6 +2098,168 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             "step_seconds": dt,
             "horizon_steps": len(predictions),
         }
+
+    def preview_tuning_forecast(
+        self,
+        tuning_overrides: Dict[str, Any],
+        plot_forecast_steps: Optional[int] = None,
+        weather: Optional[Dict[str, Any]] = None,
+    ) -> dict:
+        """Run a one-off MPC solve with proposed tuning parameters.
+
+        Does not persist or apply the overrides.  Returns the same forecast
+        payload shape as :meth:`build_forecast_payload` so the dashboard can
+        render room-view plots for every room from a single solve.
+        """
+        from .controller import HeatingMPCController
+        from .ground_temp import ground_temperature
+
+        overrides = dict(tuning_overrides or {})
+        weather = dict(weather or {})
+
+        outdoor_temp = self.outdoor_temp
+        if outdoor_temp is None:
+            outdoor_temp = self._last_valid_outdoor_temp
+        if outdoor_temp is None:
+            return {"error": "outdoor_temperature_unavailable"}
+
+        preview_horizon = int(overrides.get(CONF_HORIZON, self._horizon))
+        preview_dt = float(overrides.get(CONF_UPDATE_INTERVAL, self._update_interval_s))
+        comfort_override = overrides.get(CONF_COMFORT_OFFSET)
+
+        preview_ctrl = HeatingMPCController(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=preview_horizon,
+            dt=preview_dt,
+            measurement_dt=preview_dt,
+            latitude=self._latitude,
+            longitude=self._longitude,
+            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
+            tracking_weight=float(
+                overrides.get(CONF_TRACKING_WEIGHT, self._tracking_weight)
+            ),
+            energy_weight=float(
+                overrides.get(CONF_ENERGY_WEIGHT, self._energy_weight)
+            ),
+            smoothing_weight=float(
+                overrides.get(CONF_SMOOTHING_WEIGHT, self._smoothing_weight)
+            ),
+            soft_constraint_weight=float(
+                overrides.get(
+                    CONF_SOFT_CONSTRAINT_WEIGHT, self._soft_constraint_weight
+                )
+            ),
+            soft_constraint_linear_weight=float(
+                overrides.get(
+                    CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
+                    self._soft_constraint_linear_weight,
+                )
+            ),
+            terminal_weight=float(
+                overrides.get(CONF_TERMINAL_WEIGHT, self._terminal_weight)
+            ),
+            sigma_w=self._sigma_w,
+            sigma_v=self._sigma_v,
+            sigma_b=self._sigma_b,
+            energy_price_weight=float(
+                overrides.get(CONF_ENERGY_PRICE_WEIGHT, self._energy_price_weight)
+            ),
+        )
+
+        if hasattr(self, "controller"):
+            try:
+                x_hat, P = self.controller.ekf_state
+                preview_ctrl.restore_ekf_state(x_hat, P)
+            except Exception:
+                _LOGGER.debug(
+                    "preview_tuning_forecast: could not copy EKF state",
+                    exc_info=True,
+                )
+
+        now = getattr(self, "now_utc", None) or datetime.now(tz=timezone.utc)
+        now_local = now.astimezone()
+
+        if comfort_override is not None:
+            saved_offsets = dict(self._room_comfort_offset)
+            try:
+                preview_comfort = float(comfort_override)
+                for room_name in self._room_comfort_offset:
+                    self._room_comfort_offset[room_name] = preview_comfort
+                preview_traj = self._compute_control_trajectory(
+                    now_local, preview_horizon, preview_dt
+                )
+            finally:
+                self._room_comfort_offset = saved_offsets
+        else:
+            preview_traj = self._compute_control_trajectory(
+                now_local, preview_horizon, preview_dt
+            )
+
+        disabled_src_names = {
+            src.name
+            for src in self.heat_sources
+            if not self.is_room_enabled(src.room)
+            or self.is_window_override_active(src.room)
+        }
+        experiment_clamps = (
+            self._build_experiment_clamps(now) if self._system_enabled else {}
+        )
+
+        cloud_cover_now = weather.get("cloud_cover_now")
+        cloud_forecast = weather.get("cloud_forecast")
+        ghi_now = weather.get("ghi_now")
+        ghi_forecast = weather.get("ghi_forecast")
+        wind_forecast = weather.get("wind_forecast")
+
+        if hasattr(preview_ctrl, "set_wind_speed"):
+            preview_ctrl.set_wind_speed(self._read_wind_speed_now())
+        if hasattr(preview_ctrl, "set_cloud_cover"):
+            preview_ctrl.set_cloud_cover(cloud_cover_now)
+        if hasattr(preview_ctrl, "set_ground_temp"):
+            preview_ctrl.set_ground_temp(ground_temperature(now))
+        if hasattr(preview_ctrl, "set_room_process_noise_covariance_scales"):
+            q_scale = {
+                room_name: (
+                    self._window_open_q_inflation
+                    if self.is_window_override_active(room_name)
+                    else 1.0
+                )
+                for room_name in self.model.room_names
+            }
+            preview_ctrl.set_room_process_noise_covariance_scales(q_scale)
+
+        outdoor_fc = list(self.outdoor_forecast or [])
+        price_fc = list(self.price_forecast or [])
+
+        preview_ctrl.compute(
+            outdoor_temp=outdoor_temp,
+            solar_gains=self.solar_gains,
+            now=now,
+            outdoor_forecast=outdoor_fc if outdoor_fc else None,
+            cloud_forecast=cloud_forecast,
+            cloud_cover_now=cloud_cover_now,
+            ghi_forecast=ghi_forecast,
+            ghi_now=ghi_now,
+            wind_forecast=wind_forecast,
+            disabled_sources=disabled_src_names or None,
+            control_trajectory=preview_traj,
+            price_forecast=price_fc if price_fc else None,
+            input_clamps=experiment_clamps or None,
+            run_optimization=True,
+        )
+
+        return self.build_forecast_payload(
+            plot_forecast_steps=plot_forecast_steps,
+            predictions=preview_ctrl.predictions,
+            linearised_predictions=preview_ctrl.linearised_predictions,
+            heating_schedule=preview_ctrl.heating_schedule,
+            outdoor_forecast=preview_ctrl.outdoor_forecast,
+            solar_forecast=preview_ctrl.solar_forecast,
+            price_forecast=preview_ctrl.price_forecast or price_fc,
+            control_trajectory=preview_traj,
+            step_dt=preview_dt,
+        )
 
     def reset_estimated_parameters(self) -> None:
         """Discard persisted estimation and revert the live model to the

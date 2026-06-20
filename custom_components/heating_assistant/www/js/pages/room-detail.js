@@ -957,3 +957,9 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
     }
   });
 }
+
+export {
+  buildTemperatureChart,
+  buildPowerChart,
+  buildDisturbanceChart,
+};
