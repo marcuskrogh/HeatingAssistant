@@ -726,11 +726,28 @@ function buildCapacityPoints(roomForecast, past) {
   return { heating, cooling };
 }
 
+/**
+ * Heating-side Y-axis anchor for the power chart [kW].
+ *
+ * Prefer the COP-limited rated capacity at the present outdoor temperature
+ * (``current_rated_max_power``) so full command fills the scale.  Raw
+ * ``max_power`` is the configured datasheet maximum at the rated COP point
+ * and can be much higher than what a heat pump can deliver in cold weather,
+ * which makes traces look capped around half the axis even at u = 1.
+ */
+function resolveHeatingPlotMaxKw(roomForecast) {
+  return wattsToKw(
+    roomForecast?.current_rated_max_power
+    ?? roomForecast?.max_power
+    ?? null,
+  );
+}
+
 /** Refresh the power-chart Y limits and dynamic capacity corridor after a forecast update. */
 function updatePowerChartBounds(chart, roomForecast) {
   if (!chart._chart || !roomForecast) return;
 
-  const maxPower = wattsToKw(roomForecast?.max_power ?? null);
+  const maxPower = resolveHeatingPlotMaxKw(roomForecast);
   const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
@@ -762,7 +779,7 @@ function updatePowerChartBounds(chart, roomForecast) {
 }
 
 function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast) {
-  const maxPower = wattsToKw(roomForecast?.max_power ?? null);
+  const maxPower = resolveHeatingPlotMaxKw(roomForecast);
   const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 

@@ -139,10 +139,8 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
     thermal power depends on the outdoor temperature through the COP.
 
     For cooling-capable heat pumps, the thermal contribution is computed via
-    a smooth, asymmetric sigmoid (see ``HeatPump.smooth_thermal_power``) that
-    maps u ∈ [−1, 1] continuously to the range [−Q_cool_max, +Q_heat_max].
-    This eliminates the non-differentiable kink at u = 0 that a piecewise
-    model would produce, giving the NLP optimiser smooth gradients.
+    the piecewise-linear map in ``HeatPump.smooth_thermal_power`` that
+    delivers Q_heat·u (u ≥ 0) and Q_cool·u (u < 0).
 
     Parameters
     ----------
@@ -553,9 +551,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         Heat-source dispatch:
 
-        * **Cooling-capable** (``src.can_cool``): smooth asymmetric
-          shifted-logistic sigmoid mapping u ∈ [−1, 1] → [−Q_cool_max,
-          +Q_heat_max].  C∞ everywhere for gradient-friendly NLP solves.
+        * **Cooling-capable** (``src.can_cool``): piecewise-linear map
+          u ∈ [−1, 1] → [−Q_cool_max, +Q_heat_max] via
+          ``smooth_thermal_power``.
         * **Heating-only**: linear ``thermal_power(max(0, u), T_out)``.
 
         Parameter vector ``p`` (or ``self._theta`` when ``p`` is empty)
@@ -889,10 +887,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         (u ≥ 0 is guaranteed by the box constraint u_min = 0, so
         max(0, u·scale) is differentiable everywhere in the feasible region.)
 
-        For **cooling-capable** (heat-pump) sources the derivative of the
-        smooth sigmoid is::
-
-            ∂f[target] / ∂u_j = (Q_heat + Q_cool) · k · σ(1−σ) · scale_j / C_cap[target]
+        For **cooling-capable** (heat-pump) sources the derivative follows the
+        piecewise-linear power curve (with a small blend around u = 0 to avoid
+        a discontinuous Jacobian when the equilibrium input crosses zero)::
 
         For **filtered** sources (emitter lag τ > 0)::
 
@@ -1186,7 +1183,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
     ) -> Dict[str, float]:
         """Convert fractions u to per-room total thermal power [W].
 
-        Cooling-capable sources use the smooth asymmetric sigmoid (same as
+        Cooling-capable sources use ``smooth_thermal_power`` (same as
         ``f()``); heating-only sources use the linear ``thermal_power``.
         Negative power values represent active heat removal (cooling).
         """
@@ -1212,7 +1209,7 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         Solves f_T(x, u_eq, d) = 0 for the temperature block by inverting
         each source's power function exactly:
-        - Cooling-capable sources: closed-form sigmoid inverse.
+        - Cooling-capable sources: closed-form piecewise-linear inverse.
         - Heating-only sources: linear inverse.
 
         The result is clipped to each source's [u_min, u_max].
@@ -1224,9 +1221,9 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
         Callers that build the operating-point state x_ss should set
         x_ss[n + k_filter] = u_eq[j] for each filtered source j.
 
-        This is used as the QP linearisation point so that the sigmoid's
-        local gradient matches the expected operating region, reducing model
-        mismatch during large transients.
+        This is used as the QP linearisation point so the local power slope
+        matches the expected operating region, reducing model mismatch during
+        large transients.
         """
         # Temperature tendency at zero commanded input captures net heat loss
         # (structural exchange + disturbances, no heat-source contribution).
@@ -2516,7 +2513,7 @@ class HeatingMPCController:
             )
 
             if src.can_cool:
-                # Track the smooth-sigmoid power so sensors and the EKF are
+                # Track smooth_thermal_power so sensors and the EKF are
                 # consistent with the model function f().
                 p_smooth = src.smooth_thermal_power(
                     eff_frac, outdoor_temp, self._system._k_sigmoid,

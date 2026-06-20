@@ -1774,10 +1774,21 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             room_sources = self.sources_for_room(room_name)
             outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
 
+            def _rated_heat_cap(src: Any, t_out: float) -> float:
+                fn = getattr(src, "rated_heating_capacity", None)
+                if callable(fn):
+                    return float(fn(t_out))
+                if hasattr(src, "thermal_power"):
+                    return float(src.thermal_power(1.0, t_out))
+                return float(getattr(src, "max_power", 0.0) or 0.0)
+
+            def _delivered_heat_cap(src: Any, t_out: float) -> float:
+                if hasattr(src, "thermal_power"):
+                    return float(src.thermal_power(1.0, t_out))
+                return _rated_heat_cap(src, t_out)
+
             def _heat_cap(t_out: float, _src=room_sources) -> float:
-                return round(
-                    sum(s.rated_heating_capacity(t_out) for s in _src), 1,
-                )
+                return round(sum(_rated_heat_cap(s, t_out) for s in _src), 1)
 
             def _cool_cap(t_out: float, _src=room_sources) -> float:
                 return round(sum(
@@ -1950,17 +1961,22 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #   power_scale) so the bound reflects what COP allows rather than an
             #   extra sysid scale factor.  current_max_power / current_max_cooling_power
             #   still carry the identified-scale achievable limits for the gauge.
-            # Rated capacity — used for the power-chart Y-axis corridor so the
-            # plot scale matches the configured heater bounds regardless of the
-            # current outdoor temperature.
+            # Rated capacity — configured datasheet maximum at the rated COP
+            # point (independent of current outdoor temperature).
             max_power = sum(s.max_power for s in room_sources)
             # Current capacity at the present outdoor temperature — used for the
             # power gauge so the bar reads 100 % when the heater is at the limit
             # it can actually deliver right now (a heat pump's output drops at
             # cold outdoor temps because COP falls with the temperature delta).
-            current_max_power = sum(s.thermal_power(1.0, outdoor_now) for s in room_sources)
+            current_max_power = sum(
+                _delivered_heat_cap(s, outdoor_now) for s in room_sources
+            )
+            # COP-limited rated capacity at the present outdoor temperature (no
+            # power_scale).  The room power chart Y-axis anchors here so full
+            # command fills the scale; ``max_power`` alone can be much higher
+            # in cold weather and makes traces look capped around half the axis.
             current_rated_max_power = sum(
-                s.rated_heating_capacity(outdoor_now) for s in room_sources
+                _rated_heat_cap(s, outdoor_now) for s in room_sources
             )
             # Rated cooling capacity (without power_scale) — used for the plot
             # Y-axis bound so it matches the configured values just like

@@ -772,30 +772,20 @@ class HeatPump(HeatSource):
         self, u: float, outdoor_temp: float, k_base: float = 5.0,
     ) -> float:
         """
-        Smooth, asymmetric sigmoid mapping of the MPC control input
-        *u* ∈ [−1, 1] to instantaneous thermal power [W].
+        Piecewise-linear mapping of the MPC control input *u* ∈ [−1, 1] to
+        instantaneous thermal power [W].
 
-        The function is the unique shifted logistic that satisfies:
+        * φ(u) = Q_heat · u  for u ≥ 0  (heating)
+        * φ(u) = Q_cool · u  for u < 0  (cooling; Q_cool > 0 ⇒ negative power)
 
-        * φ(0) = 0  (zero control → zero power)
-        * φ(u) → +Q_heat  as u → +1  (positive control → heating)
-        * φ(u) → −Q_cool  as u → −1  (negative control → cooling)
+        with φ(0) = 0, φ(+1) = +Q_heat, and φ(−1) = −Q_cool where::
 
-        Concretely::
+            Q_heat = thermal_power(1, T_out)   # COP-limited heating capacity [W]
+            Q_cool = |cooling_power(T_out)|    # rated cooling capacity [W]
 
-            Q_heat = thermal_power(1, T_out)       # max heating capacity [W]
-            Q_cool = |cooling_power(T_out)|        # max cooling capacity [W]
-            offset = ln(Q_cool / Q_heat)           # ensures φ(0) = 0
-            k      = k_base + max(0, ln(Q_heat / Q_cool))
-                    # adaptive sharpness: guarantees ≥ σ(k_base) saturation
-                    # (≈ 99 % for k_base = 5) at u = ±1
-            φ(u)   = (Q_heat + Q_cool) · σ(k · u + offset) − Q_cool
-
-        where σ is the standard logistic sigmoid.
-
-        The function is smooth (C∞) everywhere and has continuous gradients
-        that the L-BFGS-B optimiser can exploit without needing to handle
-        a non-differentiable kink at u = 0.
+        ``k_base`` is retained for API compatibility but no longer shapes the
+        curve (the previous logistic sigmoid under-predicted delivery when the
+        linearised MPC turned the compressor down).
 
         Parameters
         ----------
@@ -804,10 +794,7 @@ class HeatPump(HeatSource):
         outdoor_temp : float
             Current outdoor temperature [°C] for COP calculation.
         k_base : float, optional
-            Base sharpness parameter.  The effective sharpness is automatically
-            increased to compensate for asymmetric heating/cooling capacities so
-            that both extremes saturate to ≥ σ(k_base) of their capacity within
-            u ∈ [−1, 1].  Default is 5.0.
+            Unused; kept for backward compatibility.  Default is 5.0.
 
         Returns
         -------
