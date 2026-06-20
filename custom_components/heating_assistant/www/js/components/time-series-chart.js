@@ -228,7 +228,36 @@ export class TimeSeriesChart {
       if (dynamicLimits.xMax !== undefined) opts.scales.x.max = dynamicLimits.xMax;
     }
 
+    this._applyAxisFormatting(opts);
+
     return opts;
+  }
+
+  /** Apply optional per-axis tick and tooltip value formatters from config. */
+  _applyAxisFormatting(opts) {
+    if (this._config.yTickFormat) {
+      opts.scales.y.ticks.callback = (value) => this._config.yTickFormat(value);
+    }
+    if (this._config.y2 && this._config.y2TickFormat) {
+      opts.scales.y2.ticks.callback = (value) => this._config.y2TickFormat(value);
+    }
+
+    const yValueFormat = this._config.yValueFormat;
+    const y2ValueFormat = this._config.y2ValueFormat;
+    if (!yValueFormat && !y2ValueFormat) return;
+
+    const existing = opts.plugins.tooltip.callbacks || {};
+    opts.plugins.tooltip.callbacks = {
+      ...existing,
+      label: (context) => {
+        const val = context.parsed.y;
+        if (val == null) return context.dataset.label;
+        const axisId = context.dataset.yAxisID || 'y';
+        const fmt = axisId === 'y2' ? y2ValueFormat : yValueFormat;
+        if (fmt) return `${context.dataset.label}: ${fmt(val)}`;
+        return `${context.dataset.label}: ${val}`;
+      },
+    };
   }
 }
 
