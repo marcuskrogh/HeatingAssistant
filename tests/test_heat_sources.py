@@ -534,6 +534,39 @@ class TestHeatPump:
         power = hp.thermal_power(1.0, outdoor_temp=7.0)
         assert power == pytest.approx(6000.0, rel=0.02)
 
+    def test_rated_heating_capacity_ignores_power_scale(self):
+        """Plot bounds must reflect datasheet COP limits, not sysid power_scale."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0, power_scale=0.6,
+        )
+        rated = hp.rated_heating_capacity(outdoor_temp=7.0)
+        scaled = hp.thermal_power(1.0, outdoor_temp=7.0)
+        assert rated == pytest.approx(6000.0, rel=0.02)
+        assert scaled == pytest.approx(0.6 * rated, rel=0.02)
+
+    def test_rated_heating_capacity_follows_outdoor_cop(self):
+        """Rated capacity must rise with outdoor temperature via COP."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=6000.0,
+            cop_rated=3.5, cop_temp_ref=7.0,
+        )
+        cold = hp.rated_heating_capacity(outdoor_temp=-10.0)
+        mild = hp.rated_heating_capacity(outdoor_temp=7.0)
+        warm = hp.rated_heating_capacity(outdoor_temp=15.0)
+        assert cold < mild <= warm
+        assert mild == pytest.approx(6000.0, rel=0.02)
+
+    def test_rated_heating_capacity_matches_thermal_power_at_unit_scale(self):
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000.0,
+            cop_rated=3.5, cop_temp_ref=7.0, power_scale=1.0,
+        )
+        for t_out in (-5.0, 0.0, 7.0, 12.0):
+            assert hp.rated_heating_capacity(t_out) == pytest.approx(
+                hp.thermal_power(1.0, t_out), rel=1e-6,
+            )
+
     # -- _soft_ceiling unit tests ------------------------------------------
 
     def test_soft_ceiling_below_cap_is_identity(self):

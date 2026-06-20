@@ -141,6 +141,17 @@ class HeatSource(ABC):
         float : thermal power output [W].
         """
 
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        """Rated heating capacity [W] at ``u = 1`` without identified ``power_scale``.
+
+        Mirrors :meth:`rated_cooling_power` on the heating side: reflects the
+        configured datasheet capacity (including outdoor-temperature-dependent
+        COP for heat pumps) rather than the runtime ``power_scale`` correction
+        identified by sysid.  Use this for plot actuation bounds; use
+        :meth:`thermal_power` for model/MPC delivery and the power gauge.
+        """
+        return self.max_power
+
     def set_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """
         Apply a control set-point, update internal state, and return the
@@ -254,6 +265,9 @@ class ElectricHeater(HeatSource):
         """Thermal power = electrical power × efficiency × power_scale."""
         return self._gain * setpoint_fraction
 
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        return self.max_power * self.efficiency
+
     @property
     def elec_per_unit_heat(self) -> float:
         return self.max_power * self.efficiency * self.power_scale
@@ -306,6 +320,9 @@ class GenericThermostat(HeatSource):
 
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         return self._gain * setpoint_fraction
+
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        return self.max_power
 
     @property
     def elec_per_unit_heat(self) -> float:
@@ -361,6 +378,9 @@ class GasHeater(HeatSource):
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """Thermal power = gas input × combustion efficiency × power_scale."""
         return self._gain * setpoint_fraction
+
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        return self.max_power * self.efficiency
 
     @property
     def elec_per_unit_heat(self) -> float:
@@ -423,6 +443,9 @@ class HydronicRadiator(HeatSource):
     def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
         """Thermal power = EN 442 rated output × power_scale × u."""
         return self._gain * setpoint_fraction
+
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        return self.max_power
 
     @property
     def elec_per_unit_heat(self) -> float:
@@ -560,6 +583,14 @@ class HeatPump(HeatSource):
         self._q_heat_max: float = (
             self.max_power * self.heating_efficiency * self._power_scale
         )
+        # Rated-capacity caches (no power_scale) for plot bounds — mirrors
+        # ``rated_cooling_power`` on the heating side.
+        self._q_heat_base_rated: float = (
+            self._electric_max * self.heating_efficiency
+        )
+        self._q_heat_max_rated: float = (
+            self.max_power * self.heating_efficiency
+        )
 
     @property
     def can_cool(self) -> bool:
@@ -609,6 +640,19 @@ class HeatPump(HeatSource):
         cop_now = max(1.0, self._cop_scale * _T_SUPPLY_K / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0))
         power = _soft_ceiling(self._q_heat_base * cop_now, self._q_heat_max) * setpoint_fraction
         return power
+
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        """COP-limited rated heating capacity at ``u = 1`` without ``power_scale``."""
+        if outdoor_temp < self.min_outdoor_temp:
+            return 0.0
+        cop_now = max(
+            1.0,
+            self._cop_scale * _T_SUPPLY_K
+            / max(_T_SUPPLY_K - outdoor_temp - 273.15, 1.0),
+        )
+        return _soft_ceiling(
+            self._q_heat_base_rated * cop_now, self._q_heat_max_rated,
+        )
 
     def cooling_power(self, outdoor_temp: float = 0.0) -> float:
         """

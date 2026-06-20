@@ -1775,13 +1775,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
 
             def _heat_cap(t_out: float, _src=room_sources) -> float:
-                return round(sum(s.thermal_power(1.0, t_out) for s in _src), 1)
+                return round(
+                    sum(s.rated_heating_capacity(t_out) for s in _src), 1,
+                )
 
             def _cool_cap(t_out: float, _src=room_sources) -> float:
                 return round(sum(
-                    -s.cooling_power(t_out)
+                    s.rated_cooling_power
                     for s in _src
-                    if getattr(s, "can_cool", False) and hasattr(s, "cooling_power")
+                    if getattr(s, "can_cool", False)
+                    and hasattr(s, "rated_cooling_power")
                 ), 1)
 
             current_heating = sum(
@@ -1942,7 +1945,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             #   bar reads 100 % at the limit the unit can currently deliver.
             # Per-step heating_capacity / cooling_capacity in each forecast entry
             #   let the frontend draw a dynamic corridor that moves with the outdoor
-            #   temperature forecast.
+            #   temperature forecast.  These use rated_heating_capacity /
+            #   rated_cooling_power (configured datasheet limits, no identified
+            #   power_scale) so the bound reflects what COP allows rather than an
+            #   extra sysid scale factor.  current_max_power / current_max_cooling_power
+            #   still carry the identified-scale achievable limits for the gauge.
             # Rated capacity — used for the power-chart Y-axis corridor so the
             # plot scale matches the configured heater bounds regardless of the
             # current outdoor temperature.
@@ -1952,6 +1959,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # it can actually deliver right now (a heat pump's output drops at
             # cold outdoor temps because COP falls with the temperature delta).
             current_max_power = sum(s.thermal_power(1.0, outdoor_now) for s in room_sources)
+            current_rated_max_power = sum(
+                s.rated_heating_capacity(outdoor_now) for s in room_sources
+            )
             # Rated cooling capacity (without power_scale) — used for the plot
             # Y-axis bound so it matches the configured values just like
             # max_power does for heating.
@@ -1980,6 +1990,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 "horizon_minutes": round(len(predictions) * dt / 60, 1),
                 "max_power": max_power if max_power > 0 else None,
                 "current_max_power": current_max_power if current_max_power > 0 else None,
+                "current_rated_max_power": (
+                    current_rated_max_power if current_rated_max_power > 0 else None
+                ),
                 "max_cooling_power": max_cooling_power if max_cooling_power > 0 else None,
                 "current_max_cooling_power": current_max_cooling_power if current_max_cooling_power > 0 else None,
             }
