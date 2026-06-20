@@ -101,6 +101,25 @@ export class HaConnection {
     }
   }
 
+  // Run a one-off MPC solve with proposed tuning parameters (not applied).
+  // Returns the same forecast payload shape as getForecasts, or null on failure.
+  async previewTuningForecast(tuningParams, plotForecastHours) {
+    try {
+      const msg = {
+        type: 'heating_assistant/preview_tuning_forecast',
+        ...tuningParams,
+      };
+      if (plotForecastHours != null && Number(plotForecastHours) > 0) {
+        msg.plot_forecast_hours = Number(plotForecastHours);
+      }
+      const result = await this._hass.callWS(msg);
+      return result || null;
+    } catch (e) {
+      console.warn('Failed to preview tuning forecast via WebSocket:', e);
+      return null;
+    }
+  }
+
   // Lightweight fetch of just the dashboard display settings (plot windows).
   // Returns null on failure so callers can fall back to their own defaults.
   async getUiSettings() {
