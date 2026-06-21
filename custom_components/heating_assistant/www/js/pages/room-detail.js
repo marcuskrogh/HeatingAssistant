@@ -771,8 +771,8 @@ function updatePowerChartBounds(chart, roomForecast, windowStart) {
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const ds = chart._chart.data.datasets;
-  const measuredIdx = ds.findIndex((d) => d.label === 'Measured');
-  const plannedIdx = ds.findIndex((d) => d.label === 'Planned');
+  const measuredIdx = ds.findIndex((d) => d.label === 'Measured Power');
+  const plannedIdx = ds.findIndex((d) => d.label === 'Planned Power');
   const powerSeries = [
     measuredIdx >= 0 ? ds[measuredIdx].data : [],
     plannedIdx >= 0 ? ds[plannedIdx].data : [],
@@ -818,14 +818,14 @@ function buildPowerChart(
   const datasets = [];
   if (!forecastOnly) {
     datasets.push(
-      makeDataset('Measured', powerHistoryKw, '#ffb74d', {
+      makeDataset('Measured Power', powerHistoryKw, '#ffb74d', {
         borderWidth: 2, stepped: 'before',
         fill: true, backgroundColor: 'rgba(255,183,77,0.08)',
       }),
     );
   }
   datasets.push(
-    makeDataset('Planned', powerForecastKw, '#ffb74d', {
+    makeDataset('Planned Power', powerForecastKw, '#ffb74d', {
       dashed: !forecastOnly, borderWidth: 2, stepped: 'before',
       ...(forecastOnly ? { fill: true, backgroundColor: 'rgba(255,183,77,0.08)' } : {}),
     }),
@@ -894,11 +894,11 @@ function buildDisturbanceChart(
   const datasets = [];
   if (!forecastOnly) {
     datasets.push(
-      makeDataset('Outdoor Temp', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
+      makeDataset('Outdoor Temperature', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
     );
   }
   datasets.push(
-    makeDataset(forecastOnly ? 'Outdoor Temp' : 'Outdoor Forecast', outdoorForecast, '#90a4ae', {
+    makeDataset(forecastOnly ? 'Outdoor Temperature' : 'Outdoor Forecast', outdoorForecast, '#90a4ae', {
       dashed: !forecastOnly, borderWidth: 2,
     }),
   );
@@ -911,7 +911,7 @@ function buildDisturbanceChart(
     );
   }
   datasets.push(
-    makeDataset('Solar Gain', solarForecastKw, '#ffd54f', {
+    makeDataset(forecastOnly ? 'Solar Gain' : 'Solar Gain Forecast', solarForecastKw, '#ffd54f', {
       dashed: !forecastOnly, borderWidth: 2, yAxisID: 'y2',
       ...(forecastOnly ? { fill: true, backgroundColor: 'rgba(255,213,79,0.08)' } : {}),
     }),
@@ -974,7 +974,7 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
 
       // Extend the measured-power history to "now" so there is no visual gap
       // between the last recorded point and the forecast start.
-      const measuredIdx = ds.findIndex((d) => d.label === 'Measured');
+      const measuredIdx = ds.findIndex((d) => d.label === 'Measured Power');
       if (measuredIdx >= 0) {
         const powerEntity = room.entities['heating_power_measured'];
         const currentPower = entityValue(state, powerEntity);

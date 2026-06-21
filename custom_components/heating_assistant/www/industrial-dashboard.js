@@ -177,9 +177,9 @@ class HaIndustrialPanel extends HTMLElement {
         <nav class="panel-nav" id="panel-nav">
           <div class="panel-nav__links" id="nav-links">
             <a class="panel-nav__link" href="#overview">OVERVIEW</a>
-            <a class="panel-nav__link" href="#identification">IDENTIFICATION</a>
             <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
             <a class="panel-nav__link" href="#tuning">TUNING</a>
+            <a class="panel-nav__link" href="#identification">SYSTEM IDENTIFICATION</a>
             <a class="panel-nav__link" href="#config">CONFIGURATION</a>
           </div>
           <div class="panel-nav__brand">

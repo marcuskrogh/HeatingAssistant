@@ -3,6 +3,7 @@ export const SHADING_DATASET_LABELS = new Set([
   'Constraint Upper',
   'Constraint Lower',
   'Sensor Min',
+  'Sensor Range',
   'Heating Capacity',
   'Cooling Capacity',
 ]);

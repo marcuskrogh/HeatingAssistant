@@ -129,6 +129,47 @@ export function signalLabel(type) {
   return ({ prbs: 'PRBS', step: 'STEP', pulse: 'PULSE' }[type] || (type || '—').toUpperCase());
 }
 
+/** Compact overview window label for experiment rows, e.g. "Jun 21 23:00". */
+export function fmtExperimentOverviewWindow(exp) {
+  if (!exp?.start_ts) return '—';
+  const d = new Date(exp.start_ts * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Status badge metadata for experiment summary rows. */
+export function experimentStatusInfo(status) {
+  return ({
+    scheduled: { label: 'UPCOMING', cls: 'exp-status-badge--scheduled' },
+    running: { label: 'RUNNING', cls: 'exp-status-badge--running' },
+    completed: { label: 'COMPLETED', cls: 'exp-status-badge--completed' },
+    cancelled: { label: 'CANCELLED', cls: 'exp-status-badge--cancelled' },
+  }[status] || { label: (status || '—').toUpperCase(), cls: 'exp-status-badge--completed' });
+}
+
+/** Earliest scheduled experiment that has not started yet. */
+export function findNextScheduledExperiment(experiments) {
+  const nowS = Date.now() / 1000;
+  const upcoming = (experiments || []).filter(
+    (e) => e.status === 'scheduled' && (e.start_ts ?? 0) > nowS,
+  );
+  if (!upcoming.length) return null;
+  return upcoming.reduce((earliest, e) => ((e.start_ts ?? 0) < (earliest.start_ts ?? 0) ? e : earliest));
+}
+
+/** HTML for a single experiment summary row (shared sched-row styling). */
+export function experimentRowHtml(exp, { isActive = false, isNext = false } = {}) {
+  const { label, cls } = experimentStatusInfo(exp.status);
+  const window = fmtExperimentOverviewWindow(exp);
+  return `<div class="sched-row${isActive ? ' sched-row--active' : ''}${isNext ? ' sched-row--next' : ''}">
+    ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
+    ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
+    <span class="exp-status-badge ${cls}">${label}</span>
+    <span class="sched-row__name">${exp.name || 'Experiment'}</span>
+    <span class="sched-row__time">${window}</span>
+  </div>`;
+}
+
 /** Compact "time left" phrasing for the progress readout (uppercase, on-brand). */
 export function formatRemaining(seconds) {
   if (seconds == null || !isFinite(seconds) || seconds <= 0) return 'FINISHING';

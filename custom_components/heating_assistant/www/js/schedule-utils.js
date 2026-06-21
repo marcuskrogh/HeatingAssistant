@@ -65,3 +65,27 @@ export function periodModeDisplay(p) {
   if (p.setpoint != null) return { text: `${p.setpoint}°C`, cls: 'sched-row__mode--comfort' };
   return { text: 'COMFORT', cls: 'sched-row__mode--comfort' };
 }
+
+/** ENABLED/DISABLED badge for schedule sections. */
+export function scheduleEnabledBadgeHtml(enabled) {
+  const on = enabled ?? true;
+  return `<span class="sched-index-card__badge ${on ? 'sched-index-card__badge--on' : 'sched-index-card__badge--off'}">${on ? 'ENABLED' : 'DISABLED'}</span>`;
+}
+
+/** HTML for a single comfort-period summary row (shared across schedule surfaces). */
+export function periodRowHtml(p, isActive, isNext) {
+  return `<div class="sched-row${isActive ? ' sched-row--active' : ''}${isNext ? ' sched-row--next' : ''}">
+    ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
+    ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
+    <span class="sched-row__name">${p.name || 'Period'}</span>
+    <span class="sched-row__time">${p.start}–${p.end}</span>
+  </div>`;
+}
+
+/** Section header used for comfort/experiment blocks inside schedule cards. */
+export function scheduleSectionHeaderHtml(title, badgeHtml = '') {
+  return `<div class="sched-section__header">
+    <span class="sched-section__title">${title}</span>
+    ${badgeHtml}
+  </div>`;
+}
