@@ -775,6 +775,122 @@ class TestScaledIdleOffsetNonHP:
         assert calls[1].args[2]["temperature"] == pytest.approx(21.0)
 
 
+async def _run_reapply(heat_sources, actions, entity_states, room_setpoints,
+                       room_temperatures=None, room_enabled=None):
+    """Directly exercise ``_reapply_climate_setpoints`` (the fast-cadence path)."""
+    from custom_components.heating_assistant.coordinator import (
+        HeatingAssistantCoordinator,
+    )
+
+    hass = _make_fake_hass(entity_states)
+
+    coord = object.__new__(HeatingAssistantCoordinator)
+    coord.hass = hass
+    coord.heat_sources = heat_sources
+    coord.actions = actions
+
+    model_rooms = {}
+    for name, sp in room_setpoints.items():
+        room = MagicMock()
+        room.setpoint = sp
+        room.temperature = (room_temperatures or {}).get(name, 20.0)
+        model_rooms[name] = room
+    model = MagicMock()
+    model.rooms = model_rooms
+    coord.model = model
+
+    coord._system_enabled = True
+    coord._room_enabled = {name: True for name in room_setpoints}
+    if room_enabled:
+        coord._room_enabled.update(room_enabled)
+    coord._schedule_disabled = {name: False for name in room_setpoints}
+    coord._window_state = {name: "closed" for name in room_setpoints}
+
+    await coord._reapply_climate_setpoints(outdoor_temp=5.0)
+    return hass, coord
+
+
+class TestReapplyClimateSetpoints:
+    """Fast-cadence setpoint re-application holds the (target − internal) gap."""
+
+    @pytest.mark.asyncio
+    async def test_hp_reapply_tracks_internal_temp(self):
+        """Re-applying with a higher internal temp raises the target by the same
+        amount, so the commanded gap (and HP modulating power) is unchanged."""
+        hp = HeatPump(
+            "hp1", "living_room", max_power=5000, delta_sat=3.0,
+            hvac_mode="heat", heater_entity="climate.hp",
+        )
+        hass1, _ = await _run_reapply(
+            [hp], {"hp1": 0.6},
+            {"climate.hp": {"state": "heat",
+                            "attributes": {"current_temperature": 21.0}}},
+            {"living_room": 25.0},
+        )
+        calls1 = hass1.services.async_call.call_args_list
+        # Fast path re-issues only set_temperature (mode set by the full tick).
+        assert len(calls1) == 1
+        assert calls1[0].args[:2] == ("climate", "set_temperature")
+        t1 = calls1[0].args[2]["temperature"]
+        assert t1 == pytest.approx(hp.target_temperature(0.6, 21.0))
+
+        hass2, _ = await _run_reapply(
+            [hp], {"hp1": 0.6},
+            {"climate.hp": {"state": "heat",
+                            "attributes": {"current_temperature": 22.0}}},
+            {"living_room": 25.0},
+        )
+        t2 = hass2.services.async_call.call_args_list[0].args[2]["temperature"]
+        assert t2 == pytest.approx(hp.target_temperature(0.6, 22.0))
+        # Gap held constant as the internal temperature rose 1 °C.
+        assert (t2 - 22.0) == pytest.approx(t1 - 21.0)
+
+    @pytest.mark.asyncio
+    async def test_thermostat_reapply_tracks_internal_temp(self):
+        """Non-HP climate heating target re-anchors to the unit's internal temp."""
+        heater = ElectricHeater(
+            "e1", "bedroom", max_power=2000, heater_entity="climate.h",
+        )
+        hass, _ = await _run_reapply(
+            [heater], {"e1": 0.7},
+            {"climate.h": {"state": "heat",
+                           "attributes": {"current_temperature": 20.0}}},
+            {"bedroom": 21.0}, room_temperatures={"bedroom": 20.0},
+        )
+        calls = hass.services.async_call.call_args_list
+        assert len(calls) == 1
+        assert calls[0].args[:2] == ("climate", "set_temperature")
+        # max(21.0, 20.0 + 0.7 * 5.0) = 23.5
+        assert calls[0].args[2]["temperature"] == pytest.approx(23.5)
+
+    @pytest.mark.asyncio
+    async def test_reapply_skips_number_and_switch(self):
+        """Direct power/duty units are already constant-power; not re-anchored."""
+        h1 = ElectricHeater("e1", "k", max_power=2000, heater_entity="number.p")
+        h2 = ElectricHeater("e2", "k2", max_power=2000, heater_entity="switch.s")
+        hass, _ = await _run_reapply(
+            [h1, h2], {"e1": 0.5, "e2": 0.9},
+            {"number.p": "50", "switch.s": "on"},
+            {"k": 21.0, "k2": 21.0},
+        )
+        hass.services.async_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reapply_skips_disabled_room(self):
+        """A disabled room is held off by the full tick; the fast path skips it."""
+        hp = HeatPump(
+            "hp1", "lr", max_power=5000, delta_sat=3.0,
+            hvac_mode="heat", heater_entity="climate.hp",
+        )
+        hass, _ = await _run_reapply(
+            [hp], {"hp1": 0.6},
+            {"climate.hp": {"state": "heat",
+                            "attributes": {"current_temperature": 21.0}}},
+            {"lr": 25.0}, room_enabled={"lr": False},
+        )
+        hass.services.async_call.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Tests: delivered-power read-back (system stopped)
 # ---------------------------------------------------------------------------
