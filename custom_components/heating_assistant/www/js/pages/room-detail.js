@@ -603,41 +603,60 @@ function buildTemperatureChart(
   constraintUpperHistory, constraintUpperForecast,
   constraintLowerHistory, constraintLowerForecast,
   sensorSpan,
+  options = {},
 ) {
-  const combinedSetpoint = [...setpointHistory, ...setpointForecast];
-  const combinedUpper = [...constraintUpperHistory, ...constraintUpperForecast];
-  const combinedLower = [...constraintLowerHistory, ...constraintLowerForecast];
+  const forecastOnly = options.forecastOnly === true;
+  const combinedSetpoint = forecastOnly
+    ? setpointForecast
+    : [...setpointHistory, ...setpointForecast];
+  const combinedUpper = forecastOnly
+    ? constraintUpperForecast
+    : [...constraintUpperHistory, ...constraintUpperForecast];
+  const combinedLower = forecastOnly
+    ? constraintLowerForecast
+    : [...constraintLowerHistory, ...constraintLowerForecast];
 
   const spanPts = sensorSpan ? [sensorSpan.min, sensorSpan.max] : [];
-  const allData = [
-    filteredHistory, measuredHistory,
-    combinedSetpoint, forecastNonlinear, forecastLinearised,
-    combinedUpper, combinedLower,
-    ...spanPts,
-  ];
+  const allData = forecastOnly
+    ? [combinedSetpoint, forecastNonlinear, forecastLinearised, combinedUpper, combinedLower]
+    : [
+      filteredHistory, measuredHistory,
+      combinedSetpoint, forecastNonlinear, forecastLinearised,
+      combinedUpper, combinedLower,
+      ...spanPts,
+    ];
   const { yMin, yMax } = computeYLimits(allData, []);
 
-  const datasets = [
-    makeDataset('Filtered', filteredHistory, '#4fc3f7', { borderWidth: 2 }),
-    makeDataset('Measured', measuredHistory, '#e57373', {
-      borderWidth: 0, pointRadius: 3, pointHoverRadius: 5,
-      pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
-      showLine: false,
+  const datasets = [];
+  if (!forecastOnly) {
+    datasets.push(
+      makeDataset('Filtered', filteredHistory, '#4fc3f7', { borderWidth: 2 }),
+      makeDataset('Measured', measuredHistory, '#e57373', {
+        borderWidth: 0, pointRadius: 3, pointHoverRadius: 5,
+        pointBackgroundColor: '#e57373', pointBorderColor: '#e57373',
+        showLine: false,
+      }),
+    );
+  }
+  datasets.push(
+    makeDataset('Forecast', forecastNonlinear, '#4fc3f7', {
+      dashed: !forecastOnly, borderWidth: 2,
     }),
-    makeDataset('Forecast', forecastNonlinear, '#4fc3f7', { dashed: true, borderWidth: 2 }),
-  ];
+  );
 
   if (forecastLinearised.length > 0) {
     datasets.push(
-      makeDataset('Linearised', forecastLinearised, '#ab47bc', { dashed: true, borderWidth: 1.5 })
+      makeDataset('Linearised', forecastLinearised, '#ab47bc', {
+        dashed: !forecastOnly, borderWidth: 1.5,
+      }),
     );
   }
 
   if (combinedSetpoint.length > 0) {
     datasets.push(
       makeDataset('Setpoint', combinedSetpoint, '#e57373', {
-        dashed: true, borderWidth: 1, pointRadius: 0, stepped: 'before', spanGaps: false,
-      })
+        dashed: !forecastOnly, borderWidth: 1, pointRadius: 0, stepped: 'before', spanGaps: false,
+      }),
     );
   }
 
@@ -696,7 +715,7 @@ function buildTemperatureChart(
  * computed from the outdoor-temperature forecast so the corridor visibly moves
  * with outdoor temperature.
  */
-function buildCapacityPoints(roomForecast, windowStart) {
+function buildCapacityPoints(roomForecast, windowStart, forecastOnly = false) {
   const currentHeat = (
     roomForecast?.current_rated_max_power
     ?? roomForecast?.current_max_power
@@ -712,8 +731,10 @@ function buildCapacityPoints(roomForecast, windowStart) {
   const heating = [];
   const cooling = [];
 
-  if (currentHeat != null) heating.push({ x: windowStart, y: wattsToKw(currentHeat) });
-  if (currentCool != null) cooling.push({ x: windowStart, y: -wattsToKw(currentCool) });
+  if (!forecastOnly) {
+    if (currentHeat != null) heating.push({ x: windowStart, y: wattsToKw(currentHeat) });
+    if (currentCool != null) cooling.push({ x: windowStart, y: -wattsToKw(currentCool) });
+  }
 
   for (const entry of (roomForecast?.forecast ?? [])) {
     const t = new Date(entry.time).getTime();
@@ -776,41 +797,59 @@ function updatePowerChartBounds(chart, roomForecast, windowStart) {
   chart._chart.update('none');
 }
 
-function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast, windowStart) {
+function buildPowerChart(
+  chart, powerHistory, powerForecast, priceHistory, priceForecast, roomForecast, windowStart,
+  options = {},
+) {
+  const forecastOnly = options.forecastOnly === true;
   const maxPower = resolveHeatingPlotMaxKw(roomForecast);
   const maxCoolingPower = wattsToKw(roomForecast?.max_cooling_power ?? null);
   const minPower = maxCoolingPower !== null ? -maxCoolingPower : 0;
 
   const powerHistoryKw = wattsToKwPoints(powerHistory);
   const powerForecastKw = wattsToKwPoints(powerForecast);
-  const allPower = [powerHistoryKw, powerForecastKw];
+  const allPower = forecastOnly ? [powerForecastKw] : [powerHistoryKw, powerForecastKw];
   const boundsArr = [maxPower, minPower, 0];
   const { yMin, yMax } = computeYLimits(allPower, boundsArr);
 
-  const allPrice = [...priceHistory, ...priceForecast];
+  const allPrice = forecastOnly ? priceForecast : [...priceHistory, ...priceForecast];
   const { yMin: priceMin, yMax: priceMax } = computeYLimits([allPrice], [0]);
 
-  const datasets = [
-    makeDataset('Measured', powerHistoryKw, '#ffb74d', {
-      borderWidth: 2, stepped: 'before',
-      fill: true, backgroundColor: 'rgba(255,183,77,0.08)',
-    }),
+  const datasets = [];
+  if (!forecastOnly) {
+    datasets.push(
+      makeDataset('Measured', powerHistoryKw, '#ffb74d', {
+        borderWidth: 2, stepped: 'before',
+        fill: true, backgroundColor: 'rgba(255,183,77,0.08)',
+      }),
+    );
+  }
+  datasets.push(
     makeDataset('Planned', powerForecastKw, '#ffb74d', {
-      dashed: true, borderWidth: 2, stepped: 'before',
+      dashed: !forecastOnly, borderWidth: 2, stepped: 'before',
+      ...(forecastOnly ? { fill: true, backgroundColor: 'rgba(255,183,77,0.08)' } : {}),
     }),
-    makeDataset('Price', priceHistory, '#81c784', {
-      borderWidth: 2, yAxisID: 'y2', stepped: 'before',
+  );
+  if (!forecastOnly) {
+    datasets.push(
+      makeDataset('Price', priceHistory, '#81c784', {
+        borderWidth: 2, yAxisID: 'y2', stepped: 'before',
+      }),
+    );
+  }
+  datasets.push(
+    makeDataset(forecastOnly ? 'Price' : 'Price Forecast', priceForecast, '#81c784', {
+      dashed: !forecastOnly, borderWidth: forecastOnly ? 2 : 1.5, yAxisID: 'y2', stepped: 'before',
     }),
-    makeDataset('Price Forecast', priceForecast, '#81c784', {
-      dashed: true, borderWidth: 1.5, yAxisID: 'y2', stepped: 'before',
-    }),
-  ];
+  );
 
   // Dynamic capacity corridor: invisible boundary datasets whose fill extends to
   // the axis edge so infeasible regions are shaded without dashed reference lines.
   const historyStart = windowStart ?? (Date.now() - 12 * 3600 * 1000);
   chart._historyWindowStart = historyStart;
-  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(roomForecast, historyStart);
+  const { heating: heatingCapPts, cooling: coolingCapPts } = buildCapacityPoints(
+    roomForecast, historyStart, forecastOnly,
+  );
 
   if (heatingCapPts.length > 0) {
     datasets.push(makeDataset('Heating Capacity', heatingCapPts, 'transparent', {
@@ -839,26 +878,44 @@ function buildPowerChart(chart, powerHistory, powerForecast, priceHistory, price
   chart.render(datasets, { yMin, yMax, y2Min: priceMin, y2Max: priceMax });
 }
 
-function buildDisturbanceChart(chart, outdoorHistory, outdoorForecast, solarHistory, solarForecast) {
-  const allOutdoor = [...outdoorHistory, ...outdoorForecast];
+function buildDisturbanceChart(
+  chart, outdoorHistory, outdoorForecast, solarHistory, solarForecast,
+  options = {},
+) {
+  const forecastOnly = options.forecastOnly === true;
+  const allOutdoor = forecastOnly ? outdoorForecast : [...outdoorHistory, ...outdoorForecast];
   const solarHistoryKw = wattsToKwPoints(solarHistory);
   const solarForecastKw = wattsToKwPoints(solarForecast);
-  const allSolar = [...solarHistoryKw, ...solarForecastKw];
+  const allSolar = forecastOnly ? solarForecastKw : [...solarHistoryKw, ...solarForecastKw];
 
   const { yMin: outdoorMin, yMax: outdoorMax } = computeYLimits([allOutdoor], []);
   const { yMin: solarMin, yMax: solarMax } = computeYLimits([allSolar], [0]);
 
-  const datasets = [
-    makeDataset('Outdoor Temp', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
-    makeDataset('Outdoor Forecast', outdoorForecast, '#90a4ae', { dashed: true, borderWidth: 1.5 }),
-    makeDataset('Solar Gain', solarHistoryKw, '#ffd54f', {
-      borderWidth: 2, yAxisID: 'y2',
-      fill: true, backgroundColor: 'rgba(255,213,79,0.08)',
+  const datasets = [];
+  if (!forecastOnly) {
+    datasets.push(
+      makeDataset('Outdoor Temp', outdoorHistory, '#90a4ae', { borderWidth: 2 }),
+    );
+  }
+  datasets.push(
+    makeDataset(forecastOnly ? 'Outdoor Temp' : 'Outdoor Forecast', outdoorForecast, '#90a4ae', {
+      dashed: !forecastOnly, borderWidth: 2,
     }),
-    makeDataset('Solar Forecast', solarForecastKw, '#ffd54f', {
-      dashed: true, borderWidth: 1.5, yAxisID: 'y2',
+  );
+  if (!forecastOnly) {
+    datasets.push(
+      makeDataset('Solar Gain', solarHistoryKw, '#ffd54f', {
+        borderWidth: 2, yAxisID: 'y2',
+        fill: true, backgroundColor: 'rgba(255,213,79,0.08)',
+      }),
+    );
+  }
+  datasets.push(
+    makeDataset('Solar Gain', solarForecastKw, '#ffd54f', {
+      dashed: !forecastOnly, borderWidth: 2, yAxisID: 'y2',
+      ...(forecastOnly ? { fill: true, backgroundColor: 'rgba(255,213,79,0.08)' } : {}),
     }),
-  ];
+  );
 
   chart.render(datasets, { yMin: outdoorMin, yMax: outdoorMax, y2Min: solarMin, y2Max: solarMax });
 }

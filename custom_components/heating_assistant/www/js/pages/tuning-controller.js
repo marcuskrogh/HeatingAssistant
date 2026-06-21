@@ -1,7 +1,5 @@
 import {
   TimeSeriesChart,
-  historyToDataPoints,
-  historyToEnabledPoints,
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
@@ -11,7 +9,6 @@ import {
   buildPowerChart,
   buildDisturbanceChart,
 } from './room-detail.js';
-import { systemEntity } from '../utils.js';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -81,13 +78,13 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Configure MPC controller and window detection parameters. Change values, preview the resulting control plan, then apply when satisfied.';
+  desc.textContent = 'Adjust MPC controller and window-detection settings. Preview the planned trajectories before applying changes to the live controller.';
   container.appendChild(desc);
 
   const pendingBanner = document.createElement('div');
   pendingBanner.className = 'tuning-pending-banner';
   pendingBanner.hidden = true;
-  pendingBanner.textContent = 'The configured parameters differ from what is currently applied. Click Apply Changes to take effect.';
+  pendingBanner.textContent = 'Unsaved changes — the values shown differ from what the controller is using. Apply to update the running controller.';
   container.appendChild(pendingBanner);
 
   // --- Unified action bar ---
@@ -167,8 +164,8 @@ function renderTuningIndex(container, rooms, connection, hass) {
   previewSection.innerHTML = `
     <div class="tuning-section__title">Controller Preview</div>
     <p class="tuning-section__desc">
-      Solve the optimal control problem with the configured MPC parameters above and inspect the planned trajectories per room.
-      Preview does not change the live controller.
+      Run a one-off solve with the configured MPC parameters and review the predicted trajectories for each room.
+      The live controller is not affected.
     </p>
     <div class="tuning-actions">
       <button class="btn btn--accent tuning-actions__btn" id="btn-preview">Preview Controller Behaviour</button>
@@ -205,9 +202,10 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   let appliedConfig = null;
   let previewPayload = null;
-  let previewHistory = null;
   let selectedPreviewRoom = rooms[0]?.slug ?? null;
-  let plotSettings = { historyHours: 12, forecastHours: 0 };
+  let plotSettings = { forecastHours: 0 };
+
+  const previewChartOpts = { forecastOnly: true };
 
   const previewCharts = {
     temp: new TimeSeriesChart(previewChartsEl.querySelector('[data-chart="temp"]'), {
@@ -377,61 +375,16 @@ function renderTuningIndex(container, rooms, connection, hass) {
     }
   }
 
-  function closeStepSegments(pts) {
-    const out = [];
-    for (let i = 0; i < pts.length; i++) {
-      out.push(pts[i]);
-      if (pts[i].y !== null && i + 1 < pts.length && pts[i + 1].y === null) {
-        out.push({ x: pts[i + 1].x - 1, y: pts[i].y });
-      }
-    }
-    return out;
-  }
-
-  function clampFirstToWindow(pts, windowStart) {
-    if (pts.length > 0 && pts[0].x < windowStart) {
-      pts[0] = { ...pts[0], x: windowStart };
-    }
-    return pts;
-  }
-
   function renderPreviewChartsForRoom(roomSlug) {
     const room = rooms.find((r) => r.slug === roomSlug);
-    if (!room || !previewPayload || !previewHistory) return;
-
-    const historyHours = plotSettings.historyHours || 12;
-    const windowStart = Date.now() - historyHours * 3600 * 1000;
-    const history = previewHistory;
-
-    const tempFilteredEntity = room.entities['temperature_filtered'];
-    const tempMeasuredEntity = room.entities['temperature_measured'];
-    const setpointEntity = room.entities['setpoint'];
-    const constraintUpperEntity = room.entities['constraint_upper'];
-    const constraintLowerEntity = room.entities['constraint_lower'];
-    const powerMeasuredEntity = room.entities['heating_power_measured'];
-    const solarMeasuredEntity = room.entities['solar_gain_measured'];
-    const outdoorEntity = systemEntity('outdoor_temperature_measured');
-    const priceEntity = systemEntity('electricity_price');
-
-    const filteredHistory = historyToDataPoints(history[tempFilteredEntity]);
-    const measuredHistory = historyToDataPoints(history[tempMeasuredEntity]);
-    const setpointHistory = closeStepSegments(
-      clampFirstToWindow(historyToEnabledPoints(history[setpointEntity]), windowStart),
-    );
-    const constraintUpperHistory = closeStepSegments(
-      clampFirstToWindow(historyToEnabledPoints(history[constraintUpperEntity]), windowStart),
-    );
-    const constraintLowerHistory = closeStepSegments(
-      clampFirstToWindow(historyToEnabledPoints(history[constraintLowerEntity]), windowStart),
-    );
-    const powerHistory = historyToDataPoints(history[powerMeasuredEntity]);
-    const solarHistory = historyToDataPoints(history[solarMeasuredEntity]);
-    const outdoorHistory = historyToDataPoints(history[outdoorEntity]);
-    const priceHistory = historyToDataPoints(history[priceEntity]);
+    if (!room || !previewPayload) return;
 
     const roomForecast = previewPayload.rooms?.[roomSlug];
     const forecastData = roomForecast?.forecast || [];
     const priceForecastData = previewPayload.price_forecast || [];
+    const forecastStart = forecastData.length
+      ? new Date(forecastData[0].time).getTime()
+      : Date.now();
 
     const tempForecastNonlinear = forecastToDataPoints(forecastData, 'temperature');
     const tempForecastLinearised = forecastToDataPoints(forecastData, 'linearised_temperature');
@@ -445,33 +398,36 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
     buildTemperatureChart(
       previewCharts.temp,
-      filteredHistory, measuredHistory,
-      setpointHistory, setpointForecast,
+      [], [],
+      [], setpointForecast,
       tempForecastNonlinear, tempForecastLinearised,
-      constraintUpperHistory, constraintUpperForecast,
-      constraintLowerHistory, constraintLowerForecast,
+      [], constraintUpperForecast,
+      [], constraintLowerForecast,
       null,
+      previewChartOpts,
     );
     buildPowerChart(
       previewCharts.power,
-      powerHistory,
+      [],
       powerForecast,
-      priceHistory,
+      [],
       priceForecast,
       roomForecast,
-      windowStart,
+      forecastStart,
+      previewChartOpts,
     );
     buildDisturbanceChart(
       previewCharts.disturb,
-      outdoorHistory,
+      [],
       outdoorForecast,
-      solarHistory,
+      [],
       solarForecast,
+      previewChartOpts,
     );
   }
 
   async function runPreview() {
-    setPreviewStatus('Computing preview…', 'running');
+    setPreviewStatus('Computing control plan…', 'running');
     btnPreview.disabled = true;
     previewChartsEl.hidden = true;
     roomSelectorEl.hidden = true;
@@ -479,8 +435,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
       await loadChartJs();
       const uiSettings = await connection.getUiSettings();
       if (uiSettings) {
-        const h = Number(uiSettings.plot_history_hours);
-        if (Number.isFinite(h) && h > 0) plotSettings.historyHours = h;
         const f = Number(uiSettings.plot_forecast_hours);
         if (Number.isFinite(f)) plotSettings.forecastHours = f;
       }
@@ -494,31 +448,10 @@ function renderTuningIndex(container, rooms, connection, hass) {
         return;
       }
       if (payload.error === 'outdoor_temperature_unavailable') {
-        setPreviewStatus('Outdoor temperature is unavailable — preview needs current weather data.', 'error');
+        setPreviewStatus('Outdoor temperature is unavailable. A current reading is required to run the preview.', 'error');
         return;
       }
 
-      const historyEntities = [];
-      for (const room of rooms) {
-        historyEntities.push(
-          room.entities['temperature_filtered'],
-          room.entities['temperature_measured'],
-          room.entities['setpoint'],
-          room.entities['constraint_upper'],
-          room.entities['constraint_lower'],
-          room.entities['heating_power_measured'],
-          room.entities['solar_gain_measured'],
-        );
-      }
-      historyEntities.push(
-        systemEntity('outdoor_temperature_measured'),
-        systemEntity('electricity_price'),
-      );
-
-      previewHistory = await connection.getHistory(
-        historyEntities.filter(Boolean),
-        plotSettings.historyHours,
-      );
       previewPayload = payload;
 
       if (!selectedPreviewRoom || !previewPayload.rooms?.[selectedPreviewRoom]) {
@@ -530,7 +463,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
       previewChartsEl.hidden = false;
       renderRoomSelector();
       if (selectedPreviewRoom) renderPreviewChartsForRoom(selectedPreviewRoom);
-      setPreviewStatus('Preview ready — switch rooms below without recomputing.', 'success');
+      setPreviewStatus('Preview complete. Select a room below to view its trajectories.', 'success');
     } catch (err) {
       setPreviewStatus('Error: ' + (err.message || err), 'error');
     } finally {
@@ -552,7 +485,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
       applyConfig(await fromWebSocket()) || applyConfig(fromEntityState());
       userEditing = false;
       previewPayload = null;
-      previewHistory = null;
       previewChartsEl.hidden = true;
       roomSelectorEl.hidden = true;
       setPreviewStatus('');
@@ -573,8 +505,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
 
   connection.getUiSettings().then((s) => {
     if (!s) return;
-    const h = Number(s.plot_history_hours);
-    if (Number.isFinite(h) && h > 0) plotSettings.historyHours = h;
     const f = Number(s.plot_forecast_hours);
     if (Number.isFinite(f)) plotSettings.forecastHours = f;
   }).catch(() => {});
