@@ -963,6 +963,12 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
     ):
         assert f"'{label}'" in chart_js, f"SHADING_DATASET_LABELS should include {label!r}"
 
+    assert "function legendLabelFilter" in chart_js
+    assert "function tooltipItemFilter" in chart_js
+    assert "applyPluginFilters(opts)" in chart_js, (
+        "Chart options must reattach legend/tooltip filters after JSON cloning"
+    )
+
     assert "13 * 3600 * 1000" not in room_detail, (
         "Capacity shading must follow the configured history window, not a hardcoded 13 h offset"
     )

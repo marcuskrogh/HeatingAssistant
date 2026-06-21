@@ -15,6 +15,22 @@ function isMobileChartViewport() {
     || window.matchMedia('(max-width: 768px)').matches;
 }
 
+function legendLabelFilter(item) {
+  return !item.text.startsWith('Above') && !item.text.startsWith('Below')
+    && !SHADING_DATASET_LABELS.has(item.text);
+}
+
+function tooltipItemFilter(item) {
+  return !item.dataset.label?.startsWith('Above') && !item.dataset.label?.startsWith('Below')
+    && !SHADING_DATASET_LABELS.has(item.dataset.label);
+}
+
+/** JSON cloning drops function callbacks; reattach plugin filters after deep-copying options. */
+function applyPluginFilters(opts) {
+  opts.plugins.legend.labels.filter = legendLabelFilter;
+  opts.plugins.tooltip.filter = tooltipItemFilter;
+}
+
 const CHART_DEFAULTS = {
   responsive: true,
   maintainAspectRatio: false,
@@ -32,8 +48,7 @@ const CHART_DEFAULTS = {
         padding: 12,
         usePointStyle: true,
         pointStyle: 'line',
-        filter: (item) => !item.text.startsWith('Above') && !item.text.startsWith('Below')
-          && !SHADING_DATASET_LABELS.has(item.text),
+        filter: legendLabelFilter,
       },
     },
     tooltip: {
@@ -47,8 +62,7 @@ const CHART_DEFAULTS = {
       padding: 10,
       displayColors: true,
       boxPadding: 4,
-      filter: (item) => !item.dataset.label?.startsWith('Above') && !item.dataset.label?.startsWith('Below')
-        && !SHADING_DATASET_LABELS.has(item.dataset.label),
+      filter: tooltipItemFilter,
     },
   },
   scales: {
@@ -246,6 +260,7 @@ export class TimeSeriesChart {
     }
 
     this._applyAxisFormatting(opts);
+    applyPluginFilters(opts);
 
     if (isMobileChartViewport()) {
       opts.plugins.tooltip.enabled = false;
