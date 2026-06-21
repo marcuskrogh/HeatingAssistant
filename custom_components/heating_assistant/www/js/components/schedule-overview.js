@@ -1,47 +1,35 @@
 /* schedule-overview.js — read-only schedule summary card for the room-level
  * overview (room-detail) page.
  *
- * It reuses the same visual language as the schedules index cards
- * (.sched-index-card / .sched-row): an ENABLED/DISABLED badge followed by a
- * flat list of all configured periods.  The active period receives a NOW badge
- * and the next upcoming period receives a NEXT badge, applied inline in the
- * list.  The whole card is clickable and navigates to the editable schedule
- * detail page.
- *
- * Also shows any scheduled or running experiments for this room below the
- * period list.
+ * Shows comfort periods and identification experiments as two parallel sections
+ * with the same sched-row visual language used on the schedules index and
+ * overview room cards.  The whole card is clickable and navigates to the
+ * editable schedule detail page.
  */
 
-import { findActivePeriod, findNextPeriod } from '../schedule-utils.js';
-
-/** Builds the inner HTML for a single period summary row. */
-function periodRowHtml(p, isActive, isNext) {
-  return `<div class="sched-row${isActive ? ' sched-row--active' : ''}${isNext ? ' sched-row--next' : ''}">
-      ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
-      ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
-      <span class="sched-row__name">${p.name || 'Period'}</span>
-      <span class="sched-row__time">${p.start}–${p.end}</span>
-    </div>`;
-}
-
-function fmtOverviewExpWindow(exp) {
-  if (!exp.start_ts) return '—';
-  const d = new Date(exp.start_ts * 1000);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+import {
+  findActivePeriod, findNextPeriod,
+  periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml,
+} from '../schedule-utils.js';
+import {
+  experimentRowHtml, findNextScheduledExperiment,
+} from '../experiment-utils.js';
 
 function render(card, schedData, experiments = []) {
   const periods = schedData?.periods || [];
   const enabled = schedData?.enabled ?? true;
-
   const activePeriod = findActivePeriod(periods);
   const nextPeriod = findNextPeriod(periods);
 
-  let html = `<div class="sched-index-card__header">
-      <span class="sched-index-card__name">SCHEDULE</span>
-      <span class="sched-index-card__badge ${enabled ? 'sched-index-card__badge--on' : 'sched-index-card__badge--off'}">${enabled ? 'ENABLED' : 'DISABLED'}</span>
-    </div>`;
+  const upcoming = experiments.filter((e) => e.status === 'scheduled' || e.status === 'running');
+  const activeExp = upcoming.find((e) => e.status === 'running') || null;
+  const nextExp = findNextScheduledExperiment(upcoming);
+
+  let html = '';
+
+  // Comfort periods section
+  html += `<div class="sched-section">
+    ${scheduleSectionHeaderHtml('COMFORT PERIODS', scheduleEnabledBadgeHtml(enabled))}`;
 
   if (periods.length === 0) {
     html += `<div class="sched-index-card__empty">No periods configured — click to edit</div>`;
@@ -49,25 +37,22 @@ function render(card, schedData, experiments = []) {
     const rows = periods.map((p) => periodRowHtml(p, p === activePeriod, p === nextPeriod)).join('');
     html += `<div class="sched-index-card__list">${rows}</div>`;
   }
+  html += '</div>';
 
-  // Experiment section
-  const upcoming = experiments.filter((e) => e.status === 'scheduled' || e.status === 'running');
-  if (upcoming.length > 0) {
-    const expRows = upcoming.map((e) => {
-      const isRunning = e.status === 'running';
-      const cls = isRunning ? 'exp-status-badge--running' : 'exp-status-badge--scheduled';
-      const label = isRunning ? 'RUNNING' : 'UPCOMING';
-      const window = fmtOverviewExpWindow(e);
-      return `<div class="sched-row">
-        <span class="exp-status-badge ${cls}">${label}</span>
-        <span class="sched-row__name">${e.name || 'Experiment'}</span>
-        <span class="sched-row__time">${window}</span>
-      </div>`;
-    }).join('');
-    html += `<div class="sched-index-card__sep"></div>
-      <div class="sched-index-card__exp-label">EXPERIMENTS</div>
-      <div class="sched-index-card__list">${expRows}</div>`;
+  // Experiments section — always shown so the two categories are recognisable
+  html += `<div class="sched-section">
+    ${scheduleSectionHeaderHtml('EXPERIMENTS')}`;
+
+  if (upcoming.length === 0) {
+    html += `<div class="sched-index-card__empty">No experiments scheduled</div>`;
+  } else {
+    const expRows = upcoming.map((e) => experimentRowHtml(e, {
+      isActive: e === activeExp,
+      isNext: !activeExp && e === nextExp,
+    })).join('');
+    html += `<div class="sched-index-card__list">${expRows}</div>`;
   }
+  html += '</div>';
 
   card.innerHTML = html;
 }

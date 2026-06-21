@@ -205,7 +205,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // Back navigation
   const nav = document.createElement('button');
   nav.className = 'nav-back';
-  nav.innerHTML = '<span class="nav-back__arrow">←</span> IDENTIFICATION';
+  nav.innerHTML = '<span class="nav-back__arrow">←</span> SYSTEM IDENTIFICATION';
   nav.addEventListener('click', () => { window.location.hash = '#identification'; });
   container.appendChild(nav);
 

@@ -957,6 +957,7 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
         "Constraint Upper",
         "Constraint Lower",
         "Sensor Min",
+        "Sensor Range",
         "Heating Capacity",
         "Cooling Capacity",
     ):

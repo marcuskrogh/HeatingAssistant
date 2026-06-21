@@ -1,5 +1,5 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData } from '../schedule-utils.js';
-import { signalLabel } from '../experiment-utils.js';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js';
+import { signalLabel, experimentRowHtml, findNextScheduledExperiment, experimentStatusInfo } from '../experiment-utils.js';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -21,14 +21,8 @@ const getScheduleDataForRoom = getRoomScheduleData;
 /** Renders a single period summary row element. */
 function makePeriodRow(p, isActive, isNext) {
   const row = document.createElement('div');
-  row.className = 'sched-row' + (isActive ? ' sched-row--active' : '') + (isNext ? ' sched-row--next' : '');
-  row.innerHTML = `
-    ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
-    ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
-    <span class="sched-row__name">${p.name || 'Period'}</span>
-    <span class="sched-row__time">${p.start}–${p.end}</span>
-  `;
-  return row;
+  row.innerHTML = periodRowHtml(p, isActive, isNext);
+  return row.firstElementChild;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,12 +63,7 @@ function tsToLocalInput(ts) {
 }
 
 function expStatusInfo(status) {
-  return ({
-    scheduled: { label: 'SCHEDULED', cls: 'exp-status-badge--scheduled' },
-    running:   { label: 'RUNNING',   cls: 'exp-status-badge--running'   },
-    completed: { label: 'COMPLETED', cls: 'exp-status-badge--completed' },
-    cancelled: { label: 'CANCELLED', cls: 'exp-status-badge--cancelled' },
-  }[status] || { label: (status || '—').toUpperCase(), cls: 'exp-status-badge--completed' });
+  return experimentStatusInfo(status);
 }
 
 function expCardModifier(status) {
@@ -119,29 +108,31 @@ function renderScheduleIndex(container, rooms, state, connection, hass) {
       const nextPeriod = findNextPeriod(periods);
 
       const roomExps = expsByRoom[room.slug] || [];
-      const activeExpCount = roomExps.filter((e) => e.status === 'scheduled' || e.status === 'running').length;
+      const upcomingExps = roomExps.filter((e) => e.status === 'scheduled' || e.status === 'running');
+      const activeExp = upcomingExps.find((e) => e.status === 'running') || null;
+      const nextExp = findNextScheduledExperiment(upcomingExps);
 
       const card = document.createElement('div');
       card.className = 'card card--clickable sched-index-card';
 
-      // ── Header: room name + enabled badge ────────────────────────────────
+      // ── Header: room name ────────────────────────────────────────────────
       const cardHeader = document.createElement('div');
       cardHeader.className = 'sched-index-card__header';
-      cardHeader.innerHTML = `
-        <span class="sched-index-card__name">${room.name}</span>
-        <span class="sched-index-card__badge ${enabled ? 'sched-index-card__badge--on' : 'sched-index-card__badge--off'}">
-          ${enabled ? 'ENABLED' : 'DISABLED'}
-        </span>
-        ${activeExpCount > 0 ? `<span class="sched-index-card__exp-badge">${activeExpCount} experiment${activeExpCount > 1 ? 's' : ''}</span>` : ''}
-      `;
+      cardHeader.innerHTML = `<span class="sched-index-card__name">${room.name}</span>`;
       card.appendChild(cardHeader);
 
-      // ── Period list ───────────────────────────────────────────────────────
+      // ── Comfort periods section ─────────────────────────────────────────
+      const comfortSection = document.createElement('div');
+      comfortSection.className = 'sched-section';
+      comfortSection.innerHTML = scheduleSectionHeaderHtml(
+        'COMFORT PERIODS',
+        scheduleEnabledBadgeHtml(enabled),
+      );
       if (periods.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'sched-index-card__empty';
         empty.textContent = 'No periods configured — click to add';
-        card.appendChild(empty);
+        comfortSection.appendChild(empty);
       } else {
         const list = document.createElement('div');
         list.className = 'sched-index-card__list';
@@ -160,8 +151,41 @@ function renderScheduleIndex(container, rooms, state, connection, hass) {
           list.appendChild(more);
         }
 
-        card.appendChild(list);
+        comfortSection.appendChild(list);
       }
+      card.appendChild(comfortSection);
+
+      // ── Experiments section ─────────────────────────────────────────────
+      const expSection = document.createElement('div');
+      expSection.className = 'sched-section';
+      expSection.innerHTML = scheduleSectionHeaderHtml('EXPERIMENTS');
+      if (upcomingExps.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'sched-index-card__empty';
+        empty.textContent = 'No experiments scheduled';
+        expSection.appendChild(empty);
+      } else {
+        const list = document.createElement('div');
+        list.className = 'sched-index-card__list';
+        const preview = upcomingExps.slice(0, 3);
+        const overflow = upcomingExps.length - preview.length;
+        for (const e of preview) {
+          const row = document.createElement('div');
+          row.innerHTML = experimentRowHtml(e, {
+            isActive: e === activeExp,
+            isNext: !activeExp && e === nextExp,
+          });
+          list.appendChild(row.firstElementChild);
+        }
+        if (overflow > 0) {
+          const more = document.createElement('div');
+          more.className = 'sched-index-card__overflow';
+          more.textContent = `+${overflow} more…`;
+          list.appendChild(more);
+        }
+        expSection.appendChild(list);
+      }
+      card.appendChild(expSection);
 
       card.addEventListener('click', () => {
         window.location.hash = `#schedules/${room.slug}`;
@@ -207,32 +231,36 @@ function renderScheduleIndex(container, rooms, state, connection, hass) {
 // ---------------------------------------------------------------------------
 
 function renderExperimentsSection(container, room, connection, hass) {
+  const sectionWrap = document.createElement('div');
+  sectionWrap.className = 'sched-section sched-section--detail';
+  container.appendChild(sectionWrap);
+
   const sectionHeader = document.createElement('div');
   sectionHeader.className = 'sched-detail__section-header';
   sectionHeader.innerHTML = `
     <span class="sched-detail__section-title" id="exp-section-title">EXPERIMENTS</span>
-    <button class="btn btn--accent btn--sm" id="btn-add-exp">+ Schedule Experiment</button>
+    <button class="btn btn--primary btn--sm" id="btn-add-exp">+ Add Experiment</button>
   `;
-  container.appendChild(sectionHeader);
+  sectionWrap.insertBefore(sectionHeader, sectionWrap.firstChild);
 
   const expDesc = document.createElement('p');
   expDesc.className = 'tuning-section__desc';
   expDesc.style.margin = '0 0 14px';
-  expDesc.textContent = 'Excitation experiments override the comfort schedule for this room during the window, driving the heaters with a test signal to capture thermal response data for identification.';
-  container.appendChild(expDesc);
+  expDesc.textContent = 'Override comfort schedules with test-signal excitation to capture thermal response data for identification.';
+  sectionWrap.appendChild(expDesc);
 
   const formContainer = document.createElement('div');
-  container.appendChild(formContainer);
+  sectionWrap.appendChild(formContainer);
 
   const expListContainer = document.createElement('div');
-  container.appendChild(expListContainer);
+  sectionWrap.appendChild(expListContainer);
 
   let experiments = [];
   let formVisible = false;
   const expandedExpIds = new Set();
 
-  const sectionTitleEl = container.querySelector('#exp-section-title');
-  const btnAdd = container.querySelector('#btn-add-exp');
+  const sectionTitleEl = sectionWrap.querySelector('#exp-section-title');
+  const btnAdd = sectionWrap.querySelector('#btn-add-exp');
 
   function getDefaultWindow() {
     const now = new Date();
@@ -402,7 +430,7 @@ function renderExperimentsSection(container, room, connection, hass) {
   function hideForm() {
     formVisible = false;
     formContainer.innerHTML = '';
-    btnAdd.textContent = '+ Schedule Experiment';
+    btnAdd.textContent = '+ Add Experiment';
   }
 
   function renderList() {
@@ -420,7 +448,7 @@ function renderExperimentsSection(container, room, connection, hass) {
       empty.className = 'sched-detail__empty';
       empty.innerHTML = `
         <p>No experiments scheduled for this room.</p>
-        <p>Click <strong>+ Schedule Experiment</strong> above to create one.</p>
+        <p>Click <strong>+ Add Experiment</strong> above to create one.</p>
       `;
       expListContainer.appendChild(empty);
       return;
@@ -619,14 +647,20 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
   `;
   container.appendChild(toggleRow);
 
-  // Periods section header (title + Add button side by side)
+  // Comfort periods section header (title + Add button side by side)
   const periodsHeader = document.createElement('div');
   periodsHeader.className = 'sched-detail__section-header';
   periodsHeader.innerHTML = `
-    <span class="sched-detail__section-title" id="sched-periods-title">PERIODS</span>
+    <span class="sched-detail__section-title" id="sched-periods-title">COMFORT PERIODS</span>
     <button class="btn btn--primary btn--sm" id="btn-add-period">+ Add Period</button>
   `;
   container.appendChild(periodsHeader);
+
+  const comfortDesc = document.createElement('p');
+  comfortDesc.className = 'tuning-section__desc';
+  comfortDesc.style.margin = '0 0 14px';
+  comfortDesc.textContent = 'Daily comfort windows that set target temperature and operating mode for this room.';
+  container.appendChild(comfortDesc);
 
   // Period form cards live here
   const periodsContainer = document.createElement('div');
@@ -692,8 +726,8 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
     const nextPeriod = findNextPeriod(localPeriods);
 
     periodsTitleEl.textContent = localPeriods.length > 0
-      ? `PERIODS (${localPeriods.length})`
-      : 'PERIODS';
+      ? `COMFORT PERIODS (${localPeriods.length})`
+      : 'COMFORT PERIODS';
 
     periodsContainer.innerHTML = '';
 
