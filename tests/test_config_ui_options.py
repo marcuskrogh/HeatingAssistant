@@ -378,3 +378,20 @@ def test_room_helper_update_strips_advanced_when_user_chooses_defaults() -> None
     room = helper.rooms[0]
     assert CONF_FLOOR_TYPE not in room
     assert CONF_THERMAL_BRIDGE_PSI_L not in room
+
+
+def test_tuning_page_splits_live_and_restart_parameters() -> None:
+    """Controller tuning UI must group live vs restart-required MPC parameters."""
+    source = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js" / "pages"
+        / "tuning-controller.js"
+    ).read_text(encoding="utf-8")
+    assert "LIVE_PARAM_DEFS" in source
+    assert "RESTART_PARAM_DEFS" in source
+    assert "Live tuning" in source
+    assert "Restart required" in source
+    assert "hasPendingRestartChanges" in source
+    assert "tuning-pending-banner--restart" in source
+    assert "'horizon'" in source
+    assert "'update_interval'" in source
+    assert "'tracking_weight'" in source

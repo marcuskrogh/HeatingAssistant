@@ -1181,6 +1181,15 @@
   line-height: 1.5;
 }
 
+.tuning-pending-banner--restart {
+  border-color: var(--alarm);
+  background: rgba(244, 67, 54, 0.08);
+}
+
+.params-subsection__desc {
+  margin: 0 0 12px;
+}
+
 .form-input--modified {
   border-color: var(--warning);
   box-shadow: 0 0 0 1px rgba(255, 193, 7, 0.25);

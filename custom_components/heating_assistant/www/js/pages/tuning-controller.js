@@ -12,10 +12,9 @@ import {
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
-const PARAM_DEFS = [
-  { key: 'update_interval', label: 'Sample Interval', unit: 's', hint: 'Re-planning cadence', step: 30, parse: parseInt },
+// Parameters that take effect on the live controller without rebuilding its structure.
+const LIVE_PARAM_DEFS = [
   { key: 'comfort_offset', label: 'Comfort Offset', unit: '°C', hint: 'Symmetric band around setpoint', step: 0.1, parse: parseFloat },
-  { key: 'horizon', label: 'Prediction Horizon', unit: 'steps', hint: 'Control intervals planned ahead', step: 1, parse: parseInt },
   { key: 'tracking_weight', label: 'Tracking Weight', unit: '', hint: 'Setpoint tracking strength (0 = band only)', step: 0.1, parse: parseFloat },
   { key: 'energy_weight', label: 'Energy Weight', unit: '', hint: 'Energy-use penalty', step: 0.01, parse: parseFloat },
   { key: 'energy_price_weight', label: 'Price Sensitivity', unit: '', hint: 'Electricity price cost scaling', step: 0.1, parse: parseFloat },
@@ -24,6 +23,14 @@ const PARAM_DEFS = [
   { key: 'soft_constraint_linear_weight', label: 'Comfort Band Penalty (linear)', unit: '', hint: 'Linear penalty for comfort-band violations (0 = disabled)', step: 1, parse: parseFloat },
   { key: 'terminal_weight', label: 'Terminal Weight', unit: '', hint: 'End-of-horizon constraint', step: 1, parse: parseFloat },
 ];
+
+// Changing these rebuilds the MPC problem (sample interval / prediction horizon).
+const RESTART_PARAM_DEFS = [
+  { key: 'update_interval', label: 'Sample Interval', unit: 's', hint: 'Re-planning cadence — changing this rebuilds the controller', step: 30, parse: parseInt },
+  { key: 'horizon', label: 'Prediction Horizon', unit: 'steps', hint: 'Control intervals planned ahead — changing this rebuilds the controller', step: 1, parse: parseInt },
+];
+
+const PARAM_DEFS = [...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
 
 // Must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
@@ -84,7 +91,6 @@ function renderTuningIndex(container, rooms, connection, hass) {
   const pendingBanner = document.createElement('div');
   pendingBanner.className = 'tuning-pending-banner';
   pendingBanner.hidden = true;
-  pendingBanner.textContent = 'Unsaved changes — the values shown differ from what the controller is using. Apply to update the running controller.';
   container.appendChild(pendingBanner);
 
   // --- Unified action bar ---
@@ -106,24 +112,44 @@ function renderTuningIndex(container, rooms, connection, hass) {
   mpcTitle.textContent = 'MPC Controller Parameters';
   formSection.appendChild(mpcTitle);
 
-  const grid = document.createElement('div');
-  grid.className = 'tuning-params-grid tuning-params-grid--wide';
-  formSection.appendChild(grid);
-  container.appendChild(formSection);
-
   const inputs = {};
-  for (const def of PARAM_DEFS) {
-    const group = document.createElement('div');
-    group.className = 'form-group';
-    group.innerHTML = `
-      <label class="form-label" for="ctrl-${def.key}">${def.label}</label>
-      <input class="form-input" type="number" id="ctrl-${def.key}"
-        step="${def.step}" value="">
-      <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
+
+  function appendParamSubsection(title, description, defs) {
+    const subsection = document.createElement('div');
+    subsection.className = 'params-subsection';
+    subsection.innerHTML = `
+      <div class="params-subsection__title">${title}</div>
+      <p class="tuning-section__desc params-subsection__desc">${description}</p>
     `;
-    grid.appendChild(group);
-    inputs[def.key] = group.querySelector('input');
+    const grid = document.createElement('div');
+    grid.className = 'tuning-params-grid tuning-params-grid--wide';
+    subsection.appendChild(grid);
+    formSection.appendChild(subsection);
+    for (const def of defs) {
+      const group = document.createElement('div');
+      group.className = 'form-group';
+      group.innerHTML = `
+        <label class="form-label" for="ctrl-${def.key}">${def.label}</label>
+        <input class="form-input" type="number" id="ctrl-${def.key}"
+          step="${def.step}" value="">
+        <span class="form-hint">${def.unit ? def.unit + ' — ' : ''}${def.hint}</span>
+      `;
+      grid.appendChild(group);
+      inputs[def.key] = group.querySelector('input');
+    }
   }
+
+  appendParamSubsection(
+    'Live tuning',
+    'Penalty weights and comfort band — applied to the running controller on the next planning cycle.',
+    LIVE_PARAM_DEFS,
+  );
+  appendParamSubsection(
+    'Restart required',
+    'Sample interval and prediction horizon — the MPC problem is rebuilt when these change.',
+    RESTART_PARAM_DEFS,
+  );
+  container.appendChild(formSection);
 
   // --- Window Configuration section ---
   const windowSection = document.createElement('div');
@@ -251,9 +277,33 @@ function renderTuningIndex(container, rooms, connection, hass) {
     ));
   }
 
+  function hasPendingRestartChanges() {
+    if (!appliedConfig) return false;
+    const configured = collectConfiguredConfig();
+    return RESTART_PARAM_DEFS.some((def) => !valuesEqual(
+      configured[def.key],
+      appliedConfig[def.key] ?? ALL_DEFAULTS[def.key],
+    ));
+  }
+
+  function updatePendingBanner(pending) {
+    if (!pending) {
+      pendingBanner.hidden = true;
+      pendingBanner.classList.remove('tuning-pending-banner--restart');
+      pendingBanner.textContent = '';
+      return;
+    }
+    pendingBanner.hidden = false;
+    const needsRestart = hasPendingRestartChanges();
+    pendingBanner.classList.toggle('tuning-pending-banner--restart', needsRestart);
+    pendingBanner.textContent = needsRestart
+      ? 'Unsaved changes include sample interval or prediction horizon — applying will rebuild the MPC controller.'
+      : 'Unsaved changes — penalty weights and window settings apply to the live controller on the next cycle.';
+  }
+
   function updatePendingIndicators() {
     const pending = hasPendingChanges();
-    pendingBanner.hidden = !pending;
+    updatePendingBanner(pending);
     for (const def of ALL_PARAM_DEFS) {
       const input = inputs[def.key] ?? windowInputs[def.key];
       if (!input) continue;
