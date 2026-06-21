@@ -4122,10 +4122,20 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # and emits an unattenuated clear-sky solar-gain spike.
         await self._ensure_runtime_state_loaded()
         try:
-            self._refresh_live_state()
+            outdoor_temp = self._refresh_live_state()
         except Exception:
             _LOGGER.warning("Fast UI refresh failed", exc_info=True)
             return
+        # Re-anchor climate setpoints to the units' current internal
+        # temperatures so the delivered power tracks the MPC's constant-input
+        # assumption between scheduled ticks (see _reapply_climate_setpoints).
+        if outdoor_temp is not None:
+            try:
+                await self._reapply_climate_setpoints(outdoor_temp)
+            except Exception:
+                _LOGGER.debug(
+                    "Fast UI refresh: setpoint re-apply failed", exc_info=True,
+                )
         self.async_update_listeners()
 
     async def _async_push_window_override(self) -> None:
@@ -4181,6 +4191,153 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Always notify entity subscribers so the UI immediately reflects both
         # the new window-override state and the freshly read sensor values.
         self.async_update_listeners()
+
+    def _climate_internal_temp(self, src: HeatSource, state: Any) -> float:
+        """Best estimate of a climate unit's own internal temperature [°C].
+
+        Prefers the entity's ``current_temperature`` attribute (the sensor the
+        unit's built-in thermostat regulates against); falls back to the
+        modelled room air temperature when the attribute is missing or
+        unparsable.
+        """
+        attrs = getattr(state, "attributes", {})
+        raw_temp = attrs.get("current_temperature")
+        if raw_temp is not None:
+            try:
+                return float(raw_temp)
+            except (ValueError, TypeError):
+                pass
+        return self.model.rooms[src.room].temperature
+
+    def _climate_hp_command(
+        self,
+        src: "HeatPump",
+        fraction: float,
+        internal_temp: float,
+        outdoor_temp: float,
+        state: Any,
+    ) -> Tuple[str, float]:
+        """``(hvac_mode, target_temp)`` for an enabled heat-pump climate source.
+
+        The target is the unit's internal temperature plus the logit-mapped
+        offset for the held MPC ``fraction``, so re-applying it as the internal
+        temperature drifts keeps the commanded gap — and the power the HP
+        modulates to deliver for that gap — constant over the interval.  The HA
+        mode string is resolved against the modes the entity advertises.
+        """
+        attrs = getattr(state, "attributes", {})
+        supported_modes = attrs.get("hvac_modes", [])
+        if src.hvac_mode == "heat_cool":
+            if "heat_cool" in supported_modes:
+                hvac_mode_str = "heat_cool"
+            elif "auto" in supported_modes:
+                hvac_mode_str = "auto"
+            else:
+                hvac_mode_str = "heat_cool"
+        elif src.hvac_mode == "cool":
+            if "cool" in supported_modes:
+                hvac_mode_str = "cool"
+            elif "dry" in supported_modes:
+                hvac_mode_str = "dry"
+            else:
+                hvac_mode_str = "fan_only"
+        else:
+            hvac_mode_str = "heat"
+        target_temp = src.target_temperature(fraction, internal_temp, outdoor_temp)
+        return hvac_mode_str, target_temp
+
+    def _climate_thermostat_command(
+        self,
+        src: HeatSource,
+        fraction: float,
+        internal_temp: float,
+        room_temp: float,
+        room_setpoint: float,
+    ) -> Tuple[str, float]:
+        """``(hvac_mode, target_temp)`` for an enabled non-HP climate source.
+
+        Heating (``fraction > 0`` and room at/below setpoint): the target is the
+        unit's internal temperature plus the fraction-scaled offset, floored at
+        the room comfort setpoint.  Otherwise (idle or cooling protection): the
+        target is pushed below the internal temperature by
+        ``DEFAULT_IDLE_OFFSET`` plus any room overshoot so the unit's own
+        thermostat does not fire.  Anchoring to ``internal_temp`` keeps the gap
+        — and therefore the delivered power — constant when the command is
+        re-asserted between MPC ticks.
+        """
+        if fraction > 0.0 and room_temp <= room_setpoint:
+            target_temp = max(
+                room_setpoint, src.target_temperature(fraction, internal_temp),
+            )
+            return "heat", target_temp
+        overshoot = max(0.0, room_temp - room_setpoint)
+        target_temp = internal_temp - (DEFAULT_IDLE_OFFSET + overshoot)
+        return "heat", target_temp
+
+    async def _reapply_climate_setpoints(self, outdoor_temp: float) -> None:
+        """Re-assert climate setpoints between MPC ticks to hold the gap constant.
+
+        The MPC commands a constant input over each ``update_interval`` (a ZOH
+        hold), but a climate unit regulates to an *absolute* target using its own
+        internal sensor: written once per tick, that target lets the delivered
+        power sag as the unit warms toward it.  Re-anchoring the target to the
+        unit's current internal temperature on the fast UI cadence keeps
+        (target − internal_temp), and hence the modulating power, ~constant
+        across the interval — which is what the MPC plant model and the
+        parameter identification assume.
+
+        Only ``set_temperature`` is re-issued, and only for ``climate`` entities:
+        the MPC ``fraction`` is held fixed (no EKF/optimiser work and no
+        ``notify_applied_u`` — the applied-input record must carry one value per
+        tick), the hvac mode was already set by the last full tick, and
+        ``number`` / ``switch`` units are commanded as power/duty directly so
+        they need no re-anchoring.
+        """
+        if not self._system_enabled or not self.actions:
+            return
+        for src in self.heat_sources:
+            entity_id = src.heater_entity
+            if not entity_id or entity_id.split(".")[0] != "climate":
+                continue
+            room_enabled = self.is_room_enabled(src.room)
+            window_override_active = self.is_window_override_active(src.room)
+            experiment_active = self.is_experiment_active(src.room)
+            effective_room_enabled = (
+                self._system_enabled
+                and (room_enabled or experiment_active)
+                and not window_override_active
+            )
+            if not effective_room_enabled:
+                # Unit is held off by the last full tick / window path; there is
+                # nothing to re-anchor while it is not heating.
+                continue
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                continue
+            fraction = float(self.actions.get(src.name, 0.0))
+            internal_temp = self._climate_internal_temp(src, state)
+            if isinstance(src, HeatPump):
+                _mode, target_temp = self._climate_hp_command(
+                    src, fraction, internal_temp, outdoor_temp, state,
+                )
+            else:
+                room_temp = self.model.rooms[src.room].temperature
+                room_setpoint = self.get_room_setpoint(src.room)
+                _mode, target_temp = self._climate_thermostat_command(
+                    src, fraction, internal_temp, room_temp, room_setpoint,
+                )
+            try:
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_temperature",
+                    {"entity_id": entity_id, "temperature": target_temp},
+                    blocking=False,
+                )
+            except Exception:
+                _LOGGER.debug(
+                    "Fast setpoint re-apply failed for %s", entity_id,
+                    exc_info=True,
+                )
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         """Write the computed set-point fractions to heater entities via HA services."""
@@ -4240,35 +4397,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         )
                         continue
 
-                    attrs = getattr(state, "attributes", {})
-
-                    # Use the stable comfort setpoint as the base for the
-                    # logit offset, not the current temperature.  Using the
-                    # current temperature causes the setpoint to chase the room
-                    # upward every cycle as it warms toward the setpoint.
-                    base_temp = self.get_room_setpoint(src.room)
-
-                    # Map the configured hvac_mode to the best HA mode string
-                    # the entity actually supports.
-                    supported_modes = attrs.get("hvac_modes", [])
-                    if src.hvac_mode == "heat_cool":
-                        if "heat_cool" in supported_modes:
-                            hvac_mode_str = "heat_cool"
-                        elif "auto" in supported_modes:
-                            hvac_mode_str = "auto"
-                        else:
-                            hvac_mode_str = "heat_cool"
-                    elif src.hvac_mode == "cool":
-                        if "cool" in supported_modes:
-                            hvac_mode_str = "cool"
-                        elif "dry" in supported_modes:
-                            hvac_mode_str = "dry"
-                        else:
-                            hvac_mode_str = "fan_only"
-                    else:
-                        hvac_mode_str = "heat"
-
-                    target_temp = src.target_temperature(fraction, base_temp, outdoor_temp)
+                    # Anchor the logit offset to the unit's current internal
+                    # temperature so the commanded gap (target − internal_temp)
+                    # — and therefore the power the HP modulates to deliver for
+                    # that gap — stays constant when the setpoint is re-asserted
+                    # on the fast cadence between MPC ticks.  Holding the gap is
+                    # what makes the delivered power honour the MPC's constant-
+                    # input (ZOH) assumption across the whole interval; a fixed
+                    # absolute target instead lets the power sag as the room
+                    # warms toward it.
+                    internal_temp = self._climate_internal_temp(src, state)
+                    hvac_mode_str, target_temp = self._climate_hp_command(
+                        src, fraction, internal_temp, outdoor_temp, state,
+                    )
 
                     await self.hass.services.async_call(
                         "climate",
@@ -4283,26 +4424,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         blocking=False,
                     )
                 else:
-                    # Non-heat-pump climate entity (e.g. electric heater
-                    # with a built-in thermostat).
-                    #
-                    # Read the entity's own internal temperature so we
-                    # can guarantee the applied setpoint is below it
-                    # whenever the room is above the desired setpoint.
-                    entity_temp: Optional[float] = None
-                    attrs = getattr(state, "attributes", {})
-                    raw_temp = attrs.get("current_temperature")
-                    if raw_temp is not None:
-                        try:
-                            entity_temp = float(raw_temp)
-                        except (ValueError, TypeError):
-                            pass
-                    if entity_temp is None:
-                        entity_temp = self.model.rooms[src.room].temperature
-
-                    room_temp = self.model.rooms[src.room].temperature
-                    room_setpoint = self.get_room_setpoint(src.room)
-
+                    # Non-heat-pump climate entity (e.g. electric heater with a
+                    # built-in thermostat).  Disabled rooms are turned off;
+                    # otherwise the target is computed by the same internal-
+                    # temperature-anchored helper the fast re-apply path uses, so
+                    # the commanded gap — and the delivered power — is held
+                    # constant across the MPC interval rather than sagging as the
+                    # unit warms toward a once-per-tick absolute setpoint.  The
+                    # idle/cooling-protection branch likewise tracks the internal
+                    # temperature so the thermostat never fires while idle.
                     if not effective_room_enabled:
                         # Room explicitly disabled – turn the entity off.
                         await self.hass.services.async_call(
@@ -4311,50 +4441,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                             {"entity_id": entity_id, "hvac_mode": "off"},
                             blocking=False,
                         )
-                    elif fraction > 0.0 and room_temp <= room_setpoint:
-                        # Active heating: room is at or below setpoint.
-                        # When fraction > 0 but room_temp > setpoint the
-                        # code intentionally falls through to the else
-                        # branch (cooling protection) to prevent the
-                        # heater from firing.
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": "heat"},
-                            blocking=False,
-                        )
-                        target_temp = max(
-                            room_setpoint,
-                            src.target_temperature(fraction, entity_temp),
-                        )
-                        await self.hass.services.async_call(
-                            "climate",
-                            "set_temperature",
-                            {"entity_id": entity_id, "temperature": target_temp},
-                            blocking=False,
-                        )
                     else:
-                        # Idle or cooling protection.  The room is above
-                        # setpoint or the MPC requests no heat.  In either
-                        # case the entity's internal setpoint is placed
-                        # below the entity's own temperature reading so
-                        # the heater's built-in thermostat never fires,
-                        # even if its internal sensor disagrees with the
-                        # HA room sensor.  Commands are re-issued every
-                        # update cycle to track sensor drift.
-                        #
-                        # The offset grows proportionally with how far the
-                        # room temperature exceeds the setpoint so that
-                        # heaters that regulate on their own internal sensor
-                        # are pushed further away from firing the more the
-                        # room overshoots.
-                        overshoot = max(0.0, room_temp - room_setpoint)
-                        target_temp = entity_temp - (DEFAULT_IDLE_OFFSET + overshoot)
-
+                        internal_temp = self._climate_internal_temp(src, state)
+                        room_temp = self.model.rooms[src.room].temperature
+                        room_setpoint = self.get_room_setpoint(src.room)
+                        hvac_mode_str, target_temp = self._climate_thermostat_command(
+                            src, fraction, internal_temp, room_temp, room_setpoint,
+                        )
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
-                            {"entity_id": entity_id, "hvac_mode": "heat"},
+                            {"entity_id": entity_id, "hvac_mode": hvac_mode_str},
                             blocking=False,
                         )
                         await self.hass.services.async_call(
