@@ -7,6 +7,13 @@ export const SHADING_DATASET_LABELS = new Set([
   'Cooling Capacity',
 ]);
 
+/** Touch-first or narrow viewports — Chart.js tap tooltips are sticky and obscure plots. */
+function isMobileChartViewport() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia('(pointer: coarse)').matches
+    || window.matchMedia('(max-width: 768px)').matches;
+}
+
 const CHART_DEFAULTS = {
   responsive: true,
   maintainAspectRatio: false,
@@ -238,6 +245,12 @@ export class TimeSeriesChart {
     }
 
     this._applyAxisFormatting(opts);
+
+    if (isMobileChartViewport()) {
+      opts.plugins.tooltip.enabled = false;
+      // Chart.js shows tap-triggered tooltips via touch/click; drop those events on mobile.
+      opts.events = [];
+    }
 
     return opts;
   }
