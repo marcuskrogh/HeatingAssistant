@@ -1,7 +1,7 @@
-import { TimeSeriesChart, makeDataset, loadChartJs, createSparkline, historyToDataPoints } from '../components/time-series-chart.js';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js';
 import { createKpiCard, updateKpiCard } from '../components/kpi-card.js';
 import { createCollapsible } from '../components/collapsible.js';
-import { entityValue, formatNumber, systemEntity } from '../utils.js';
+import { formatNumber, modelFitLabel } from '../utils.js';
 
 // Default parameter values — must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
@@ -23,16 +23,15 @@ export function renderSystemIdentification(container, rooms, state, connection, 
   if (slug) {
     return renderIdentificationDetail(container, slug, rooms, state, connection, hass);
   }
-  return renderIdentificationIndex(container, rooms, state, connection);
+  return renderIdentificationIndex(container, rooms, state);
 }
 
 // ---------------------------------------------------------------------------
 // Index view — room selection grid
 // ---------------------------------------------------------------------------
 
-function renderIdentificationIndex(container, rooms, state, connection) {
+function renderIdentificationIndex(container, rooms, state) {
   container.innerHTML = '';
-  const sparklines = [];
 
   const header = document.createElement('div');
   header.className = 'section-header';
@@ -51,109 +50,143 @@ function renderIdentificationIndex(container, rooms, state, connection) {
   function buildTiles(st) {
     grid.innerHTML = '';
     for (const room of rooms) {
-      const tile = document.createElement('div');
-      tile.className = 'card card--clickable identification-tile';
-
-      const fitEntity = st[`sensor.heating_assistant_${room.slug}_model_fit_quality`];
-      const fitVal = fitEntity ? parseFloat(fitEntity.state) : null;
-      const fitInfo = modelFitBadge(fitVal);
-
-      tile.innerHTML = `
-        <span class="room-tile__name">${room.name}</span>
-        <div class="identification-tile__kpi-row">
-          <div class="identification-tile__kpi-box ${fitInfo.class}">
-            <span class="identification-tile__kpi-label">FIT</span>
-            <span class="identification-tile__kpi-value">${fitInfo.label}</span>
-          </div>
-          <div class="identification-tile__kpi-box">
-            <span class="identification-tile__kpi-label">RMSE</span>
-            <span class="identification-tile__kpi-value" data-room="${room.slug}">—</span>
-          </div>
-        </div>
-        <div class="identification-tile__sparkline">
-          <canvas data-sparkline="${room.slug}"></canvas>
-        </div>
-      `;
-      tile.addEventListener('click', () => {
+      const card = document.createElement('div');
+      card.className = 'card card--clickable sysid-index-card';
+      card.dataset.room = room.slug;
+      card.innerHTML = buildIdentificationCardHtml(room, st);
+      card.addEventListener('click', () => {
         window.location.hash = `#identification/${room.slug}`;
       });
-      grid.appendChild(tile);
-    }
-  }
-
-  function computeRMSE(filtered, measured) {
-    let sumSq = 0, count = 0;
-    for (const m of measured) {
-      let best = null, bestDist = Infinity;
-      for (const f of filtered) {
-        const dist = Math.abs(f.x - m.x);
-        if (dist < bestDist) { bestDist = dist; best = f; }
-      }
-      if (best && bestDist < 120000) {
-        sumSq += (best.y - m.y) ** 2;
-        count++;
-      }
-    }
-    return count > 0 ? Math.sqrt(sumSq / count) : null;
-  }
-
-  async function loadSparklines() {
-    const entityIds = [];
-    for (const room of rooms) {
-      entityIds.push(`sensor.heating_assistant_${room.slug}_temperature_filtered`);
-      entityIds.push(`sensor.heating_assistant_${room.slug}_temperature_measured`);
-    }
-    const history = await connection.getHistory(entityIds, 6);
-
-    for (const room of rooms) {
-      const filteredHist = history[`sensor.heating_assistant_${room.slug}_temperature_filtered`] || [];
-      const measuredHist = history[`sensor.heating_assistant_${room.slug}_temperature_measured`] || [];
-      const filteredPts = historyToDataPoints(filteredHist);
-      const measuredPts = historyToDataPoints(measuredHist);
-
-      const rmse = computeRMSE(filteredPts, measuredPts);
-      const rmseEl = grid.querySelector(`[data-room="${room.slug}"]`);
-      if (rmseEl) {
-        rmseEl.textContent = rmse != null ? `${rmse.toFixed(3)} °C` : '—';
-      }
-
-      const canvas = grid.querySelector(`[data-sparkline="${room.slug}"]`);
-      if (canvas && filteredPts.length > 0) {
-        const datasets = [
-          { data: filteredPts, borderColor: '#4fc3f7', borderWidth: 1.5, spanGaps: true },
-          { data: measuredPts, borderColor: '#e57373', borderWidth: 0, pointRadius: 1.5, pointBackgroundColor: '#e57373', showLine: false, spanGaps: true },
-        ];
-        const chart = await createSparkline(canvas, datasets);
-        sparklines.push(chart);
-      }
+      grid.appendChild(card);
     }
   }
 
   buildTiles(state);
-  loadSparklines();
 
   return {
     update(newState) {
       for (const room of rooms) {
-        const fitEntity = newState[`sensor.heating_assistant_${room.slug}_model_fit_quality`];
-        const fitVal = fitEntity ? parseFloat(fitEntity.state) : null;
-        const fitInfo = modelFitBadge(fitVal);
-        const tile = grid.querySelector(`[data-room="${room.slug}"]`);
-        if (tile) {
-          const kpiBox = tile.closest('.identification-tile__kpi-row')?.querySelector('.identification-tile__kpi-box');
-          if (kpiBox) {
-            kpiBox.className = `identification-tile__kpi-box ${fitInfo.class}`;
-            const valEl = kpiBox.querySelector('.identification-tile__kpi-value');
-            if (valEl) valEl.textContent = fitInfo.label;
-          }
-        }
+        const card = grid.querySelector(`[data-room="${room.slug}"]`);
+        if (card) card.innerHTML = buildIdentificationCardHtml(room, newState);
       }
     },
-    destroy() {
-      for (const chart of sparklines) chart.destroy();
-      sparklines.length = 0;
-    },
+    destroy() {},
   };
+}
+
+function identificationEntityIds(slug) {
+  return {
+    fit: `sensor.heating_assistant_${slug}_model_fit_quality`,
+    confidence: `sensor.heating_assistant_${slug}_parameter_confidence`,
+    openLoop: `sensor.heating_assistant_${slug}_open_loop_rmse`,
+  };
+}
+
+function fitBadgeClass(fitInfo) {
+  if (fitInfo.class === 'fit--good') return 'sysid-index-card__badge--good';
+  if (fitInfo.class === 'fit--acceptable') return 'sysid-index-card__badge--acceptable';
+  if (fitInfo.class === 'fit--poor') return 'sysid-index-card__badge--poor';
+  return 'sysid-index-card__badge--unknown';
+}
+
+function identificationStat(label, value) {
+  return `<span class="store-stat"><span class="store-stat__k">${label}</span><span class="store-stat__v">${value}</span></span>`;
+}
+
+function identificationActionHint({ fitVal, fitAttrs, confVal, confAttrs, olRmse }) {
+  const warnings = Array.isArray(confAttrs.warnings) ? confAttrs.warnings : [];
+  const nSamples = fitAttrs.n_samples;
+
+  if (fitVal == null || (nSamples != null && nSamples < 2)) {
+    return {
+      text: 'Waiting for enough temperature history to assess model fit.',
+      severity: 'dim',
+    };
+  }
+  if (confVal != null && confVal < 100) {
+    return {
+      text: warnings[0] || 'Review parameters — some values are outside expected ranges.',
+      severity: 'warn',
+    };
+  }
+  if (fitVal <= 0.5) {
+    return {
+      text: 'Poor fit — run auto-identification or check heater and sensor configuration.',
+      severity: 'alarm',
+    };
+  }
+  if (olRmse == null) {
+    return {
+      text: 'Run open-loop simulation on the room page to validate forecast accuracy.',
+      severity: 'dim',
+    };
+  }
+  if (olRmse > 0.5) {
+    return {
+      text: 'Open-loop error is high — re-estimate parameters or widen the identification window.',
+      severity: 'warn',
+    };
+  }
+  if (fitVal > 0.8) {
+    return {
+      text: 'Model looks good — no action needed.',
+      severity: 'good',
+    };
+  }
+  return {
+    text: 'Acceptable fit — consider re-identifying after a heating cycle or experiment.',
+    severity: 'dim',
+  };
+}
+
+function buildIdentificationCardHtml(room, st) {
+  const ids = identificationEntityIds(room.slug);
+  const fitEntity = st[ids.fit];
+  const confEntity = st[ids.confidence];
+  const olEntity = st[ids.openLoop];
+
+  const fitVal = fitEntity ? parseFloat(fitEntity.state) : null;
+  const fitInfo = modelFitLabel(fitVal);
+  const fitAttrs = fitEntity?.attributes || {};
+  const confVal = confEntity ? parseFloat(confEntity.state) : null;
+  const confAttrs = confEntity?.attributes || {};
+  const olRmse = olEntity?.attributes?.open_loop_rmse ?? (
+    olEntity?.state != null && olEntity.state !== 'unknown' ? parseFloat(olEntity.state) : null
+  );
+  const olMae = olEntity?.attributes?.open_loop_mae ?? null;
+
+  const r2 = fitVal != null && !isNaN(fitVal) ? formatNumber(fitVal, 2) : '—';
+  const rmse = fitAttrs.rmse != null ? `${formatNumber(fitAttrs.rmse, 3)} °C` : '—';
+  const mae = fitAttrs.mae != null ? `${formatNumber(fitAttrs.mae, 3)} °C` : '—';
+  const confidence = confVal != null && !isNaN(confVal) ? `${formatNumber(confVal, 0)}%` : '—';
+  const tau = confAttrs.time_constant_hours != null
+    ? `${formatNumber(confAttrs.time_constant_hours, 1)} h`
+    : '—';
+  const olRmseText = olRmse != null && !isNaN(olRmse) ? `${formatNumber(olRmse, 3)} °C` : '—';
+  const olMaeText = olMae != null && !isNaN(olMae) ? `${formatNumber(olMae, 3)} °C` : '—';
+  const samples = fitAttrs.n_samples != null ? `${fitAttrs.n_samples}` : '—';
+  const estimated = confAttrs.is_estimated === true ? 'Yes' : (confAttrs.is_estimated === false ? 'No' : '—');
+
+  const action = identificationActionHint({ fitVal, fitAttrs, confVal, confAttrs, olRmse });
+
+  return `
+    <div class="sysid-index-card__header">
+      <span class="sysid-index-card__name">${room.name}</span>
+      <span class="sysid-index-card__badge ${fitBadgeClass(fitInfo)}">${fitInfo.label === '—' ? 'NO DATA' : fitInfo.label}</span>
+    </div>
+    <div class="sysid-index-card__meta">
+      ${identificationStat('R²', r2)}
+      ${identificationStat('RMSE', rmse)}
+      ${identificationStat('MAE', mae)}
+      ${identificationStat('Confidence', confidence)}
+      ${identificationStat('τ', tau)}
+      ${identificationStat('OL RMSE', olRmseText)}
+      ${identificationStat('OL MAE', olMaeText)}
+      ${identificationStat('Samples', samples)}
+      ${identificationStat('Estimated', estimated)}
+    </div>
+    <div class="sysid-index-card__action sysid-index-card__action--${action.severity}">${action.text}</div>
+  `;
 }
 
 // ---------------------------------------------------------------------------
@@ -1309,16 +1342,6 @@ function _toLocalInput(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function _statusBadge(status) {
-  const cls = {
-    scheduled: 'fit--acceptable',
-    running: 'fit--good',
-    completed: '',
-    cancelled: 'fit--poor',
-  }[status] || '';
-  return `<span class="identification-tile__kpi-box ${cls}" style="display:inline-block;padding:1px 6px">${(status || '').toUpperCase()}</span>`;
-}
-
 // Build the experiment-scheduler and stored-dataset cards, append them to the
 // container, and wire all their interactions.  Returns a handle with a
 // ``destroy`` method that tears down the periodic refresh timer.
@@ -1635,12 +1658,6 @@ function formatMass(val) {
   return num.toFixed(0) + ' J/K';
 }
 
-function modelFitBadge(val) {
-  if (val == null || isNaN(val)) return { label: '—', class: '' };
-  if (val > 0.8) return { label: 'GOOD', class: 'fit--good' };
-  if (val > 0.5) return { label: 'ACCEPTABLE', class: 'fit--acceptable' };
-  return { label: 'POOR', class: 'fit--poor' };
-}
 
 function buildEkfChart(chart, simulation) {
   if (!simulation || simulation.length === 0) {
