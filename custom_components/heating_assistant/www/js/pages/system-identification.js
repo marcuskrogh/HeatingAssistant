@@ -18,6 +18,7 @@ const DEFAULTS = {
 };
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+const DISMISSED_WARNINGS_KEY = 'heating_assistant_sysid_dismissed_v1';
 
 export function renderSystemIdentification(container, rooms, state, connection, hass, slug) {
   if (slug) {
@@ -29,6 +30,23 @@ export function renderSystemIdentification(container, rooms, state, connection, 
 // ---------------------------------------------------------------------------
 // Index view — room selection grid
 // ---------------------------------------------------------------------------
+
+function loadDismissedWarnings(slug) {
+  try {
+    const raw = localStorage.getItem(`${DISMISSED_WARNINGS_KEY}_${slug}`);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function saveDismissedWarning(slug, code) {
+  const dismissed = loadDismissedWarnings(slug);
+  dismissed.add(code);
+  try {
+    localStorage.setItem(`${DISMISSED_WARNINGS_KEY}_${slug}`, JSON.stringify([...dismissed]));
+  } catch (_) {}
+}
 
 function renderIdentificationIndex(container, rooms, state) {
   container.innerHTML = '';
@@ -47,7 +65,10 @@ function renderIdentificationIndex(container, rooms, state) {
   grid.className = 'grid-rooms';
   container.appendChild(grid);
 
+  let latestState = state;
+
   function buildTiles(st) {
+    latestState = st;
     grid.innerHTML = '';
     for (const room of rooms) {
       const card = document.createElement('div');
@@ -61,6 +82,22 @@ function renderIdentificationIndex(container, rooms, state) {
     }
   }
 
+  grid.addEventListener('click', (event) => {
+    const dismissBtn = event.target.closest('[data-dismiss-warning]');
+    if (!dismissBtn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const card = dismissBtn.closest('[data-room]');
+    const slug = card?.dataset.room;
+    const code = dismissBtn.dataset.dismissWarning;
+    if (!slug || !code) return;
+    saveDismissedWarning(slug, code);
+    const room = rooms.find((r) => r.slug === slug);
+    if (room && card) {
+      card.innerHTML = buildIdentificationCardHtml(room, latestState);
+    }
+  });
+
   buildTiles(state);
 
   return {
@@ -69,6 +106,7 @@ function renderIdentificationIndex(container, rooms, state) {
         const card = grid.querySelector(`[data-room="${room.slug}"]`);
         if (card) card.innerHTML = buildIdentificationCardHtml(room, newState);
       }
+      latestState = newState;
     },
     destroy() {},
   };
@@ -93,81 +131,37 @@ function identificationStat(label, value) {
   return `<span class="store-stat"><span class="store-stat__k">${label}</span><span class="store-stat__v">${value}</span></span>`;
 }
 
-function identificationActionHint({ fitVal, fitAttrs, confVal, confAttrs, olRmse }) {
-  const warnings = Array.isArray(confAttrs.warnings) ? confAttrs.warnings : [];
-  const nSamples = fitAttrs.n_samples;
+function identificationWarningsHtml(slug, confAttrs) {
+  const warnings = Array.isArray(confAttrs.card_warnings) ? confAttrs.card_warnings : [];
+  const dismissed = loadDismissedWarnings(slug);
+  const visible = warnings.filter((w) => w?.code && !dismissed.has(w.code));
+  if (visible.length === 0) return '';
 
-  if (fitVal == null || (nSamples != null && nSamples < 2)) {
-    return {
-      text: 'Waiting for enough temperature history to assess model fit.',
-      severity: 'dim',
-    };
-  }
-  if (confVal != null && confVal < 100) {
-    return {
-      text: warnings[0] || 'Review parameters — some values are outside expected ranges.',
-      severity: 'warn',
-    };
-  }
-  if (fitVal <= 0.5) {
-    return {
-      text: 'Poor fit — run auto-identification or check heater and sensor configuration.',
-      severity: 'alarm',
-    };
-  }
-  if (olRmse == null) {
-    return {
-      text: 'Run open-loop simulation on the room page to validate forecast accuracy.',
-      severity: 'dim',
-    };
-  }
-  if (olRmse > 0.5) {
-    return {
-      text: 'Open-loop error is high — re-estimate parameters or widen the identification window.',
-      severity: 'warn',
-    };
-  }
-  if (fitVal > 0.8) {
-    return {
-      text: 'Model looks good — no action needed.',
-      severity: 'good',
-    };
-  }
-  return {
-    text: 'Acceptable fit — consider re-identifying after a heating cycle or experiment.',
-    severity: 'dim',
-  };
+  return `<div class="sysid-index-card__warnings">${visible.map((w) => {
+    const severity = w.severity || 'warn';
+    return `
+      <div class="sysid-index-card__warning sysid-index-card__warning--${severity}">
+        <span class="sysid-index-card__warning-text">${w.message}</span>
+        <button type="button" class="sysid-index-card__warning-dismiss" data-dismiss-warning="${w.code}" aria-label="Dismiss warning">×</button>
+      </div>`;
+  }).join('')}</div>`;
 }
 
 function buildIdentificationCardHtml(room, st) {
   const ids = identificationEntityIds(room.slug);
   const fitEntity = st[ids.fit];
   const confEntity = st[ids.confidence];
-  const olEntity = st[ids.openLoop];
 
   const fitVal = fitEntity ? parseFloat(fitEntity.state) : null;
   const fitInfo = modelFitLabel(fitVal);
   const fitAttrs = fitEntity?.attributes || {};
-  const confVal = confEntity ? parseFloat(confEntity.state) : null;
   const confAttrs = confEntity?.attributes || {};
-  const olRmse = olEntity?.attributes?.open_loop_rmse ?? (
-    olEntity?.state != null && olEntity.state !== 'unknown' ? parseFloat(olEntity.state) : null
-  );
-  const olMae = olEntity?.attributes?.open_loop_mae ?? null;
 
   const r2 = fitVal != null && !isNaN(fitVal) ? formatNumber(fitVal, 2) : '—';
   const rmse = fitAttrs.rmse != null ? `${formatNumber(fitAttrs.rmse, 3)} °C` : '—';
-  const mae = fitAttrs.mae != null ? `${formatNumber(fitAttrs.mae, 3)} °C` : '—';
-  const confidence = confVal != null && !isNaN(confVal) ? `${formatNumber(confVal, 0)}%` : '—';
-  const tau = confAttrs.time_constant_hours != null
-    ? `${formatNumber(confAttrs.time_constant_hours, 1)} h`
-    : '—';
-  const olRmseText = olRmse != null && !isNaN(olRmse) ? `${formatNumber(olRmse, 3)} °C` : '—';
-  const olMaeText = olMae != null && !isNaN(olMae) ? `${formatNumber(olMae, 3)} °C` : '—';
-  const samples = fitAttrs.n_samples != null ? `${fitAttrs.n_samples}` : '—';
-  const estimated = confAttrs.is_estimated === true ? 'Yes' : (confAttrs.is_estimated === false ? 'No' : '—');
-
-  const action = identificationActionHint({ fitVal, fitAttrs, confVal, confAttrs, olRmse });
+  const estimated = confAttrs.is_estimated === true
+    ? 'Yes'
+    : (confAttrs.is_estimated === false ? 'No' : '—');
 
   return `
     <div class="sysid-index-card__header">
@@ -177,15 +171,9 @@ function buildIdentificationCardHtml(room, st) {
     <div class="sysid-index-card__meta">
       ${identificationStat('R²', r2)}
       ${identificationStat('RMSE', rmse)}
-      ${identificationStat('MAE', mae)}
-      ${identificationStat('Confidence', confidence)}
-      ${identificationStat('τ', tau)}
-      ${identificationStat('OL RMSE', olRmseText)}
-      ${identificationStat('OL MAE', olMaeText)}
-      ${identificationStat('Samples', samples)}
       ${identificationStat('Estimated', estimated)}
     </div>
-    <div class="sysid-index-card__action sysid-index-card__action--${action.severity}">${action.text}</div>
+    ${identificationWarningsHtml(room.slug, confAttrs)}
   `;
 }
 

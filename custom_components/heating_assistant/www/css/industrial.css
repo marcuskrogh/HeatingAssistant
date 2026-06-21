@@ -1528,6 +1528,63 @@
   font-style: italic;
 }
 
+.sysid-index-card__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.sysid-index-card__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sysid-index-card__warning-text {
+  flex: 1;
+}
+
+.sysid-index-card__warning--info,
+.sysid-index-card__warning--dim {
+  background: rgba(144, 164, 174, 0.12);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning--warn {
+  background: rgba(255, 193, 7, 0.1);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning--alarm {
+  background: rgba(244, 67, 54, 0.1);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning--good {
+  background: rgba(76, 175, 80, 0.1);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning-dismiss {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.sysid-index-card__warning-dismiss:hover {
+  color: var(--text-secondary);
+}
+
 .schedule-tile {
   padding: 20px;
   transition: border-color var(--transition), background var(--transition);

@@ -74,6 +74,15 @@ class ModelFitMetrics:
 
 
 @dataclass
+class IdentificationWarning:
+    """Structured warning for the system-identification room cards."""
+
+    code: str
+    message: str
+    severity: str = "warn"
+
+
+@dataclass
 class ParameterValidation:
     """
     Parameter validity assessment for a single room.
@@ -160,9 +169,31 @@ R_EXTERNAL_MAX = 10.0
 
 # Time constant bounds [hours]
 # - Lower: ~0.1 hours (very fast response, poor insulation)
-# - Upper: ~100 hours (extremely slow, very high thermal mass and insulation)
+# - Soft upper: ~100 hours — large open-plan rooms can exceed this with good fit
+# - Hard upper: ~500 hours — beyond this is almost certainly wrong
 TIME_CONSTANT_MIN_HOURS = 0.1
-TIME_CONSTANT_MAX_HOURS = 100.0
+TIME_CONSTANT_SOFT_MAX_HOURS = 100.0
+TIME_CONSTANT_MAX_HOURS = 500.0
+
+# Closed-loop fit thresholds aligned with the dashboard fit badges.
+_GOOD_FIT_R_SQUARED = 0.8
+_GOOD_FIT_RMSE_C = 0.5
+_ACCEPTABLE_FIT_R_SQUARED = 0.5
+_OPEN_LOOP_WARN_RMSE_C = 0.5
+_OPEN_LOOP_ALARM_RMSE_C = 1.0
+
+
+def _good_closed_loop_fit(
+    model_r_squared: Optional[float],
+    model_rmse: Optional[float],
+) -> bool:
+    if model_r_squared is None or model_r_squared <= _GOOD_FIT_R_SQUARED:
+        return False
+    return model_rmse is None or model_rmse <= _GOOD_FIT_RMSE_C
+
+
+def _acceptable_closed_loop_fit(model_r_squared: Optional[float]) -> bool:
+    return model_r_squared is not None and model_r_squared > _ACCEPTABLE_FIT_R_SQUARED
 
 
 # ── Model fit metrics computation ───────────────────────────────────────────
@@ -326,6 +357,9 @@ def validate_parameters(
     room_name: str,
     thermal_mass: float,
     r_external: float,
+    *,
+    model_r_squared: Optional[float] = None,
+    model_rmse: Optional[float] = None,
 ) -> ParameterValidation:
     """
     Validate physical reasonableness of thermal parameters.
@@ -345,6 +379,7 @@ def validate_parameters(
         Validation result with warnings
     """
     warnings = []
+    good_fit = _good_closed_loop_fit(model_r_squared, model_rmse)
 
     # Check thermal mass
     mass_valid = THERMAL_MASS_MIN <= thermal_mass <= THERMAL_MASS_MAX
@@ -352,13 +387,12 @@ def validate_parameters(
         if thermal_mass < THERMAL_MASS_MIN:
             warnings.append(
                 f"Thermal mass {thermal_mass:.0f} J/K is unusually low "
-                f"(< {THERMAL_MASS_MIN:.0f} J/K). Room may be too small or "
-                "parameter estimation may have failed."
+                f"(< {THERMAL_MASS_MIN:.0f} J/K). Check room size or re-run identification."
             )
         else:
             warnings.append(
                 f"Thermal mass {thermal_mass:.0f} J/K is unusually high "
-                f"(> {THERMAL_MASS_MAX:.0f} J/K). Check parameter estimation."
+                f"(> {THERMAL_MASS_MAX:.0f} J/K). Re-run identification or review inputs."
             )
 
     # Check external resistance
@@ -366,34 +400,44 @@ def validate_parameters(
     if not r_valid:
         if r_external < R_EXTERNAL_MIN:
             warnings.append(
-                f"External resistance {r_external:.6f} K/W is unusually low "
-                f"(< {R_EXTERNAL_MIN:.6f} K/W). Room may have very poor insulation."
+                f"Envelope resistance {r_external:.6f} K/W is unusually low "
+                f"(< {R_EXTERNAL_MIN:.6f} K/W). Check insulation assumptions."
             )
         else:
             warnings.append(
-                f"External resistance {r_external:.6f} K/W is unusually high "
-                f"(> {R_EXTERNAL_MAX:.1f} K/W). Check parameter estimation."
+                f"Envelope resistance {r_external:.6f} K/W is unusually high "
+                f"(> {R_EXTERNAL_MAX:.1f} K/W). Re-run identification or review inputs."
             )
 
     # Compute time constant (τ = R × C)
     time_constant_seconds = thermal_mass * r_external
     time_constant_hours = time_constant_seconds / 3600.0
 
-    # Check time constant
-    tc_valid = (
+    # Time constant validity: hard bounds always apply; the soft upper bound
+    # only reduces confidence when closed-loop fit is not good.
+    tc_hard_valid = (
         TIME_CONSTANT_MIN_HOURS <= time_constant_hours <= TIME_CONSTANT_MAX_HOURS
     )
-    if not tc_valid:
+    tc_soft_valid = time_constant_hours <= TIME_CONSTANT_SOFT_MAX_HOURS
+    tc_valid = tc_hard_valid and (tc_soft_valid or good_fit)
+
+    if not tc_hard_valid:
         if time_constant_hours < TIME_CONSTANT_MIN_HOURS:
             warnings.append(
-                f"Time constant {time_constant_hours:.2f} hours is unusually short "
-                f"(< {TIME_CONSTANT_MIN_HOURS:.1f} hours). Room responds very quickly."
+                f"Thermal time constant {time_constant_hours:.1f} h is very short "
+                f"(< {TIME_CONSTANT_MIN_HOURS:.1f} h) — the room would respond almost instantly."
             )
         else:
             warnings.append(
-                f"Time constant {time_constant_hours:.2f} hours is unusually long "
-                f"(> {TIME_CONSTANT_MAX_HOURS:.0f} hours). Room responds very slowly."
+                f"Thermal time constant {time_constant_hours:.0f} h is extremely long "
+                f"(> {TIME_CONSTANT_MAX_HOURS:.0f} h) — parameters are likely inconsistent."
             )
+    elif not tc_soft_valid and not good_fit:
+        warnings.append(
+            f"Thermal time constant {time_constant_hours:.0f} h is longer than typical "
+            f"(> {TIME_CONSTANT_SOFT_MAX_HOURS:.0f} h) and closed-loop fit is not strong — "
+            "re-run identification or review thermal mass and envelope resistance."
+        )
 
     return ParameterValidation(
         room_name=room_name,
@@ -405,6 +449,112 @@ def validate_parameters(
         time_constant_valid=tc_valid,
         warnings=warnings,
     )
+
+
+def build_identification_warnings(
+    room_name: str,
+    validation: ParameterValidation,
+    *,
+    model_r_squared: Optional[float] = None,
+    model_rmse: Optional[float] = None,
+    open_loop_rmse: Optional[float] = None,
+    n_samples: Optional[int] = None,
+) -> List[IdentificationWarning]:
+    """Build structured, user-facing warnings for the sysid index cards."""
+    del room_name  # reserved for future per-room tailoring
+    warnings: List[IdentificationWarning] = []
+    good_fit = _good_closed_loop_fit(model_r_squared, model_rmse)
+    acceptable_fit = _acceptable_closed_loop_fit(model_r_squared)
+
+    code_map = {
+        "thermal mass": "thermal_mass",
+        "envelope resistance": "r_external",
+        "thermal time constant": "time_constant",
+    }
+
+    for text in validation.warnings:
+        code = "parameter_validation"
+        lowered = text.lower()
+        for needle, mapped in code_map.items():
+            if needle in lowered:
+                code = mapped
+                break
+        severity = "info" if code == "time_constant" and good_fit else "warn"
+        warnings.append(IdentificationWarning(code=code, message=text, severity=severity))
+
+    if n_samples is not None and n_samples < 2:
+        warnings.append(IdentificationWarning(
+            code="insufficient_data",
+            message="Waiting for enough temperature history to assess model fit.",
+            severity="info",
+        ))
+    elif model_r_squared is None:
+        warnings.append(IdentificationWarning(
+            code="no_fit_data",
+            message="No closed-loop fit data yet — run the controller or EKF reconstruction.",
+            severity="info",
+        ))
+    elif not acceptable_fit:
+        warnings.append(IdentificationWarning(
+            code="poor_fit",
+            message="Poor closed-loop fit — run auto-identification or check heater and sensor configuration.",
+            severity="alarm",
+        ))
+
+    if open_loop_rmse is not None and open_loop_rmse > _OPEN_LOOP_WARN_RMSE_C:
+        if good_fit and open_loop_rmse <= _OPEN_LOOP_ALARM_RMSE_C:
+            warnings.append(IdentificationWarning(
+                code="open_loop_moderate",
+                message=(
+                    f"Open-loop drift is {open_loop_rmse:.2f} °C while closed-loop fit is good — "
+                    "optional check with a longer open-loop simulation if forecasts look off."
+                ),
+                severity="info",
+            ))
+        elif good_fit:
+            warnings.append(IdentificationWarning(
+                code="open_loop_high",
+                message=(
+                    f"Open-loop error is {open_loop_rmse:.2f} °C despite good closed-loop fit — "
+                    "validate with a fresh identification window before changing parameters."
+                ),
+                severity="warn",
+            ))
+        elif acceptable_fit:
+            warnings.append(IdentificationWarning(
+                code="open_loop_elevated",
+                message=(
+                    f"Open-loop error is {open_loop_rmse:.2f} °C — re-estimate parameters "
+                    "or widen the identification window."
+                ),
+                severity="warn",
+            ))
+        else:
+            warnings.append(IdentificationWarning(
+                code="open_loop_high",
+                message=(
+                    f"Open-loop error is {open_loop_rmse:.2f} °C with weak closed-loop fit — "
+                    "re-estimate parameters before relying on forecasts."
+                ),
+                severity="alarm",
+            ))
+    elif acceptable_fit and open_loop_rmse is None and n_samples is not None and n_samples >= 2:
+        warnings.append(IdentificationWarning(
+            code="open_loop_missing",
+            message="Run open-loop simulation on the room page to validate forecast accuracy.",
+            severity="info",
+        ))
+
+
+    # Deduplicate by code while preserving first occurrence.
+    seen: set[str] = set()
+    unique: List[IdentificationWarning] = []
+    for warning in warnings:
+        if warning.code in seen:
+            continue
+        seen.add(warning.code)
+        unique.append(warning)
+    return unique
 
 
 # ── Controller performance analysis ──────────────────────────────────────────

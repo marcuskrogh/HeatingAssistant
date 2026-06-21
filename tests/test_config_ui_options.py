@@ -395,3 +395,19 @@ def test_tuning_page_splits_live_and_restart_parameters() -> None:
     assert "'horizon'" in source
     assert "'update_interval'" in source
     assert "'tracking_weight'" in source
+
+
+def test_sysid_index_cards_show_core_kpis_and_dismissible_warnings() -> None:
+    """System identification index cards must show R²/RMSE/Estimated and dismissible warnings."""
+    source = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js" / "pages"
+        / "system-identification.js"
+    ).read_text(encoding="utf-8")
+    assert "identificationStat('R²'" in source
+    assert "identificationStat('RMSE'" in source
+    assert "identificationStat('Estimated'" in source
+    assert "card_warnings" in source
+    assert "data-dismiss-warning" in source
+    assert "DISMISSED_WARNINGS_KEY" in source
+    assert "identificationStat('MAE'" not in source
+    assert "identificationStat('Confidence'" not in source

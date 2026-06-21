@@ -529,7 +529,15 @@ def test_parameter_confidence_sensor_has_is_estimated_attribute():
     room = _make_room("lr", 5_000_000, 0.05)
     coordinator = _FakeCoordinator([room])
     snap = {
-        "rooms": {"lr": {"thermal_mass": 5e6, "r_external": 0.05, "internal_gain": 0}},
+        "rooms": {
+            "lr": {
+                "thermal_mass": 5e6,
+                "r_external": 0.05,
+                "internal_gain": 0,
+                "is_estimated": True,
+                "estimated_at": "2025-06-01T00:00:00+00:00",
+            },
+        },
         "sources": {},
         "connections": {},
         "estimated_at": "2025-06-01T00:00:00+00:00",
@@ -638,7 +646,14 @@ def test_estimated_parameters_status_sensor_estimated():
         rooms=[_make_room("lr")], sources=[_make_source("hp")]
     )
     snap = {
-        "rooms": {"lr": {"thermal_mass": 3e6, "r_external": 0.03, "internal_gain": 50.0}},
+        "rooms": {
+            "lr": {
+                "thermal_mass": 3e6,
+                "r_external": 0.03,
+                "internal_gain": 50.0,
+                "is_estimated": True,
+            },
+        },
         "sources": {"hp": {"power_scale": 1.2}},
         "connections": {},
         "estimated_at": "2025-08-01T00:00:00+00:00",
