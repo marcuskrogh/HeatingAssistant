@@ -2508,16 +2508,32 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Persist the full per-room parameter set (not just C / R_ext) so the
         # restart-time restore re-applies the identified envelope split, solar
         # scale and internal gain rather than reverting them to defaults.
+        prev_rooms = old_active.get("rooms", {}) or existing_snap.get("rooms", {})
+
+        def _room_snapshot_entry(r_name: str, r_obj: Any) -> Dict[str, Any]:
+            prev = prev_rooms.get(r_name, {}) if isinstance(prev_rooms.get(r_name), dict) else {}
+            just_estimated = r_name == room_name
+            entry: Dict[str, Any] = {
+                "thermal_mass": r_obj.thermal_mass,
+                "r_external": r_obj.r_external,
+                "internal_gain": float(getattr(r_obj, "internal_gain", 0.0)),
+                "solar_scale": float(getattr(r_obj, "solar_scale", 1.0)),
+                "c_air_fraction": float(getattr(r_obj, "c_air_fraction", 0.05)),
+                "r_aw_fraction": float(getattr(r_obj, "r_aw_fraction", 0.05)),
+                "is_estimated": bool(just_estimated or prev.get("is_estimated", False)),
+            }
+            if just_estimated:
+                entry["estimated_at"] = now_iso
+                entry["estimation_source"] = source
+            elif prev.get("estimated_at"):
+                entry["estimated_at"] = prev.get("estimated_at")
+                if prev.get("estimation_source"):
+                    entry["estimation_source"] = prev.get("estimation_source")
+            return entry
+
         new_active: Dict[str, Any] = {
             "rooms": {
-                name: {
-                    "thermal_mass": r.thermal_mass,
-                    "r_external": r.r_external,
-                    "internal_gain": float(getattr(r, "internal_gain", 0.0)),
-                    "solar_scale": float(getattr(r, "solar_scale", 1.0)),
-                    "c_air_fraction": float(getattr(r, "c_air_fraction", 0.05)),
-                    "r_aw_fraction": float(getattr(r, "r_aw_fraction", 0.05)),
-                }
+                name: _room_snapshot_entry(name, r)
                 for name, r in self.model.rooms.items()
             },
             "estimated_at": now_iso,
@@ -5328,26 +5344,44 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         # --- Persist the snapshot so values survive a full HA restart -------
         now_iso = datetime.now(timezone.utc).isoformat()
+        prev_rooms: Dict[str, Any] = {}
+        try:
+            prev_rooms = (self.estimated_params_snapshot or {}).get("rooms", {})
+        except Exception:
+            pass
+
+        snapshot_rooms: Dict[str, Any] = {}
+        for name in self.model.room_names:
+            prev = prev_rooms.get(name, {}) if isinstance(prev_rooms.get(name), dict) else {}
+            just_estimated = name in estimated_params
+            entry: Dict[str, Any] = {
+                "thermal_mass": self.model.rooms[name].thermal_mass,
+                "r_external": self.model.rooms[name].r_external,
+                "internal_gain": float(
+                    getattr(self.model.rooms[name], "internal_gain", 0.0)
+                ),
+                "solar_scale": float(
+                    getattr(self.model.rooms[name], "solar_scale", 1.0)
+                ),
+                "c_air_fraction": float(
+                    getattr(self.model.rooms[name], "c_air_fraction", 0.05)
+                ),
+                "r_aw_fraction": float(
+                    getattr(self.model.rooms[name], "r_aw_fraction", 0.05)
+                ),
+                "is_estimated": bool(just_estimated or prev.get("is_estimated", False)),
+            }
+            if just_estimated:
+                entry["estimated_at"] = now_iso
+                entry["estimation_source"] = "ml"
+            elif prev.get("estimated_at"):
+                entry["estimated_at"] = prev.get("estimated_at")
+                if prev.get("estimation_source"):
+                    entry["estimation_source"] = prev.get("estimation_source")
+            snapshot_rooms[name] = entry
+
         snapshot: Dict[str, Any] = {
-            "rooms": {
-                name: {
-                    "thermal_mass": self.model.rooms[name].thermal_mass,
-                    "r_external": self.model.rooms[name].r_external,
-                    "internal_gain": float(
-                        getattr(self.model.rooms[name], "internal_gain", 0.0)
-                    ),
-                    "solar_scale": float(
-                        getattr(self.model.rooms[name], "solar_scale", 1.0)
-                    ),
-                    "c_air_fraction": float(
-                        getattr(self.model.rooms[name], "c_air_fraction", 0.05)
-                    ),
-                    "r_aw_fraction": float(
-                        getattr(self.model.rooms[name], "r_aw_fraction", 0.05)
-                    ),
-                }
-                for name in self.model.room_names
-            },
+            "rooms": snapshot_rooms,
             "sources": {
                 src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
                 for src in self.heat_sources

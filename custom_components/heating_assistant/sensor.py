@@ -1679,6 +1679,59 @@ class ModelFitQualitySensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
 # Parameter confidence sensor (per room)
 # ---------------------------------------------------------------------------
 
+
+def _closed_loop_fit_for_room(
+    coordinator: HeatingAssistantCoordinator,
+    room_name: str,
+) -> tuple[Optional[float], Optional[float], Optional[int]]:
+    """Return (r_squared, rmse, n_samples) from the history buffer, if available."""
+    from .model_diagnostics import compute_model_fit_metrics
+
+    try:
+        room_idx = coordinator.model.room_names.index(room_name)
+    except ValueError:
+        return None, None, None
+
+    predictions: list[float] = []
+    measurements: list[float] = []
+    history = getattr(coordinator, "history_buffer", None) or []
+    for record in history:
+        y = record.get("y", [])
+        y_pred = record.get("y_pred")
+        if y_pred is None:
+            continue
+        if room_idx < len(y) and room_idx < len(y_pred):
+            predictions.append(y_pred[room_idx])
+            measurements.append(y[room_idx])
+
+    if len(predictions) < 2:
+        return None, None, len(predictions)
+
+    try:
+        metrics = compute_model_fit_metrics(predictions, measurements, room_name)
+        return metrics.r_squared, metrics.rmse, metrics.n_samples
+    except Exception:
+        return None, None, len(predictions)
+
+
+def _room_estimation_provenance(
+    snapshot: Optional[dict],
+    room_name: str,
+) -> tuple[bool, Optional[str]]:
+    """Return per-room estimation flags from the persisted snapshot."""
+    if not snapshot:
+        return False, None
+    room_snap = snapshot.get("rooms", {}).get(room_name)
+    if not isinstance(room_snap, dict):
+        return False, None
+    if "is_estimated" in room_snap:
+        is_estimated = bool(room_snap.get("is_estimated"))
+        estimated_at = room_snap.get("estimated_at") if is_estimated else None
+        return is_estimated, estimated_at
+    # Legacy snapshots listed every room without a provenance flag.
+    return False, None
+
+
 class ParameterConfidenceSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
     """
     Sensor reporting confidence/validity of thermal parameters for a room.
@@ -1715,10 +1768,15 @@ class ParameterConfidenceSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
         room = self._coordinator.model.rooms[self._room_name]
 
         try:
+            fit_r2, fit_rmse, _ = _closed_loop_fit_for_room(
+                self._coordinator, self._room_name,
+            )
             validation = validate_parameters(
                 self._room_name,
                 room.thermal_mass,
                 room.r_external,
+                model_r_squared=fit_r2,
+                model_rmse=fit_rmse,
             )
 
             # Compute confidence score
@@ -1738,26 +1796,44 @@ class ParameterConfidenceSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
     @property
     def extra_state_attributes(self) -> dict:
         """Expose detailed parameter validation."""
-        from .model_diagnostics import validate_parameters
+        from .model_diagnostics import (
+            build_identification_warnings,
+            validate_parameters,
+        )
 
         room = self._coordinator.model.rooms[self._room_name]
 
         try:
+            fit_r2, fit_rmse, n_samples = _closed_loop_fit_for_room(
+                self._coordinator, self._room_name,
+            )
             validation = validate_parameters(
                 self._room_name,
                 room.thermal_mass,
                 room.r_external,
+                model_r_squared=fit_r2,
+                model_rmse=fit_rmse,
             )
 
-            # Determine whether this room's parameters came from estimation.
             snapshot = None
             try:
                 snapshot = self._coordinator.estimated_params_snapshot
             except Exception:
                 pass
-            is_estimated = (
-                self._room_name in snapshot.get("rooms", {})
-                if snapshot else False
+            is_estimated, estimated_at = _room_estimation_provenance(
+                snapshot, self._room_name,
+            )
+
+            ol_rmse = getattr(self._coordinator, "open_loop_results", {}).get(
+                self._room_name, {},
+            ).get("rmse")
+            card_warnings = build_identification_warnings(
+                self._room_name,
+                validation,
+                model_r_squared=fit_r2,
+                model_rmse=fit_rmse,
+                open_loop_rmse=ol_rmse,
+                n_samples=n_samples,
             )
 
             return {
@@ -1771,8 +1847,12 @@ class ParameterConfidenceSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
                 "r_external_valid": validation.r_external_valid,
                 "time_constant_valid": validation.time_constant_valid,
                 "warnings": validation.warnings,
+                "card_warnings": [
+                    {"code": w.code, "message": w.message, "severity": w.severity}
+                    for w in card_warnings
+                ],
                 "is_estimated": is_estimated,
-                "estimated_at": snapshot.get("estimated_at") if snapshot else None,
+                "estimated_at": estimated_at,
             }
         except Exception as exc:
             _LOGGER.warning("Failed to validate parameters for %s: %s", self._room_name, exc)
@@ -2285,13 +2365,15 @@ class EstimatedParametersStatusSensor(_LiveValueSensorMixin, CoordinatorEntity, 
 
         rooms_data: Dict[str, Any] = {}
         for name, room in self._coordinator.model.rooms.items():
+            room_snap = rooms_snap.get(name, {}) if isinstance(rooms_snap.get(name), dict) else {}
+            is_estimated = bool(room_snap.get("is_estimated", False)) if room_snap else False
             rooms_data[name] = {
                 "thermal_mass": round(room.thermal_mass, 0),
                 "r_external": round(room.r_external, 6),
                 "internal_gain": round(
                     float(getattr(room, "internal_gain", 0.0)), 2
                 ),
-                "is_estimated": name in rooms_snap,
+                "is_estimated": is_estimated,
             }
 
         sources_data: Dict[str, Any] = {}

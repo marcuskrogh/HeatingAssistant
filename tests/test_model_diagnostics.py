@@ -215,6 +215,61 @@ def test_validate_parameters_time_constant_extreme():
     assert len(validation.warnings) > 0
 
 
+def test_validate_parameters_long_time_constant_allowed_with_good_fit():
+    """Large open-plan rooms can have τ > 100 h when closed-loop fit is strong."""
+    validation = validate_parameters(
+        "test_room",
+        thermal_mass=10_000_000.0,
+        r_external=0.072,
+        model_r_squared=0.9,
+        model_rmse=0.2,
+    )
+
+    assert validation.time_constant_hours == pytest.approx(200.0, abs=1.0)
+    assert validation.time_constant_valid
+    assert len(validation.warnings) == 0
+
+
+def test_validate_parameters_long_time_constant_warns_without_good_fit():
+    """Soft τ overflow should warn when closed-loop fit is weak."""
+    validation = validate_parameters(
+        "test_room",
+        thermal_mass=10_000_000.0,
+        r_external=0.072,
+        model_r_squared=0.4,
+    )
+
+    assert not validation.time_constant_valid
+    assert any("time constant" in w.lower() for w in validation.warnings)
+
+
+def test_build_identification_warnings_open_loop_info_when_fit_good():
+    """Open-loop drift should not alarm when closed-loop fit is good."""
+    from custom_components.heating_assistant.model_diagnostics import (
+        build_identification_warnings,
+        validate_parameters,
+    )
+
+    validation = validate_parameters(
+        "living_room",
+        thermal_mass=5_000_000.0,
+        r_external=0.05,
+        model_r_squared=0.9,
+        model_rmse=0.2,
+    )
+    warnings = build_identification_warnings(
+        "living_room",
+        validation,
+        model_r_squared=0.9,
+        model_rmse=0.2,
+        open_loop_rmse=0.6,
+        n_samples=50,
+    )
+    codes = {w.code for w in warnings}
+    assert "open_loop_moderate" in codes
+    assert "open_loop_high" not in codes
+
+
 def test_validate_parameters_edge_cases():
     """Test validation at the boundaries of valid ranges."""
     # Minimum valid values
