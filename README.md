@@ -13,8 +13,9 @@ settings that keep every room comfortable for the least energy.
 It accounts for heat flowing between rooms and to the outdoors, solar gain
 through your windows, and the weather forecast — so it pre-heats before you wake,
 coasts on free solar gain, and avoids the overshoot-and-recover cycle of a
-reactive thermostat. It drives electric heaters and air-source heat pumps, and
-runs entirely locally.
+reactive thermostat. It drives a range of heaters — electric panels, hydronic
+and oil radiators, electric and hydronic underfloor heating, gas heaters, and
+air-source heat pumps — and runs entirely locally.
 
 **Everything is configured through the Home Assistant UI** — there is no YAML to
 edit. The integration adds its own **Heating Assistant** panel to the sidebar
@@ -47,9 +48,11 @@ for setup, monitoring and tuning.
   instead of chasing it.
 - **State estimation.** A continuous-discrete Extended Kalman Filter
   reconstructs the unmeasured wall temperature and smooths sensor noise.
-- **Mixed heat sources.** Electric heaters and air-source heat pumps (with
-  temperature-dependent COP and cooling support) can be combined in the same
-  room, each driving a `switch`, `number` or `climate` entity.
+- **Mixed heat sources.** A range of types — electric heaters, hydronic and oil
+  radiators, electric and hydronic underfloor heating, gas heaters, generic
+  thermostats, and air-source heat pumps (temperature-dependent COP, with
+  cooling support) — can be combined in the same room. Each drives a `switch`,
+  `number` or `climate` entity.
 - **Solar gain.** Per-window solar modelling from your location and window
   geometry, optionally driven by a measured irradiance forecast.
 - **Weather-aware.** An optional weather entity sharpens the outdoor-temperature
@@ -174,12 +177,13 @@ climate card in step 5.)
 On **Configuration → Heat Sources**, click **+ Add heat source** and fill in:
 
 - **Display name** — e.g. *Living Room Heater*.
-- **Type** — *Electric heater* or *Heat pump*.
+- **Type** — the heater type: electric heater, hydronic or oil radiator,
+  electric or hydronic underfloor heating, gas heater, generic thermostat, or
+  heat pump.
 - **Room** — the room it heats.
 - **Maximum power** — the heater's rated output in watts.
-- **Driven entity** — the entity that controls the device. For an electric
-  heater this is a `switch`, `number` or `climate` entity; for a heat pump it is
-  the pump's `climate` entity.
+- **Driven entity** — the entity that controls the device (a `switch`, `number`
+  or `climate` entity; for a heat pump, pick its `climate` entity).
 - For a heat pump, set the rated COP and reference temperature from its
   datasheet under the performance fields.
 

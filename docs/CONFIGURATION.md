@@ -118,7 +118,7 @@ options). Heat-pump-specific fields appear once the type is set to *Heat pump*.
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `name` | string | **Yes** | — | Unique identifier for this heat source.  Must be unique across all heat sources. |
-| `type` | string | **Yes** | — | Source type.  Must be `electric_heater` or `heat_pump`. |
+| `type` | string | **Yes** | — | Source type. One of `electric_heater`, `hydronic_radiator`, `oil_radiator`, `electric_floor_heating`, `hydronic_floor_heating`, `gas_heater`, `generic_thermostat`, or `heat_pump`. The type sets sensible defaults (e.g. the emitter time constant); heat pumps additionally model a temperature-dependent COP and cooling. |
 | `room` | string | **Yes** | — | Name of the room this source heats.  Must match a room `name`. |
 | `max_power` | float | **Yes** | — | Maximum **thermal** output power [W].  For an electric heater this equals the rated electrical input.  For a heat pump this is the rated thermal output at `cop_temp_ref` conditions. |
 | `heater_entity` | string | No | — | HA entity ID to control.  Supported domains: `switch`, `number`, `climate`.  If omitted, the controller computes the optimal action but does not issue any HA service call. |
