@@ -454,7 +454,7 @@ CONF_PLOT_FORECAST_HOURS = "plot_forecast_hours"  # hours of forecast shown on r
 DEFAULT_PLOT_HISTORY_HOURS = 12.0
 DEFAULT_PLOT_FORECAST_HOURS = 0.0                 # 0 = auto: use the full controller horizon
 
-# Electricity price (Nord Pool / Tibber / any hourly price sensor)
+# Electricity price (Nord Pool / Energi Data Service / Tibber / any price sensor)
 CONF_PRICE_ENTITY = "price_entity"                # HA sensor entity_id exposing Nord Pool / market prices
 CONF_ENERGY_PRICE_WEIGHT = "energy_price_weight"  # α: dimensionless scale on the linear price term
 CONF_PRICE_NET_TARIFF = "price_net_tariff"        # fixed net/grid tariff added to raw spot price (same unit/kWh)

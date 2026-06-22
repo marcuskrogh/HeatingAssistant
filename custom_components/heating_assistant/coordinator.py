@@ -198,6 +198,7 @@ from .schedule import (
     resolve_effective_control_params,
     resolve_effective_setpoint,
 )
+from . import electricity_price as _electricity_price
 from . import weather as _weather
 from .experiments import (
     ExperimentManager,
@@ -3588,27 +3589,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     ) -> Optional[List[float]]:
         """Read the electricity price forecast from the configured price entity.
 
-        Three attribute formats are supported, tried in order:
-
-        **Path A – timestamped dicts (Nord Pool HACS v2)**
-            ``raw_today`` / ``raw_tomorrow`` are lists of dicts with an
-            explicit ``start`` ISO-8601 datetime and a ``value``/``price``/
-            ``total`` key.  Each horizon step is mapped to the price whose
-            ``start <= step_time``, so the transition to the next hourly price
-            happens at the exact wall-clock moment regardless of the MPC step
-            size.
-
-        **Path B – plain hourly lists (Nord Pool HACS v1 / generic)**
-            ``today`` / ``tomorrow`` (or ``prices_today`` / ``prices_tomorrow``)
-            are 24-element lists where index ``h`` holds the price for local
-            hour ``h``.  The number of steps already elapsed within the
-            current hour is taken into account so that the price change
-            propagates at the correct MPC step rather than always at the top
-            of the hour.
-
-        **Fallback – current sensor state**
-            The numeric state of the price entity is repeated over the full
-            horizon.
+        Delegates to :mod:`electricity_price`, which merges known day-ahead
+        prices (``raw_today``/``raw_tomorrow``, ``today``/``tomorrow``) with
+        the optional extended ``forecast`` attribute.  Supports Nord Pool,
+        Energi Data Service (hourly and quarterly resolution), and generic
+        price sensors.
 
         Returns a list of N prices [currency/kWh] aligned to horizon steps,
         or None when no price entity is configured or the sensor is unavailable.
@@ -3616,129 +3601,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if not self._price_entity:
             return None
         state = self.hass.states.get(self._price_entity)
-        if state is None or state.state in ("unknown", "unavailable"):
-            return None
-
-        attrs = state.attributes
         adder = self._price_net_tariff + self._price_spot_surcharge
-        N = self._horizon
-        dt_s = float(self.dt)
-
-        # ── Path A: timestamped dicts with explicit ``start`` key ─────────
-        #
-        # Nord Pool HACS v2 exposes raw_today / raw_tomorrow as lists of dicts
-        # like {"start": "<iso-dt>", "end": "<iso-dt>", "value": <float>}.
-        # We sort them by start time and, for each horizon step, walk forward
-        # to find the last entry whose start <= step_time.  This is immune to
-        # sub-hourly rounding because we compare real wall-clock times rather
-        # than doing hour-index arithmetic.
-        raw_today = attrs.get("raw_today") or []
-        raw_tomorrow = attrs.get("raw_tomorrow") or []
-        if raw_today or raw_tomorrow:
-            timed_prices: List[Tuple[datetime, float]] = []
-            for entry in list(raw_today) + list(raw_tomorrow):
-                if not isinstance(entry, dict):
-                    continue
-                start_str = entry.get("start")
-                v = None
-                for key in ("value", "price", "total"):
-                    if key in entry and entry[key] is not None:
-                        v = entry[key]
-                        break
-                if start_str is None or v is None:
-                    continue
-                try:
-                    start_dt = datetime.fromisoformat(str(start_str))
-                    timed_prices.append((start_dt, float(v)))
-                except (TypeError, ValueError):
-                    continue
-            if timed_prices:
-                timed_prices.sort(key=lambda tp: tp[0])
-                aligned_a: List[float] = []
-                for k in range(N):
-                    step_time = now + timedelta(seconds=dt_s * k)
-                    # Initialise with the first available price in case now is
-                    # before all known entries.
-                    price = timed_prices[0][1]
-                    for start_dt, p in timed_prices:
-                        if start_dt <= step_time:
-                            price = p
-                        else:
-                            break
-                    aligned_a.append(max(0.0, price + adder))
-                return aligned_a
-
-        # ── Path B: plain hourly lists ────────────────────────────────────
-        #
-        # today / tomorrow (or prices_today / prices_tomorrow) are 24-element
-        # lists where index h holds the price for local hour h.  We correct
-        # for sub-hourly position by counting how many MPC steps have already
-        # elapsed within the current hour (elapsed_steps).  Without this
-        # correction the code would treat now as always being at the top of
-        # the hour, causing the transition to the next hourly price to arrive
-        # up to (steps_per_hour − 1) steps too late.
-        today_raw = attrs.get("today") or attrs.get("prices_today") or []
-        tomorrow_raw = attrs.get("tomorrow") or attrs.get("prices_tomorrow") or []
-
-        today_prices: List[float] = []
-        tomorrow_prices: List[float] = []
-
-        for entry in today_raw:
-            if isinstance(entry, (int, float)):
-                today_prices.append(float(entry))
-            elif isinstance(entry, dict):
-                v = None
-                for key in ("value", "price", "total"):
-                    if key in entry and entry[key] is not None:
-                        v = entry[key]
-                        break
-                if v is not None:
-                    try:
-                        today_prices.append(float(v))
-                    except (TypeError, ValueError):
-                        pass
-
-        for entry in tomorrow_raw:
-            if isinstance(entry, (int, float)):
-                tomorrow_prices.append(float(entry))
-            elif isinstance(entry, dict):
-                v = None
-                for key in ("value", "price", "total"):
-                    if key in entry and entry[key] is not None:
-                        v = entry[key]
-                        break
-                if v is not None:
-                    try:
-                        tomorrow_prices.append(float(v))
-                    except (TypeError, ValueError):
-                        pass
-
-        all_prices = today_prices + tomorrow_prices
-        if all_prices:
-            now_local = now.astimezone()
-            current_hour = now_local.hour
-            steps_per_hour = max(1, round(3600.0 / dt_s))
-            # Steps already elapsed within the current hour.
-            elapsed_steps = int(
-                (now_local.minute * 60 + now_local.second) / dt_s
-            )
-            aligned_b: List[float] = []
-            for k in range(N):
-                hour_idx = current_hour + (elapsed_steps + k) // steps_per_hour
-                raw = (
-                    all_prices[hour_idx]
-                    if hour_idx < len(all_prices)
-                    else all_prices[-1]
-                )
-                aligned_b.append(max(0.0, raw + adder))
-            return aligned_b
-
-        # ── Fallback: current sensor state repeated over full horizon ─────
-        try:
-            current_price = float(state.state)
-        except (ValueError, TypeError):
-            return None
-        return [max(0.0, current_price + adder)] * N
+        return _electricity_price.build_price_forecast(
+            state,
+            now=now,
+            horizon=self._horizon,
+            dt_s=float(self.dt),
+            adder=adder,
+        )
 
     def _record_weather_success(self) -> None:
         """Mark the most recent forecast fetch as successful."""
