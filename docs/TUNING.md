@@ -5,9 +5,8 @@
 > automatic ML identification persists its results, and how to tune the MPC
 > regulator to eliminate oscillation and short-cycling.
 
-Accurate parameters lead to accurate predictions and better control. Start with
-the rough starting points in the [Quick start](../README.md#quick-start), then
-refine with the empirical and machine-learning methods below. For the theory
+Accurate parameters lead to accurate predictions and better control. Start with the rough starting points in sections 14.1–14.2 below, then refine
+with the empirical and machine-learning methods that follow. For the theory
 behind the models these parameters feed, see [Physics, Models & Control
 Theory](THEORY.md); for the services referenced here, see the [Services
 reference](SERVICES.md).
@@ -108,7 +107,9 @@ The MPC controller solves a quadratic program at each update cycle.  Its behavio
 | **EKF measurement noise** | `sigma_v` | `0.5` | Measurement-noise level for room temperature sensors. Higher values trust sensors less and model predictions more. |
 | **EKF offset noise** | `sigma_b` | `0.002` | Process noise for the integrated offset state (model-mismatch compensation). Higher values let offset correction adapt faster. |
 
-These parameters can be tuned from the integration setup/options UI, and can also be set under the top-level `heating_assistant:` key in `configuration.yaml`.
+These parameters are set in the UI — from **Configure → Control behaviour**, or
+the **System identification & tuning** page of the Heating Assistant panel.
+Changes take effect immediately, without restarting Home Assistant.
 
 #### 14.5.2 Diagnosing and correcting oscillations
 
@@ -118,34 +119,24 @@ Oscillations appear as repeated undershoot/overshoot cycles around the setpoint 
 
 When `horizon` is small (e.g. 2–4 steps at 15-minute intervals = only 30–60 minutes of lookahead), the controller does not see far enough ahead to account for the building's thermal lag.  It heats aggressively to hit the setpoint within the short window, overshoots, then cuts off heating, undershoots, and repeats.
 
-*Fix:* Increase `horizon`.  Start with 6–8 steps (90–120 min at `update_interval = 900 s`).  The computational cost scales roughly as O(N²), so avoid very large horizons (> 24).
-
-```yaml
-heating_assistant:
-  horizon: 8
-```
+*Fix:* Increase `horizon` (e.g. to 8 steps, ≈ 2 h at `update_interval = 900 s`).
+The computational cost scales roughly as O(N²), so avoid very large horizons.
 
 **Cause 2 — Smoothing weight too low**
 
 With a low `smoothing_weight` the controller is free to swing the heating fraction between 0 and 1 from one 15-minute step to the next.  This produces bang-bang-like behaviour that generates oscillations.
 
-*Fix:* Increase `smoothing_weight`.  The default is `0.1`; try values in the range `0.5`–`2.0` if oscillations persist.  A value of `1.0` penalises a full 0→1 step change as heavily as a 1 °C tracking error.
-
-```yaml
-heating_assistant:
-  smoothing_weight: 1.0
-```
+*Fix:* Increase `smoothing_weight` (default `0.1`; try `0.5`–`2.0` if
+oscillations persist). A value of `1.0` penalises a full 0→1 step change as
+heavily as a 1 °C tracking error.
 
 **Cause 3 — Energy weight too high**
 
 A very high `energy_weight` forces the controller to keep heating to a minimum.  The room cools below setpoint, triggering a burst of full-power heating, which overshoots, causing a repeated cycle.
 
-*Fix:* Reduce `energy_weight`.  The default is `0.01`; values below `0.001` are rarely needed.  If you notice abrupt full-power bursts followed by long off periods, decrease `energy_weight`.
-
-```yaml
-heating_assistant:
-  energy_weight: 0.005
-```
+*Fix:* Reduce `energy_weight` (default `0.01`; values below `0.001` are rarely
+needed). If you notice abrupt full-power bursts followed by long off periods,
+decrease `energy_weight` (e.g. to `0.005`).
 
 **Cause 4 — Incorrect thermal parameters**
 
@@ -159,7 +150,7 @@ If you are experiencing oscillations, follow these steps in order:
 
 1. **Check the predicted temperature sensor** (`sensor.heating_assistant_<room>_temperature_forecast`).  If the MPC prediction closely tracks the oscillation, the problem is in the controller weights.  If the prediction is smooth but the actual temperature oscillates, the issue is in the thermal model parameters.
 
-2. **Increase `smoothing_weight` in steps** — try `0.5`, then `1.0`, then `2.0`.  After each change, restart HA and observe the system for one to two hours.  The oscillation amplitude should decrease.  Stop when the response is acceptably smooth.
+2. **Increase `smoothing_weight` in steps** — try `0.5`, then `1.0`, then `2.0`.  Each change takes effect immediately; observe the system for one to two hours after each.  The oscillation amplitude should decrease.  Stop when the response is acceptably smooth.
 
 3. **If oscillations persist, increase `horizon`** — try `8`, then `10`.  This gives the controller enough lookahead to ride out the room's thermal lag without overshooting.
 
@@ -171,13 +162,9 @@ If you are experiencing oscillations, follow these steps in order:
 
 Heat pumps are particularly sensitive to rapid on/off commands because each compressor start causes mechanical wear and a brief efficiency dip.  In addition to the heat pump's own `turn_off_deadband` parameter, increasing `smoothing_weight` at the controller level discourages the MPC from requesting large changes in the heating fraction between consecutive steps.
 
-Recommended starting point for a heat pump installation:
-
-```yaml
-heating_assistant:
-  smoothing_weight: 0.5   # penalises rapid changes; reduce short-cycling
-  horizon: 8              # longer lookahead reduces the need for rapid corrections
-```
+Recommended starting point for a heat pump installation: `smoothing_weight` ≈
+`0.5` (penalises rapid changes to reduce short-cycling) and `horizon` ≈ `8`
+(longer lookahead reduces the need for rapid corrections).
 
 If the compressor still short-cycles after increasing `smoothing_weight`, also increase `turn_off_deadband` on the heat pump source (default `1.0 °C`; try `1.5`–`2.0 °C`).
 

@@ -6,7 +6,7 @@
 
 For the services these entities expose, see the [Services
 reference](SERVICES.md); for building dashboards from them, see
-[Dashboards & Lovelace Cards](DASHBOARDS.md). For installation and a quick
+[the dashboard & custom cards](DASHBOARDS.md). For installation and a quick
 overview, see the [main README](../README.md).
 
 **Contents**
@@ -23,7 +23,7 @@ overview, see the [main README](../README.md).
 
 Heating Assistant registers three HA platforms: **climate**, **sensor**, and **button**.
 
-For each room declared in `configuration.yaml` the integration creates:
+For each configured room the integration creates:
 
 | Entity ID | Platform | State | Attributes |
 |-----------|----------|-------|------------|
@@ -146,7 +146,7 @@ Every 900 seconds (15 minutes):
 |-----------|-------|-------|
 | `state` (`hvac_mode`) | `heat_cool`, `heat`, or `off` | `heat_cool` is advertised for rooms with a heat pump; `heat` for heat-only rooms; `off` for frost-protection mode |
 | `current_temperature` | float [°C] | Latest room temperature from sensor or model |
-| `temperature` | float [°C] | Current setpoint (read by Lovelace thermostat cards) |
+| `temperature` | float [°C] | Current setpoint (read by thermostat cards) |
 | `hvac_action` | `heating`, `cooling`, or `idle` | `heating` when any source in the room is producing heat; `cooling` when a heat pump is actively removing heat; `idle` otherwise |
 | `min_temp` | 5.0 | Frost-protection floor |
 | `max_temp` | 30.0 | Maximum allowed setpoint |
@@ -486,7 +486,7 @@ In addition to the basic sensors (predicted temperature, heating power, solar ga
 | **Kalman Innovation** | ✓ | Innovation series with consistency flag for filter tuning |
 | **Residual ACF** | ✓ | Lag-0…20 autocorrelation of residuals + 95 % confidence band + Ljung-Box Q |
 
-All sensors update every coordinator cycle (default 900 seconds / 15 minutes) and expose detailed breakdowns as state attributes that can be plotted in Lovelace dashboards.
+All sensors update every coordinator cycle (default 900 seconds / 15 minutes) and expose detailed breakdowns as state attributes you can plot in the panel or your own dashboards.
 
 The diagnostic sensors (Prediction Error, Model Fit Quality, Parameter Confidence, Open-Loop RMSE, Kalman Innovation, Residual ACF) are documented in detail — including ready-to-paste ApexCharts cards — in [`MODEL_FIT_GUIDE.md`](../MODEL_FIT_GUIDE.md).  All forecast and diagnostic attributes emit ISO-8601 timestamp strings; use `new Date(e.time).getTime()` (not `e.time * 1000`) in your `data_generator` expressions.
 
@@ -570,7 +570,7 @@ The **Outdoor Temperature Forecast** sensor exposes the outdoor temperature pred
 
 When a `weather_entity` is configured (e.g. `weather.forecast_home` from Met.no), the coordinator retrieves the hourly forecast using the `weather.get_forecasts` service introduced in HA 2023.9.  For older HA versions, it falls back to reading the deprecated `forecast` state attribute.  In both cases the raw hourly forecast entries are linearly interpolated to the MPC time grid so there is a value for every horizon step.
 
-When no weather entity is configured, a persistence forecast is used: the current outdoor temperature is repeated for every step.  Configure a weather entity (see the [Quick start](../README.md#quick-start)) for improved prediction accuracy.
+When no weather entity is configured, a persistence forecast is used: the current outdoor temperature is repeated for every step.  Configure a weather entity (see [Setting up your first home](../README.md#setting-up-your-first-home)) for improved prediction accuracy.
 
 This sensor is useful for:
 - Verifying that the weather forecast is being picked up correctly — the `outdoor_temp` values in the `forecast` attribute should vary over time when a weather entity is configured, not be constant
