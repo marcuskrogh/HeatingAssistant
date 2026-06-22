@@ -4,13 +4,14 @@
 > windows, heat sources, comfort schedules, and the global/control settings.
 
 **Heating Assistant is configured entirely in the Home Assistant UI; there is no
-`configuration.yaml` to edit.** There are two equivalent entry points:
+`configuration.yaml` to edit.** The configuration surfaces are:
 
-- **Settings → Devices & services → Heating Assistant → Configure** — the
-  options menu, with editors for rooms, windows, heat sources, schedules,
-  general & sensor settings, and control behaviour.
-- **The Heating Assistant sidebar panel → Configuration page** — the same
-  settings inside the integration's own UI.
+- **The Heating Assistant sidebar panel** — the primary surface. Its
+  **Configuration** page covers rooms, heat sources, environment/site and system
+  parameters; comfort **schedules** and **controller tuning** are on the panel's
+  **Schedules** and **Tuning** pages.
+- **Settings → Devices & services → Heating Assistant → Configure** — a subset:
+  general & sensor settings, and the room, window and heat-source editors.
 
 This page documents what each setting means and its default. For a guided
 walkthrough of a first install, see [Setting up your first
@@ -31,10 +32,10 @@ parameter values, see the [Parameter Estimation & Tuning guide](TUNING.md).
 
 ## 10. Configuration Reference
 
-The settings group into the **global/control settings** (set under *General &
-sensor settings* and *Control behaviour*) and the per-room **room**,
-**connection**, **window**, **heat source** and **schedule** settings (set from
-the room/window/heater/schedule editors).
+The settings group into the **global/control settings** (the panel's
+*Environment & Site*, *System Parameters* and *Tuning* pages) and the per-room
+**room**, **connection**, **window**, **heat source** and **schedule** settings
+(the panel's *Rooms*, *Heat Sources* and *Schedules* pages).
 
 ### 10.1 Top-level keys
 
@@ -51,7 +52,7 @@ the room/window/heater/schedule editors).
 | `smoothing_weight` | float | No | `0.1` | Weight on the input rate-of-change cost ‖Δ**u**‖² in the MPC objective.  Higher values strongly penalise rapid changes in heater output between consecutive time steps, dampening oscillations and reducing actuator wear.  Set to `0.0` to disable.  Typical range: `0.0`–`2.0`.  See [Section 14.5](TUNING.md#145-mpc-regulator-tuning). |
 | `constraint_offset` | float | No | `2.0` | Symmetric soft output constraint band [°C] around the setpoint: the controller keeps predicted room temperatures within `[setpoint − δ, setpoint + δ]`.  Violations are penalised but not forbidden.  Decrease for tighter tracking; increase if the solver reports infeasibility. |
 | `terminal_weight` | float | No | `100.0` | Terminal cost multiplier λ: **P** = λ × **Q**.  A large value forces the predicted trajectory to converge to the setpoint by the end of the horizon, dramatically improving steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint; decrease toward 10–20 if you prefer softer convergence with more energy-aware shaping over the horizon.  Must be ≥ 1. |
-| `mpc_solver` | string | No | `cvxopt` | QP solver backend for the linearized MPC.  The default uses CVXOPT for the batch convex QP. |
+| `mpc_solver` | string | No | `qp` | Solver mode for the linearized MPC. The convex QP is solved via OSQP/HiGHS; legacy values (e.g. `ipopt`, `slsqp`) are accepted but ignored. |
 | `mpc_analytic_derivatives` | bool | No | `true` | Enables analytical-derivative plumbing when supported by the installed `mbc` backend. Unsupported hooks automatically fall back to numerical derivatives. |
 | `sigma_w` | float | No | `0.1` | EKF process-noise standard deviation [K/√s]. Increase when the thermal model is too “stiff” and does not adapt quickly enough to disturbances. UI/YAML range: `1e-6`–`10.0`. |
 | `sigma_v` | float | No | `0.5` | EKF measurement-noise standard deviation [K]. Increase when room sensors are noisy/spiky; decrease when sensors are stable and you want tighter measurement tracking. UI/YAML range: `1e-6`–`10.0`. |
@@ -64,15 +65,15 @@ the room/window/heater/schedule editors).
 
 ### 10.2 Room block (`rooms`)
 
-Each room is added from **Configure → Manage rooms → Add a room** (or the
-panel's Configuration page). Its settings:
+Each room is added on the panel's **Configuration → Rooms** page (or via
+**Configure → Manage rooms** in the integration options). Its settings:
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `name` | string | **Yes** | — | Unique identifier for the room.  Used to match heat sources, connections, and HA entity IDs.  Use only letters, digits, and underscores (no spaces). |
 | `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 14.1](TUNING.md#141-thermal-mass-thermal_mass) for guidance. |
 | `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 14.2](TUNING.md#142-external-thermal-resistance-r_external) for guidance. |
-| `setpoint` | float | No | `21.0` | Initial desired temperature [°C].  Can be overridden at runtime by the `climate.*` entity. |
+| `setpoint` | float | No | `22.0` | Target temperature [°C]. Set per room from its climate card (not the room editor); persisted and adjustable at runtime. |
 | `comfort_corridor_low` | float | No | `setpoint - constraint_offset` | Lower comfort bound [°C] used by the MPC soft-corridor objective. |
 | `comfort_corridor_high` | float | No | `setpoint + constraint_offset` | Upper comfort bound [°C] used by the MPC soft-corridor objective. |
 | `temp_sensor` | string | No | — | Entity ID of a single HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode.  Cannot be combined with `temp_sensors`. |
@@ -97,8 +98,8 @@ room. Add connections from a room's editor.
 
 ### 10.4 Window block (`windows`)
 
-Each window (or glazed door) is added from **Configure → Windows**, after
-picking the room.
+Each window (or glazed door) is added in the room editor under **Solar gain →
+Windows** (panel), or via **Configure → Windows** in the integration options.
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
@@ -108,9 +109,9 @@ picking the room.
 
 ### 10.5 Heat source block (`heat_sources`)
 
-Each controllable heating device is added from **Configure → Heat sources**,
-after picking the room. Heat-pump-specific fields live under the **Performance
-details** section of the form.
+Each controllable heating device is added on the panel's **Configuration →
+Heat Sources** page (or via **Configure → Heat sources** in the integration
+options). Heat-pump-specific fields appear once the type is set to *Heat pump*.
 
 **Common settings (all types)**
 
@@ -142,8 +143,7 @@ details** section of the form.
 
 ### 10.6 Comfort schedule block (`schedule`)
 
-Each room may have a schedule of named time-of-day periods, managed from
-**Configure → Schedule** (after picking the room). Use it to lower the setpoint
+Each room may have a schedule of named time-of-day periods, managed from the panel's **Schedules** page. Use it to lower the setpoint
 when nobody is home (setback) or to switch the heat off entirely while you sleep,
 with the controller automatically warming the room back up before you wake. A
 period is matched purely on the local clock — no presence sensor or automation
@@ -272,7 +272,7 @@ sensor drops out, the average of the rest is used.
 
 ### 11.5 Comfort schedules — sleep and setback
 
-Add periods under **Configure → Schedule** for each room:
+Add periods on the panel's **Schedules** page for each room:
 
 - **Living room** — a weekday *eco* setback (e.g. 18 °C, 08:30–16:00, Mon–Fri)
   and an overnight *off* period (22:30–05:30, frost protection 12 °C). The MPC

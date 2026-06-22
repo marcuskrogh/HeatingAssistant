@@ -46,7 +46,7 @@ custom_components/heating_assistant/
 │                          • _async_update_data() called every UPDATE_INTERVAL seconds
 │                          • Reads sensor states → runs MPC → writes heater actions
 │
-├── thermal_model.py       Physics: lumped 1R1C model
+├── thermal_model.py       Physics: lumped 2R2C model (fast air + slow wall node)
 │                          • RoomConnection, Window, Room  (dataclasses)
 │                          • HouseModel: step(), predict(), state-space matrices
 │                          • compute_heat_flows(): per-room heat loss breakdown
@@ -194,7 +194,7 @@ Inside HeatingMPCController.compute():
   │          min  Σ ‖z[k] − z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S
   │               + ρ_z (soft constraint violation penalty)
   │          s.t.  0 ≤ u ≤ 1  (hard input box)
-  │    solve via CVXOPT
+  │    solve via OSQP/HiGHS
   │
   └─ apply u*[0] to heat sources (receding horizon)
 ```
@@ -257,7 +257,7 @@ HeatingAssistant/
 Install the required packages once:
 
 ```bash
-pip install numpy scipy cvxopt homeassistant pytest voluptuous pytest-asyncio
+pip install numpy scipy highspy osqp homeassistant pytest voluptuous pytest-asyncio
 pip install mbc @ git+https://github.com/marcuskrogh/mbc.git
 ```
 

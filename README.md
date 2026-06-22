@@ -13,8 +13,8 @@ settings that keep every room comfortable for the least energy.
 It accounts for heat flowing between rooms and to the outdoors, solar gain
 through your windows, and the weather forecast — so it pre-heats before you wake,
 coasts on free solar gain, and avoids the overshoot-and-recover cycle of a
-reactive thermostat. It drives electric heaters, hydronic radiators and
-air-source heat pumps, and runs entirely locally.
+reactive thermostat. It drives electric heaters and air-source heat pumps, and
+runs entirely locally.
 
 **Everything is configured through the Home Assistant UI** — there is no YAML to
 edit. The integration adds its own **Heating Assistant** panel to the sidebar
@@ -47,9 +47,9 @@ for setup, monitoring and tuning.
   instead of chasing it.
 - **State estimation.** A continuous-discrete Extended Kalman Filter
   reconstructs the unmeasured wall temperature and smooths sensor noise.
-- **Mixed heat sources.** Electric heaters, infrared panels, hydronic radiators
-  and air-source heat pumps (with temperature-dependent COP and cooling
-  support) can be combined in the same room.
+- **Mixed heat sources.** Electric heaters and air-source heat pumps (with
+  temperature-dependent COP and cooling support) can be combined in the same
+  room, each driving a `switch`, `number` or `climate` entity.
 - **Solar gain.** Per-window solar modelling from your location and window
   geometry, optionally driven by a measured irradiance forecast.
 - **Weather-aware.** An optional weather entity sharpens the outdoor-temperature
@@ -129,9 +129,10 @@ After restarting (either method), continue with
 
 ## Setting up your first home
 
-Heating Assistant is configured entirely in the UI. The example below sets up a
-single room with one heater; repeat the room/heater steps for the rest of your
-home.
+Heating Assistant is configured in the UI: the initial wizard collects
+site-level settings, and the rest of the setup happens on the **Configuration**
+page of the integration's own sidebar panel. The example below sets up a single
+room with one heater; repeat the room/heater steps for the rest of your home.
 
 ### 1. Add the integration
 
@@ -146,53 +147,59 @@ home.
    - **Control interval** — how often the controller re-plans (default
      **15 min**; leave as-is unless you have a reason to change it).
 4. Submit. Home Assistant creates the integration and adds a **Heating
-   Assistant** entry to the sidebar.
+   Assistant** entry to the sidebar. Open it and go to the **Configuration**
+   page for the rest of the setup.
 
 ### 2. Add a room
 
-1. On **Settings → Devices & services**, find the Heating Assistant card and
-   click **Configure**.
-2. Choose **Manage rooms → Add a room** and fill in:
-   - **Room name** — e.g. *Living Room* (becomes the climate entity name).
-   - **Temperature sensor** — the room's temperature `sensor.*`.
-   - **Setpoint** — the default target temperature, e.g. 21 °C.
-   - **Room size / building age** — presets that seed the thermal mass and
-     insulation; you can refine these later, or let the integration learn them
-     (see [Tuning and accuracy](#tuning-and-accuracy)).
-3. Save the room.
+On the panel's **Configuration → Rooms** page, click **+ Add room** and fill in:
+
+- **Room name** — e.g. *Living Room* (becomes the climate entity name).
+- **Temperature sensor(s)** — the room's temperature `sensor.*` (add more than
+  one to average them).
+- **Thermal model** — pick a **room size** and **insulation/age** preset; these
+  seed the room's thermal mass and resistance. You can override the numbers, or
+  let the integration learn them later (see [Tuning and
+  accuracy](#tuning-and-accuracy)).
+
+Save the room. (The room's target temperature isn't set here — you set it on the
+climate card in step 5.)
 
 > **Tip — connected rooms.** If two rooms share a wall and noticeably affect
-> each other, add a connection between them so the model accounts for the heat
-> exchange. This is optional; start without it and add it if needed.
+> each other, add an inter-room connection in the room editor so the model
+> accounts for the heat exchange. This is optional; start without it.
 
 ### 3. Add a heat source
 
-1. Back in **Configure**, choose **Heat sources**, pick the room, and select
-   **Add a heat source**.
-2. Fill in:
-   - **Display name** — e.g. *Living Room Heater*.
-   - **Type** — *Electric heater* or *Heat pump*.
-   - **Maximum power** — the heater's rated output in watts.
-   - **Heater entity** — the HA `switch.*`, `number.*`, or `climate.*` entity
-     that controls the device.
-   - For a heat pump, set the rated COP and reference temperature from its
-     datasheet under **Performance details**.
-3. Save the heat source.
+On **Configuration → Heat Sources**, click **+ Add heat source** and fill in:
+
+- **Display name** — e.g. *Living Room Heater*.
+- **Type** — *Electric heater* or *Heat pump*.
+- **Room** — the room it heats.
+- **Maximum power** — the heater's rated output in watts.
+- **Driven entity** — the entity that controls the device. For an electric
+  heater this is a `switch`, `number` or `climate` entity; for a heat pump it is
+  the pump's `climate` entity.
+- For a heat pump, set the rated COP and reference temperature from its
+  datasheet under the performance fields.
+
+Save the heat source.
 
 ### 4. (Optional) Add windows
 
-For accurate solar gain, choose **Windows**, pick the room, and add each window
-with its **area** and **orientation** (compass direction it faces). You can skip
-this and add windows later.
+For accurate solar gain, open the room again under **Configuration → Rooms**,
+expand **Solar gain → Windows**, and add each window with its **area** and
+**orientation** (compass direction it faces). You can skip this and add windows
+later.
 
 ### 5. Set the temperature and let it run
 
-1. Add a standard **Thermostat** card pointing at
-   `climate.heating_assistant_<room>` — or just use the room tile on the
-   **Heating Assistant** sidebar panel — and set your target temperature.
+1. Set the room's target temperature — on the room tile/climate card in the
+   **Heating Assistant** panel, or with a standard **Thermostat** card pointing
+   at `climate.heating_assistant_<room>`.
 2. Give the controller one full cycle (up to 15 minutes) to read the sensors,
    plan, and command your heater.
-3. Open the **Heating Assistant** panel from the sidebar to watch the predicted
+3. Use the panel's **Overview** and **Room detail** pages to watch the predicted
    temperature, the heating plan, and the live model fit.
 
 That's a working single-room setup. Repeat steps 2–4 for each additional room,
@@ -201,17 +208,23 @@ guide once you have a day or two of history.
 
 ## Configuration
 
-All configuration lives in the UI. There are two entry points:
+All configuration lives in the UI. The main surface is the **Configuration**
+page of the Heating Assistant sidebar panel, which has sections for:
 
-- **Settings → Devices & services → Heating Assistant → Configure** — the
-  options menu, with editors for **rooms**, **windows**, **heat sources**,
-  **schedules**, **general & sensor settings**, and **control behaviour**.
-- **The Heating Assistant sidebar panel → Configuration page** — the same
-  settings from within the integration's own UI, alongside live monitoring.
+- **Rooms** — sensors, thermal-model presets/overrides, solar gain and windows,
+  and inter-room connections.
+- **Heat Sources** — type, room, power, the driven entity and performance.
+- **Environment & Site** — outdoor, weather, solar-irradiance and price sensors,
+  and the site location.
+- **System Parameters** and **Display & Plots** — history retention and the
+  panel's plot windows.
 
-Site settings (location, sensors, control interval) can be revisited at any time
-via **Configure → General & sensor settings**, or **Reconfigure** on the
-integration card. Changes take effect without restarting Home Assistant.
+Comfort **schedules** and **controller tuning** have their own panel pages
+(**Schedules** and **Tuning**). Site settings can also be edited from the
+initial wizard via **Reconfigure** on the integration card, and a subset of
+settings (general & sensor settings, rooms, windows, heat sources) is available
+through **Settings → Devices & services → Heating Assistant → Configure**.
+Changes take effect without restarting Home Assistant.
 
 For a field-by-field reference of every room, window, heat-source and schedule
 setting, see the **[Configuration Reference](docs/CONFIGURATION.md)**.
@@ -220,20 +233,21 @@ setting, see the **[Configuration Reference](docs/CONFIGURATION.md)**.
 
 The integration ships its own web UI as a sidebar panel (**Heating Assistant**)
 — this is the intended way to monitor and tune the system, so there are no
-Lovelace cards to build by hand. The panel includes:
+Lovelace cards to build by hand. Its pages are:
 
 - **Overview** — comfort tiles per room, system power and energy, and a
   health summary.
 - **Room detail** — predicted temperature with the comfort band, the planned
   heating power, disturbance forecasts, and model-fit diagnostics.
-- **System identification & tuning** — run parameter estimation, review the
-  model fit, and adjust the controller.
-- **Configuration** — manage rooms, heat sources, sensors and schedules.
+- **System identification** — run parameter estimation and review the model fit.
+- **Tuning** — adjust the controller's behaviour.
+- **Schedules** — per-room comfort/setback periods.
+- **Configuration** — manage rooms, heat sources, sensors and site settings.
 
 Every value shown in the panel is also available as a normal Home Assistant
 entity (see below), so you can still build your own Lovelace dashboard from the
 climate and sensor entities if you prefer. Optional, ready-made card recipes are
-collected in [Dashboards & custom cards](docs/DASHBOARDS.md).
+collected in [the dashboard & custom cards](docs/DASHBOARDS.md).
 
 ## Entities and services
 

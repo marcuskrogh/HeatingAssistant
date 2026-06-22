@@ -107,9 +107,9 @@ The MPC controller solves a quadratic program at each update cycle.  Its behavio
 | **EKF measurement noise** | `sigma_v` | `0.5` | Measurement-noise level for room temperature sensors. Higher values trust sensors less and model predictions more. |
 | **EKF offset noise** | `sigma_b` | `0.002` | Process noise for the integrated offset state (model-mismatch compensation). Higher values let offset correction adapt faster. |
 
-These parameters are set in the UI — from **Configure → Control behaviour**, or
-the **System identification & tuning** page of the Heating Assistant panel.
-Changes take effect immediately, without restarting Home Assistant.
+These parameters are set on the **Tuning** page of the Heating Assistant panel
+(some are also adjustable from the **System identification** page). Changes take
+effect immediately, without restarting Home Assistant.
 
 #### 14.5.2 Diagnosing and correcting oscillations
 
