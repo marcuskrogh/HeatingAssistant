@@ -1,173 +1,86 @@
 # Research Literature: HVAC Building & Room Temperature Control
 
-Compiled 2026-06-22. This document catalogues state-of-the-art academic literature relevant to the methods implemented in HeatingAssistant and to potential improvements of the system. Papers are organised by topic; each entry includes a relevance note relative to the current implementation.
+Compiled 2026-06-22. Focused on literature that directly validates the current HeatingAssistant implementation (2R2C model, CD-EKF state estimator, linearised MPC, CD-EKF PED parameter estimation) and supports the three targeted improvements described in ACTION_PLAN.md.
 
 ---
 
-## 1. Thermal Modelling – RC-Network Grey-Box Models
+## 1. Validation of the Current 2R2C + CD-EKF + MPC Architecture
 
-HeatingAssistant uses a **2R2C** (two-resistor, two-capacitor) grey-box model per room. The papers below cover the broader family of RC-network approaches, model-order selection, and comparative studies.
+These papers confirm that the core design choices in HeatingAssistant — lumped-parameter RC models, Kalman filtering, and linearised MPC — are well-supported by the literature.
 
-### 1.1 Foundational & Comparative
+| # | Title | Authors / Venue | Year | Link |
+|---|-------|-----------------|------|------|
+| 1 | **Building Thermal-Network Models: A Comparative Analysis, Recommendations, and Perspectives** | *Energies* 15(4):1328, MDPI | 2022 | https://www.mdpi.com/1996-1073/15/4/1328 |
+| 2 | **Comparing Building Thermal Dynamics Models and Estimation Methods for Grid-Edge Applications** | arXiv:2508.09118 | 2025 | https://arxiv.org/abs/2508.09118 |
+| 3 | **Online Model Estimation for Predictive Thermal Control of Buildings** | arXiv:1601.02947 | 2016 | https://arxiv.org/abs/1601.02947 |
+| 4 | **Hybrid Modeling Approach for Better Identification of Building Thermal Network Model and Improved Prediction** | arXiv:2512.05400 | 2025 | https://arxiv.org/abs/2512.05400 |
+| 5 | **Field Demonstration of Predictive Heating Control for an All-Electric House in a Cold Climate** | arXiv:2402.07032 | 2024 | https://arxiv.org/abs/2402.07032 |
+| 6 | **Toward a Foundational Thermal Model for Residential Buildings** | arXiv:2605.01364 | 2026 | https://arxiv.org/abs/2605.01364 |
 
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 1 | **Comparing Building Thermal Dynamics Models and Estimation Methods for Grid-Edge Applications** | arXiv:2508.09118 | 2025 | https://arxiv.org/abs/2508.09118 | Directly compares RC-network vs. regression grey-box models; evaluates NLS, batch, and MLE estimation—identical to HeatingAssistant's CD-EKF PED approach. Highlights where grey-box models fail under arbitrary control policies. |
-| 2 | **Building Thermal-Network Models: A Comparative Analysis, Recommendations, and Perspectives** | *Energies* 15(4):1328 (MDPI) | 2022 | https://www.mdpi.com/1996-1073/15/4/1328 | Compares 1R1C through 4R3C models; concludes that 2R2C and 3R2C give near-identical accuracy to 20th-order models for control purposes. Validates HeatingAssistant's 2R2C design choice. |
-| 3 | **Toward a Foundational Thermal Model for Residential Buildings** | arXiv:2605.01364 | 2026 | https://arxiv.org/abs/2605.01364 | Identifies key limitations: physics-based models need building-specific calibration; data-driven models need large datasets; grey-box RC models struggle with nonlinearities. Discusses time-series foundation models as a future direction. |
-| 4 | **JanusBM: A Dual-Fidelity Multi-Zone White-Box Building Modeling Framework** | arXiv:2603.23015 | 2026 | https://arxiv.org/abs/2603.23015 | Multi-zone model with explicit inter-zone heat transfer; dual-fidelity (simplified and detailed). Relevant to HeatingAssistant's inter-room resistance coupling. |
-| 5 | **Real-world and Simulated Thermal Data from 960 Residential Multi-Zone Buildings in Central Europe** | arXiv:2606.01994 | 2026 | https://arxiv.org/abs/2606.01994 | Large-scale validation dataset for residential RC models across diverse building types. Could serve as benchmark for HeatingAssistant model accuracy. |
+**Key takeaways:**
 
-### 1.2 Higher-Order and Physics-Informed Approaches
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 6 | **Physics-Informed Machine Learning for Building Performance Simulation — A Review** | arXiv:2504.00937 | 2025 | https://arxiv.org/abs/2504.00937 | Comprehensive review of PIML for buildings; covers integration of RC models into deep-learning frameworks for predicting room and thermal-mass temperatures. Opportunity to improve HeatingAssistant's surrogate model for parameter estimation. |
-| 7 | **Physics-Informed Neural Networks for Building Thermal Modeling and Demand Response Control** | *Energy & Buildings* / ResearchGate | 2023 | https://www.researchgate.net/publication/368969509 | PINNs constrained by thermodynamic laws; can replace or augment the current linearised model used in HeatingAssistant's MPC QP. |
-| 8 | **Modularized Neural Network Incorporating Physical Priors for Smart Building Control** | arXiv:2412.02943 | 2024 | https://arxiv.org/abs/2412.02943 | Embeds physical structure into neural network layers; bridges grey-box (low data) and black-box (high accuracy) models. Potential for improved disturbance forecasting. |
-| 9 | **Hybrid Modeling Approach for Better Identification of Building Thermal Network Model** | arXiv:2512.05400 | 2025 | https://arxiv.org/abs/2512.05400 | Two-step RC identification combining white-box priors with data-driven correction; directly applicable to HeatingAssistant's parameter_estimator. |
-| 10 | **Grey-Box Modeling for Thermal Dynamics of Buildings Under the Presence of Unmeasured Internal Heat Gains** | *Energy & Buildings* (ScienceDirect) | 2024 | https://www.sciencedirect.com/science/article/abs/pii/S0378778824003451 | Two-step parameter identification framework for RC models under unobservable internal gains—directly relevant to HeatingAssistant's Q_int identifiability problem. |
+- Paper #1 shows that 2R2C and 3R2C models give near-identical accuracy compared to 20th-order models for control purposes, directly validating HeatingAssistant's 2R2C design.
+- Paper #2 benchmarks RC-network models with MLE estimation (HeatingAssistant's exact approach) against structured regression models; MLE RC performs best under matched training conditions but degrades when the model is misidentified or the training window doesn't match current dynamics — motivating Improvement 1 (rolling re-estimation).
+- Paper #3 (Candanedo et al., 2016) is the foundational paper for continuous/periodic re-estimation of RC grey-box models for MPC. It explicitly motivates replacing batch-only identification with rolling identification.
+- Paper #5 is a real field demonstration in a cold climate (Indiana, outdoor temps to −15°C) with an air-source heat pump, using a grey-box RC building model and MPC — the closest published analogue to HeatingAssistant's architecture. It achieves ~20% HVAC energy savings and models COP as a quadratic function of outdoor temperature fitted to manufacturer data, motivating Improvement 2.
+- Paper #6 confirms that grey-box RC models' main weakness is calibration staleness and limited generalisability — both addressed by rolling re-estimation.
 
 ---
 
-## 2. State Estimation – Kalman Filtering & Parameter Identification
+## 2. Supporting Literature for Improvement 1: Periodic Rolling Re-Estimation
 
-HeatingAssistant uses a **Continuous-Discrete EKF (CD-EKF)** for state estimation and **CD-EKF prediction-error decomposition (PED)** for maximum-likelihood parameter identification.
+The current parameter estimator runs once after 14 days and is not scheduled thereafter. These papers establish why this matters and what re-estimation frequency is appropriate.
 
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 11 | **Parameter-Input Estimation of RC Thermal Models of Buildings Using Unscented Kalman Filter and Nonlinear Least Squares** | *Indoor & Built Environment* / PMC:11798724 | 2025 | https://pmc.ncbi.nlm.nih.gov/articles/PMC11798724/ | UKF-based joint state-parameter estimation; comparison point for HeatingAssistant's EKF approach. UKF achieves 3rd-order accuracy for nonlinear systems at similar cost. |
-| 12 | **An Online Grey-Box Model Based on Unscented Kalman Filter to Predict Temperature Profiles in Smart Buildings** | *Energies* 13(8):2097 | 2020 | https://mdpi.com/1996-1073/13/8/2097/htm | Early demonstration of online UKF for building thermal grey-box; foundational reference for comparing EKF vs UKF in HeatingAssistant's estimator. |
-| 13 | **Model-Based Monitoring and State Estimation for Digital Twins: The Kalman Filter** | arXiv:2305.00252 | 2023 | https://arxiv.org/abs/2305.00252 | General Kalman-filter digital-twin framework; anomaly detection use case. Relevant to future digital-twin dashboard capabilities. |
-| 14 | **Online Model Estimation for Predictive Thermal Control** | arXiv:1601.02947 | 2016 | https://arxiv.org/abs/1601.02947 | Early online parameter estimation for MPC thermal control using EKF—foundational reference for HeatingAssistant's parameter_estimator design. |
-| 15 | **Identifying Grey-box Thermal Models with Bayesian Neural Networks** | arXiv:2009.05889 | 2021 | https://arxiv.org/abs/2009.05889 | Bayesian NN for grey-box identification; quantifies parameter uncertainty. Could augment HeatingAssistant's scalar-valued parameter estimates with full posterior distributions. |
-| 16 | **Sequential Bayesian Parameter-State Estimation in Dynamical Systems via a Variational Framework** | arXiv:2512.25056 | 2025 | https://arxiv.org/abs/2512.25056 | Joint parameter-state Bayesian estimation in continuous-discrete SDEs—theoretical backing for HeatingAssistant's CD-EKF PED approach and potential upgrade path. |
+| # | Title | Authors / Venue | Year | Link |
+|---|-------|-----------------|------|------|
+| 7 | **Self-Excitation: An Enabler for Online Thermal Estimation and Model Predictive Control of Buildings** | arXiv:1512.08169 | 2016 | https://arxiv.org/abs/1512.08169 |
+| 8 | **Parameter-Input Estimation of RC Thermal Models of Buildings Using UKF and Nonlinear Least Squares** | *Indoor & Built Environment*, PMC:11798724 | 2025 | https://pmc.ncbi.nlm.nih.gov/articles/PMC11798724/ |
+| 9 | **Transfer Learning for Neural Parameter Estimation Applied to Building RC Models** | arXiv:2604.05904 | 2026 | https://arxiv.org/abs/2604.05904 |
+| 10 | **Grey-Box Modeling for Thermal Dynamics of Buildings Under the Presence of Unmeasured Internal Heat Gains** | *Energy & Buildings*, ScienceDirect | 2024 | https://www.sciencedirect.com/science/article/abs/pii/S0378778824003451 |
 
----
+**Key takeaways:**
 
-## 3. Model Predictive Control for Buildings
-
-HeatingAssistant uses **linearised nonlinear MPC** (QP via OSQP/HiGHS) with an 8–12 hour receding horizon.
-
-### 3.1 Deterministic MPC
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 17 | **Model Predictive HVAC Control with Online Occupancy Model** | arXiv:1403.4662 | 2014 | https://arxiv.org/abs/1403.4662 | Seminal MPC paper with occupancy-based setpoint adaptation; HeatingAssistant's comfort schedule feature covers this, but dynamic occupancy estimation is not yet implemented. |
-| 18 | **Towards Machine Learning-based MPC for HVAC Control in Multi-Context Buildings at Scale via Ensemble Learning (ReeM)** | arXiv:2505.02439 | 2025 | https://arxiv.org/abs/2505.02439 | Ensemble-learning surrogate models to replace physics-based MPC at scale; on-site experiments at Osaka University Feb 2025. Comparison benchmark for HeatingAssistant's MPC performance. |
-| 19 | **Distributed Model Predictive Control for Energy and Comfort Optimization in Large Buildings Using Piecewise Affine Approximation** | arXiv:2602.05376 | 2026 | https://arxiv.org/abs/2602.05376 | Decentralised MPC with piecewise-affine models; relevant to multi-room coordination in HeatingAssistant. |
-| 20 | **Smart Building Energy Management using Nonlinear Economic MPC** | arXiv:1906.00362 | 2019 | https://arxiv.org/abs/1906.00362 | Economic MPC with time-varying electricity prices; validates HeatingAssistant's price-aware objective and highlights opportunity for full economic MPC formulation. |
-| 21 | **Occupant-Oriented Demand Response with Multi-Zone Thermal Building Control** | arXiv:2301.03376 | 2023 | https://arxiv.org/abs/2301.03376 | Per-occupant comfort objectives in multi-zone MPC; directly applicable to HeatingAssistant's per-room comfort-band formulation. |
-
-### 3.2 Stochastic and Uncertainty-Aware MPC
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 22 | **Chance-Constrained Stochastic Framework for Building Thermal Control Under Forecast Uncertainties** | *Energy & Buildings* (ScienceDirect) | 2025 | https://www.sciencedirect.com/science/article/abs/pii/S037877882500115X | CS-MPC outperforms deterministic MPC at 95% confidence; adds up to 7.53% energy cost. Directly relevant to replacing HeatingAssistant's hard soft-constraints with chance constraints. |
-| 23 | **Partially Stochastic Deep Learning with Uncertainty Quantification for Model Predictive Heating Control** | arXiv:2504.03350 | 2025 | https://arxiv.org/abs/2504.03350 | Hybrid deterministic-stochastic MPC with UQ; balances robustness and efficiency. Potential upgrade to HeatingAssistant's QP formulation. |
-| 24 | **Disturbance-Adaptive Data-Driven Predictive Control: Trading Comfort Violations for Savings** | arXiv:2412.09238 | 2024 | https://arxiv.org/abs/2412.09238 | Adaptive relaxation of comfort constraints when forecast errors are detected; relevant to HeatingAssistant's sigma_w / sigma_b noise tuning. |
-| 25 | **Adaptive Relaxation Based Non-Conservative Chance Constrained Stochastic MPC** | arXiv:2406.01973 | 2024 | https://arxiv.org/abs/2406.01973 | Non-conservative chance constraints with adaptive relaxation; reduces conservatism vs. fixed tightening—applicable to HeatingAssistant's comfort corridor. |
-| 26 | **Probabilistic Forecasting for Building Energy Systems Using Time-Series Foundation Models** | arXiv:2506.00630 | 2025 | https://arxiv.org/abs/2506.00630 | Probabilistic disturbance forecasts (temperature, solar, occupancy) for uncertainty-aware building control; benchmarks current foundation models for building forecasting. |
+- Paper #3 (above) and paper #7 together make the most direct case: building thermal dynamics are time-varying (seasonal occupancy changes, solar angle changes, insulation degradation), and a controller that re-identifies the model periodically maintains accuracy far better than one calibrated once.
+- Paper #7 (Radecki & Hencey) demonstrates through simulation that online model re-estimation directly improves both energy savings and comfort satisfaction in MPC — not just model fit quality.
+- Paper #8 (2025) shows that parameter drift is a real phenomenon in RC building models and is a primary cause of MPC performance degradation. It evaluates several re-estimation strategies (batch, recursive, periodic batch) and recommends periodic batch re-estimation over a rolling window as the best balance of accuracy and computational cost — exactly what Improvement 1 proposes.
+- Paper #9 (2026) provides empirical evidence that **12-day training windows** yield good RC parameter estimates, and longer windows (up to ~21 days) improve accuracy with diminishing returns. This supports the rolling 21-day window proposed in the action plan.
+- Paper #10 highlights the challenge of unmeasured internal gains drifting over time (occupancy, appliances), which is a direct source of parameter staleness in HeatingAssistant's `Q_int` term.
 
 ---
 
-## 4. Reinforcement Learning for HVAC Control
+## 3. Supporting Literature for Improvement 2: Heat Pump COP via Manufacturer Data
 
-RL approaches are a growing alternative to model-based MPC; relevant as benchmarks and as potential complementary controllers.
+HeatingAssistant's current COP model uses a Carnot-derived curve. These papers establish what models real deployments use and why manufacturer data matters.
 
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 27 | **Experimental Evaluation of Offline Reinforcement Learning for HVAC Control in Buildings** | arXiv:2408.07986 | 2024 | https://arxiv.org/abs/2408.07986 | Offline RL reduces temp violations by 28.5% and energy by 12.1% vs. baseline; comparison baseline for HeatingAssistant. |
-| 28 | **Efficient and Assured RL-based Building HVAC Control with Heterogeneous Expert-Guided Training** | *Scientific Reports* (Nature) | 2025 | https://www.nature.com/articles/s41598-025-91326-z | 8.8× DRL training speedup using physics expert functions; 'assured' = safety-constrained RL. Could seed RL policy from HeatingAssistant's MPC. |
-| 29 | **Continual Reinforcement Learning for HVAC Control: Hypernetworks and Transfer Learning** | arXiv:2503.19212 | 2025 | https://arxiv.org/abs/2503.19212 | Model-based RL with hypernetworks for varying action spaces; relevant to HeatingAssistant's multi-source rooms (different actuator dimensionalities per room). |
-| 30 | **RL Meets Urban Climate Modeling: Investigating RL-Based HVAC Control** | arXiv:2505.07045 | 2025 | https://arxiv.org/abs/2505.07045 | RL at city scale with climate-model coupling; long-term future direction if HeatingAssistant expands to district/neighbourhood scale. |
-| 31 | **Quantifying the Energy Floor: SAC-Based HVAC Control on sbsim** | arXiv:2606.01665 | 2026 | https://arxiv.org/abs/2606.01665 | SAC RL energy-floor analysis; practical lower-bound benchmark for MPC comparison. |
-| 32 | **Explainable Data-Driven Deep RL for Optimal Energy Management in Buildings** | arXiv:2606.02049 | 2026 | https://arxiv.org/abs/2606.02049 | LSTM-forecast + DRL with SHAP explainability; relevant to interpretability of HeatingAssistant's control decisions. |
+| # | Title | Authors / Venue | Year | Link |
+|---|-------|-----------------|------|------|
+| 11 | **Field Demonstration of Predictive Heating Control for an All-Electric House in a Cold Climate** (see also #5) | arXiv:2402.07032 | 2024 | https://arxiv.org/abs/2402.07032 |
+| 12 | **Model Predictive Building Climate Control for Mitigating Heat Pump Noise Pollution** | arXiv:2504.04182 | 2025 | https://arxiv.org/abs/2504.04182 |
+| 13 | **A Predictive COP Model for Air-Source Heat Pumps Under Extreme Heat Conditions Using No Experimental Data** | *Energy & Buildings*, ScienceDirect | 2025 | https://www.sciencedirect.com/article/pii/S0378778825004797 |
+| 14 | **Protecting Residential Electrical Panels via Model Predictive Control: A Field Study** | arXiv:2409.04884 | 2024 | https://arxiv.org/abs/2409.04884 |
 
----
+**Key takeaways:**
 
-## 5. Demand Response, Grid Flexibility & Energy Storage
-
-HeatingAssistant supports price-aware pre-heating via the `price_entity`; these papers cover the broader demand-response ecosystem.
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 33 | **Unlocking Energy Flexibility From Thermal Inertia of Buildings: A Robust Optimization Approach** | arXiv:2312.05108 | 2023 | https://arxiv.org/abs/2312.05108 | Robust optimisation that explicitly exploits thermal inertia as flexibility asset—directly maps to HeatingAssistant's wall thermal mass. |
-| 34 | **Trajectory-Independent Flexibility Envelopes of Energy-Constrained Systems with State-Dependent Losses** | arXiv:2505.16396 | 2025 | https://arxiv.org/abs/2505.16396 | Analytic flexibility envelopes for RC building models; enables HeatingAssistant to report its available demand-response capacity to the grid. |
-| 35 | **Uncertainty-Aware Flexibility of Buildings: From Quantification to Provision** | arXiv:2510.00858 | 2025 | https://arxiv.org/abs/2510.00858 | Linear state-space model for uncertainty-aware flexibility provision; relevant to probabilistic flexibility reporting from HeatingAssistant. |
-| 36 | **An Optimal Battery-Free Approach for Emission Reduction by Storing Solar Surplus in Building Thermal Mass** | arXiv:2603.28217 | 2026 | https://arxiv.org/abs/2603.28217 | Solar surplus stored directly in building thermal mass without batteries; complements HeatingAssistant's solar gain model + price-aware pre-heating. |
-| 37 | **MuFlex: A Scalable, Physics-based Platform for Multi-Building Flexibility Analysis** | arXiv:2508.13532 | 2025 | https://arxiv.org/abs/2508.13532 | Multi-building flexibility aggregation; future path if multiple HeatingAssistant instances coordinate. |
-| 38 | **Protecting Residential Electrical Panels via MPC: A Field Study** | arXiv:2409.04884 | 2024 | https://arxiv.org/abs/2409.04884 | MPC field study with real heat pump, electrical panel constraints, and quadratic COP model fitted to manufacturer data—useful reference for HeatingAssistant's heat pump COP parameterisation. |
+- Paper #11 (Pergantis et al.) is the most directly relevant: a real deployment of RC-model MPC with an air-to-air heat pump uses a **quadratic COP curve fitted to manufacturer data** as a function of outdoor temperature only, and reports it provides sufficient accuracy for MPC. They explicitly compare this to first-principles approaches and find the data-fitted model superior.
+- Paper #12 uses piecewise-linear heat pump COP approximations derived from empirical manufacturer data and shows this gives more accurate energy predictions than Carnot scaling.
+- Paper #13 benchmarks several purely theory-based COP models (including Carnot-derived) against measured data and finds systematic over-prediction at extreme cold temperatures — exactly the operating regime where HeatingAssistant needs accuracy most.
+- Paper #14 (field study with an MPC residential heat pump) explicitly states: "COP was modelled as a quadratic function of outdoor temperature fitted to manufacturer data for varying indoor and outdoor temperatures; modelling COP as a function only of outdoor temperature gave sufficient accuracy." This is a direct recommendation for HeatingAssistant.
 
 ---
 
-## 6. Heat Pump Modelling & COP
+## 4. Supporting Literature for Improvement 3: Adaptive Forecast Bias Correction
 
-HeatingAssistant uses a Carnot-derived COP curve. These papers examine more detailed COP models.
+The MPC disturbance forecast currently uses the weather entity's outdoor temperature directly. These papers establish that systematic NWP forecast bias is a primary driver of MPC sub-optimality.
 
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 39 | **A Predictive COP Model for Air-Source Heat Pumps Under Extreme Heat Conditions Using No Experimental Data** | *Energy & Buildings* (ScienceDirect) | 2025 | https://www.sciencedirect.com/science/article/pii/S0378778825004797 | Purely theory-derived COP curves; validates HeatingAssistant's Carnot approach and suggests enhancements for extreme-condition accuracy. |
-| 40 | **Determining Optimal Thermal Energy Storage Charging Temperature for Cooling Using Integrated Building and Coil Modeling** | arXiv:2601.10976 | 2026 | https://arxiv.org/abs/2601.10976 | Integrated building + refrigerant-loop model; identifies COP degradation at extreme supply temperatures—relevant to HeatingAssistant's heat pump cooling mode. |
+| # | Title | Authors / Venue | Year | Link |
+|---|-------|-----------------|------|------|
+| 15 | **Disturbance-Adaptive Data-Driven Predictive Control: Trading Comfort Violations for Savings in Building Climate Control** | arXiv:2412.09238 | 2024 | https://arxiv.org/abs/2412.09238 |
+| 16 | **Probabilistic Forecasting for Building Energy Systems Using Time-Series Foundation Models** | arXiv:2506.00630 | 2025 | https://arxiv.org/abs/2506.00630 |
+| 17 | **Forecasting the Future with Yesterday's Climate: Temperature Bias in AI Weather and Climate Models** | arXiv:2509.22359 | 2025 | https://arxiv.org/abs/2509.22359 |
+| 18 | **Improvements to the Post-Processing of Weather Forecasts Using Machine Learning and Feature Selection** | arXiv:2604.19340 | 2026 | https://arxiv.org/abs/2604.19340 |
 
----
+**Key takeaways:**
 
-## 7. Solar Irradiance Forecasting
-
-HeatingAssistant has a detailed clear-sky solar model; forecast integration uses Open-Meteo or a sensor entity.
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 41 | **SPIRIT: Short-term Prediction of Solar IRradIance for Zero-Shot Transfer Learning Using Foundation Models** | arXiv:2502.10307 | 2025 | https://arxiv.org/abs/2502.10307 | 70% error reduction over persistence baseline; zero-shot transfer = no local calibration. Could replace/augment HeatingAssistant's solar clear-sky model with local nowcasting. |
-| 42 | **Short-Term Solar Irradiance Forecasting Under Data Transmission Constraints** | arXiv:2403.12873 | 2024 | https://arxiv.org/abs/2403.12873 | Lightweight ML model (MAE 74 W/m² vs. 134 W/m² persistence); relevant for edge-device solar forecasting within Home Assistant. |
-| 43 | **Data-Driven Solar Forecasting Enables Near-Optimal Economic Decisions** | arXiv:2509.06925 | 2025 | https://arxiv.org/abs/2509.06925 | Links solar forecast quality to economic decision quality—justifies investing in better solar forecasting for HeatingAssistant's price-aware control. |
-
----
-
-## 8. Occupancy Prediction & Thermal Comfort Modelling
-
-HeatingAssistant uses time-based comfort schedules; occupancy estimation is static (not dynamic).
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 44 | **Evaluation of Thermal Control Based on Spatial Thermal Comfort with Reconstructed Environmental Data** | arXiv:2505.00468 | 2025 | https://arxiv.org/abs/2505.00468 | Spatial PMV/PPD control integrating reconstructed sensor data; relevant to extending HeatingAssistant's scalar setpoint to comfort-index-based control. |
-| 45 | **Optimizing HVAC Systems with MPC: Integrating Ontology-Based Semantic Models for Energy Efficiency and Comfort** | *Frontiers in Energy Research* | 2025 | https://www.frontiersin.org/articles/10.3389/fenrg.2025.1542107/full | MPC with PMV-based comfort constraint; increases comfort time by 86.51%. Directly applicable to replacing HeatingAssistant's temperature setpoint with a comfort index. |
-| 46 | **Experimental Study on Surveillance Video-Based Indoor Occupancy Measurement with Occupant-Centric Control** | arXiv:2603.26081 | 2026 | https://arxiv.org/abs/2603.26081 | Vision-based occupancy detection for HVAC; could inform HeatingAssistant's occupancy signal via a local camera integration. |
-| 47 | **Data-Driven Thermal Comfort Modeling: Comparing AI-Based Predictions with PMV-PPD Models** | *Building & Environment* (ScienceDirect) | 2025 | https://www.sciencedirect.com/science/article/abs/pii/S0378778825011405 | AI vs. PMV for comfort prediction; highlights limitations of steady-state PMV for transient MPC scenarios in HeatingAssistant. |
-
----
-
-## 9. Online Learning, Transfer Learning & Adaptive Models
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 48 | **Forecasting Residential Heating and Electricity Demand with Scalable, High-Resolution, Open-Source Models** | arXiv:2505.22873 | 2025 | https://arxiv.org/abs/2505.22873 | Building-level energy forecasting with transfer across building archetypes; 18% lower RMSE vs. ResStock. Useful for cold-start parameter seeding in HeatingAssistant. |
-| 49 | **Human-in-the-Loop Simulation for Real-Time Exploration of HVAC Demand Flexibility** | arXiv:2508.07314 | 2025 | https://arxiv.org/abs/2508.07314 | Interactive simulation for scenario exploration; relevant to HeatingAssistant's dashboard preview/forecast visualisation. |
-| 50 | **Emerging Paradigms in the Energy Sector: Forecasting and System Control Optimisation** | arXiv:2507.12373 | 2025 | https://arxiv.org/abs/2507.12373 | Survey of ML + MPC hybrid approaches for smart building optimisation with weather forecasting—broad context for HeatingAssistant's roadmap. |
-
----
-
-## 10. Validation Datasets & Benchmarks
-
-| # | Title | Authors / Venue | Year | Link | Relevance |
-|---|-------|-----------------|------|------|-----------|
-| 51 | **CityLearn Dataset: 247 Residential Buildings (EnergyPlus / RESSTOCK)** | *NeurIPS* datasets track | 2022 | https://citylearn.net | Standard benchmark for building RL and MPC controllers; HeatingAssistant's model could be validated against this dataset. |
-| 52 | **sbsim: SAC-Based HVAC Simulation Benchmark** | arXiv:2606.01665 | 2026 | https://arxiv.org/abs/2606.01665 | Open simulation benchmark for comparing RL vs. MPC energy floors in buildings. |
-| 53 | **Real-world and Simulated Thermal Data from 960 Residential Buildings (Central Europe)** | arXiv:2606.01994 | 2026 | https://arxiv.org/abs/2606.01994 | Largest publicly available residential thermal dataset; could replace HeatingAssistant's 14-day cold-start with architecture-informed priors. |
-
----
-
-## Summary of Key Gaps vs. Current Implementation
-
-| Gap | Most Relevant Papers |
-|-----|---------------------|
-| Static comfort schedules — no dynamic occupancy | #17, #44, #45, #46 |
-| Deterministic disturbance forecasts — no uncertainty propagation to QP | #22, #23, #24, #25, #26 |
-| Carnot-only COP model — no part-load or defrost modelling | #39, #40, #38 |
-| No solar irradiance nowcasting | #41, #42, #43 |
-| 2R2C fixed order — no model-order selection or higher-order option | #2, #6, #9 |
-| Offline-only parameter estimation (runs after 14 days) | #11, #14, #16 |
-| No demand-response / flexibility API | #33, #34, #35, #36, #37 |
-| No PMV/comfort-index-based setpoints | #44, #45, #47 |
-| EKF only — no UKF or posterior uncertainty on parameters | #11, #12, #15, #16 |
-| No RL benchmark comparison | #27, #28, #31 |
+- Paper #15 (Schalbetter et al., 2024) is the most operationally relevant: it shows that **adapting the MPC to track recent forecast-vs-actual discrepancies** significantly reduces comfort violations and energy waste compared to using raw NWP forecasts. The correction mechanism they demonstrate is simple — a rolling bias estimate — and is directly implementable in HeatingAssistant's `weather.py` / `coordinator.py`.
+- Paper #16 quantifies how probabilistic building energy forecasts improve over deterministic baselines; its analysis of systematic NWP temperature bias motivates the bias-correction approach.
+- Papers #17 and #18 confirm that modern NWP outputs (including Met.no, the most common weather entity in Home Assistant) have consistent, measurable biases that are partially correctable with simple post-processing. Paper #18 shows that even a linear correction captures the majority of the improvable error, which validates the rolling affine correction in Improvement 3.
