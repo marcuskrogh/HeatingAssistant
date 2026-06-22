@@ -23,7 +23,16 @@
       "Bash(tasklist)",
       "Bash(taskkill //F //IM python3.13.exe)",
       "Bash(rm -f \"C:/Documents/projects/HeatingAssistant/tests/bench_user_scenario.py\" /tmp/bench.log)",
-      "Bash(python -m pytest tests/ --tb=line -q)"
+      "Bash(python -m pytest tests/ --tb=line -q)",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__list_teams",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__list_projects",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__list_issue_labels",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__list_issue_statuses",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__list_issues",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__save_issue",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__create_issue_label",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__get_team",
+      "mcp__d6ef2d1f-eeb9-4680-9041-90e9d38db3a7__get_project"
     ]
   }
 }
