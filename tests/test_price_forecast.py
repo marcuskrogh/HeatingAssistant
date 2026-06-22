@@ -1,8 +1,9 @@
-"""Tests for coordinator._async_read_price_forecast.
+"""Tests for coordinator._async_read_price_forecast and electricity_price module.
 
-Covers three reading paths:
+Covers:
   - Path A: timestamped dicts (Nord Pool HACS v2 ``raw_today``/``raw_tomorrow``)
-  - Path B: plain hourly lists (Nord Pool v1 ``today``/``tomorrow`` / generic)
+  - Path B: plain hourly/quarterly lists (Nord Pool v1 / EDS / generic)
+  - EDS: ``hour``+``price`` raw format, quarterly resolution, Carnot ``forecast``
   - Fallback: sensor state only (constant persistence)
 
 The sub-hourly alignment fix is verified explicitly: at 14:45 with dt=15 min
@@ -19,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+from custom_components.heating_assistant import electricity_price as ep
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +406,7 @@ class TestFallback:
 
 class TestPathPriority:
     def test_raw_today_takes_precedence_over_today(self):
-        """When both raw_today and today are present, raw_today wins."""
+        """When both raw_today and today are present, raw_today wins at lookup."""
         raw_today = [_raw_entry(h, 99.0) for h in range(24)]
         today = [0.01] * 24
         coord = _make_coordinator(
@@ -415,3 +417,169 @@ class TestPathPriority:
         # Should use raw_today (99.0), not today (0.01)
         assert result is not None
         assert result[0] == pytest.approx(99.0)
+
+
+# ---------------------------------------------------------------------------
+# Energi Data Service (EDS) formats
+# ---------------------------------------------------------------------------
+
+
+def _eds_raw_entry(
+    hour: int,
+    price: float,
+    date: str = "2024-06-05",
+    minute: int = 0,
+) -> dict:
+    """Build an EDS-style raw entry using the ``hour`` + ``price`` keys."""
+    return {
+        "hour": f"{date}T{hour:02d}:{minute:02d}:00+00:00",
+        "price": price,
+    }
+
+
+class TestEDS:
+    """Energi Data Service HACS integration attribute formats."""
+
+    def test_eds_raw_hour_key_alignment(self):
+        """EDS raw_today uses ``hour`` not ``start`` — must still align."""
+        raw_today = [_eds_raw_entry(h, float(h)) for h in range(24)]
+        coord = _make_coordinator("sensor.price", {"raw_today": raw_today})
+        result = _run(coord._async_read_price_forecast(NOW))
+        assert result is not None
+        assert result[0] == pytest.approx(14.0)   # k=0: 14:45 → hour 14
+        assert result[1] == pytest.approx(15.0)   # k=1: 15:00 → hour 15
+
+    def test_eds_quarterly_raw_resolution(self):
+        """96-entry quarterly raw_today gives distinct 15-min prices."""
+        raw_today = []
+        for h in range(24):
+            for q in range(4):
+                price = h * 10.0 + q
+                raw_today.append(_eds_raw_entry(h, price, minute=q * 15))
+        coord = _make_coordinator("sensor.price", {"raw_today": raw_today}, dt_s=900)
+        result = _run(coord._async_read_price_forecast(NOW))
+        assert result is not None
+        # NOW = 14:45 → quarter 3 of hour 14 → price 14*10+3 = 143
+        assert result[0] == pytest.approx(143.0)
+        # k=1: 15:00 → hour 15 quarter 0 → 150
+        assert result[1] == pytest.approx(150.0)
+
+    def test_eds_quarterly_today_list(self):
+        """96-element ``today`` list is treated as 15-min intervals."""
+        prices = [float(i) for i in range(96)]
+        coord = _make_coordinator("sensor.price", {"today": prices}, dt_s=900)
+        result = _run(coord._async_read_price_forecast(NOW))
+        assert result is not None
+        # 14:45 = index 14*4+3 = 59
+        assert result[0] == pytest.approx(59.0)
+        # 15:00 = index 60
+        assert result[1] == pytest.approx(60.0)
+
+    def test_forecast_fills_tomorrow_before_known_prices(self):
+        """When tomorrow is empty, forecast supplies tomorrow's prices."""
+        raw_today = [_eds_raw_entry(h, 1.0) for h in range(24)]
+        forecast = [
+            _eds_raw_entry(h, 5.0, date="2024-06-05") for h in range(24)
+        ] + [
+            _eds_raw_entry(h, 9.0, date="2024-06-06") for h in range(24)
+        ]
+        now_late = datetime(2024, 6, 5, 23, 45, 0, tzinfo=UTC)
+        coord = _make_coordinator(
+            "sensor.price",
+            {"raw_today": raw_today, "tomorrow": [], "forecast": forecast},
+            horizon=8,
+        )
+        result = _run(coord._async_read_price_forecast(now_late))
+        assert result is not None
+        assert result[0] == pytest.approx(1.0)   # k=0: 23:45 today
+        assert result[1] == pytest.approx(9.0)   # k=1: 00:00 tomorrow from forecast
+
+    def test_known_tomorrow_overrides_forecast(self):
+        """Known tomorrow prices beat forecast predictions (same priority tier)."""
+        raw_today = [_eds_raw_entry(h, 1.0) for h in range(24)]
+        raw_tomorrow = [
+            _eds_raw_entry(h, 2.0, date="2024-06-06") for h in range(24)
+        ]
+        forecast = [
+            _eds_raw_entry(h, 5.0, date="2024-06-05") for h in range(24)
+        ] + [
+            _eds_raw_entry(h, 9.0, date="2024-06-06") for h in range(24)
+        ]
+        now_late = datetime(2024, 6, 5, 23, 45, 0, tzinfo=UTC)
+        coord = _make_coordinator(
+            "sensor.price",
+            {
+                "raw_today": raw_today,
+                "raw_tomorrow": raw_tomorrow,
+                "forecast": forecast,
+            },
+            horizon=8,
+        )
+        result = _run(coord._async_read_price_forecast(now_late))
+        assert result is not None
+        assert result[1] == pytest.approx(2.0)   # known tomorrow, not forecast 9.0
+
+    def test_forecast_extends_beyond_tomorrow(self):
+        """Five-day forecast fills horizon beyond today+tomorrow."""
+        raw_today = [_eds_raw_entry(h, 1.0, date="2024-06-06") for h in range(24)]
+        raw_tomorrow = [
+            _eds_raw_entry(h, 2.0, date="2024-06-07") for h in range(24)
+        ]
+        forecast = [
+            _eds_raw_entry(h, 1.0, date="2024-06-06") for h in range(24)
+        ] + [
+            _eds_raw_entry(h, 2.0, date="2024-06-07") for h in range(24)
+        ] + [
+            _eds_raw_entry(h, 7.0, date="2024-06-08") for h in range(24)
+        ]
+        now_mid = datetime(2024, 6, 6, 10, 0, 0, tzinfo=UTC)
+        coord = _make_coordinator(
+            "sensor.price",
+            {
+                "raw_today": raw_today,
+                "raw_tomorrow": raw_tomorrow,
+                "forecast": forecast,
+            },
+            horizon=49,
+            dt_s=3600,
+        )
+        result = _run(coord._async_read_price_forecast(now_mid))
+        assert result is not None
+        # k=24 → 2024-06-07 10:00 (known tomorrow) → 2.0
+        assert result[24] == pytest.approx(2.0)
+        # k=48 → 2024-06-08 10:00 (forecast only) → 7.0
+        assert result[48] == pytest.approx(7.0)
+
+    def test_quarterly_raw_beats_hourly_today_list(self):
+        """Sub-hourly raw entries override coarser hourly today list."""
+        raw_today = [
+            _eds_raw_entry(14, 99.0, minute=45),
+        ]
+        today = [1.0] * 24
+        coord = _make_coordinator("sensor.price", {"raw_today": raw_today, "today": today})
+        result = _run(coord._async_read_price_forecast(NOW))
+        assert result is not None
+        # At 14:45 the quarterly raw entry at 14:45 (99.0) beats hourly at 14:00 (1.0)
+        assert result[0] == pytest.approx(99.0)
+
+
+class TestElectricityPriceModule:
+    """Direct unit tests for the electricity_price helpers."""
+
+    def test_infer_list_interval_seconds(self):
+        assert ep.infer_list_interval_seconds(24) == 3600.0
+        assert ep.infer_list_interval_seconds(96) == 900.0
+        assert ep.infer_list_interval_seconds(48) == 1800.0
+
+    def test_collect_price_series_merges_all_sources(self):
+        attrs = {
+            "raw_today": [_eds_raw_entry(0, 1.0)],
+            "forecast": [_eds_raw_entry(0, 9.0)],
+        }
+        series = ep.collect_price_series(attrs, NOW)
+        priorities = {tp[2] for tp in series}
+        sources = {tp[3] for tp in series}
+        assert ep._PRIORITY_KNOWN in priorities
+        assert ep._PRIORITY_FORECAST in priorities
+        assert ep._SOURCE_TODAY in sources
+        assert ep._SOURCE_FORECAST in sources
