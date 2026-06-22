@@ -343,7 +343,7 @@ The controller (`controller.py`) implements a **nonlinear model predictive contr
 |-----------|-------|------|
 | **System model** | `ContinuousDiscreteModel` (ABC) | Defines the continuous-discrete SDE: `dx = f(x,u,d,p,t)dt + σdw`, `ym = hm(x,...)`. |
 | **State estimator** | `ContinuousDiscreteEKF` | CD-EKF: integrates the nonlinear drift and linearised Riccati ODE between measurement steps using implicit-Euler sub-stepping. |
-| **Optimal control** | `CDLinearizedMPCController` | Linearizes the nonlinear SDE around the current operating point, discretizes via ZOH, and solves the resulting batch convex QP via CVXOPT. |
+| **Optimal control** | `CDLinearizedMPCController` | Linearizes the nonlinear SDE around the current operating point, discretizes via ZOH, and solves the resulting batch convex QP via OSQP/HiGHS. |
 
 The house-heating application provides two classes in `controller.py`:
 
@@ -411,7 +411,7 @@ where $\Delta\mathbf{u}[k] = \mathbf{u}[k] - \mathbf{u}[k{-}1]$ (with $\mathbf{u
 | $\rho_z$ | Soft constraint penalty weight (default: $10^4$) |
 | $\mathbf{u}[k]$ | Input vector (continuous fractions $\in [0, 1]$) |
 
-The predicted state trajectory is propagated by linearizing the nonlinear SDE around the current operating point (x̂, u_prev, d_now) using the analytic Jacobians, then discretizing the local linear model via ZOH.  The resulting convex QP is solved via **CVXOPT** with box constraints $0 \le \mathbf{u}[k] \le 1$.
+The predicted state trajectory is propagated by linearizing the nonlinear SDE around the current operating point (x̂, u_prev, d_now) using the analytic Jacobians, then discretizing the local linear model via ZOH.  The resulting convex QP is solved via **OSQP/HiGHS** with box constraints $0 \le \mathbf{u}[k] \le 1$.
 
 The **terminal cost** $\mathbf{P}$ is the key mechanism for achieving setpoint tracking.  Without a large terminal weight the optimizer has weak incentive to drive the state to the reference by the end of the horizon — it can minimise total cost by spreading the error across all stages without converging.  Setting $\mathbf{P} = \lambda \mathbf{Q}$ with $\lambda \gg 1$ (default $\lambda = 100$) is equivalent to approximating the infinite-horizon cost and forces the optimal trajectory to converge to the setpoint well within the horizon.
 
@@ -455,7 +455,7 @@ compute(outdoor_temp, solar_gains=None, now=None, outdoor_forecast=None)
 │   ├─ linearize: ∂f/∂x, ∂f/∂u evaluated at (x̂, u_prev, d_now)
 │   ├─ discretize: ZOH → local linear model (A_d, B_d)
 │   ├─ QP: min Σ ‖z[k]-z_ref‖²_Q + ‖u[k]‖²_R + ‖Δu[k]‖²_S + ρ_z·corridor_violation
-│   └─ solve via CVXOPT  s.t.  0 ≤ u ≤ 1
+│   └─ solve via OSQP/HiGHS  s.t.  0 ≤ u ≤ 1
 │
 └─ Apply u*[0] to heat sources (receding horizon)
    Return {source_name: fraction}

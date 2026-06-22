@@ -49,7 +49,7 @@ This is the surface we build on.  Every later phase is described as a
 | **Disturbances** | Outdoor temperature (HA weather forecast, interpolated to horizon); solar irradiance from latitude/longitude clear-sky pipeline |
 | **State estimator** | Continuous-discrete EKF; implicit-Euler sub-stepped covariance propagation; per-room scalar measurement update |
 | **Optimal-control problem** | Receding-horizon linearized MPC over continuous $u\in[0,1]$ minimising tracking + energy + Δu smoothing + soft-constraint slack; zero-order hold; horizon $N$ steps × $\Delta t$ (default 6 × 15 min) |
-| **Solver** | CVXOPT (batch convex QP after linearization); analytic Jacobians for `f` and `h` |
+| **Solver** | OSQP/HiGHS (batch convex QP after linearization); analytic Jacobians for `f` and `h` |
 | **System ID** | Offline maximum-likelihood (multi-step open-loop objective with analytic forward sensitivities) over the rolling history buffer; identifies $C_i$, $R_{i,\text{ext}}$, internal gain, heater scale, inter-room R, per-room solar scale, and the 2R2C envelope splits (gated) |
 | **Constraints** | Box on $u$; soft slack on temperature corridors; Schmitt-trigger hysteresis on cooling mode |
 | **Cycle time** | ~5 s for a 5-room / 6-step horizon on a small NUC |

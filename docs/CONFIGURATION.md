@@ -1,39 +1,41 @@
-# Configuration Reference & Examples
+# Configuration Reference
 
-> The complete YAML configuration reference for Heating Assistant, followed by
-> full worked examples ranging from a single-room studio to a five-room house
-> with comfort schedules.
+> A field-by-field reference for every Heating Assistant setting — rooms,
+> windows, heat sources, comfort schedules, and the global/control settings.
 
-All room, window, heat-source and schedule configuration is declared in
-`configuration.yaml` under the `heating_assistant:` key. Site-level settings
-(location, control step, horizon) are set through the UI setup wizard — see the
-[main README](../README.md#quick-start). For guidance on choosing thermal
+**Heating Assistant is configured entirely in the Home Assistant UI; there is no
+`configuration.yaml` to edit.** The configuration surfaces are:
+
+- **The Heating Assistant sidebar panel** — the primary surface. Its
+  **Configuration** page covers rooms, heat sources, environment/site and system
+  parameters; comfort **schedules** and **controller tuning** are on the panel's
+  **Schedules** and **Tuning** pages.
+- **Settings → Devices & services → Heating Assistant → Configure** — a subset:
+  general & sensor settings, and the room, window and heat-source editors.
+
+This page documents what each setting means and its default. For a guided
+walkthrough of a first install, see [Setting up your first
+home](../README.md#setting-up-your-first-home). For help choosing thermal
 parameter values, see the [Parameter Estimation & Tuning guide](TUNING.md).
+
+> **Note on naming.** The tables below use each setting's internal name (e.g.
+> `thermal_mass`). In the UI these appear as friendly labels with inline help
+> (e.g. *Thermal mass*); the names are what you would see in diagnostics,
+> service calls, and the panel's Configuration page.
 
 **Contents**
 
 - [10. Configuration Reference](#10-configuration-reference)
-- [11. Complete Configuration Examples](#11-complete-configuration-examples)
+- [11. Example home layouts](#11-example-home-layouts)
 
 ---
 
 ## 10. Configuration Reference
 
-All room, window, and heat-source configuration is declared in `configuration.yaml` under the `heating_assistant:` key.
-
-```yaml
-heating_assistant:
-  outdoor_temp_entity: ...
-  weather_entity: ...
-  latitude: ...
-  longitude: ...
-  update_interval: ...
-  horizon: ...
-  rooms:
-    - ...
-  heat_sources:
-    - ...
-```
+The settings group into the **global/control settings** (the panel's
+*Environment & Site*, *System Parameters* and *Tuning* pages) and the per-room
+**room**, **connection**, **window**, **heat source** and **schedule** settings
+(the panel's *Rooms*, *Heat Sources* and *Schedules* pages).
 
 ### 10.1 Top-level keys
 
@@ -50,7 +52,7 @@ heating_assistant:
 | `smoothing_weight` | float | No | `0.1` | Weight on the input rate-of-change cost ‖Δ**u**‖² in the MPC objective.  Higher values strongly penalise rapid changes in heater output between consecutive time steps, dampening oscillations and reducing actuator wear.  Set to `0.0` to disable.  Typical range: `0.0`–`2.0`.  See [Section 14.5](TUNING.md#145-mpc-regulator-tuning). |
 | `constraint_offset` | float | No | `2.0` | Symmetric soft output constraint band [°C] around the setpoint: the controller keeps predicted room temperatures within `[setpoint − δ, setpoint + δ]`.  Violations are penalised but not forbidden.  Decrease for tighter tracking; increase if the solver reports infeasibility. |
 | `terminal_weight` | float | No | `100.0` | Terminal cost multiplier λ: **P** = λ × **Q**.  A large value forces the predicted trajectory to converge to the setpoint by the end of the horizon, dramatically improving steady-state tracking.  Increase to 200–500 if the controller still crosses or misses the setpoint; decrease toward 10–20 if you prefer softer convergence with more energy-aware shaping over the horizon.  Must be ≥ 1. |
-| `mpc_solver` | string | No | `cvxopt` | QP solver backend for the linearized MPC.  The default uses CVXOPT for the batch convex QP. |
+| `mpc_solver` | string | No | `qp` | Solver mode for the linearized MPC. The convex QP is solved via OSQP/HiGHS; legacy values (e.g. `ipopt`, `slsqp`) are accepted but ignored. |
 | `mpc_analytic_derivatives` | bool | No | `true` | Enables analytical-derivative plumbing when supported by the installed `mbc` backend. Unsupported hooks automatically fall back to numerical derivatives. |
 | `sigma_w` | float | No | `0.1` | EKF process-noise standard deviation [K/√s]. Increase when the thermal model is too “stiff” and does not adapt quickly enough to disturbances. UI/YAML range: `1e-6`–`10.0`. |
 | `sigma_v` | float | No | `0.5` | EKF measurement-noise standard deviation [K]. Increase when room sensors are noisy/spiky; decrease when sensors are stable and you want tighter measurement tracking. UI/YAML range: `1e-6`–`10.0`. |
@@ -63,31 +65,15 @@ heating_assistant:
 
 ### 10.2 Room block (`rooms`)
 
-Each entry in the `rooms` list fully describes one room.
-
-```yaml
-rooms:
-  - name: living_room           # required – unique identifier
-    thermal_mass: 8000000       # J/K  – optional
-    r_external: 0.04            # K/W  – optional
-    setpoint: 21.0              # °C   – optional
-    temp_sensor: sensor.living_room_temperature  # optional – single sensor
-    # OR use a list of sensors whose readings are averaged:
-    # temp_sensors:
-    #   - sensor.living_room_temp_north
-    #   - sensor.living_room_temp_south
-    connections:                # optional
-      - ...
-    windows:                    # optional
-      - ...
-```
+Each room is added on the panel's **Configuration → Rooms** page (or via
+**Configure → Manage rooms** in the integration options). Its settings:
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `name` | string | **Yes** | — | Unique identifier for the room.  Used to match heat sources, connections, and HA entity IDs.  Use only letters, digits, and underscores (no spaces). |
 | `thermal_mass` | float | No | `5 000 000` | Effective heat capacity of the room [J/K].  Includes air mass, furniture, interior walls, and a fraction of the exterior walls.  See [Section 14.1](TUNING.md#141-thermal-mass-thermal_mass) for guidance. |
 | `r_external` | float | No | `0.05` | Thermal resistance from the room to the outdoor environment [K/W].  Represents the sum of all paths to the outside: exterior walls, roof, ground, and infiltration.  See [Section 14.2](TUNING.md#142-external-thermal-resistance-r_external) for guidance. |
-| `setpoint` | float | No | `21.0` | Initial desired temperature [°C].  Can be overridden at runtime by the `climate.*` entity. |
+| `setpoint` | float | No | `22.0` | Target temperature [°C]. Set per room from its climate card (not the room editor); persisted and adjustable at runtime. |
 | `comfort_corridor_low` | float | No | `setpoint - constraint_offset` | Lower comfort bound [°C] used by the MPC soft-corridor objective. |
 | `comfort_corridor_high` | float | No | `setpoint + constraint_offset` | Upper comfort bound [°C] used by the MPC soft-corridor objective. |
 | `temp_sensor` | string | No | — | Entity ID of a single HA sensor that measures the actual room temperature.  If provided, this value is used to correct the model state at each update cycle.  Without a sensor, the model runs in open-loop (simulation-only) mode.  Cannot be combined with `temp_sensors`. |
@@ -102,29 +88,18 @@ rooms:
 
 ### 10.3 Connection block (`connections`)
 
-Each connection represents a wall, door, floor or ceiling shared with another room.
-
-```yaml
-connections:
-  - room: kitchen       # required – must match the name of another room
-    r_value: 0.2        # K/W – required
-```
+Each connection represents a wall, door, floor or ceiling shared with another
+room. Add connections from a room's editor.
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
-| `room` | string | **Yes** | — | The `name` of the adjacent room.  Connections are directional in the YAML but the thermal model treats them symmetrically — you do NOT need to repeat the entry in both rooms.  (The matrix is built correctly even if only one side is declared, but declaring both sides is also harmless.) |
+| `room` | string | **Yes** | — | The `name` of the adjacent room.  The thermal model treats connections symmetrically — you only need to declare each connection once (adding it on both rooms is harmless). |
 | `r_value` | float | **Yes** | — | Thermal resistance between the two rooms [K/W].  See [Section 14.3](TUNING.md#143-inter-room-thermal-resistance-r_value) for guidance. |
 
 ### 10.4 Window block (`windows`)
 
-Each window (or glazed door) is a separate entry.
-
-```yaml
-windows:
-  - area: 3.0           # m²  – required
-    orientation: 180    # degrees – required (clockwise from North: 0=N, 90=E, 180=S, 270=W)
-    tilt: 90            # degrees – optional (default 90 = vertical)
-```
+Each window (or glazed door) is added in the room editor under **Solar gain →
+Windows** (panel), or via **Configure → Windows** in the integration options.
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
@@ -134,40 +109,16 @@ windows:
 
 ### 10.5 Heat source block (`heat_sources`)
 
-Each entry describes one controllable heating device.
+Each controllable heating device is added on the panel's **Configuration →
+Heat Sources** page (or via **Configure → Heat sources** in the integration
+options). Heat-pump-specific fields appear once the type is set to *Heat pump*.
 
-```yaml
-heat_sources:
-  - name: living_room_heater    # required – unique identifier
-    type: electric_heater       # required – "electric_heater" or "heat_pump"
-    room: living_room           # required – must match a room name
-    max_power: 2000             # W – required
-    heater_entity: switch.living_room_heater  # optional
-    efficiency: 1.0             # optional (electric_heater only)
-```
-
-```yaml
-heat_sources:
-  - name: heat_pump
-    type: heat_pump
-    room: living_room
-    max_power: 5000             # W thermal – required
-    heater_entity: climate.living_room_heat_pump  # optional
-    cop_rated: 3.5              # optional (heat_pump only)
-    cop_temp_ref: 7.0           # °C – optional (heat_pump only)
-    min_power: 800              # W thermal – optional (heat_pump only)
-    max_temp_offset: 5.0        # °C – optional (heat_pump only)
-    turn_off_deadband: 1.0      # °C – optional (heat_pump only)
-    cooling_cop: 2.5            # rated EER for cooling – optional (heat_pump only)
-    cooling_efficiency: 1.0     # 0–1, fraction of cooling capacity actually used – optional
-```
-
-**Common keys (all types)**
+**Common settings (all types)**
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
 | `name` | string | **Yes** | — | Unique identifier for this heat source.  Must be unique across all heat sources. |
-| `type` | string | **Yes** | — | Source type.  Must be `electric_heater` or `heat_pump`. |
+| `type` | string | **Yes** | — | Source type. One of `electric_heater`, `hydronic_radiator`, `oil_radiator`, `electric_floor_heating`, `hydronic_floor_heating`, `gas_heater`, `generic_thermostat`, or `heat_pump`. The type sets sensible defaults (e.g. the emitter time constant); heat pumps additionally model a temperature-dependent COP and cooling. |
 | `room` | string | **Yes** | — | Name of the room this source heats.  Must match a room `name`. |
 | `max_power` | float | **Yes** | — | Maximum **thermal** output power [W].  For an electric heater this equals the rated electrical input.  For a heat pump this is the rated thermal output at `cop_temp_ref` conditions. |
 | `heater_entity` | string | No | — | HA entity ID to control.  Supported domains: `switch`, `number`, `climate`.  If omitted, the controller computes the optimal action but does not issue any HA service call. |
@@ -192,21 +143,11 @@ heat_sources:
 
 ### 10.6 Comfort schedule block (`schedule`)
 
-Each room may declare a `schedule` list of named time-of-day periods.  Use this to lower the setpoint when nobody is home (setback) or to switch off the heat source entirely while you sleep, with the controller automatically warming the room back up before you wake.  A period is matched purely on the local clock — no presence sensor, no automation glue required.
-
-```yaml
-schedule:
-  - name: night
-    start: "22:00"
-    end: "04:00"
-    mode: off                # turn the room's heat sources off
-    frost_protection: 12.0   # never let it drop below this (°C)
-  - name: workday_eco
-    start: "08:30"
-    end: "16:00"
-    days: [mon, tue, wed, thu, fri]
-    setpoint: 18.0           # lower setpoint while at work
-```
+Each room may have a schedule of named time-of-day periods, managed from the panel's **Schedules** page. Use it to lower the setpoint
+when nobody is home (setback) or to switch the heat off entirely while you sleep,
+with the controller automatically warming the room back up before you wake. A
+period is matched purely on the local clock — no presence sensor or automation
+required. Each period has these fields:
 
 | Key | Type | Required | Default | Description |
 |-----|------|----------|---------|-------------|
@@ -273,468 +214,74 @@ data:
 
 ---
 
-## 11. Complete Configuration Examples
+## 11. Example home layouts
 
-### 11.1 Studio apartment – single room, one electric heater
+These examples show how to translate a few real homes into rooms, connections,
+windows and heat sources. Everything below is entered through the UI editors
+(**Configure → Manage rooms / Windows / Heat sources / Schedule**) — there is no
+file to edit. The starting parameter values come from the
+[room size / building-age presets](#10-configuration-reference) and can be
+refined later (see the [Tuning guide](TUNING.md)).
 
-A single-room installation with one window and a direct plug-in electric heater controlled via a smart plug (switch entity).
+### 11.1 Studio apartment — one room, one heater
 
-```yaml
-heating_assistant:
-  outdoor_temp_entity: sensor.openweathermap_temperature
-  weather_entity: weather.forecast_home         # optional: enables weather-based outdoor temp forecast
+The simplest case: a single room with one window and a plug-in electric heater
+on a smart switch.
 
-  rooms:
-    - name: studio
-      thermal_mass: 3000000   # ~3 MJ/K for a small furnished room
-      r_external: 0.08        # K/W – older building, poor insulation
-      setpoint: 21.0
-      temp_sensor: sensor.studio_thermometer
-      windows:
-        - area: 1.5
-          orientation: 90     # East-facing window
-          tilt: 90
+- **Room** *Studio* — temperature sensor `sensor.studio_thermometer`,
+  setpoint 21 °C, an older/poorly-insulated preset.
+- **Window** — 1.5 m², facing **East** (90°).
+- **Heat source** *Studio heater* — electric heater, 1500 W, controlled by
+  `switch.studio_smart_plug`.
 
-  heat_sources:
-    - name: studio_heater
-      type: electric_heater
-      room: studio
-      max_power: 1500
-      heater_entity: switch.studio_smart_plug
-```
+### 11.2 Two-bedroom flat — heat pump plus a backup heater
 
-### 11.2 Two-bedroom flat – rooms with heat pump and supplemental heater
+An open-plan living/kitchen with a wall heat pump and a backup panel heater,
+plus a separate bedroom. The two rooms share a doorway.
 
-A two-bedroom apartment with an open-plan living/kitchen area and one separate bedroom.  The living area has a wall-mounted heat pump (exposed as a `climate.*` entity in HA) and a backup electric panel heater on a smart switch.  The bedroom has a small electric heater only.  The two rooms are connected through a doorway.
+- **Room** *Living/Kitchen* — large/modern preset, setpoint 21 °C; windows
+  facing **South** (large) and **East**. **Connection** to *Bedroom*
+  (interior door, `r_value` ≈ 0.3).
+- **Room** *Bedroom* — setpoint 19 °C; one window facing **West**.
+- **Heat sources** — a **heat pump** (`climate.*` entity, rated COP from its
+  datasheet) and a backup **electric heater** in the living/kitchen; a small
+  **electric heater** in the bedroom.
 
-```yaml
-heating_assistant:
-  outdoor_temp_entity: sensor.netatmo_outdoor_temperature
-  update_interval: 900  # 15-minute control step (OCP ZOH = EKF step = coordinator period)
-  horizon: 8            # 2-hour lookahead
+### 11.3 Whole house — central hallway, heat pump, solar windows
 
-  rooms:
-    - name: living_kitchen
-      thermal_mass: 10000000  # large open-plan area
-      r_external: 0.03        # modern well-insulated building
-      setpoint: 21.0
-      temp_sensor: sensor.living_room_temperature
-      connections:
-        - room: bedroom
-          r_value: 0.3        # interior wall + door
-      windows:
-        - area: 4.0
-          orientation: 180    # large south-facing window
-          tilt: 90
-        - area: 1.2
-          orientation: 90     # east kitchen window
-          tilt: 90
+A detached house with a hallway connecting the living room, kitchen and two
+bedrooms. The heat pump serves the main living space; each bedroom has a panel
+heater.
 
-    - name: bedroom
-      thermal_mass: 5000000
-      r_external: 0.05
-      setpoint: 19.0          # slightly cooler setpoint for sleeping
-      temp_sensor: sensor.bedroom_temperature
-      connections:
-        - room: living_kitchen
-          r_value: 0.3
-      windows:
-        - area: 1.8
-          orientation: 270    # west-facing bedroom window
-          tilt: 90
+- **Hallway** — mostly interior walls (high `r_external`); **connections** to
+  the living room, kitchen and both bedrooms.
+- **Living room** — well-insulated preset; large **South**-facing glazing and a
+  **West** patio door; heat pump.
+- **Kitchen**, **Bedroom 1**, **Bedroom 2** — each with its sensor, a window,
+  and (bedrooms) a panel heater.
 
-  heat_sources:
-    - name: hp_living
-      type: heat_pump
-      room: living_kitchen
-      max_power: 4500         # 4.5 kW thermal at A7/W35
-      cop_rated: 4.0
-      cop_temp_ref: 7.0
-      min_power: 900          # unit cannot modulate below 20 % of rated capacity
-      max_temp_offset: 5.0    # °C offset at full power
-      turn_off_deadband: 1.0  # °C above setpoint before switching to cooling mode
-      heater_entity: climate.mitsubishi_hp
+Connections only need to be declared once per room pair.
 
-    - name: backup_heater_living
-      type: electric_heater
-      room: living_kitchen
-      max_power: 1500
-      heater_entity: switch.living_backup_heater
+### 11.4 Rooms with several temperature sensors
 
-    - name: bedroom_heater
-      type: electric_heater
-      room: bedroom
-      max_power: 1000
-      heater_entity: switch.bedroom_heater
-```
+Large or irregular rooms can have noticeable temperature gradients. In a room's
+editor you can attach **multiple temperature sensors** (e.g. one at each end of
+an open-plan space, or three around a busy kitchen); the controller averages
+their readings before feeding the model. This also adds resilience — if one
+sensor drops out, the average of the rest is used.
 
-### 11.3 Full house – five rooms, heat pump, and solar-facing windows
+### 11.5 Comfort schedules — sleep and setback
 
-A detached house with a central hallway connecting all other rooms, a ground-floor living room and kitchen, and two upstairs bedrooms.  The heat pump serves the main living space; each bedroom has a panel heater.
+Add periods on the panel's **Schedules** page for each room:
 
-```yaml
-heating_assistant:
-  outdoor_temp_entity: sensor.weather_station_outdoor
-  latitude: 55.68    # Copenhagen
-  longitude: 12.57
-  update_interval: 900
-  horizon: 6
+- **Living room** — a weekday *eco* setback (e.g. 18 °C, 08:30–16:00, Mon–Fri)
+  and an overnight *off* period (22:30–05:30, frost protection 12 °C). The MPC
+  pre-heats before the morning so the room is warm when the off period ends.
+- **Bedrooms** — *off* overnight with a higher frost-protection floor; an
+  optional daytime setback.
+- **Bathroom** — a warm *comfort* period for the morning peak only, idling
+  cooler the rest of the day.
 
-  rooms:
-    - name: hallway
-      thermal_mass: 2000000
-      r_external: 0.1        # mostly interior walls, small external area
-      setpoint: 18.0
-      temp_sensor: sensor.hallway_temp
-      connections:
-        - room: living_room
-          r_value: 0.25
-        - room: kitchen
-          r_value: 0.4
-        - room: bedroom_1
-          r_value: 0.3
-        - room: bedroom_2
-          r_value: 0.3
-
-    - name: living_room
-      thermal_mass: 9000000
-      r_external: 0.03
-      setpoint: 21.0
-      temp_sensor: sensor.living_temp
-      connections:
-        - room: hallway
-          r_value: 0.25
-        - room: kitchen
-          r_value: 0.2       # open archway
-      windows:
-        - area: 5.0
-          orientation: 180   # south-facing bay window
-          tilt: 90
-        - area: 1.0
-          orientation: 270   # west patio door
-          tilt: 90
-
-    - name: kitchen
-      thermal_mass: 5000000
-      r_external: 0.05
-      setpoint: 20.0
-      temp_sensor: sensor.kitchen_temp
-      connections:
-        - room: hallway
-          r_value: 0.4
-        - room: living_room
-          r_value: 0.2
-      windows:
-        - area: 1.5
-          orientation: 90    # east-facing kitchen window
-
-    - name: bedroom_1
-      thermal_mass: 4000000
-      r_external: 0.04
-      setpoint: 19.0
-      temp_sensor: sensor.bedroom1_temp
-      connections:
-        - room: hallway
-          r_value: 0.3
-      windows:
-        - area: 2.0
-          orientation: 180   # south bedroom window
-          tilt: 90
-
-    - name: bedroom_2
-      thermal_mass: 3500000
-      r_external: 0.045
-      setpoint: 19.0
-      temp_sensor: sensor.bedroom2_temp
-      connections:
-        - room: hallway
-          r_value: 0.3
-      windows:
-        - area: 1.5
-          orientation: 0     # north bedroom window – little solar gain
-          tilt: 90
-
-  heat_sources:
-    - name: main_heat_pump
-      type: heat_pump
-      room: living_room
-      max_power: 7000
-      cop_rated: 3.8
-      cop_temp_ref: 7.0
-      min_power: 1400         # ~20 % of rated – prevents short-cycling
-      max_temp_offset: 5.0    # °C offset at full power
-      turn_off_deadband: 1.0  # °C above setpoint before switching to cooling mode
-      heater_entity: climate.daikin_hp
-
-    - name: bedroom1_heater
-      type: electric_heater
-      room: bedroom_1
-      max_power: 1000
-      heater_entity: switch.bedroom1_heater
-
-    - name: bedroom2_heater
-      type: electric_heater
-      room: bedroom_2
-      max_power: 800
-      heater_entity: switch.bedroom2_heater
-```
-
-### 11.4 Multiple temperature sensors per room
-
-Large or irregularly shaped rooms often have noticeable temperature gradients — one corner near a radiator can read 2–3 °C warmer than the opposite wall.  Using a single sensor introduces a systematic bias into the model correction step.  By listing several sensors under `temp_sensors`, the coordinator automatically averages their readings before feeding the value to the thermal model.
-
-The same mechanism can also be used when you have redundant sensors and want to guard against a single sensor going offline (the average of the remaining valid readings is used).
-
-#### 11.4.1 Open-plan living/dining room with two sensors
-
-A large open-plan space has one sensor mounted near the dining area (north wall) and another near the sofa/TV area (south wall, closer to the heat pump).  The average of the two sensors gives a more representative room temperature.
-
-```yaml
-heating_assistant:
-  outdoor_temp_entity: sensor.outdoor_temperature
-
-  rooms:
-    - name: living_dining
-      thermal_mass: 12000000    # large open-plan space
-      r_external: 0.03
-      setpoint: 21.0
-      temp_sensors:             # averaged by the coordinator
-        - sensor.living_dining_temp_north
-        - sensor.living_dining_temp_south
-      windows:
-        - area: 5.0
-          orientation: 180      # south-facing glazing
-          tilt: 90
-
-  heat_sources:
-    - name: hp_living
-      type: heat_pump
-      room: living_dining
-      max_power: 5000
-      cop_rated: 4.0
-      cop_temp_ref: 7.0
-      min_power: 1000         # unit cannot modulate below 1 kW thermal
-      max_temp_offset: 5.0
-      turn_off_deadband: 1.0
-      heater_entity: climate.living_heat_pump
-```
-
-#### 11.4.2 Full house with mixed single- and multi-sensor rooms
-
-This example combines rooms that use a single `temp_sensor` with rooms that use multiple sensors under `temp_sensors`.  The kitchen uses three sensors — one at counter height near the window, one above the stove, and one at seating height — to capture the wider temperature spread in a heavily used cooking space.
-
-```yaml
-heating_assistant:
-  outdoor_temp_entity: sensor.weather_station_outdoor
-  latitude: 55.68
-  longitude: 12.57
-  update_interval: 900
-  horizon: 6
-
-  rooms:
-    - name: hallway
-      thermal_mass: 2000000
-      r_external: 0.1
-      setpoint: 18.0
-      temp_sensor: sensor.hallway_temp   # single sensor is fine for a small hallway
-      connections:
-        - room: living_room
-          r_value: 0.25
-        - room: kitchen
-          r_value: 0.4
-        - room: bedroom_1
-          r_value: 0.3
-        - room: bedroom_2
-          r_value: 0.3
-
-    - name: living_room
-      thermal_mass: 9000000
-      r_external: 0.03
-      setpoint: 21.0
-      temp_sensors:            # two sensors: one at each end of the room
-        - sensor.living_room_temp_east
-        - sensor.living_room_temp_west
-      connections:
-        - room: hallway
-          r_value: 0.25
-        - room: kitchen
-          r_value: 0.2
-      windows:
-        - area: 5.0
-          orientation: 180
-          tilt: 90
-
-    - name: kitchen
-      thermal_mass: 5000000
-      r_external: 0.05
-      setpoint: 20.0
-      temp_sensors:            # three sensors averaged for representative reading
-        - sensor.kitchen_temp_window
-        - sensor.kitchen_temp_stove
-        - sensor.kitchen_temp_table
-      connections:
-        - room: hallway
-          r_value: 0.4
-        - room: living_room
-          r_value: 0.2
-      windows:
-        - area: 1.5
-          orientation: 90
-
-    - name: bedroom_1
-      thermal_mass: 4000000
-      r_external: 0.04
-      setpoint: 19.0
-      temp_sensor: sensor.bedroom1_temp
-      connections:
-        - room: hallway
-          r_value: 0.3
-      windows:
-        - area: 2.0
-          orientation: 180
-          tilt: 90
-
-    - name: bedroom_2
-      thermal_mass: 3500000
-      r_external: 0.045
-      setpoint: 19.0
-      temp_sensor: sensor.bedroom2_temp
-      connections:
-        - room: hallway
-          r_value: 0.3
-      windows:
-        - area: 1.5
-          orientation: 0
-          tilt: 90
-
-  heat_sources:
-    - name: main_heat_pump
-      type: heat_pump
-      room: living_room
-      max_power: 7000
-      cop_rated: 3.8
-      cop_temp_ref: 7.0
-      min_power: 1400         # ~20 % of rated – prevents short-cycling
-      max_temp_offset: 5.0
-      turn_off_deadband: 1.0
-      heater_entity: climate.daikin_hp
-
-    - name: kitchen_heater
-      type: electric_heater
-      room: kitchen
-      max_power: 1200
-      heater_entity: switch.kitchen_heater
-
-    - name: bedroom1_heater
-      type: electric_heater
-      room: bedroom_1
-      max_power: 1000
-      heater_entity: switch.bedroom1_heater
-
-    - name: bedroom2_heater
-      type: electric_heater
-      room: bedroom_2
-      max_power: 800
-      heater_entity: switch.bedroom2_heater
-```
-
-### 11.5 Comfort schedules – sleep mode and weekday setback
-
-The same two-bedroom flat from [Section 11.2](#112-two-bedroom-flat--rooms-with-heat-pump-and-supplemental-heater), augmented with comfort schedules:
-
-* the **living room** runs an eco setback while the household is at work and switches off entirely overnight (heat returns automatically before the morning routine thanks to the MPC's preheat);
-* the **bedrooms** stay cool during the day and switch off during sleep hours;
-* the **bathroom** keeps a comfort temperature in the morning peak only.
-
-```yaml
-heating_assistant:
-  outdoor_temp_entity: sensor.openweathermap_temperature
-  weather_entity: weather.forecast_home
-  horizon: 8                # 8 × 15 min = 2 h preheat look-ahead
-
-  rooms:
-    - name: living_room
-      thermal_mass: 8000000
-      r_external: 0.04
-      setpoint: 21.0                   # comfort setpoint (used outside any period)
-      temp_sensor: sensor.living_room_temperature
-      schedule:
-        - name: workday_eco
-          start: "08:30"
-          end: "16:00"
-          days: [mon, tue, wed, thu, fri]
-          setpoint: 18.0               # gentle setback while at work
-        - name: night
-          start: "22:30"
-          end: "05:30"
-          mode: off                    # heat source completely off
-          frost_protection: 12.0
-
-    - name: bedroom_1
-      thermal_mass: 4000000
-      r_external: 0.05
-      setpoint: 19.0
-      temp_sensor: sensor.bedroom1_temperature
-      schedule:
-        - name: night
-          start: "22:00"
-          end: "06:00"
-          mode: off
-          frost_protection: 14.0       # bedrooms typically need a higher floor
-        - name: daytime_eco
-          start: "08:00"
-          end: "20:00"
-          setpoint: 17.0               # rarely used during the day
-
-    - name: bathroom
-      thermal_mass: 2500000
-      r_external: 0.06
-      setpoint: 19.0                   # gentle baseline, used outside the morning peak
-      temp_sensor: sensor.bathroom_temperature
-      schedule:
-        - name: morning_peak
-          start: "06:30"
-          end: "08:30"
-          setpoint: 22.0               # warm towel-rail temperature for showers
-        - name: night
-          start: "22:30"
-          end: "05:30"
-          mode: off
-          frost_protection: 12.0
-
-  heat_sources:
-    - name: living_room_hp
-      type: heat_pump
-      room: living_room
-      max_power: 5000
-      heater_entity: climate.living_room_heat_pump
-    - name: bedroom1_heater
-      type: electric_heater
-      room: bedroom_1
-      max_power: 1500
-      heater_entity: switch.bedroom1_heater
-    - name: bathroom_heater
-      type: electric_heater
-      room: bathroom
-      max_power: 800
-      heater_entity: switch.bathroom_heater
-```
-
-What this configuration achieves:
-
-* Between 22:30 and 05:30 the living-room heat pump and bathroom heater stop running — no electricity is drawn unless the indoor temperature drops to the frost-protection floor.
-* The MPC sees the upcoming 05:30 transition through its 2-hour horizon and starts heating around 03:30–04:00, so the room is back at 21 °C when the schedule wakes up.
-* Weekdays from 08:30–16:00 the living-room setpoint drops to 18 °C; the controller saves energy without letting the room cool past the eco target.
-* The bathroom is fully comfortable from 06:30–08:30 and idles around 19 °C the rest of the day.
-
-To override a schedule for a single evening — e.g. you decide to stay in the living room past 22:30 — call:
-
-```yaml
-service: heating_assistant.set_schedule_enabled
-data:
-  room_name: living_room
-  enabled: false
-```
-
-The schedule resumes at the next Home Assistant restart, or when you call the same service with `enabled: true`.
-
+To override a schedule for one evening, call the
+`heating_assistant.set_schedule_enabled` service with the room and
+`enabled: false`; it resumes on the next restart or when you re-enable it.
