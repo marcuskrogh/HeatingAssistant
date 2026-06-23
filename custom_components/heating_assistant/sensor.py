@@ -60,6 +60,10 @@ from .heat_sources import HeatPump
 _LOGGER = logging.getLogger(__name__)
 
 
+def _preload_model_diagnostics() -> None:
+    from . import model_diagnostics  # noqa: F401 – triggers scipy import in executor thread
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -67,6 +71,8 @@ async def async_setup_entry(
 ) -> None:
     """Set up Heating Assistant sensor entities from a config entry."""
     coordinator: HeatingAssistantCoordinator = hass.data[DOMAIN][entry.entry_id]
+
+    await hass.async_add_executor_job(_preload_model_diagnostics)
 
     entities: List[SensorEntity] = []
 

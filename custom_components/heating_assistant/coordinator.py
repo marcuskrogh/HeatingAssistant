@@ -1451,11 +1451,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # Fallback: check if the room name is a slug of a known canonical name.
             canonical = slug_to_canonical.get(_slugify(s.room))
             if canonical is not None:
-                _LOGGER.warning(
+                _LOGGER.info(
                     "Heating Assistant: heat source %r references room %r by "
-                    "slug form; correcting to canonical name %r. "
-                    "Update the heat source configuration to use the canonical "
-                    "room name to suppress this warning.",
+                    "slug form; correcting to canonical name %r.",
                     getattr(s, "name", s),
                     s.room,
                     canonical,
