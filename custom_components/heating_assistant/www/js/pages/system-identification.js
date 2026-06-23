@@ -336,7 +336,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       </div>
     </div>
 
-    <div class="params-subsection params-subsection--last">
+    <div class="params-subsection">
       <div class="params-subsection__title">Identification Window</div>
       <div class="window-mode-toggle">
         <button class="window-mode-btn window-mode-btn--active" id="window-mode-recent" type="button">Recent Horizon</button>
@@ -378,6 +378,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         </div>
       </div>
     </div>
+
+    <div class="params-subsection params-subsection--last" id="ds-save-mount"></div>
   `;
   container.appendChild(paramsCard);
 
@@ -1411,7 +1413,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // Section 5: Stored datasets
   // -----------------------------------------------------------------------
   const refreshHandles = setupDatasetsAndExperiments({
-    container, room, roomSlug, hass, connection,
+    container, paramsCard, room, roomSlug, hass, connection,
     windowStartInput, windowEndInput, applyWindowMode: _applyWindowMode,
     toDatetimeLocal: _toDatetimeLocal,
     setSelectedDataset, clearSelectedDataset,
@@ -1501,25 +1503,18 @@ function _toLocalInput(date) {
 // down the periodic refresh timer.
 function setupDatasetsAndExperiments(ctx) {
   const {
-    container, room, roomSlug, hass, connection,
+    container, paramsCard, room, roomSlug, hass, connection,
     windowStartInput, windowEndInput, applyWindowMode, toDatetimeLocal,
     setSelectedDataset, clearSelectedDataset, onDatasetSelectionRenderer,
   } = ctx;
 
-  // ---- Stored datasets card ---------------------------------------------
-  const dsCard = document.createElement('div');
-  dsCard.className = 'card tuning-section';
-  dsCard.innerHTML = `
-    <div class="tuning-section__title">Stored Datasets</div>
-    <p class="tuning-section__desc">
-      Save the current identification window as a named, permanent dataset, then
-      use any number of stored datasets for identification. Tick the datasets you
-      want and run a joint automatic identification across all of them, or load a
-      single dataset into the custom window to inspect, validate or identify it on
-      its own.
+  const saveMount = paramsCard.querySelector('#ds-save-mount');
+  saveMount.innerHTML = `
+    <div class="params-subsection__title">Save Current Window</div>
+    <p class="params-subsection__desc">
+      Store the identification window configured above as a named, permanent dataset.
     </p>
-
-    <div class="ds-save-row">
+    <div class="ds-save-row ds-save-row--compact">
       <div class="form-group ds-save-row__name">
         <label class="form-label" for="ds-name">New dataset name</label>
         <input class="form-input" type="text" id="ds-name" placeholder="e.g. Cold snap — ${room.name}">
@@ -1533,7 +1528,17 @@ function setupDatasetsAndExperiments(ctx) {
         <span class="tuning-actions__status" id="ds-status"></span>
       </div>
     </div>
+    <div id="ds-selected-note" class="ds-loaded-note"></div>
+  `;
 
+  const dsListSection = document.createElement('div');
+  dsListSection.className = 'card tuning-section';
+  const dsCollapsible = createCollapsible({ title: 'Stored Datasets', open: false });
+  dsCollapsible.body.innerHTML = `
+    <p class="tuning-section__desc" style="margin:0 0 12px">
+      Select datasets for joint automatic identification, or load one into the
+      custom window to inspect, validate, or identify it on its own.
+    </p>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
         Run Automatic Identification (0)
@@ -1541,20 +1546,20 @@ function setupDatasetsAndExperiments(ctx) {
       <button class="btn btn--ghost btn--sm" id="btn-clear-selection" disabled>Clear selection</button>
       <span class="tuning-actions__status" id="ds-id-status"></span>
     </div>
-    <div id="ds-selected-note" class="ds-loaded-note"></div>
     <div id="ds-list" class="store-list"></div>
   `;
-  container.appendChild(dsCard);
+  dsListSection.appendChild(dsCollapsible.element);
+  container.appendChild(dsListSection);
 
   // ---- References --------------------------------------------------------
-  const dsStatus = dsCard.querySelector('#ds-status');
-  const dsListEl = dsCard.querySelector('#ds-list');
-  const dsNameInput = dsCard.querySelector('#ds-name');
-  const dsNotesInput = dsCard.querySelector('#ds-notes');
-  const dsSelectedNote = dsCard.querySelector('#ds-selected-note');
-  const dsIdStatus = dsCard.querySelector('#ds-id-status');
-  const btnIdentifySelected = dsCard.querySelector('#btn-identify-selected');
-  const btnClearSelection = dsCard.querySelector('#btn-clear-selection');
+  const dsStatus = saveMount.querySelector('#ds-status');
+  const dsListEl = dsCollapsible.body.querySelector('#ds-list');
+  const dsNameInput = saveMount.querySelector('#ds-name');
+  const dsNotesInput = saveMount.querySelector('#ds-notes');
+  const dsSelectedNote = saveMount.querySelector('#ds-selected-note');
+  const dsIdStatus = dsCollapsible.body.querySelector('#ds-id-status');
+  const btnIdentifySelected = dsCollapsible.body.querySelector('#btn-identify-selected');
+  const btnClearSelection = dsCollapsible.body.querySelector('#btn-clear-selection');
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
@@ -1641,7 +1646,7 @@ function setupDatasetsAndExperiments(ctx) {
     return { startTs, endTs };
   }
 
-  dsCard.querySelector('#btn-save-dataset').addEventListener('click', async () => {
+  saveMount.querySelector('#btn-save-dataset').addEventListener('click', async () => {
     const name = (dsNameInput.value || '').trim();
     if (!name) {
       setStatus(dsStatus, 'Enter a dataset name first.', 'error');
@@ -1707,6 +1712,7 @@ function setupDatasetsAndExperiments(ctx) {
     // empty "no datasets" state that only a page refresh would recover from.
     if (datasets == null) return;
     lastDatasets = datasets;
+    dsCollapsible.setBadge(datasets.length ? `${datasets.length}` : '');
 
     // Drop selections for datasets that no longer exist.
     const liveIds = new Set(datasets.map((d) => d.id));
