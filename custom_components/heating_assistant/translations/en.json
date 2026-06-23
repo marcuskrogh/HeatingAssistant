@@ -117,11 +117,6 @@
       "add_room": {
         "title": "Add a room",
         "description": "Tell Heating Assistant about a new room. Optional envelope refinements are in the collapsible **Advanced settings** section.",
-        "sections": {
-          "advanced_envelope": {
-            "name": "Advanced settings"
-          }
-        },
         "data": {
           "name": "Room name",
           "temp_sensors": "Indoor temperature sensors",
@@ -165,11 +160,6 @@
       "room_detail": {
         "title": "Edit room: {name}",
         "description": "Update sensors, sizing, and the comfort band for this room.",
-        "sections": {
-          "advanced_envelope": {
-            "name": "Advanced settings"
-          }
-        },
         "data": {
           "name": "Room name",
           "temp_sensors": "Indoor temperature sensors",
@@ -289,11 +279,6 @@
       "add_heater": {
         "title": "Add a heat source to {name}",
         "description": "Configure a heater or heat pump. Performance details are in the collapsible **Performance details** section.",
-        "sections": {
-          "performance": {
-            "name": "Performance details"
-          }
-        },
         "data": {
           "name": "Display name",
           "type": "Type",
@@ -337,11 +322,6 @@
       "heater_detail": {
         "title": "Edit heat source: {name}",
         "description": "Update this heater's wiring and performance parameters.",
-        "sections": {
-          "performance": {
-            "name": "Performance details"
-          }
-        },
         "data": {
           "name": "Display name",
           "type": "Type",
