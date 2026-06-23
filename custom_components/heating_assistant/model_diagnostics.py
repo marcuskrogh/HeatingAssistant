@@ -22,8 +22,10 @@ import numpy as np
 
 try:
     from scipy.stats import chi2 as _scipy_chi2
+    from scipy.linalg import expm as _scipy_expm
 except Exception:  # scipy absent or import error at startup
     _scipy_chi2 = None
+    _scipy_expm = None
 
 from .integrator import (
     ImplicitEulerConvergenceError,
@@ -1242,13 +1244,13 @@ def wall_state_observability(
     if c_a <= 0.0 or c_w <= 0.0:
         return None
 
+    if _scipy_expm is None:
+        return None
     A = np.array([
         [-(g_inf + g_aw) / c_a, g_aw / c_a],
         [g_aw / c_w, -(g_aw + g_wout) / c_w],
     ])
-    # Exact ZOH discretisation of the 2×2 system.
-    from scipy.linalg import expm  # noqa: PLC0415
-    Ad = expm(A * float(dt))
+    Ad = _scipy_expm(A * float(dt))
 
     C_meas = np.array([[1.0, 0.0]])
     W = np.zeros((2, 2))
