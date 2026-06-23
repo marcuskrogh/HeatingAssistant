@@ -328,8 +328,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <div class="form-group">
           <label class="form-label" for="param-horizon">Horizon</label>
           <input class="form-input" type="number" id="param-horizon"
-            step="0.5" min="0.5" max="72" value="${DEFAULTS.horizon_hours}">
-          <span class="form-hint">hours &mdash; history window ending at the most recent record</span>
+            step="0.5" min="0.5" max="2160" value="${DEFAULTS.horizon_hours}">
+          <span class="form-hint">hours &mdash; history window ending at the most recent record (up to identification-history retention)</span>
         </div>
       </div>
       <div id="window-panel-custom" class="window-datetime-panel" style="display:none">
