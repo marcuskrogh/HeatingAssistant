@@ -633,8 +633,30 @@ def _room_form_schema(
     sensors_list = _coerce_to_list(sensors_default)
     window_sensors_list = _coerce_to_list(window_sensors_default)
 
-    advanced_schema = vol.Schema(
+    return vol.Schema(
         {
+            vol.Required(CONF_ROOM_NAME, default=name_default): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT)
+            ),
+            vol.Optional(CONF_TEMP_SENSORS, default=sensors_list): _entity_selector_multi("sensor"),
+            vol.Optional(
+                CONF_WINDOW_SENSORS, default=window_sensors_list,
+            ): _entity_selector_multi("binary_sensor"),
+            vol.Required("room_size", default=room_size_default): _dropdown(
+                list(ROOM_SIZE_TO_THERMAL_MASS), translation_key="room_size",
+            ),
+            vol.Required("building_age", default=building_age_default): _dropdown(
+                list(BUILDING_AGE_TO_R_EXTERNAL), translation_key="building_age",
+            ),
+            vol.Required(
+                "envelope_tightness", default=envelope_tightness_default,
+            ): _dropdown(
+                list(ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION),
+                translation_key="envelope_tightness",
+            ),
+            vol.Required(
+                CONF_COMFORT_OFFSET, default=float(comfort_offset_default),
+            ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
             vol.Optional(CONF_FLOOR_TYPE, default=floor_type_default): _dropdown(
                 FLOOR_TYPE_OPTIONS, translation_key="floor_type",
             ),
@@ -666,34 +688,6 @@ def _room_form_schema(
             ): _dropdown(
                 list(COMPASS_TO_DEGREES), translation_key="orientation",
             ),
-        }
-    )
-
-    return vol.Schema(
-        {
-            vol.Required(CONF_ROOM_NAME, default=name_default): TextSelector(
-                TextSelectorConfig(type=TextSelectorType.TEXT)
-            ),
-            vol.Optional(CONF_TEMP_SENSORS, default=sensors_list): _entity_selector_multi("sensor"),
-            vol.Optional(
-                CONF_WINDOW_SENSORS, default=window_sensors_list,
-            ): _entity_selector_multi("binary_sensor"),
-            vol.Required("room_size", default=room_size_default): _dropdown(
-                list(ROOM_SIZE_TO_THERMAL_MASS), translation_key="room_size",
-            ),
-            vol.Required("building_age", default=building_age_default): _dropdown(
-                list(BUILDING_AGE_TO_R_EXTERNAL), translation_key="building_age",
-            ),
-            vol.Required(
-                "envelope_tightness", default=envelope_tightness_default,
-            ): _dropdown(
-                list(ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION),
-                translation_key="envelope_tightness",
-            ),
-            vol.Required(
-                CONF_COMFORT_OFFSET, default=float(comfort_offset_default),
-            ): _number_slider(min_value=0.1, max_value=5.0, step=0.1, unit="°C"),
-            SECTION_ADV_ENVELOPE: _section(advanced_schema, collapsed=True),
         }
     )
 
@@ -766,44 +760,37 @@ def _heater_form_schema(
     else:
         schema_dict[vol.Required(CONF_SOURCE_HEATER_ENTITY)] = _entity_selector_optional("switch")
 
-    # ── Performance details (collapsed advanced section) ──
-    perf_schema = vol.Schema(
-        {
-            vol.Optional(
-                CONF_SOURCE_EFFICIENCY, default=float(efficiency_default),
-            ): _number_slider(min_value=0.1, max_value=1.0, step=0.05),
-            vol.Optional(
-                CONF_SOURCE_COP_RATED, default=float(cop_rated_default),
-            ): _number_slider(min_value=1.0, max_value=8.0, step=0.1),
-            vol.Optional(
-                CONF_SOURCE_COP_TEMP_REF, default=float(cop_temp_ref_default),
-            ): _number_box(min_value=-20.0, max_value=20.0, step=0.5, unit="°C"),
-            vol.Optional(
-                CONF_SOURCE_MIN_POWER, default=float(min_power_default),
-            ): _number_box(min_value=0.0, max_value=100000.0, step=10.0, unit="W"),
-            vol.Optional(
-                CONF_SOURCE_MAX_TEMP_OFFSET, default=float(max_temp_offset_default),
-            ): _number_box(min_value=0.1, max_value=20.0, step=0.1, unit="°C"),
-            vol.Optional(CONF_SOURCE_HVAC_MODE, default=hvac_mode_default): _dropdown(
-                [SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL],
-                translation_key="hvac_mode",
-            ),
-            vol.Optional(
-                CONF_SOURCE_HEATING_EFFICIENCY, default=float(heating_efficiency_default),
-            ): _number_slider(min_value=0.1, max_value=1.0, step=0.05),
-            vol.Optional(
-                CONF_SOURCE_COOLING_COP, default=float(cooling_cop_default),
-            ): _number_slider(min_value=0.0, max_value=8.0, step=0.1),
-            vol.Optional(
-                CONF_SOURCE_COOLING_EFFICIENCY, default=float(cooling_efficiency_default),
-            ): _number_slider(min_value=0.0, max_value=1.0, step=0.05),
-            vol.Optional(
-                CONF_SOURCE_EMITTER_TIME_CONSTANT,
-                default=float(emitter_time_constant_default),
-            ): _number_box(min_value=0.0, max_value=600.0, step=5.0, unit="s"),
-        }
+    schema_dict[vol.Optional(CONF_SOURCE_EFFICIENCY, default=float(efficiency_default))] = (
+        _number_slider(min_value=0.1, max_value=1.0, step=0.05)
     )
-    schema_dict[SECTION_PERFORMANCE] = _section(perf_schema, collapsed=True)
+    schema_dict[vol.Optional(CONF_SOURCE_COP_RATED, default=float(cop_rated_default))] = (
+        _number_slider(min_value=1.0, max_value=8.0, step=0.1)
+    )
+    schema_dict[vol.Optional(CONF_SOURCE_COP_TEMP_REF, default=float(cop_temp_ref_default))] = (
+        _number_box(min_value=-20.0, max_value=20.0, step=0.5, unit="°C")
+    )
+    schema_dict[vol.Optional(CONF_SOURCE_MIN_POWER, default=float(min_power_default))] = (
+        _number_box(min_value=0.0, max_value=100000.0, step=10.0, unit="W")
+    )
+    schema_dict[vol.Optional(CONF_SOURCE_MAX_TEMP_OFFSET, default=float(max_temp_offset_default))] = (
+        _number_box(min_value=0.1, max_value=20.0, step=0.1, unit="°C")
+    )
+    schema_dict[vol.Optional(CONF_SOURCE_HVAC_MODE, default=hvac_mode_default)] = _dropdown(
+        [SOURCE_HVAC_MODE_HEAT, SOURCE_HVAC_MODE_COOL, SOURCE_HVAC_MODE_HEAT_COOL],
+        translation_key="hvac_mode",
+    )
+    schema_dict[vol.Optional(
+        CONF_SOURCE_HEATING_EFFICIENCY, default=float(heating_efficiency_default),
+    )] = _number_slider(min_value=0.1, max_value=1.0, step=0.05)
+    schema_dict[vol.Optional(CONF_SOURCE_COOLING_COP, default=float(cooling_cop_default))] = (
+        _number_slider(min_value=0.0, max_value=8.0, step=0.1)
+    )
+    schema_dict[vol.Optional(
+        CONF_SOURCE_COOLING_EFFICIENCY, default=float(cooling_efficiency_default),
+    )] = _number_slider(min_value=0.0, max_value=1.0, step=0.05)
+    schema_dict[vol.Optional(
+        CONF_SOURCE_EMITTER_TIME_CONSTANT, default=float(emitter_time_constant_default),
+    )] = _number_box(min_value=0.0, max_value=600.0, step=5.0, unit="s")
 
     return vol.Schema(schema_dict)
 
