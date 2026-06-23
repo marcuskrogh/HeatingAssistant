@@ -20,6 +20,15 @@ const DEFAULTS = {
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DISMISSED_WARNINGS_KEY = 'heating_assistant_sysid_dismissed_v1';
 
+function valuesEqual(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb)) {
+    return Math.abs(na - nb) <= 1e-9 * Math.max(1, Math.abs(na), Math.abs(nb));
+  }
+  return a === b;
+}
+
 export function renderSystemIdentification(container, rooms, state, connection, hass, slug) {
   if (slug) {
     return renderIdentificationDetail(container, slug, rooms, state, connection, hass);
@@ -205,6 +214,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   header.className = 'room-header';
   header.innerHTML = `<h2 class="room-header__title">${room.name}</h2>`;
   container.appendChild(header);
+
+  const pendingBanner = document.createElement('div');
+  pendingBanner.className = 'tuning-pending-banner tuning-pending-banner--actions';
+  pendingBanner.hidden = true;
+  container.appendChild(pendingBanner);
 
   // -----------------------------------------------------------------------
   // Section 1: Action buttons (top of page)
@@ -606,8 +620,143 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // re-created (navigation / page refresh) or after the user commits or
   // reverts parameters.
   let userEditing = false;
+  let appliedParams = null;
+
+  function captureAppliedParams(st) {
+    const filteredAttrs = st[filteredEntityId(roomSlug)]?.attributes || {};
+    const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
+    const heaterScales = {};
+    const currentScales = configAttrs.current_heater_scales || {};
+    for (const [srcName, info] of Object.entries(currentScales)) {
+      if (info.room_slug === roomSlug && info.power_scale != null) {
+        heaterScales[srcName] = info.power_scale;
+      }
+    }
+    appliedParams = {
+      thermal_mass: filteredAttrs.thermal_mass ?? DEFAULTS.thermal_mass,
+      r_external: filteredAttrs.r_external ?? DEFAULTS.r_external,
+      internal_gain: filteredAttrs.internal_gain ?? DEFAULTS.internal_gain,
+      solar_scale: filteredAttrs.solar_scale ?? DEFAULTS.solar_scale,
+      c_air_fraction: filteredAttrs.c_air_fraction ?? DEFAULTS.c_air_fraction,
+      r_aw_fraction: filteredAttrs.r_aw_fraction ?? DEFAULTS.r_aw_fraction,
+      sigma_w: configAttrs.sigma_w ?? DEFAULTS.sigma_w,
+      sigma_v: configAttrs.sigma_v ?? DEFAULTS.sigma_v,
+      horizon_hours: configAttrs.identification_horizon_hours ?? DEFAULTS.horizon_hours,
+      heater_scales: heaterScales,
+    };
+  }
+
+  function collectCurrentParams() {
+    const heaterScales = {};
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      const val = parseFloat(inp.value);
+      if (isFinite(val)) heaterScales[srcName] = val;
+    }
+    return {
+      thermal_mass: parseFloat(thermalMassInput.value),
+      r_external: parseFloat(rExternalInput.value),
+      internal_gain: parseFloat(internalGainInput.value),
+      solar_scale: parseFloat(solarScaleInput.value),
+      c_air_fraction: parseFloat(cAirFractionInput.value),
+      r_aw_fraction: parseFloat(rAwFractionInput.value),
+      sigma_w: parseFloat(sigmaWInput.value),
+      sigma_v: parseFloat(sigmaVInput.value),
+      horizon_hours: parseFloat(horizonInput.value),
+      heater_scales: heaterScales,
+    };
+  }
+
+  function paramsDiffer(current, applied) {
+    if (!applied) return false;
+    const scalarKeys = [
+      'thermal_mass', 'r_external', 'internal_gain', 'solar_scale',
+      'c_air_fraction', 'r_aw_fraction', 'sigma_w', 'sigma_v', 'horizon_hours',
+    ];
+    if (scalarKeys.some((key) => !valuesEqual(current[key], applied[key]))) return true;
+    const appliedScales = applied.heater_scales || {};
+    const currentScales = current.heater_scales || {};
+    const scaleKeys = new Set([...Object.keys(appliedScales), ...Object.keys(currentScales)]);
+    return [...scaleKeys].some(
+      (key) => !valuesEqual(currentScales[key], appliedScales[key]),
+    );
+  }
+
+  function hasPendingChanges() {
+    return paramsDiffer(collectCurrentParams(), appliedParams);
+  }
+
+  function updatePendingBanner(pending) {
+    pendingBanner.hidden = !pending;
+    pendingBanner.replaceChildren();
+    if (!pending) return;
+    const text = document.createElement('span');
+    text.textContent = 'Unsaved parameter changes — click Apply Parameters to save, or revert to the last applied values.';
+    const revertBtn = document.createElement('button');
+    revertBtn.type = 'button';
+    revertBtn.className = 'btn btn--ghost btn--sm';
+    revertBtn.textContent = 'Revert changes';
+    revertBtn.addEventListener('click', revertToApplied);
+    pendingBanner.append(text, revertBtn);
+  }
+
+  function updatePendingIndicators() {
+    const pending = hasPendingChanges();
+    updatePendingBanner(pending);
+    if (!appliedParams) return;
+    const current = collectCurrentParams();
+    const scalarFields = [
+      [thermalMassInput, 'thermal_mass'],
+      [rExternalInput, 'r_external'],
+      [internalGainInput, 'internal_gain'],
+      [solarScaleInput, 'solar_scale'],
+      [cAirFractionInput, 'c_air_fraction'],
+      [rAwFractionInput, 'r_aw_fraction'],
+      [sigmaWInput, 'sigma_w'],
+      [sigmaVInput, 'sigma_v'],
+      [horizonInput, 'horizon_hours'],
+    ];
+    for (const [input, key] of scalarFields) {
+      input.classList.toggle(
+        'form-input--modified',
+        pending && !valuesEqual(current[key], appliedParams[key]),
+      );
+    }
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      inp.classList.toggle(
+        'form-input--modified',
+        pending && !valuesEqual(
+          current.heater_scales[srcName],
+          appliedParams.heater_scales?.[srcName],
+        ),
+      );
+    }
+  }
+
+  function revertToApplied() {
+    if (!appliedParams) return;
+    thermalMassInput.value = appliedParams.thermal_mass;
+    rExternalInput.value = appliedParams.r_external;
+    internalGainInput.value = appliedParams.internal_gain;
+    solarScaleInput.value = appliedParams.solar_scale;
+    cAirFractionInput.value = appliedParams.c_air_fraction;
+    rAwFractionInput.value = appliedParams.r_aw_fraction;
+    sigmaWInput.value = appliedParams.sigma_w;
+    sigmaVInput.value = appliedParams.sigma_v;
+    horizonInput.value = appliedParams.horizon_hours;
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      const scale = appliedParams.heater_scales?.[srcName];
+      if (scale != null) inp.value = scale;
+    }
+    userEditing = false;
+    updatePendingIndicators();
+    setStatus(actionStatusEl, '', '');
+  }
+
   paramInputs.forEach((inp) => {
-    inp.addEventListener('input', () => { userEditing = true; });
+    inp.addEventListener('input', () => {
+      userEditing = true;
+      updatePendingIndicators();
+    });
   });
 
   // When a stored dataset is selected for identification, its id is sent with
@@ -815,6 +964,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const info = currentScales[srcName];
       if (info && info.power_scale != null) inp.value = info.power_scale;
     }
+    if (!userEditing) {
+      captureAppliedParams(st);
+    }
+    updatePendingIndicators();
   }
 
   // The heat sources in this room are read from the config sensor's
@@ -862,7 +1015,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const inp = group.querySelector('input');
       const lockBtn = group.querySelector('.param-lock-btn');
       heaterScaleInputs[srcName] = inp;
-      inp.addEventListener('input', () => { userEditing = true; });
+      inp.addEventListener('input', () => {
+        userEditing = true;
+        updatePendingIndicators();
+      });
       const heaterKey = `heater_scale:${srcName}`;
       _applyLockVisual(heaterKey, inp, lockBtn);
       lockBtn.addEventListener('click', () => toggleLock(heaterKey, inp, lockBtn));
@@ -1021,6 +1177,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     if (roomData.r_aw_fraction != null) rAwFractionInput.value = roomData.r_aw_fraction;
     // Loaded values are pending review; protect them from state-sync resets.
     userEditing = true;
+    updatePendingIndicators();
     setStatus(actionStatusEl, 'Loaded from history — review the fields above, then click Apply Parameters.', '');
   }
 
@@ -1121,6 +1278,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       populateModelFromSysid(roomSlug, latestState);
       // Loaded values are pending review; protect them from state-sync resets.
       userEditing = true;
+      updatePendingIndicators();
       setStatus(statusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
       return true;
     } catch (err) {
@@ -1179,6 +1337,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       // Edits are now the applied parameters; resume syncing the form from
       // system state so it reflects the authoritative committed values.
       userEditing = false;
+      appliedParams = collectCurrentParams();
+      updatePendingIndicators();
       setStatus(actionStatusEl, 'Applied.', 'success');
     } catch (err) {
       setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
@@ -1200,6 +1360,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     for (const inp of Object.values(heaterScaleInputs)) inp.value = DEFAULTS.heater_scale;
     // Defaults are pending review; protect them from state-sync resets.
     userEditing = true;
+    updatePendingIndicators();
     setStatus(actionStatusEl, 'Defaults loaded.', '');
   });
 
@@ -1288,6 +1449,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         // inputs get built once the config sensor (which lists the room's
         // sources) becomes available.  This never overwrites existing values.
         ensureHeaterScaleInputs(newState);
+        updatePendingIndicators();
       }
       renderEkfResults(roomSlug, newState);
       renderOlResults(roomSlug, newState);
