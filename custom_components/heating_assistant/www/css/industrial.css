@@ -3185,6 +3185,10 @@
   padding-bottom: 2px;
 }
 
+.ds-save-row--compact .form-group {
+  margin-bottom: 0;
+}
+
 /* Toolbar for the multi-select joint identification. */
 .ds-toolbar {
   display: flex;
@@ -3417,6 +3421,10 @@ input[type="time"] {
   .ds-save-row {
     flex-direction: column;
     align-items: stretch;
+    gap: 8px;
+  }
+  .ds-save-row--compact .form-group + .form-group {
+    margin-top: 0;
   }
   .ds-save-row__action {
     justify-content: flex-start;
