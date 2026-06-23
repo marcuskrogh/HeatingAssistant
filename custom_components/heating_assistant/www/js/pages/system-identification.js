@@ -75,14 +75,15 @@ function renderIdentificationIndex(container, rooms, state) {
       card.className = 'card card--clickable sysid-index-card';
       card.dataset.room = room.slug;
       card.innerHTML = buildIdentificationCardHtml(room, st);
-      card.addEventListener('click', () => {
+      card.addEventListener('click', (event) => {
+        if (event.target.closest('[data-dismiss-warning]')) return;
         window.location.hash = `#identification/${room.slug}`;
       });
       grid.appendChild(card);
     }
   }
 
-  grid.addEventListener('click', (event) => {
+  function handleDismissWarning(event) {
     const dismissBtn = event.target.closest('[data-dismiss-warning]');
     if (!dismissBtn) return;
     event.preventDefault();
@@ -96,7 +97,10 @@ function renderIdentificationIndex(container, rooms, state) {
     if (room && card) {
       card.innerHTML = buildIdentificationCardHtml(room, latestState);
     }
-  });
+  }
+
+  grid.addEventListener('click', handleDismissWarning);
+  grid.addEventListener('pointerdown', handleDismissWarning);
 
   buildTiles(state);
 
