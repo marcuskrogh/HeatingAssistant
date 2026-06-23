@@ -1181,6 +1181,14 @@
   line-height: 1.5;
 }
 
+.tuning-pending-banner--actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .tuning-pending-banner--restart {
   border-color: var(--alarm);
   background: rgba(244, 67, 54, 0.08);
