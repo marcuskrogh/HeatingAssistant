@@ -3105,7 +3105,7 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_store_identified_parameters(call: ServiceCall) -> None:
         """Store identified parameters with history tracking."""
         coordinator = _get_coordinator(hass)
-        room_name: str = call.data["room_name"]
+        room_name: str = _resolve_room(coordinator, call.data["room_name"])
         thermal_mass: float = call.data["thermal_mass"]
         r_external: float = call.data["r_external"]
         source: str = call.data.get("source", "manual")
@@ -3155,7 +3155,7 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_revert_parameters(call: ServiceCall) -> None:
         """Revert parameters to a previous history entry."""
         coordinator = _get_coordinator(hass)
-        room_name: str = call.data["room_name"]
+        room_name: str = _resolve_room(coordinator, call.data["room_name"])
         history_index: int = call.data["history_index"]
         coordinator.revert_parameters(room_name, history_index)
         coordinator.async_update_listeners()
