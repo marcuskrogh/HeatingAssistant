@@ -1243,7 +1243,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   });
 
   // -----------------------------------------------------------------------
-  // Section 5: Stored datasets & experiment scheduler
+  // Section 5: Stored datasets
   // -----------------------------------------------------------------------
   const refreshHandles = setupDatasetsAndExperiments({
     container, room, roomSlug, hass, connection,
@@ -1330,28 +1330,15 @@ function _toLocalInput(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// Build the experiment-scheduler and stored-dataset cards, append them to the
-// container, and wire all their interactions.  Returns a handle with a
-// ``destroy`` method that tears down the periodic refresh timer.
+// Build the stored-dataset cards, append them to the container, and wire all
+// their interactions.  Returns a handle with a ``destroy`` method that tears
+// down the periodic refresh timer.
 function setupDatasetsAndExperiments(ctx) {
   const {
     container, room, roomSlug, hass, connection,
     windowStartInput, windowEndInput, applyWindowMode, toDatetimeLocal,
     setSelectedDataset, clearSelectedDataset, onDatasetSelectionRenderer,
   } = ctx;
-
-  // ---- Experiments note card ---------------------------------------------
-  const expNote = document.createElement('div');
-  expNote.className = 'card tuning-section';
-  expNote.innerHTML = `
-    <div class="tuning-section__title">Experiments</div>
-    <p class="tuning-section__desc">
-      Schedule identification experiments from the
-      <a href="#schedules/${roomSlug}" class="link">Schedules page</a>
-      for this room. Experiment datasets, once auto-saved, appear in the Stored Datasets section below.
-    </p>
-  `;
-  container.appendChild(expNote);
 
   // ---- Stored datasets card ---------------------------------------------
   const dsCard = document.createElement('div');
@@ -1560,7 +1547,7 @@ function setupDatasetsAndExperiments(ctx) {
     [...selectedIds].forEach((id) => { if (!liveIds.has(id)) selectedIds.delete(id); });
 
     if (datasets.length === 0) {
-      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet. Save the current window to create one, or check the Schedules page to run an experiment.</span>';
+      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet. Save the current window to create one.</span>';
       updateSelectionToolbar();
       return;
     }
