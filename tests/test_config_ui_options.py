@@ -8,6 +8,7 @@ from pathlib import Path
 from custom_components.heating_assistant.config_flow import (
     _build_period_dict,
     _flatten_sections,
+    _initial_entry_data,
     _is_valid_time_string,
     _normalise_time_string,
 )
@@ -20,9 +21,13 @@ from custom_components.heating_assistant.const import (
     CONF_FACADE_COLOUR,
     CONF_FACADE_SOLAR_SHARE,
     CONF_FLOOR_TYPE,
+    CONF_LATITUDE,
+    CONF_LONGITUDE,
     CONF_SKY_RADIATIVE_UA,
     CONF_THERMAL_BRIDGE_PSI_L,
+    CONF_UPDATE_INTERVAL,
     DEFAULT_SETPOINT,
+    DEFAULT_UPDATE_INTERVAL,
 )
 
 
@@ -35,6 +40,18 @@ STRINGS_PATH = REPO_ROOT / "custom_components" / "heating_assistant" / "strings.
 EN_TRANSLATION_PATH = (
     REPO_ROOT / "custom_components" / "heating_assistant" / "translations" / "en.json"
 )
+
+
+def test_initial_entry_data_sets_location_and_default_update_interval() -> None:
+    """Location-only setup should persist coords and default control interval."""
+    data = _initial_entry_data(
+        {CONF_LATITUDE: 55.6761, CONF_LONGITUDE: 12.5683},
+    )
+    assert data == {
+        CONF_LATITUDE: 55.6761,
+        CONF_LONGITUDE: 12.5683,
+        CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL,
+    }
 
 
 def test_default_setpoint_is_22() -> None:
@@ -207,18 +224,15 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
         assert key in reconfigure_step["data"]
         assert key in reconfigure_step["data_description"]
 
-    # The original user-step (initial setup) is also flat.
+    # The original user-step (initial setup) is location-only.
     user_step = strings["config"]["step"]["user"]
     assert "sections" not in user_step
-    for key in (
-        "latitude",
-        "longitude",
-        "outdoor_temp_entity",
-        "weather_entity",
-        "update_interval",
-    ):
+    for key in ("latitude", "longitude"):
         assert key in user_step["data"]
         assert key in user_step["data_description"]
+    assert "outdoor_temp_entity" not in user_step["data"]
+    assert "weather_entity" not in user_step["data"]
+    assert "update_interval" not in user_step["data"]
 
 
 def test_period_time_validation_helper_accepts_hh_mm_and_rejects_invalid() -> None:

@@ -3,20 +3,14 @@
     "step": {
       "user": {
         "title": "Welcome to Heating Assistant",
-        "description": "Heating Assistant uses model-predictive control to keep your home comfortable while minimising energy use. It learns your home's thermal behaviour and plans ahead using outdoor temperature and weather forecasts.\n\nStart with the basics below. After setup you can add rooms, heat sources and schedules from the integration's **Configure** menu.",
+        "description": "Heating Assistant uses model-predictive control to keep your home comfortable while minimising energy use.\n\nConfirm your home's location below (pre-filled from Home Assistant). After setup, open the **Heating Assistant** sidebar panel to add rooms, heat sources and sensors.",
         "data": {
           "latitude": "Latitude",
-          "longitude": "Longitude",
-          "outdoor_temp_entity": "Outdoor temperature sensor",
-          "weather_entity": "Weather forecast",
-          "update_interval": "Control interval (seconds)"
+          "longitude": "Longitude"
         },
         "data_description": {
           "latitude": "Decimal degrees, positive north of the equator. Used for solar gain prediction. Pre-filled from your Home Assistant location.",
-          "longitude": "Decimal degrees, positive east of the prime meridian. Used for solar gain prediction. Pre-filled from your Home Assistant location.",
-          "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. At least one of this or the weather entity is required.",
-          "weather_entity": "Provides hourly forecasts so the controller can plan ahead. At least one of this or the outdoor sensor is required.",
-          "update_interval": "Re-planning cadence in seconds. 900 s (15 min) suits most homes; lower values respond faster but use more CPU."
+          "longitude": "Decimal degrees, positive east of the prime meridian. Used for solar gain prediction. Pre-filled from your Home Assistant location."
         }
       },
       "reconfigure": {
