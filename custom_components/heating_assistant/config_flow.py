@@ -197,9 +197,6 @@ DEFAULT_ROOM_SETPOINT = 22.0
 
 # Section identifiers used in both schemas and strings.json. Centralised so
 # the flattening helper stays in sync with the schema builders.
-SECTION_LOCATION = "location"
-SECTION_SENSORS = "sensors"
-SECTION_TIMING = "timing"
 SECTION_ADV_ENVELOPE = "advanced_envelope"
 SECTION_PERFORMANCE = "performance"
 
@@ -421,15 +418,13 @@ def _number_slider(
 
 
 # ---------------------------------------------------------------------------
-# Location schema (initial setup) and site-settings schema (reconfigure)
+# Location schema (initial setup and reconfigure)
 # ---------------------------------------------------------------------------
-
-
-_SITE_SECTION_KEYS: Tuple[str, ...] = (
-    SECTION_LOCATION,
-    SECTION_SENSORS,
-    SECTION_TIMING,
-)
+#
+# The integration config is intentionally limited to the site location. Every
+# other setting (sensors, timing, rooms, heat sources, schedules) is managed
+# from the Heating Assistant panel / options flow, so both the add and the
+# reconfigure entry-points show this single location-only form.
 
 
 def _location_schema(
@@ -437,7 +432,7 @@ def _location_schema(
     latitude_default: float,
     longitude_default: float,
 ) -> vol.Schema:
-    """Schema for the initial add-integration step — location only."""
+    """Schema for the location-only config and reconfigure steps."""
     return vol.Schema(
         {
             vol.Required(CONF_LATITUDE, default=float(latitude_default)): _number_box(
@@ -450,73 +445,13 @@ def _location_schema(
     )
 
 
-def _initial_entry_data(flat: Dict[str, Any]) -> Dict[str, Any]:
+def _initial_entry_data(user_input: Dict[str, Any]) -> Dict[str, Any]:
     """Build persisted config-entry data from the location-only user step."""
     return {
-        CONF_LATITUDE: float(flat[CONF_LATITUDE]),
-        CONF_LONGITUDE: float(flat[CONF_LONGITUDE]),
+        CONF_LATITUDE: float(user_input[CONF_LATITUDE]),
+        CONF_LONGITUDE: float(user_input[CONF_LONGITUDE]),
         CONF_UPDATE_INTERVAL: int(DEFAULT_UPDATE_INTERVAL),
     }
-
-
-def _site_settings_schema(
-    *,
-    latitude_default: float,
-    longitude_default: float,
-    outdoor_temp_default: Optional[str],
-    weather_default: Optional[str],
-    update_interval_default: int,
-) -> vol.Schema:
-    """Flat schema used by the initial setup and reconfigure flows.
-
-    The visual grouping comes from field ordering and ``data_description``
-    helper text rather than ``section()`` wrappers — the latter has
-    proved fragile when mixed with top-level fields on some Home
-    Assistant versions.
-    """
-    schema_dict: Dict[Any, Any] = {
-        vol.Required(CONF_LATITUDE, default=float(latitude_default)): _number_box(
-            min_value=-90.0, max_value=90.0, step="any", unit="°",
-        ),
-        vol.Required(CONF_LONGITUDE, default=float(longitude_default)): _number_box(
-            min_value=-180.0, max_value=180.0, step="any", unit="°",
-        ),
-    }
-
-    if outdoor_temp_default:
-        schema_dict[
-            vol.Optional(
-                CONF_OUTDOOR_TEMP_ENTITY,
-                description={"suggested_value": outdoor_temp_default},
-            )
-        ] = _entity_selector_optional("sensor")
-    else:
-        schema_dict[vol.Optional(CONF_OUTDOOR_TEMP_ENTITY)] = _entity_selector_optional("sensor")
-
-    if weather_default:
-        schema_dict[
-            vol.Optional(
-                CONF_WEATHER_ENTITY,
-                description={"suggested_value": weather_default},
-            )
-        ] = _entity_selector_optional("weather")
-    else:
-        schema_dict[vol.Optional(CONF_WEATHER_ENTITY)] = _entity_selector_optional("weather")
-
-    schema_dict[
-        vol.Required(CONF_UPDATE_INTERVAL, default=int(update_interval_default))
-    ] = _number_box(min_value=60, max_value=3600, step=30, unit="s")
-
-    return vol.Schema(schema_dict)
-
-
-def _site_settings_errors(flat: Dict[str, Any]) -> Dict[str, str]:
-    """Validate that at least one outdoor source is configured."""
-    outdoor = flat.get(CONF_OUTDOOR_TEMP_ENTITY)
-    weather = flat.get(CONF_WEATHER_ENTITY)
-    if not outdoor and not weather:
-        return {"base": "outdoor_or_weather_required"}
-    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -537,8 +472,7 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Step 1: Location only — rooms, sensors and heat sources are configured in the panel."""
         if user_input is not None:
-            flat = _flatten_sections(user_input, _SITE_SECTION_KEYS)
-            self._data.update(_initial_entry_data(flat))
+            self._data.update(_initial_entry_data(user_input))
             return self.async_create_entry(title=NAME, data=self._data)
 
         ha_lat = self.hass.config.latitude if self.hass is not None else 0.0
@@ -557,40 +491,33 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Allow site basics to be revisited after the initial setup."""
+        """Allow the site location to be revisited after the initial setup."""
         entry = self._get_reconfigure_entry()
         existing = dict(entry.data) if entry is not None else {}
-        errors: Dict[str, str] = {}
 
         if user_input is not None:
-            flat = _flatten_sections(user_input, _SITE_SECTION_KEYS)
-            errors = _site_settings_errors(flat)
-            if not errors:
-                new_data = {**existing, **flat}
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data=new_data,
-                    reason="reconfigure_successful",
-                )
-            existing = {**existing, **flat}
+            new_data = {
+                **existing,
+                CONF_LATITUDE: float(user_input[CONF_LATITUDE]),
+                CONF_LONGITUDE: float(user_input[CONF_LONGITUDE]),
+            }
+            return self.async_update_reload_and_abort(
+                entry,
+                data=new_data,
+                reason="reconfigure_successful",
+            )
 
         ha_lat = self.hass.config.latitude if self.hass is not None else 0.0
         ha_lon = self.hass.config.longitude if self.hass is not None else 0.0
 
-        schema = _site_settings_schema(
+        schema = _location_schema(
             latitude_default=float(existing.get(CONF_LATITUDE, ha_lat)),
             longitude_default=float(existing.get(CONF_LONGITUDE, ha_lon)),
-            outdoor_temp_default=existing.get(CONF_OUTDOOR_TEMP_ENTITY) or None,
-            weather_default=existing.get(CONF_WEATHER_ENTITY) or None,
-            update_interval_default=int(
-                existing.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-            ),
         )
 
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=schema,
-            errors=errors,
         )
 
     def _get_reconfigure_entry(self) -> Optional[config_entries.ConfigEntry]:

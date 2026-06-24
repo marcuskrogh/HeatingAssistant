@@ -211,18 +211,15 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
         assert "options" in selector[key]
         assert selector[key]["options"]  # non-empty
 
-    # ── Reconfigure step is present in the config flow and also flat. ──
+    # ── Reconfigure step is present, flat, and location-only. ──
     reconfigure_step = strings["config"]["step"]["reconfigure"]
     assert "sections" not in reconfigure_step
-    for key in (
-        "latitude",
-        "longitude",
-        "outdoor_temp_entity",
-        "weather_entity",
-        "update_interval",
-    ):
+    for key in ("latitude", "longitude"):
         assert key in reconfigure_step["data"]
         assert key in reconfigure_step["data_description"]
+    # Everything else is managed from the panel / options flow.
+    for key in ("outdoor_temp_entity", "weather_entity", "update_interval"):
+        assert key not in reconfigure_step["data"]
 
     # The original user-step (initial setup) is location-only.
     user_step = strings["config"]["step"]["user"]
