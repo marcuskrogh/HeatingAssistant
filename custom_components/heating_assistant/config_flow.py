@@ -471,10 +471,10 @@ def _site_settings_schema(
     """
     schema_dict: Dict[Any, Any] = {
         vol.Required(CONF_LATITUDE, default=float(latitude_default)): _number_box(
-            min_value=-90.0, max_value=90.0, step=0.000001, unit="°",
+            min_value=-90.0, max_value=90.0, step=0.001, unit="°",
         ),
         vol.Required(CONF_LONGITUDE, default=float(longitude_default)): _number_box(
-            min_value=-180.0, max_value=180.0, step=0.000001, unit="°",
+            min_value=-180.0, max_value=180.0, step=0.001, unit="°",
         ),
     }
 
