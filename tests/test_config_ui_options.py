@@ -59,31 +59,27 @@ def test_default_setpoint_is_22() -> None:
     assert DEFAULT_SETPOINT == 22.0
 
 
-def test_options_flow_source_has_expected_room_and_solver_updates() -> None:
-    """Options flow should expose simplified room UI (solver backend removed from UI).
+def test_config_flow_has_no_options_flow() -> None:
+    """HA integration config must not expose the legacy options flow.
 
-    Room/window CRUD lives in ``_options_flow.py`` after the U4 refactor,
-    so a few of these checks span both files.
+    All configuration beyond the site location (rooms, sensors, heat sources,
+    schedules) is managed from the Heating Assistant panel, not from the native
+    HA integration configure/reconfigure dialogs.
     """
     config_flow_source = CONFIG_FLOW_PATH.read_text(encoding="utf-8")
     helpers_source = OPTIONS_FLOW_HELPERS_PATH.read_text(encoding="utf-8")
-    combined = config_flow_source + "\n" + helpers_source
 
-    # OptionsFlow-side wiring still lives in config_flow.py.
-    assert "manage_room_windows" in config_flow_source
-    # Solver backend is always QP; the dropdown is no longer shown to users.
+    # No options flow class in config_flow.py.
+    assert "HeatingAssistantOptionsFlow" not in config_flow_source
+    assert "async_get_options_flow" not in config_flow_source
+    # Room/window/heater management stays in the helper module only.
+    assert "manage_room_windows" not in config_flow_source
+    # Solver backend is always QP; the dropdown must not appear.
     assert 'vol.In(["slsqp", "ipopt"])' not in config_flow_source
-    assert "DEFAULT_ROOM_SETPOINT = 22.0" in config_flow_source
-    # The default setpoint is passed into the helper's add() call.
-    assert "setpoint=DEFAULT_ROOM_SETPOINT" in config_flow_source
-
-    # Shared constants/symbols can live in either file.
-    assert "CONF_TEMP_SENSORS" in combined
-    assert "ROOM_SIZE_TO_THERMAL_MASS" in combined
-    assert "BUILDING_AGE_TO_R_EXTERNAL" in combined
-    # The room dict template (now built inside RoomFlowHelper.add) wires the
-    # setpoint into CONF_SETPOINT.
+    # Room CRUD helpers remain in _options_flow.py for the panel to use.
     assert "CONF_SETPOINT: setpoint" in helpers_source
+    assert "ROOM_SIZE_TO_THERMAL_MASS" in helpers_source
+    assert "BUILDING_AGE_TO_R_EXTERNAL" in helpers_source
 
 
 def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None:
