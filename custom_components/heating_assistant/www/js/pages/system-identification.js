@@ -20,6 +20,15 @@ const DEFAULTS = {
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DISMISSED_WARNINGS_KEY = 'heating_assistant_sysid_dismissed_v1';
 
+function valuesEqual(a, b) {
+  const na = Number(a);
+  const nb = Number(b);
+  if (Number.isFinite(na) && Number.isFinite(nb)) {
+    return Math.abs(na - nb) <= 1e-9 * Math.max(1, Math.abs(na), Math.abs(nb));
+  }
+  return a === b;
+}
+
 export function renderSystemIdentification(container, rooms, state, connection, hass, slug) {
   if (slug) {
     return renderIdentificationDetail(container, slug, rooms, state, connection, hass);
@@ -75,14 +84,15 @@ function renderIdentificationIndex(container, rooms, state) {
       card.className = 'card card--clickable sysid-index-card';
       card.dataset.room = room.slug;
       card.innerHTML = buildIdentificationCardHtml(room, st);
-      card.addEventListener('click', () => {
+      card.addEventListener('click', (event) => {
+        if (event.target.closest('[data-dismiss-warning]')) return;
         window.location.hash = `#identification/${room.slug}`;
       });
       grid.appendChild(card);
     }
   }
 
-  grid.addEventListener('click', (event) => {
+  function handleDismissWarning(event) {
     const dismissBtn = event.target.closest('[data-dismiss-warning]');
     if (!dismissBtn) return;
     event.preventDefault();
@@ -96,7 +106,10 @@ function renderIdentificationIndex(container, rooms, state) {
     if (room && card) {
       card.innerHTML = buildIdentificationCardHtml(room, latestState);
     }
-  });
+  }
+
+  grid.addEventListener('click', handleDismissWarning);
+  grid.addEventListener('pointerdown', handleDismissWarning);
 
   buildTiles(state);
 
@@ -201,6 +214,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   header.className = 'room-header';
   header.innerHTML = `<h2 class="room-header__title">${room.name}</h2>`;
   container.appendChild(header);
+
+  const pendingBanner = document.createElement('div');
+  pendingBanner.className = 'tuning-pending-banner tuning-pending-banner--actions';
+  pendingBanner.hidden = true;
+  container.appendChild(pendingBanner);
 
   // -----------------------------------------------------------------------
   // Section 1: Action buttons (top of page)
@@ -318,7 +336,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       </div>
     </div>
 
-    <div class="params-subsection params-subsection--last">
+    <div class="params-subsection">
       <div class="params-subsection__title">Identification Window</div>
       <div class="window-mode-toggle">
         <button class="window-mode-btn window-mode-btn--active" id="window-mode-recent" type="button">Recent Horizon</button>
@@ -328,8 +346,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <div class="form-group">
           <label class="form-label" for="param-horizon">Horizon</label>
           <input class="form-input" type="number" id="param-horizon"
-            step="0.5" min="0.5" max="72" value="${DEFAULTS.horizon_hours}">
-          <span class="form-hint">hours &mdash; history window ending at the most recent record</span>
+            step="0.5" min="0.5" max="2160" value="${DEFAULTS.horizon_hours}">
+          <span class="form-hint">hours &mdash; history window ending at the most recent record (up to identification-history retention)</span>
         </div>
       </div>
       <div id="window-panel-custom" class="window-datetime-panel" style="display:none">
@@ -360,6 +378,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         </div>
       </div>
     </div>
+
+    <div class="params-subsection params-subsection--last" id="ds-save-mount"></div>
   `;
   container.appendChild(paramsCard);
 
@@ -602,8 +622,143 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // re-created (navigation / page refresh) or after the user commits or
   // reverts parameters.
   let userEditing = false;
+  let appliedParams = null;
+
+  function captureAppliedParams(st) {
+    const filteredAttrs = st[filteredEntityId(roomSlug)]?.attributes || {};
+    const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
+    const heaterScales = {};
+    const currentScales = configAttrs.current_heater_scales || {};
+    for (const [srcName, info] of Object.entries(currentScales)) {
+      if (info.room_slug === roomSlug && info.power_scale != null) {
+        heaterScales[srcName] = info.power_scale;
+      }
+    }
+    appliedParams = {
+      thermal_mass: filteredAttrs.thermal_mass ?? DEFAULTS.thermal_mass,
+      r_external: filteredAttrs.r_external ?? DEFAULTS.r_external,
+      internal_gain: filteredAttrs.internal_gain ?? DEFAULTS.internal_gain,
+      solar_scale: filteredAttrs.solar_scale ?? DEFAULTS.solar_scale,
+      c_air_fraction: filteredAttrs.c_air_fraction ?? DEFAULTS.c_air_fraction,
+      r_aw_fraction: filteredAttrs.r_aw_fraction ?? DEFAULTS.r_aw_fraction,
+      sigma_w: configAttrs.sigma_w ?? DEFAULTS.sigma_w,
+      sigma_v: configAttrs.sigma_v ?? DEFAULTS.sigma_v,
+      horizon_hours: configAttrs.identification_horizon_hours ?? DEFAULTS.horizon_hours,
+      heater_scales: heaterScales,
+    };
+  }
+
+  function collectCurrentParams() {
+    const heaterScales = {};
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      const val = parseFloat(inp.value);
+      if (isFinite(val)) heaterScales[srcName] = val;
+    }
+    return {
+      thermal_mass: parseFloat(thermalMassInput.value),
+      r_external: parseFloat(rExternalInput.value),
+      internal_gain: parseFloat(internalGainInput.value),
+      solar_scale: parseFloat(solarScaleInput.value),
+      c_air_fraction: parseFloat(cAirFractionInput.value),
+      r_aw_fraction: parseFloat(rAwFractionInput.value),
+      sigma_w: parseFloat(sigmaWInput.value),
+      sigma_v: parseFloat(sigmaVInput.value),
+      horizon_hours: parseFloat(horizonInput.value),
+      heater_scales: heaterScales,
+    };
+  }
+
+  function paramsDiffer(current, applied) {
+    if (!applied) return false;
+    const scalarKeys = [
+      'thermal_mass', 'r_external', 'internal_gain', 'solar_scale',
+      'c_air_fraction', 'r_aw_fraction', 'sigma_w', 'sigma_v', 'horizon_hours',
+    ];
+    if (scalarKeys.some((key) => !valuesEqual(current[key], applied[key]))) return true;
+    const appliedScales = applied.heater_scales || {};
+    const currentScales = current.heater_scales || {};
+    const scaleKeys = new Set([...Object.keys(appliedScales), ...Object.keys(currentScales)]);
+    return [...scaleKeys].some(
+      (key) => !valuesEqual(currentScales[key], appliedScales[key]),
+    );
+  }
+
+  function hasPendingChanges() {
+    return paramsDiffer(collectCurrentParams(), appliedParams);
+  }
+
+  function updatePendingBanner(pending) {
+    pendingBanner.hidden = !pending;
+    pendingBanner.replaceChildren();
+    if (!pending) return;
+    const text = document.createElement('span');
+    text.textContent = 'Unsaved parameter changes — click Apply Parameters to save, or revert to the last applied values.';
+    const revertBtn = document.createElement('button');
+    revertBtn.type = 'button';
+    revertBtn.className = 'btn btn--ghost btn--sm';
+    revertBtn.textContent = 'Revert changes';
+    revertBtn.addEventListener('click', revertToApplied);
+    pendingBanner.append(text, revertBtn);
+  }
+
+  function updatePendingIndicators() {
+    const pending = hasPendingChanges();
+    updatePendingBanner(pending);
+    if (!appliedParams) return;
+    const current = collectCurrentParams();
+    const scalarFields = [
+      [thermalMassInput, 'thermal_mass'],
+      [rExternalInput, 'r_external'],
+      [internalGainInput, 'internal_gain'],
+      [solarScaleInput, 'solar_scale'],
+      [cAirFractionInput, 'c_air_fraction'],
+      [rAwFractionInput, 'r_aw_fraction'],
+      [sigmaWInput, 'sigma_w'],
+      [sigmaVInput, 'sigma_v'],
+      [horizonInput, 'horizon_hours'],
+    ];
+    for (const [input, key] of scalarFields) {
+      input.classList.toggle(
+        'form-input--modified',
+        pending && !valuesEqual(current[key], appliedParams[key]),
+      );
+    }
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      inp.classList.toggle(
+        'form-input--modified',
+        pending && !valuesEqual(
+          current.heater_scales[srcName],
+          appliedParams.heater_scales?.[srcName],
+        ),
+      );
+    }
+  }
+
+  function revertToApplied() {
+    if (!appliedParams) return;
+    thermalMassInput.value = appliedParams.thermal_mass;
+    rExternalInput.value = appliedParams.r_external;
+    internalGainInput.value = appliedParams.internal_gain;
+    solarScaleInput.value = appliedParams.solar_scale;
+    cAirFractionInput.value = appliedParams.c_air_fraction;
+    rAwFractionInput.value = appliedParams.r_aw_fraction;
+    sigmaWInput.value = appliedParams.sigma_w;
+    sigmaVInput.value = appliedParams.sigma_v;
+    horizonInput.value = appliedParams.horizon_hours;
+    for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
+      const scale = appliedParams.heater_scales?.[srcName];
+      if (scale != null) inp.value = scale;
+    }
+    userEditing = false;
+    updatePendingIndicators();
+    setStatus(actionStatusEl, '', '');
+  }
+
   paramInputs.forEach((inp) => {
-    inp.addEventListener('input', () => { userEditing = true; });
+    inp.addEventListener('input', () => {
+      userEditing = true;
+      updatePendingIndicators();
+    });
   });
 
   // When a stored dataset is selected for identification, its id is sent with
@@ -811,6 +966,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const info = currentScales[srcName];
       if (info && info.power_scale != null) inp.value = info.power_scale;
     }
+    if (!userEditing) {
+      captureAppliedParams(st);
+    }
+    updatePendingIndicators();
   }
 
   // The heat sources in this room are read from the config sensor's
@@ -858,7 +1017,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       const inp = group.querySelector('input');
       const lockBtn = group.querySelector('.param-lock-btn');
       heaterScaleInputs[srcName] = inp;
-      inp.addEventListener('input', () => { userEditing = true; });
+      inp.addEventListener('input', () => {
+        userEditing = true;
+        updatePendingIndicators();
+      });
       const heaterKey = `heater_scale:${srcName}`;
       _applyLockVisual(heaterKey, inp, lockBtn);
       lockBtn.addEventListener('click', () => toggleLock(heaterKey, inp, lockBtn));
@@ -1017,6 +1179,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     if (roomData.r_aw_fraction != null) rAwFractionInput.value = roomData.r_aw_fraction;
     // Loaded values are pending review; protect them from state-sync resets.
     userEditing = true;
+    updatePendingIndicators();
     setStatus(actionStatusEl, 'Loaded from history — review the fields above, then click Apply Parameters.', '');
   }
 
@@ -1117,6 +1280,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       populateModelFromSysid(roomSlug, latestState);
       // Loaded values are pending review; protect them from state-sync resets.
       userEditing = true;
+      updatePendingIndicators();
       setStatus(statusEl, 'Loaded — review the fields below, then click Apply Parameters.', '');
       return true;
     } catch (err) {
@@ -1175,6 +1339,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       // Edits are now the applied parameters; resume syncing the form from
       // system state so it reflects the authoritative committed values.
       userEditing = false;
+      appliedParams = collectCurrentParams();
+      updatePendingIndicators();
       setStatus(actionStatusEl, 'Applied.', 'success');
     } catch (err) {
       setStatus(actionStatusEl, 'Error: ' + (err.message || err), 'error');
@@ -1196,6 +1362,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     for (const inp of Object.values(heaterScaleInputs)) inp.value = DEFAULTS.heater_scale;
     // Defaults are pending review; protect them from state-sync resets.
     userEditing = true;
+    updatePendingIndicators();
     setStatus(actionStatusEl, 'Defaults loaded.', '');
   });
 
@@ -1243,10 +1410,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   });
 
   // -----------------------------------------------------------------------
-  // Section 5: Stored datasets & experiment scheduler
+  // Section 5: Stored datasets
   // -----------------------------------------------------------------------
   const refreshHandles = setupDatasetsAndExperiments({
-    container, room, roomSlug, hass, connection,
+    container, paramsCard, room, roomSlug, hass, connection,
     windowStartInput, windowEndInput, applyWindowMode: _applyWindowMode,
     toDatetimeLocal: _toDatetimeLocal,
     setSelectedDataset, clearSelectedDataset,
@@ -1284,6 +1451,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         // inputs get built once the config sensor (which lists the room's
         // sources) becomes available.  This never overwrites existing values.
         ensureHeaterScaleInputs(newState);
+        updatePendingIndicators();
       }
       renderEkfResults(roomSlug, newState);
       renderOlResults(roomSlug, newState);
@@ -1330,43 +1498,23 @@ function _toLocalInput(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// Build the experiment-scheduler and stored-dataset cards, append them to the
-// container, and wire all their interactions.  Returns a handle with a
-// ``destroy`` method that tears down the periodic refresh timer.
+// Build the stored-dataset cards, append them to the container, and wire all
+// their interactions.  Returns a handle with a ``destroy`` method that tears
+// down the periodic refresh timer.
 function setupDatasetsAndExperiments(ctx) {
   const {
-    container, room, roomSlug, hass, connection,
+    container, paramsCard, room, roomSlug, hass, connection,
     windowStartInput, windowEndInput, applyWindowMode, toDatetimeLocal,
     setSelectedDataset, clearSelectedDataset, onDatasetSelectionRenderer,
   } = ctx;
 
-  // ---- Experiments note card ---------------------------------------------
-  const expNote = document.createElement('div');
-  expNote.className = 'card tuning-section';
-  expNote.innerHTML = `
-    <div class="tuning-section__title">Experiments</div>
-    <p class="tuning-section__desc">
-      Schedule identification experiments from the
-      <a href="#schedules/${roomSlug}" class="link">Schedules page</a>
-      for this room. Experiment datasets, once auto-saved, appear in the Stored Datasets section below.
+  const saveMount = paramsCard.querySelector('#ds-save-mount');
+  saveMount.innerHTML = `
+    <div class="params-subsection__title">Save Current Window</div>
+    <p class="params-subsection__desc">
+      Store the identification window configured above as a named, permanent dataset.
     </p>
-  `;
-  container.appendChild(expNote);
-
-  // ---- Stored datasets card ---------------------------------------------
-  const dsCard = document.createElement('div');
-  dsCard.className = 'card tuning-section';
-  dsCard.innerHTML = `
-    <div class="tuning-section__title">Stored Datasets</div>
-    <p class="tuning-section__desc">
-      Save the current identification window as a named, permanent dataset, then
-      use any number of stored datasets for identification. Tick the datasets you
-      want and run a joint automatic identification across all of them, or load a
-      single dataset into the custom window to inspect, validate or identify it on
-      its own.
-    </p>
-
-    <div class="ds-save-row">
+    <div class="ds-save-row ds-save-row--compact">
       <div class="form-group ds-save-row__name">
         <label class="form-label" for="ds-name">New dataset name</label>
         <input class="form-input" type="text" id="ds-name" placeholder="e.g. Cold snap — ${room.name}">
@@ -1380,7 +1528,17 @@ function setupDatasetsAndExperiments(ctx) {
         <span class="tuning-actions__status" id="ds-status"></span>
       </div>
     </div>
+    <div id="ds-selected-note" class="ds-loaded-note"></div>
+  `;
 
+  const dsListSection = document.createElement('div');
+  dsListSection.className = 'card tuning-section';
+  const dsCollapsible = createCollapsible({ title: 'Stored Datasets', open: false });
+  dsCollapsible.body.innerHTML = `
+    <p class="tuning-section__desc" style="margin:0 0 12px">
+      Select datasets for joint automatic identification, or load one into the
+      custom window to inspect, validate, or identify it on its own.
+    </p>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
         Run Automatic Identification (0)
@@ -1388,20 +1546,20 @@ function setupDatasetsAndExperiments(ctx) {
       <button class="btn btn--ghost btn--sm" id="btn-clear-selection" disabled>Clear selection</button>
       <span class="tuning-actions__status" id="ds-id-status"></span>
     </div>
-    <div id="ds-selected-note" class="ds-loaded-note"></div>
     <div id="ds-list" class="store-list"></div>
   `;
-  container.appendChild(dsCard);
+  dsListSection.appendChild(dsCollapsible.element);
+  container.appendChild(dsListSection);
 
   // ---- References --------------------------------------------------------
-  const dsStatus = dsCard.querySelector('#ds-status');
-  const dsListEl = dsCard.querySelector('#ds-list');
-  const dsNameInput = dsCard.querySelector('#ds-name');
-  const dsNotesInput = dsCard.querySelector('#ds-notes');
-  const dsSelectedNote = dsCard.querySelector('#ds-selected-note');
-  const dsIdStatus = dsCard.querySelector('#ds-id-status');
-  const btnIdentifySelected = dsCard.querySelector('#btn-identify-selected');
-  const btnClearSelection = dsCard.querySelector('#btn-clear-selection');
+  const dsStatus = saveMount.querySelector('#ds-status');
+  const dsListEl = dsCollapsible.body.querySelector('#ds-list');
+  const dsNameInput = saveMount.querySelector('#ds-name');
+  const dsNotesInput = saveMount.querySelector('#ds-notes');
+  const dsSelectedNote = saveMount.querySelector('#ds-selected-note');
+  const dsIdStatus = dsCollapsible.body.querySelector('#ds-id-status');
+  const btnIdentifySelected = dsCollapsible.body.querySelector('#btn-identify-selected');
+  const btnClearSelection = dsCollapsible.body.querySelector('#btn-clear-selection');
 
   // Multi-select set of dataset ids chosen for joint identification.
   const selectedIds = new Set();
@@ -1488,7 +1646,7 @@ function setupDatasetsAndExperiments(ctx) {
     return { startTs, endTs };
   }
 
-  dsCard.querySelector('#btn-save-dataset').addEventListener('click', async () => {
+  saveMount.querySelector('#btn-save-dataset').addEventListener('click', async () => {
     const name = (dsNameInput.value || '').trim();
     if (!name) {
       setStatus(dsStatus, 'Enter a dataset name first.', 'error');
@@ -1554,13 +1712,14 @@ function setupDatasetsAndExperiments(ctx) {
     // empty "no datasets" state that only a page refresh would recover from.
     if (datasets == null) return;
     lastDatasets = datasets;
+    dsCollapsible.setBadge(datasets.length ? `${datasets.length}` : '');
 
     // Drop selections for datasets that no longer exist.
     const liveIds = new Set(datasets.map((d) => d.id));
     [...selectedIds].forEach((id) => { if (!liveIds.has(id)) selectedIds.delete(id); });
 
     if (datasets.length === 0) {
-      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet. Save the current window to create one, or check the Schedules page to run an experiment.</span>';
+      dsListEl.innerHTML = '<span class="tuning-section__desc">No stored datasets yet. Save the current window to create one.</span>';
       updateSelectionToolbar();
       return;
     }

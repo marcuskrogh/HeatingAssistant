@@ -230,6 +230,7 @@ from .const import (
     CONF_PLOT_FORECAST_HOURS,
     CONF_IDENTIFICATION_HISTORY_DAYS,
     DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+    MAX_IDENTIFICATION_HORIZON_HOURS,
     CONF_SOURCE_HVAC_MODE,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_PLOT_HISTORY_HOURS,
@@ -1615,6 +1616,36 @@ async def _get_history_for_window(
     return buf
 
 
+async def _get_history_for_horizon(
+    hass: HomeAssistant,
+    coordinator: HeatingAssistantCoordinator,
+    horizon_hours: float,
+) -> List[Dict[str, Any]]:
+    """Return history for a trailing recent-horizon window.
+
+    Uses the in-memory buffer when it already covers the requested span;
+    otherwise fetches older records from the JSONL store / Recorder.
+    """
+    from .history_window import select_recent_window
+
+    horizon_s = float(horizon_hours) * 3600.0
+    buf = list(coordinator.history_buffer)
+    if not buf or horizon_s <= 0:
+        return buf
+
+    latest_ts = float(buf[-1]["timestamp"])
+    window_start = latest_ts - horizon_s
+    oldest_buf_ts = float(buf[0]["timestamp"])
+
+    if oldest_buf_ts <= window_start:
+        return select_recent_window(buf, horizon_s, coordinator.dt)
+
+    history = await _get_history_for_window(
+        hass, coordinator, window_start, latest_ts
+    )
+    return select_recent_window(history, horizon_s, coordinator.dt)
+
+
 def _records_for_dataset(
     coordinator: HeatingAssistantCoordinator,
     dataset_id: Optional[str],
@@ -2035,6 +2066,11 @@ def _register_services(hass: HomeAssistant) -> None:
                 hass, coordinator, window_start_ml, window_end_ml
             )
 
+        if history_override is None and horizon_hours is not None:
+            history_override = await _get_history_for_horizon(
+                hass, coordinator, float(horizon_hours)
+            )
+
         result = await coordinator.async_estimate_parameters_ml(
             apply_params=apply_params,
             horizon_hours=horizon_hours if history_override is None else None,
@@ -2196,10 +2232,8 @@ def _register_services(hass: HomeAssistant) -> None:
             from .history_window import select_window_by_timestamps
             history = select_window_by_timestamps(history, window_start_ol, window_end_ol)
         elif horizon_hours is not None:
-            history = list(coordinator.history_buffer)
-            from .history_window import select_recent_window
-            history = select_recent_window(
-                history, float(horizon_hours) * 3600.0, coordinator.dt
+            history = await _get_history_for_horizon(
+                hass, coordinator, float(horizon_hours)
             )
         else:
             history = list(coordinator.history_buffer)
@@ -2590,9 +2624,14 @@ def _register_services(hass: HomeAssistant) -> None:
             history = dataset_records
             window_spec = None
         else:
-            history = await _get_history_for_window(
-                hass, coordinator, window_start, window_end
-            )
+            if window_spec is not None:
+                history = await _get_history_for_window(
+                    hass, coordinator, window_start, window_end
+                )
+            else:
+                history = await _get_history_for_horizon(
+                    hass, coordinator, horizon_hours
+                )
 
         # Patch heat-source copies with the heater power scales currently shown
         # in the UI (falling back to the last auto-identified scales) so the EKF
@@ -2656,7 +2695,7 @@ def _register_services(hass: HomeAssistant) -> None:
             {
                 vol.Optional("room_name"): cv.string,
                 vol.Optional("horizon_hours", default=6.0): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.5, max=72.0)
+                    vol.Coerce(float), vol.Range(min=0.5, max=MAX_IDENTIFICATION_HORIZON_HOURS)
                 ),
                 vol.Optional("sigma_w"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.0, max=10.0)
@@ -2857,7 +2896,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional(CONF_SIGMA_V): vol.Coerce(float),
                 vol.Optional(CONF_SIGMA_B): vol.Coerce(float),
                 vol.Optional(CONF_IDENTIFICATION_HORIZON_HOURS): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.5, max=72.0)
+                    vol.Coerce(float), vol.Range(min=0.5, max=MAX_IDENTIFICATION_HORIZON_HOURS)
                 ),
                 vol.Optional(CONF_WINDOW_OPEN_DEBOUNCE): vol.Coerce(int),
                 vol.Optional(CONF_WINDOW_OPEN_CLOSE_SETTLE): vol.Coerce(int),

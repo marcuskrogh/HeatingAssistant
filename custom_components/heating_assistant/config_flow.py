@@ -3,8 +3,8 @@
 The flow is organised so the user-facing forms feel like other modern Home
 Assistant integrations:
 
-* Initial setup is a single, friendly step with grouped sections (Location,
-  Outdoor information, Update timing) and explanatory text under every field.
+* Initial setup is a single location step (latitude/longitude). All other
+  configuration happens in the Heating Assistant panel.
 * Site settings can be revisited via the **Reconfigure** entry-point without
   diving into the options flow.
 * All numeric fields use ``NumberSelector`` (with sliders where it helps),
@@ -415,7 +415,7 @@ def _number_slider(
 
 
 # ---------------------------------------------------------------------------
-# Site-settings schema (initial setup + reconfigure)
+# Location schema (initial setup) and site-settings schema (reconfigure)
 # ---------------------------------------------------------------------------
 
 
@@ -424,6 +424,33 @@ _SITE_SECTION_KEYS: Tuple[str, ...] = (
     SECTION_SENSORS,
     SECTION_TIMING,
 )
+
+
+def _location_schema(
+    *,
+    latitude_default: float,
+    longitude_default: float,
+) -> vol.Schema:
+    """Schema for the initial add-integration step — location only."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_LATITUDE, default=float(latitude_default)): _number_box(
+                min_value=-90.0, max_value=90.0, step=0.000001, unit="°",
+            ),
+            vol.Required(CONF_LONGITUDE, default=float(longitude_default)): _number_box(
+                min_value=-180.0, max_value=180.0, step=0.000001, unit="°",
+            ),
+        }
+    )
+
+
+def _initial_entry_data(flat: Dict[str, Any]) -> Dict[str, Any]:
+    """Build persisted config-entry data from the location-only user step."""
+    return {
+        CONF_LATITUDE: float(flat[CONF_LATITUDE]),
+        CONF_LONGITUDE: float(flat[CONF_LONGITUDE]),
+        CONF_UPDATE_INTERVAL: int(DEFAULT_UPDATE_INTERVAL),
+    }
 
 
 def _site_settings_schema(
@@ -502,36 +529,23 @@ class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> ConfigFlowResult:
-        """Step 1: Site basics — location, outdoor sources, update timing."""
-        errors: Dict[str, str] = {}
-
+        """Step 1: Location only — rooms, sensors and heat sources are configured in the panel."""
         if user_input is not None:
             flat = _flatten_sections(user_input, _SITE_SECTION_KEYS)
-            errors = _site_settings_errors(flat)
-            if not errors:
-                self._data.update(flat)
-                return self.async_create_entry(title=NAME, data=self._data)
-            current = flat
-        else:
-            current = {}
+            self._data.update(_initial_entry_data(flat))
+            return self.async_create_entry(title=NAME, data=self._data)
 
         ha_lat = self.hass.config.latitude if self.hass is not None else 0.0
         ha_lon = self.hass.config.longitude if self.hass is not None else 0.0
 
-        schema = _site_settings_schema(
-            latitude_default=float(current.get(CONF_LATITUDE, ha_lat)),
-            longitude_default=float(current.get(CONF_LONGITUDE, ha_lon)),
-            outdoor_temp_default=current.get(CONF_OUTDOOR_TEMP_ENTITY) or None,
-            weather_default=current.get(CONF_WEATHER_ENTITY) or None,
-            update_interval_default=int(
-                current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
-            ),
+        schema = _location_schema(
+            latitude_default=ha_lat,
+            longitude_default=ha_lon,
         )
 
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
-            errors=errors,
         )
 
     async def async_step_reconfigure(
