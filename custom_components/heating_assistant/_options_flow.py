@@ -89,6 +89,31 @@ from .const import (
     FLOOR_TYPE_UFH,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
+    SOURCE_TYPE_GAS_HEATER,
+    SOURCE_TYPE_OIL_BOILER,
+    SOURCE_TYPE_HYDRONIC_RADIATOR,
+    SOURCE_TYPE_HYDRONIC_FLOOR,
+    SOURCE_TYPE_OIL_RADIATOR,
+    SOURCE_TYPE_ELECTRIC_FLOOR,
+    SOURCE_TYPE_GENERIC_THERMOSTAT,
+    SOURCE_TYPE_GROUND_SOURCE_HP,
+    SOURCE_TYPE_PELLET_STOVE,
+    SOURCE_TYPE_ELECTRIC_STORAGE,
+    CONF_SOURCE_MIN_POWER_FRACTION,
+    CONF_SOURCE_CHARGE_POWER,
+    CONF_SOURCE_STORAGE_CAPACITY_KWH,
+    CONF_SOURCE_PASSIVE_DISCHARGE_RATE,
+    DEFAULT_GAS_EFFICIENCY,
+    DEFAULT_OIL_BOILER_EFFICIENCY,
+    DEFAULT_PELLET_EFFICIENCY,
+    DEFAULT_PELLET_MIN_POWER_FRACTION,
+    DEFAULT_GROUND_SOURCE_COP,
+    DEFAULT_STORAGE_CHARGE_POWER,
+    DEFAULT_STORAGE_CAPACITY_KWH,
+    DEFAULT_STORAGE_DISCHARGE_RATE,
+    DEFAULT_COOLING_COP,
+    DEFAULT_COOLING_EFFICIENCY,
+    DEFAULT_HEATING_EFFICIENCY,
 )
 
 # ---------------------------------------------------------------------------
@@ -519,12 +544,28 @@ class WindowFlowHelper:
 # ---------------------------------------------------------------------------
 
 
+_SOURCE_TYPE_LABELS: dict = {
+    SOURCE_TYPE_ELECTRIC: "Electric heater",
+    SOURCE_TYPE_HEAT_PUMP: "Air-source heat pump",
+    SOURCE_TYPE_GROUND_SOURCE_HP: "Ground-source heat pump",
+    SOURCE_TYPE_GAS_HEATER: "Gas heater",
+    SOURCE_TYPE_OIL_BOILER: "Oil boiler",
+    SOURCE_TYPE_HYDRONIC_RADIATOR: "Hydronic radiator",
+    SOURCE_TYPE_HYDRONIC_FLOOR: "Hydronic UFH",
+    SOURCE_TYPE_ELECTRIC_FLOOR: "Electric UFH",
+    SOURCE_TYPE_OIL_RADIATOR: "Oil radiator",
+    SOURCE_TYPE_PELLET_STOVE: "Pellet stove",
+    SOURCE_TYPE_ELECTRIC_STORAGE: "Storage heater",
+    SOURCE_TYPE_GENERIC_THERMOSTAT: "Generic thermostat",
+}
+
+
 def heater_display(room_name: str, idx: int, heater: Dict[str, Any]) -> str:
     """Human-readable heater label for the remove-heater selector."""
     name = heater.get(CONF_SOURCE_NAME, f"Heater {idx + 1}")
-    source_type = heater.get(CONF_SOURCE_TYPE, "Unknown")
-    source_type_label = "Heat Pump" if source_type == SOURCE_TYPE_HEAT_PUMP else "Electric Heater"
-    return f"{room_name} · {name} ({source_type_label})"
+    source_type = heater.get(CONF_SOURCE_TYPE, "")
+    label = _SOURCE_TYPE_LABELS.get(source_type, source_type.replace("_", " ").title())
+    return f"{room_name} · {name} ({label})"
 
 
 class HeaterFlowHelper:
@@ -575,6 +616,10 @@ class HeaterFlowHelper:
         cooling_cop: float | None = None,
         cooling_efficiency: float | None = None,
         heating_efficiency: float | None = None,
+        min_power_fraction: float | None = None,
+        charge_power: float | None = None,
+        storage_capacity_kwh: float | None = None,
+        passive_discharge_rate: float | None = None,
     ) -> None:
         """Append a new heater to the room."""
         new_heater: Dict[str, Any] = {
@@ -603,6 +648,14 @@ class HeaterFlowHelper:
             new_heater[CONF_SOURCE_COOLING_EFFICIENCY] = float(cooling_efficiency)
         if heating_efficiency is not None:
             new_heater[CONF_SOURCE_HEATING_EFFICIENCY] = float(heating_efficiency)
+        if min_power_fraction is not None:
+            new_heater[CONF_SOURCE_MIN_POWER_FRACTION] = float(min_power_fraction)
+        if charge_power is not None:
+            new_heater[CONF_SOURCE_CHARGE_POWER] = float(charge_power)
+        if storage_capacity_kwh is not None:
+            new_heater[CONF_SOURCE_STORAGE_CAPACITY_KWH] = float(storage_capacity_kwh)
+        if passive_discharge_rate is not None:
+            new_heater[CONF_SOURCE_PASSIVE_DISCHARGE_RATE] = float(passive_discharge_rate)
         self._heat_sources_list.append(new_heater)
 
     def update(
@@ -623,6 +676,10 @@ class HeaterFlowHelper:
         cooling_cop: float | None = None,
         cooling_efficiency: float | None = None,
         heating_efficiency: float | None = None,
+        min_power_fraction: float | None = None,
+        charge_power: float | None = None,
+        storage_capacity_kwh: float | None = None,
+        passive_discharge_rate: float | None = None,
     ) -> bool:
         """Update heater at idx. Returns False if out of range."""
         if not (0 <= idx < len(self._heat_sources_list)):
@@ -652,6 +709,14 @@ class HeaterFlowHelper:
             heater[CONF_SOURCE_COOLING_EFFICIENCY] = float(cooling_efficiency)
         if heating_efficiency is not None:
             heater[CONF_SOURCE_HEATING_EFFICIENCY] = float(heating_efficiency)
+        if min_power_fraction is not None:
+            heater[CONF_SOURCE_MIN_POWER_FRACTION] = float(min_power_fraction)
+        if charge_power is not None:
+            heater[CONF_SOURCE_CHARGE_POWER] = float(charge_power)
+        if storage_capacity_kwh is not None:
+            heater[CONF_SOURCE_STORAGE_CAPACITY_KWH] = float(storage_capacity_kwh)
+        if passive_discharge_rate is not None:
+            heater[CONF_SOURCE_PASSIVE_DISCHARGE_RATE] = float(passive_discharge_rate)
         return True
 
     def remove(self, idx: int) -> bool:

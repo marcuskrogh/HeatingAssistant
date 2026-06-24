@@ -278,11 +278,15 @@
           "heating_efficiency": "Heating efficiency (heat pump)",
           "cooling_cop": "Cooling COP / EER (heat pump)",
           "cooling_efficiency": "Cooling efficiency (heat pump)",
-          "emitter_time_constant": "Emitter response time (s)"
+          "emitter_time_constant": "Emitter response time (s)",
+          "min_power_fraction": "Minimum output fraction (pellet stove)",
+          "charge_power": "Charge power (W)",
+          "storage_capacity_kwh": "Storage capacity (kWh)",
+          "passive_discharge_rate": "Passive discharge rate (fraction/s)"
         },
         "data_description": {
           "name": "Friendly name shown in the dashboard.",
-          "type": "Electric heaters convert electricity 1:1 to heat. Heat pumps lift heat from outdoors at higher efficiency (COP > 1).",
+          "type": "Select the heat source type. Each type has a dedicated physics model. Use 'Generic thermostat' for any device not listed.",
           "max_power": "Rated thermal output in watts when fully on. For heat pumps this is the heat delivered, not the electrical input.",
           "heater_entity": "The Home Assistant switch that turns this heater on and off.",
           "efficiency": "Fraction of electrical input delivered as heat (0–1). Normally 1.0 for electric heaters.",
@@ -294,7 +298,11 @@
           "heating_efficiency": "Fraction of rated thermal heating capacity actually delivered (0–1).",
           "cooling_cop": "Cooling coefficient of performance (EER). Cooling capacity = rated electrical input × this value, so it sets the (asymmetric) maximum cooling power independently of heating. Set 0 to disable cooling.",
           "cooling_efficiency": "Fraction of the rated cooling capacity used (0–1). Lower for gentle dry/dehumidify modes.",
-          "emitter_time_constant": "Lag between the controller's command and heat actually reaching the room. Radiators ≈ 600 s; fan coils ≈ 60 s; resistive heaters ≈ 0 s."
+          "emitter_time_constant": "Lag between the controller's command and heat actually reaching the room. Radiators ≈ 600 s; fan coils ≈ 60 s; resistive heaters ≈ 0 s.",
+          "min_power_fraction": "Pellet stoves cannot modulate below ~30 % of rated output — below this the burner shuts off. Typical value: 0.30.",
+          "charge_power": "Electrical power drawn during the overnight charging window (W). Typical: 1000–3000 W.",
+          "storage_capacity_kwh": "Thermal energy stored in the brick core at full charge (kWh). Typical: 4–18 kWh.",
+          "passive_discharge_rate": "Fraction of stored energy released per second as passive heat. Default (1/(8×3600) ≈ 3.5×10⁻⁵) drains fully over 8 h."
         }
       },
       "edit_heater": {
@@ -321,11 +329,15 @@
           "heating_efficiency": "Heating efficiency (heat pump)",
           "cooling_cop": "Cooling COP / EER (heat pump)",
           "cooling_efficiency": "Cooling efficiency (heat pump)",
-          "emitter_time_constant": "Emitter response time (s)"
+          "emitter_time_constant": "Emitter response time (s)",
+          "min_power_fraction": "Minimum output fraction (pellet stove)",
+          "charge_power": "Charge power (W)",
+          "storage_capacity_kwh": "Storage capacity (kWh)",
+          "passive_discharge_rate": "Passive discharge rate (fraction/s)"
         },
         "data_description": {
           "name": "Friendly name shown in the dashboard.",
-          "type": "Electric heaters convert electricity 1:1. Heat pumps lift heat at higher efficiency.",
+          "type": "Select the heat source type. Each type has a dedicated physics model. Use 'Generic thermostat' for any device not listed.",
           "max_power": "Rated thermal output in watts when fully on.",
           "heater_entity": "The Home Assistant switch that turns this heater on and off.",
           "efficiency": "Fraction of electrical input delivered as heat (0–1).",
@@ -337,7 +349,11 @@
           "heating_efficiency": "Fraction of rated thermal heating capacity actually delivered (0–1).",
           "cooling_cop": "Cooling COP (EER). Sets the maximum cooling power (rated electrical input × this value), independent of heating. Set 0 to disable cooling.",
           "cooling_efficiency": "Fraction of rated cooling capacity used (0–1).",
-          "emitter_time_constant": "Lag between command and delivered heat."
+          "emitter_time_constant": "Lag between command and delivered heat.",
+          "min_power_fraction": "Pellet stoves cannot modulate below ~30 % of rated output — below this the burner shuts off. Typical value: 0.30.",
+          "charge_power": "Electrical power drawn during the overnight charging window (W). Typical: 1000–3000 W.",
+          "storage_capacity_kwh": "Thermal energy stored in the brick core at full charge (kWh). Typical: 4–18 kWh.",
+          "passive_discharge_rate": "Fraction of stored energy released per second as passive heat. Default (1/(8×3600) ≈ 3.5×10⁻⁵) drains fully over 8 h."
         }
       },
       "remove_heater": {
@@ -488,7 +504,17 @@
     "source_type": {
       "options": {
         "electric_heater": "Electric heater",
-        "heat_pump": "Heat pump"
+        "heat_pump": "Air-source heat pump",
+        "ground_source_heat_pump": "Ground-source heat pump",
+        "gas_heater": "Gas heater / boiler",
+        "oil_boiler": "Oil boiler",
+        "hydronic_radiator": "Hydronic radiator (district heat / hot water)",
+        "hydronic_floor_heating": "Hydronic underfloor heating",
+        "electric_floor_heating": "Electric underfloor heating",
+        "oil_radiator": "Oil-filled electric radiator",
+        "pellet_stove": "Pellet stove",
+        "electric_storage_heater": "Electric storage heater (night storage)",
+        "generic_thermostat": "Generic thermostat (catch-all)"
       }
     },
     "hvac_mode": {
