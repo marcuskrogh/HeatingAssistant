@@ -17,7 +17,37 @@ from custom_components.heating_assistant.heat_sources import (
     _cop_at_temp,
     _soft_ceiling,
     _SOFT_CEIL_K,
+    GroundSourceHeatPump,
+    PelletStove,
+    ElectricStorageHeater,
 )
+from custom_components.heating_assistant.const import (
+    SOURCE_TYPE_OIL_BOILER,
+    SOURCE_TYPE_GROUND_SOURCE_HP,
+    SOURCE_TYPE_PELLET_STOVE,
+    SOURCE_TYPE_ELECTRIC_STORAGE,
+    SOURCE_TYPE_HYDRONIC_FLOOR,
+    DEFAULT_OIL_BOILER_EFFICIENCY,
+    DEFAULT_GROUND_SOURCE_COP,
+    DEFAULT_PELLET_EFFICIENCY,
+    DEFAULT_PELLET_MIN_POWER_FRACTION,
+    DEFAULT_STORAGE_CHARGE_POWER,
+    DEFAULT_STORAGE_CAPACITY_KWH,
+    DEFAULT_STORAGE_DISCHARGE_RATE,
+    CONF_SOURCE_MIN_POWER_FRACTION,
+    CONF_SOURCE_CHARGE_POWER,
+    CONF_SOURCE_STORAGE_CAPACITY_KWH,
+    CONF_SOURCE_PASSIVE_DISCHARGE_RATE,
+    SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
+    CONF_SOURCE_NAME,
+    CONF_SOURCE_ROOM,
+    CONF_SOURCE_MAX_POWER,
+    CONF_SOURCE_EFFICIENCY,
+    CONF_SOURCE_TYPE,
+    CONF_SOURCE_COP_RATED,
+    CONF_SOURCE_HVAC_MODE,
+)
+from custom_components.heating_assistant.coordinator import build_heat_sources
 
 
 class TestElectricHeater:
@@ -806,3 +836,362 @@ class TestHydronicRadiator:
         hr = HydronicRadiator("hr1", "living_room", max_power=2000.0)
         assert hr.u_min == pytest.approx(0.0)
         assert hr.u_max == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# WP2 new heat source types
+# ---------------------------------------------------------------------------
+
+class TestGroundSourceHeatPump:
+    def test_full_power_default_cop(self):
+        """Full setpoint delivers close to max_power (soft ceiling ≤ 2 % below)."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        assert gshp.thermal_power(1.0) == pytest.approx(8000.0, rel=0.02)
+
+    def test_off(self):
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        assert gshp.thermal_power(0.0) == pytest.approx(0.0)
+
+    def test_partial_power_linear(self):
+        """At fraction=0.5 the output is the soft-ceiling of (max_power * 0.5)."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        # At 0.5 fraction: raw = 4000, cap = 8000 → soft_ceiling(4000, 8000) ≈ 4000
+        # The key assertion is that output at 0.5 is well below output at 1.0
+        # (not exactly half, because soft_ceiling(raw, cap) ≠ 0.5 * soft_ceiling(2*raw, cap)).
+        # We verify it is in the correct ballpark and positive.
+        p05 = gshp.thermal_power(0.5)
+        p10 = gshp.thermal_power(1.0)
+        assert p05 > 0.0
+        assert p05 < p10
+        # At 0.5 fraction the raw value is half max_power; since 4000 ≪ 8000
+        # the soft ceiling barely bites, so the output should be ≈ 4000 W.
+        assert p05 == pytest.approx(4000.0, rel=0.02)
+
+    def test_cop_does_not_vary_with_outdoor_temp(self):
+        """Key differentiator: flat COP — no Carnot outdoor-temperature correction."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        p_cold = gshp.thermal_power(1.0, outdoor_temp=-15.0)
+        p_warm = gshp.thermal_power(1.0, outdoor_temp=15.0)
+        assert p_cold == pytest.approx(p_warm)
+
+    def test_rated_heating_capacity_flat(self):
+        """Rated capacity must not change with outdoor temperature (unlike ASHP)."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        assert gshp.rated_heating_capacity(-15.0) == pytest.approx(
+            gshp.rated_heating_capacity(15.0)
+        )
+
+    def test_can_cool_default(self):
+        """Default hvac_mode='heat_cool' → can_cool is True."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        assert gshp.can_cool is True
+
+    def test_heat_only_mode(self):
+        """hvac_mode='heat' → can_cool False, u bounds [0, 1]."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0, hvac_mode="heat")
+        assert gshp.can_cool is False
+        assert gshp.u_min == pytest.approx(0.0)
+        assert gshp.u_max == pytest.approx(1.0)
+
+    def test_cooling_power(self):
+        """Cooling power = -(max_power / cop_rated) * cooling_cop * cooling_efficiency."""
+        gshp = GroundSourceHeatPump(
+            "g", "r", max_power=8000.0, cop_rated=4.5,
+            cooling_cop=2.5, cooling_efficiency=1.0,
+        )
+        expected = -(8000.0 / 4.5) * 2.5
+        assert gshp.cooling_power() == pytest.approx(expected, rel=1e-3)
+
+    def test_elec_per_unit_heat(self):
+        """Electrical draw = (max_power / cop_rated) * heating_efficiency."""
+        gshp = GroundSourceHeatPump(
+            "g", "r", max_power=8000.0, cop_rated=4.5, heating_efficiency=1.0,
+        )
+        assert gshp.elec_per_unit_heat == pytest.approx(8000.0 / 4.5 * 1.0, rel=1e-3)
+
+    def test_target_temperature_zero(self):
+        """At fraction=0.0 the setpoint equals the base temperature."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        assert gshp.target_temperature(0.0, 22.0) == pytest.approx(22.0)
+
+    def test_target_temperature_full_heat(self):
+        """At fraction=1.0 the offset saturates at delta_sat (default 3.0 °C)."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0, delta_sat=3.0)
+        result = gshp.target_temperature(1.0, 20.0)
+        assert result == pytest.approx(20.0 + 3.0)
+
+    def test_default_emitter_tau(self):
+        """Class default emitter_time_constant is 0.0 (coordinator applies typology default)."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        assert gshp.emitter_time_constant == pytest.approx(0.0)
+
+    def test_power_scale_update(self):
+        """Assigning power_scale re-derives gain; output at fraction=0.5 changes proportionally."""
+        gshp = GroundSourceHeatPump("g", "r", max_power=8000.0)
+        gshp.power_scale = 0.8
+        # At fraction=0.5 with scale=0.8: raw = 8000*1.0*0.8*0.5 = 3200, cap = 8000*1.0*0.8 = 6400
+        # soft_ceiling(3200, 6400) ≈ 3200 (3200 ≪ 6400, minimal soft-ceiling bias)
+        assert gshp.thermal_power(0.5) == pytest.approx(3200.0, rel=0.02)
+
+
+class TestPelletStove:
+    def test_full_power(self):
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.thermal_power(1.0) == pytest.approx(10000.0 * 0.88)
+
+    def test_off(self):
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.thermal_power(0.0) == pytest.approx(0.0)
+
+    def test_below_min_fraction_is_zero(self):
+        """Below the 30 % floor the stove is off."""
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.thermal_power(0.29) == pytest.approx(0.0)
+
+    def test_at_min_fraction(self):
+        """At exactly the floor fraction the output is linear (not zero)."""
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.thermal_power(0.30) == pytest.approx(10000.0 * 0.88 * 0.30)
+
+    def test_above_min_fraction_linear(self):
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.thermal_power(0.5) == pytest.approx(10000.0 * 0.88 * 0.5)
+
+    def test_custom_min_fraction(self):
+        ps = PelletStove("p", "r", max_power=10000.0, min_power_fraction=0.20)
+        assert ps.thermal_power(0.19) == pytest.approx(0.0)
+        assert ps.thermal_power(0.20) == pytest.approx(10000.0 * 0.88 * 0.20)
+
+    def test_efficiency_scales_output(self):
+        ps = PelletStove("p", "r", max_power=10000.0, efficiency=0.92)
+        assert ps.thermal_power(1.0) == pytest.approx(10000.0 * 0.92)
+
+    def test_invalid_efficiency(self):
+        with pytest.raises(ValueError):
+            PelletStove("p", "r", max_power=10000.0, efficiency=1.1)
+
+    def test_invalid_min_fraction_too_high(self):
+        with pytest.raises(ValueError):
+            PelletStove("p", "r", max_power=10000.0, min_power_fraction=1.0)
+
+    def test_elec_per_unit_heat_is_zero(self):
+        """Pellet stove burns biomass — zero electrical draw."""
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.elec_per_unit_heat == pytest.approx(0.0)
+
+    def test_cannot_cool(self):
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.can_cool is False
+
+    def test_default_emitter_tau(self):
+        """Class default τ_em is 2400.0 s (40 min burn-bed lag)."""
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.emitter_time_constant == pytest.approx(2400.0)
+
+    def test_rated_heating_capacity(self):
+        ps = PelletStove("p", "r", max_power=10000.0, efficiency=0.88)
+        assert ps.rated_heating_capacity() == pytest.approx(10000.0 * 0.88)
+
+    def test_outdoor_temp_ignored(self):
+        ps = PelletStove("p", "r", max_power=10000.0)
+        assert ps.thermal_power(1.0, -20.0) == pytest.approx(ps.thermal_power(1.0, 20.0))
+
+    def test_power_scale_update(self):
+        ps = PelletStove("p", "r", max_power=10000.0, efficiency=0.88)
+        ps.power_scale = 0.9
+        assert ps.thermal_power(1.0) == pytest.approx(10000.0 * 0.88 * 0.9)
+
+
+class TestElectricStorageHeater:
+    def test_boost_power_thermal(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        assert esh.thermal_power(1.0) == pytest.approx(500.0)
+
+    def test_boost_power_off(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        assert esh.thermal_power(0.0) == pytest.approx(0.0)
+
+    def test_boost_partial(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        assert esh.thermal_power(0.5) == pytest.approx(250.0)
+
+    def test_passive_thermal_output_full_charge(self):
+        """At full charge: stored_kwh * 3_600_000 * discharge_rate."""
+        esh = ElectricStorageHeater(
+            "e", "r", max_power=0.0,
+            storage_capacity_kwh=8.0,
+            passive_discharge_rate=DEFAULT_STORAGE_DISCHARGE_RATE,
+        )
+        expected = 8.0 * 3_600_000.0 * DEFAULT_STORAGE_DISCHARGE_RATE
+        assert esh.passive_thermal_output(8.0) == pytest.approx(expected)
+
+    def test_passive_thermal_output_zero_stored(self):
+        esh = ElectricStorageHeater("e", "r", max_power=0.0)
+        assert esh.passive_thermal_output(0.0) == pytest.approx(0.0)
+
+    def test_passive_thermal_output_proportional(self):
+        """Doubling stored energy doubles passive output."""
+        esh = ElectricStorageHeater("e", "r", max_power=0.0)
+        p1 = esh.passive_thermal_output(4.0)
+        p2 = esh.passive_thermal_output(8.0)
+        assert p2 == pytest.approx(2.0 * p1)
+
+    def test_elec_per_unit_heat_is_charge_power(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0, charge_power=1500.0)
+        assert esh.elec_per_unit_heat == pytest.approx(1500.0)
+
+    def test_cannot_cool(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        assert esh.can_cool is False
+
+    def test_default_charge_power(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        assert esh.charge_power == pytest.approx(DEFAULT_STORAGE_CHARGE_POWER)
+
+    def test_default_storage_capacity(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        assert esh.storage_capacity_kwh == pytest.approx(DEFAULT_STORAGE_CAPACITY_KWH)
+
+    def test_emitter_tau_default(self):
+        """Boost coil is instant — class default τ_em is 0.0."""
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        assert esh.emitter_time_constant == pytest.approx(0.0)
+
+    def test_power_scale_affects_boost(self):
+        esh = ElectricStorageHeater("e", "r", max_power=500.0)
+        esh.power_scale = 0.5
+        assert esh.thermal_power(1.0) == pytest.approx(500.0 * 0.5)
+
+
+class TestOilBoilerAlias:
+    def _make_cfg(self, extra=None):
+        cfg = {
+            CONF_SOURCE_TYPE: SOURCE_TYPE_OIL_BOILER,
+            CONF_SOURCE_NAME: "ob",
+            CONF_SOURCE_ROOM: "r",
+            CONF_SOURCE_MAX_POWER: 20000.0,
+        }
+        if extra:
+            cfg.update(extra)
+        return [cfg]
+
+    def test_factory_returns_gas_heater(self):
+        sources = build_heat_sources(self._make_cfg())
+        assert isinstance(sources[0], GasHeater)
+
+    def test_default_efficiency(self):
+        sources = build_heat_sources(self._make_cfg())
+        assert sources[0].efficiency == pytest.approx(DEFAULT_OIL_BOILER_EFFICIENCY)
+
+    def test_thermal_power(self):
+        sources = build_heat_sources(self._make_cfg())
+        assert sources[0].thermal_power(1.0) == pytest.approx(20000.0 * DEFAULT_OIL_BOILER_EFFICIENCY)
+
+    def test_elec_per_unit_heat_zero(self):
+        """Oil combustion draws no electricity."""
+        sources = build_heat_sources(self._make_cfg())
+        assert sources[0].elec_per_unit_heat == pytest.approx(0.0)
+
+    def test_custom_efficiency_override(self):
+        sources = build_heat_sources(self._make_cfg(extra={CONF_SOURCE_EFFICIENCY: 0.93}))
+        assert sources[0].efficiency == pytest.approx(0.93)
+
+
+class TestCoordinatorFactoryNewTypes:
+    def _cfg(self, src_type, extra=None):
+        cfg = {
+            CONF_SOURCE_TYPE: src_type,
+            CONF_SOURCE_NAME: "s",
+            CONF_SOURCE_ROOM: "r",
+            CONF_SOURCE_MAX_POWER: 5000.0,
+        }
+        if extra:
+            cfg.update(extra)
+        return [cfg]
+
+    def test_ground_source_hp_factory(self):
+        sources = build_heat_sources(self._cfg(SOURCE_TYPE_GROUND_SOURCE_HP))
+        assert isinstance(sources[0], GroundSourceHeatPump)
+
+    def test_ground_source_hp_tau(self):
+        sources = build_heat_sources(self._cfg(SOURCE_TYPE_GROUND_SOURCE_HP))
+        assert sources[0].emitter_time_constant == pytest.approx(
+            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_GROUND_SOURCE_HP]
+        )
+
+    def test_pellet_stove_factory(self):
+        sources = build_heat_sources(self._cfg(SOURCE_TYPE_PELLET_STOVE))
+        assert isinstance(sources[0], PelletStove)
+
+    def test_pellet_stove_tau(self):
+        sources = build_heat_sources(self._cfg(SOURCE_TYPE_PELLET_STOVE))
+        assert sources[0].emitter_time_constant == pytest.approx(
+            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_PELLET_STOVE]
+        )
+
+    def test_electric_storage_factory(self):
+        sources = build_heat_sources(self._cfg(SOURCE_TYPE_ELECTRIC_STORAGE))
+        assert isinstance(sources[0], ElectricStorageHeater)
+
+    def test_electric_storage_tau(self):
+        sources = build_heat_sources(self._cfg(SOURCE_TYPE_ELECTRIC_STORAGE))
+        assert sources[0].emitter_time_constant == pytest.approx(
+            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_ELECTRIC_STORAGE]
+        )
+
+    def test_hydronic_floor_tau_fixed(self):
+        """Regression: WP2 fixes hydronic_floor_heating τ_em from 3600 → 7200 s."""
+        sources = build_heat_sources(self._cfg(SOURCE_TYPE_HYDRONIC_FLOOR))
+        assert sources[0].emitter_time_constant == pytest.approx(7200.0)
+
+    def test_ground_source_hp_custom_cop(self):
+        sources = build_heat_sources(
+            self._cfg(SOURCE_TYPE_GROUND_SOURCE_HP, extra={CONF_SOURCE_COP_RATED: 5.0})
+        )
+        assert sources[0].cop_rated == pytest.approx(5.0)
+
+    def test_pellet_stove_custom_min_fraction(self):
+        sources = build_heat_sources(
+            self._cfg(SOURCE_TYPE_PELLET_STOVE, extra={CONF_SOURCE_MIN_POWER_FRACTION: 0.25})
+        )
+        assert sources[0].min_power_fraction == pytest.approx(0.25)
+
+    def test_electric_storage_custom_charge_power(self):
+        sources = build_heat_sources(
+            self._cfg(SOURCE_TYPE_ELECTRIC_STORAGE, extra={CONF_SOURCE_CHARGE_POWER: 2000.0})
+        )
+        assert sources[0].charge_power == pytest.approx(2000.0)
+
+
+class TestHydronicFloorHeatingTauRegression:
+    def test_tau_default_is_7200(self):
+        """Regression guard: WP2 fixed τ_em from 3600 s to 7200 s."""
+        assert SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_HYDRONIC_FLOOR] == pytest.approx(7200.0)
+
+    def test_factory_applies_7200_default(self):
+        """Factory with no explicit emitter_time_constant yields 7200 s."""
+        cfg = [
+            {
+                CONF_SOURCE_TYPE: SOURCE_TYPE_HYDRONIC_FLOOR,
+                CONF_SOURCE_NAME: "ufh",
+                CONF_SOURCE_ROOM: "r",
+                CONF_SOURCE_MAX_POWER: 3000.0,
+            }
+        ]
+        sources = build_heat_sources(cfg)
+        assert sources[0].emitter_time_constant == pytest.approx(7200.0)
+
+    def test_factory_respects_override(self):
+        """An explicit emitter_time_constant overrides the typology default."""
+        from custom_components.heating_assistant.const import CONF_SOURCE_EMITTER_TIME_CONSTANT
+        cfg = [
+            {
+                CONF_SOURCE_TYPE: SOURCE_TYPE_HYDRONIC_FLOOR,
+                CONF_SOURCE_NAME: "ufh",
+                CONF_SOURCE_ROOM: "r",
+                CONF_SOURCE_MAX_POWER: 3000.0,
+                CONF_SOURCE_EMITTER_TIME_CONSTANT: 10800.0,
+            }
+        ]
+        sources = build_heat_sources(cfg)
+        assert sources[0].emitter_time_constant == pytest.approx(10800.0)
