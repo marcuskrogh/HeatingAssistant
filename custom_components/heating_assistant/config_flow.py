@@ -383,9 +383,14 @@ def _number_box(
     *,
     min_value: float,
     max_value: float,
-    step: float = 1.0,
+    step: "float | str" = 1.0,
     unit: Optional[str] = None,
 ) -> NumberSelector:
+    # ``step`` may be the literal "any" to allow arbitrary precision. HA's
+    # NumberSelector rejects numeric steps below 1e-3, so latitude/longitude
+    # (which need ~1e-6 precision) must use "any" rather than a tiny float —
+    # otherwise building the schema raises and the config flow fails to load
+    # with a "400: Bad Request".
     kwargs: Dict[str, Any] = {
         "min": min_value,
         "max": max_value,
@@ -436,10 +441,10 @@ def _location_schema(
     return vol.Schema(
         {
             vol.Required(CONF_LATITUDE, default=float(latitude_default)): _number_box(
-                min_value=-90.0, max_value=90.0, step=0.000001, unit="°",
+                min_value=-90.0, max_value=90.0, step="any", unit="°",
             ),
             vol.Required(CONF_LONGITUDE, default=float(longitude_default)): _number_box(
-                min_value=-180.0, max_value=180.0, step=0.000001, unit="°",
+                min_value=-180.0, max_value=180.0, step="any", unit="°",
             ),
         }
     )
@@ -471,10 +476,10 @@ def _site_settings_schema(
     """
     schema_dict: Dict[Any, Any] = {
         vol.Required(CONF_LATITUDE, default=float(latitude_default)): _number_box(
-            min_value=-90.0, max_value=90.0, step=0.001, unit="°",
+            min_value=-90.0, max_value=90.0, step="any", unit="°",
         ),
         vol.Required(CONF_LONGITUDE, default=float(longitude_default)): _number_box(
-            min_value=-180.0, max_value=180.0, step=0.001, unit="°",
+            min_value=-180.0, max_value=180.0, step="any", unit="°",
         ),
     }
 
