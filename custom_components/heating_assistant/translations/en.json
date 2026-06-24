@@ -14,29 +14,20 @@
         }
       },
       "reconfigure": {
-        "title": "Site settings",
-        "description": "Update location, outdoor sources, and update timing. Rooms, heat sources and schedules are managed from **Configure**.",
+        "title": "Site location",
+        "description": "Update your home's location. Sensors, timing, rooms, heat sources and schedules are managed from **Configure** and the Heating Assistant panel.",
         "data": {
           "latitude": "Latitude",
-          "longitude": "Longitude",
-          "outdoor_temp_entity": "Outdoor temperature sensor",
-          "weather_entity": "Weather forecast",
-          "update_interval": "Control interval (seconds)"
+          "longitude": "Longitude"
         },
         "data_description": {
-          "latitude": "Decimal degrees, positive north of the equator.",
-          "longitude": "Decimal degrees, positive east of the prime meridian.",
-          "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. At least one of this or the weather entity is required.",
-          "weather_entity": "Provides hourly forecasts so the controller can plan ahead. At least one of this or the outdoor sensor is required.",
-          "update_interval": "Re-planning cadence in seconds. 900 s (15 min) suits most homes."
+          "latitude": "Decimal degrees, positive north of the equator. Used for solar gain prediction.",
+          "longitude": "Decimal degrees, positive east of the prime meridian. Used for solar gain prediction."
         }
       }
     },
-    "error": {
-      "outdoor_or_weather_required": "Please pick at least one outdoor temperature sensor or weather forecast entity."
-    },
     "abort": {
-      "reconfigure_successful": "Site settings updated."
+      "reconfigure_successful": "Site location updated."
     }
   },
   "options": {
