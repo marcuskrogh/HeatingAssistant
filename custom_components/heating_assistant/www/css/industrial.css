@@ -1133,6 +1133,11 @@
   margin-bottom: 24px;
 }
 
+.tuning-actions--footer {
+  margin-top: 20px;
+  margin-bottom: 0;
+}
+
 .tuning-actions__btn {
   min-width: 150px;
 }
@@ -3469,6 +3474,16 @@ input[type="time"] {
   line-height: 1.5;
   color: var(--text-secondary);
   margin: 0 0 16px 0;
+}
+
+/* Sub-page shell: tighten gap between title row and page description */
+.section-header + .config-section__desc {
+  margin-top: -8px;
+}
+
+/* List pages: page description flows into the list action header */
+.config-section__desc + .sched-detail__section-header {
+  margin-top: 0;
 }
 
 /* Landing cards */

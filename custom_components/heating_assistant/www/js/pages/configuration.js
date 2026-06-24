@@ -125,12 +125,60 @@ function advancedSubsection(parent, title = 'Advanced settings') {
   return sec.body;
 }
 
-function actionsBar(primaryLabel) {
-  const row = el('div', 'tuning-actions');
+function configListHeader(title, addLabel, onAdd) {
+  const header = el('div', 'sched-detail__section-header');
+  header.appendChild(el('span', 'sched-detail__section-title', title));
+  const addBtn = el('button', 'btn btn--primary btn--sm');
+  addBtn.dataset.role = 'add';
+  addBtn.textContent = addLabel;
+  addBtn.addEventListener('click', onAdd);
+  header.appendChild(addBtn);
+  return header;
+}
+
+function configPageShell(container, { backLabel, backHash, title, description } = {}) {
+  container.innerHTML = '';
+  if (backLabel != null && backHash != null) {
+    container.appendChild(backNav(backLabel, backHash));
+  }
+  if (title) {
+    container.appendChild(el('div', 'section-header', title));
+  }
+  if (description) {
+    container.appendChild(el('p', 'config-section__desc', description));
+  }
+  const body = el('div');
+  container.appendChild(body);
+  return { body };
+}
+
+function actionsBar(primaryLabel, { placement = 'top', secondaryLabel } = {}) {
+  const classes = placement === 'footer'
+    ? 'tuning-actions tuning-actions--footer'
+    : 'tuning-actions';
+  const row = el('div', classes);
+  let html = `<button class="btn btn--primary tuning-actions__btn" data-role="save">${primaryLabel}</button>`;
+  if (secondaryLabel) {
+    html += `<button class="btn btn--secondary" data-role="secondary">${secondaryLabel}</button>`;
+  }
+  html += `<span class="tuning-actions__status" data-role="status"></span>`;
+  row.innerHTML = html;
+  return row;
+}
+
+function editorActionsBar({ primaryLabel, showDelete = false, deleteLabel } = {}) {
+  const row = el('div', 'tuning-actions tuning-actions--footer');
   row.innerHTML = `
     <button class="btn btn--primary tuning-actions__btn" data-role="save">${primaryLabel}</button>
     <span class="tuning-actions__status" data-role="status"></span>
   `;
+  if (showDelete && deleteLabel) {
+    const statusEl = row.querySelector('[data-role="status"]');
+    const deleteBtn = el('button', 'btn btn--danger');
+    deleteBtn.dataset.role = 'delete';
+    deleteBtn.textContent = deleteLabel;
+    row.insertBefore(deleteBtn, statusEl);
+  }
   return row;
 }
 
@@ -447,13 +495,13 @@ function renderLanding(container) {
 // ---------------------------------------------------------------------------
 
 function renderDisplay(container, connection, hass) {
-  container.innerHTML = '';
-  container.appendChild(backNav('CONFIGURATION', '#config'));
-  container.appendChild(el('div', 'section-header', 'DISPLAY & PLOTS'));
-
-  const body = el('div');
+  const { body } = configPageShell(container, {
+    backLabel: 'CONFIGURATION',
+    backHash: '#config',
+    title: 'DISPLAY & PLOTS',
+    description: 'How much history and forecast the room charts show. Decoupled from the controller horizon.',
+  });
   body.appendChild(loadingNode());
-  container.appendChild(body);
 
   connection.getModelConfig().then((cfg) => {
     const ui = (cfg && cfg.ui_settings) || {};
@@ -511,27 +559,20 @@ function renderDisplay(container, connection, hass) {
 // ---------------------------------------------------------------------------
 
 function renderRoomList(container, connection, hass) {
-  container.innerHTML = '';
-  container.appendChild(backNav('CONFIGURATION', '#config'));
-
-  const header = el('div', 'sched-detail__section-header');
-  header.innerHTML = `
-    <span class="section-header" style="margin:0;border:0;padding:0;">ROOMS</span>
-    <button class="btn btn--primary btn--sm" data-role="add">+ Add Room</button>
-  `;
-  container.appendChild(header);
-
-  const body = el('div');
-  body.appendChild(loadingNode());
-  container.appendChild(body);
-
-  header.querySelector('[data-role="add"]').addEventListener('click', () => {
-    window.location.hash = '#config/rooms/new';
+  const { body } = configPageShell(container, {
+    backLabel: 'CONFIGURATION',
+    backHash: '#config',
+    description: 'Thermal model, comfort setpoints, sensors, windows and inter-room connections for each room.',
   });
+  container.insertBefore(
+    configListHeader('ROOMS', '+ Add Room', () => {
+      window.location.hash = '#config/rooms/new';
+    }),
+    body,
+  );
+  body.appendChild(loadingNode());
 
   connection.getModelConfig().then((cfg) => {
-    console.log('[HA] getModelConfig rooms:', JSON.stringify(cfg && cfg.rooms));
-    console.log('[HA] getModelConfig heat_sources:', JSON.stringify(cfg && cfg.heat_sources));
     const list = (cfg && cfg.rooms) || [];
     body.innerHTML = '';
     if (list.length === 0) {
@@ -570,11 +611,14 @@ function renderRoomList(container, connection, hass) {
 // ---------------------------------------------------------------------------
 
 function renderRoomEditor(container, connection, hass, idxParam) {
-  container.innerHTML = '';
-  container.appendChild(backNav('ROOMS', '#config/rooms'));
-  const body = el('div');
+  const isNewInitial = idxParam === 'new';
+  const { body } = configPageShell(container, {
+    backLabel: 'ROOMS',
+    backHash: '#config/rooms',
+    title: isNewInitial ? 'NEW ROOM' : 'EDIT ROOM',
+    description: LANDING_CARDS.find((c) => c.hash === '#config/rooms').desc,
+  });
   body.appendChild(loadingNode());
-  container.appendChild(body);
 
   connection.getModelConfig().then((cfg) => {
     const allRooms = (cfg && cfg.rooms) ? cfg.rooms.map((r) => ({ ...r })) : [];
@@ -601,8 +645,10 @@ function renderRoomEditor(container, connection, hass, idxParam) {
     }
     delete room.temp_sensor;
 
+    const titleEl = container.querySelector('.section-header');
+    if (titleEl) titleEl.textContent = isNew ? 'NEW ROOM' : `EDIT ROOM: ${room.name || ''}`;
+
     body.innerHTML = '';
-    body.appendChild(el('div', 'section-header', isNew ? 'NEW ROOM' : `EDIT ROOM: ${room.name || ''}`));
 
     // --- Identity -----------------------------------------------------------
     const idCard = sectionCard('Room identity',
@@ -759,13 +805,11 @@ function renderRoomEditor(container, connection, hass, idxParam) {
     body.appendChild(envCard);
 
     // --- Save / delete ------------------------------------------------------
-    const actions = el('div', 'tuning-actions');
-    actions.style.marginTop = '20px';
-    actions.innerHTML = `
-      <button class="btn btn--primary" data-role="save">${isNew ? 'Create Room' : 'Save Changes'}</button>
-      ${isNew ? '' : '<button class="btn btn--danger" data-role="delete">Delete Room</button>'}
-      <span class="tuning-actions__status" data-role="status"></span>
-    `;
+    const actions = editorActionsBar({
+      primaryLabel: isNew ? 'Create Room' : 'Save Changes',
+      showDelete: !isNew,
+      deleteLabel: 'Delete Room',
+    });
     body.appendChild(actions);
     const statusEl = actions.querySelector('[data-role="status"]');
 
@@ -855,23 +899,18 @@ function cleanRoom(room) {
 // ---------------------------------------------------------------------------
 
 function renderSourceList(container, connection, hass) {
-  container.innerHTML = '';
-  container.appendChild(backNav('CONFIGURATION', '#config'));
-
-  const header = el('div', 'sched-detail__section-header');
-  header.innerHTML = `
-    <span class="section-header" style="margin:0;border:0;padding:0;">HEAT SOURCES</span>
-    <button class="btn btn--primary btn--sm" data-role="add">+ Add Heat Source</button>
-  `;
-  container.appendChild(header);
-
-  const body = el('div');
-  body.appendChild(loadingNode());
-  container.appendChild(body);
-
-  header.querySelector('[data-role="add"]').addEventListener('click', () => {
-    window.location.hash = '#config/sources/new';
+  const { body } = configPageShell(container, {
+    backLabel: 'CONFIGURATION',
+    backHash: '#config',
+    description: 'Electric heaters and heat pumps: capacity, efficiency, COP and the entity each one drives.',
   });
+  container.insertBefore(
+    configListHeader('HEAT SOURCES', '+ Add Heat Source', () => {
+      window.location.hash = '#config/sources/new';
+    }),
+    body,
+  );
+  body.appendChild(loadingNode());
 
   connection.getModelConfig().then((cfg) => {
     const list = (cfg && cfg.heat_sources) || [];
@@ -906,11 +945,14 @@ function renderSourceList(container, connection, hass) {
 // ---------------------------------------------------------------------------
 
 function renderSourceEditor(container, connection, hass, idxParam) {
-  container.innerHTML = '';
-  container.appendChild(backNav('HEAT SOURCES', '#config/sources'));
-  const body = el('div');
+  const isNewInitial = idxParam === 'new';
+  const { body } = configPageShell(container, {
+    backLabel: 'HEAT SOURCES',
+    backHash: '#config/sources',
+    title: isNewInitial ? 'NEW HEAT SOURCE' : 'EDIT SOURCE',
+    description: LANDING_CARDS.find((c) => c.hash === '#config/sources').desc,
+  });
   body.appendChild(loadingNode());
-  container.appendChild(body);
 
   connection.getModelConfig().then((cfg) => {
     const allSources = (cfg && cfg.heat_sources) ? cfg.heat_sources.map((s) => ({ ...s })) : [];
@@ -928,8 +970,10 @@ function renderSourceEditor(container, connection, hass, idxParam) {
       ? { name: '', type: 'electric_heater', room: roomNames[0] || '', max_power: 2000, hvac_mode: 'heat_cool' }
       : { ...allSources[idx] };
 
+    const titleEl = container.querySelector('.section-header');
+    if (titleEl) titleEl.textContent = isNew ? 'NEW HEAT SOURCE' : `EDIT SOURCE: ${src.name || ''}`;
+
     body.innerHTML = '';
-    body.appendChild(el('div', 'section-header', isNew ? 'NEW HEAT SOURCE' : `EDIT SOURCE: ${src.name || ''}`));
 
     // Dynamic body re-renders when type or HVAC mode changes (so the heating /
     // cooling sections appear and disappear with the selected mode).
@@ -1086,13 +1130,11 @@ function renderSourceEditor(container, connection, hass, idxParam) {
 
     renderFields();
 
-    const actions = el('div', 'tuning-actions');
-    actions.style.marginTop = '20px';
-    actions.innerHTML = `
-      <button class="btn btn--primary" data-role="save">${isNew ? 'Create Source' : 'Save Changes'}</button>
-      ${isNew ? '' : '<button class="btn btn--danger" data-role="delete">Delete Source</button>'}
-      <span class="tuning-actions__status" data-role="status"></span>
-    `;
+    const actions = editorActionsBar({
+      primaryLabel: isNew ? 'Create Source' : 'Save Changes',
+      showDelete: !isNew,
+      deleteLabel: 'Delete Source',
+    });
     body.appendChild(actions);
     const statusEl = actions.querySelector('[data-role="status"]');
 
@@ -1165,13 +1207,13 @@ function cleanSource(src) {
 // ---------------------------------------------------------------------------
 
 function renderSystemParams(container, connection, hass) {
-  container.innerHTML = '';
-  container.appendChild(backNav('CONFIGURATION', '#config'));
-  container.appendChild(el('div', 'section-header', 'SYSTEM PARAMETERS'));
-
-  const body = el('div');
+  const { body } = configPageShell(container, {
+    backLabel: 'CONFIGURATION',
+    backHash: '#config',
+    title: 'SYSTEM PARAMETERS',
+    description: 'Data retention, history depth and other system-level settings that control how the integration stores and manages data.',
+  });
   body.appendChild(loadingNode());
-  container.appendChild(body);
 
   connection.getModelConfig().then((cfg) => {
     const sp = (cfg && cfg.system_params) || {};
@@ -1226,13 +1268,13 @@ function renderSystemParams(container, connection, hass) {
 // ---------------------------------------------------------------------------
 
 function renderSystem(container, connection, hass) {
-  container.innerHTML = '';
-  container.appendChild(backNav('CONFIGURATION', '#config'));
-  container.appendChild(el('div', 'section-header', 'ENVIRONMENT & SITE'));
-
-  const body = el('div');
+  const { body } = configPageShell(container, {
+    backLabel: 'CONFIGURATION',
+    backHash: '#config',
+    title: 'ENVIRONMENT & SITE',
+    description: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors, plus site location.',
+  });
   body.appendChild(loadingNode());
-  container.appendChild(body);
 
   connection.getModelConfig().then((cfg) => {
     const sys = (cfg && cfg.system) || {};

@@ -28,3 +28,6 @@ env/
 # Home Assistant
 *.db
 *.log
+
+# Development docs
+docs/
