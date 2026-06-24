@@ -31,3 +31,6 @@ env/
 
 # Development docs
 docs/
+
+# Claude Code internal
+.claude/
