@@ -6,7 +6,17 @@ import { createScheduleOverview } from '../components/schedule-overview.js';
 import { getRoomScheduleData } from '../schedule-utils.js';
 import { findActiveExperiment, experimentBands } from '../experiment-utils.js';
 import {
-  formatPower, formatPowerKw, formatTemperature, formatPrice,
+  KPI_SEVERITY,
+  COMFORT_DEVIATION_GAUGE_MAX_C,
+  isRoomActive,
+  roomComfortDeviation,
+  roomHeatLoss,
+  heatLossGaugeMax,
+  solarGainGaugeMax,
+  roomModelFit,
+} from '../kpi-engine.js';
+import {
+  formatPower, formatPowerKw,
   entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
 } from '../utils.js';
@@ -14,24 +24,18 @@ import {
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
 const DEFAULT_MAX_POWER = 2000;
-// Outdoor-temperature gauge thresholds, matched to the overview page so the
-// colour bands are identical across surfaces.
-const OUTDOOR_SEVERITY = { good: 5, warning: -5, alarm: -15 };
-// Per-room solar-gain gauge span [W]; typical sunlit windows land well within.
-const DEFAULT_MAX_SOLAR = 1000;
 // Compact kW axis/tooltip formatting for power plots (values already in kW).
 const POWER_KW_TICK = (v) => Number(v).toFixed(1);
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
-/** Format the current electricity price with the unit the price entity reports
- *  (currency/kWh), falling back to a bare number when no unit is available. */
-function formatPriceWithUnit(state, priceEntity) {
-  const value = entityValue(state, priceEntity);
-  const text = formatPrice(value);
-  if (text === '—') return text;
-  const unit = entityAttr(state, priceEntity, 'unit_of_measurement');
-  return unit ? `${text} ${unit}` : text;
+/** Comfort deviation display: 0.0°C in band, otherwise +d°C (KPI_SPEC §5.2). */
+function formatComfortDeviation(deviation) {
+  if (deviation === null || deviation === undefined) return '—';
+  const num = parseFloat(deviation);
+  if (isNaN(num)) return '—';
+  if (num === 0) return '0.0°C';
+  return `+${num.toFixed(1)}°C`;
 }
 
 /** Whether the room is currently off — the effective state published by the
@@ -53,7 +57,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   container.innerHTML = '';
 
   // Tracks the freshest state snapshot; declared up-front because some gauge
-  // formatters (e.g. the price unit) read live attributes lazily on each paint.
+  // formatters read live attributes lazily on each paint.
   let latestState = state;
   // The identification experiment currently exciting this room, or null —
   // refreshed via WebSocket so the climate card can show the in-progress look.
@@ -135,15 +139,21 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   // KPIs use the same gauge design as the overview page (label + value +
   // severity bar). At room level these are the *current system values for this
-  // room* — heater power, energy price, outdoor temperature and solar gain —
-  // since indoor temperature / setpoint / comfort band already live on the
-  // climate card above. Model fit is an overall-model metric and lives only on
-  // the main overview.
+  // room* — comfort deviation, heater power, solar gain, heat loss, and model
+  // fit — since indoor temperature / setpoint / comfort band already live on the
+  // climate card above.
   const powerBounds = { min: 0, max: DEFAULT_MAX_POWER };
 
-  const priceEntity = systemEntity('electricity_price');
-  const outdoorEntity = systemEntity('outdoor_temperature_measured');
   const solarEntity = room.entities['solar_gain_measured'];
+
+  const comfortGauge = createGauge({
+    value: 0,
+    min: 0,
+    max: COMFORT_DEVIATION_GAUGE_MAX_C,
+    label: 'COMFORT DEV',
+    format: () => formatComfortDeviation(null),
+    severity: KPI_SEVERITY.comfortDeviation,
+  });
 
   const powerGauge = createGauge({
     value: powerVal,
@@ -153,78 +163,96 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     format: formatPower,
   });
 
-  // Price bar spans the upcoming forecast range (filled in from getForecasts);
-  // until then it falls back to a 0-based unit scale. Cheaper = greener.
-  const priceBounds = { min: 0, max: 1 };
-  const priceGauge = createGauge({
-    value: entityValue(state, priceEntity) ?? 0,
-    min: priceBounds.min,
-    max: priceBounds.max,
-    label: 'ENERGY PRICE',
-    format: () => formatPriceWithUnit(latestState, priceEntity),
-  });
-  if (!(priceEntity in state)) priceGauge.style.display = 'none';
-
-  const outdoorGauge = createGauge({
-    value: entityValue(state, outdoorEntity) ?? 0,
-    min: -30,
-    max: 40,
-    label: 'OUTDOOR',
-    format: formatTemperature,
-    severity: OUTDOOR_SEVERITY,
-  });
-
   const solarGauge = createGauge({
     value: entityValue(state, solarEntity) ?? 0,
     min: 0,
-    max: DEFAULT_MAX_SOLAR,
+    max: solarGainGaugeMax(0),
     label: 'SOLAR GAIN',
     format: formatPower,
-    severity: { good: 300, warning: 50, alarm: 0 },
+    severity: KPI_SEVERITY.solarGain,
   });
 
+  const heatLossGauge = createGauge({
+    value: 0,
+    min: 0,
+    max: heatLossGaugeMax(0),
+    label: 'HEAT LOSS',
+    format: formatPower,
+    severity: KPI_SEVERITY.heatLoss,
+  });
+
+  const initialFit = roomModelFit(state, room);
+  const modelFitGauge = createGauge({
+    value: initialFit.value ?? 0,
+    min: 0,
+    max: 1,
+    label: 'MODEL FIT',
+    format: () => initialFit.label,
+    severity: KPI_SEVERITY.modelFit,
+  });
+
+  kpiGrid.appendChild(comfortGauge);
   kpiGrid.appendChild(powerGauge);
-  kpiGrid.appendChild(priceGauge);
-  kpiGrid.appendChild(outdoorGauge);
   kpiGrid.appendChild(solarGauge);
+  kpiGrid.appendChild(heatLossGauge);
+  kpiGrid.appendChild(modelFitGauge);
 
-  function paintPowerGauge(value) {
+  function paintComfortGauge(s) {
+    const lower = entityValue(s, room.entities['constraint_lower']);
+    const upper = entityValue(s, room.entities['constraint_upper']);
+    const hasBounds = lower !== null && upper !== null;
+    comfortGauge.style.display = hasBounds ? '' : 'none';
+    if (!hasBounds) return;
+
+    const active = isRoomActive(s, roomSlug);
+    const dev = roomComfortDeviation(s, room, active);
+    const clamped = dev !== null ? Math.min(dev, COMFORT_DEVIATION_GAUGE_MAX_C) : 0;
+    updateGauge(comfortGauge, {
+      value: clamped,
+      min: 0,
+      max: COMFORT_DEVIATION_GAUGE_MAX_C,
+      format: () => formatComfortDeviation(dev),
+      severity: active && dev !== null ? KPI_SEVERITY.comfortDeviation : undefined,
+    });
+  }
+
+  function paintPowerGauge(value, roomOff) {
+    const displayVal = roomOff ? 0 : (value ?? 0);
     updateGauge(powerGauge, {
-      value, min: powerBounds.min, max: powerBounds.max, format: formatPower,
-    });
-  }
-
-  function paintPriceGauge(value) {
-    // Hide the price KPI entirely when no price entity is configured (the
-    // backend then publishes no electricity-price sensor at all).
-    priceGauge.style.display = priceEntity in latestState ? '' : 'none';
-    // Colour cheaper prices green: position within the forecast range, inverted.
-    const span = priceBounds.max - priceBounds.min || 1;
-    updateGauge(priceGauge, {
-      value: value ?? 0, min: priceBounds.min, max: priceBounds.max,
-      format: () => formatPriceWithUnit(latestState, priceEntity),
-      severity: {
-        good: priceBounds.min + span / 3,
-        warning: priceBounds.min + (2 * span) / 3,
-        alarm: priceBounds.max,
-        inverse: true,
-      },
-    });
-  }
-
-  function paintOutdoorGauge(value) {
-    updateGauge(outdoorGauge, {
-      value: value ?? 0, min: -30, max: 40,
-      format: formatTemperature, severity: OUTDOOR_SEVERITY,
+      value: displayVal, min: powerBounds.min, max: powerBounds.max, format: formatPower,
     });
   }
 
   function paintSolarGauge(value) {
+    const gain = value ?? 0;
     updateGauge(solarGauge, {
-      value: value ?? 0, min: 0, max: DEFAULT_MAX_SOLAR,
-      format: formatPower, severity: { good: 300, warning: 50, alarm: 0 },
+      value: gain, min: 0, max: solarGainGaugeMax(gain),
+      format: formatPower, severity: KPI_SEVERITY.solarGain,
     });
   }
+
+  function paintHeatLossGauge(s) {
+    const loss = roomHeatLoss(s, room) ?? 0;
+    updateGauge(heatLossGauge, {
+      value: loss, min: 0, max: heatLossGaugeMax(loss),
+      format: formatPower, severity: KPI_SEVERITY.heatLoss,
+    });
+  }
+
+  function paintModelFitGauge(s) {
+    const fit = roomModelFit(s, room);
+    updateGauge(modelFitGauge, {
+      value: fit.value ?? 0, min: 0, max: 1,
+      format: () => fit.label,
+      severity: fit.value !== null ? KPI_SEVERITY.modelFit : undefined,
+    });
+  }
+
+  paintComfortGauge(state);
+  paintPowerGauge(powerVal, offVal);
+  paintSolarGauge(entityValue(state, solarEntity));
+  paintHeatLossGauge(state);
+  paintModelFitGauge(state);
 
   const countdown = createCountdown(state, true);
   kpiGrid.appendChild(countdown.element);
@@ -274,7 +302,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
       const gaugeMin = roomForecast.max_cooling_power
         ?? roomForecast.current_max_cooling_power;
       if (gaugeMin != null) powerBounds.min = -gaugeMin;
-      paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']));
+      paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']), computeRoomOff(latestState, roomSlug));
     }
   }
 
@@ -343,7 +371,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // lastRunTs tracks the MPC solve timestamp; when it changes we know new
   // forecast data is available and re-fetch via the WS endpoint.
   const lastRunTs = { value: null };
-  const onChartsReady = (roomForecast, priceForecast) => {
+  const onChartsReady = (roomForecast) => {
     // Scale the power gauge to rated heating/cooling capacity (no sysid scale).
     const gaugeMax = roomForecast?.current_rated_max_power ?? roomForecast?.max_power;
     if (gaugeMax != null) powerBounds.max = gaugeMax;
@@ -353,18 +381,10 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     // Same forecast block feeds the experiment-band grid alignment.
     latestForecastRoom = roomForecast || null;
     applyExperimentBands();
-    paintPowerGauge(entityValue(latestState, room.entities['heating_power_measured']));
-
-    // Span the price bar over the upcoming price range so the fill shows where
-    // the current price sits within the forecast horizon.
-    const prices = (priceForecast || []).map((p) => p.y).filter((y) => y != null);
-    const current = entityValue(latestState, priceEntity);
-    if (current != null) prices.push(current);
-    if (prices.length > 0) {
-      priceBounds.min = Math.min(...prices);
-      priceBounds.max = Math.max(...prices);
-    }
-    paintPriceGauge(current);
+    paintPowerGauge(
+      entityValue(latestState, room.entities['heating_power_measured']),
+      computeRoomOff(latestState, roomSlug),
+    );
   };
 
   // Resolve display settings before the first chart load so the history window
@@ -399,10 +419,11 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
         comfortLower: cl, comfortUpper: cu, off,
         experiment: activeExperiment,
       });
-      paintPowerGauge(pv);
-      paintPriceGauge(entityValue(newState, priceEntity));
-      paintOutdoorGauge(entityValue(newState, outdoorEntity));
+      paintComfortGauge(newState);
+      paintPowerGauge(pv, off);
       paintSolarGauge(entityValue(newState, solarEntity));
+      paintHeatLossGauge(newState);
+      paintModelFitGauge(newState);
 
       // Keep the schedule overview in sync with any toggle/save that triggered
       // this state update.

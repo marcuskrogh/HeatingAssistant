@@ -3,14 +3,20 @@ import { createRoomClimateTile } from '../components/room-climate-tile.js';
 import { createCountdown, updateCountdown } from '../components/countdown.js';
 import { indexExperimentsByRoom } from '../experiment-utils.js';
 import {
-  formatEnergy, formatTemperature, formatPercent, formatIrradiance,
-  entityValue, entityAttr, systemEntity, modelFitLabel,
-  MAX_SOLVE_TIME_S,
+  KPI_SEVERITY,
+  DAILY_ENERGY_GAUGE_MAX_KWH,
+  houseComfortIndex,
+  houseHeatingPowerKw,
+  houseHeatingPowerGaugeFill,
+  houseEffectiveCop,
+  houseMeanTrackingError,
+  houseModelFit,
+  mpcLoadPercent,
+} from '../kpi-engine.js';
+import {
+  formatEnergy, formatPercent, formatPowerKw, formatNumber,
+  entityValue,
 } from '../utils.js';
-
-// Sensor whose ``ghi_now_effective`` attribute carries the building-level solar
-// irradiance [W/m²] (measured/forecast when available, else modeled clear-sky).
-const SOLAR_STATUS_ENTITY = systemEntity('solar_radiation_status');
 
 export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';
@@ -113,49 +119,71 @@ export function renderOverview(container, rooms, state, connection, hass) {
 function buildGauges(state, rooms, connection) {
   const gauges = [];
 
-  // ── Outdoor temperature ────────────────────────────────────────────────────
-  const outdoorEntity = systemEntity('outdoor_temperature_measured');
-  const outdoorGauge = createGauge({
-    value: entityValue(state, outdoorEntity) ?? 0,
-    min: -30,
-    max: 40,
-    label: 'OUTDOOR',
-    format: formatTemperature,
-    severity: { good: 5, warning: -5, alarm: -15 },
+  // ── Comfort index ────────────────────────────────────────────────────────────
+  const comfortGauge = createGauge({
+    value: houseComfortIndex(state, rooms) ?? 0,
+    min: 0,
+    max: 100,
+    label: 'COMFORT',
+    format: formatPercent,
+    severity: KPI_SEVERITY.comfortIndex,
   });
+  if (houseComfortIndex(state, rooms) === null) comfortGauge.style.display = 'none';
   gauges.push({
-    element: outdoorGauge,
-    updater: (s) => updateGauge(outdoorGauge, {
-      value: entityValue(s, outdoorEntity) ?? 0, min: -30, max: 40,
-      format: formatTemperature,
-      severity: { good: 5, warning: -5, alarm: -15 },
-    }),
+    element: comfortGauge,
+    updater: (s) => {
+      const idx = houseComfortIndex(s, rooms);
+      comfortGauge.style.display = idx === null ? 'none' : '';
+      updateGauge(comfortGauge, {
+        value: idx ?? 0, min: 0, max: 100,
+        format: formatPercent,
+        severity: KPI_SEVERITY.comfortIndex,
+      });
+    },
   });
 
-  // ── Solar irradiance ─────────────────────────────────────────────────────────
-  // A building-level, location-only metric (W/m²) — "how strong is the sun" —
-  // rather than a sum of per-room window gains, which only makes sense per room.
-  // The backend always supplies an effective value (measured/forecast, else a
-  // modeled clear-sky value), so the card is only hidden if that value is
-  // genuinely unavailable (e.g. no site location).
-  const solarGauge = createGauge({
-    value: solarIrradiance(state) ?? 0,
+  // ── Total heating power ──────────────────────────────────────────────────────
+  const powerFill = houseHeatingPowerGaugeFill(state) ?? 0;
+  const powerGauge = createGauge({
+    value: powerFill,
     min: 0,
-    max: 1000,
-    label: 'SOLAR',
-    format: formatIrradiance,
-    severity: { good: 400, warning: 100, alarm: 0 },
+    max: 1,
+    label: 'HEATING POWER',
+    format: () => formatPowerKw(houseHeatingPowerKw(state) ?? 0),
+    severity: KPI_SEVERITY.houseHeatingPower,
   });
-  if (solarIrradiance(state) === null) solarGauge.style.display = 'none';
   gauges.push({
-    element: solarGauge,
+    element: powerGauge,
     updater: (s) => {
-      const ghi = solarIrradiance(s);
-      solarGauge.style.display = ghi === null ? 'none' : '';
-      updateGauge(solarGauge, {
-        value: ghi ?? 0, min: 0, max: 1000,
-        format: formatIrradiance,
-        severity: { good: 400, warning: 100, alarm: 0 },
+      const fill = houseHeatingPowerGaugeFill(s) ?? 0;
+      updateGauge(powerGauge, {
+        value: fill, min: 0, max: 1,
+        format: () => formatPowerKw(houseHeatingPowerKw(s) ?? 0),
+        severity: KPI_SEVERITY.houseHeatingPower,
+      });
+    },
+  });
+
+  // ── Effective system COP ─────────────────────────────────────────────────────
+  const initialCop = houseEffectiveCop(state);
+  const copGauge = createGauge({
+    value: initialCop ?? 0,
+    min: 0,
+    max: 5,
+    label: 'SYSTEM COP',
+    format: (v) => formatNumber(v, 2),
+    severity: KPI_SEVERITY.effectiveCop,
+  });
+  if (initialCop === null) copGauge.style.display = 'none';
+  gauges.push({
+    element: copGauge,
+    updater: (s) => {
+      const cop = houseEffectiveCop(s);
+      copGauge.style.display = cop === null ? 'none' : '';
+      updateGauge(copGauge, {
+        value: cop ?? 0, min: 0, max: 5,
+        format: (v) => formatNumber(v, 2),
+        severity: KPI_SEVERITY.effectiveCop,
       });
     },
   });
@@ -169,75 +197,86 @@ function buildGauges(state, rooms, connection) {
   const energyGauge = createGauge({
     value: 0,
     min: 0,
-    max: 100,
+    max: DAILY_ENERGY_GAUGE_MAX_KWH,
     label: 'DAILY ENERGY',
     format: () => formatEnergy(dailyEnergy.value()),
-    severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+    severity: KPI_SEVERITY.dailyEnergy,
   });
   dailyEnergy.init(state).then(() => paintEnergy(state));
   function paintEnergy(s) {
     dailyEnergy.observe(s);
     updateGauge(energyGauge, {
-      value: dailyEnergy.value(), min: 0, max: 100,
+      value: dailyEnergy.value(), min: 0, max: DAILY_ENERGY_GAUGE_MAX_KWH,
       format: () => formatEnergy(dailyEnergy.value()),
-      severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+      severity: KPI_SEVERITY.dailyEnergy,
     });
   }
   gauges.push({ element: energyGauge, updater: paintEnergy });
 
+  // ── Mean tracking error ──────────────────────────────────────────────────────
+  const trackingGauge = createGauge({
+    value: houseMeanTrackingError(state, rooms) ?? 0,
+    min: 0,
+    max: 1,
+    label: 'TRACKING ERROR',
+    format: (v) => `${formatNumber(v, 2)}°C`,
+    severity: KPI_SEVERITY.meanTrackingError,
+  });
+  if (houseMeanTrackingError(state, rooms) === null) trackingGauge.style.display = 'none';
+  gauges.push({
+    element: trackingGauge,
+    updater: (s) => {
+      const err = houseMeanTrackingError(s, rooms);
+      trackingGauge.style.display = err === null ? 'none' : '';
+      updateGauge(trackingGauge, {
+        value: err ?? 0, min: 0, max: 1,
+        format: (v) => `${formatNumber(v, 2)}°C`,
+        severity: KPI_SEVERITY.meanTrackingError,
+      });
+    },
+  });
+
   // ── Model fit ──────────────────────────────────────────────────────────────
-  const initialFit = computeOverallFit(state, rooms);
+  const initialFit = houseModelFit(state, rooms);
   const fitGauge = createGauge({
     value: initialFit.value,
     min: 0,
     max: 1,
     label: 'MODEL FIT',
     format: () => initialFit.label,
-    severity: { good: 0.8, warning: 0.5, alarm: 0 },
+    severity: KPI_SEVERITY.modelFit,
   });
   gauges.push({
     element: fitGauge,
     updater: (s) => {
-      const fit = computeOverallFit(s, rooms);
+      const fit = houseModelFit(s, rooms);
       updateGauge(fitGauge, {
         value: fit.value, min: 0, max: 1,
         format: () => fit.label,
-        severity: { good: 0.8, warning: 0.5, alarm: 0 },
+        severity: KPI_SEVERITY.modelFit,
       });
     },
   });
 
   // ── MPC load ─────────────────────────────────────────────────────────────────
-  const mpcEntity = systemEntity('mpc_performance');
-  const mpcPercent = (s) => {
-    const v = entityValue(s, mpcEntity);
-    return v !== null ? (v / MAX_SOLVE_TIME_S) * 100 : 0;
-  };
   const mpcGauge = createGauge({
-    value: mpcPercent(state),
+    value: mpcLoadPercent(state),
     min: 0,
     max: 100,
     label: 'MPC LOAD',
-    format: (v) => formatPercent(v),
-    severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+    format: formatPercent,
+    severity: KPI_SEVERITY.mpcLoad,
   });
   gauges.push({
     element: mpcGauge,
     updater: (s) => updateGauge(mpcGauge, {
-      value: mpcPercent(s), min: 0, max: 100,
-      format: (v) => formatPercent(v),
-      severity: { good: 0, warning: 50, alarm: 80, inverse: true },
+      value: mpcLoadPercent(s), min: 0, max: 100,
+      format: formatPercent,
+      severity: KPI_SEVERITY.mpcLoad,
     }),
   });
 
   return gauges;
-}
-
-/** Building-level solar irradiance [W/m²] for display, or null when unavailable. */
-function solarIrradiance(state) {
-  const ghi = entityAttr(state, SOLAR_STATUS_ENTITY, 'ghi_now_effective');
-  const num = parseFloat(ghi);
-  return isNaN(num) ? null : num;
 }
 
 /** Entity ids of every cumulative heat-source energy-total sensor. */
@@ -318,26 +357,3 @@ class DailyEnergyTracker {
   }
 }
 
-function computeOverallFit(state, rooms) {
-  // Evaluate the overall model on the MEAN R² across rooms, and derive the
-  // GOOD / ACCEPTABLE / POOR label from that same mean — so the bar fill and
-  // the label always describe the same quantity (previously the bar showed the
-  // average while the label reflected the single worst room).
-  let sum = 0;
-  let count = 0;
-
-  for (const room of rooms) {
-    const entity = room.entities['model_fit_quality'];
-    if (entity) {
-      const v = entityValue(state, entity);
-      if (v !== null) {
-        sum += v;
-        count++;
-      }
-    }
-  }
-
-  const avg = count > 0 ? sum / count : 0;
-  const fit = count > 0 ? modelFitLabel(avg) : { label: '—' };
-  return { value: avg, label: fit.label };
-}

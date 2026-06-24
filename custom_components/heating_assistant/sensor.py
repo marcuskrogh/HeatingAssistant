@@ -56,6 +56,13 @@ from .const import DOMAIN
 from .coordinator import HeatingAssistantCoordinator
 from .dashboard import slugify
 from .heat_sources import HeatPump
+from .kpi import (
+    RoomSnapshot,
+    comfort_index_pct,
+    mean_tracking_error_c,
+    room_comfort_deviation_c,
+    room_temperature,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -233,6 +240,9 @@ class TemperatureFilteredSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
     @property
     def extra_state_attributes(self) -> dict:
         room = self._coordinator.model.rooms[self._room_name]
+        deviation = room_comfort_deviation_c(
+            _kpi_room_snapshot(self._coordinator, self._room_name)
+        )
         return {
             "thermal_mass": room.thermal_mass,
             "r_external": room.r_external,
@@ -240,6 +250,9 @@ class TemperatureFilteredSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
             "solar_scale": round(float(getattr(room, "solar_scale", 1.0)), 4),
             "c_air_fraction": round(float(room.c_air_fraction), 4),
             "r_aw_fraction": round(float(room.r_aw_fraction), 4),
+            "comfort_deviation": (
+                round(deviation, 1) if deviation is not None else None
+            ),
         }
 
 
@@ -613,6 +626,33 @@ def _constraint_bound(
     if offset is None:
         return None
     return float(room.setpoint) + sign * float(offset)
+
+
+def _kpi_room_snapshot(
+    coordinator: HeatingAssistantCoordinator, room_name: str,
+) -> RoomSnapshot:
+    """Build a :class:`~.kpi.RoomSnapshot` from live coordinator state."""
+    room = coordinator.model.rooms.get(room_name)
+    setpoint = float(room.setpoint) if room is not None else None
+    return RoomSnapshot(
+        slug=slugify(room_name),
+        room_active=coordinator.is_room_enabled(room_name),
+        temperature_filtered=coordinator.filtered_temperatures.get(room_name),
+        temperature_measured=coordinator.measured_temperatures.get(room_name),
+        constraint_lower=_constraint_bound(coordinator, room_name, -1.0),
+        constraint_upper=_constraint_bound(coordinator, room_name, 1.0),
+        setpoint=setpoint,
+    )
+
+
+def _kpi_room_snapshots(
+    coordinator: HeatingAssistantCoordinator,
+) -> list[RoomSnapshot]:
+    """Per-room KPI inputs for all model rooms."""
+    return [
+        _kpi_room_snapshot(coordinator, name)
+        for name in coordinator.model.room_names
+    ]
 
 
 def _build_horizon_forecast(
@@ -1216,6 +1256,9 @@ class SystemEfficiencySensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
 
         # Count active sources
         active_sources = sum(1 for s in sources if s.current_power > 0)
+        has_heat_pump = any(isinstance(src, HeatPump) for src in sources)
+        room_snapshots = _kpi_room_snapshots(self._coordinator)
+        comfort_index = comfort_index_pct(room_snapshots)
 
         return {
             "total_heating_power": round(total_heating, 1),
@@ -1226,6 +1269,10 @@ class SystemEfficiencySensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
             "electrical_input_estimate": round(electrical_input, 1),
             "active_sources": active_sources,
             "total_sources": len(sources),
+            "has_heat_pump": has_heat_pump,
+            "comfort_index_pct": (
+                round(comfort_index) if comfort_index is not None else None
+            ),
             "room_heating_power": room_heating,
             "outdoor_temperature": self._coordinator.outdoor_temp,
             "system_enabled": self._coordinator.system_enabled,
@@ -2495,25 +2542,27 @@ class MPCPerformanceSensor(CoordinatorEntity, SensorEntity):
             last_run_ts + self._coordinator.dt if last_run_ts else None
         )
 
-        # Tracking error per room (absolute deviation from setpoint)
+        # Tracking error per room (|T − setpoint|; mean excludes inactive rooms)
         room_names = self._coordinator.model.room_names
-        tracking_error_values = [
-            abs(
-                self._coordinator.model.rooms[name].temperature
-                - self._coordinator.model.rooms[name].setpoint
-            )
-            for name in room_names
-        ]
-        attrs["current_tracking_errors"] = {
-            name: round(v, 3) for name, v in zip(room_names, tracking_error_values)
-        }
+        room_snapshots = _kpi_room_snapshots(self._coordinator)
+        tracking_errors: Dict[str, float] = {}
+        for name, snap in zip(room_names, room_snapshots):
+            temp = room_temperature(snap)
+            setpoint = snap.setpoint
+            if temp is not None and setpoint is not None:
+                tracking_errors[name] = round(abs(temp - setpoint), 3)
+        attrs["current_tracking_errors"] = tracking_errors
+        mean_err = mean_tracking_error_c(room_snapshots)
         attrs["mean_tracking_error"] = (
-            round(float(np.mean(tracking_error_values)), 3)
-            if tracking_error_values else None
+            round(mean_err, 2) if mean_err is not None else None
         )
+        active_errors = [
+            tracking_errors[name]
+            for name, snap in zip(room_names, room_snapshots)
+            if snap.room_active and name in tracking_errors
+        ]
         attrs["max_tracking_error"] = (
-            round(float(np.max(tracking_error_values)), 3)
-            if tracking_error_values else None
+            round(max(active_errors), 2) if active_errors else None
         )
 
         # Terminal-weight in effect (for reference)
