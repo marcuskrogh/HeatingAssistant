@@ -989,6 +989,26 @@ The **`mbc` packaging decision** (PyPI vs vendoring) is **orthogonal** to App vs
 
 ---
 
+## Stakeholder decision (2026-06-24)
+
+After review of WP1–WP7, the project owner decided:
+
+> **Stay integration only.** No HA App or hybrid path. Vendor the parts of `mbc` needed when HACS default listing prep begins.
+
+### Impact on prior recommendations
+
+| Prior recommendation | Status |
+|---------------------|--------|
+| Hybrid App + bridge (primary for OS) | **Declined** |
+| Full App | **Declined** (already No-Go) |
+| Stay + vendored `mbc` | **Adopted** |
+| Hybrid PoC (WP7) | **Not proceeding** |
+| Phase B PyPI publish for `mbc` | **Not required** — vendoring preferred |
+
+The feasibility analysis remains valid as historical reference. The locked path is documented in [STATUS.md](STATUS.md) and [PLAN.md](PLAN.md).
+
+---
+
 ## WP6: Recommended Strategy & Phased Roadmap
 
 > **Date:** 2026-06-24  
