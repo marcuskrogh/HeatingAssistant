@@ -1254,16 +1254,6 @@ function renderSystem(container, connection, hass) {
     ));
     body.appendChild(envCard);
 
-    const siteCard = sectionCard('Site location',
-      'Used by the solar-position model. Defaults to your Home Assistant location — only override '
-      + 'it if this building is somewhere else.');
-    const siteAdv = advancedSubsection(siteCard, 'Override site location');
-    siteAdv.appendChild(paramGrid(
-      numberField(working, 'latitude', 'Latitude', { step: 0.0001, min: -90, max: 90, unit: '°' }),
-      numberField(working, 'longitude', 'Longitude', { step: 0.0001, min: -180, max: 180, unit: '°' }),
-    ));
-    body.appendChild(siteCard);
-
     const statusEl = actions.querySelector('[data-role="status"]');
     actions.querySelector('[data-role="save"]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -1276,8 +1266,6 @@ function renderSystem(container, connection, hass) {
           solar_radiation_entity: working.solar_radiation_entity || '',
           price_entity: working.price_entity || '',
         };
-        if (working.latitude != null && working.latitude !== '') data.latitude = Number(working.latitude);
-        if (working.longitude != null && working.longitude !== '') data.longitude = Number(working.longitude);
         await hass.callService('heating_assistant', 'update_system_config', data);
         setStatus(statusEl, 'Applied.', 'success');
       } catch (err) {
