@@ -1598,14 +1598,41 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
 
         Used when the controller is stopped: state estimation and innovation
         logging must keep running so the filtered temperatures stay grounded in
-        reality, but the (expensive) MPC optimisation is skipped.  Delegates to
-        the native :meth:`~StandardLinearisedContinuousMPC.propagate`, which
-        advances the disturbance memory and leaves ``_u_prev`` untouched so the
-        coordinator can correct it to the actually-delivered input before the
-        next cycle.  Returns the filtered state estimate ``x_hat``.
+        reality, but the (expensive) MPC optimisation is skipped.
+
+        Calls the estimator's combined step (predict for the nominal Ts then
+        measurement update) directly rather than delegating to
+        :meth:`~StandardLinearisedContinuousMPC.propagate`.  ``propagate``
+        gates the predict phase on ``t - t_last > 0``, but because the full
+        optimization path always passes ``t=0.0`` the stored ``_t_last`` is
+        permanently 0 — making ``dt`` identically zero and silently dropping
+        every predict call.  Without predict, process noise is never added to
+        the covariance ``P``: over many cycles ``P → 0``, the Kalman gain
+        collapses to zero, and the filter stops tracking the actual
+        temperature.  When the system is later re-enabled the first real
+        predict step inflates ``P`` and the subsequent update snaps the frozen
+        estimate to the current measurement, producing the large discrete jump
+        reported by the user.
+
+        Calling ``_estimator.step`` directly guarantees predict always runs
+        for exactly ``Ts``, keeping ``P`` at its healthy steady-state value
+        and the gain at a level that lets the filter track temperature changes
+        throughout the stopped period.
+
+        ``_d_prev`` is advanced to the current disturbance (matching
+        ``propagate``'s bookkeeping) so the next cycle's predict uses the
+        right disturbance; ``_u_prev`` is left untouched so the coordinator
+        can correct it to the actually-delivered input via
+        :meth:`HeatingMPCController.notify_applied_u` before the next cycle.
+
+        Returns the filtered state estimate ``x_hat``.
         """
-        x_hat, _ = self.propagate(y, d, p, t)
-        return x_hat
+        d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
+        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
+        y_arr = np.asarray(y, dtype=float).reshape(self._model.nym)
+        x_hat, _ = self._estimator.step(y_arr, self._u_prev, self._d_prev, p_, t)
+        self._d_prev = d_now.copy()
+        return np.asarray(x_hat, dtype=float)
 
 
 # ============================================================
