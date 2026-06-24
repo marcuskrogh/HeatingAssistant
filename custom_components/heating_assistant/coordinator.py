@@ -174,11 +174,38 @@ from .const import (
     SOURCE_TYPE_GAS_HEATER,
     SOURCE_TYPE_HYDRONIC_RADIATOR,
     SOURCE_TYPE_HYDRONIC_FLOOR,
+    SOURCE_TYPE_OIL_BOILER,
+    SOURCE_TYPE_GROUND_SOURCE_HP,
+    SOURCE_TYPE_PELLET_STOVE,
+    SOURCE_TYPE_ELECTRIC_STORAGE,
     DEFAULT_GAS_EFFICIENCY,
+    DEFAULT_OIL_BOILER_EFFICIENCY,
+    DEFAULT_GROUND_SOURCE_COP,
+    DEFAULT_PELLET_EFFICIENCY,
+    DEFAULT_PELLET_MIN_POWER_FRACTION,
+    DEFAULT_STORAGE_CHARGE_POWER,
+    DEFAULT_STORAGE_CAPACITY_KWH,
+    DEFAULT_STORAGE_DISCHARGE_RATE,
+    CONF_SOURCE_DELTA_SAT,
+    CONF_SOURCE_MIN_POWER_FRACTION,
+    CONF_SOURCE_CHARGE_POWER,
+    CONF_SOURCE_STORAGE_CAPACITY_KWH,
+    CONF_SOURCE_PASSIVE_DISCHARGE_RATE,
+    DEFAULT_DELTA_SAT,
     SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
     UPDATE_INTERVAL,
 )
-from .heat_sources import ElectricHeater, GasHeater, GenericThermostat, HeatPump, HeatSource, HydronicRadiator
+from .heat_sources import (
+    ElectricHeater,
+    ElectricStorageHeater,
+    GasHeater,
+    GenericThermostat,
+    GroundSourceHeatPump,
+    HeatPump,
+    HeatSource,
+    HydronicRadiator,
+    PelletStove,
+)
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import HeatingMPCController
 from .ground_temp import ground_temperature
@@ -470,7 +497,7 @@ def build_heat_sources(
                 )
             )
         elif src_type in (SOURCE_TYPE_HYDRONIC_RADIATOR, SOURCE_TYPE_HYDRONIC_FLOOR):
-            # hydronic_floor_heating is an alias with a longer default τ_em (3600 s vs 600 s),
+            # hydronic_floor_heating is an alias with a longer default τ_em (7200 s vs 600 s),
             # applied via SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU above.
             sources.append(
                 HydronicRadiator(
@@ -482,6 +509,49 @@ def build_heat_sources(
                     emitter_time_constant=tau_em,
                 )
             )
+        elif src_type == SOURCE_TYPE_OIL_BOILER:
+            sources.append(
+                GasHeater(
+                    name=name,
+                    room=room,
+                    max_power=max_power,
+                    efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_OIL_BOILER_EFFICIENCY),
+                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
+                    heater_entity=entity,
+                    emitter_time_constant=tau_em,
+                )
+            )
+        elif src_type == SOURCE_TYPE_GROUND_SOURCE_HP:
+            sources.append(GroundSourceHeatPump(
+                name=name, room=room, max_power=max_power,
+                cop_rated=sc.get(CONF_SOURCE_COP_RATED, DEFAULT_GROUND_SOURCE_COP),
+                max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
+                delta_sat=sc.get(CONF_SOURCE_DELTA_SAT, DEFAULT_DELTA_SAT),
+                hvac_mode=sc.get(CONF_SOURCE_HVAC_MODE, DEFAULT_SOURCE_HVAC_MODE),
+                heater_entity=entity,
+                cooling_cop=sc.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP),
+                cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
+                heating_efficiency=sc.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY),
+                emitter_time_constant=tau_em,
+            ))
+        elif src_type == SOURCE_TYPE_PELLET_STOVE:
+            sources.append(PelletStove(
+                name=name, room=room, max_power=max_power,
+                efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_PELLET_EFFICIENCY),
+                min_power_fraction=sc.get(CONF_SOURCE_MIN_POWER_FRACTION, DEFAULT_PELLET_MIN_POWER_FRACTION),
+                max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
+                heater_entity=entity,
+                emitter_time_constant=tau_em,
+            ))
+        elif src_type == SOURCE_TYPE_ELECTRIC_STORAGE:
+            sources.append(ElectricStorageHeater(
+                name=name, room=room, max_power=max_power,
+                charge_power=sc.get(CONF_SOURCE_CHARGE_POWER, DEFAULT_STORAGE_CHARGE_POWER),
+                storage_capacity_kwh=sc.get(CONF_SOURCE_STORAGE_CAPACITY_KWH, DEFAULT_STORAGE_CAPACITY_KWH),
+                passive_discharge_rate=sc.get(CONF_SOURCE_PASSIVE_DISCHARGE_RATE, DEFAULT_STORAGE_DISCHARGE_RATE),
+                heater_entity=entity,
+                emitter_time_constant=tau_em,
+            ))
         else:
             _LOGGER.warning("Unknown heat source type %r – skipping %r", src_type, name)
     return sources
