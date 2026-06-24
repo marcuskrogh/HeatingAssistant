@@ -108,6 +108,14 @@ CONF_SOURCE_COOLING_COP = "cooling_cop"  # cooling COP (EER) for heat pumps in c
 CONF_SOURCE_COOLING_EFFICIENCY = "cooling_efficiency"  # fraction of max cooling capacity (0–1) used in dry/cool mode
 CONF_SOURCE_HEATING_EFFICIENCY = "heating_efficiency"  # fraction of max heating capacity (0–1) used in heat mode
 CONF_SOURCE_EMITTER_TIME_CONSTANT = "emitter_time_constant"  # s, first-order lag between commanded fraction and delivered power (Phase 1 B2)
+CONF_SOURCE_DELTA_SAT = "delta_sat"          # °C saturation offset for sigmoid setpoint mapping (GSHP / HP)
+CONF_SOURCE_MIN_POWER_FRACTION = "min_power_fraction"  # minimum modulation fraction for pellet stoves (below → off)
+CONF_SOURCE_CHARGE_POWER = "charge_power"    # W, electrical draw of storage heater during charging
+CONF_SOURCE_STORAGE_CAPACITY_KWH = "storage_capacity_kwh"  # kWh, brick-core thermal storage capacity
+CONF_SOURCE_PASSIVE_DISCHARGE_RATE = "passive_discharge_rate"  # s⁻¹, passive heat release fraction per second
+
+# Delta-sat default for GSHP sigmoid setpoint mapping.
+DEFAULT_DELTA_SAT = 3.0                      # °C, matches HeatPump default
 
 # Envelope tightness (Sherman–Grimsrud infiltration model — Phase 1 C1).
 #
@@ -517,9 +525,25 @@ SOURCE_TYPE_ELECTRIC_FLOOR = "electric_floor_heating"
 SOURCE_TYPE_GAS_HEATER = "gas_heater"
 SOURCE_TYPE_HYDRONIC_RADIATOR = "hydronic_radiator"
 SOURCE_TYPE_HYDRONIC_FLOOR = "hydronic_floor_heating"
+SOURCE_TYPE_OIL_BOILER = "oil_boiler"
+SOURCE_TYPE_GROUND_SOURCE_HP = "ground_source_heat_pump"
+SOURCE_TYPE_PELLET_STOVE = "pellet_stove"
+SOURCE_TYPE_ELECTRIC_STORAGE = "electric_storage_heater"
 
 # Default combustion efficiency for gas heaters (condensing ≈ 0.95; conventional ≈ 0.80–0.85).
 DEFAULT_GAS_EFFICIENCY = 0.90
+# Default efficiency for oil boilers (non-condensing; condensing units reach ≈ 0.93).
+DEFAULT_OIL_BOILER_EFFICIENCY = 0.87
+# Ground-source heat pump defaults.
+DEFAULT_GROUND_SOURCE_COP = 4.5
+DEFAULT_GROUND_LOOP_TEMP = 10.0            # °C, typical European borehole temperature
+# Pellet stove defaults.
+DEFAULT_PELLET_EFFICIENCY = 0.88
+DEFAULT_PELLET_MIN_POWER_FRACTION = 0.30   # minimum modulation floor (below → fully off)
+# Electric storage heater defaults.
+DEFAULT_STORAGE_CHARGE_POWER = 1500.0      # W, electrical draw during charging window
+DEFAULT_STORAGE_CAPACITY_KWH = 8.0         # kWh, thermal brick-core storage capacity
+DEFAULT_STORAGE_DISCHARGE_RATE = 1.0 / (8 * 3600)  # s⁻¹, full discharge in 8 hours
 
 # Phase 1 B2 — typology defaults for the per-source emitter time
 # constant ``τ_em`` [s].  Applied in ``coordinator.build_heat_sources``
@@ -547,8 +571,12 @@ SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU: dict = {
     SOURCE_TYPE_HYDRONIC_RADIATOR: 600.0,
     SOURCE_TYPE_OIL_RADIATOR: 1800.0,
     SOURCE_TYPE_ELECTRIC_FLOOR: 3600.0,
-    SOURCE_TYPE_HYDRONIC_FLOOR: 3600.0,
+    SOURCE_TYPE_HYDRONIC_FLOOR: 7200.0,
     SOURCE_TYPE_GAS_HEATER: 0.0,
+    SOURCE_TYPE_OIL_BOILER: 600.0,
+    SOURCE_TYPE_GROUND_SOURCE_HP: 60.0,
+    SOURCE_TYPE_PELLET_STOVE: 2400.0,
+    SOURCE_TYPE_ELECTRIC_STORAGE: 0.0,
 }
 
 # Update interval (seconds)

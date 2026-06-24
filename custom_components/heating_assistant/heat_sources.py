@@ -883,3 +883,360 @@ class HeatPump(HeatSource):
         """
         pf = float(power_fraction)
         return max(self.u_min, min(self.u_max, pf))
+
+
+# ---------------------------------------------------------------------------
+# Ground-source heat pump
+# ---------------------------------------------------------------------------
+
+class GroundSourceHeatPump(HeatSource):
+    """
+    Ground-source heat pump (GSHP) with borehole or ground-loop heat exchange.
+
+    Unlike an air-source heat pump, the GSHP draws heat from the ground at a
+    nearly constant temperature (``ground_temp``, default 10 °C).  The COP
+    does not vary with outdoor air temperature — it depends on the stable
+    ground-loop supply temperature.  At any outdoor condition the delivered
+    thermal power is therefore flat:
+
+        Q = max_power × heating_efficiency × power_scale × u
+
+    The ``cop_rated`` parameter is used only for the ``elec_per_unit_heat``
+    calculation (electrical draw = thermal / cop_rated) and is not applied as
+    an outdoor-temperature correction (cf. ``HeatPump``).
+
+    Cooling mode follows the same convention as ``HeatPump``: the cooling
+    capacity is derived from the rated electrical input multiplied by
+    ``cooling_cop`` (EER).
+
+    The sigmoid logit setpoint mapping from ``HeatPump.target_temperature`` is
+    reused unchanged — the control characteristic of the indoor unit is the
+    same regardless of the heat source.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        room: str,
+        max_power: float,
+        cop_rated: float = 4.5,
+        min_outdoor_temp: float = -50.0,
+        max_temp_offset: float = 5.0,
+        delta_sat: float = 3.0,
+        hvac_mode: str = "heat_cool",
+        heater_entity: Optional[str] = None,
+        cooling_cop: float = 2.5,
+        cooling_efficiency: float = 1.0,
+        heating_efficiency: float = 1.0,
+        power_scale: float = 1.0,
+        emitter_time_constant: float = 0.0,
+    ) -> None:
+        super().__init__(
+            name, room, max_power, heater_entity, power_scale,
+            emitter_time_constant=emitter_time_constant,
+        )
+        self.cop_rated = cop_rated
+        self.min_outdoor_temp = min_outdoor_temp
+        self.max_temp_offset = max_temp_offset
+        self.delta_sat = delta_sat
+        self.hvac_mode = hvac_mode
+        self.cooling_cop = cooling_cop
+        self.cooling_efficiency = cooling_efficiency
+        self.heating_efficiency = heating_efficiency
+        # Precomputed rated electrical input (used in elec_per_unit_* properties).
+        self._electric_max: float = max_power / cop_rated if cop_rated > 0 else 0.0
+        self._recompute_power_scaled_gains()
+
+    def _recompute_power_scaled_gains(self) -> None:
+        """Re-derive cached thermal-output constants after a scale change."""
+        self._q_heat_max: float = (
+            self.max_power * self.heating_efficiency * self._power_scale
+        )
+        self._q_cool_const: float = (
+            self._electric_max * self.cooling_cop
+            * self.cooling_efficiency * self._power_scale
+        )
+
+    @property
+    def can_cool(self) -> bool:
+        """Returns True when the configured hvac_mode includes cooling."""
+        return self.hvac_mode in ("cool", "heat_cool") and self.cooling_cop > 0
+
+    @property
+    def elec_per_unit_heat(self) -> float:
+        """Electrical draw [W] at full heating load (thermal / cop_rated)."""
+        electric_max = self.max_power / self.cop_rated if self.cop_rated > 0 else 0.0
+        return electric_max * self.heating_efficiency * self.power_scale
+
+    @property
+    def elec_per_unit_cool(self) -> float:
+        if not self.can_cool:
+            return 0.0
+        electric_max = self.max_power / self.cop_rated if self.cop_rated > 0 else 0.0
+        return electric_max * self.cooling_efficiency * self.power_scale
+
+    @property
+    def u_min(self) -> float:
+        return 0.0 if self.hvac_mode == "heat" else -1.0
+
+    @property
+    def u_max(self) -> float:
+        return 0.0 if self.hvac_mode == "cool" else 1.0
+
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        """Rated heating capacity [W] — flat, no outdoor-temp correction."""
+        return self.max_power * self.heating_efficiency
+
+    def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
+        """
+        Thermal power [W].  Linear in setpoint_fraction; no outdoor-temp COP
+        correction (ground temperature is stable year-round).
+
+        A soft ceiling is applied to prevent numerical overshoot in the solver.
+        """
+        raw = self.max_power * self.heating_efficiency * self._power_scale * setpoint_fraction
+        return _soft_ceiling(raw, self._q_heat_max)
+
+    def cooling_power(self, outdoor_temp: float = 0.0) -> float:
+        """Cooling (heat-removal) power [W] — negative value."""
+        if self.cop_rated <= 0:
+            return 0.0
+        return -self._q_cool_const
+
+    def target_temperature(
+        self,
+        fraction: float,
+        base_temp: float,
+        outdoor_temp: float = 0.0,
+    ) -> float:
+        """
+        Compute the climate-entity setpoint from the control fraction, using
+        the same sigmoid logit formula as ``HeatPump.target_temperature``.
+        """
+        fraction = max(self.u_min, min(self.u_max, fraction))
+        if abs(fraction) < 1e-9:
+            return base_temp
+        u_range = self.u_max if fraction > 0.0 else abs(self.u_min)
+        f = max(1e-4, min(1.0 - 1e-4, abs(fraction) / max(u_range, 1e-9)))
+        logit_f = math.log(f / (1.0 - f))
+        half_sat = self.delta_sat / 2.0
+        offset = half_sat * (1.0 + logit_f / 5.0)
+        offset = max(0.0, min(offset, self.delta_sat))
+        return base_temp + math.copysign(offset, fraction)
+
+
+# ---------------------------------------------------------------------------
+# Pellet stove
+# ---------------------------------------------------------------------------
+
+class PelletStove(HeatSource):
+    """
+    Pellet stove with a minimum modulation floor.
+
+    A pellet stove cannot be throttled below ``min_power_fraction`` of rated
+    output without extinguishing; below that threshold it is fully off.  This
+    creates a piecewise map:
+
+        u < min_power_fraction  →  Q = 0
+        u ≥ min_power_fraction  →  Q = max_power × efficiency × power_scale × u
+
+    The MPC treats the region below the floor as a deadband; in practice the
+    controller will operate either fully off or above the floor.
+
+    ``elec_per_unit_heat`` is zero: the pellet stove draws no meaningful
+    electricity for its thermal output (auger motor and controls are negligible).
+
+    The default ``emitter_time_constant`` of 2400 s (40 min) reflects the
+    metal firebox and heat exchanger mass that buffers combustion dynamics
+    from room-air delivery.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        room: str,
+        max_power: float,
+        efficiency: float = 0.88,
+        min_power_fraction: float = 0.30,
+        max_temp_offset: float = 5.0,
+        heater_entity: Optional[str] = None,
+        power_scale: float = 1.0,
+        emitter_time_constant: float = 2400.0,
+    ) -> None:
+        super().__init__(
+            name, room, max_power, heater_entity, power_scale,
+            emitter_time_constant=emitter_time_constant,
+        )
+        if not 0.0 < efficiency <= 1.0:
+            raise ValueError(f"efficiency must be in (0, 1]; got {efficiency}")
+        if not 0.0 <= min_power_fraction < 1.0:
+            raise ValueError(
+                f"min_power_fraction must be in [0, 1); got {min_power_fraction}"
+            )
+        if max_temp_offset < 0.0:
+            raise ValueError(f"max_temp_offset must be >= 0; got {max_temp_offset}")
+        self.efficiency = efficiency
+        self.min_power_fraction = min_power_fraction
+        self.max_temp_offset = max_temp_offset
+        self._gain: float = max_power * efficiency * self._power_scale
+
+    def _recompute_power_scaled_gains(self) -> None:
+        """Re-derive the cached linear gain after a ``power_scale`` change."""
+        self._gain = self.max_power * self.efficiency * self._power_scale
+
+    def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
+        """
+        Thermal power [W].
+
+        Returns 0 when ``setpoint_fraction`` is below the minimum modulation
+        floor; otherwise linear above the floor.
+        """
+        if setpoint_fraction < self.min_power_fraction:
+            return 0.0
+        return self._gain * setpoint_fraction
+
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        """Rated heating capacity [W] at full modulation."""
+        return self.max_power * self.efficiency
+
+    @property
+    def elec_per_unit_heat(self) -> float:
+        """Pellet stoves draw no meaningful electricity for heat output."""
+        return 0.0
+
+    def target_temperature(self, setpoint_fraction: float, internal_temp: float) -> float:
+        """Target setpoint = internal_temp + fraction × max_temp_offset."""
+        setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
+        return internal_temp + setpoint_fraction * self.max_temp_offset
+
+
+# ---------------------------------------------------------------------------
+# Electric storage heater
+# ---------------------------------------------------------------------------
+
+class ElectricStorageHeater(HeatSource):
+    """
+    Electric storage heater with brick-core thermal accumulation.
+
+    Operating modes
+    ---------------
+    * **Charge mode** (off-peak window): draws ``charge_power`` watts of
+      electricity, storing energy in the brick core.
+    * **Passive discharge** (daytime): releases stored heat at a rate
+      proportional to stored energy × ``passive_discharge_rate``.
+    * **Boost mode** (real-time control via MPC): fan-assisted output up to
+      ``max_power`` (= ``boost_power``) watts — this is the controllable
+      component exposed through the standard ``thermal_power`` interface.
+
+    MPC interface
+    -------------
+    ``thermal_power(u)`` models only the **boost** component (real-time
+    control).  Pass ``max_power = 0`` if the unit has no boost fan.
+
+    The autonomous passive discharge is available via ``passive_thermal_output``
+    for callers that track stored energy (e.g. the charge-window planner or a
+    future storage-state estimator).
+
+    ``charge_power_input`` exposes the electrical draw during the charge window
+    for tariff/cost optimisation.
+
+    ``elec_per_unit_heat`` returns ``charge_power``: the electrical energy
+    consumed per unit of charge-mode activation.  The boost is not accounted
+    for here because boost electricity is directly proportional to boost
+    thermal output at efficiency ≈ 1.
+
+    The ``emitter_time_constant`` default of 0 s reflects the boost fan path
+    (instant delivery); the slow passive slab discharge is modelled separately
+    via ``passive_thermal_output`` rather than the emitter filter.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        room: str,
+        max_power: float,
+        charge_power: float = 1500.0,
+        storage_capacity_kwh: float = 8.0,
+        passive_discharge_rate: float = 1.0 / (8 * 3600),
+        heater_entity: Optional[str] = None,
+        power_scale: float = 1.0,
+        emitter_time_constant: float = 0.0,
+    ) -> None:
+        super().__init__(
+            name, room, max_power, heater_entity, power_scale,
+            emitter_time_constant=emitter_time_constant,
+        )
+        if charge_power < 0.0:
+            raise ValueError(f"charge_power must be >= 0; got {charge_power}")
+        if storage_capacity_kwh <= 0.0:
+            raise ValueError(
+                f"storage_capacity_kwh must be > 0; got {storage_capacity_kwh}"
+            )
+        if passive_discharge_rate < 0.0:
+            raise ValueError(
+                f"passive_discharge_rate must be >= 0; got {passive_discharge_rate}"
+            )
+        self.charge_power = charge_power
+        self.storage_capacity_kwh = storage_capacity_kwh
+        self.passive_discharge_rate = passive_discharge_rate
+        self._gain: float = max_power * self._power_scale
+
+    def _recompute_power_scaled_gains(self) -> None:
+        """Re-derive the cached boost gain after a ``power_scale`` change."""
+        self._gain = self.max_power * self._power_scale
+
+    def thermal_power(self, setpoint_fraction: float, outdoor_temp: float = 0.0) -> float:
+        """
+        Instantaneous boost thermal power [W].
+
+        This covers only the fan-assisted boost output controlled by the MPC.
+        The autonomous passive discharge is tracked separately via
+        ``passive_thermal_output``.
+        """
+        return self._gain * setpoint_fraction
+
+    def passive_thermal_output(self, stored_energy_kwh: float) -> float:
+        """
+        Passive (autonomous) heat release rate [W] from stored energy.
+
+        Computes the discharge power as:
+
+            P_passive = stored_energy_kwh × 3600 × 1000 × passive_discharge_rate
+
+        The result is clamped to [0, rated_passive_max] where
+        ``rated_passive_max`` is the passive output at full storage.
+
+        Parameters
+        ----------
+        stored_energy_kwh : float
+            Current thermal energy stored in the brick core [kWh].
+
+        Returns
+        -------
+        float
+            Heat release rate [W].  Non-negative.
+        """
+        stored_j = max(0.0, stored_energy_kwh) * 3_600_000.0  # kWh → J
+        return stored_j * self.passive_discharge_rate
+
+    @property
+    def charge_power_input(self) -> float:
+        """Electrical draw [W] during the charging window."""
+        return self.charge_power
+
+    def rated_heating_capacity(self, outdoor_temp: float = 0.0) -> float:
+        """
+        Upper bound on total deliverable heat [W]: boost + full passive discharge.
+        """
+        passive_max = self.passive_thermal_output(self.storage_capacity_kwh)
+        return self.max_power * self._power_scale + max(passive_max, 0.0)
+
+    @property
+    def elec_per_unit_heat(self) -> float:
+        """Electrical draw during charging (cost proxy for charge-window planning)."""
+        return self.charge_power
+
+    def target_temperature(self, setpoint_fraction: float, internal_temp: float) -> float:
+        """Target setpoint for boost fan control (linear offset)."""
+        setpoint_fraction = max(0.0, min(1.0, setpoint_fraction))
+        return internal_temp + setpoint_fraction * 5.0  # 5 °C max offset for boost
