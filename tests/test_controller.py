@@ -1478,6 +1478,79 @@ class TestRunOptimizationGate:
         assert ctrl.total_computes == 1
         assert len(ctrl.predictions) > 0
 
+    def test_covariance_not_collapsed_after_many_stopped_cycles(self):
+        """EKF covariance must not collapse to zero during extended stopped periods.
+
+        Without a predict step, P can only decrease via the update equation.
+        After many cycles P → 0, the Kalman gain K → 0, and the filter
+        freezes — it no longer tracks the actual temperature.  This is the
+        open-loop-drift symptom the user reported overnight.
+
+        The fix (calling estimator.step rather than propagate) guarantees
+        predict always runs for the nominal Ts, keeping P at its steady-state
+        value and the gain at a level that lets the filter track changes.
+        """
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        # Warm up with one optimisation cycle.
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+
+        # Simulate an overnight stopped period: 32 cycles at 15-min intervals.
+        for k in range(32):
+            model.rooms["living_room"].temperature = 20.0 - k * 0.1
+            model.rooms["bedroom"].temperature = 19.0 - k * 0.1
+            ctrl.compute(outdoor_temp=5.0, now=self._NOW, run_optimization=False)
+
+        # After the stopped period the room has cooled significantly.
+        # A healthy filter (P maintained by predict) must still track it.
+        model.rooms["living_room"].temperature = 15.0
+        model.rooms["bedroom"].temperature = 14.0
+        ctrl.compute(outdoor_temp=0.0, now=self._NOW, run_optimization=False)
+
+        filt = ctrl.filtered_temperatures
+        # If P had collapsed (K ≈ 0) the estimate would be frozen near 20 °C.
+        # A working filter must pull the estimate well below 19 °C.
+        assert filt["living_room"] < 19.0, (
+            "EKF must still track temperature changes after many stopped cycles; "
+            "if the covariance collapsed the estimate would be frozen near 20 °C"
+        )
+
+    def test_no_discrete_jump_on_re_enable(self):
+        """Filtered temperature must not jump discontinuously when re-enabled.
+
+        With the P-collapse bug: overnight stopped → estimate freezes at ~20 °C,
+        room cools to ~16 °C → re-enable → first predict inflates P → huge
+        update correction → discrete jump reported by the user.
+
+        After the fix the estimate tracks the measurement throughout the stopped
+        period so the innovation at re-enable is small and no jump occurs.
+        """
+        model, sources = _make_model_and_sources()
+        ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
+        ctrl.compute(outdoor_temp=5.0, now=self._NOW)
+
+        # Stopped period: room cools from 20 °C to 16 °C over 20 cycles.
+        for k in range(20):
+            temp = 20.0 - k * 0.2
+            model.rooms["living_room"].temperature = temp
+            model.rooms["bedroom"].temperature = temp - 1.0
+            ctrl.compute(outdoor_temp=3.0, now=self._NOW, run_optimization=False)
+
+        filt_before = ctrl.filtered_temperatures["living_room"]
+
+        # Re-enable: first optimisation cycle after the stopped period.
+        model.rooms["living_room"].temperature = 16.0
+        model.rooms["bedroom"].temperature = 15.0
+        ctrl.compute(outdoor_temp=3.0, now=self._NOW, run_optimization=True)
+
+        filt_after = ctrl.filtered_temperatures["living_room"]
+        jump = abs(filt_after - filt_before)
+        assert jump < 2.0, (
+            f"Filtered temperature jumped {jump:.2f} °C on re-enable; "
+            "the estimate should have been tracking the measurement during the "
+            "stopped period so no large correction is needed at re-enable"
+        )
+
 
 class TestTerminalWeight:
     """HeatingMPCController.terminal_weight exposes the configured weight."""
