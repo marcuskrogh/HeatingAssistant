@@ -287,6 +287,9 @@ class _ThetaLayout:
         [ log_mass_1..n
           log_r_ext_1..n
           q_int_1..n
+          t_wall_init_seg0_1..n          (first dataset / single dataset)
+          [t_wall_init_seg1_1..n]        (second dataset, when n_wall_segs>1)
+          ...
           log_alpha_{s_k} for s_k in identifiable_sources
           log_r_ij_{p_k} for p_k in identifiable_pairs
           log_solar_{i_k} for i_k in identifiable_solar
@@ -296,7 +299,9 @@ class _ThetaLayout:
     The first three blocks always exist (one entry per room); the gated
     blocks are present only for the rooms / sources / pairs that passed
     their identifiability gates, so an old 3n-element θ remains a valid
-    layout with all gates closed.
+    layout with all gates closed.  ``n_wall_segs`` controls how many
+    dataset-level initial-wall-temperature blocks are included; each block
+    covers all rooms.
     """
 
     def __init__(
@@ -306,20 +311,23 @@ class _ThetaLayout:
         identifiable_pairs: List[Tuple[int, int]],
         identifiable_solar: Optional[List[int]] = None,
         identifiable_splits: Optional[List[int]] = None,
+        n_wall_segs: int = 1,
     ) -> None:
         self.n_rooms = n_rooms
         self.identifiable_sources = list(identifiable_sources)
         self.identifiable_pairs = list(identifiable_pairs)
         self.identifiable_solar = list(identifiable_solar or [])
         self.identifiable_splits = list(identifiable_splits or [])
+        self.n_wall_segs = max(1, int(n_wall_segs))
 
         n = n_rooms
         self.idx_log_mass = (0, n)
         self.idx_log_r = (n, 2 * n)
         self.idx_q_int = (2 * n, 3 * n)
-        self.idx_t_wall_init = (3 * n, 4 * n)
+        # t_wall_init block: n_wall_segs blocks of n rooms each.
+        self.idx_t_wall_init = (3 * n, 3 * n + self.n_wall_segs * n)
 
-        off = 4 * n
+        off = 3 * n + self.n_wall_segs * n
         self.idx_log_alpha = (off, off + len(identifiable_sources))
         off = self.idx_log_alpha[1]
         self.idx_log_r_ij = (off, off + len(identifiable_pairs))
@@ -332,6 +340,12 @@ class _ThetaLayout:
 
         self.size = self.idx_r_aw[1]
 
+    def get_t_wall_seg(self, theta: np.ndarray, seg: int) -> np.ndarray:
+        """Return the t_wall_init block for dataset segment ``seg``."""
+        n = self.n_rooms
+        a = self.idx_t_wall_init[0] + seg * n
+        return theta[a: a + n]
+
     def unpack(self, theta: np.ndarray):
         a, b = self.idx_log_mass
         log_mass = theta[a:b]
@@ -339,8 +353,9 @@ class _ThetaLayout:
         log_r = theta[a:b]
         a, b = self.idx_q_int
         q_int = theta[a:b]
-        a, b = self.idx_t_wall_init
-        t_wall_init = theta[a:b]
+        # Return FIRST segment's wall temps for backward compatibility.
+        a = self.idx_t_wall_init[0]
+        t_wall_init = theta[a: a + self.n_rooms]
         a, b = self.idx_log_alpha
         log_alpha = theta[a:b]
         a, b = self.idx_log_r_ij
@@ -702,6 +717,7 @@ class KalmanMLEstimator:
         self,
         history: List[Dict[str, Any]],
         locked_params: Optional[Dict[str, Any]] = None,
+        dataset_start_timestamps: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
         Estimate all identifiable thermal parameters from the history buffer
@@ -713,6 +729,13 @@ class KalmanMLEstimator:
         locked_params : dict, optional
             Parameters to hold fixed (not decision variables) during
             optimisation.  Format::
+        dataset_start_timestamps : list of float, optional
+            UNIX timestamps of the first record in each stored dataset being
+            identified jointly.  When provided, one independent
+            ``t_wall_initial`` block per dataset is added to the parameter
+            vector so each dataset's initial envelope temperature is estimated
+            separately.  When ``None`` (single-dataset or live-window mode),
+            a single shared block is used as before.
 
                 {
                     "thermal_mass":    {"room_name": value, ...},
@@ -827,12 +850,16 @@ class KalmanMLEstimator:
             excited_sources, self._sources, self._room_names,
         )
 
+        # One t_wall_init block per distinct dataset start timestamp (minimum 1).
+        n_wall_segs = max(1, len(dataset_start_timestamps)) if dataset_start_timestamps else 1
+
         layout = _ThetaLayout(
             n_rooms=self._n,
             identifiable_sources=identifiable_sources,
             identifiable_pairs=identifiable_pairs,
             identifiable_solar=identifiable_solar,
             identifiable_splits=identifiable_splits,
+            n_wall_segs=n_wall_segs,
         )
 
         # ── Build initial point and priors for the joint vector ────────────
@@ -852,11 +879,13 @@ class KalmanMLEstimator:
         r_aw_prior = np.array([
             self._r_aw_prior_full[i] for i in identifiable_splits
         ])
+        # t_wall_init prior: one block per wall segment (tiled from the single prior).
+        t_wall_prior_all = np.tile(self._t_wall_init_prior, n_wall_segs)
         theta_prior = np.concatenate([
             self._log_mass_prior,
             self._log_r_prior,
             self._q_int_prior,
-            self._t_wall_init_prior,
+            t_wall_prior_all,
             log_alpha_prior,
             log_r_ij_prior,
             log_solar_prior,
@@ -870,7 +899,7 @@ class KalmanMLEstimator:
             [(_LOG_MASS_LO, _LOG_MASS_HI)] * n
             + [(_LOG_R_LO, _LOG_R_HI)] * n
             + [(_Q_INT_LO, _Q_INT_HI)] * n
-            + [(_T_WALL_LO, _T_WALL_HI)] * n
+            + [(_T_WALL_LO, _T_WALL_HI)] * (n * n_wall_segs)
             + [(_LOG_ALPHA_LO, _LOG_ALPHA_HI)] * len(identifiable_sources)
             + [(_LOG_R_IJ_LO, _LOG_R_IJ_HI)] * len(identifiable_pairs)
             + [(_LOG_SOLAR_LO, _LOG_SOLAR_HI)] * len(identifiable_solar)
@@ -912,6 +941,7 @@ class KalmanMLEstimator:
                     theta, layout, std_history, nominal_dt=self._dt,
                     max_window_steps=self._max_window_steps,
                     min_segment_steps=self._min_segment_steps,
+                    dataset_start_ts=dataset_start_timestamps,
                 )
                 reg = _regularization_fn(theta)
                 reg_grad = self._compute_regularization_gradient(
@@ -1069,11 +1099,22 @@ class KalmanMLEstimator:
                 "r_aw_fraction": round(float(r_aw[k]), 4),
             }
 
-        # Per-room wall initial temperatures (always identified).
+        # Per-room wall initial temperatures — first dataset segment for backward compat.
         estimated_t_wall_initial: Dict[str, float] = {
             self._room_names[i]: round(float(t_wall_init[i]), 2)
             for i in range(self._n)
         }
+        # All dataset-segment wall temperatures (populated when n_wall_segs > 1).
+        if n_wall_segs > 1:
+            estimated_t_wall_per_dataset: Optional[List[Dict[str, float]]] = [
+                {
+                    self._room_names[i]: round(float(layout.get_t_wall_seg(best_theta, seg)[i]), 2)
+                    for i in range(self._n)
+                }
+                for seg in range(n_wall_segs)
+            ]
+        else:
+            estimated_t_wall_per_dataset = None
 
         # Report negative normalised MSE (higher → better fit).
         # Stored in the same "log_likelihood" field for dashboard compatibility;
@@ -1139,6 +1180,7 @@ class KalmanMLEstimator:
             "estimated_solar_scales": estimated_solar_scales,
             "estimated_envelope_splits": estimated_splits,
             "estimated_t_wall_initial": estimated_t_wall_initial,
+            "estimated_t_wall_per_dataset": estimated_t_wall_per_dataset,
             "identifiable_connections": identifiable_names,
             "identifiable_sources": identifiable_source_names,
             "identifiable_solar_rooms": [
@@ -1388,9 +1430,11 @@ class KalmanMLEstimator:
 
                 elif param_key == "t_wall_initial":
                     val = max(_T_WALL_LO, min(_T_WALL_HI, float(value)))
-                    idx = layout.idx_t_wall_init[0] + i
-                    bounds[idx] = (val, val)
-                    theta_prior[idx] = val
+                    # Lock ALL dataset-segment wall temps to the same value.
+                    for seg in range(layout.n_wall_segs):
+                        idx = layout.idx_t_wall_init[0] + seg * layout.n_rooms + i
+                        bounds[idx] = (val, val)
+                        theta_prior[idx] = val
 
     def _physics_informed_theta(
         self,
@@ -1741,6 +1785,7 @@ class KalmanMLEstimator:
         max_gap_factor: float = 1.5,
         min_segment_steps: int = 20,
         max_window_steps: int = 60,
+        dataset_start_ts: Optional[List[float]] = None,
     ) -> Tuple[float, np.ndarray]:
         """
         Multi-step open-loop simulation MSE and its gradient w.r.t. ``theta``.
@@ -1762,9 +1807,14 @@ class KalmanMLEstimator:
 
         **Wall-seed contract** (see
         :meth:`HouseThermalSDE.initial_state_from_measurement`): the first
-        window seeds the envelope from ``θ[t_wall_initial]`` (air seed then
-        override); every later window uses the ``"steady_state"`` warm start
-        at the local (T_a, T_out) equilibrium — matching open-loop diagnostics.
+        window of each *dataset* segment seeds the envelope from the
+        corresponding per-dataset ``θ[t_wall_init_seg_k]`` block (air seed
+        then override); every later window — including the first window of
+        within-dataset timestamp-gap segments — uses the ``"steady_state"``
+        warm start at the local (T_a, T_out) equilibrium.  When
+        ``dataset_start_ts`` is ``None`` (backward-compat / single-dataset
+        path) the very first segment receives the single ``θ[t_wall_init]``
+        block and all remaining segments use steady-state.
 
         Returns
         -------
@@ -1819,13 +1869,21 @@ class KalmanMLEstimator:
 
         ra0, _ = layout.idx_r_aw
         tw0, _ = layout.idx_t_wall_init
+        n_wall_segs = layout.n_wall_segs
 
-        # Wall-seed contract (see HouseThermalSDE.initial_state_from_measurement):
-        # the first window seeds the envelope from θ[t_wall_initial]; every
-        # later window (including after timestamp-gap segments) uses the
-        # (T_a, T_out) steady-state warm start so the short open-loop horizon
-        # is not biased by the dataset-start wall temperature.
-        is_first_dataset_window = True
+        # Pre-process dataset start timestamps for O(1) segment-to-dataset
+        # lookup.  Each detected contiguous segment whose first record's
+        # timestamp falls within half a nominal step of a known dataset start
+        # will be assigned the corresponding per-dataset θ[t_wall_init_seg]
+        # block.  Segments that arise from *within-dataset* gaps (controller
+        # restarts) will not match any dataset start and will use steady-state.
+        _ts_tol = 0.5 * nominal_dt
+        if dataset_start_ts is not None and len(dataset_start_ts) > 0:
+            _ds_ts_arr: Optional[np.ndarray] = np.array(
+                dataset_start_ts, dtype=float
+            )
+        else:
+            _ds_ts_arr = None
 
         for seg_i in range(len(seg_starts) - 1):
             seg_begin = seg_starts[seg_i]
@@ -1835,24 +1893,47 @@ class KalmanMLEstimator:
 
             seg = std_history[seg_begin:seg_end]
 
+            # Determine which (if any) per-dataset wall-temp block applies to
+            # the first window of this segment.
+            #   _wall_seg_idx is None  → steady-state seed (no injection)
+            #   _wall_seg_idx == k     → inject θ[t_wall_init_seg_k]
+            _wall_seg_idx: Optional[int]
+            if _ds_ts_arr is not None:
+                t_seg_start = seg[0].get("t")
+                if t_seg_start is not None:
+                    diffs = np.abs(_ds_ts_arr - float(t_seg_start))
+                    best_k = int(np.argmin(diffs))
+                    _wall_seg_idx = (
+                        best_k if diffs[best_k] <= _ts_tol else None
+                    )
+                else:
+                    _wall_seg_idx = None
+            else:
+                # Backward-compat / single-dataset: seed only the very first
+                # segment with the single θ[t_wall_init] block (seg index 0).
+                _wall_seg_idx = 0 if seg_i == 0 else None
+
             # Split the contiguous segment into windows of at most
             # max_window_steps.  Each window is simulated independently
             # from its own first measurement so that the open-loop horizon
             # never grows so long that the gradient for slow parameters
             # (q_int, large C) is swamped by accumulated simulation error.
+            is_first_window = True
             for win_start in range(0, len(seg), max_window_steps):
                 win_end = min(win_start + max_window_steps, len(seg))
                 if (win_end - win_start) < min_segment_steps:
+                    is_first_window = False
                     continue
                 win = seg[win_start:win_end]
 
                 ym0 = np.asarray(win[0]["ym"], dtype=float)
                 u0 = np.asarray(win[0].get("u", []), dtype=float)
                 d0 = np.asarray(win[0].get("d", []), dtype=float)
-                # Match diagnostics: neutral air seed on the first window, then
-                # override with θ[t_wall_initial]; interior windows use the
-                # parameter-dependent steady-state equilibrium directly.
-                _wall_seed = "air" if is_first_dataset_window else "steady_state"
+                # Match diagnostics: air seed for the first window of a
+                # dataset segment (wall override applied next); interior
+                # windows use the parameter-dependent steady-state directly.
+                _inject_wall = is_first_window and _wall_seg_idx is not None
+                _wall_seed = "air" if _inject_wall else "steady_state"
                 try:
                     x = np.asarray(
                         model.initial_state_from_measurement(
@@ -1866,16 +1947,22 @@ class KalmanMLEstimator:
                         dtype=float,
                     )
                 sx = np.zeros((ntheta, nx))  # ∂x/∂θ — reset per window
+                is_first_window = False
 
-                if is_first_dataset_window:
-                    # Identified t_wall_initial from θ; ∂x₀[n+i]/∂θ[tw0+i] = 1.
-                    is_first_dataset_window = False
+                if _inject_wall:
+                    # Identified per-dataset t_wall_init from θ;
+                    # ∂x₀[n+i]/∂θ[tw_base+i] = 1.
+                    tw_base = tw0 + _wall_seg_idx * n  # type: ignore[operator]
                     for i in range(n):
                         if n + i < nx:
                             x[n + i] = float(
-                                np.clip(theta[tw0 + i], _T_WALL_LO, _T_WALL_HI)
+                                np.clip(theta[tw_base + i], _T_WALL_LO, _T_WALL_HI)
                             )
-                            sx[tw0 + i, n + i] = 1.0
+                            sx[tw_base + i, n + i] = 1.0
+                    # From the second window onward the remaining segment
+                    # windows use steady-state, so clear the dataset index to
+                    # avoid accidental re-injection.
+                    _wall_seg_idx = None
                 else:
                     # steady_state wall seed already applied; propagate
                     # r_aw sensitivity for that warmstart.
@@ -2255,8 +2342,10 @@ class KalmanMLEstimator:
 
         lam_tw = max(lam, _T_WALL_MIN_LAM)
         a, b = layout.idx_t_wall_init
+        all_t_wall = theta[a:b]
+        all_t_wall_prior = np.tile(self._t_wall_init_prior, layout.n_wall_segs)
         grad[a:b] = (
-            2.0 * lam_tw * (t_wall_init - self._t_wall_init_prior)
+            2.0 * lam_tw * (all_t_wall - all_t_wall_prior)
             / (_T_WALL_PRIOR_STD ** 2)
         )
 
@@ -2568,11 +2657,15 @@ class KalmanMLEstimator:
         )
         lam = self._regularization
         lam_tw = max(lam, _T_WALL_MIN_LAM)
-        # Wall initial temperature: Gaussian prior toward first air temp.
-        # Uses lam_tw ≥ _T_WALL_MIN_LAM so even under the default weak
-        # regularisation the parameter stays in a physically plausible range.
+        # Wall initial temperatures (all segments): Gaussian prior toward
+        # first air temp.  Uses lam_tw ≥ _T_WALL_MIN_LAM so even under the
+        # default weak regularisation the parameters stay in a physically
+        # plausible range.
+        a, b = layout.idx_t_wall_init
+        all_t_wall = theta[a:b]
+        all_t_wall_prior = np.tile(self._t_wall_init_prior, layout.n_wall_segs)
         reg += lam_tw * float(
-            np.sum((t_wall_init - self._t_wall_init_prior) ** 2)
+            np.sum((all_t_wall - all_t_wall_prior) ** 2)
         ) / (_T_WALL_PRIOR_STD ** 2)
         if len(log_solar):
             prior = np.array([

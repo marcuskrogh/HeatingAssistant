@@ -5149,6 +5149,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         horizon_hours: Optional[float] = None,
         locked_params: Optional[Dict[str, Any]] = None,
         history_override: Optional[List[Dict[str, Any]]] = None,
+        dataset_start_timestamps: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
         """
         Estimate thermal parameters via open-loop simulation MSE minimisation.
@@ -5221,7 +5222,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
         # Optimisation may take a few seconds; run in a thread executor.
-        _estimate = lambda: estimator.estimate(history, locked_params=locked_params)  # noqa: E731
+        _estimate = lambda: estimator.estimate(  # noqa: E731
+            history,
+            locked_params=locked_params,
+            dataset_start_timestamps=dataset_start_timestamps,
+        )
         result: Dict[str, Any] = await self.hass.async_add_executor_job(_estimate)
 
         if result["success"] and apply_params:

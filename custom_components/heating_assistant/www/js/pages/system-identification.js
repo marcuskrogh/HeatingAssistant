@@ -228,10 +228,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   actionsCard.innerHTML = `
     <div class="tuning-section__title">Actions</div>
     <p class="tuning-section__desc">
-      Auto-Identification fills the fields below with estimates — nothing is applied until you click Apply Parameters.
+      Edit the fields below, then click Apply Parameters to activate them. Use the Stored Datasets section to run automatic identification.
     </p>
     <div class="tuning-actions">
-      <button class="btn btn--accent tuning-actions__btn" id="btn-auto-identify">Run Auto-Identification</button>
       <button class="btn btn--primary tuning-actions__btn" id="btn-apply-params">Apply Parameters</button>
       <button class="btn btn--secondary tuning-actions__btn" id="btn-reset-defaults">Reset to Defaults</button>
       <span class="tuning-actions__status" id="action-status"></span>
@@ -517,7 +516,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     <div id="param-history-list"></div>
   `;
   historySection.appendChild(historyCollapsible.element);
-  container.appendChild(historySection);
+  // historySection is appended after setupDatasetsAndExperiments() so that
+  // Stored Datasets appears above Applied Model History in the page.
 
   const historyListEl = historyCollapsible.element.querySelector('#param-history-list');
 
@@ -542,7 +542,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const windowPanelCustom = container.querySelector('#window-panel-custom');
   const windowStartInput = container.querySelector('#param-window-start');
   const windowEndInput = container.querySelector('#param-window-end');
-  const btnAutoIdentify = container.querySelector('#btn-auto-identify');
   const btnApplyParams = container.querySelector('#btn-apply-params');
   const btnResetDefaults = container.querySelector('#btn-reset-defaults');
   const btnSysid = container.querySelector('#btn-sysid');
@@ -1338,14 +1337,11 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // Button interactions
   // -----------------------------------------------------------------------
 
-  // Run Auto-Identification: dry-run ML estimation, then populate model
-  // parameter fields with the identified C and R from the sysid sensor.
   // Shared auto-identification routine: runs a dry-run ML estimation over the
   // data described by ``idData`` (a window, horizon, single dataset_id or a
   // list of dataset_ids), then populates the parameter fields from the result
-  // for review. Reused by the top "Run Auto-Identification" button (window /
-  // loaded dataset) and the datasets section's "Run on Selected" button
-  // (multiple datasets). Returns true on success.
+  // for review. Used by the datasets section's "Run on Selected" button.
+  // Returns true on success.
   async function runAutoIdentification(idData, statusEl) {
     setStatus(statusEl, 'Running identification…', 'running');
     try {
@@ -1370,26 +1366,6 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       return false;
     }
   }
-
-  btnAutoIdentify.addEventListener('click', async () => {
-    btnAutoIdentify.disabled = true;
-    const idData = {};
-    // A loaded stored dataset overrides the window for identification.
-    if (selectedDatasetId) {
-      idData.dataset_id = selectedDatasetId;
-    } else if (windowMode === 'custom' && windowStartInput.value && windowEndInput.value) {
-      const startTs = new Date(windowStartInput.value).getTime() / 1000;
-      const endTs   = new Date(windowEndInput.value).getTime() / 1000;
-      if (isFinite(startTs) && isFinite(endTs) && startTs < endTs) {
-        idData.window_start = startTs;
-        idData.window_end   = endTs;
-      }
-    } else {
-      idData.horizon_hours = parseFloat(horizonInput.value);
-    }
-    await runAutoIdentification(idData, actionStatusEl);
-    btnAutoIdentify.disabled = false;
-  });
 
   // Apply Parameters: persist the full model parameter set (including the
   // per-source heater scales) plus the stochastic params to the system.
@@ -1502,6 +1478,10 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     getSelectedDatasetId: () => selectedDatasetId,
     runAutoIdentification,
   });
+
+  // Stored Datasets section is already appended inside setupDatasetsAndExperiments();
+  // append Applied Model History here so it appears below Stored Datasets.
+  container.appendChild(historySection);
 
   // -----------------------------------------------------------------------
   // Initial render
