@@ -578,12 +578,68 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
   buildDisturbanceChart(disturbChart, outdoorHistory, outdoorForecast, solarHistory, solarForecast);
 }
 
-function appendCurrentValue(dataPoints, state, entityId) {
-  const val = entityValue(state, entityId);
-  if (val !== null) {
-    dataPoints.push({ x: Date.now(), y: val });
+function extendDatasetToNow(pts, value, now = Date.now()) {
+  if (value === null || value === undefined) return;
+  if (pts.length === 0 || pts[pts.length - 1].x < now) {
+    pts.push({ x: now, y: value });
+  } else {
+    pts[pts.length - 1] = { x: now, y: value };
   }
+}
+
+function appendCurrentValue(dataPoints, state, entityId) {
+  extendDatasetToNow(dataPoints, entityValue(state, entityId));
   return dataPoints;
+}
+
+/** Extend measured history datasets to the current time on every state update. */
+function extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart) {
+  const now = Date.now();
+
+  if (tempChart._chart) {
+    const ds = tempChart._chart.data.datasets;
+    const filteredIdx = ds.findIndex((d) => d.label === 'Filtered');
+    const measuredIdx = ds.findIndex((d) => d.label === 'Measured');
+    if (filteredIdx >= 0) {
+      extendDatasetToNow(ds[filteredIdx].data, entityValue(state, room.entities['temperature_filtered']), now);
+    }
+    if (measuredIdx >= 0) {
+      extendDatasetToNow(ds[measuredIdx].data, entityValue(state, room.entities['temperature_measured']), now);
+    }
+    tempChart._chart.update('none');
+  }
+
+  if (powerChart._chart) {
+    const ds = powerChart._chart.data.datasets;
+    const measuredIdx = ds.findIndex((d) => d.label === 'Measured Power');
+    if (measuredIdx >= 0) {
+      const currentPower = entityValue(state, room.entities['heating_power_measured']);
+      if (currentPower !== null) {
+        extendDatasetToNow(ds[measuredIdx].data, wattsToKw(currentPower), now);
+      }
+    }
+    const priceIdx = ds.findIndex((d) => d.label === 'Price');
+    if (priceIdx >= 0) {
+      extendDatasetToNow(ds[priceIdx].data, entityValue(state, systemEntity('electricity_price')), now);
+    }
+    powerChart._chart.update('none');
+  }
+
+  if (disturbChart._chart) {
+    const ds = disturbChart._chart.data.datasets;
+    const outdoorIdx = ds.findIndex((d) => d.label === 'Outdoor Temperature');
+    const solarIdx = ds.findIndex((d) => d.label === 'Solar Gain');
+    if (outdoorIdx >= 0) {
+      extendDatasetToNow(ds[outdoorIdx].data, entityValue(state, systemEntity('outdoor_temperature_measured')), now);
+    }
+    if (solarIdx >= 0) {
+      const solarVal = entityValue(state, room.entities['solar_gain_measured']);
+      if (solarVal !== null) {
+        extendDatasetToNow(ds[solarIdx].data, wattsToKw(solarVal), now);
+      }
+    }
+    disturbChart._chart.update('none');
+  }
 }
 
 function computeYLimits(allDataPoints, bounds, marginFraction = 0.05) {
@@ -942,6 +998,9 @@ function buildDisturbanceChart(
 }
 
 function updateChartsFromState(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast, plotSettings) {
+  // Keep measured history lines flush with the moving NOW marker on every update.
+  extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart);
+
   // Forecast data only changes when the MPC runs; detect that via last_run_ts.
   const currentRunTs = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
   if (currentRunTs === lastRunTs.value) return;
@@ -992,21 +1051,6 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
     if (powerChart._chart) {
       const ds = powerChart._chart.data.datasets;
       if (ds[1]) ds[1].data = wattsToKwPoints(powerForecast);
-
-      // Extend the measured-power history to "now" so there is no visual gap
-      // between the last recorded point and the forecast start.
-      const measuredIdx = ds.findIndex((d) => d.label === 'Measured Power');
-      if (measuredIdx >= 0) {
-        const powerEntity = room.entities['heating_power_measured'];
-        const currentPower = entityValue(state, powerEntity);
-        if (currentPower !== null) {
-          const pts = ds[measuredIdx].data;
-          const now = Date.now();
-          if (pts.length === 0 || pts[pts.length - 1].x < now) {
-            pts.push({ x: now, y: wattsToKw(currentPower) });
-          }
-        }
-      }
 
       const priceIdx = ds.findIndex((d) => d.label === 'Price');
       const priceForecastIdx = ds.findIndex((d) => d.label === 'Price Forecast');
