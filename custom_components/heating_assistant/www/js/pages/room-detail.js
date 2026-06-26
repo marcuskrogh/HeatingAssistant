@@ -1,10 +1,10 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=79';
-import { createGauge, updateGauge } from '../components/gauge.js?v=79';
-import { createClimateCard } from '../components/climate-card.js?v=79';
-import { createCountdown } from '../components/countdown.js?v=79';
-import { createScheduleOverview } from '../components/schedule-overview.js?v=79';
-import { getRoomScheduleData } from '../schedule-utils.js?v=79';
-import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=79';
+import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=80';
+import { createGauge, updateGauge } from '../components/gauge.js?v=80';
+import { createClimateCard } from '../components/climate-card.js?v=80';
+import { createCountdown } from '../components/countdown.js?v=80';
+import { createScheduleOverview } from '../components/schedule-overview.js?v=80';
+import { getRoomScheduleData } from '../schedule-utils.js?v=80';
+import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=80';
 import {
   KPI_SEVERITY,
   isRoomActive,
@@ -13,12 +13,12 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-} from '../kpi-engine.js?v=79';
+} from '../kpi-engine.js?v=80';
 import {
   formatPower, formatPowerKw, formatPrice,
   entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
-} from '../utils.js?v=79';
+} from '../utils.js?v=80';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
@@ -424,7 +424,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   // lastRunTs tracks the MPC solve timestamp; when it changes we know new
   // forecast data is available and re-fetch via the WS endpoint.
-  const lastRunTs = { value: null };
+  const lastRunTs = { value: null, sensorEntities: [] };
   const onChartsReady = (roomForecast, priceForecast) => {
     // Scale the power gauge to rated heating/cooling capacity (no sysid scale).
     const gaugeMax = roomForecast?.current_rated_max_power ?? roomForecast?.max_power;
@@ -560,6 +560,7 @@ async function loadChartsData(room, state, connection, tempChart, powerChart, di
       }
       if (sensorSeries.length > 1) {
         sensorSpan = sensorHistoriesToMinMaxSpan(sensorSeries, measuredHistory);
+        lastRunTs.sensorEntities = rawSensorEntities;
       }
     }
   } catch (e) {
@@ -653,7 +654,7 @@ function appendCurrentValue(dataPoints, state, entityId) {
 }
 
 /** Extend measured history datasets to the current time on every state update. */
-function extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart) {
+function extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart, sensorEntityIds = []) {
   const now = Date.now();
 
   if (tempChart._chart) {
@@ -665,6 +666,17 @@ function extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart
     }
     if (measuredIdx >= 0) {
       extendDatasetToNow(ds[measuredIdx].data, entityValue(state, room.entities['temperature_measured']), now);
+    }
+    if (sensorEntityIds.length > 1) {
+      const sensorMinIdx = ds.findIndex((d) => d.label === 'Sensor Min');
+      const sensorRangeIdx = ds.findIndex((d) => d.label === 'Sensor Range');
+      if (sensorMinIdx >= 0 && sensorRangeIdx >= 0) {
+        const values = sensorEntityIds.map((id) => entityValue(state, id)).filter((v) => v != null);
+        if (values.length >= 2) {
+          extendDatasetToNow(ds[sensorMinIdx].data, Math.min(...values), now);
+          extendDatasetToNow(ds[sensorRangeIdx].data, Math.max(...values), now);
+        }
+      }
     }
     tempChart._chart.update('none');
   }
@@ -1059,7 +1071,7 @@ function buildDisturbanceChart(
 
 function updateChartsFromState(room, state, connection, tempChart, powerChart, disturbChart, lastRunTs, onForecast, plotSettings) {
   // Keep measured history lines flush with the moving NOW marker on every update.
-  extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart);
+  extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart, lastRunTs.sensorEntities || []);
 
   // Forecast data only changes when the MPC runs; detect that via last_run_ts.
   const currentRunTs = entityAttr(state, systemEntity('mpc_performance'), 'last_run_ts');
@@ -1105,6 +1117,11 @@ function updateChartsFromState(room, state, connection, tempChart, powerChart, d
         }
       }
 
+      const { yMin, yMax } = computeYLimits(ds.map((d) => d.data || []), []);
+      if (tempChart._chart.options?.scales?.y) {
+        if (yMin !== undefined) tempChart._chart.options.scales.y.min = yMin;
+        if (yMax !== undefined) tempChart._chart.options.scales.y.max = yMax;
+      }
       tempChart._chart.update('none');
     }
 
