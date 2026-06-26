@@ -421,6 +421,23 @@ def test_sysid_pending_banner_hides_when_empty() -> None:
     assert "tuning-pending-banner--actions" in source
 
 
+def test_panel_js_files_use_ascii_quotes_only() -> None:
+    """Curly/smart quotes break ES module parsing in the browser (SyntaxError)."""
+    js_root = REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
+    bad_chars = {"\u2018", "\u2019", "\u201c", "\u201d"}
+    offenders: list[str] = []
+    for path in sorted(js_root.rglob("*.js")):
+        if "vendor" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for i, ch in enumerate(text):
+            if ch in bad_chars:
+                line = text.count("\n", 0, i) + 1
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{line}")
+                break
+    assert not offenders, f"Non-ASCII quotes in panel JS: {offenders}"
+
+
 def test_sysid_index_cards_show_core_kpis_and_dismissible_warnings() -> None:
     """System identification index cards must show R²/RMSE/Estimated and dismissible warnings."""
     source = (
