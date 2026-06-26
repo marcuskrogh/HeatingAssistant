@@ -16,6 +16,7 @@ from custom_components.heating_assistant.model_diagnostics import (
     compute_controller_performance,
     analyze_innovations,
     generate_model_fit_report,
+    is_default_thermal_configuration,
     THERMAL_MASS_MIN,
     THERMAL_MASS_MAX,
     R_EXTERNAL_MIN,
@@ -268,6 +269,83 @@ def test_build_identification_warnings_open_loop_info_when_fit_good():
     codes = {w.code for w in warnings}
     assert "open_loop_moderate" in codes
     assert "open_loop_high" not in codes
+
+
+def test_is_default_thermal_configuration():
+    """Preset grid and canonical defaults are recognised."""
+    assert is_default_thermal_configuration(5_000_000.0, 0.05)
+    assert is_default_thermal_configuration(9_000_000.0, 0.05)
+    assert is_default_thermal_configuration(5_000_000.0, 0.08)
+    assert is_default_thermal_configuration(14_000_000.0, 0.12)
+    assert not is_default_thermal_configuration(10_000_000.0, 0.072)
+
+
+def test_build_identification_warnings_skips_param_warnings_for_defaults():
+    """Default thermal params should not produce parameter card warnings."""
+    from custom_components.heating_assistant.model_diagnostics import (
+        build_identification_warnings,
+    )
+
+    validation = validate_parameters(
+        "bedroom",
+        thermal_mass=5_000_000.0,
+        r_external=0.05,
+        model_r_squared=0.4,
+    )
+    warnings = build_identification_warnings(
+        "bedroom",
+        validation,
+        model_r_squared=0.4,
+        n_samples=50,
+    )
+    param_codes = {"thermal_mass", "r_external", "time_constant"}
+    assert not param_codes.intersection({w.code for w in warnings})
+
+
+def test_build_identification_warnings_skips_time_constant_for_preset_combo():
+    """Large + standard preset exceeds soft τ but is still a valid default."""
+    from custom_components.heating_assistant.model_diagnostics import (
+        build_identification_warnings,
+    )
+
+    validation = validate_parameters(
+        "living_room",
+        thermal_mass=9_000_000.0,
+        r_external=0.05,
+        model_r_squared=0.4,
+    )
+    assert not validation.time_constant_valid
+    assert any("time constant" in w.lower() for w in validation.warnings)
+
+    warnings = build_identification_warnings(
+        "living_room",
+        validation,
+        model_r_squared=0.4,
+        n_samples=50,
+    )
+    assert "time_constant" not in {w.code for w in warnings}
+
+
+def test_build_identification_warnings_still_warns_for_modified_params():
+    """User-modified params outside the preset grid should still warn."""
+    from custom_components.heating_assistant.model_diagnostics import (
+        build_identification_warnings,
+    )
+
+    validation = validate_parameters(
+        "living_room",
+        thermal_mass=10_000_000.0,
+        r_external=0.072,
+        model_r_squared=0.4,
+    )
+    warnings = build_identification_warnings(
+        "living_room",
+        validation,
+        model_r_squared=0.4,
+        n_samples=50,
+    )
+    param_codes = {"thermal_mass", "r_external", "time_constant", "parameter_validation"}
+    assert param_codes.intersection({w.code for w in warnings})
 
 
 def test_validate_parameters_edge_cases():

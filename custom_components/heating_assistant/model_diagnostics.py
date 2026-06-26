@@ -27,6 +27,7 @@ except Exception:  # scipy absent or import error at startup
     _scipy_chi2 = None
     _scipy_expm = None
 
+from .const import DEFAULT_R_EXTERNAL, DEFAULT_THERMAL_MASS
 from .integrator import (
     ImplicitEulerConvergenceError,
     implicit_euler_substeps,
@@ -183,6 +184,45 @@ _GOOD_FIT_RMSE_C = 0.5
 _ACCEPTABLE_FIT_R_SQUARED = 0.5
 _OPEN_LOOP_WARN_RMSE_C = 0.5
 _OPEN_LOOP_ALARM_RMSE_C = 1.0
+
+# Categorical thermal presets (mirror configuration.js ROOM_SIZE_PRESETS ×
+# HOUSE_AGE_PRESETS).  These are intentional user-facing defaults — not
+# mis-identifications — so sysid card warnings should not fire for them.
+_ROOM_SIZE_THERMAL_MASSES = (
+    2_500_000.0,   # small
+    5_000_000.0,   # medium (also DEFAULT_THERMAL_MASS)
+    9_000_000.0,   # large
+    14_000_000.0,  # open / open-plan
+)
+_HOUSE_AGE_R_EXTERNALS = (
+    0.03,   # old / poorly insulated
+    0.05,   # standard (also DEFAULT_R_EXTERNAL)
+    0.08,   # modern / well insulated
+    0.12,   # passive house
+)
+
+
+def _params_close(a: float, b: float) -> bool:
+    """Match preset values with the same tolerance used in the sysid UI."""
+    return math.isclose(a, b, rel_tol=0.0, abs_tol=1e-9 * max(1.0, abs(a), abs(b)))
+
+
+def is_default_thermal_configuration(
+    thermal_mass: float,
+    r_external: float,
+) -> bool:
+    """Return True when params match canonical or preset defaults (unmodified baseline)."""
+    if _params_close(thermal_mass, DEFAULT_THERMAL_MASS) and _params_close(
+        r_external, DEFAULT_R_EXTERNAL
+    ):
+        return True
+    for tm in _ROOM_SIZE_THERMAL_MASSES:
+        if not _params_close(thermal_mass, tm):
+            continue
+        for r in _HOUSE_AGE_R_EXTERNALS:
+            if _params_close(r_external, r):
+                return True
+    return False
 
 
 def _good_closed_loop_fit(
@@ -474,7 +514,14 @@ def build_identification_warnings(
         "thermal time constant": "time_constant",
     }
 
+    skip_param_warnings = is_default_thermal_configuration(
+        validation.thermal_mass,
+        validation.r_external,
+    )
+
     for text in validation.warnings:
+        if skip_param_warnings:
+            continue
         code = "parameter_validation"
         lowered = text.lower()
         for needle, mapped in code_map.items():
