@@ -452,8 +452,8 @@ const LANDING_CARDS = [
   {
     hash: '#config/system',
     icon: ICONS.system,
-    title: 'Environment & Site',
-    desc: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors, plus site location.',
+    title: 'Environment',
+    desc: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors.',
   },
   {
     hash: '#config/params',
@@ -1333,8 +1333,8 @@ function renderSystem(container, connection, hass) {
   const { body } = configPageShell(container, {
     backLabel: 'CONFIGURATION',
     backHash: '#config',
-    title: 'ENVIRONMENT & SITE',
-    description: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors, plus site location.',
+    title: 'ENVIRONMENT',
+    description: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors.',
   });
   body.appendChild(loadingNode());
 
