@@ -10,10 +10,10 @@
 import {
   findActivePeriod, findNextPeriod,
   periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml,
-} from '../schedule-utils.js';
+} from '../schedule-utils.js?v=79';
 import {
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js';
+} from '../experiment-utils.js?v=79';
 
 function render(card, schedData, experiments = []) {
   const periods = schedData?.periods || [];

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from custom_components.heating_assistant.config_flow import (
@@ -436,6 +437,63 @@ def test_panel_js_files_use_ascii_quotes_only() -> None:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{line}")
                 break
     assert not offenders, f"Non-ASCII quotes in panel JS: {offenders}"
+
+
+def _panel_cache_bust_token() -> str:
+    init_py = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "__init__.py"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"industrial-dashboard\.js\?v=(\d+)", init_py)
+    assert match, "Panel js_url cache-bust token not found in __init__.py"
+    return match.group(1)
+
+
+def test_panel_cache_bust_token_in_sync() -> None:
+    """js_url ?v=, dashboard fallback, and panel-cache-bust.js must match."""
+    token = _panel_cache_bust_token()
+    cache_bust = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
+        / "panel-cache-bust.js"
+    ).read_text(encoding="utf-8")
+    dashboard = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www"
+        / "industrial-dashboard.js"
+    ).read_text(encoding="utf-8")
+    assert f"PANEL_CACHE_BUST = '{token}'" in cache_bust
+    assert f"return '{token}'" in dashboard
+
+
+def test_panel_relative_imports_use_cache_bust_suffix() -> None:
+    """Transitive ES module imports must carry ?v= or browsers serve stale modules."""
+    token = _panel_cache_bust_token()
+    js_root = REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
+    offenders: list[str] = []
+    for path in sorted(js_root.rglob("*.js")):
+        if "vendor" in path.parts or path.name in {"panel-cache-bust.js"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"from '(\.\.?/[^']+\.js)(?:\?v=\d+)?'", text):
+            full = match.group(0)
+            if f"?v={token}" not in full:
+                line = text.count("\n", 0, match.start()) + 1
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{line}:{full}")
+    assert not offenders, f"Unversioned panel imports: {offenders[:5]}"
+
+
+def test_kpi_engine_exports_room_time_in_range() -> None:
+    """room-detail imports roomTimeInRangePct — kpi-engine must export it."""
+    kpi_engine = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
+        / "kpi-engine.js"
+    ).read_text(encoding="utf-8")
+    room_detail = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js" / "pages"
+        / "room-detail.js"
+    ).read_text(encoding="utf-8")
+    token = _panel_cache_bust_token()
+    assert "export function roomTimeInRangePct" in kpi_engine
+    assert f"from '../kpi-engine.js?v={token}'" in room_detail
+    assert "roomTimeInRangePct" in room_detail
 
 
 def test_sysid_index_cards_show_core_kpis_and_dismissible_warnings() -> None:
