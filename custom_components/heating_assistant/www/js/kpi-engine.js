@@ -28,6 +28,7 @@ export const MPC_LOAD_GAUGE_MAX_PCT = 100;
 /** Severity thresholds per KPI (KPI_SPEC §4–5). Use with severityColor / severityColorInverse. */
 export const KPI_SEVERITY = {
   comfortIndex: { good: 95, warning: 80 },
+  timeInRange: { good: 95, warning: 80 },
   houseHeatingPower: { good: 0.30, warning: 0.70, inverse: true },
   effectiveCop: { good: 3.0, warning: 2.0 },
   dailyEnergy: { good: 20, warning: 50, inverse: true },
@@ -98,6 +99,30 @@ export function roomComfortDeviation(state, room, roomActive) {
     return null;
   }
   return comfortDeviationC(temp, lower, upper);
+}
+
+/**
+ * Per-room 24 h time-in-range [%].
+ * Reads ``time_in_range_pct_24h`` from ``temperature_filtered`` when present.
+ */
+export function roomTimeInRangePct(state, room, roomActive) {
+  if (!roomActive) return null;
+
+  const filteredEntity = room.entities?.temperature_filtered;
+  if (filteredEntity) {
+    const attr = entityAttr(state, filteredEntity, 'time_in_range_pct_24h');
+    if (attr !== null && attr !== undefined && isFiniteNum(attr)) {
+      return parseFloat(attr);
+    }
+  }
+
+  const temp = roomTemperature(state, room);
+  const lower = entityValue(state, room.entities?.constraint_lower);
+  const upper = entityValue(state, room.entities?.constraint_upper);
+  if (!isFiniteNum(temp) || !isFiniteNum(lower) || !isFiniteNum(upper)) {
+    return null;
+  }
+  return null;
 }
 
 /** Percentage of active rooms within the comfort corridor (§4.2). */

@@ -1142,6 +1142,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # SysIdSimulationSensor reads from here.
         self.sysid_results: Dict[str, Any] = {}
 
+        # Per-room rolling 24 h time-in-range [%] from recorder history; refreshed
+        # periodically by ``kpi_history.async_refresh_time_in_range_kpis``.
+        self._time_in_range_pct_24h: Dict[str, Optional[float]] = {}
+        self._time_in_range_last_refresh_ts: float = 0.0
+
         # Schedule-projected per-step control parameters for the current
         # MPC horizon.  Populated each cycle by _compute_control_trajectory
         # and read by setpoint / constraint sensors to plot the time-varying
@@ -3309,6 +3314,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     )
                     await self.id_history_store.async_purge_old()
 
+            await self._async_refresh_time_in_range_kpis_if_due()
+
             # 7. Write set-points to heater entities. Keep the latest
             # forecast/prediction entities available even if HA service calls
             # fail for a specific heater entity.
@@ -3345,6 +3352,25 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    async def _async_refresh_time_in_range_kpis_if_due(self) -> None:
+        """Rate-limited refresh of per-room 24 h time-in-range KPI cache."""
+        from .kpi_history import (  # noqa: PLC0415 — HA import boundary
+            TIME_IN_RANGE_REFRESH_S,
+            async_refresh_time_in_range_kpis,
+        )
+
+        now_ts = self.now_utc.timestamp()
+        if (
+            self._time_in_range_last_refresh_ts > 0.0
+            and now_ts - self._time_in_range_last_refresh_ts < TIME_IN_RANGE_REFRESH_S
+        ):
+            return
+
+        self._time_in_range_pct_24h = await async_refresh_time_in_range_kpis(
+            self.hass, self, now_ts,
+        )
+        self._time_in_range_last_refresh_ts = now_ts
 
     def setup_startup_listeners(self) -> Optional[Callable]:
         """Watch the specific entities this integration needs, not all of HA.

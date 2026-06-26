@@ -240,9 +240,18 @@ class TemperatureFilteredSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
     @property
     def extra_state_attributes(self) -> dict:
         room = self._coordinator.model.rooms[self._room_name]
-        deviation = room_comfort_deviation_c(
-            _kpi_room_snapshot(self._coordinator, self._room_name)
-        )
+        snapshot = _kpi_room_snapshot(self._coordinator, self._room_name)
+        deviation = room_comfort_deviation_c(snapshot)
+        cached_pct = self._coordinator._time_in_range_pct_24h.get(self._room_name)
+        time_in_range = None
+        if (
+            snapshot.room_active
+            and room_temperature(snapshot) is not None
+            and snapshot.constraint_lower is not None
+            and snapshot.constraint_upper is not None
+            and cached_pct is not None
+        ):
+            time_in_range = cached_pct
         return {
             "thermal_mass": room.thermal_mass,
             "r_external": room.r_external,
@@ -252,6 +261,9 @@ class TemperatureFilteredSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
             "r_aw_fraction": round(float(room.r_aw_fraction), 4),
             "comfort_deviation": (
                 round(deviation, 1) if deviation is not None else None
+            ),
+            "time_in_range_pct_24h": (
+                round(time_in_range) if time_in_range is not None else None
             ),
         }
 

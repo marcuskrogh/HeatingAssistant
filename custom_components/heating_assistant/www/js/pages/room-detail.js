@@ -7,9 +7,8 @@ import { getRoomScheduleData } from '../schedule-utils.js';
 import { findActiveExperiment, experimentBands } from '../experiment-utils.js';
 import {
   KPI_SEVERITY,
-  COMFORT_DEVIATION_GAUGE_MAX_C,
   isRoomActive,
-  roomComfortDeviation,
+  roomTimeInRangePct,
   roomHeatLoss,
   heatLossGaugeMax,
   solarGainGaugeMax,
@@ -29,13 +28,12 @@ const POWER_KW_TICK = (v) => Number(v).toFixed(1);
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
-/** Comfort deviation display: 0.0°C in band, otherwise +d°C (KPI_SPEC §5.2). */
-function formatComfortDeviation(deviation) {
-  if (deviation === null || deviation === undefined) return '—';
-  const num = parseFloat(deviation);
+/** Time-in-range display as integer percent (KPI_SPEC §5.2). */
+function formatTimeInRangePct(pct) {
+  if (pct === null || pct === undefined) return '—';
+  const num = parseFloat(pct);
   if (isNaN(num)) return '—';
-  if (num === 0) return '0.0°C';
-  return `+${num.toFixed(1)}°C`;
+  return `${Math.round(num)}%`;
 }
 
 /** Whether the room is currently off — the effective state published by the
@@ -146,13 +144,13 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
 
   const solarEntity = room.entities['solar_gain_measured'];
 
-  const comfortGauge = createGauge({
+  const timeInRangeGauge = createGauge({
     value: 0,
     min: 0,
-    max: COMFORT_DEVIATION_GAUGE_MAX_C,
-    label: 'COMFORT DEV',
-    format: () => formatComfortDeviation(null),
-    severity: KPI_SEVERITY.comfortDeviation,
+    max: 100,
+    label: 'TIME IN RANGE',
+    format: () => formatTimeInRangePct(null),
+    severity: KPI_SEVERITY.timeInRange,
   });
 
   const powerGauge = createGauge({
@@ -191,28 +189,28 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     severity: KPI_SEVERITY.modelFit,
   });
 
-  kpiGrid.appendChild(comfortGauge);
+  kpiGrid.appendChild(timeInRangeGauge);
   kpiGrid.appendChild(powerGauge);
   kpiGrid.appendChild(solarGauge);
   kpiGrid.appendChild(heatLossGauge);
   kpiGrid.appendChild(modelFitGauge);
 
-  function paintComfortGauge(s) {
+  function paintTimeInRangeGauge(s) {
     const lower = entityValue(s, room.entities['constraint_lower']);
     const upper = entityValue(s, room.entities['constraint_upper']);
-    const hasBounds = lower !== null && upper !== null;
-    comfortGauge.style.display = hasBounds ? '' : 'none';
-    if (!hasBounds) return;
-
+    const temp = entityValue(s, room.entities['temperature_filtered'] || room.entities['temperature_measured']);
+    const hasData = lower !== null && upper !== null && temp !== null;
     const active = isRoomActive(s, roomSlug);
-    const dev = roomComfortDeviation(s, room, active);
-    const clamped = dev !== null ? Math.min(dev, COMFORT_DEVIATION_GAUGE_MAX_C) : 0;
-    updateGauge(comfortGauge, {
-      value: clamped,
+    const pct = roomTimeInRangePct(s, room, active);
+    timeInRangeGauge.style.display = active && hasData && pct !== null ? '' : 'none';
+    if (!active || !hasData || pct === null) return;
+
+    updateGauge(timeInRangeGauge, {
+      value: pct,
       min: 0,
-      max: COMFORT_DEVIATION_GAUGE_MAX_C,
-      format: () => formatComfortDeviation(dev),
-      severity: active && dev !== null ? KPI_SEVERITY.comfortDeviation : undefined,
+      max: 100,
+      format: () => formatTimeInRangePct(pct),
+      severity: KPI_SEVERITY.timeInRange,
     });
   }
 
@@ -248,7 +246,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     });
   }
 
-  paintComfortGauge(state);
+  paintTimeInRangeGauge(state);
   paintPowerGauge(powerVal, offVal);
   paintSolarGauge(entityValue(state, solarEntity));
   paintHeatLossGauge(state);
@@ -419,7 +417,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
         comfortLower: cl, comfortUpper: cu, off,
         experiment: activeExperiment,
       });
-      paintComfortGauge(newState);
+      paintTimeInRangeGauge(newState);
       paintPowerGauge(pv, off);
       paintSolarGauge(entityValue(newState, solarEntity));
       paintHeatLossGauge(newState);
