@@ -62,7 +62,7 @@ import asyncio
 import logging
 import time
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import voluptuous as vol
 
@@ -1702,6 +1702,31 @@ def _records_for_datasets(
     return merged
 
 
+def _dataset_boundaries(
+    coordinator: HeatingAssistantCoordinator,
+    dataset_ids: Optional[List[str]],
+) -> Optional[List[float]]:
+    """Return the first timestamp of each stored dataset, sorted ascending.
+
+    Passed to the multi-dataset estimator so it can assign an independent
+    per-dataset wall-temperature parameter block to each dataset segment.
+    Returns ``None`` when ``dataset_ids`` is empty or the store is unavailable.
+    """
+    if not dataset_ids:
+        return None
+    store = getattr(coordinator, "dataset_store", None)
+    if store is None:
+        return None
+    starts: List[float] = []
+    for ds_id in dataset_ids:
+        recs = store.get_records(ds_id)
+        if recs:
+            ts = recs[0].get("timestamp")
+            if ts is not None:
+                starts.append(float(ts))
+    return sorted(starts) if starts else None
+
+
 def _persist_tuning_updates(
     hass: HomeAssistant,
     coordinator: HeatingAssistantCoordinator,
@@ -2135,8 +2160,14 @@ def _register_services(hass: HomeAssistant) -> None:
         #   2. ``dataset_id`` — a single stored dataset's snapshot.
         #   3. an explicit ``window_start``/``window_end`` (JSONL / Recorder).
         # Each takes precedence over the trailing ``horizon_hours`` window.
-        history_override = _records_for_datasets(
-            coordinator, call.data.get("dataset_ids")
+        dataset_ids = call.data.get("dataset_ids")
+        history_override = _records_for_datasets(coordinator, dataset_ids)
+        # Collect each dataset's first timestamp so the estimator assigns an
+        # independent per-dataset wall-temperature parameter block.
+        dataset_start_timestamps: Optional[List[float]] = (
+            _dataset_boundaries(coordinator, dataset_ids)
+            if history_override is not None
+            else None
         )
         if history_override is None:
             history_override = _records_for_dataset(
@@ -2157,6 +2188,7 @@ def _register_services(hass: HomeAssistant) -> None:
             horizon_hours=horizon_hours if history_override is None else None,
             locked_params=locked_params,
             history_override=history_override,
+            dataset_start_timestamps=dataset_start_timestamps,
         )
 
         # Update sysid_results so that the dashboard sensor entities reflect
@@ -2376,41 +2408,34 @@ def _register_services(hass: HomeAssistant) -> None:
         else:
             system = coordinator.controller._system
 
-        # Seed wall-envelope initial temperatures from cached ML identification
-        # when available; fast-estimate only rooms still missing a value.
-        t_wall_initial_identified = _open_loop_t_wall_initial_dict(
-            room_params, coordinator
-        )
-        missing_t_wall = [
-            name for name in room_names if name not in t_wall_initial_identified
-        ]
-        if missing_t_wall:
-            try:
-                from .parameter_estimator import KalmanMLEstimator
-                fast_estimator = KalmanMLEstimator(
-                    rooms=list(coordinator.model.rooms.values()),
-                    sources=coordinator.heat_sources,
-                    dt=dt,
-                )
-                fast_estimated = await hass.async_add_executor_job(
-                    fast_estimator.estimate_wall_initial_only,
-                    history,
-                    room_params if room_params else None,
-                )
-                t_wall_initial_identified = _open_loop_t_wall_initial_dict(
-                    room_params, coordinator, fast_estimated
-                )
-                _LOGGER.debug(
-                    "Fast t_wall_init estimate for open-loop sim (rooms %s): %s",
-                    missing_t_wall,
-                    {k: t_wall_initial_identified[k] for k in missing_t_wall
-                     if k in t_wall_initial_identified},
-                )
-            except Exception as exc:
-                _LOGGER.warning(
-                    "Open-loop: fast t_wall_init estimation failed (%s); "
-                    "falling back to air-temperature seed.", exc,
-                )
+        # Always run a fast wall-temperature identification using the current
+        # UI parameter values so the open-loop simulation starts from the
+        # correct wall state for the chosen parameter set, not a stale value.
+        t_wall_initial_identified: Dict[str, float] = {}
+        try:
+            from .parameter_estimator import KalmanMLEstimator
+            fast_estimator = KalmanMLEstimator(
+                rooms=list(coordinator.model.rooms.values()),
+                sources=coordinator.heat_sources,
+                dt=dt,
+            )
+            fast_estimated = await hass.async_add_executor_job(
+                fast_estimator.estimate_wall_initial_only,
+                history,
+                room_params if room_params else None,
+            )
+            t_wall_initial_identified = {
+                name: float(v)
+                for name, v in fast_estimated.items()
+            }
+        except Exception as exc:
+            _LOGGER.warning(
+                "Open-loop: fast t_wall_init estimation failed (%s); "
+                "falling back to cached or air-temperature seed.", exc,
+            )
+            t_wall_initial_identified = _open_loop_t_wall_initial_dict(
+                room_params, coordinator
+            )
 
         # Results are surfaced in the UI via the per-room OpenLoopRMSESensor
         # entities, so this service writes its output to the coordinator cache
@@ -2701,11 +2726,8 @@ def _register_services(hass: HomeAssistant) -> None:
         horizon_steps = max(1, int(horizon_hours * 3600.0 / dt))
 
         # Build per-room parameter overrides from service data (full parameter
-        # set, keyed by ``<param>_<room_slug>``), then inject the last identified
-        # wall envelope initial temperature so reconstruction always starts from
-        # a physically informed wall state without requiring any UI interaction.
+        # set, keyed by ``<param>_<room_slug>``).
         room_params = _extract_sim_room_params(call, coordinator.model.room_names)
-        _inject_identified_t_wall_initial(room_params, coordinator)
 
         # Fetch history: a stored dataset (``dataset_id``) supplies its
         # snapshotted records directly; otherwise use the JSONL store / Recorder
@@ -2724,6 +2746,30 @@ def _register_services(hass: HomeAssistant) -> None:
                 history = await _get_history_for_horizon(
                     hass, coordinator, horizon_hours
                 )
+
+        # Always run a fast wall-temperature identification using the current
+        # UI parameter values so the EKF reconstruction starts from a physically
+        # correct wall state rather than a stale or steady-state estimate.
+        try:
+            from .parameter_estimator import KalmanMLEstimator
+            _fast_est = KalmanMLEstimator(
+                rooms=list(coordinator.model.rooms.values()),
+                sources=coordinator.heat_sources,
+                dt=dt,
+            )
+            _fast_t_wall = await hass.async_add_executor_job(
+                _fast_est.estimate_wall_initial_only,
+                history,
+                room_params if room_params else None,
+            )
+            for _rn, _tw in _fast_t_wall.items():
+                room_params.setdefault(_rn, {})["t_wall_initial"] = _tw
+        except Exception as exc:
+            _LOGGER.warning(
+                "EKF sim: fast t_wall_init estimation failed (%s); "
+                "falling back to cached or air-temperature seed.", exc,
+            )
+            _inject_identified_t_wall_initial(room_params, coordinator)
 
         # Patch heat-source copies with the heater power scales currently shown
         # in the UI (falling back to the last auto-identified scales) so the EKF
