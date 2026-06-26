@@ -1,4 +1,4 @@
-import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js';
+import { formatCountdown, entityAttr, entityLastUpdated, systemEntity } from '../utils.js?v=79';
 
 export function createCountdown(state, small = false) {
   const container = document.createElement('div');

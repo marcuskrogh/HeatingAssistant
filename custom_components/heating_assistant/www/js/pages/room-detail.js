@@ -1,10 +1,10 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js';
-import { createGauge, updateGauge } from '../components/gauge.js';
-import { createClimateCard } from '../components/climate-card.js';
-import { createCountdown } from '../components/countdown.js';
-import { createScheduleOverview } from '../components/schedule-overview.js';
-import { getRoomScheduleData } from '../schedule-utils.js';
-import { findActiveExperiment, experimentBands } from '../experiment-utils.js';
+import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=79';
+import { createGauge, updateGauge } from '../components/gauge.js?v=79';
+import { createClimateCard } from '../components/climate-card.js?v=79';
+import { createCountdown } from '../components/countdown.js?v=79';
+import { createScheduleOverview } from '../components/schedule-overview.js?v=79';
+import { getRoomScheduleData } from '../schedule-utils.js?v=79';
+import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=79';
 import {
   KPI_SEVERITY,
   isRoomActive,
@@ -13,12 +13,12 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-} from '../kpi-engine.js';
+} from '../kpi-engine.js?v=79';
 import {
   formatPower, formatPowerKw, formatPrice,
   entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
-} from '../utils.js';
+} from '../utils.js?v=79';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
