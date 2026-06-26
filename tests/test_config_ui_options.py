@@ -404,6 +404,23 @@ def test_tuning_page_splits_live_and_restart_parameters() -> None:
     assert "'tracking_weight'" in source
 
 
+def test_sysid_pending_banner_hides_when_empty() -> None:
+    """Sysid pending banner must respect [hidden] so empty orange box is not shown."""
+    css = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "css"
+        / "industrial.css"
+    ).read_text(encoding="utf-8")
+    assert ".tuning-pending-banner[hidden]" in css
+    assert "display: none !important" in css
+
+    source = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js" / "pages"
+        / "system-identification.js"
+    ).read_text(encoding="utf-8")
+    assert "pendingBanner.hidden = !pending" in source
+    assert "tuning-pending-banner--actions" in source
+
+
 def test_sysid_index_cards_show_core_kpis_and_dismissible_warnings() -> None:
     """System identification index cards must show R²/RMSE/Estimated and dismissible warnings."""
     source = (

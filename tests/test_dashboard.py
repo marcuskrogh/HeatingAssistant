@@ -974,3 +974,42 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
     )
     assert "buildCapacityPoints(roomForecast, windowStart)" in room_detail
     assert "buildPowerChart(powerChart" in room_detail and "windowStart" in room_detail
+
+
+def test_room_detail_js_extends_temperature_history_on_live_updates(two_room_spec):
+    """Measured temperature history must be extended to 'now' on every state update,
+    not only when MPC re-fetches forecasts."""
+    js_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "custom_components",
+        "heating_assistant",
+        "www",
+        "js",
+        "pages",
+        "room-detail.js",
+    )
+    with open(js_path) as fh:
+        source = fh.read()
+
+    assert "function extendLiveChartHistory" in source
+    assert "extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart)" in source
+
+    # extendLiveChartHistory must run before the MPC last_run_ts early return.
+    update_fn = source.split("function updateChartsFromState", 1)[1]
+    extend_pos = update_fn.index("extendLiveChartHistory")
+    early_return_pos = update_fn.index("if (currentRunTs === lastRunTs.value) return")
+    assert extend_pos < early_return_pos, (
+        "extendLiveChartHistory must run on every update, before the MPC early return"
+    )
+
+    # Temperature datasets are the primary fix (CON-60).
+    assert "'Filtered'" in source and "'Measured'" in source
+    assert "room.entities['temperature_filtered']" in source
+    assert "room.entities['temperature_measured']" in source
+
+    # Disturbance and price histories share the same live-extension path.
+    assert "'Outdoor Temperature'" in source
+    assert "'Solar Gain'" in source
+    assert "'Price'" in source
+    assert "function extendDatasetToNow" in source

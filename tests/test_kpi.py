@@ -11,6 +11,8 @@ from custom_components.heating_assistant.kpi import (
     RoomSnapshot,
     comfort_deviation_c,
     room_comfort_deviation_c,
+    room_time_in_range_pct,
+    time_in_range_pct_from_samples,
     comfort_index_pct,
     mean_tracking_error_c,
     aggregate_model_fit_r2,
@@ -87,6 +89,61 @@ def test_room_comfort_deviation_missing_bounds_returns_none():
 def test_room_comfort_deviation_prefers_filtered():
     room = _room("bed", temp_filtered=21.0, temp_measured=19.0)
     assert room_comfort_deviation_c(room) == pytest.approx(0.0)
+
+
+# ── Time in range (24 h) ──────────────────────────────────────────────────
+
+
+def test_time_in_range_all_in_band():
+    temps = [(0.0, 21.0), (3600.0, 21.5)]
+    lowers = [(0.0, 20.0)]
+    uppers = [(0.0, 22.0)]
+    assert time_in_range_pct_from_samples(temps, lowers, uppers, 0.0, 7200.0) == pytest.approx(100.0)
+
+
+def test_time_in_range_half_out_of_band():
+    temps = [(0.0, 21.0), (3600.0, 23.0)]
+    lowers = [(0.0, 20.0)]
+    uppers = [(0.0, 22.0)]
+    assert time_in_range_pct_from_samples(temps, lowers, uppers, 0.0, 7200.0) == pytest.approx(50.0)
+
+
+def test_time_in_range_excludes_missing_bounds():
+    temps = [(0.0, 21.0), (3600.0, 23.0)]
+    lowers = [(3600.0, 20.0)]
+    uppers = [(3600.0, 22.0)]
+    # First hour has no bounds -> excluded; second hour is out of band -> 0%.
+    assert time_in_range_pct_from_samples(temps, lowers, uppers, 0.0, 7200.0) == pytest.approx(0.0)
+
+
+def test_time_in_range_none_when_no_eligible_time():
+    assert time_in_range_pct_from_samples([], [], [], 0.0, 3600.0) is None
+
+
+def test_room_time_in_range_inactive_returns_none():
+    room = _room("bed", active=False)
+    assert room_time_in_range_pct(
+        room, [(0.0, 21.0)], [(0.0, 20.0)], [(0.0, 22.0)], 86400.0,
+    ) is None
+
+
+def test_room_time_in_range_missing_current_bounds_returns_none():
+    room = _room("bed", temp_filtered=21.0, lower=None, upper=22.0)
+    assert room_time_in_range_pct(
+        room, [(0.0, 21.0)], [(0.0, 20.0)], [(0.0, 22.0)], 86400.0,
+    ) is None
+
+
+def test_room_time_in_range_delegates_to_samples():
+    room = _room("bed", temp_filtered=21.0)
+    pct = room_time_in_range_pct(
+        room,
+        [(0.0, 21.0), (43200.0, 23.0)],
+        [(0.0, 20.0)],
+        [(0.0, 22.0)],
+        86400.0,
+    )
+    assert pct == pytest.approx(50.0)
 
 
 # ── Comfort index ─────────────────────────────────────────────────────────

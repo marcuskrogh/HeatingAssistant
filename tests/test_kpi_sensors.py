@@ -98,6 +98,7 @@ def _make_coordinator(
         dt=900,
         _last_mpc_run_ts=1_700_000_000.0,
         last_update_success=True,
+        _time_in_range_pct_24h={},
     )
 
     def is_room_enabled(room_name):
@@ -213,3 +214,23 @@ def test_temperature_filtered_comfort_deviation_inactive_none():
     coord = _make_coordinator(living_active=False, living_filtered=18.0)
     attrs = TemperatureFilteredSensor(coord, "living_room").extra_state_attributes
     assert attrs["comfort_deviation"] is None
+
+
+def test_temperature_filtered_time_in_range_from_cache():
+    coord = _make_coordinator(living_filtered=21.0)
+    coord._time_in_range_pct_24h = {"living_room": 87.5}
+    attrs = TemperatureFilteredSensor(coord, "living_room").extra_state_attributes
+    assert attrs["time_in_range_pct_24h"] == 88
+
+
+def test_temperature_filtered_time_in_range_inactive_none():
+    coord = _make_coordinator(living_active=False, living_filtered=21.0)
+    coord._time_in_range_pct_24h = {"living_room": 100.0}
+    attrs = TemperatureFilteredSensor(coord, "living_room").extra_state_attributes
+    assert attrs["time_in_range_pct_24h"] is None
+
+
+def test_temperature_filtered_time_in_range_missing_cache_none():
+    coord = _make_coordinator(living_filtered=21.0)
+    attrs = TemperatureFilteredSensor(coord, "living_room").extra_state_attributes
+    assert attrs["time_in_range_pct_24h"] is None

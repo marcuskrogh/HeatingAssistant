@@ -6,9 +6,10 @@ Formulas and thresholds follow ``docs/KPI_SPEC.md``.  No Home Assistant imports.
 
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
 # Gauge scale constants (KPI_SPEC §4.3, §5.3, §5.5)
 HEAT_LOSS_GAUGE_FLOOR_W = 3000.0
@@ -17,6 +18,7 @@ SOLAR_GAIN_GAUGE_DEFAULT_MAX_W = 1000.0
 HOUSE_POWER_GAUGE_FLOOR_W = 3000.0
 HOUSE_POWER_GAUGE_DEFAULT_MAX_W = 10000.0
 HOUSE_POWER_GAUGE_SCALE_FACTOR = 1.2
+TIME_IN_RANGE_WINDOW_S = 86400.0
 
 MODEL_FIT_LABEL_GOOD = "GOOD"
 MODEL_FIT_LABEL_ACCEPTABLE = "ACCEPTABLE"
@@ -72,6 +74,105 @@ def room_comfort_deviation_c(room: RoomSnapshot) -> Optional[float]:
     if not all(_is_finite(v) for v in (temp, lower, upper)):
         return None
     return comfort_deviation_c(temp, lower, upper)
+
+
+def _zoh_value_at(
+    samples: Sequence[Tuple[float, float]], ts: float,
+) -> Optional[float]:
+    """Return the zero-order-hold value of ``samples`` at timestamp ``ts``."""
+    clean = sorted(
+        (float(t), float(v))
+        for t, v in samples
+        if _is_finite(t) and _is_finite(v)
+    )
+    if not clean:
+        return None
+    times = [t for t, _ in clean]
+    idx = bisect.bisect_right(times, ts) - 1
+    return clean[idx][1] if idx >= 0 else None
+
+
+def _zoh_interval_boundaries(
+    window_start: float,
+    window_end: float,
+    *sample_sets: Sequence[Tuple[float, float]],
+) -> list[float]:
+    """Sorted interval edges for piecewise-constant (ZOH) integration."""
+    points = {float(window_start), float(window_end)}
+    for samples in sample_sets:
+        for ts, _ in samples:
+            ts_f = float(ts)
+            if window_start < ts_f < window_end:
+                points.add(ts_f)
+    return sorted(points)
+
+
+def time_in_range_pct_from_samples(
+    temp_samples: Sequence[Tuple[float, float]],
+    lower_samples: Sequence[Tuple[float, float]],
+    upper_samples: Sequence[Tuple[float, float]],
+    window_start: float,
+    window_end: float,
+) -> Optional[float]:
+    """Time-weighted percentage inside the comfort corridor over ``[window_start, window_end]``.
+
+    Intervals where temperature or either bound is unknown are excluded from
+    both numerator and denominator.
+    """
+    if window_end <= window_start:
+        return None
+
+    boundaries = _zoh_interval_boundaries(
+        window_start, window_end, temp_samples, lower_samples, upper_samples,
+    )
+    if len(boundaries) < 2:
+        return None
+
+    eligible_s = 0.0
+    in_band_s = 0.0
+    for i in range(len(boundaries) - 1):
+        t0 = boundaries[i]
+        t1 = boundaries[i + 1]
+        dt_seg = t1 - t0
+        if dt_seg <= 0.0:
+            continue
+
+        temp = _zoh_value_at(temp_samples, t0)
+        lower = _zoh_value_at(lower_samples, t0)
+        upper = _zoh_value_at(upper_samples, t0)
+        if not all(_is_finite(v) for v in (temp, lower, upper)):
+            continue
+
+        eligible_s += dt_seg
+        if lower <= temp <= upper:
+            in_band_s += dt_seg
+
+    if eligible_s <= 0.0:
+        return None
+    return 100.0 * in_band_s / eligible_s
+
+
+def room_time_in_range_pct(
+    room: RoomSnapshot,
+    temp_samples: Sequence[Tuple[float, float]],
+    lower_samples: Sequence[Tuple[float, float]],
+    upper_samples: Sequence[Tuple[float, float]],
+    window_end_ts: float,
+    window_seconds: float = TIME_IN_RANGE_WINDOW_S,
+) -> Optional[float]:
+    """Per-room 24h rolling time-in-range; ``None`` when inactive or data missing."""
+    if not room.room_active:
+        return None
+    temp = room_temperature(room)
+    lower = room.constraint_lower
+    upper = room.constraint_upper
+    if not all(_is_finite(v) for v in (temp, lower, upper)):
+        return None
+
+    window_start = float(window_end_ts) - float(window_seconds)
+    return time_in_range_pct_from_samples(
+        temp_samples, lower_samples, upper_samples, window_start, float(window_end_ts),
+    )
 
 
 def comfort_index_pct(rooms_data: Sequence[RoomSnapshot]) -> Optional[float]:

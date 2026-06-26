@@ -1194,6 +1194,10 @@
   gap: 10px;
 }
 
+.tuning-pending-banner[hidden] {
+  display: none !important;
+}
+
 .tuning-pending-banner--restart {
   border-color: var(--alarm);
   background: rgba(244, 67, 54, 0.08);
