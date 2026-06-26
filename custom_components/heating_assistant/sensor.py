@@ -1934,12 +1934,13 @@ class OpenLoopRMSESensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity)
     """
     Sensor reporting the open-loop prediction RMSE for a room.
 
-    Runs multi-step simulations (default 30 steps = 30 minutes) over the
-    history buffer without Kalman state correction.  The RMSE of these
-    open-loop predictions shows how much the thermal model drifts from
-    reality, which is the root cause of MPC overshoot.
+    Values come from a continuous open-loop simulation over the history
+    buffer (no Kalman correction, no artificial segment restarts).  The
+    ``rmse_by_horizon`` attribute reports segmented RMSE at ~4 h / 12 h /
+    24 h lookahead horizons.  Together these show how much the thermal
+    model drifts from reality, which is the root cause of MPC overshoot.
 
-    Rule of thumb:
+    Rule of thumb (continuous RMSE):
         < 0.2 °C: excellent – MPC predictions are reliable
         0.2–0.5 °C: acceptable
         > 0.5 °C: likely contributing to overshoot; re-run parameter estimation
@@ -1951,8 +1952,6 @@ class OpenLoopRMSESensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity)
     _attr_suggested_display_precision = 2
     _attr_icon = "mdi:chart-timeline-variant"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    SEGMENT_LENGTH = 30  # steps
 
     def __init__(
         self,
@@ -2792,6 +2791,7 @@ class SysIdSimulationSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
             "c_air_fraction": room_data.get("c_air_fraction"),
             "r_aw_fraction": room_data.get("r_aw_fraction"),
             "t_wall_initial": room_data.get("t_wall_initial"),
+            "estimated_inter_room_r": room_data.get("estimated_inter_room_r"),
             "heater_scales": room_data.get("heater_scales"),
             "sigma_w": room_data.get("sigma_w"),
             "sigma_v": room_data.get("sigma_v"),

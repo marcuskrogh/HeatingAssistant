@@ -504,6 +504,10 @@ def _init_state_from_measurement(
     When ``t_wall_init`` is provided (identified wall initial temperatures per
     room), those values override the default wall seed so the reconstruction
     starts from the identified envelope state rather than assuming T_wall = T_air.
+
+    Wall-seed contract: first anchor uses air → ``t_wall_init`` override;
+    see :meth:`HouseThermalSDE.initial_state_from_measurement` for the shared
+    policy with the estimator objective and open-loop diagnostics.
     """
     air = np.array(
         [float(y_vals[i]) if i < len(y_vals) else 0.0 for i in range(n)],

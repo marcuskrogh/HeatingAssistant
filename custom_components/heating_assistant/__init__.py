@@ -1806,6 +1806,22 @@ def _extract_sim_room_params(
     return room_params
 
 
+def _merge_per_room_into_sysid_results(
+    sysid_results: Dict[str, Any],
+    per_room: Dict[str, Any],
+) -> None:
+    """Merge per-room simulation results into the coordinator cache.
+
+    Preserves fields already stored for a room (e.g. ML-identified
+    t_wall_initial, internal_gain, heater_scales) while adding or
+    updating simulation diagnostics (simulation, rmse, mae).
+    """
+    for room_name, room_data in per_room.items():
+        existing = sysid_results.get(room_name, {})
+        existing.update(room_data)
+        sysid_results[room_name] = existing
+
+
 def _inject_identified_t_wall_initial(
     room_params: Dict[str, Dict[str, float]],
     coordinator: HeatingAssistantCoordinator,
@@ -1826,6 +1842,63 @@ def _inject_identified_t_wall_initial(
             room_params.setdefault(room_name, {}).setdefault(
                 "t_wall_initial", float(t_wall)
             )
+
+
+def _open_loop_t_wall_initial_dict(
+    room_params: Dict[str, Dict[str, float]],
+    coordinator: HeatingAssistantCoordinator,
+    fast_estimated: Optional[Dict[str, float]] = None,
+) -> Dict[str, float]:
+    """Resolve per-room wall initial temperatures for open-loop simulation.
+
+    Injects cached ML-identified values from ``sysid_results`` first, then
+    merges *fast_estimated* only for rooms that still lack ``t_wall_initial``.
+    """
+    _inject_identified_t_wall_initial(room_params, coordinator)
+    room_names = coordinator.model.room_names
+    result: Dict[str, float] = {
+        name: float(room_params[name]["t_wall_initial"])
+        for name in room_names
+        if room_params.get(name, {}).get("t_wall_initial") is not None
+    }
+    if fast_estimated:
+        for name in room_names:
+            if name not in result and name in fast_estimated:
+                result[name] = float(fast_estimated[name])
+    return result
+
+
+async def _compute_open_loop_rmse_by_horizon(
+    hass: Any,
+    history: List[Dict[str, Any]],
+    system: Any,
+    room_names: List[str],
+    n_rooms: int,
+    dt: float,
+    t_wall_initial: Optional[Dict[str, float]],
+) -> Dict[str, Dict[str, Any]]:
+    """Run segmented open-loop RMSE at ~4 h / 12 h / 24 h horizons."""
+    from .model_diagnostics import compute_open_loop_predictions
+
+    rmse_by_horizon: Dict[str, Dict[str, Any]] = {name: {} for name in room_names}
+    t_wall = t_wall_initial or None
+    for hours in (4, 12, 24):
+        steps = max(2, int(round(hours * 3600.0 / dt)))
+        res_h = await hass.async_add_executor_job(
+            compute_open_loop_predictions,
+            history,
+            system,
+            room_names,
+            n_rooms,
+            dt,
+            steps,
+            t_wall,
+        )
+        if "error" in res_h:
+            continue
+        for name, room_res in res_h.get("per_room", {}).items():
+            rmse_by_horizon[name][f"{hours}h"] = room_res.get("rmse")
+    return rmse_by_horizon
 
 
 def _effective_heater_scales(
@@ -2101,6 +2174,7 @@ def _register_services(hass: HomeAssistant) -> None:
             envelope_splits = result.get("estimated_envelope_splits", {})
             t_wall_initial = result.get("estimated_t_wall_initial", {})
             heater_scales = result.get("estimated_heater_scales", {})
+            inter_room_r = result.get("estimated_inter_room_r", {})
 
             # Map each room to the identified scales of the heaters in it so the
             # per-room identification page can list them like any other param.
@@ -2132,6 +2206,14 @@ def _register_services(hass: HomeAssistant) -> None:
                         existing["r_aw_fraction"] = splits["r_aw_fraction"]
                 if room_name in t_wall_initial:
                     existing["t_wall_initial"] = t_wall_initial[room_name]
+                room_connections = {
+                    key: val
+                    for key, val in inter_room_r.items()
+                    if key.startswith(f"{room_name}:")
+                    or key.endswith(f":{room_name}")
+                }
+                if room_connections:
+                    existing["estimated_inter_room_r"] = room_connections
                 if room_name in sources_by_room:
                     existing["heater_scales"] = sources_by_room[room_name]
                 if horizon_steps is not None:
@@ -2218,7 +2300,6 @@ def _register_services(hass: HomeAssistant) -> None:
         from .sysid import _build_sim_model
 
         coordinator = _get_coordinator(hass)
-        segment_length = int(call.data.get("segment_length", 30))
         horizon_hours: Optional[float] = call.data.get("horizon_hours")
         window_start_ol: Optional[float] = (
             float(call.data["window_start"]) if "window_start" in call.data else None
@@ -2295,33 +2376,41 @@ def _register_services(hass: HomeAssistant) -> None:
         else:
             system = coordinator.controller._system
 
-        # Quickly identify the wall-envelope initial temperature for this
-        # specific dataset so the continuous simulation starts from a
-        # physically informed wall state.  All structural parameters are
-        # locked to the values already in use; only t_wall_init is free.
-        # A single L-BFGS-B pass is used — no multistart — so this is fast.
-        t_wall_initial_identified: Optional[Dict[str, float]] = None
-        try:
-            from .parameter_estimator import KalmanMLEstimator
-            fast_estimator = KalmanMLEstimator(
-                rooms=list(coordinator.model.rooms.values()),
-                sources=coordinator.heat_sources,
-                dt=dt,
-            )
-            t_wall_initial_identified = await hass.async_add_executor_job(
-                fast_estimator.estimate_wall_initial_only,
-                history,
-                room_params if room_params else None,
-            )
-            _LOGGER.debug(
-                "Fast t_wall_init estimate for open-loop sim: %s",
-                t_wall_initial_identified,
-            )
-        except Exception as exc:
-            _LOGGER.warning(
-                "Open-loop: fast t_wall_init estimation failed (%s); "
-                "falling back to air-temperature seed.", exc,
-            )
+        # Seed wall-envelope initial temperatures from cached ML identification
+        # when available; fast-estimate only rooms still missing a value.
+        t_wall_initial_identified = _open_loop_t_wall_initial_dict(
+            room_params, coordinator
+        )
+        missing_t_wall = [
+            name for name in room_names if name not in t_wall_initial_identified
+        ]
+        if missing_t_wall:
+            try:
+                from .parameter_estimator import KalmanMLEstimator
+                fast_estimator = KalmanMLEstimator(
+                    rooms=list(coordinator.model.rooms.values()),
+                    sources=coordinator.heat_sources,
+                    dt=dt,
+                )
+                fast_estimated = await hass.async_add_executor_job(
+                    fast_estimator.estimate_wall_initial_only,
+                    history,
+                    room_params if room_params else None,
+                )
+                t_wall_initial_identified = _open_loop_t_wall_initial_dict(
+                    room_params, coordinator, fast_estimated
+                )
+                _LOGGER.debug(
+                    "Fast t_wall_init estimate for open-loop sim (rooms %s): %s",
+                    missing_t_wall,
+                    {k: t_wall_initial_identified[k] for k in missing_t_wall
+                     if k in t_wall_initial_identified},
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "Open-loop: fast t_wall_init estimation failed (%s); "
+                    "falling back to air-temperature seed.", exc,
+                )
 
         # Results are surfaced in the UI via the per-room OpenLoopRMSESensor
         # entities, so this service writes its output to the coordinator cache
@@ -2353,20 +2442,15 @@ def _register_services(hass: HomeAssistant) -> None:
                 # that matters for price-driven anticipatory heating, where
                 # the plan spans many hours.  Each run reuses the same
                 # history and model; only the segment slicing differs.
-                rmse_by_horizon: Dict[str, Dict[str, Any]] = {
-                    name: {} for name in room_names
-                }
-                for hours in (4, 12, 24):
-                    steps = max(2, int(round(hours * 3600.0 / dt)))
-                    res_h = await hass.async_add_executor_job(
-                        compute_open_loop_predictions,
-                        history, system, room_names, n_rooms,
-                        dt, steps,
-                    )
-                    if "error" in res_h:
-                        continue
-                    for name, room_res in res_h.get("per_room", {}).items():
-                        rmse_by_horizon[name][f"{hours}h"] = room_res.get("rmse")
+                rmse_by_horizon = await _compute_open_loop_rmse_by_horizon(
+                    hass,
+                    history,
+                    system,
+                    room_names,
+                    n_rooms,
+                    dt,
+                    t_wall_initial_identified,
+                )
                 for name in room_names:
                     if name in per_room:
                         per_room[name]["rmse_by_horizon"] = rmse_by_horizon[name]
@@ -2689,7 +2773,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 # Results are surfaced via the per-room SysID diagnostic
                 # sensors, so this service stores them on the coordinator and
                 # refreshes listeners instead of raising a notification.
-                coordinator.sysid_results.update(per_room)
+                _merge_per_room_into_sysid_results(coordinator.sysid_results, per_room)
                 coordinator.async_update_listeners()
 
         except Exception as exc:

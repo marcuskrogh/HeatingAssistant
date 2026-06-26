@@ -1017,7 +1017,25 @@ class HouseThermalSDE(ContinuousDiscreteSDE):
 
         This is the single source of truth for initialising an open-loop
         (free-run) simulation or filter from a recorded data point so that
-        the model **starts at the same state the data is in**:
+        the model **starts at the same state the data is in**.
+
+        **Wall-seed contract** (shared by the three replay pipelines)::
+
+            Pipeline                          First start           Continuation
+            --------------------------------  --------------------  ------------------
+            Estimator objective               air → t_wall_initial  steady_state
+            Open-loop diagnostics             air → t_wall_initial  steady_state *
+            EKF reconstruction (sysid)        air → t_wall_initial  (N/A — filter)
+
+        ``t_wall_initial`` is the identified envelope temperature at the
+        **dataset start**; it is applied exactly once per replay.  Later
+        estimator windows and diagnostic segment restarts use
+        ``"steady_state"`` so the wall warm-start tracks the local
+        (T_a, T_out) equilibrium instead of reusing the dataset-start value.
+        Continuous open-loop plots (``segment_length=None``) propagate state
+        forward and do not re-seed mid-run (* no re-init).
+
+        Common air / emitter / offset rules for every call:
 
         * air-temperature block ``T_a`` ← measured temperatures ``y`` so
           that ``hm(x0) == y`` exactly (the offset block ``b`` is zeroed,

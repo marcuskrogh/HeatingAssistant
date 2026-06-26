@@ -1305,6 +1305,25 @@ If R² < 0.7:
 
 ## Technical Details
 
+### Parameter estimation (`estimate_parameters_ml`)
+
+The ``heating_assistant.estimate_parameters_ml`` service (and the
+**Estimate Parameters** button) jointly fits grey-box thermal parameters by
+minimising the mean squared error of short open-loop simulation windows over
+the configured identification horizon.  For each candidate parameter set the
+model is integrated forward from measured initial conditions without Kalman
+corrections; IPOPT finds the parameter vector with the lowest simulation
+MSE plus a light MAP prior.
+
+The result dict exposes ``log_likelihood`` for backward compatibility with
+dashboards and sensors.  This value is the **negative normalised simulation
+MSE** at the optimum (higher → better fit), not a Gaussian log-likelihood.
+The alias ``neg_normalized_mse`` carries the same number.
+
+After estimation, validate the fit with ``run_open_loop_simulation`` and the
+open-loop RMSE sensors — they measure the same free-run quality the
+estimator optimises.
+
 ### Goodness-of-Fit Metrics
 
 **Root Mean Squared Error (RMSE):**

@@ -310,7 +310,24 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
             step="0.001" min="0" max="1" value="${DEFAULTS.r_aw_fraction}">
           <span class="form-hint">0&ndash;1 &mdash; fraction of conductive-path resistance on the air&harr;wall film (infiltration excluded)</span>
         </div>
+        <div class="form-group">
+          <div class="form-group__header">
+            <label class="form-label" for="param-t-wall-initial">Wall Initial Temp (T<sub>wall,0</sub>)</label>
+            <button class="param-lock-btn" data-param="t_wall_initial" title="Lock: hold fixed during auto-identification">Fix</button>
+          </div>
+          <input class="form-input form-input--readonly" type="text" id="param-t-wall-initial"
+            readonly value="&mdash;" tabindex="-1">
+          <span class="form-hint">&deg;C &mdash; identified envelope temperature at window start (populated after auto-ID; lock to hold fixed)</span>
+        </div>
       </div>
+    </div>
+
+    <div class="params-subsection" id="inter-room-r-subsection" hidden>
+      <div class="params-subsection__title">Inter-Room Connections</div>
+      <p class="params-subsection__desc">
+        Thermal resistances between this room and neighbours, estimated during auto-identification when enough cross-room excitation is present.
+      </p>
+      <div class="tuning-params-grid" id="inter-room-r-list"></div>
     </div>
 
     <div class="params-subsection" id="heater-scales-subsection">
@@ -395,19 +412,34 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   validationIntro.innerHTML = `
     <div class="tuning-section__title">Model Validation</div>
     <p class="tuning-section__desc">
-      Simulate the thermal model using the parameters and horizon configured above.
+      Two complementary fit tests over the identification window configured above.
+      <strong>One-step EKF reconstruction</strong> measures short-horizon tracking with Kalman
+      correction at each timestep; <strong>multi-step open-loop simulation</strong> is a free-run
+      drift test with no measurement feedback. A good model should score well on both.
     </p>
+    <div class="grid-kpi" id="fit-comparison-kpis"></div>
+    <div class="fit-comparison__hints">
+      <span class="form-hint">EKF RMSE: one-step ahead with Kalman correction each timestep</span>
+      <span class="form-hint">Open-loop RMSE: multi-step free-run drift without measurement feedback</span>
+    </div>
   `;
   container.appendChild(validationIntro);
+
+  const fitComparisonGrid = validationIntro.querySelector('#fit-comparison-kpis');
+  const kpiCompareEkfRmse = createKpiCard({ value: '—', label: 'EKF RMSE (one-step)', unit: '' });
+  const kpiCompareOlRmse = createKpiCard({ value: '—', label: 'Open-loop RMSE (multi-step)', unit: '' });
+  fitComparisonGrid.appendChild(kpiCompareEkfRmse);
+  fitComparisonGrid.appendChild(kpiCompareOlRmse);
 
   // Each validation section is laid out top-to-bottom as:
   //   button → fit KPIs → temperature plot → heating-input plot → disturbance plot
   // so the action sits directly above the plots it produces.
-  function buildValidationSection({ title, btnId, btnClass, btnLabel, statusId, kpiId }) {
+  function buildValidationSection({ title, desc, btnId, btnClass, btnLabel, statusId, kpiId }) {
     const section = document.createElement('div');
     section.className = 'card tuning-section';
     section.innerHTML = `
       <div class="tuning-section__title">${title}</div>
+      <p class="tuning-section__desc">${desc}</p>
       <div class="tuning-actions">
         <button class="btn ${btnClass}" id="${btnId}">${btnLabel}</button>
         <span class="tuning-actions__status" id="${statusId}"></span>
@@ -421,21 +453,22 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     return section;
   }
 
-  // ---- EKF Reconstruction section ----
+  // ---- One-step EKF reconstruction section ----
   const ekfSection = buildValidationSection({
-    title: 'EKF Reconstruction',
-    btnId: 'btn-sysid', btnClass: 'btn--primary', btnLabel: 'Run EKF Reconstruction',
+    title: 'One-Step EKF Reconstruction',
+    desc: 'Re-runs the Extended Kalman Filter over the window, resetting state with each new measurement. Evaluates one-step prediction accuracy &mdash; a tight fit here means the model tracks short-term dynamics well.',
+    btnId: 'btn-sysid', btnClass: 'btn--primary', btnLabel: 'Run One-Step EKF Reconstruction',
     statusId: 'ekf-status', kpiId: 'ekf-kpis',
   });
 
   const ekfKpiGrid = ekfSection.querySelector('#ekf-kpis');
-  const kpiEkfRmse = createKpiCard({ value: '—', label: 'RMSE', unit: '' });
+  const kpiEkfRmse = createKpiCard({ value: '—', label: 'RMSE (one-step)', unit: '' });
   const kpiEkfMae = createKpiCard({ value: '—', label: 'MAE', unit: '' });
   ekfKpiGrid.appendChild(kpiEkfRmse);
   ekfKpiGrid.appendChild(kpiEkfMae);
 
   const ekfChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="temp"]'), {
-    title: 'EKF RECONSTRUCTION', yLabel: '°C', height: 260,
+    title: 'ONE-STEP EKF RECONSTRUCTION', yLabel: '°C', height: 260,
   });
   const ekfInputsChart = new TimeSeriesChart(ekfSection.querySelector('[data-chart="inputs"]'), {
     title: 'HEATING INPUT', yLabel: 'W', height: 180,
@@ -444,21 +477,22 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     title: 'DISTURBANCES', yLabel: '°C', y2: true, y2Label: 'W', height: 180,
   });
 
-  // ---- Open-Loop Simulation section ----
+  // ---- Multi-step open-loop simulation section ----
   const olSection = buildValidationSection({
-    title: 'Open-Loop Simulation',
-    btnId: 'btn-open-loop', btnClass: 'btn--primary', btnLabel: 'Run Open-Loop Simulation',
+    title: 'Multi-Step Open-Loop Simulation',
+    desc: 'Integrates the model forward from the window start without measurement corrections &mdash; a stress test for drift over many timesteps. A good open-loop fit confirms parameters generalise beyond per-step Kalman corrections.',
+    btnId: 'btn-open-loop', btnClass: 'btn--primary', btnLabel: 'Run Multi-Step Open-Loop Simulation',
     statusId: 'ol-status', kpiId: 'ol-kpis',
   });
 
   const olKpiGrid = olSection.querySelector('#ol-kpis');
-  const kpiOlRmse = createKpiCard({ value: '—', label: 'RMSE', unit: '' });
+  const kpiOlRmse = createKpiCard({ value: '—', label: 'RMSE (multi-step)', unit: '' });
   const kpiOlMae = createKpiCard({ value: '—', label: 'MAE', unit: '' });
   olKpiGrid.appendChild(kpiOlRmse);
   olKpiGrid.appendChild(kpiOlMae);
 
   const olChart = new TimeSeriesChart(olSection.querySelector('[data-chart="temp"]'), {
-    title: 'OPEN-LOOP SIMULATION', yLabel: '°C', height: 260,
+    title: 'MULTI-STEP OPEN-LOOP SIMULATION', yLabel: '°C', height: 260,
   });
   const olInputsChart = new TimeSeriesChart(olSection.querySelector('[data-chart="inputs"]'), {
     title: 'HEATING INPUT', yLabel: 'W', height: 180,
@@ -496,6 +530,9 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const solarScaleInput = container.querySelector('#param-solar-scale');
   const cAirFractionInput = container.querySelector('#param-c-air-fraction');
   const rAwFractionInput = container.querySelector('#param-r-aw-fraction');
+  const tWallInitialInput = container.querySelector('#param-t-wall-initial');
+  const interRoomRSubsection = container.querySelector('#inter-room-r-subsection');
+  const interRoomRList = container.querySelector('#inter-room-r-list');
   const sigmaWInput = container.querySelector('#param-sigma-w');
   const sigmaVInput = container.querySelector('#param-sigma-v');
   const horizonInput = container.querySelector('#param-horizon');
@@ -603,6 +640,12 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     for (const [param, inp] of Object.entries(roomParamInputs)) {
       if (lockedParams.has(param)) {
         result[param] = { [roomSlug]: parseFloat(inp.value) };
+      }
+    }
+    if (lockedParams.has('t_wall_initial')) {
+      const twVal = parseFloat(tWallInitialInput.value);
+      if (isFinite(twVal)) {
+        result.t_wall_initial = { [roomSlug]: twVal };
       }
     }
     for (const [srcName, inp] of Object.entries(heaterScaleInputs)) {
@@ -1033,6 +1076,40 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // set into sysid_results and fires async_update_listeners(), so the sysid
   // sensor attributes carry the freshly estimated values.  Populate every
   // parameter field (including the per-source heater scales) from them.
+  function formatRmseKpi(val) {
+    return val != null ? formatNumber(val, 3) + ' °C' : '—';
+  }
+
+  function renderIdentifiedExtras(slug, st) {
+    const sysidAttrs = st[sysidEntityId(slug)]?.attributes || {};
+    if (sysidAttrs.t_wall_initial != null && !lockedParams.has('t_wall_initial')) {
+      tWallInitialInput.value = formatNumber(sysidAttrs.t_wall_initial, 2);
+    } else if (sysidAttrs.t_wall_initial == null && !lockedParams.has('t_wall_initial')) {
+      tWallInitialInput.value = '—';
+    }
+
+    const connections = sysidAttrs.estimated_inter_room_r;
+    if (connections && typeof connections === 'object' && Object.keys(connections).length > 0) {
+      interRoomRSubsection.hidden = false;
+      interRoomRList.innerHTML = Object.entries(connections).map(([pair, rVal]) => {
+        const [roomA, roomB] = pair.split(':');
+        const other = roomA === room.name ? roomB
+          : (roomB === room.name ? roomA : pair.replace(':', ' \u2194 '));
+        const inputId = `inter-room-r-${pair.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        return `
+          <div class="form-group">
+            <label class="form-label" for="${inputId}">${other}</label>
+            <input class="form-input form-input--readonly" type="text" id="${inputId}"
+              readonly value="${formatNumber(rVal, 4)}" tabindex="-1">
+            <span class="form-hint">K/W &mdash; thermal resistance to ${other}</span>
+          </div>`;
+      }).join('');
+    } else {
+      interRoomRSubsection.hidden = true;
+      interRoomRList.innerHTML = '';
+    }
+  }
+
   function populateModelFromSysid(slug, st) {
     const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
     if (!sysidAttrs) return;
@@ -1057,18 +1134,23 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         heaterScaleInputs[srcName].value = scale;
       }
     }
+    renderIdentifiedExtras(slug, st);
   }
 
   function renderEkfResults(slug, st) {
     const attrs = st[sysidEntityId(slug)]?.attributes || {};
-    updateKpiCard(kpiEkfRmse, { value: attrs.rmse != null ? formatNumber(attrs.rmse, 3) + ' °C' : '—' });
+    const rmseStr = formatRmseKpi(attrs.rmse);
+    updateKpiCard(kpiEkfRmse, { value: rmseStr });
+    updateKpiCard(kpiCompareEkfRmse, { value: rmseStr });
     updateKpiCard(kpiEkfMae, { value: attrs.mae != null ? formatNumber(attrs.mae, 3) + ' °C' : '—' });
     buildEkfChart(ekfChart, attrs.simulation);
   }
 
   function renderOlResults(slug, st) {
     const attrs = st[openLoopEntityId(slug)]?.attributes || {};
-    updateKpiCard(kpiOlRmse, { value: attrs.open_loop_rmse != null ? formatNumber(attrs.open_loop_rmse, 3) + ' °C' : '—' });
+    const rmseStr = formatRmseKpi(attrs.open_loop_rmse);
+    updateKpiCard(kpiOlRmse, { value: rmseStr });
+    updateKpiCard(kpiCompareOlRmse, { value: rmseStr });
     updateKpiCard(kpiOlMae, { value: attrs.open_loop_mae != null ? formatNumber(attrs.open_loop_mae, 3) + ' °C' : '—' });
     buildOlChart(olChart, attrs.simulation);
   }
@@ -1368,7 +1450,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
 
   // EKF Reconstruction: run with the current parameter field values.
   btnSysid.addEventListener('click', async () => {
-    setStatus(ekfStatusEl, 'Running EKF reconstruction…', 'running');
+    setStatus(ekfStatusEl, 'Running one-step EKF reconstruction…', 'running');
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
@@ -1390,13 +1472,12 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // chart reflects the model the user is currently evaluating, not the last
   // applied set.
   btnOpenLoop.addEventListener('click', async () => {
-    setStatus(olStatusEl, 'Running open-loop simulation…', 'running');
+    setStatus(olStatusEl, 'Running multi-step open-loop simulation…', 'running');
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
       await hass.callService('heating_assistant', 'run_open_loop_simulation', {
         ...collectSimParams(),
-        segment_length: 30,
       });
       await new Promise((res) => setTimeout(res, 800));
       renderOlResults(roomSlug, latestState);
@@ -1426,6 +1507,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // Initial render
   // -----------------------------------------------------------------------
   populateFromState(roomSlug, state);
+  renderIdentifiedExtras(roomSlug, state);
   renderEkfResults(roomSlug, state);
   renderOlResults(roomSlug, state);
   renderParamHistory(state);
@@ -1455,6 +1537,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
       }
       renderEkfResults(roomSlug, newState);
       renderOlResults(roomSlug, newState);
+      renderIdentifiedExtras(roomSlug, newState);
       renderParamHistory(newState);
     },
     destroy() {

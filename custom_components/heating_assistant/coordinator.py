@@ -5140,7 +5140,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         }
 
     # ------------------------------------------------------------------
-    # ML parameter estimation (Kalman filter / maximum likelihood)
+    # Parameter estimation (open-loop simulation MSE + IPOPT)
     # ------------------------------------------------------------------
 
     async def async_estimate_parameters_ml(
@@ -5151,11 +5151,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         history_override: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
-        Estimate thermal parameters using Kalman-filter maximum-likelihood.
+        Estimate thermal parameters via open-loop simulation MSE minimisation.
 
-        Runs the prediction-error decomposition (PED) log-likelihood
+        Runs :class:`~.parameter_estimator.KalmanMLEstimator` joint IPOPT
         optimisation over the rolling observation history buffer in a
-        thread-executor so that the HA event loop is not blocked.
+        thread-executor so that the HA event loop is not blocked.  The
+        objective is multi-step free-run simulation error (not CD-EKF PED
+        log-likelihood).
 
         Parameters
         ----------

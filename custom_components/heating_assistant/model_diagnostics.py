@@ -907,6 +907,13 @@ def compute_open_loop_predictions(
     This is the correct mode for visualisation: the wall/envelope temperature
     evolves freely and the plot has no discontinuities.
 
+    **Wall-seed contract** (see
+    ``HouseThermalSDE.initial_state_from_measurement``): the first segment of
+    the dataset uses a neutral air seed with an optional ``t_wall_initial``
+    override; later segment restarts (segmented N-step mode or post-gap runs)
+    use the (T_a, T_out) steady-state warm start — matching the estimator
+    objective.
+
     When ``segment_length`` is an integer the history is divided into
     fixed-length windows of that many steps, each re-initialised from the
     first measurement in the window.  Use this mode only for computing
@@ -1017,6 +1024,12 @@ def compute_open_loop_predictions(
 
     n_segments = 0
 
+    # Wall-seed contract (see HouseThermalSDE.initial_state_from_measurement):
+    # t_wall_initial is applied on the first segment only; later segment
+    # restarts (segmented N-step mode or post-gap contiguous runs) use the
+    # (T_a, T_out) steady-state warm start, matching the estimator objective.
+    is_first_dataset_segment = True
+
     # Split the history into contiguous runs at restart gaps so a segment never
     # straddles a dead interval: free-running the model across a multi-hour (or
     # multi-day) gap with stale held inputs would otherwise produce a large
@@ -1064,27 +1077,31 @@ def compute_open_loop_predictions(
         # air temperatures from the measurement (so hm(x0) == y0 with the
         # offset block zeroed) and warm-starts the emitter-lag states to the
         # commanded fraction, avoiding a spurious cold-emitter transient at the
-        # start of every segment.  The envelope is seeded at the air temperature
-        # (``wall_seed="air"`` → T_air = T_envelope) so the displayed free-run
-        # starts unbiased rather than jumping the wall to a parameter-dependent
-        # steady state.  Fall back to the legacy room-only initialisation for
-        # system objects that don't provide the helper.
+        # start of every segment.
+        #
+        # First segment: neutral air seed, then override with identified
+        # t_wall_initial when available (matches the estimator objective).
+        # Later segments: steady-state wall warm start (local T_a, T_out
+        # equilibrium) — same policy as interior estimator windows.
         d_prev = _make_d(seg[0])
         init_fn = getattr(system, "initial_state_from_measurement", None)
         if callable(init_fn):
             y0_arr = np.asarray(y0[:n], dtype=float)
+            _wall_seed = "air" if is_first_dataset_segment else "steady_state"
             try:
-                x = np.asarray(init_fn(y0_arr, u_prev, d_prev, wall_seed="air"), dtype=float)
+                x = np.asarray(
+                    init_fn(y0_arr, u_prev, d_prev, wall_seed=_wall_seed),
+                    dtype=float,
+                )
             except TypeError:
                 try:
                     x = np.asarray(init_fn(y0_arr, u_prev, d_prev), dtype=float)
                 except TypeError:
                     # Older system objects accept (y, u) only.
                     x = np.asarray(init_fn(y0_arr, u_prev), dtype=float)
-            # Seed the wall/envelope state.  When an identified t_wall_initial
-            # is provided use it; otherwise fall back to air temperature so the
-            # free-run starts without a parameter-dependent jump.
-            if x.shape[0] >= 2 * n:
+            # First segment only: apply identified t_wall_initial on top of
+            # the neutral air seed; without it the wall stays at T_air.
+            if is_first_dataset_segment and x.shape[0] >= 2 * n:
                 if t_wall_initial:
                     for room_idx, room_name in enumerate(room_names):
                         if room_idx < n and room_name in t_wall_initial:
@@ -1093,9 +1110,11 @@ def compute_open_loop_predictions(
                             x[n + room_idx] = float(y0_arr[room_idx])
                 else:
                     x[n:2 * n] = y0_arr[:n]
+            is_first_dataset_segment = False
         else:
             x = np.zeros(nx, dtype=float)
             x[:n] = np.array(y0[:n], dtype=float)
+            is_first_dataset_segment = False
 
         # Anchor point: record the t=0 initial state so the chart shows the
         # simulation starting exactly at the measurement.  predicted == measured
