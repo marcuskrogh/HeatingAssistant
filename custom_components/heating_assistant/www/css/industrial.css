@@ -983,6 +983,22 @@
   border-color: var(--warning);
 }
 
+.form-input--readonly {
+  cursor: default;
+  color: var(--text-secondary);
+}
+
+.fit-comparison__hints {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 16px;
+  margin: -12px 0 8px;
+}
+
+.fit-comparison__hints .form-hint {
+  margin: 0;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

@@ -126,6 +126,7 @@ def test_objective_finite_at_extreme_theta():
         np.array([math.log(2e4)]),   # log_mass — tiny
         np.array([math.log(5.0)]),   # log_r — large
         np.array([0.0]),             # q_int
+        np.array([20.0]),            # t_wall_init
         np.array([0.0]),             # log_alpha
     ])
     val, grad = est._simulation_mse_and_grad(

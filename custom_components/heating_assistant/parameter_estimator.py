@@ -1,5 +1,5 @@
 """
-Maximum-likelihood thermal parameter estimation.
+Grey-box thermal parameter estimation.
 
 Estimates a *complete* set of grey-box parameters jointly:
 
@@ -8,22 +8,19 @@ Estimates a *complete* set of grey-box parameters jointly:
     Per source s: power-scale α_s (heater-power miscalibration correction)
     Per pair (i,j): inter-room resistance R_ij [K/W] (when identifiable)
 
-The estimator maximises the prediction-error decomposition (PED) Gaussian
-log-likelihood
+The production objective minimises the mean squared error of multi-step
+open-loop simulations over short contiguous windows of the history buffer.
+For each candidate parameter set the grey-box model is integrated forward
+from measured initial conditions **without** Kalman corrections; the squared
+temperature error is averaged over rooms and steps.  A deliberately light
+Gaussian MAP prior shrinks each parameter toward its configured value (or
+toward zero for unconstrained directions) only where the data cannot
+constrain it; the prior is kept weak so the configured data window — not the
+prior — drives the estimate.
 
-    log L(θ) = -½ Σ_k [ log|Sₖ| + νₖᵀ Sₖ⁻¹ νₖ ]
-
-where νₖ = yₖ − A x̂ₖ₋₁ − B (α ⊙ u_{k-1}) − E (d_{k-1} + Q_int)
-      Sₖ = Pₖ⁻ + R   (since C = I)
-
-The Kalman filter is evaluated forward through the accumulated data history
-for each candidate parameter set.  All positive parameters are log-transformed
-to guarantee positivity and improve numerical conditioning; the unbounded
-internal-gain parameters Q_int are kept in linear space.  A deliberately
-light Gaussian regularisation term shrinks each parameter toward its prior
-(the configured value or zero) only in the directions the data cannot
-constrain; it is kept weak so the configured data window — not the prior —
-drives the estimate.
+All positive parameters are log-transformed to guarantee positivity and
+improve numerical conditioning; the unbounded internal-gain parameters Q_int
+are kept in linear space.
 
 Identifiability gates
 ---------------------
@@ -34,14 +31,18 @@ The optimiser only includes a parameter when the data actually identify it:
 * Q_int,i — always included (always identifiable from the steady-state
             energy balance jointly with C, R_ext)
 
-A multi-start IPOPT run is started from the prior plus a few small random
-perturbations; the run with the best (lowest) negative log-likelihood is
-returned.  Analytical gradients of the CD-EKF PED log-likelihood are
-supplied via a forward-sensitivity pass, giving IPOPT exact first-order
-information and dramatically reducing the number of function evaluations
-compared to Nelder–Mead.  The IPOPT call is routed through mbc's
+A multi-start IPOPT run is started from physically-anchored points (a coarse
+physics-informed least-squares fit and the configured prior); the run with
+the lowest simulation MSE is returned.  Analytical gradients of the
+open-loop MSE are supplied via a forward-sensitivity pass, giving IPOPT
+exact first-order information.  The IPOPT call is routed through mbc's
 ``IpoptNLPBackend`` — the same backend the MPC controller uses for OCP
 solves — so identification and control share a single IPOPT integration.
+
+CD-EKF PED log-likelihood evaluation is retained in
+:meth:`KalmanMLEstimator.compute_log_likelihood` and
+:meth:`KalmanMLEstimator.compute_loglik_slice` for diagnostics and
+visualisation, but is no longer the production optimisation objective.
 """
 
 from __future__ import annotations
@@ -358,7 +359,7 @@ class _ThetaLayout:
 
 class KalmanMLEstimator:
     """
-    Maximum-likelihood estimator for grey-box thermal model parameters.
+    Simulation-MSE estimator for grey-box thermal model parameters.
 
     Performs a single joint optimisation over the identifiable subset of:
 
@@ -398,9 +399,14 @@ class KalmanMLEstimator:
         Sampling interval [s].  **Must match the history buffer sampling
         interval** (typically 60 s).
     Q_var : float
-        Diagonal process-noise variance used in the Kalman filter [°C²].
+        Diagonal process-noise variance [°C²].  Used only by the diagnostic
+        CD-EKF PED methods (:meth:`compute_log_likelihood`,
+        :meth:`compute_loglik_slice`); not used in the production
+        simulation-MSE objective.
     R_var : float
-        Diagonal measurement-noise variance [°C²].
+        Diagonal measurement-noise variance [°C²].  Used only by the
+        diagnostic CD-EKF PED methods; not used in the production
+        simulation-MSE objective.
     regularization : float
         Weight of the Gaussian prior shrinking the solution toward the
         current configured values (and toward zero for ``q_int`` /
@@ -722,6 +728,19 @@ class KalmanMLEstimator:
             Locked parameters are pinned to the given value by setting their
             lower and upper bounds equal (lb = ub = fixed_value), so the
             optimiser never moves them while leaving all other parameters free.
+
+        Returns
+        -------
+        dict
+            Estimation result.  Key fields include ``estimated_params``,
+            ``estimated_internal_gains``, ``estimated_heater_scales``, etc.
+
+            ``log_likelihood`` — negative normalised open-loop simulation MSE
+            at the optimal solution (higher is better).  Kept under this name
+            for dashboard / sensor backward compatibility; it is **not** a true
+            Gaussian log-likelihood.
+
+            ``neg_normalized_mse`` — alias for ``log_likelihood`` (same value).
         """
         n_steps = len(history)
 
@@ -772,6 +791,7 @@ class KalmanMLEstimator:
                 "stage2_converged": False,
                 "n_steps": n_steps,
                 "log_likelihood": None,
+                "neg_normalized_mse": None,
                 "message": (
                     f"Insufficient data: {n_steps} steps available, "
                     f"need ≥ {self._min_history_steps}.  Keep the system running "
@@ -1130,6 +1150,7 @@ class KalmanMLEstimator:
             "stage2_converged": best_converged,
             "n_steps": n_steps,
             "log_likelihood": log_ll_val,
+            "neg_normalized_mse": log_ll_val,
             "message": "  ".join(msg_parts),
         }
 
@@ -1739,6 +1760,12 @@ class KalmanMLEstimator:
         the sensitivity resets at every window boundary rather than
         accumulating across the full dataset.
 
+        **Wall-seed contract** (see
+        :meth:`HouseThermalSDE.initial_state_from_measurement`): the first
+        window seeds the envelope from ``θ[t_wall_initial]`` (air seed then
+        override); every later window uses the ``"steady_state"`` warm start
+        at the local (T_a, T_out) equilibrium — matching open-loop diagnostics.
+
         Returns
         -------
         mse : float
@@ -1793,9 +1820,11 @@ class KalmanMLEstimator:
         ra0, _ = layout.idx_r_aw
         tw0, _ = layout.idx_t_wall_init
 
-        # Track which window is first in the entire dataset so the identified
-        # t_wall_initial is applied exactly once (at the very start of the
-        # history) and the sensitivity is only non-zero there.
+        # Wall-seed contract (see HouseThermalSDE.initial_state_from_measurement):
+        # the first window seeds the envelope from θ[t_wall_initial]; every
+        # later window (including after timestamp-gap segments) uses the
+        # (T_a, T_out) steady-state warm start so the short open-loop horizon
+        # is not biased by the dataset-start wall temperature.
         is_first_dataset_window = True
 
         for seg_i in range(len(seg_starts) - 1):
@@ -1820,15 +1849,26 @@ class KalmanMLEstimator:
                 ym0 = np.asarray(win[0]["ym"], dtype=float)
                 u0 = np.asarray(win[0].get("u", []), dtype=float)
                 d0 = np.asarray(win[0].get("d", []), dtype=float)
-                x = np.asarray(
-                    model.initial_state_from_measurement(ym0, u0, d0),
-                    dtype=float,
-                )
+                # Match diagnostics: neutral air seed on the first window, then
+                # override with θ[t_wall_initial]; interior windows use the
+                # parameter-dependent steady-state equilibrium directly.
+                _wall_seed = "air" if is_first_dataset_window else "steady_state"
+                try:
+                    x = np.asarray(
+                        model.initial_state_from_measurement(
+                            ym0, u0, d0, wall_seed=_wall_seed
+                        ),
+                        dtype=float,
+                    )
+                except TypeError:
+                    x = np.asarray(
+                        model.initial_state_from_measurement(ym0, u0, d0),
+                        dtype=float,
+                    )
                 sx = np.zeros((ntheta, nx))  # ∂x/∂θ — reset per window
 
                 if is_first_dataset_window:
-                    # For the first window use the identified t_wall_initial
-                    # to seed the wall nodes; ∂x₀[n+i]/∂θ[tw0+i] = 1.
+                    # Identified t_wall_initial from θ; ∂x₀[n+i]/∂θ[tw0+i] = 1.
                     is_first_dataset_window = False
                     for i in range(n):
                         if n + i < nx:
@@ -1837,7 +1877,7 @@ class KalmanMLEstimator:
                             )
                             sx[tw0 + i, n + i] = 1.0
                 else:
-                    # Later windows: keep steady-state wall seed; propagate
+                    # steady_state wall seed already applied; propagate
                     # r_aw sensitivity for that warmstart.
                     if len(d0) > 0 and len(layout.identifiable_splits):
                         T_out0 = float(d0[0])
