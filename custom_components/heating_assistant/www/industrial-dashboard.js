@@ -23,8 +23,14 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '82';
+  return '83';
 })();
+
+// If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
+// "INITIALIZING…" with no router), the watchdog abandons the stalled attempt and
+// retries so the panel can never get permanently stuck requiring a manual page
+// reload.  Generous enough that a slow first-ever asset fetch is not interrupted.
+const BOOT_WATCHDOG_MS = 6000;
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -36,8 +42,11 @@ class HaIndustrialPanel extends HTMLElement {
     this._rooms = [];
     this._state = {};
     this._booting = false;
-    // Bumped on disconnect so in-flight async boot work is ignored after teardown.
+    // Bumped on disconnect (and by the watchdog) so in-flight async boot work is
+    // ignored after teardown / supersession.
     this._bootGeneration = 0;
+    // Recovery timer that re-boots if an attempt stalls before a router exists.
+    this._watchdogTimer = null;
     // The backend starts STOPPED after every (re)start; the user must press
     // START to engage the controller.  Reflect that default until the real
     // system_enabled attribute syncs in from the coordinator.
@@ -101,6 +110,7 @@ class HaIndustrialPanel extends HTMLElement {
 
     this._booting = true;
     const generation = this._bootGeneration;
+    this._startBootWatchdog(generation);
 
     if (this._router) {
       this._router.destroy();
@@ -156,6 +166,8 @@ class HaIndustrialPanel extends HTMLElement {
       });
 
       this._router.start();
+      // A working router means boot succeeded — stand the watchdog down.
+      this._clearBootWatchdog();
       this._updateActiveNav();
       this._syncSystemRunning();
 
@@ -350,6 +362,29 @@ class HaIndustrialPanel extends HTMLElement {
     });
   }
 
+  _startBootWatchdog(generation) {
+    this._clearBootWatchdog();
+    this._watchdogTimer = setTimeout(() => {
+      this._watchdogTimer = null;
+      // Only intervene if THIS boot attempt is still the current one, we are
+      // still connected, and it never produced a router (i.e. it stalled).
+      if (this.isConnected && !this._router && generation === this._bootGeneration) {
+        // Invalidate the stalled attempt so its eventual (or never) resolution
+        // cannot race the retry, release the guard, and boot again from scratch.
+        this._bootGeneration += 1;
+        this._booting = false;
+        this._boot();
+      }
+    }, BOOT_WATCHDOG_MS);
+  }
+
+  _clearBootWatchdog() {
+    if (this._watchdogTimer) {
+      clearTimeout(this._watchdogTimer);
+      this._watchdogTimer = null;
+    }
+  }
+
   connectedCallback() {
     // ha-panel-custom destroys and recreates this element on every sidebar
     // navigation.  Boot only once we are in the document — set hass() is
@@ -363,6 +398,7 @@ class HaIndustrialPanel extends HTMLElement {
   disconnectedCallback() {
     this._bootGeneration += 1;
     this._booting = false;
+    this._clearBootWatchdog();
     if (this._router) {
       this._router.destroy();
       this._router = null;
