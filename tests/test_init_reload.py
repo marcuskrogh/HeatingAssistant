@@ -57,6 +57,7 @@ async def test_unload_stashes_runtime_state_for_reload():
     coordinator._room_enabled = {"living_room": False, "kitchen": True}
     coordinator._schedule_enabled = {"living_room": False}
     coordinator._base_setpoint = {"living_room": 24.0, "kitchen": 20.0}
+    coordinator._system_enabled = True
 
     hass.data[DOMAIN] = {entry.entry_id: coordinator}
 
@@ -71,6 +72,7 @@ async def test_unload_stashes_runtime_state_for_reload():
     assert stash["room_enabled"] == {"living_room": False, "kitchen": True}
     assert stash["schedule_enabled"] == {"living_room": False}
     assert stash["base_setpoint"] == {"living_room": 24.0, "kitchen": 20.0}
+    assert stash["system_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -84,6 +86,7 @@ async def test_setup_entry_restores_stashed_state(monkeypatch):
         "_reload_state": {
             entry.entry_id: {
                 "history_buffer": [{"step": 7}],
+                "system_enabled": False,
                 "room_enabled": {"living_room": False, "removed_room": False},
                 "schedule_enabled": {"living_room": False},
                 "base_setpoint": {"living_room": 24.0, "removed_room": 21.0},
@@ -98,6 +101,7 @@ async def test_setup_entry_restores_stashed_state(monkeypatch):
     class _Coordinator(_SetupListenerCoordinatorMixin):
         def __init__(self, *_args, **_kwargs):
             self._history_buffer = []
+            self._system_enabled = True
             self._room_enabled = {"living_room": True, "kitchen": True}
             self._schedule_enabled = {"living_room": True, "kitchen": True}
             self._base_setpoint = {"living_room": 22.0, "kitchen": 20.0}
@@ -112,6 +116,7 @@ async def test_setup_entry_restores_stashed_state(monkeypatch):
 
     coordinator = hass.data[DOMAIN][entry.entry_id]
     assert coordinator._history_buffer == [{"step": 7}]
+    assert coordinator._system_enabled is False
     # Only rooms still present are restored; "removed_room" is dropped.
     assert coordinator._room_enabled == {"living_room": False, "kitchen": True}
     assert coordinator._schedule_enabled == {"living_room": False, "kitchen": True}

@@ -1022,6 +1022,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return {_renames.get(k, k): v for k, v in state_dict.items()}
 
         coordinator._history_buffer.extend(reload_state.get("history_buffer", []))
+        if "system_enabled" in reload_state:
+            coordinator._system_enabled = bool(reload_state["system_enabled"])
         for room, value in _remap(reload_state.get("room_enabled", {})).items():
             if room in coordinator._room_enabled:
                 coordinator._room_enabled[room] = value
@@ -1530,6 +1532,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             reload_state = hass.data[DOMAIN].setdefault("_reload_state", {})
             reload_state[entry.entry_id] = {
                 "history_buffer": list(coordinator._history_buffer),
+                "system_enabled": coordinator._system_enabled,
                 "room_enabled": dict(coordinator._room_enabled),
                 "schedule_enabled": dict(coordinator._schedule_enabled),
                 "base_setpoint": dict(coordinator._base_setpoint),
