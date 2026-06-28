@@ -9,6 +9,7 @@ import custom_components.heating_assistant.__init__ as init_mod
 from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
+    CONF_PERSISTED_SYSTEM_ENABLED,
     CONF_ROOMS,
     DEFAULT_HORIZON,
     DOMAIN,
@@ -21,6 +22,54 @@ class _SetupListenerCoordinatorMixin:
 
     def setup_window_listeners(self):
         return None
+
+    @property
+    def update_interval_seconds(self):
+        return 900
+
+
+def _patch_setup_stores(monkeypatch):
+    """Stub heavy stores so async_setup_entry can run without HA."""
+
+    class _FakeIdHistoryStore:
+        async def async_setup(self):
+            return None
+
+        async def async_query_recent(self, _n):
+            return []
+
+    class _FakeDatasetStore:
+        async def async_load(self):
+            return None
+
+    class _FakeExperimentStore:
+        async def async_load(self):
+            return None
+
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.identification_history.IdentificationHistoryStore",
+        lambda *_a, **_kw: _FakeIdHistoryStore(),
+    )
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.datasets.DatasetStore",
+        lambda *_a, **_kw: _FakeDatasetStore(),
+    )
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.experiments.ExperimentStore",
+        lambda *_a, **_kw: _FakeExperimentStore(),
+    )
+
+
+def _make_setup_hass():
+    hass = SimpleNamespace()
+    hass.data = {DOMAIN: {"yaml_config": {CONF_ROOMS: [], CONF_HEAT_SOURCES: []}}}
+    hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
+    hass.config_entries = SimpleNamespace(
+        async_update_entry=MagicMock(),
+        async_forward_entry_setups=AsyncMock(),
+    )
+    hass.http = SimpleNamespace(async_register_static_paths=AsyncMock())
+    return hass
 
 
 @pytest.mark.asyncio
@@ -241,3 +290,54 @@ async def test_coordinator_builds_runtime_store_during_init(monkeypatch):
     # The runtime store is built and keyed by the entry id.
     assert coord._runtime_store is not None
     assert "entry-store-1" in coord._runtime_store._key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("persisted_enabled,expect_refresh", [(True, 1), (False, 0)])
+async def test_setup_entry_engages_controller_from_persisted_state(
+    monkeypatch, persisted_enabled, expect_refresh
+):
+    """Restored START state must trigger a full refresh, not only the UI flag."""
+    entry = SimpleNamespace(
+        data={
+            CONF_ROOMS: [],
+            CONF_HEAT_SOURCES: [],
+            CONF_PERSISTED_SYSTEM_ENABLED: persisted_enabled,
+        },
+        options={},
+        entry_id="entry-engage",
+        title="Heating Assistant",
+        add_update_listener=MagicMock(return_value=lambda: None),
+        async_on_unload=MagicMock(),
+    )
+
+    hass = _make_setup_hass()
+    refresh_calls = []
+
+    class _Coordinator(_SetupListenerCoordinatorMixin):
+        def __init__(self, *_args, **_kwargs):
+            self._history_buffer = []
+            self._system_enabled = persisted_enabled
+            self._room_enabled = {}
+            self._schedule_enabled = {}
+            self._base_setpoint = {}
+            self.model = SimpleNamespace(rooms={})
+
+        @property
+        def system_enabled(self):
+            return self._system_enabled
+
+        async def async_config_entry_first_refresh(self):
+            return None
+
+        async def async_request_refresh(self):
+            refresh_calls.append(True)
+
+        def async_update_listeners(self):
+            return None
+
+    monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _Coordinator)
+    _patch_setup_stores(monkeypatch)
+
+    assert await init_mod.async_setup_entry(hass, entry) is True
+    assert len(refresh_calls) == expect_refresh
