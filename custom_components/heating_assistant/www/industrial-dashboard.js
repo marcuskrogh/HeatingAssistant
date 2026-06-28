@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '79';
+  return '81';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -36,6 +36,9 @@ class HaIndustrialPanel extends HTMLElement {
     this._rooms = [];
     this._state = {};
     this._initialized = false;
+    this._booting = false;
+    // Bumped on disconnect so in-flight async boot work is ignored after teardown.
+    this._bootGeneration = 0;
     // The backend starts STOPPED after every (re)start; the user must press
     // START to engage the controller.  Reflect that default until the real
     // system_enabled attribute syncs in from the coordinator.
@@ -43,6 +46,14 @@ class HaIndustrialPanel extends HTMLElement {
     // Stable reference so the same listener can be added/removed across
     // disconnect/reconnect cycles without accumulating duplicates.
     this._onHashChange = () => this._updateActiveNav();
+  }
+
+  // HA may batch property updates via setProperties instead of individual setters.
+  setProperties(props) {
+    if ('hass' in props) this.hass = props.hass;
+    if ('narrow' in props) this.narrow = props.narrow;
+    if ('panel' in props) this.panel = props.panel;
+    if ('route' in props) this.route = props.route;
   }
 
   set hass(hass) {
@@ -68,6 +79,11 @@ class HaIndustrialPanel extends HTMLElement {
         this._router.update(this._state);
         this._syncSystemRunning();
       }
+    } else if (this._initialized && !this._router && !this._booting && hass && this.isConnected) {
+      // Boot was interrupted (e.g. user navigated away during INITIALIZING).
+      // HA often does not call set hass again on reconnect when the hass object
+      // reference is unchanged, so connectedCallback must also retry boot.
+      this._boot();
     }
   }
 
@@ -83,6 +99,12 @@ class HaIndustrialPanel extends HTMLElement {
   }
 
   async _boot() {
+    if (this._booting || !this._hass) return;
+
+    this._booting = true;
+    const generation = this._bootGeneration;
+
+    window.removeEventListener('hashchange', this._onHashChange);
     this._renderShell();
 
     try {
@@ -107,6 +129,10 @@ class HaIndustrialPanel extends HTMLElement {
         import(`${BASE_PATH}/js/pages/schedules.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/configuration.js?v=${PANEL_VERSION}`),
       ]);
+
+      if (generation !== this._bootGeneration || !this.isConnected) {
+        return;
+      }
 
       this._connection = new HaConnection(this._hass);
 
@@ -136,6 +162,9 @@ class HaIndustrialPanel extends HTMLElement {
       // activation where state_changed events could be missed.
       this._syncLatestState();
     } catch (err) {
+      if (generation !== this._bootGeneration) {
+        return;
+      }
       // Surface the error in the panel instead of leaving the user on the
       // frozen "INITIALIZING..." placeholder forever.
       const contentEl = this.shadowRoot.getElementById('content');
@@ -147,6 +176,10 @@ class HaIndustrialPanel extends HTMLElement {
           </div>`;
       }
       console.error('[heating-assistant] Boot failed:', err);
+    } finally {
+      if (generation === this._bootGeneration) {
+        this._booting = false;
+      }
     }
   }
 
@@ -314,17 +347,40 @@ class HaIndustrialPanel extends HTMLElement {
     });
   }
 
-  connectedCallback() {
-    // Resume when element is reconnected after SPA navigation away and back.
-    // HA reuses the same element instance, so router.destroy() was called in
-    // disconnectedCallback and the router must be restarted from scratch here.
-    if (this._initialized && this._router) {
-      this._router.start(); // re-adds hashchange listener + renders current route
+  _resumePanel() {
+    if (!this._hass) return;
+
+    if (this._menuButton) {
+      this._menuButton.hass = this._hass;
+    }
+    if (this._connection) {
+      this._connection.updateHass(this._hass);
+    }
+
+    if (this._router) {
+      this._router.start();
       window.addEventListener('hashchange', this._onHashChange);
+      this._syncLatestState();
+      this._syncSystemRunning();
+      this._updateActiveNav();
+      return;
+    }
+
+    if (this._initialized && !this._booting) {
+      this._boot();
     }
   }
 
+  connectedCallback() {
+    // Home Assistant keeps custom panel elements in memory across sidebar
+    // navigation.  disconnectedCallback tears down the router; on reconnect we
+    // must resume without waiting for a fresh set hass() call.
+    this._resumePanel();
+  }
+
   disconnectedCallback() {
+    this._bootGeneration += 1;
+    this._booting = false;
     if (this._router) {
       this._router.destroy();
     }

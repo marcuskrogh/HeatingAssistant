@@ -24,11 +24,11 @@
  *   card.destroy();                                  // on teardown
  */
 
-import { formatTemperature } from '../utils.js?v=80';
+import { formatTemperature } from '../utils.js?v=81';
 import {
   experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress, experimentProgress,
-} from '../experiment-utils.js?v=80';
+} from '../experiment-utils.js?v=81';
 
 const SP_STEP = 0.5;
 const SP_MIN = 5;
