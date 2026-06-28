@@ -640,6 +640,10 @@ CONF_PERSISTED_COMFORT_OFFSETS = "persisted_comfort_offsets"
 #: full Home Assistant restart, mirroring CONF_PERSISTED_SETPOINTS.
 CONF_PERSISTED_ROOM_ENABLED = "persisted_room_enabled"
 
+#: entry.data key that stores the global START/STOP toggle so the integration
+#: resumes in the same running or stopped state after a full HA restart.
+CONF_PERSISTED_SYSTEM_ENABLED = "persisted_system_enabled"
+
 # ---------------------------------------------------------------------------
 # System-identification experiments and stored datasets
 # ---------------------------------------------------------------------------

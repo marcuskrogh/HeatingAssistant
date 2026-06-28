@@ -39,6 +39,7 @@ from .const import (
     CONF_PERSISTED_SCHEDULES,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_PERSISTED_ROOM_ENABLED,
+    CONF_PERSISTED_SYSTEM_ENABLED,
     CONF_TRACKING_WEIGHT,
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
@@ -579,6 +580,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         CONF_ESTIMATED_PARAMS,
         CONF_PERSISTED_COMFORT_OFFSETS,
         CONF_PERSISTED_ROOM_ENABLED,
+        CONF_PERSISTED_SYSTEM_ENABLED,
     }
     _RUNTIME_RECONFIG_KEYS: Set[str] = {
         CONF_OUTDOOR_TEMP_ENTITY,
@@ -900,11 +902,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         configured rules.
         """
         room_names = self.model.room_names
-        # The controller starts STOPPED after every (re)start.  The user must
-        # explicitly press START in the dashboard to engage the MPC backend.
-        # State estimation and logging still run while stopped; only the MPC
+        # Restore the global START/STOP toggle from the config entry so a full
+        # HA restart resumes in the same running or stopped state.  State
+        # estimation and logging still run while stopped; only the MPC
         # optimisation and actuator commands are gated on this flag.
-        self._system_enabled: bool = False
+        self._system_enabled: bool = bool(
+            self._entry.data.get(CONF_PERSISTED_SYSTEM_ENABLED, False)
+        )
         self._room_enabled: Dict[str, bool] = {name: True for name in room_names}
         self._schedule_disabled: Dict[str, bool] = {name: False for name in room_names}
 
@@ -4533,6 +4537,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     def set_system_enabled(self, enabled: bool) -> None:
         """Enable or disable the entire heating assistant controller."""
         self._system_enabled = bool(enabled)
+        # Persist so the START/STOP toggle survives a full HA restart.
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            self.hass.config_entries.async_update_entry(
+                real_entry,
+                data={
+                    **dict(real_entry.data),
+                    CONF_PERSISTED_SYSTEM_ENABLED: self._system_enabled,
+                },
+            )
 
     # ------------------------------------------------------------------
     # Room enable/disable helpers (called by climate platform)
