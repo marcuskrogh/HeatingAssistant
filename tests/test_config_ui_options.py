@@ -463,6 +463,26 @@ def test_panel_cache_bust_token_in_sync() -> None:
     assert f"return '{token}'" in dashboard
 
 
+def test_panel_lifecycle_handles_sidebar_navigation() -> None:
+    """Panel must resume or retry boot after HA SPA disconnect/reconnect."""
+    dashboard = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www"
+        / "industrial-dashboard.js"
+    ).read_text(encoding="utf-8")
+    required = [
+        "setProperties(props)",
+        "_bootGeneration",
+        "_booting",
+        "_resumePanel()",
+        "connectedCallback()",
+        "disconnectedCallback()",
+        "generation !== this._bootGeneration",
+        "!this._router && !this._booting",
+    ]
+    missing = [snippet for snippet in required if snippet not in dashboard]
+    assert not missing, f"Panel lifecycle fix incomplete, missing: {missing}"
+
+
 def test_panel_relative_imports_use_cache_bust_suffix() -> None:
     """Transitive ES module imports must carry ?v= or browsers serve stale modules."""
     token = _panel_cache_bust_token()
