@@ -1155,6 +1155,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if cancel_startup is not None:
         entry.async_on_unload(cancel_startup)
 
+    # Persisted START/STOP only restores the flag and UI state.  Mirror the
+    # set_system_enabled service's immediate refresh so MPC, EKF, and actuator
+    # commands resume without waiting for the next scheduled interval (or a
+    # manual STOP/START cycle).
+    if coordinator.system_enabled:
+        await coordinator.async_request_refresh()
+
     # Schedule immediate + deadline-aligned refreshes for window open/close
     # events so debounce and settle timings are honoured independently of the
     # coordinator's update interval.

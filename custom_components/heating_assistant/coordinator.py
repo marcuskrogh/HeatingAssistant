@@ -3418,7 +3418,25 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             )
             self.hass.async_create_task(self.async_request_refresh())
 
-        return async_track_state_change_event(self.hass, entity_ids, _on_entity_ready)
+        cancel = async_track_state_change_event(self.hass, entity_ids, _on_entity_ready)
+
+        # After a HA restart, watched entities are often already reporting valid
+        # states when this listener is registered, so no unknown→valid transition
+        # ever fires and the coordinator would otherwise sit idle until the next
+        # scheduled interval.  Request a refresh when any watched entity is
+        # already readable.
+        if any(
+            (state := self.hass.states.get(eid)) is not None
+            and state.state not in _UNAVAILABLE
+            for eid in entity_ids
+        ):
+            _LOGGER.debug(
+                "Startup: watched entities already available — requesting "
+                "coordinator refresh",
+            )
+            self.hass.async_create_task(self.async_request_refresh())
+
+        return cancel
 
     def setup_window_listeners(self) -> Optional[Callable]:
         """Set up window-sensor listeners for event-driven debounce/settle timing.
