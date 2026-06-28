@@ -464,7 +464,7 @@ def test_panel_cache_bust_token_in_sync() -> None:
 
 
 def test_panel_lifecycle_handles_sidebar_navigation() -> None:
-    """Panel must resume or retry boot after HA SPA disconnect/reconnect."""
+    """Panel must boot on connect and fully tear down on disconnect."""
     dashboard = (
         REPO_ROOT / "custom_components" / "heating_assistant" / "www"
         / "industrial-dashboard.js"
@@ -473,14 +473,21 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
         "setProperties(props)",
         "_bootGeneration",
         "_booting",
-        "_resumePanel()",
         "connectedCallback()",
         "disconnectedCallback()",
         "generation !== this._bootGeneration",
-        "!this._router && !this._booting",
+        "!this.isConnected) return",
+        "this._router = null",
+        "_applyHassState(hass)",
+    ]
+    forbidden = [
+        "_initialized",
+        "_resumePanel()",
     ]
     missing = [snippet for snippet in required if snippet not in dashboard]
+    present = [snippet for snippet in forbidden if snippet in dashboard]
     assert not missing, f"Panel lifecycle fix incomplete, missing: {missing}"
+    assert not present, f"Panel lifecycle regressions, found: {present}"
 
 
 def test_panel_relative_imports_use_cache_bust_suffix() -> None:

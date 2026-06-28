@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '81';
+  return '82';
 })();
 
 class HaIndustrialPanel extends HTMLElement {
@@ -35,7 +35,6 @@ class HaIndustrialPanel extends HTMLElement {
     this._router = null;
     this._rooms = [];
     this._state = {};
-    this._initialized = false;
     this._booting = false;
     // Bumped on disconnect so in-flight async boot work is ignored after teardown.
     this._bootGeneration = 0;
@@ -64,26 +63,25 @@ class HaIndustrialPanel extends HTMLElement {
     if (this._menuButton) {
       this._menuButton.hass = hass;
     }
-    if (!this._initialized && hass) {
-      this._initialized = true;
+    if (this._router) {
+      this._applyHassState(hass);
+    } else if (hass && this.isConnected && !this._booting) {
+      // Fallback when hass updates after connect but boot was interrupted.
       this._boot();
-    } else if (this._initialized && this._router) {
-      let changed = false;
-      for (const [id, state] of Object.entries(hass.states)) {
-        if (id.startsWith('sensor.heating_assistant_') && this._state[id] !== state) {
-          this._state[id] = state;
-          changed = true;
-        }
+    }
+  }
+
+  _applyHassState(hass) {
+    let changed = false;
+    for (const [id, state] of Object.entries(hass.states)) {
+      if (id.startsWith('sensor.heating_assistant_') && this._state[id] !== state) {
+        this._state[id] = state;
+        changed = true;
       }
-      if (changed) {
-        this._router.update(this._state);
-        this._syncSystemRunning();
-      }
-    } else if (this._initialized && !this._router && !this._booting && hass && this.isConnected) {
-      // Boot was interrupted (e.g. user navigated away during INITIALIZING).
-      // HA often does not call set hass again on reconnect when the hass object
-      // reference is unchanged, so connectedCallback must also retry boot.
-      this._boot();
+    }
+    if (changed) {
+      this._router.update(this._state);
+      this._syncSystemRunning();
     }
   }
 
@@ -99,10 +97,15 @@ class HaIndustrialPanel extends HTMLElement {
   }
 
   async _boot() {
-    if (this._booting || !this._hass) return;
+    if (this._booting || !this._hass || !this.isConnected) return;
 
     this._booting = true;
     const generation = this._bootGeneration;
+
+    if (this._router) {
+      this._router.destroy();
+      this._router = null;
+    }
 
     window.removeEventListener('hashchange', this._onHashChange);
     this._renderShell();
@@ -347,35 +350,14 @@ class HaIndustrialPanel extends HTMLElement {
     });
   }
 
-  _resumePanel() {
-    if (!this._hass) return;
-
-    if (this._menuButton) {
-      this._menuButton.hass = this._hass;
-    }
-    if (this._connection) {
-      this._connection.updateHass(this._hass);
-    }
-
-    if (this._router) {
-      this._router.start();
-      window.addEventListener('hashchange', this._onHashChange);
-      this._syncLatestState();
-      this._syncSystemRunning();
-      this._updateActiveNav();
-      return;
-    }
-
-    if (this._initialized && !this._booting) {
+  connectedCallback() {
+    // ha-panel-custom destroys and recreates this element on every sidebar
+    // navigation.  Boot only once we are in the document — set hass() is
+    // often called before appendChild, and HA may not call it again when the
+    // hass object reference is unchanged.
+    if (this._hass && !this._booting) {
       this._boot();
     }
-  }
-
-  connectedCallback() {
-    // Home Assistant keeps custom panel elements in memory across sidebar
-    // navigation.  disconnectedCallback tears down the router; on reconnect we
-    // must resume without waiting for a fresh set hass() call.
-    this._resumePanel();
   }
 
   disconnectedCallback() {
@@ -383,7 +365,10 @@ class HaIndustrialPanel extends HTMLElement {
     this._booting = false;
     if (this._router) {
       this._router.destroy();
+      this._router = null;
     }
+    this._connection = null;
+    this._menuButton = null;
     window.removeEventListener('hashchange', this._onHashChange);
   }
 }
