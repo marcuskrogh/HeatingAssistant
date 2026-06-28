@@ -40,6 +40,9 @@ class HaIndustrialPanel extends HTMLElement {
     // START to engage the controller.  Reflect that default until the real
     // system_enabled attribute syncs in from the coordinator.
     this._systemRunning = false;
+    // Stable reference so the same listener can be added/removed across
+    // disconnect/reconnect cycles without accumulating duplicates.
+    this._onHashChange = () => this._updateActiveNav();
   }
 
   set hass(hass) {
@@ -244,7 +247,7 @@ class HaIndustrialPanel extends HTMLElement {
       });
     });
 
-    window.addEventListener('hashchange', () => this._updateActiveNav());
+    window.addEventListener('hashchange', this._onHashChange);
   }
 
   _updateRunButton() {
@@ -311,10 +314,21 @@ class HaIndustrialPanel extends HTMLElement {
     });
   }
 
+  connectedCallback() {
+    // Resume when element is reconnected after SPA navigation away and back.
+    // HA reuses the same element instance, so router.destroy() was called in
+    // disconnectedCallback and the router must be restarted from scratch here.
+    if (this._initialized && this._router) {
+      this._router.start(); // re-adds hashchange listener + renders current route
+      window.addEventListener('hashchange', this._onHashChange);
+    }
+  }
+
   disconnectedCallback() {
     if (this._router) {
       this._router.destroy();
     }
+    window.removeEventListener('hashchange', this._onHashChange);
   }
 }
 
