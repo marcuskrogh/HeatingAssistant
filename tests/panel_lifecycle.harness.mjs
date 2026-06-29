@@ -57,7 +57,7 @@ class Shim {
 }
 globalThis.HTMLElement = Shim;
 globalThis.customElements = { define() {}, get() { return undefined; } };
-globalThis.document = { currentScript: { src: '/x?v=85' }, createElement() { return new Shim(); }, addEventListener() {} };
+globalThis.document = { currentScript: { src: '/x?v=86' }, createElement() { return new Shim(); }, addEventListener() {} };
 globalThis.history = {
   replaceState(_state, _title, url) {
     const path = url.split('?')[0];
@@ -66,7 +66,23 @@ globalThis.history = {
     window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
   },
 };
+globalThis.history = {
+  state: null,
+  pushState(_state, _title, url) {
+    const path = url.split('?')[0];
+    const hashIdx = url.indexOf('#');
+    window.location._pathname = path;
+    window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
+  },
+  replaceState(_state, _title, url) {
+    const path = url.split('?')[0];
+    const hashIdx = url.indexOf('#');
+    window.location._pathname = path;
+    window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
+  },
+};
 globalThis.window = {
+  __haIndustrialPanelHashGuard: false,
   innerWidth: 1200,
   location: {
     _pathname: '/ha-industrial',
@@ -88,8 +104,10 @@ globalThis.window = {
 // ---- real router.js + panel-hash.js -----------------------------------------
 const panelHashSrc = readFileSync(join(WWW, 'js/panel-hash.js'), 'utf8')
   .replace(/export const /g, 'const ')
-  .replace(/export function /g, 'function ');
-const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, readPanelRoute, setPanelHash, clearPanelHash, isPanelHash, PANEL_PATH };`)();
+  .replace(/export function /g, 'function ')
+  .replace(/\ninstallPanelHashGuard\(\);\s*$/, '');
+const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, readPanelRoute, setPanelHash, clearPanelHash, stripLeakedPanelHash, installPanelHashGuard, isPanelHash, PANEL_PATH };`)();
+panelHashMod.installPanelHashGuard();
 const routerSrc = readFileSync(join(WWW, 'js/router.js'), 'utf8')
   .replace(/import .*panel-hash.*\n/, '')
   .replace(/export class Router/, 'class Router');
@@ -157,6 +175,12 @@ async function main() {
   assert(!el._connection, 'connection must be cleared on disconnect');
   await wait(5);
   assert(window.location.hash === '', 'panel hash must not leak onto integrations route');
+
+  // --- HA sidebar uses pushState; hash must strip even if disconnect missed --
+  window.location._pathname = '/ha-industrial';
+  window.location.hash = '#config/rooms';
+  history.pushState(null, '', '/config/integrations');
+  assert(window.location.hash === '', 'pushState to integrations must strip panel hash');
 
   // --- Sidebar back: new element, reconnect without fresh set hass() ----------
   window.location._pathname = '/ha-industrial';
