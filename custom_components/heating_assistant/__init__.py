@@ -234,7 +234,6 @@ from .const import (
     CONF_PLOT_FORECAST_HOURS,
     CONF_IDENTIFICATION_HISTORY_DAYS,
     DEFAULT_IDENTIFICATION_HISTORY_DAYS,
-    MAX_IDENTIFICATION_HORIZON_HOURS,
     CONF_SOURCE_HVAC_MODE,
     DEFAULT_ENVELOPE_TIGHTNESS,
     DEFAULT_PLOT_HISTORY_HOURS,
@@ -429,10 +428,10 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_LATITUDE): vol.Coerce(float),
                 vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
                 vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
-                    vol.Coerce(int), vol.Range(min=60, max=3600)
+                    vol.Coerce(int), vol.Range(min=60)
                 ),
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=100)
+                    vol.Coerce(int), vol.Range(min=1)
                 ),
                 vol.Optional(
                     CONF_TRACKING_WEIGHT, default=DEFAULT_TRACKING_WEIGHT
@@ -450,38 +449,38 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
                 vol.Optional(CONF_SIGMA_W, default=DEFAULT_SIGMA_W): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                    vol.Coerce(float), vol.Range(min=1e-6)
                 ),
                 vol.Optional(CONF_SIGMA_V, default=DEFAULT_SIGMA_V): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6, max=10.0)
+                    vol.Coerce(float), vol.Range(min=1e-6)
                 ),
                 vol.Optional(CONF_SIGMA_B, default=DEFAULT_SIGMA_B): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-8, max=1.0)
+                    vol.Coerce(float), vol.Range(min=1e-8)
                 ),
                 vol.Optional(
                     CONF_WINDOW_OPEN_DEBOUNCE,
                     default=DEFAULT_WINDOW_OPEN_DEBOUNCE,
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0)),
                 vol.Optional(
                     CONF_WINDOW_OPEN_CLOSE_SETTLE,
                     default=DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=0)),
                 vol.Optional(
                     CONF_WINDOW_OPEN_Q_INFLATION,
                     default=DEFAULT_WINDOW_OPEN_Q_INFLATION,
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=1000.0)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
                 vol.Optional(
                     CONF_PLOT_HISTORY_HOURS,
                     default=DEFAULT_PLOT_HISTORY_HOURS,
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=168.0)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
                 vol.Optional(
                     CONF_PLOT_FORECAST_HOURS,
                     default=DEFAULT_PLOT_FORECAST_HOURS,
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=168.0)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
                 vol.Optional(
                     CONF_IDENTIFICATION_HISTORY_DAYS,
                     default=DEFAULT_IDENTIFICATION_HISTORY_DAYS,
-                ): vol.All(vol.Coerce(int), vol.Range(min=7, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=7)),
             }
         )
     },
@@ -2681,7 +2680,7 @@ def _register_services(hass: HomeAssistant) -> None:
             {
                 vol.Optional("room_name"): cv.string,
                 vol.Optional("segment_length", default=30): vol.All(
-                    vol.Coerce(int), vol.Range(min=5, max=120)
+                    vol.Coerce(int), vol.Range(min=5)
                 ),
                 vol.Optional("horizon_hours"): vol.Coerce(float),
                 # Explicit window overrides horizon when both start and end are
@@ -2689,10 +2688,10 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional("window_start"): vol.Coerce(float),
                 vol.Optional("window_end"): vol.Coerce(float),
                 vol.Optional("sigma_w"): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                    vol.Coerce(float), vol.Range(min=0.0)
                 ),
                 vol.Optional("sigma_v"): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                    vol.Coerce(float), vol.Range(min=0.0)
                 ),
                 # Per-source heater power scales {source_name: scale}.
                 vol.Optional("heater_scales"): {cv.string: vol.Coerce(float)},
@@ -2843,13 +2842,13 @@ def _register_services(hass: HomeAssistant) -> None:
             {
                 vol.Optional("room_name"): cv.string,
                 vol.Optional("horizon_hours", default=6.0): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.5, max=MAX_IDENTIFICATION_HORIZON_HOURS)
+                    vol.Coerce(float), vol.Range(min=0.5)
                 ),
                 vol.Optional("sigma_w"): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                    vol.Coerce(float), vol.Range(min=0.0)
                 ),
                 vol.Optional("sigma_v"): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                    vol.Coerce(float), vol.Range(min=0.0)
                 ),
                 # Explicit identification window as UNIX timestamps [s].
                 # When both are provided, horizon_hours is ignored and only data
@@ -3044,7 +3043,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 vol.Optional(CONF_SIGMA_V): vol.Coerce(float),
                 vol.Optional(CONF_SIGMA_B): vol.Coerce(float),
                 vol.Optional(CONF_IDENTIFICATION_HORIZON_HOURS): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.5, max=MAX_IDENTIFICATION_HORIZON_HOURS)
+                    vol.Coerce(float), vol.Range(min=0.5)
                 ),
                 vol.Optional(CONF_WINDOW_OPEN_DEBOUNCE): vol.Coerce(int),
                 vol.Optional(CONF_WINDOW_OPEN_CLOSE_SETTLE): vol.Coerce(int),
@@ -3078,10 +3077,10 @@ def _register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema(
             {
                 vol.Optional(CONF_PLOT_HISTORY_HOURS): vol.All(
-                    vol.Coerce(float), vol.Range(min=1.0, max=168.0)
+                    vol.Coerce(float), vol.Range(min=1.0)
                 ),
                 vol.Optional(CONF_PLOT_FORECAST_HOURS): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=168.0)
+                    vol.Coerce(float), vol.Range(min=0.0)
                 ),
             }
         ),
@@ -3106,7 +3105,7 @@ def _register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema(
             {
                 vol.Optional(CONF_IDENTIFICATION_HISTORY_DAYS): vol.All(
-                    vol.Coerce(int), vol.Range(min=7, max=365)
+                    vol.Coerce(int), vol.Range(min=7)
                 ),
             }
         ),
@@ -3489,7 +3488,7 @@ def _register_services(hass: HomeAssistant) -> None:
             {
                 vol.Required("room_name"): cv.string,
                 vol.Required("comfort_offset"): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.1, max=5.0)
+                    vol.Coerce(float), vol.Range(min=0.1)
                 ),
             }
         ),

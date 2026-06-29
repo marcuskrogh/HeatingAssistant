@@ -600,9 +600,6 @@ CONF_IDENTIFICATION_HISTORY_DAYS = "identification_history_days"
 #: Default number of days the integration-managed JSONL identification history
 #: store retains data.  Independent of HA Recorder's ``purge_keep_days``.
 DEFAULT_IDENTIFICATION_HISTORY_DAYS = 90
-#: Upper bound for the identification "recent horizon" slider and related
-#: service schemas — aligned with the JSONL identification-history retention.
-MAX_IDENTIFICATION_HORIZON_HOURS = float(DEFAULT_IDENTIFICATION_HISTORY_DAYS * 24)
 #: Exponential-moving-average time constant [s] for smoothing the live cloud
 #: cover used by the solar model.  Clouds change gradually, so the instantaneous
 #: weather-entity reading is low-pass filtered to keep the solar attenuation
