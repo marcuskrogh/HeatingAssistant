@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '85';
+  return '86';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -34,9 +34,17 @@ const BOOT_WATCHDOG_MS = 6000;
 
 const PANEL_PATH = '/ha-industrial';
 const PANEL_HASH_PREFIXES = ['overview', 'room', 'schedules', 'tuning', 'identification', 'config'];
+const PANEL_HASH_GUARD_FLAG = '__haIndustrialPanelHashGuard';
+
+let _nativeReplaceState = null;
 
 function _isOnPanelPath() {
   return window.location.pathname.startsWith(PANEL_PATH);
+}
+
+function _isPanelHash(hash) {
+  const route = (hash || '').replace(/^#/, '').split('/')[0];
+  return PANEL_HASH_PREFIXES.includes(route);
 }
 
 function _readPanelRoute() {
@@ -52,14 +60,43 @@ function _setPanelHash(hash) {
   }
 }
 
-function _clearLeakedPanelHash() {
+function _stripLeakedPanelHash() {
+  if (_isOnPanelPath()) return;
   if (!window.location.hash) return;
-  const route = window.location.hash.replace(/^#/, '').split('/')[0];
-  if (!_isOnPanelPath() && PANEL_HASH_PREFIXES.includes(route)) {
-    const url = window.location.pathname + window.location.search;
-    history.replaceState(history.state, '', url);
-  }
+  if (!_isPanelHash(window.location.hash)) return;
+  const url = window.location.pathname + window.location.search;
+  const replace = _nativeReplaceState || history.replaceState.bind(history);
+  replace(history.state, '', url);
 }
+
+// Install synchronously when the entry script loads.  ES module imports of
+// panel-hash.js also install the guard, but that happens later during boot.
+function _installPanelHashGuard() {
+  if (window[PANEL_HASH_GUARD_FLAG]) return;
+  window[PANEL_HASH_GUARD_FLAG] = true;
+
+  _nativeReplaceState = history.replaceState.bind(history);
+  const nativePushState = history.pushState.bind(history);
+
+  window.addEventListener('hashchange', _stripLeakedPanelHash);
+  window.addEventListener('popstate', _stripLeakedPanelHash);
+  window.addEventListener('location-changed', _stripLeakedPanelHash);
+
+  history.pushState = (...args) => {
+    const result = nativePushState(...args);
+    _stripLeakedPanelHash();
+    return result;
+  };
+  history.replaceState = (...args) => {
+    const result = _nativeReplaceState(...args);
+    _stripLeakedPanelHash();
+    return result;
+  };
+
+  _stripLeakedPanelHash();
+}
+
+_installPanelHashGuard();
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -425,12 +462,20 @@ class HaIndustrialPanel extends HTMLElement {
     if (this._hashCleanupTimer) {
       clearTimeout(this._hashCleanupTimer);
     }
-    // After HA sidebar navigation the pathname updates asynchronously; strip
-    // any panel hash that leaked onto another HA route (e.g. /config/integrations).
-    this._hashCleanupTimer = setTimeout(() => {
-      this._hashCleanupTimer = null;
-      _clearLeakedPanelHash();
-    }, 0);
+    // Pathname may update after disconnect; retry a few times as a backstop in
+    // case pushState/location-changed hooks were not yet installed.
+    const delays = [0, 50, 200];
+    let step = 0;
+    const run = () => {
+      _stripLeakedPanelHash();
+      step += 1;
+      if (step < delays.length) {
+        this._hashCleanupTimer = setTimeout(run, delays[step]);
+      } else {
+        this._hashCleanupTimer = null;
+      }
+    };
+    this._hashCleanupTimer = setTimeout(run, delays[0]);
   }
 
   _startBootWatchdog(generation) {

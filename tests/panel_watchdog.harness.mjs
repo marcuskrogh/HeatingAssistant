@@ -42,8 +42,24 @@ class Shim {
 }
 globalThis.HTMLElement = Shim;
 globalThis.customElements = { define() {}, get() { return undefined; } };
-globalThis.document = { currentScript: { src: '/x?v=85' }, createElement() { return new Shim(); }, addEventListener() {} };
+globalThis.document = { currentScript: { src: '/x?v=86' }, createElement() { return new Shim(); }, addEventListener() {} };
+globalThis.history = {
+  state: null,
+  pushState(_state, _title, url) {
+    const path = url.split('?')[0];
+    const hashIdx = url.indexOf('#');
+    window.location._pathname = path;
+    window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
+  },
+  replaceState(_state, _title, url) {
+    const path = url.split('?')[0];
+    const hashIdx = url.indexOf('#');
+    window.location._pathname = path;
+    window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
+  },
+};
 globalThis.window = {
+  __haIndustrialPanelHashGuard: false,
   innerWidth: 1200,
   location: {
     _pathname: '/ha-industrial',
@@ -65,7 +81,8 @@ globalThis.window = {
 // ---- real router.js + panel-hash.js -----------------------------------------
 const panelHashSrc = readFileSync(join(WWW, 'js/panel-hash.js'), 'utf8')
   .replace(/export const /g, 'const ')
-  .replace(/export function /g, 'function ');
+  .replace(/export function /g, 'function ')
+  .replace(/\ninstallPanelHashGuard\(\);\s*$/, '');
 const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, readPanelRoute, setPanelHash, clearPanelHash, isPanelHash, PANEL_PATH };`)();
 const routerSrc = readFileSync(join(WWW, 'js/router.js'), 'utf8')
   .replace(/import .*panel-hash.*\n/, '')

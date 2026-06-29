@@ -9,8 +9,8 @@
  *    container._editing guard are fully retained.
  */
 
-import { formatTemperature, formatPower, entityValue } from '../utils.js?v=85';
-import { setPanelHash } from '../panel-hash.js?v=85';
+import { formatTemperature, formatPower, entityValue } from '../utils.js?v=86';
+import { setPanelHash } from '../panel-hash.js?v=86';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;

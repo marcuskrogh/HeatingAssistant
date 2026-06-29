@@ -490,7 +490,9 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
         "_ensureBooted",
         "_resetStaleBoot",
         "_scheduleHashCleanup",
-        "_clearLeakedPanelHash",
+        "_stripLeakedPanelHash",
+        "_installPanelHashGuard",
+        "location-changed",
     ]
     forbidden = [
         "_initialized",
@@ -505,6 +507,20 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
 def test_panel_watchdog_recovers_stalled_boot() -> None:
     """A boot that stalls before a router exists must self-recover (no reload)."""
     harness = REPO_ROOT / "tests" / "panel_watchdog.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_panel_hash_guard_strips_leaked_hashes() -> None:
+    """Panel hashes must not survive HA sidebar pushState navigation."""
+    harness = REPO_ROOT / "tests" / "panel_hash.harness.mjs"
     result = subprocess.run(
         ["node", str(harness)],
         cwd=REPO_ROOT,

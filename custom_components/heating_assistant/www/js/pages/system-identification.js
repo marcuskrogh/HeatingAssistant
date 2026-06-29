@@ -1,8 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=85';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=85';
-import { createCollapsible } from '../components/collapsible.js?v=85';
-import { formatNumber, modelFitLabel } from '../utils.js?v=85';
-import { setPanelHash } from '../panel-hash.js?v=85';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=86';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=86';
+import { createCollapsible } from '../components/collapsible.js?v=86';
+import { formatNumber, modelFitLabel } from '../utils.js?v=86';
+import { setPanelHash } from '../panel-hash.js?v=86';
 
 // Default parameter values — must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
