@@ -8,7 +8,8 @@
  * connectedCallback alone.
  *
  * Also verifies panel-nav clicks route through the router even when the hash
- * is already active (hashchange would not fire).
+ * is already active (hashchange would not fire), and that panel hashes do not
+ * leak onto other HA routes (e.g. /config/integrations).
  *
  * Run: node tests/panel_lifecycle.harness.mjs
  */
@@ -56,11 +57,22 @@ class Shim {
 }
 globalThis.HTMLElement = Shim;
 globalThis.customElements = { define() {}, get() { return undefined; } };
-globalThis.document = { currentScript: { src: '/x?v=84' }, createElement() { return new Shim(); }, addEventListener() {} };
+globalThis.document = { currentScript: { src: '/x?v=85' }, createElement() { return new Shim(); }, addEventListener() {} };
+globalThis.history = {
+  replaceState(_state, _title, url) {
+    const path = url.split('?')[0];
+    const hashIdx = url.indexOf('#');
+    window.location._pathname = path;
+    window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
+  },
+};
 globalThis.window = {
   innerWidth: 1200,
   location: {
+    _pathname: '/ha-industrial',
     _hash: '',
+    get pathname() { return this._pathname; },
+    get search() { return ''; },
     get hash() { return this._hash; },
     set hash(v) {
       if (this._hash !== v) {
@@ -73,13 +85,24 @@ globalThis.window = {
   removeEventListener(t, fn) { const i = hashListeners.indexOf(fn); if (i >= 0) hashListeners.splice(i, 1); },
 };
 
-// ---- real router.js ---------------------------------------------------------
-const routerSrc = readFileSync(join(WWW, 'js/router.js'), 'utf8').replace(/export\s+class\s+Router/, 'class Router');
-const Router = new Function(`${routerSrc}\nreturn Router;`)();
+// ---- real router.js + panel-hash.js -----------------------------------------
+const panelHashSrc = readFileSync(join(WWW, 'js/panel-hash.js'), 'utf8')
+  .replace(/export const /g, 'const ')
+  .replace(/export function /g, 'function ');
+const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, readPanelRoute, setPanelHash, clearPanelHash, isPanelHash, PANEL_PATH };`)();
+const routerSrc = readFileSync(join(WWW, 'js/router.js'), 'utf8')
+  .replace(/import .*panel-hash.*\n/, '')
+  .replace(/export class Router/, 'class Router');
+const Router = new Function('isOnPanelPath', 'readPanelRoute', 'setPanelHash', `${routerSrc}\nreturn Router;`)(
+  panelHashMod.isOnPanelPath,
+  panelHashMod.readPanelRoute,
+  panelHashMod.setPanelHash,
+);
 const stub = (name) => (contentEl) => { contentEl.innerHTML = `PAGE:${name}`; return { destroy() {}, update() {} }; };
 
 globalThis.__imp = async (spec) => {
   if (spec.includes('/router.js')) return { Router };
+  if (spec.includes('/panel-hash.js')) return panelHashMod;
   if (spec.includes('/ha-connection.js')) return { HaConnection: class { updateHass() {} async getState() { return {}; } } };
   if (spec.includes('/discovery.js')) return { discoverRooms: () => [] };
   if (spec.includes('/pages/overview.js')) return { renderOverview: stub('overview') };
@@ -126,26 +149,47 @@ async function main() {
   await bootAndWait(el);
 
   // --- Sidebar away: full teardown ------------------------------------------
+  window.location._pathname = '/config/integrations';
+  window.location.hash = '#config/rooms';
   el._connectedFlag = false;
   el.disconnectedCallback();
   assert(!el._router, 'router must be cleared on disconnect');
   assert(!el._connection, 'connection must be cleared on disconnect');
+  await wait(5);
+  assert(window.location.hash === '', 'panel hash must not leak onto integrations route');
 
-  // --- Sidebar back: reconnect without a fresh set hass() -------------------
+  // --- Sidebar back: new element, reconnect without fresh set hass() ----------
+  window.location._pathname = '/ha-industrial';
   window.location.hash = '#schedules';
-  el._connectedFlag = true;
-  el.connectedCallback();
-  await bootAndWait(el);
-  assert(content(el) === 'PAGE:schedules', 'reconnect must honour current hash');
+  const el2 = new Panel();
+  el2._hass = hass;
+  el2._connectedFlag = true;
+  el2.connectedCallback();
+  await bootAndWait(el2);
+  assert(content(el2) === 'PAGE:schedules', 'reconnect must honour current hash');
+
+  // --- Stale _booting guard must not block reconnect --------------------------
+  const el3 = new Panel();
+  el3.setProperties({ panel: {}, hass, narrow: false, route: {} });
+  el3._connectedFlag = true;
+  el3._booting = true;
+  el3.connectedCallback();
+  await bootAndWait(el3);
 
   // --- Panel side menu: same-hash click must still render -------------------
-  el.shadowRoot.registerNavLink(makeNavLink('#schedules'));
+  el2.shadowRoot.registerNavLink(makeNavLink('#schedules'));
   window.location.hash = '#schedules';
-  el._navigatePanel('#schedules');
-  assert(content(el) === 'PAGE:schedules', 'same-hash nav must force router render');
+  el2._navigatePanel('#schedules');
+  assert(content(el2) === 'PAGE:schedules', 'same-hash nav must force router render');
 
-  el._navigatePanel('#tuning');
-  assert(content(el) === 'PAGE:tuning', 'side-menu nav must switch pages');
+  el2._navigatePanel('#tuning');
+  assert(content(el2) === 'PAGE:tuning', 'side-menu nav must switch pages');
+
+  // --- setPanelHash must not write hash off-panel ----------------------------
+  window.location._pathname = '/config/integrations';
+  window.location.hash = '#domain=heating_assistant';
+  panelHashMod.setPanelHash('#config');
+  assert(window.location.hash === '#domain=heating_assistant', 'setPanelHash must no-op off the panel path');
 
   console.log('heating lifecycle harness: ok');
   process.exit(0);

@@ -1,5 +1,6 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=84';
-import { signalLabel, experimentRowHtml, findNextScheduledExperiment, experimentStatusInfo } from '../experiment-utils.js?v=84';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=85';
+import { signalLabel, experimentRowHtml, findNextScheduledExperiment, experimentStatusInfo } from '../experiment-utils.js?v=85';
+import { setPanelHash } from '../panel-hash.js?v=85';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -188,7 +189,7 @@ function renderScheduleIndex(container, rooms, state, connection, hass) {
       card.appendChild(expSection);
 
       card.addEventListener('click', () => {
-        window.location.hash = `#schedules/${room.slug}`;
+        setPanelHash(`#schedules/${room.slug}`);
       });
       grid.appendChild(card);
     }
@@ -628,7 +629,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
   const nav = document.createElement('button');
   nav.className = 'nav-back';
   nav.innerHTML = '<span class="nav-back__arrow">←</span> SCHEDULES';
-  nav.addEventListener('click', () => { window.location.hash = '#schedules'; });
+  nav.addEventListener('click', () => { setPanelHash('#schedules'); });
   container.appendChild(nav);
 
   // Room title

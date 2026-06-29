@@ -1,7 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=84';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=84';
-import { createCollapsible } from '../components/collapsible.js?v=84';
-import { formatNumber, modelFitLabel } from '../utils.js?v=84';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=85';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=85';
+import { createCollapsible } from '../components/collapsible.js?v=85';
+import { formatNumber, modelFitLabel } from '../utils.js?v=85';
+import { setPanelHash } from '../panel-hash.js?v=85';
 
 // Default parameter values — must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
@@ -86,7 +87,7 @@ function renderIdentificationIndex(container, rooms, state) {
       card.innerHTML = buildIdentificationCardHtml(room, st);
       card.addEventListener('click', (event) => {
         if (event.target.closest('[data-dismiss-warning]')) return;
-        window.location.hash = `#identification/${room.slug}`;
+        setPanelHash(`#identification/${room.slug}`);
       });
       grid.appendChild(card);
     }
@@ -207,7 +208,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   const nav = document.createElement('button');
   nav.className = 'nav-back';
   nav.innerHTML = '<span class="nav-back__arrow">←</span> SYSTEM IDENTIFICATION';
-  nav.addEventListener('click', () => { window.location.hash = '#identification'; });
+  nav.addEventListener('click', () => { setPanelHash('#identification'); });
   container.appendChild(nav);
 
   const header = document.createElement('div');

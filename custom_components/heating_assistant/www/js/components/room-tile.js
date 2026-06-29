@@ -9,7 +9,8 @@
  *    container._editing guard are fully retained.
  */
 
-import { formatTemperature, formatPower, entityValue } from '../utils.js?v=84';
+import { formatTemperature, formatPower, entityValue } from '../utils.js?v=85';
+import { setPanelHash } from '../panel-hash.js?v=85';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -26,7 +27,7 @@ export function createRoomTile(room, state, hass, scheduleData) {
 
   container.addEventListener('click', () => {
     if (!container._editing) {
-      window.location.hash = `#room/${room.slug}`;
+      setPanelHash(`#room/${room.slug}`);
     }
   });
 
