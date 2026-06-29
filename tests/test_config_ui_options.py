@@ -485,6 +485,8 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
         "_startBootWatchdog",
         "_clearBootWatchdog",
         "BOOT_WATCHDOG_MS",
+        "_navigatePanel",
+        "navigateTo",
     ]
     forbidden = [
         "_initialized",
@@ -499,6 +501,20 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
 def test_panel_watchdog_recovers_stalled_boot() -> None:
     """A boot that stalls before a router exists must self-recover (no reload)."""
     harness = REPO_ROOT / "tests" / "panel_watchdog.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_panel_lifecycle_survives_ha_sidebar_remount() -> None:
+    """HA setProperties-before-connect and sidebar remount must boot and route pages."""
+    harness = REPO_ROOT / "tests" / "panel_lifecycle.harness.mjs"
     result = subprocess.run(
         ["node", str(harness)],
         cwd=REPO_ROOT,

@@ -22,6 +22,17 @@ export class Router {
     }
   }
 
+  // Navigate to a hash route.  When the hash is already active, hashchange does
+  // not fire — call _navigate() directly so side-menu clicks always render.
+  navigateTo(hash) {
+    const normalized = hash.startsWith('#') ? hash : `#${hash}`;
+    if (window.location.hash === normalized) {
+      this._navigate();
+    } else {
+      window.location.hash = normalized;
+    }
+  }
+
   _onHashChange() {
     this._navigate();
   }

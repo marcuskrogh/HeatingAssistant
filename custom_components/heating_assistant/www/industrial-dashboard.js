@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '83';
+  return '84';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -285,8 +285,7 @@ class HaIndustrialPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll('.panel-nav__link').forEach((link) => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
-        const target = link.getAttribute('href');
-        window.location.hash = target;
+        this._navigatePanel(link.getAttribute('href'));
         // Close mobile dropdown after navigation
         if (navLinks) {
           navLinks.classList.remove('panel-nav__links--open');
@@ -360,6 +359,16 @@ class HaIndustrialPanel extends HTMLElement {
       const linkRoute = link.getAttribute('href').slice(1);
       link.classList.toggle('panel-nav__link--active', linkRoute === hash);
     });
+  }
+
+  _navigatePanel(target) {
+    if (!target) return;
+    if (this._router) {
+      this._router.navigateTo(target);
+      this._updateActiveNav();
+    } else {
+      window.location.hash = target;
+    }
   }
 
   _startBootWatchdog(generation) {
