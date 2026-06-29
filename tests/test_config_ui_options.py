@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 from custom_components.heating_assistant.config_flow import (
@@ -479,6 +480,11 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
         "!this.isConnected) return",
         "this._router = null",
         "_applyHassState(hass)",
+        # Self-healing watchdog: a stalled boot must never leave the panel stuck
+        # on "INITIALIZING…" requiring a manual force reload.
+        "_startBootWatchdog",
+        "_clearBootWatchdog",
+        "BOOT_WATCHDOG_MS",
     ]
     forbidden = [
         "_initialized",
@@ -488,6 +494,20 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
     present = [snippet for snippet in forbidden if snippet in dashboard]
     assert not missing, f"Panel lifecycle fix incomplete, missing: {missing}"
     assert not present, f"Panel lifecycle regressions, found: {present}"
+
+
+def test_panel_watchdog_recovers_stalled_boot() -> None:
+    """A boot that stalls before a router exists must self-recover (no reload)."""
+    harness = REPO_ROOT / "tests" / "panel_watchdog.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_panel_relative_imports_use_cache_bust_suffix() -> None:
