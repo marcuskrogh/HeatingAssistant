@@ -42,11 +42,14 @@ class Shim {
 }
 globalThis.HTMLElement = Shim;
 globalThis.customElements = { define() {}, get() { return undefined; } };
-globalThis.document = { currentScript: { src: '/x?v=84' }, createElement() { return new Shim(); }, addEventListener() {} };
+globalThis.document = { currentScript: { src: '/x?v=85' }, createElement() { return new Shim(); }, addEventListener() {} };
 globalThis.window = {
   innerWidth: 1200,
   location: {
+    _pathname: '/ha-industrial',
     _hash: '',
+    get pathname() { return this._pathname; },
+    get search() { return ''; },
     get hash() { return this._hash; },
     set hash(v) {
       if (this._hash !== v) {
@@ -59,9 +62,19 @@ globalThis.window = {
   removeEventListener(t, fn) { const i = hashListeners.indexOf(fn); if (i >= 0) hashListeners.splice(i, 1); },
 };
 
-// ---- real router.js ---------------------------------------------------------
-const routerSrc = readFileSync(join(WWW, 'js/router.js'), 'utf8').replace(/export\s+class\s+Router/, 'class Router');
-const Router = new Function(`${routerSrc}\nreturn Router;`)();
+// ---- real router.js + panel-hash.js -----------------------------------------
+const panelHashSrc = readFileSync(join(WWW, 'js/panel-hash.js'), 'utf8')
+  .replace(/export const /g, 'const ')
+  .replace(/export function /g, 'function ');
+const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, readPanelRoute, setPanelHash, clearPanelHash, isPanelHash, PANEL_PATH };`)();
+const routerSrc = readFileSync(join(WWW, 'js/router.js'), 'utf8')
+  .replace(/import .*panel-hash.*\n/, '')
+  .replace(/export class Router/, 'class Router');
+const Router = new Function('isOnPanelPath', 'readPanelRoute', 'setPanelHash', `${routerSrc}\nreturn Router;`)(
+  panelHashMod.isOnPanelPath,
+  panelHashMod.readPanelRoute,
+  panelHashMod.setPanelHash,
+);
 const stub = (name) => (contentEl) => { contentEl.innerHTML = `PAGE:${name}`; return { destroy() {}, update() {} }; };
 
 // import() loader — first router import stalls, the rest resolve.
@@ -71,6 +84,7 @@ globalThis.__imp = async (spec) => {
     if (!routerImportDone) { routerImportDone = true; return new Promise(() => {}); }
     return { Router };
   }
+  if (spec.includes('/panel-hash.js')) return panelHashMod;
   if (spec.includes('/ha-connection.js')) return { HaConnection: class { updateHass() {} async getState() { return {}; } } };
   if (spec.includes('/discovery.js')) return { discoverRooms: () => [] };
   if (spec.includes('/pages/overview.js')) return { renderOverview: stub('overview') };

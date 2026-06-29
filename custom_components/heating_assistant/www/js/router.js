@@ -1,3 +1,5 @@
+import { isOnPanelPath, readPanelRoute, setPanelHash } from './panel-hash.js?v=85';
+
 export class Router {
   constructor(container, routes) {
     this._container = container;
@@ -25,11 +27,12 @@ export class Router {
   // Navigate to a hash route.  When the hash is already active, hashchange does
   // not fire — call _navigate() directly so side-menu clicks always render.
   navigateTo(hash) {
+    if (!isOnPanelPath()) return;
     const normalized = hash.startsWith('#') ? hash : `#${hash}`;
     if (window.location.hash === normalized) {
       this._navigate();
     } else {
-      window.location.hash = normalized;
+      setPanelHash(normalized);
     }
   }
 
@@ -38,9 +41,11 @@ export class Router {
   }
 
   _navigate() {
+    if (!isOnPanelPath()) return;
+
     this._destroyCurrentPage();
 
-    const hash = window.location.hash.slice(1) || 'overview';
+    const hash = readPanelRoute();
     const parts = hash.split('/');
     const route = parts[0];
     const param = parts.slice(1).join('/');

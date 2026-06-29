@@ -487,6 +487,10 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
         "BOOT_WATCHDOG_MS",
         "_navigatePanel",
         "navigateTo",
+        "_ensureBooted",
+        "_resetStaleBoot",
+        "_scheduleHashCleanup",
+        "_clearLeakedPanelHash",
     ]
     forbidden = [
         "_initialized",

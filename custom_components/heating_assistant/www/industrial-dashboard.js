@@ -23,7 +23,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '84';
+  return '85';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -31,6 +31,35 @@ const PANEL_VERSION = (() => {
 // retries so the panel can never get permanently stuck requiring a manual page
 // reload.  Generous enough that a slow first-ever asset fetch is not interrupted.
 const BOOT_WATCHDOG_MS = 6000;
+
+const PANEL_PATH = '/ha-industrial';
+const PANEL_HASH_PREFIXES = ['overview', 'room', 'schedules', 'tuning', 'identification', 'config'];
+
+function _isOnPanelPath() {
+  return window.location.pathname.startsWith(PANEL_PATH);
+}
+
+function _readPanelRoute() {
+  if (!_isOnPanelPath()) return 'overview';
+  return window.location.hash.slice(1) || 'overview';
+}
+
+function _setPanelHash(hash) {
+  if (!_isOnPanelPath()) return;
+  const normalized = hash.startsWith('#') ? hash : `#${hash}`;
+  if (window.location.hash !== normalized) {
+    window.location.hash = normalized;
+  }
+}
+
+function _clearLeakedPanelHash() {
+  if (!window.location.hash) return;
+  const route = window.location.hash.replace(/^#/, '').split('/')[0];
+  if (!_isOnPanelPath() && PANEL_HASH_PREFIXES.includes(route)) {
+    const url = window.location.pathname + window.location.search;
+    history.replaceState(history.state, '', url);
+  }
+}
 
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
@@ -47,6 +76,8 @@ class HaIndustrialPanel extends HTMLElement {
     this._bootGeneration = 0;
     // Recovery timer that re-boots if an attempt stalls before a router exists.
     this._watchdogTimer = null;
+    // Deferred hash cleanup after sidebar navigation away from the panel.
+    this._hashCleanupTimer = null;
     // The backend starts STOPPED after every (re)start; the user must press
     // START to engage the controller.  Reflect that default until the real
     // system_enabled attribute syncs in from the coordinator.
@@ -62,6 +93,7 @@ class HaIndustrialPanel extends HTMLElement {
     if ('narrow' in props) this.narrow = props.narrow;
     if ('panel' in props) this.panel = props.panel;
     if ('route' in props) this.route = props.route;
+    this._ensureBooted();
   }
 
   set hass(hass) {
@@ -74,9 +106,9 @@ class HaIndustrialPanel extends HTMLElement {
     }
     if (this._router) {
       this._applyHassState(hass);
-    } else if (hass && this.isConnected && !this._booting) {
+    } else if (hass && this.isConnected) {
       // Fallback when hass updates after connect but boot was interrupted.
-      this._boot();
+      this._ensureBooted();
     }
   }
 
@@ -144,6 +176,7 @@ class HaIndustrialPanel extends HTMLElement {
       ]);
 
       if (generation !== this._bootGeneration || !this.isConnected) {
+        this._clearBootWatchdog();
         return;
       }
 
@@ -178,6 +211,7 @@ class HaIndustrialPanel extends HTMLElement {
       this._syncLatestState();
     } catch (err) {
       if (generation !== this._bootGeneration) {
+        this._clearBootWatchdog();
         return;
       }
       // Surface the error in the panel instead of leaving the user on the
@@ -353,7 +387,7 @@ class HaIndustrialPanel extends HTMLElement {
   }
 
   _updateActiveNav() {
-    const hash = window.location.hash.slice(1).split('/')[0] || 'overview';
+    const hash = _readPanelRoute().split('/')[0] || 'overview';
     const links = this.shadowRoot.querySelectorAll('.panel-nav__link');
     links.forEach((link) => {
       const linkRoute = link.getAttribute('href').slice(1);
@@ -367,8 +401,36 @@ class HaIndustrialPanel extends HTMLElement {
       this._router.navigateTo(target);
       this._updateActiveNav();
     } else {
-      window.location.hash = target;
+      _setPanelHash(target);
     }
+  }
+
+  _resetStaleBoot() {
+    if (!this._router && this._booting) {
+      this._bootGeneration += 1;
+      this._booting = false;
+      this._clearBootWatchdog();
+    }
+  }
+
+  _ensureBooted() {
+    if (!this._hass || !this.isConnected || this._router) return;
+    this._resetStaleBoot();
+    if (!this._booting) {
+      this._boot();
+    }
+  }
+
+  _scheduleHashCleanup() {
+    if (this._hashCleanupTimer) {
+      clearTimeout(this._hashCleanupTimer);
+    }
+    // After HA sidebar navigation the pathname updates asynchronously; strip
+    // any panel hash that leaked onto another HA route (e.g. /config/integrations).
+    this._hashCleanupTimer = setTimeout(() => {
+      this._hashCleanupTimer = null;
+      _clearLeakedPanelHash();
+    }, 0);
   }
 
   _startBootWatchdog(generation) {
@@ -399,15 +461,17 @@ class HaIndustrialPanel extends HTMLElement {
     // navigation.  Boot only once we are in the document — set hass() is
     // often called before appendChild, and HA may not call it again when the
     // hass object reference is unchanged.
-    if (this._hass && !this._booting) {
-      this._boot();
-    }
+    this._ensureBooted();
   }
 
   disconnectedCallback() {
     this._bootGeneration += 1;
     this._booting = false;
     this._clearBootWatchdog();
+    if (this._hashCleanupTimer) {
+      clearTimeout(this._hashCleanupTimer);
+      this._hashCleanupTimer = null;
+    }
     if (this._router) {
       this._router.destroy();
       this._router = null;
@@ -415,6 +479,7 @@ class HaIndustrialPanel extends HTMLElement {
     this._connection = null;
     this._menuButton = null;
     window.removeEventListener('hashchange', this._onHashChange);
+    this._scheduleHashCleanup();
   }
 }
 

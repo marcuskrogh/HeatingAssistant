@@ -1,10 +1,10 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=84';
-import { createGauge, updateGauge } from '../components/gauge.js?v=84';
-import { createClimateCard } from '../components/climate-card.js?v=84';
-import { createCountdown } from '../components/countdown.js?v=84';
-import { createScheduleOverview } from '../components/schedule-overview.js?v=84';
-import { getRoomScheduleData } from '../schedule-utils.js?v=84';
-import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=84';
+import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=85';
+import { createGauge, updateGauge } from '../components/gauge.js?v=85';
+import { createClimateCard } from '../components/climate-card.js?v=85';
+import { createCountdown } from '../components/countdown.js?v=85';
+import { createScheduleOverview } from '../components/schedule-overview.js?v=85';
+import { getRoomScheduleData } from '../schedule-utils.js?v=85';
+import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=85';
 import {
   KPI_SEVERITY,
   isRoomActive,
@@ -13,12 +13,13 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-} from '../kpi-engine.js?v=84';
+} from '../kpi-engine.js?v=85';
+import { setPanelHash } from '../panel-hash.js?v=85';
 import {
   formatPower, formatPowerKw, formatPrice,
   entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
-} from '../utils.js?v=84';
+} from '../utils.js?v=85';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
@@ -79,7 +80,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const nav = document.createElement('button');
   nav.className = 'nav-back';
   nav.innerHTML = '<span class="nav-back__arrow">\u2190</span> OVERVIEW';
-  nav.addEventListener('click', () => { window.location.hash = '#overview'; });
+  nav.addEventListener('click', () => { setPanelHash('#overview'); });
   container.appendChild(nav);
 
   const header = document.createElement('div');
@@ -312,7 +313,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   // Mirrors the schedules index-card design; clicking opens the editable
   // schedule detail page for this room.
   const scheduleOverview = createScheduleOverview(room, null, {
-    onEdit: () => { window.location.hash = `#schedules/${roomSlug}`; },
+    onEdit: () => { setPanelHash(`#schedules/${roomSlug}`); },
   });
   const scheduleSection = document.createElement('div');
   scheduleSection.className = 'room-schedule-overview';

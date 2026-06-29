@@ -10,7 +10,8 @@
 //   #config/sources/<i>  → edit a heat source (i = index, or "new")
 //   #config/system       → environment sensors + site location
 
-import { createCollapsible } from '../components/collapsible.js?v=84';
+import { createCollapsible } from '../components/collapsible.js?v=85';
+import { setPanelHash } from '../panel-hash.js?v=85';
 
 // ---------------------------------------------------------------------------
 // Teal line-art icons (same design language as the panel logo: teal strokes on
@@ -100,10 +101,15 @@ function escapeAttr(v) {
   return v != null ? String(v).replace(/"/g, '&quot;') : '';
 }
 
+/** Deferred in-panel navigation; callers must clear via returned timer id on destroy. */
+function schedulePanelNav(hash, delayMs = 800) {
+  return setTimeout(() => { setPanelHash(hash); }, delayMs);
+}
+
 function backNav(label, hash) {
   const nav = el('button', 'nav-back');
   nav.innerHTML = `<span class="nav-back__arrow">←</span> ${label}`;
-  nav.addEventListener('click', () => { window.location.hash = hash; });
+  nav.addEventListener('click', () => { setPanelHash(hash); });
   return nav;
 }
 
@@ -483,7 +489,7 @@ function renderLanding(container) {
       </div>
       <div class="config-landing-card__chevron">›</div>
     `;
-    card.addEventListener('click', () => { window.location.hash = c.hash; });
+    card.addEventListener('click', () => { setPanelHash(c.hash); });
     grid.appendChild(card);
   }
   container.appendChild(grid);
@@ -566,7 +572,7 @@ function renderRoomList(container, connection, hass) {
   });
   container.insertBefore(
     configListHeader('ROOMS', '+ Add Room', () => {
-      window.location.hash = '#config/rooms/new';
+      setPanelHash('#config/rooms/new');
     }),
     body,
   );
@@ -597,7 +603,7 @@ function renderRoomList(container, connection, hass) {
         </div>
         <div class="config-landing-card__chevron">›</div>
       `;
-      card.addEventListener('click', () => { window.location.hash = `#config/rooms/${i}`; });
+      card.addEventListener('click', () => { setPanelHash(`#config/rooms/${i}`); });
       grid.appendChild(card);
     });
     body.appendChild(grid);
@@ -611,6 +617,12 @@ function renderRoomList(container, connection, hass) {
 // ---------------------------------------------------------------------------
 
 function renderRoomEditor(container, connection, hass, idxParam) {
+  const navTimers = [];
+  const page = {
+    update() {},
+    destroy() { navTimers.forEach((id) => clearTimeout(id)); },
+  };
+
   const isNewInitial = idxParam === 'new';
   const { body } = configPageShell(container, {
     backLabel: 'ROOMS',
@@ -838,7 +850,7 @@ function renderRoomEditor(container, connection, hass, idxParam) {
         }
         await hass.callService('heating_assistant', 'update_rooms', payload);
         setStatus(statusEl, 'Saved. Restarting model…', 'success');
-        setTimeout(() => { window.location.hash = '#config/rooms'; }, 800);
+        navTimers.push(schedulePanelNav('#config/rooms', 800));
       } catch (err) {
         setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
         btn.disabled = false;
@@ -855,7 +867,7 @@ function renderRoomEditor(container, connection, hass, idxParam) {
           const next = allRooms.filter((_, i) => i !== idx).map((r) => ({ ...r }));
           await hass.callService('heating_assistant', 'update_rooms', { rooms: next });
           setStatus(statusEl, 'Deleted. Restarting model…', 'success');
-          setTimeout(() => { window.location.hash = '#config/rooms'; }, 800);
+          navTimers.push(schedulePanelNav('#config/rooms', 800));
         } catch (err) {
           setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
           delBtn.disabled = false;
@@ -864,7 +876,7 @@ function renderRoomEditor(container, connection, hass, idxParam) {
     }
   });
 
-  return { update() {}, destroy() {} };
+  return page;
 }
 
 // Strip empty/incomplete sub-records so backend validation passes.
@@ -906,7 +918,7 @@ function renderSourceList(container, connection, hass) {
   });
   container.insertBefore(
     configListHeader('HEAT SOURCES', '+ Add Heat Source', () => {
-      window.location.hash = '#config/sources/new';
+      setPanelHash('#config/sources/new');
     }),
     body,
   );
@@ -931,7 +943,7 @@ function renderSourceList(container, connection, hass) {
         </div>
         <div class="config-landing-card__chevron">›</div>
       `;
-      card.addEventListener('click', () => { window.location.hash = `#config/sources/${i}`; });
+      card.addEventListener('click', () => { setPanelHash(`#config/sources/${i}`); });
       grid.appendChild(card);
     });
     body.appendChild(grid);
@@ -945,6 +957,12 @@ function renderSourceList(container, connection, hass) {
 // ---------------------------------------------------------------------------
 
 function renderSourceEditor(container, connection, hass, idxParam) {
+  const navTimers = [];
+  const page = {
+    update() {},
+    destroy() { navTimers.forEach((id) => clearTimeout(id)); },
+  };
+
   const isNewInitial = idxParam === 'new';
   const { body } = configPageShell(container, {
     backLabel: 'HEAT SOURCES',
@@ -1206,7 +1224,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
         if (isNew) next.push(cleaned); else next[idx] = cleaned;
         await hass.callService('heating_assistant', 'update_heat_sources', { heat_sources: next });
         setStatus(statusEl, 'Saved. Restarting model…', 'success');
-        setTimeout(() => { window.location.hash = '#config/sources'; }, 800);
+        navTimers.push(schedulePanelNav('#config/sources', 800));
       } catch (err) {
         setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
         btn.disabled = false;
@@ -1223,7 +1241,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
           const next = allSources.filter((_, i) => i !== idx).map((s) => ({ ...s }));
           await hass.callService('heating_assistant', 'update_heat_sources', { heat_sources: next });
           setStatus(statusEl, 'Deleted. Restarting model…', 'success');
-          setTimeout(() => { window.location.hash = '#config/sources'; }, 800);
+          navTimers.push(schedulePanelNav('#config/sources', 800));
         } catch (err) {
           setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
           delBtn.disabled = false;
@@ -1232,7 +1250,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
     }
   });
 
-  return { update() {}, destroy() {} };
+  return page;
 }
 
 function cleanSource(src) {

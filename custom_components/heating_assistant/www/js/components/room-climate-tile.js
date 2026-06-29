@@ -16,13 +16,14 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=84';
-import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=84';
+import { entityValue } from '../utils.js?v=85';
+import { setPanelHash } from '../panel-hash.js?v=85';
+import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=85';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=84';
+} from '../experiment-utils.js?v=85';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -238,7 +239,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
 
   container.addEventListener('click', () => {
     if (!st.editing && !st.commitTimer && !st.offsetEditing && !st.offsetCommitTimer) {
-      window.location.hash = `#room/${room.slug}`;
+      setPanelHash(`#room/${room.slug}`);
     }
   });
 
