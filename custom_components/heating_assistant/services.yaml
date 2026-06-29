@@ -350,7 +350,6 @@ run_open_loop_simulation:
       selector:
         number:
           min: 5
-          max: 120
           step: 5
           unit_of_measurement: "steps"
     window_start:
@@ -471,7 +470,6 @@ run_sysid_simulation:
       selector:
         number:
           min: 0.5
-          max: 2160.0
           step: 0.5
           unit_of_measurement: "h"
     sigma_w:
@@ -486,7 +484,6 @@ run_sysid_simulation:
       selector:
         number:
           min: 0.0
-          max: 10.0
           step: 0.01
           unit_of_measurement: "K/√s"
     sigma_v:
@@ -500,7 +497,6 @@ run_sysid_simulation:
       selector:
         number:
           min: 0.0
-          max: 10.0
           step: 0.01
           unit_of_measurement: "°C"
     window_start:
@@ -611,7 +607,6 @@ update_controller_tuning:
       selector:
         number:
           min: 0
-          max: 10
           step: 0.1
     energy_weight:
       name: Energy weight
@@ -620,7 +615,6 @@ update_controller_tuning:
       selector:
         number:
           min: 0
-          max: 10
           step: 0.01
     energy_price_weight:
       name: Price sensitivity
@@ -629,7 +623,6 @@ update_controller_tuning:
       selector:
         number:
           min: 0
-          max: 10000
           step: 0.1
     smoothing_weight:
       name: Output smoothing
@@ -638,7 +631,6 @@ update_controller_tuning:
       selector:
         number:
           min: 0
-          max: 10
           step: 0.05
     soft_constraint_weight:
       name: Comfort band quadratic penalty
@@ -647,7 +639,6 @@ update_controller_tuning:
       selector:
         number:
           min: 0
-          max: 10000
           step: 1
     soft_constraint_linear_weight:
       name: Comfort band linear penalty
@@ -656,7 +647,6 @@ update_controller_tuning:
       selector:
         number:
           min: 0
-          max: 1000000
           step: 1
     terminal_weight:
       name: End-of-horizon weight
@@ -665,7 +655,6 @@ update_controller_tuning:
       selector:
         number:
           min: 1
-          max: 10000
           step: 1
     horizon:
       name: Prediction horizon
@@ -674,7 +663,6 @@ update_controller_tuning:
       selector:
         number:
           min: 1
-          max: 480
           step: 1
     update_interval:
       name: Control interval
@@ -683,7 +671,6 @@ update_controller_tuning:
       selector:
         number:
           min: 60
-          max: 3600
           step: 30
           unit_of_measurement: "s"
     comfort_offset:
@@ -693,7 +680,6 @@ update_controller_tuning:
       selector:
         number:
           min: 0.1
-          max: 5.0
           step: 0.1
           unit_of_measurement: "\u00b0C"
 
@@ -711,7 +697,6 @@ update_estimation_params:
       selector:
         number:
           min: 0.000001
-          max: 10
           step: 0.001
           unit_of_measurement: "K/\u221as"
     sigma_v:
@@ -721,7 +706,6 @@ update_estimation_params:
       selector:
         number:
           min: 0.000001
-          max: 10
           step: 0.001
           unit_of_measurement: "K"
     window_open_debounce:
@@ -731,7 +715,6 @@ update_estimation_params:
       selector:
         number:
           min: 0
-          max: 3600
           step: 10
           unit_of_measurement: "s"
     window_open_close_settle:
@@ -741,7 +724,6 @@ update_estimation_params:
       selector:
         number:
           min: 0
-          max: 3600
           step: 10
           unit_of_measurement: "s"
     window_open_q_inflation:
@@ -751,7 +733,6 @@ update_estimation_params:
       selector:
         number:
           min: 1
-          max: 1000
           step: 1
 
 store_identified_parameters:
@@ -1196,7 +1177,6 @@ set_room_comfort_offset:
       selector:
         number:
           min: 0.1
-          max: 5.0
           step: 0.1
           unit_of_measurement: "°C"
 
@@ -1213,7 +1193,6 @@ update_ui_settings:
       selector:
         number:
           min: 1
-          max: 168
           step: 1
           unit_of_measurement: "h"
     plot_forecast_hours:
@@ -1225,7 +1204,6 @@ update_ui_settings:
       selector:
         number:
           min: 0
-          max: 168
           step: 1
           unit_of_measurement: "h"
 
@@ -1244,7 +1222,6 @@ update_system_params:
       selector:
         number:
           min: 7
-          max: 365
           step: 1
           unit_of_measurement: "days"
 

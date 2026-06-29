@@ -341,13 +341,13 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <div class="form-group">
           <label class="form-label" for="param-sigma-w">Process Noise (&sigma;<sub>w</sub>)</label>
           <input class="form-input" type="number" id="param-sigma-w"
-            step="0.001" min="0.000001" max="10" value="${DEFAULTS.sigma_w}">
+            step="0.001" min="0.000001" value="${DEFAULTS.sigma_w}">
           <span class="form-hint">K/&radic;s &mdash; model adaptation rate</span>
         </div>
         <div class="form-group">
           <label class="form-label" for="param-sigma-v">Sensor Noise (&sigma;<sub>v</sub>)</label>
           <input class="form-input" type="number" id="param-sigma-v"
-            step="0.001" min="0.000001" max="10" value="${DEFAULTS.sigma_v}">
+            step="0.001" min="0.000001" value="${DEFAULTS.sigma_v}">
           <span class="form-hint">K &mdash; expected temperature sensor noise</span>
         </div>
       </div>
@@ -363,7 +363,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         <div class="form-group">
           <label class="form-label" for="param-horizon">Horizon</label>
           <input class="form-input" type="number" id="param-horizon"
-            step="0.5" min="0.5" max="2160" value="${DEFAULTS.horizon_hours}">
+            step="0.5" min="0.5" value="${DEFAULTS.horizon_hours}">
           <span class="form-hint">hours &mdash; history window ending at the most recent record (up to identification-history retention)</span>
         </div>
       </div>

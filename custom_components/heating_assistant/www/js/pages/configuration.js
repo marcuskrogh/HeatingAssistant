@@ -529,11 +529,11 @@ function renderDisplay(container, connection, hass) {
     );
     card.appendChild(paramGrid(
       numberField(working, 'plot_history_hours', 'History window', {
-        step: 1, unit: 'h', min: 1, max: 168,
+        step: 1, unit: 'h', min: 1,
         hint: 'How far back the measured history is drawn.',
       }),
       numberField(working, 'plot_forecast_hours', 'Forecast horizon', {
-        step: 1, unit: 'h', min: 0, max: 168,
+        step: 1, unit: 'h', min: 0,
         hint: '0 = match the controller horizon. Larger extends the plot past it.',
       }),
     ));
@@ -1315,7 +1315,7 @@ function renderSystemParams(container, connection, hass) {
     );
     histCard.appendChild(paramGrid(
       numberField(working, 'identification_history_days', 'History retention', {
-        step: 1, unit: 'days', min: 7, max: 365,
+        step: 1, unit: 'days', min: 7,
         hint: 'How many days of JSONL observation files to keep. Default: 90.',
       }),
     ));
