@@ -493,6 +493,8 @@ def test_panel_lifecycle_handles_sidebar_navigation() -> None:
         "_stripLeakedPanelHash",
         "_installPanelHashGuard",
         "location-changed",
+        "(() => {",
+        "customElements.get('ha-industrial-panel')",
     ]
     forbidden = [
         "_initialized",
@@ -535,6 +537,20 @@ def test_panel_hash_guard_strips_leaked_hashes() -> None:
 def test_panel_lifecycle_survives_ha_sidebar_remount() -> None:
     """HA setProperties-before-connect and sidebar remount must boot and route pages."""
     harness = REPO_ROOT / "tests" / "panel_lifecycle.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_panel_global_scope_survives_cross_panel_navigation() -> None:
+    """Entry script must not throw when another panel already declared BASE_PATH globally."""
+    harness = REPO_ROOT / "tests" / "panel_global_scope.harness.mjs"
     result = subprocess.run(
         ["node", str(harness)],
         cwd=REPO_ROOT,
