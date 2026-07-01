@@ -1,4 +1,11 @@
-const BASE_PATH = '/ha-industrial-panel';
+// HA loads custom panels as classic scripts in a shared global scope.  Visiting
+// another custom panel re-runs this file; top-level const would throw
+// "Identifier 'BASE_PATH' has already been declared".  Scope everything in an
+// IIFE and skip when the element is already registered.
+(() => {
+  if (customElements.get('ha-industrial-panel')) return;
+
+  const BASE_PATH = '/ha-industrial-panel';
 
 // Cache-bust token for all dynamically-imported submodules (js/pages/*, css).
 //
@@ -23,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '86';
+  return '87';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -528,4 +535,5 @@ class HaIndustrialPanel extends HTMLElement {
   }
 }
 
-customElements.define('ha-industrial-panel', HaIndustrialPanel);
+  customElements.define('ha-industrial-panel', HaIndustrialPanel);
+})();

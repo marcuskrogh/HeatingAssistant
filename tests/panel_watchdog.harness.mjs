@@ -41,7 +41,15 @@ class Shim {
   appendChild() {} addEventListener() {} removeEventListener() {}
 }
 globalThis.HTMLElement = Shim;
-globalThis.customElements = { define() {}, get() { return undefined; } };
+globalThis.customElements = {
+  _defs: new Map(),
+  define(name, ctor) {
+    this._defs.set(name, ctor);
+  },
+  get(name) {
+    return this._defs.get(name);
+  },
+};
 globalThis.document = { currentScript: { src: '/x?v=86' }, createElement() { return new Shim(); }, addEventListener() {} };
 globalThis.history = {
   state: null,
@@ -115,9 +123,19 @@ globalThis.__imp = async (spec) => {
 
 // ---- load the real panel, lowering the watchdog for a fast test -------------
 let src = readFileSync(join(WWW, 'industrial-dashboard.js'), 'utf8');
-src = src.replace(/\bimport\(/g, '__imp(').replace(/customElements\.define\([^;]*\);?/, '');
+src = src.replace(/\bimport\(/g, '__imp(');
 src = src.replace(/BOOT_WATCHDOG_MS = \d+/, 'BOOT_WATCHDOG_MS = 120');
-const Panel = new Function(`${src}\nreturn HaIndustrialPanel;`)();
+const panelBoot = new Function('customElements', 'HTMLElement', 'document', 'window', src);
+panelBoot(
+  globalThis.customElements,
+  globalThis.HTMLElement,
+  globalThis.document,
+  globalThis.window,
+);
+const Panel = globalThis.customElements.get('ha-industrial-panel');
+if (!Panel) {
+  throw new Error('panel script must register ha-industrial-panel');
+}
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const content = (el) => el.shadowRoot.getElementById('content').innerHTML;
