@@ -62,7 +62,7 @@ import asyncio
 import logging
 import time
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import voluptuous as vol
 
@@ -1663,6 +1663,74 @@ async def _get_history_for_horizon(
     return select_recent_window(history, horizon_s, coordinator.dt)
 
 
+async def _get_history_with_leading(
+    hass: HomeAssistant,
+    coordinator: HeatingAssistantCoordinator,
+    window_start: float,
+    window_end: float,
+    leading_hours: float = 6.0,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Fetch leading calibration data and the simulation window.
+
+    Returns ``(full_history, leading_history, simulation_history)``.
+    """
+    from .history_window import (
+        select_leading_window,
+        select_window_by_timestamps,
+    )
+
+    leading_s = float(leading_hours) * 3600.0
+    fetch_start = float(window_start) - leading_s
+    fetch_end = float(window_end)
+    full = await _get_history_for_window(hass, coordinator, fetch_start, fetch_end)
+    simulation = select_window_by_timestamps(full, window_start, window_end)
+    leading = select_leading_window(full, window_start, leading_s)
+    return full, leading, simulation
+
+
+async def _estimate_simulation_initial_state(
+    hass: HomeAssistant,
+    coordinator: HeatingAssistantCoordinator,
+    simulation_history: List[Dict[str, Any]],
+    system: Any,
+    *,
+    leading_history: Optional[List[Dict[str, Any]]] = None,
+    room_params: Optional[Dict[str, Dict[str, float]]] = None,
+    sigma_w: float = 0.1,
+    sigma_v: float = 0.5,
+    leading_hours: float = 6.0,
+) -> Dict[str, Any]:
+    """Estimate optimal air / wall temperatures at a simulation-window start."""
+    from .initial_state_estimator import (
+        DEFAULT_LEADING_HOURS,
+        estimate_simulation_initial_state,
+    )
+    from .parameter_estimator import KalmanMLEstimator
+
+    dt = coordinator.dt
+    fast_estimator = KalmanMLEstimator(
+        rooms=list(coordinator.model.rooms.values()),
+        sources=coordinator.heat_sources,
+        dt=dt,
+    )
+
+    def _run() -> Dict[str, Any]:
+        return estimate_simulation_initial_state(
+            simulation_history,
+            system,
+            coordinator.model.room_names,
+            dt,
+            leading_history=leading_history,
+            sigma_w=sigma_w,
+            sigma_v=sigma_v,
+            room_params=room_params,
+            wall_optimizer=fast_estimator,
+            leading_hours=leading_hours or DEFAULT_LEADING_HOURS,
+        )
+
+    return await hass.async_add_executor_job(_run)
+
+
 def _records_for_dataset(
     coordinator: HeatingAssistantCoordinator,
     dataset_id: Optional[str],
@@ -2348,16 +2416,24 @@ def _register_services(hass: HomeAssistant) -> None:
         window_end_ol: Optional[float] = (
             float(call.data["window_end"]) if "window_end" in call.data else None
         )
+        sigma_w: float = float(call.data.get(
+            "sigma_w", getattr(coordinator, "_sigma_w", 0.1)
+        ))
+        sigma_v: float = float(call.data.get(
+            "sigma_v", getattr(coordinator, "_sigma_v", 0.5)
+        ))
+
+        leading_history: Optional[List[Dict[str, Any]]] = None
 
         # A stored dataset takes precedence over a window / horizon and supplies
         # its snapshotted records directly.
         dataset_records = _records_for_dataset(coordinator, call.data.get("dataset_id"))
         if dataset_records is not None:
             history = dataset_records
-        # Explicit window: fetch from JSONL store / Recorder if needed.
+        # Explicit window: fetch leading calibration data plus the window.
         elif window_start_ol is not None and window_end_ol is not None:
-            history = await _get_history_for_window(
-                hass, coordinator, window_start_ol, window_end_ol
+            _full, leading_history, history = await _get_history_with_leading(
+                hass, coordinator, window_start_ol, window_end_ol,
             )
             from .history_window import select_window_by_timestamps
             history = select_window_by_timestamps(history, window_start_ol, window_end_ol)
@@ -2365,6 +2441,16 @@ def _register_services(hass: HomeAssistant) -> None:
             history = await _get_history_for_horizon(
                 hass, coordinator, float(horizon_hours)
             )
+            from .history_window import history_time_range, select_leading_window
+            min_ts, _max_ts = history_time_range(history)
+            if min_ts is not None:
+                _full, leading_history, _sim = await _get_history_with_leading(
+                    hass,
+                    coordinator,
+                    min_ts,
+                    _max_ts if _max_ts is not None else min_ts,
+                    leading_hours=6.0,
+                )
         else:
             history = list(coordinator.history_buffer)
 
@@ -2390,12 +2476,6 @@ def _register_services(hass: HomeAssistant) -> None:
 
         if room_params or heater_scales:
             from .controller import HouseThermalSDE  # noqa: PLC0415
-            sigma_w: float = float(call.data.get(
-                "sigma_w", getattr(coordinator, "_sigma_w", 0.1)
-            ))
-            sigma_v: float = float(call.data.get(
-                "sigma_v", getattr(coordinator, "_sigma_v", 0.5)
-            ))
             try:
                 sim_model = _build_sim_model(
                     coordinator.model, room_params, room_names
@@ -2417,29 +2497,31 @@ def _register_services(hass: HomeAssistant) -> None:
         else:
             system = coordinator.controller._system
 
-        # Always run a fast wall-temperature identification using the current
-        # UI parameter values so the open-loop simulation starts from the
-        # correct wall state for the chosen parameter set, not a stale value.
+        # Estimate optimal initial air / wall temperatures from a leading
+        # calibration window (or a short prefix when no leading data exists).
         t_wall_initial_identified: Dict[str, float] = {}
         try:
-            from .parameter_estimator import KalmanMLEstimator
-            fast_estimator = KalmanMLEstimator(
-                rooms=list(coordinator.model.rooms.values()),
-                sources=coordinator.heat_sources,
-                dt=dt,
-            )
-            fast_estimated = await hass.async_add_executor_job(
-                fast_estimator.estimate_wall_initial_only,
+            init_state = await _estimate_simulation_initial_state(
+                hass,
+                coordinator,
                 history,
-                room_params if room_params else None,
+                system,
+                leading_history=leading_history,
+                room_params=room_params if room_params else None,
+                sigma_w=sigma_w,
+                sigma_v=sigma_v,
             )
             t_wall_initial_identified = {
-                name: float(v)
-                for name, v in fast_estimated.items()
+                name: float(v) for name, v in init_state.get("t_wall", {}).items()
             }
+            _LOGGER.debug(
+                "Open-loop initial state: method=%s calibration_steps=%s",
+                init_state.get("method"),
+                init_state.get("calibration_steps"),
+            )
         except Exception as exc:
             _LOGGER.warning(
-                "Open-loop: fast t_wall_init estimation failed (%s); "
+                "Open-loop: initial-state estimation failed (%s); "
                 "falling back to cached or air-temperature seed.", exc,
             )
             t_wall_initial_identified = _open_loop_t_wall_initial_dict(
@@ -2738,6 +2820,8 @@ def _register_services(hass: HomeAssistant) -> None:
         # set, keyed by ``<param>_<room_slug>``).
         room_params = _extract_sim_room_params(call, coordinator.model.room_names)
 
+        leading_history: Optional[List[Dict[str, Any]]] = None
+
         # Fetch history: a stored dataset (``dataset_id``) supplies its
         # snapshotted records directly; otherwise use the JSONL store / Recorder
         # for out-of-buffer windows.  With a dataset the whole snapshot is used
@@ -2748,43 +2832,74 @@ def _register_services(hass: HomeAssistant) -> None:
             window_spec = None
         else:
             if window_spec is not None:
-                history = await _get_history_for_window(
-                    hass, coordinator, window_start, window_end
+                _full, leading_history, history = await _get_history_with_leading(
+                    hass, coordinator, window_start, window_end,
                 )
             else:
                 history = await _get_history_for_horizon(
                     hass, coordinator, horizon_hours
                 )
-
-        # Always run a fast wall-temperature identification using the current
-        # UI parameter values so the EKF reconstruction starts from a physically
-        # correct wall state rather than a stale or steady-state estimate.
-        try:
-            from .parameter_estimator import KalmanMLEstimator
-            _fast_est = KalmanMLEstimator(
-                rooms=list(coordinator.model.rooms.values()),
-                sources=coordinator.heat_sources,
-                dt=dt,
-            )
-            _fast_t_wall = await hass.async_add_executor_job(
-                _fast_est.estimate_wall_initial_only,
-                history,
-                room_params if room_params else None,
-            )
-            for _rn, _tw in _fast_t_wall.items():
-                room_params.setdefault(_rn, {})["t_wall_initial"] = _tw
-        except Exception as exc:
-            _LOGGER.warning(
-                "EKF sim: fast t_wall_init estimation failed (%s); "
-                "falling back to cached or air-temperature seed.", exc,
-            )
-            _inject_identified_t_wall_initial(room_params, coordinator)
+                from .history_window import history_time_range
+                min_ts, max_ts = history_time_range(history)
+                if min_ts is not None and max_ts is not None:
+                    _full, leading_history, _sim = await _get_history_with_leading(
+                        hass, coordinator, min_ts, max_ts, leading_hours=6.0,
+                    )
 
         # Patch heat-source copies with the heater power scales currently shown
         # in the UI (falling back to the last auto-identified scales) so the EKF
         # reconstruction uses them even when the user hasn't clicked Apply yet.
         heater_scales = _effective_heater_scales(call, coordinator)
         sim_heat_sources = _patched_heat_sources(coordinator, heater_scales)
+
+        # Build the SDE used for initial-state estimation (matches sysid run).
+        from .controller import HouseThermalSDE  # noqa: PLC0415
+        from .sysid import _build_sim_model  # noqa: PLC0415
+        try:
+            sim_model = _build_sim_model(
+                coordinator.model, room_params, coordinator.model.room_names
+            )
+            init_system = HouseThermalSDE(
+                sim_model,
+                sim_heat_sources,
+                dt,
+                sigma_w=sigma_w,
+                sigma_v=sigma_v,
+                augment_offsets=False,
+            )
+        except Exception as exc:
+            _LOGGER.warning(
+                "EKF sim: could not build system for initial-state estimation: %s",
+                exc,
+            )
+            init_system = coordinator.controller._system
+
+        # Estimate optimal initial wall temperatures from a leading calibration
+        # window (or a short prefix when no leading data exists).
+        try:
+            init_state = await _estimate_simulation_initial_state(
+                hass,
+                coordinator,
+                history,
+                init_system,
+                leading_history=leading_history,
+                room_params=room_params if room_params else None,
+                sigma_w=sigma_w,
+                sigma_v=sigma_v,
+            )
+            for _rn, _tw in init_state.get("t_wall", {}).items():
+                room_params.setdefault(_rn, {})["t_wall_initial"] = float(_tw)
+            _LOGGER.debug(
+                "EKF sim initial state: method=%s calibration_steps=%s",
+                init_state.get("method"),
+                init_state.get("calibration_steps"),
+            )
+        except Exception as exc:
+            _LOGGER.warning(
+                "EKF sim: initial-state estimation failed (%s); "
+                "falling back to cached or air-temperature seed.", exc,
+            )
+            _inject_identified_t_wall_initial(room_params, coordinator)
 
         try:
             result = await hass.async_add_executor_job(
