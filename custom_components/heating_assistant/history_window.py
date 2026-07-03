@@ -163,6 +163,31 @@ def select_window_by_timestamps(
     return [r for r in history if start_ts <= float(r["timestamp"]) <= end_ts]
 
 
+def select_leading_window(
+    history: List[Dict[str, Any]],
+    window_start_ts: float,
+    leading_seconds: float,
+) -> List[Dict[str, Any]]:
+    """Return records in ``[window_start_ts - leading_seconds, window_start_ts)``.
+
+    Used to fetch a calibration period *before* an explicit identification or
+    simulation window so the backend can estimate hidden envelope temperatures
+    (and emitter-lag states) without fitting initial conditions on the same
+    data being scored.
+
+    The returned slice excludes the anchor record at ``window_start_ts`` so
+    the simulation window and the leading calibration window do not overlap.
+    """
+    if leading_seconds <= 0:
+        return []
+    history = _normalise(history)
+    if not history:
+        return []
+    start = float(window_start_ts) - float(leading_seconds)
+    end = float(window_start_ts)
+    return [r for r in history if start <= float(r["timestamp"]) < end]
+
+
 def history_time_range(
     history: List[Dict[str, Any]],
 ) -> Tuple[Optional[float], Optional[float]]:

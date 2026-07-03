@@ -108,16 +108,18 @@ _Q_INT_HI =  5_000.0   # large internal source (server room, sauna…)
 _LOG_ALPHA_LO = math.log(0.3)   # 30 % of rated
 _LOG_ALPHA_HI = math.log(3.0)   # 300 % of rated
 
-#: Relative MAP-prior weight for the heater power-scale α, multiplying the base
-#: regularisation.  Unlike thermal mass / R_external (which are genuinely
-#: unknown a priori and get the light base weight so the data drives them), a
-#: heater's rated power is usually known to within ~±20 %, so α carries real
-#: prior information: log-space σ ≈ 0.2 ⇒ a much tighter penalty.  This is the
-#: lever that keeps the joint optimum off the documented "C huge / R huge"
-#: degenerate ridge, where C, R and α trade off against one another (README
-#: §17.5): pinning α near its physical value resolves that degeneracy so the
-#: data identifies C and R instead of sliding α to a bound.
+#: Relative MAP-prior weight for the heater power-scale α when heater duty
+#: cycle variation is weak (unexcited / constant-on).  A heater's rated
+#: power is usually known to within ~±20 %, so α carries real prior
+#: information and this weight keeps the joint optimum off the documented
+#: "C huge / R huge" degenerate ridge.
 _ALPHA_PRIOR_WEIGHT = 25.0
+
+#: Reduced α prior weight when duty-cycle excitation is strong enough that
+#: the data can identify the scale without being pinned to the rated value.
+#: Underestimating heater influence was traced to this prior dominating the
+#: open-loop MSE gradient on excited windows.
+_ALPHA_PRIOR_WEIGHT_EXCITED = 4.0
 
 #: Minimum std of inter-room temperature difference for R_ij identifiability.
 _MIN_TEMP_DIFF_STD = 0.3   # °C
@@ -275,6 +277,39 @@ def _identifiable_split_rooms(
         i for i, name in enumerate(room_names)
         if name in rooms_with_excited_source
     ]
+
+
+def _heater_excitation_score(
+    history: List[Dict[str, Any]],
+    n_u: int,
+    min_history_steps: int = MIN_HISTORY_STEPS,
+) -> float:
+    """Return the maximum std of any source duty cycle in ``history``."""
+    if len(history) < min_history_steps or n_u <= 0:
+        return 0.0
+    u_matrix = []
+    for rec in history:
+        u = rec.get("u", [])
+        if not u:
+            continue
+        row = [float(u[j]) if j < len(u) else 0.0 for j in range(n_u)]
+        u_matrix.append(row)
+    if len(u_matrix) < 2:
+        return 0.0
+    arr = np.asarray(u_matrix, dtype=float)
+    return float(np.max(np.std(arr, axis=0)))
+
+
+def _adaptive_alpha_prior_weight(
+    history: List[Dict[str, Any]],
+    n_u: int,
+    min_history_steps: int = MIN_HISTORY_STEPS,
+) -> float:
+    """Weaker α prior when heater duty cycle varies enough to identify scale."""
+    score = _heater_excitation_score(history, n_u, min_history_steps)
+    if score >= _MIN_HEATER_USAGE_STD:
+        return _ALPHA_PRIOR_WEIGHT_EXCITED
+    return _ALPHA_PRIOR_WEIGHT
 
 
 # ── Main estimator class ─────────────────────────────────────────────────────
@@ -460,7 +495,7 @@ class KalmanMLEstimator:
         # otherwise those slow parameters are unconstrained and collapse onto
         # the (possibly poor) prior.  The window is still bounded so a single
         # bad data stretch can't dominate the gradient.  Default 48 steps
-        # (= 12 h at the 900 s sampling interval).
+        # default 72 steps (= 18 h at the 900 s sampling interval).
         self._max_window_steps = int(max(20, max_window_steps))
 
         # Compute dt-aware step thresholds so the estimator works correctly
@@ -511,8 +546,10 @@ class KalmanMLEstimator:
             float(getattr(r, "r_aw_fraction", 0.05)) for r in rooms
         ])
         # Wall initial temperature prior: seeded at 20 °C; estimate() updates
-        # it to the steady-state wall temperature from the first record.
+        # it to a physics-informed value from the first record.
         self._t_wall_init_prior = np.full(len(rooms), 20.0)
+        # Adaptive heater-scale prior weight; updated per estimate() call.
+        self._alpha_prior_weight: float = _ALPHA_PRIOR_WEIGHT
 
         # Build unique inter-room connection pairs (i, j) with i < j.
         room_idx = {r.name: k for k, r in enumerate(rooms)}
@@ -768,16 +805,13 @@ class KalmanMLEstimator:
         n_steps = len(history)
 
         # Update wall-initial-temperature prior from the first measured air
-        # temperatures.  Physical rationale: absent other information the
-        # wall likely started close to the air temperature at window start.
-        if history:
-            first_y = history[0].get("y", [])
-            for i in range(self._n):
-                if i < len(first_y):
-                    try:
-                        self._t_wall_init_prior[i] = float(first_y[i])
-                    except (ValueError, TypeError):
-                        pass
+        # temperatures and outdoor temperature.  A pure air-temperature prior
+        # is a poor guess after long heating/cooling transients; the
+        # (T_a, T_out) steady-state blend is a better MAP anchor.
+        self._update_wall_init_prior_from_history(history)
+        self._alpha_prior_weight = _adaptive_alpha_prior_weight(
+            history, self._n_u, self._min_history_steps,
+        )
 
         current = {
             r.name: {
@@ -1200,6 +1234,7 @@ class KalmanMLEstimator:
         self,
         history: List[Dict[str, Any]],
         room_params: Optional[Dict[str, Dict[str, Any]]] = None,
+        calibration_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, float]:
         """Quickly estimate only the wall-envelope initial temperature.
 
@@ -1209,28 +1244,31 @@ class KalmanMLEstimator:
         multistart, no OLS warm-start — so this is fast enough to run
         before every open-loop simulation.
 
+        When ``calibration_history`` is supplied it is used for the fit
+        instead of ``history``.  This lets callers estimate the wall state
+        on a leading calibration window while applying the result at the
+        start of a separate simulation window.
+
         Returns a dict ``{room_name: t_wall_initial_float}``.  Falls back to
-        the first measured air temperature when history is too short or the
+        the physics-informed prior when history is too short or the
         optimiser fails.
         """
+        fit_history = (
+            calibration_history if calibration_history is not None else history
+        )
         n = self._n
 
-        # Seed the prior from the first measured air temperatures.
-        if history:
-            first_y = history[0].get("y", [])
-            for i in range(n):
-                if i < len(first_y):
-                    try:
-                        self._t_wall_init_prior[i] = float(first_y[i])
-                    except (ValueError, TypeError):
-                        pass
+        # Seed the prior from the anchor air / outdoor temperatures.
+        self._update_wall_init_prior_from_history(
+            fit_history if fit_history else history
+        )
 
         fallback = {
             self._room_names[i]: round(float(self._t_wall_init_prior[i]), 2)
             for i in range(n)
         }
 
-        if len(history) < self._min_history_steps:
+        if len(fit_history) < self._min_history_steps:
             return fallback
 
         # Minimal layout: only the 4n core parameters; no heater / R_ij /
@@ -1278,7 +1316,7 @@ class KalmanMLEstimator:
             + [(_T_WALL_LO, _T_WALL_HI)] * n
         )
 
-        std_history = self._convert_history_std(history, use_ym=False)
+        std_history = self._convert_history_std(fit_history, use_ym=False)
 
         _cache: List[Optional[object]] = [None, None, None]
 
@@ -1337,6 +1375,41 @@ class KalmanMLEstimator:
         return fallback
 
     # ── Internal helpers ──────────────────────────────────────────────────
+
+    def _update_wall_init_prior_from_history(
+        self,
+        history: List[Dict[str, Any]],
+    ) -> None:
+        """Set the wall-init MAP prior from the first record's air / outdoor temps.
+
+        Uses a (T_a, T_out) midpoint blend — a better default than T_wall = T_air
+        after long envelope transients — and falls back to measured air when
+        outdoor temperature is unavailable.
+        """
+        if not history:
+            return
+        first = history[0]
+        first_y = first.get("y", [])
+        t_out: Optional[float] = None
+        try:
+            t_out = float(first.get("d_outdoor"))
+        except (TypeError, ValueError):
+            t_out = None
+        for i in range(self._n):
+            t_air: Optional[float] = None
+            if i < len(first_y):
+                try:
+                    t_air = float(first_y[i])
+                except (ValueError, TypeError):
+                    t_air = None
+            if t_air is None:
+                continue
+            if t_out is not None and np.isfinite(t_out):
+                # Midpoint between air and outdoor is a robust cold-start for
+                # the hidden envelope when no filter history is available.
+                self._t_wall_init_prior[i] = 0.5 * (t_air + t_out)
+            else:
+                self._t_wall_init_prior[i] = t_air
 
     def _pin_locked_params(
         self,
@@ -1554,6 +1627,61 @@ class KalmanMLEstimator:
             theta[n + i] = log_r
             theta[2 * n + i] = q_int
             any_fit = True
+
+        # Coarse heater-scale warm start from the same energy balance when
+        # the layout includes α and the source duty cycle varies.
+        if any_fit and layout.identifiable_sources:
+            a0, b0 = layout.idx_log_alpha
+            for k_la, s_idx in enumerate(layout.identifiable_sources):
+                src = self._sources[s_idx]
+                room_i = (
+                    self._room_names.index(src.room)
+                    if src.room in self._room_names else -1
+                )
+                if room_i < 0:
+                    continue
+                C_i = math.exp(theta[room_i])
+                g_i = math.exp(-theta[n + room_i])
+                q_i = float(theta[2 * n + room_i])
+                alpha_samples: List[float] = []
+                for k in range(len(std_history) - 1):
+                    rec = std_history[k]
+                    rec_next = std_history[k + 1]
+                    try:
+                        T_k = float(rec["ym"][room_i])
+                        T_next = float(rec_next["ym"][room_i])
+                        u_k = float(rec["u"][s_idx])
+                        d_k = np.asarray(rec["d"], dtype=float)
+                    except (KeyError, TypeError, ValueError, IndexError):
+                        continue
+                    if u_k < 0.08:
+                        continue
+                    t_k = rec.get("t")
+                    t_next = rec_next.get("t")
+                    dt_step = (
+                        float(t_next) - float(t_k)
+                        if t_k is not None and t_next is not None
+                        else float(nominal_dt) if nominal_dt else self._dt
+                    )
+                    if dt_step <= 0:
+                        continue
+                    T_out = float(d_k[0]) if d_k.size > 0 else 0.0
+                    try:
+                        Q_rated = float(src.thermal_power(max(0.0, u_k), T_out))
+                    except Exception:
+                        continue
+                    if Q_rated < 1.0:
+                        continue
+                    dTdt = (T_next - T_k) / dt_step
+                    residual_q = C_i * dTdt - g_i * (T_out - T_k) - q_i
+                    alpha_samples.append(residual_q / Q_rated)
+                if len(alpha_samples) >= 5:
+                    alpha_med = float(np.median(alpha_samples))
+                    if np.isfinite(alpha_med) and alpha_med > 0:
+                        log_a = float(
+                            np.clip(math.log(alpha_med), _LOG_ALPHA_LO, _LOG_ALPHA_HI)
+                        )
+                        theta[a0 + k_la] = log_a
 
         if not any_fit:
             return None
@@ -2354,7 +2482,7 @@ class KalmanMLEstimator:
             la_prior = np.array(
                 [self._log_alpha_prior_full[s] for s in layout.identifiable_sources]
             )
-            grad[a:b] = 2.0 * lam * _ALPHA_PRIOR_WEIGHT * (log_alpha - la_prior)
+            grad[a:b] = 2.0 * lam * self._alpha_prior_weight * (log_alpha - la_prior)
 
         a, b = layout.idx_log_r_ij
         if a < b:
@@ -2628,7 +2756,7 @@ class KalmanMLEstimator:
             + float(np.sum((q_int - self._q_int_prior) ** 2)) / (100.0 ** 2)
         )
         if len(log_alpha):
-            reg += self._regularization * _ALPHA_PRIOR_WEIGHT * float(
+            reg += self._regularization * self._alpha_prior_weight * float(
                 np.sum((log_alpha - log_alpha_prior) ** 2)
             )
         if len(log_r_ij):
