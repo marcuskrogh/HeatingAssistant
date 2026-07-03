@@ -1,8 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=86';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=86';
-import { createCollapsible } from '../components/collapsible.js?v=86';
-import { formatNumber, modelFitLabel } from '../utils.js?v=86';
-import { setPanelHash } from '../panel-hash.js?v=86';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=88';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=88';
+import { createCollapsible } from '../components/collapsible.js?v=88';
+import { formatNumber, modelFitLabel } from '../utils.js?v=88';
+import { setPanelHash } from '../panel-hash.js?v=88';
 
 // Default parameter values — must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
@@ -1472,7 +1472,8 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
   // -----------------------------------------------------------------------
   const refreshHandles = setupDatasetsAndExperiments({
     container, paramsCard, room, roomSlug, hass, connection,
-    windowStartInput, windowEndInput, applyWindowMode: _applyWindowMode,
+    windowStartInput, windowEndInput, horizonInput, applyWindowMode: _applyWindowMode,
+    getWindowMode: () => windowMode,
     toDatetimeLocal: _toDatetimeLocal,
     setSelectedDataset, clearSelectedDataset,
     onDatasetSelectionRenderer: (fn) => { renderDatasetSelection = fn; },
@@ -1568,8 +1569,8 @@ function _toLocalInput(date) {
 function setupDatasetsAndExperiments(ctx) {
   const {
     container, paramsCard, room, roomSlug, hass, connection,
-    windowStartInput, windowEndInput, applyWindowMode, toDatetimeLocal,
-    setSelectedDataset, clearSelectedDataset, onDatasetSelectionRenderer,
+    windowStartInput, windowEndInput, horizonInput, applyWindowMode, toDatetimeLocal,
+    getWindowMode, setSelectedDataset, clearSelectedDataset, onDatasetSelectionRenderer,
   } = ctx;
 
   const saveMount = paramsCard.querySelector('#ds-save-mount');
@@ -1695,18 +1696,22 @@ function setupDatasetsAndExperiments(ctx) {
   // ---- Dataset saving / listing -----------------------------------------
   function currentWindowBounds() {
     // Resolve the window the user currently has configured into [start, end]
-    // UNIX seconds.  Honours an explicit custom range; otherwise falls back to
-    // the recent-horizon trailing window (now - horizon … now).
-    const startVal = windowStartInput.value;
-    const endVal = windowEndInput.value;
-    let startTs = startVal ? new Date(startVal).getTime() / 1000 : NaN;
-    let endTs = endVal ? new Date(endVal).getTime() / 1000 : NaN;
-    if (!isFinite(startTs) || !isFinite(endTs) || endTs <= startTs) {
-      const horizonEl = container.querySelector('#param-horizon');
-      const hrs = horizonEl ? parseFloat(horizonEl.value) : 6;
-      endTs = Date.now() / 1000;
-      startTs = endTs - (isFinite(hrs) ? hrs : 6) * 3600;
+    // UNIX seconds, honouring whichever tab (Recent Horizon or Custom Date
+    // Range) is actively selected — the custom inputs always hold a value
+    // (they're pre-filled from the horizon as a default), so they must only
+    // be used when the Custom tab is actually the one showing.
+    if (getWindowMode() === 'custom') {
+      const startVal = windowStartInput.value;
+      const endVal = windowEndInput.value;
+      const startTs = startVal ? new Date(startVal).getTime() / 1000 : NaN;
+      const endTs = endVal ? new Date(endVal).getTime() / 1000 : NaN;
+      if (isFinite(startTs) && isFinite(endTs) && endTs > startTs) {
+        return { startTs, endTs };
+      }
     }
+    const hrs = horizonInput ? parseFloat(horizonInput.value) : 6;
+    const endTs = Date.now() / 1000;
+    const startTs = endTs - (isFinite(hrs) ? hrs : 6) * 3600;
     return { startTs, endTs };
   }
 
