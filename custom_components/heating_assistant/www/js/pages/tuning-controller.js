@@ -3,12 +3,12 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=86';
+} from '../components/time-series-chart.js?v=88';
 import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from './room-detail.js?v=86';
+} from './room-detail.js?v=88';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
