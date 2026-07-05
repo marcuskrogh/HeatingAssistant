@@ -1,0 +1,359 @@
+/* Identification detail — parameter subsections within a card */
+.params-subsection {
+  margin-bottom: 28px;
+}
+
+.params-subsection--last {
+  margin-bottom: 0;
+}
+
+.params-subsection__title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* -----------------------------------------------------------------------
+   Window mode toggle (Recent Horizon / Custom Date Range)
+   ----------------------------------------------------------------------- */
+.window-mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  width: fit-content;
+}
+
+.window-mode-btn {
+  padding: 5px 14px;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.window-mode-btn:hover:not(.window-mode-btn--active) {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.window-mode-btn--active {
+  background: var(--accent);
+  color: #000;
+}
+
+.window-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.window-presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Custom date-range panel — outer flex column keeps everything stacked and
+   bounded; inner grid places Start/End side-by-side on wide screens and
+   collapses to a single column on narrow containers.
+
+   ROOT CAUSE of the iOS overflow: input[type="datetime-local"] is rendered by
+   the OS as a native widget.  iOS Safari enforces an intrinsic minimum width
+   for this widget regardless of CSS width / min-width / display: block rules
+   applied to the <input> element itself.  Every CSS-only constraint that was
+   tried (min-width:0, display:block, max-width:100%, minmax(0,1fr), etc.)
+   worked in most browsers but was overridden by iOS's native control sizing.
+
+   THE FIX — wrapper div approach used by every production UI framework:
+   Each <input> is placed inside a plain <div class="form-input--datetime-wrap">.
+   The wrapper div provides all visual styling (border, border-radius, background).
+   The wrapper has overflow:hidden.  Because the wrapper is a plain div (not a
+   native control), every browser respects overflow:hidden on it without
+   exception.  Any iOS native-control overflow is clipped inside the rounded
+   wrapper, so the border-radius is preserved and the card never overflows.
+
+   RESPONSIVE LAYOUT — container queries (primary) + media query (fallback):
+   container-type:inline-size on .window-datetime-panel lets children respond
+   to the actual card width, not the viewport.  This fixes the HA-sidebar case
+   where the card can be < 400 px while the viewport is > 768 px.  A viewport
+   media query is kept as a fallback for iOS 15 / Safari 15 which do not
+   support container queries. */
+.window-datetime-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  container-type: inline-size;
+}
+
+.window-datetime-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+/* Collapse to single column when the panel container is phone-width.
+   500 px leaves room for two ~220 px datetime inputs plus the gap. */
+@container (max-width: 500px) {
+  .window-datetime-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Wrapper div: carries the visual border/radius/background so that
+   overflow:hidden clips the native iOS control without also cutting the
+   rounded corner (the radius is on this div, not on the <input>). */
+.form-input--datetime-wrap {
+  padding: 0; /* Input provides its own 8px/12px padding */
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Forward the focus ring from the inner input to the visible wrapper */
+.form-input--datetime-wrap:focus-within {
+  border-color: var(--accent);
+}
+
+/* Inner input: visually bare — border, radius, and background are on the
+   wrapper; padding is re-declared here so the text sits correctly. */
+.form-input--datetime {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color-scheme: dark;
+  outline: none;
+  cursor: pointer;
+}
+
+/* Heater scales table in the identification detail view */
+.heater-scales-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.heater-scales-table th,
+.heater-scales-table td {
+  text-align: left;
+  padding: 5px 10px 5px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.heater-scales-table th {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.heater-scales-table td:first-child {
+  color: var(--text-primary);
+}
+
+.heater-scales-table td strong {
+  color: var(--text-primary);
+}
+
+.heater-scale__delta {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.heater-scale__delta--neutral {
+  background: color-mix(in srgb, var(--text-dim) 15%, transparent);
+  color: var(--text-secondary);
+}
+
+.heater-scale__delta--lower {
+  background: color-mix(in srgb, var(--alarm) 18%, transparent);
+  color: var(--alarm);
+}
+
+.heater-scale__delta--higher {
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+}
+
+/* Visual separator between the parameters section and the simulations section */
+.section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 36px 0 28px;
+  opacity: 0.6;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SYSTEM IDENTIFICATION INDEX CARDS  (.sysid-index-card)
+   Mirrors the schedule index card layout for internal consistency.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.sysid-index-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 16px;
+}
+
+.sysid-index-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.sysid-index-card__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sysid-index-card__badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 3px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.sysid-index-card__badge--good {
+  background: rgba(39, 174, 96, 0.15);
+  color: var(--good);
+}
+
+.sysid-index-card__badge--acceptable {
+  background: rgba(245, 166, 35, 0.15);
+  color: var(--warning);
+}
+
+.sysid-index-card__badge--poor {
+  background: rgba(231, 76, 60, 0.15);
+  color: var(--alarm);
+}
+
+.sysid-index-card__badge--unknown {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+}
+
+.sysid-index-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.sysid-index-card__action {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__action--good {
+  color: var(--good);
+}
+
+.sysid-index-card__action--warn {
+  color: var(--warning);
+}
+
+.sysid-index-card__action--alarm {
+  color: var(--alarm);
+}
+
+.sysid-index-card__action--dim {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.sysid-index-card__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.sysid-index-card__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sysid-index-card__warning-text {
+  flex: 1;
+}
+
+.sysid-index-card__warning--info,
+.sysid-index-card__warning--dim {
+  background: rgba(144, 164, 174, 0.12);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning--warn {
+  background: rgba(255, 193, 7, 0.1);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning--alarm {
+  background: rgba(244, 67, 54, 0.1);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning--good {
+  background: rgba(76, 175, 80, 0.1);
+  color: var(--text-secondary);
+}
+
+.sysid-index-card__warning-dismiss {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+  margin: -4px -6px -4px 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.sysid-index-card__warning-dismiss:hover {
+  color: var(--text-secondary);
+}

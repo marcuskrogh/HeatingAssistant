@@ -30,7 +30,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, DEFAULT_SETPOINT
+from .const import DOMAIN
 from .coordinator import HeatingAssistantCoordinator
 from .heat_sources import HeatPump
 
@@ -160,7 +160,12 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
         """Set a new target temperature."""
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is not None:
-            self._coordinator.set_room_setpoint(self._room_name, float(temp))
+            await self.hass.services.async_call(
+                DOMAIN,
+                "set_room_setpoint",
+                {"room_name": self._room_name, "setpoint": float(temp)},
+                blocking=True,
+            )
             # Do not force an out-of-band control update; let the new setpoint
             # be consumed on the next regular coordinator interval.
             self.async_write_ha_state()
@@ -177,12 +182,23 @@ class RoomClimateEntity(CoordinatorEntity, ClimateEntity):
         versions that overwrote the setpoint on off).
         """
         if hvac_mode == HVACMode.OFF:
-            self._coordinator.set_room_enabled(self._room_name, False)
+            await self.hass.services.async_call(
+                DOMAIN,
+                "set_room_enabled",
+                {"room_name": self._room_name, "enabled": False},
+                blocking=True,
+            )
         elif hvac_mode in (HVACMode.HEAT, HVACMode.HEAT_COOL, HVACMode.COOL):
-            self._coordinator.set_room_enabled(self._room_name, True)
-            if self._coordinator.get_room_setpoint(self._room_name) <= MIN_TEMP:
-                self._coordinator.set_room_setpoint(self._room_name, DEFAULT_SETPOINT)
-        await self._coordinator.async_request_refresh()
+            await self.hass.services.async_call(
+                DOMAIN,
+                "set_room_enabled",
+                {
+                    "room_name": self._room_name,
+                    "enabled": True,
+                    "restore_default_setpoint": True,
+                },
+                blocking=True,
+            )
 
     async def async_turn_on(self) -> None:
         """Re-enable the room (required by ClimateEntityFeature.TURN_ON)."""

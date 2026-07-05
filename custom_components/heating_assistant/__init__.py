@@ -593,62 +593,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     #     )
 
     # Register custom JS/CSS panel
-    try:
-        import pathlib
+    from .panel_setup import async_register_industrial_panel
 
-        from homeassistant.components.http import StaticPathConfig
-
-        www_path = pathlib.Path(__file__).parent / "www"
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig("/ha-industrial-panel", str(www_path), cache_headers=False)]
-        )
-
-        # Register the custom icon set so it is available on every HA page
-        # (including the sidebar) before the frontend renders.  The icon JS
-        # lives in www/ and is served under the static path above.
-        _sidebar_icon = "mdi:radiator"
-        try:
-            from homeassistant.components.frontend import async_register_extra_urls
-
-            async_register_extra_urls(
-                hass, ["/ha-industrial-panel/heating-assistant-icons.js"]
-            )
-            _sidebar_icon = "heating-assistant:logo"
-        except (ImportError, AttributeError):
-            _LOGGER.debug(
-                "Heating Assistant: async_register_extra_urls unavailable, "
-                "falling back to mdi:radiator sidebar icon",
-            )
-
-        from homeassistant.components.frontend import async_register_built_in_panel
-
-        async_register_built_in_panel(
-            hass,
-            component_name="custom",
-            sidebar_title="Heating Assistant",
-            sidebar_icon=_sidebar_icon,
-            frontend_url_path="ha-industrial",
-            config={
-                "_panel_custom": {
-                    "name": "ha-industrial-panel",
-                    # This ?v= token is the SINGLE source of truth for the
-                    # frontend cache-bust version.  industrial-dashboard.js reads
-                    # this exact token off its own URL (import.meta.url) and reuses
-                    # it for every dynamically-imported submodule, so the entry
-                    # point and its submodules can never drift out of sync.  Bump
-                    # this token (and nothing else) on every frontend change to
-                    # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=92",
-                    "embed_iframe": False,
-                }
-            },
-            require_admin=False,
-        )
-    except Exception:
-        _LOGGER.debug(
-            "Heating Assistant: custom panel registration skipped",
-            exc_info=True,
-        )
+    await async_register_industrial_panel(hass, entry)
 
     return True
 

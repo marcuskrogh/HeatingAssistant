@@ -1,6 +1,6 @@
 // Shared DOM builders for configuration sub-pages.
-import { createCollapsible } from '../components/collapsible.js?v=92';
-import { setPanelHash } from '../panel-hash.js?v=92';
+import { createCollapsible } from '../components/collapsible.js?v=93';
+import { setPanelHash } from '../panel-hash.js?v=93';
 
 function el(tag, className, html) {
   const node = document.createElement(tag);
@@ -326,6 +326,44 @@ function entitySelectorField(root, hass, obj, key, label, domains, { hint = '', 
   return group;
 }
 
+
+function listEditor({ title, items, addLabel, emptyText, renderRow, newItem }) {
+  const wrap = el('div', 'config-list-editor');
+  const head = el('div', 'config-list-editor__head');
+  head.innerHTML = `
+    <span class="config-list-editor__title">${title}</span>
+    <button class="btn btn--secondary btn--sm" type="button" data-role="add">${addLabel}</button>
+  `;
+  wrap.appendChild(head);
+  const rowsWrap = el('div', 'config-list-editor__rows');
+  wrap.appendChild(rowsWrap);
+
+  function draw() {
+    rowsWrap.innerHTML = '';
+    if (items.length === 0) {
+      rowsWrap.appendChild(el('div', 'config-empty', emptyText));
+      return;
+    }
+    items.forEach((_, i) => {
+      const rowCard = el('div', 'config-item-row');
+      rowCard.appendChild(renderRow(items, i));
+      const del = el('button', 'schedule-form__delete', '×');
+      del.type = 'button';
+      del.title = 'Remove';
+      del.addEventListener('click', () => { items.splice(i, 1); draw(); });
+      rowCard.appendChild(del);
+      rowsWrap.appendChild(rowCard);
+    });
+  }
+
+  head.querySelector('[data-role="add"]').addEventListener('click', () => {
+    items.push(newItem());
+    draw();
+  });
+
+  draw();
+  return wrap;
+}
 export {
   el,
   escapeAttr,

@@ -23,6 +23,21 @@ export async function setRoomComfortOffset(hass, roomName, comfortOffset) {
   });
 }
 
+export async function setRoomSetpoint(hass, roomName, setpoint) {
+  return ha(hass, 'set_room_setpoint', {
+    room_name: roomName,
+    setpoint,
+  });
+}
+
+export async function setRoomEnabled(hass, roomName, enabled, { restoreDefaultSetpoint = false } = {}) {
+  return ha(hass, 'set_room_enabled', {
+    room_name: roomName,
+    enabled,
+    restore_default_setpoint: restoreDefaultSetpoint,
+  });
+}
+
 export async function updateUiSettings(hass, data) {
   return ha(hass, 'update_ui_settings', data);
 }

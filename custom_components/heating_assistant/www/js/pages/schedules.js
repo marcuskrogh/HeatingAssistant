@@ -1,13 +1,13 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=92';
-import { signalLabel, experimentRowHtml, findNextScheduledExperiment, experimentStatusInfo } from '../experiment-utils.js?v=92';
-import { setPanelHash } from '../panel-hash.js?v=92';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=93';
+import { signalLabel, experimentRowHtml, findNextScheduledExperiment, experimentStatusInfo } from '../experiment-utils.js?v=93';
+import { setPanelHash } from '../panel-hash.js?v=93';
 import {
   cancelExperiment,
   deleteExperiment,
   scheduleExperiment,
   setScheduleEnabled,
   updateRoomSchedule,
-} from '../ha-services.js?v=92';
+} from '../ha-services.js?v=93';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

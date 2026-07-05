@@ -441,11 +441,11 @@ def test_panel_js_files_use_ascii_quotes_only() -> None:
 
 
 def _panel_cache_bust_token() -> str:
-    init_py = (
-        REPO_ROOT / "custom_components" / "heating_assistant" / "__init__.py"
+    panel_setup = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "panel_setup.py"
     ).read_text(encoding="utf-8")
-    match = re.search(r"industrial-dashboard\.js\?v=(\d+)", init_py)
-    assert match, "Panel js_url cache-bust token not found in __init__.py"
+    match = re.search(r"industrial-dashboard\.js\?v=(\d+)", panel_setup)
+    assert match, "Panel js_url cache-bust token not found in panel_setup.py"
     return match.group(1)
 
 

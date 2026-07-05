@@ -1,5 +1,5 @@
-import { makeDataset } from '../components/time-series-chart.js?v=92';
-import { wattsToKw, wattsToKwPoints } from '../utils.js?v=92';
+import { makeDataset } from '../components/time-series-chart.js?v=93';
+import { wattsToKw, wattsToKwPoints } from '../utils.js?v=93';
 
 export function extendDatasetToNow(pts, value, now = Date.now()) {
   if (value === null || value === undefined) return;

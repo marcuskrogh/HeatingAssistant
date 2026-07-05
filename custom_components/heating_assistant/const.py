@@ -633,6 +633,9 @@ ESTIMATION_HISTORY_SIZE = 20
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 #: Service name for runtime comfort-schedule suspend/resume
 SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
+#: Service names for per-room climate control from platform entities / dashboard
+SERVICE_SET_ROOM_SETPOINT = "set_room_setpoint"
+SERVICE_SET_ROOM_ENABLED = "set_room_enabled"
 #: entry.data key that stores the latest persisted estimation snapshot so that
 #: estimated parameters survive a full Home Assistant restart.
 CONF_ESTIMATED_PARAMS = "estimated_params"

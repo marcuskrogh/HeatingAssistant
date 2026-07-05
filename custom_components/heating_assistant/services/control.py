@@ -13,8 +13,23 @@ from ..const import (
     CONF_ROOMS,
     DOMAIN,
     SERVICE_SET_SCHEDULE_ENABLED,
+    SERVICE_SET_ROOM_ENABLED,
+    SERVICE_SET_ROOM_SETPOINT,
 )
 from .context import get_coordinator
+
+# Keep in sync with climate.MIN_TEMP (frost-protection floor).
+_FROST_PROTECTION_FLOOR = 5.0
+
+
+def _resolve_room_name(coordinator, room_name: str) -> str:
+    """Resolve a frontend slug or exact name to the canonical configured room."""
+    from ..naming import slugify as _slugify
+
+    for name in coordinator.model.room_names:
+        if name == room_name or _slugify(name) == room_name:
+            return name
+    raise ValueError(f"Room '{room_name}' not found in configuration")
 
 
 async def handle_set_schedule_enabled(hass: HomeAssistant, call: ServiceCall) -> None:
@@ -108,23 +123,40 @@ async def handle_set_room_comfort_offset(hass: HomeAssistant, call: ServiceCall)
     canonical room name from the slug sent by the frontend, applies the
     change to the live model and persists it (mirroring set_room_setpoint).
     """
-    from ..naming import slugify as _slugify
-
     coordinator = get_coordinator(hass)
     room_name: str = call.data["room_name"]
     comfort_offset: float = call.data["comfort_offset"]
 
-    canonical_name: str | None = None
-    for name in coordinator.model.room_names:
-        if name == room_name or _slugify(name) == room_name:
-            canonical_name = name
-            break
-
-    if canonical_name is None:
-        raise ValueError(f"Room '{room_name}' not found in configuration")
-
+    canonical_name = _resolve_room_name(coordinator, room_name)
     coordinator.set_room_comfort_offset(canonical_name, comfort_offset)
     coordinator.async_update_listeners()
+
+
+async def handle_set_room_setpoint(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Set the target temperature for a single room."""
+    coordinator = get_coordinator(hass)
+    room_name: str = call.data["room_name"]
+    setpoint: float = call.data["setpoint"]
+
+    canonical_name = _resolve_room_name(coordinator, room_name)
+    coordinator.set_room_setpoint(canonical_name, float(setpoint))
+    coordinator.async_update_listeners()
+
+
+async def handle_set_room_enabled(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Enable or disable heating control for a single room."""
+    from ..const import DEFAULT_SETPOINT
+
+    coordinator = get_coordinator(hass)
+    room_name: str = call.data["room_name"]
+    enabled: bool = call.data["enabled"]
+
+    canonical_name = _resolve_room_name(coordinator, room_name)
+    coordinator.set_room_enabled(canonical_name, enabled)
+    if enabled and call.data.get("restore_default_setpoint"):
+        if coordinator.get_room_setpoint(canonical_name) <= _FROST_PROTECTION_FLOOR:
+            coordinator.set_room_setpoint(canonical_name, DEFAULT_SETPOINT)
+    await coordinator.async_request_refresh()
 
 
 def register_control_services(hass: HomeAssistant) -> None:
@@ -185,6 +217,31 @@ def register_control_services(hass: HomeAssistant) -> None:
                 vol.Required("comfort_offset"): vol.All(
                     vol.Coerce(float), vol.Range(min=0.1)
                 ),
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_ROOM_SETPOINT,
+        lambda call: handle_set_room_setpoint(hass, call),
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("setpoint"): vol.Coerce(float),
+            }
+        ),
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_ROOM_ENABLED,
+        lambda call: handle_set_room_enabled(hass, call),
+        schema=vol.Schema(
+            {
+                vol.Required("room_name"): cv.string,
+                vol.Required("enabled"): cv.boolean,
+                vol.Optional("restore_default_setpoint", default=False): cv.boolean,
             }
         ),
     )
