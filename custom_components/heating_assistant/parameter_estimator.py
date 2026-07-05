@@ -47,7 +47,6 @@ visualisation, but is no longer the production optimisation objective.
 
 from __future__ import annotations
 
-import copy
 import logging
 import math
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -78,7 +77,6 @@ from .estimation.constants import (
     _Q_INT_LO,
     _R_AW_HI,
     _R_AW_LO,
-    _SPLIT_PRIOR_STD,
     _T_WALL_HI,
     _T_WALL_LO,
     _T_WALL_MIN_LAM,
@@ -93,9 +91,26 @@ from .estimation.identifiability import (
     _check_identifiable_solar,
     _identifiable_split_rooms,
 )
+from .estimation.model_build import (
+    _build_parametric_system,
+    _build_rooms_from_theta,
+    _build_system,
+    _theta_model_quantities,
+)
+from .estimation.regularization import (
+    _compute_regularization,
+    _compute_regularization_gradient,
+    _compute_regularization_theta,
+)
 from .estimation.theta_layout import _ThetaLayout
+from .estimation.warmstart import (
+    _initial_state_and_covariance,
+    _physics_informed_theta,
+    _pin_locked_params,
+    _update_wall_init_prior_from_history,
+)
 from .heat_sources import HeatSource
-from .thermal_model import HouseModel, Room
+from .thermal_model import Room
 from mbc.control import IpoptNLPBackend, NLPProblem, ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 
@@ -1075,36 +1090,7 @@ class KalmanMLEstimator:
         self,
         history: List[Dict[str, Any]],
     ) -> None:
-        """Set the wall-init MAP prior from the first record's air / outdoor temps.
-
-        Uses a (T_a, T_out) midpoint blend — a better default than T_wall = T_air
-        after long envelope transients — and falls back to measured air when
-        outdoor temperature is unavailable.
-        """
-        if not history:
-            return
-        first = history[0]
-        first_y = first.get("y", [])
-        t_out: Optional[float] = None
-        try:
-            t_out = float(first.get("d_outdoor"))
-        except (TypeError, ValueError):
-            t_out = None
-        for i in range(self._n):
-            t_air: Optional[float] = None
-            if i < len(first_y):
-                try:
-                    t_air = float(first_y[i])
-                except (ValueError, TypeError):
-                    t_air = None
-            if t_air is None:
-                continue
-            if t_out is not None and np.isfinite(t_out):
-                # Midpoint between air and outdoor is a robust cold-start for
-                # the hidden envelope when no filter history is available.
-                self._t_wall_init_prior[i] = 0.5 * (t_air + t_out)
-            else:
-                self._t_wall_init_prior[i] = t_air
+        _update_wall_init_prior_from_history(self, history)
 
     def _pin_locked_params(
         self,
@@ -1116,93 +1102,10 @@ class KalmanMLEstimator:
         identifiable_solar: List[int],
         identifiable_splits: List[int],
     ) -> None:
-        """Pin locked parameters to their fixed values by setting lb = ub.
-
-        Modifies *bounds* and *theta_prior* in-place so the optimiser treats
-        each locked parameter as a constant rather than a decision variable.
-        Values outside the physical bounds are silently clamped.
-        """
-        for param_key, room_or_src_dict in locked_params.items():
-            if not isinstance(room_or_src_dict, dict):
-                continue
-
-            if param_key == "heater_scales":
-                for src_name, value in room_or_src_dict.items():
-                    src_idx = next(
-                        (j for j, s in enumerate(self._sources)
-                         if s.name == src_name),
-                        None,
-                    )
-                    if src_idx is None or src_idx not in identifiable_sources:
-                        continue
-                    k = identifiable_sources.index(src_idx)
-                    log_val = math.log(max(float(value), 1e-3))
-                    log_val = max(_LOG_ALPHA_LO, min(_LOG_ALPHA_HI, log_val))
-                    idx = layout.idx_log_alpha[0] + k
-                    bounds[idx] = (log_val, log_val)
-                    theta_prior[idx] = log_val
-                continue
-
-            for room_name, value in room_or_src_dict.items():
-                if room_name not in self._room_names:
-                    continue
-                i = self._room_names.index(room_name)
-
-                if param_key == "thermal_mass":
-                    log_val = math.log(max(float(value), 1.0))
-                    log_val = max(_LOG_MASS_LO, min(_LOG_MASS_HI, log_val))
-                    idx = layout.idx_log_mass[0] + i
-                    bounds[idx] = (log_val, log_val)
-                    theta_prior[idx] = log_val
-
-                elif param_key == "r_external":
-                    log_val = math.log(max(float(value), 1e-9))
-                    log_val = max(_LOG_R_LO, min(_LOG_R_HI, log_val))
-                    idx = layout.idx_log_r[0] + i
-                    bounds[idx] = (log_val, log_val)
-                    theta_prior[idx] = log_val
-
-                elif param_key == "internal_gain":
-                    val = max(_Q_INT_LO, min(_Q_INT_HI, float(value)))
-                    idx = layout.idx_q_int[0] + i
-                    bounds[idx] = (val, val)
-                    theta_prior[idx] = val
-
-                elif param_key == "solar_scale":
-                    if i not in identifiable_solar:
-                        continue
-                    k = identifiable_solar.index(i)
-                    log_val = math.log(max(float(value), 1e-3))
-                    log_val = max(_LOG_SOLAR_LO, min(_LOG_SOLAR_HI, log_val))
-                    idx = layout.idx_log_solar[0] + k
-                    bounds[idx] = (log_val, log_val)
-                    theta_prior[idx] = log_val
-
-                elif param_key == "c_air_fraction":
-                    if i not in identifiable_splits:
-                        continue
-                    k = identifiable_splits.index(i)
-                    val = max(_C_AIR_LO, min(_C_AIR_HI, float(value)))
-                    idx = layout.idx_c_air[0] + k
-                    bounds[idx] = (val, val)
-                    theta_prior[idx] = val
-
-                elif param_key == "r_aw_fraction":
-                    if i not in identifiable_splits:
-                        continue
-                    k = identifiable_splits.index(i)
-                    val = max(_R_AW_LO, min(_R_AW_HI, float(value)))
-                    idx = layout.idx_r_aw[0] + k
-                    bounds[idx] = (val, val)
-                    theta_prior[idx] = val
-
-                elif param_key == "t_wall_initial":
-                    val = max(_T_WALL_LO, min(_T_WALL_HI, float(value)))
-                    # Lock ALL dataset-segment wall temps to the same value.
-                    for seg in range(layout.n_wall_segs):
-                        idx = layout.idx_t_wall_init[0] + seg * layout.n_rooms + i
-                        bounds[idx] = (val, val)
-                        theta_prior[idx] = val
+        _pin_locked_params(
+            self, bounds, theta_prior, locked_params, layout,
+            identifiable_sources, identifiable_solar, identifiable_splits,
+        )
 
     def _physics_informed_theta(
         self,
@@ -1213,236 +1116,16 @@ class KalmanMLEstimator:
         ub: np.ndarray,
         nominal_dt: Optional[float] = None,
     ) -> Optional[np.ndarray]:
-        """Coarse, data-driven starting point for the multi-start optimiser.
-
-        Performs an independent ordinary-least-squares fit of the lumped
-        1R1C energy balance for each room
-
-            C_i (dT_i/dt) = g_ext_i (T_out − T_i) + Q_i + q_int_i
-
-        where ``Q_i`` is the known heat injection (heaters at the prior
-        power-scale + solar) for room *i*.  Treating the inter-room coupling
-        as part of the residual, each room yields a linear system in the
-        unknowns ``[C_i, g_ext_i, q_int_i]`` solved by least squares over all
-        consecutive sample pairs with a near-nominal time step.
-
-        Only rooms with a well-conditioned fit and physically sensible
-        (positive, in-bounds) ``C`` and ``g_ext`` adopt the data-driven
-        values; every other room — and the heater-scale / inter-room-R
-        blocks — keeps its prior.  Returns ``None`` when no room could be
-        fit, so the caller simply falls back to the prior start.
-
-        The result is a *starting point* only; the full nonlinear multi-step
-        objective still refines it, so the coarseness of this fit (no
-        inter-room term, explicit-Euler derivative) is acceptable.
-        """
-        n = self._n
-        if len(std_history) < self._min_history_steps:
-            return None
-        dt_nom = float(nominal_dt) if nominal_dt else float(self._dt)
-
-        # Per-room accumulators for the design matrix rows.
-        rows: List[List[List[float]]] = [[] for _ in range(n)]
-        targets: List[List[float]] = [[] for _ in range(n)]
-
-        # Map each source to its room index and a thermal-power callable.
-        src_room = [self._room_names.index(s.room) if s.room in self._room_names
-                    else -1 for s in self._sources]
-
-        for k in range(len(std_history) - 1):
-            rec = std_history[k]
-            rec_next = std_history[k + 1]
-            try:
-                T_k = np.asarray(rec["ym"], dtype=float)
-                T_next = np.asarray(rec_next["ym"], dtype=float)
-                u_k = np.asarray(rec["u"], dtype=float)
-                d_k = np.asarray(rec["d"], dtype=float)
-            except (KeyError, TypeError, ValueError):
-                continue
-            if T_k.size < n or T_next.size < n:
-                continue
-
-            t_k = rec.get("t")
-            t_next = rec_next.get("t")
-            if t_k is not None and t_next is not None:
-                dt = float(t_next) - float(t_k)
-                # Skip pairs straddling a gap (controller restart / pause).
-                if not (0.5 * dt_nom <= dt <= 1.5 * dt_nom):
-                    continue
-            else:
-                dt = dt_nom
-
-            T_out = float(d_k[0]) if d_k.size > 0 else 0.0
-
-            # Known heat injection per room: heaters (prior scale) + solar.
-            Q = np.zeros(n)
-            for j, src in enumerate(self._sources):
-                i = src_room[j]
-                if i < 0:
-                    continue
-                u_s = float(u_k[j]) if j < u_k.size else 0.0
-                try:
-                    Q[i] += float(src.thermal_power(max(0.0, u_s), T_out))
-                except Exception:
-                    pass
-            for i in range(n):
-                if 1 + i < d_k.size:
-                    Q[i] += float(d_k[1 + i])  # solar gain slot
-
-            for i in range(n):
-                dTdt = (float(T_next[i]) - float(T_k[i])) / dt
-                # C·dTdt − g·(T_out − T) − q_int = Q   →  unknown [C, g, q_int]
-                rows[i].append([dTdt, -(T_out - float(T_k[i])), -1.0])
-                targets[i].append(float(Q[i]))
-
-        theta = theta_prior.copy()
-        any_fit = False
-        for i in range(n):
-            A = np.asarray(rows[i], dtype=float)
-            b = np.asarray(targets[i], dtype=float)
-            if A.shape[0] < max(self._min_history_steps // 2, 5):
-                continue
-            # Require the regressors to actually vary, else the fit is
-            # ill-posed (e.g. constant temperature / no excitation).
-            if np.all(np.std(A, axis=0) < 1e-9):
-                continue
-            try:
-                sol, _res, rank, _sv = np.linalg.lstsq(A, b, rcond=None)
-            except np.linalg.LinAlgError:
-                continue
-            if rank < 3 or not np.all(np.isfinite(sol)):
-                continue
-            C_i, g_i, q_i = float(sol[0]), float(sol[1]), float(sol[2])
-            if not (C_i > 0.0 and g_i > 0.0):
-                continue  # unphysical — keep the prior for this room
-            log_mass = float(np.clip(math.log(C_i), _LOG_MASS_LO, _LOG_MASS_HI))
-            log_r = float(np.clip(math.log(1.0 / g_i), _LOG_R_LO, _LOG_R_HI))
-            q_int = float(np.clip(q_i, _Q_INT_LO, _Q_INT_HI))
-            theta[i] = log_mass
-            theta[n + i] = log_r
-            theta[2 * n + i] = q_int
-            any_fit = True
-
-        # Coarse heater-scale warm start from the same energy balance when
-        # the layout includes α and the source duty cycle varies.
-        if any_fit and layout.identifiable_sources:
-            a0, b0 = layout.idx_log_alpha
-            for k_la, s_idx in enumerate(layout.identifiable_sources):
-                src = self._sources[s_idx]
-                room_i = (
-                    self._room_names.index(src.room)
-                    if src.room in self._room_names else -1
-                )
-                if room_i < 0:
-                    continue
-                C_i = math.exp(theta[room_i])
-                g_i = math.exp(-theta[n + room_i])
-                q_i = float(theta[2 * n + room_i])
-                alpha_samples: List[float] = []
-                for k in range(len(std_history) - 1):
-                    rec = std_history[k]
-                    rec_next = std_history[k + 1]
-                    try:
-                        T_k = float(rec["ym"][room_i])
-                        T_next = float(rec_next["ym"][room_i])
-                        u_k = float(rec["u"][s_idx])
-                        d_k = np.asarray(rec["d"], dtype=float)
-                    except (KeyError, TypeError, ValueError, IndexError):
-                        continue
-                    if u_k < 0.08:
-                        continue
-                    t_k = rec.get("t")
-                    t_next = rec_next.get("t")
-                    dt_step = (
-                        float(t_next) - float(t_k)
-                        if t_k is not None and t_next is not None
-                        else float(nominal_dt) if nominal_dt else self._dt
-                    )
-                    if dt_step <= 0:
-                        continue
-                    T_out = float(d_k[0]) if d_k.size > 0 else 0.0
-                    try:
-                        Q_rated = float(src.thermal_power(max(0.0, u_k), T_out))
-                    except Exception:
-                        continue
-                    if Q_rated < 1.0:
-                        continue
-                    dTdt = (T_next - T_k) / dt_step
-                    residual_q = C_i * dTdt - g_i * (T_out - T_k) - q_i
-                    alpha_samples.append(residual_q / Q_rated)
-                if len(alpha_samples) >= 5:
-                    alpha_med = float(np.median(alpha_samples))
-                    if np.isfinite(alpha_med) and alpha_med > 0:
-                        log_a = float(
-                            np.clip(math.log(alpha_med), _LOG_ALPHA_LO, _LOG_ALPHA_HI)
-                        )
-                        theta[a0 + k_la] = log_a
-
-        if not any_fit:
-            return None
-        return np.clip(theta, lb, ub)
+        return _physics_informed_theta(
+            self, std_history, layout, theta_prior, lb, ub, nominal_dt,
+        )
 
     def _theta_model_quantities(
         self,
         layout: "_ThetaLayout",
         theta: np.ndarray,
     ) -> Dict[str, np.ndarray]:
-        """Per-room physical quantities implied by θ, for the sensitivity pass.
-
-        Mirrors the parametrisation in :meth:`Room.conductances` /
-        :meth:`_build_rooms_from_theta`: total mass and UA from the
-        log-space θ entries, split fractions and solar scales from the
-        gated θ entries (configured values for ungated rooms).
-        """
-        from .const import (  # noqa: PLC0415
-            MAX_INFILTRATION_FRACTION,
-            SOLAR_WALL_FRACTION,
-        )
-        (log_mass, log_r, _q_int, _t_wall_init, log_alpha, log_r_ij,
-         log_solar, c_air, r_aw) = layout.unpack(theta)
-        n = self._n
-
-        C_tot = np.exp(log_mass)
-        ua = np.exp(-log_r)
-
-        fc = self._c_air_prior_full.copy()
-        rf = self._r_aw_prior_full.copy()
-        for k, i in enumerate(layout.identifiable_splits):
-            fc[i] = float(np.clip(c_air[k], _C_AIR_LO, _C_AIR_HI))
-            rf[i] = float(np.clip(r_aw[k], _R_AW_LO, _R_AW_HI))
-        s = np.exp(self._log_solar_prior_full).copy()
-        for k, i in enumerate(layout.identifiable_solar):
-            s[i] = math.exp(float(np.clip(log_solar[k], _LOG_SOLAR_LO, _LOG_SOLAR_HI)))
-
-        f_inf = np.array([
-            float(np.clip(getattr(r, "infiltration_fraction", 0.0),
-                          0.0, MAX_INFILTRATION_FRACTION))
-            for r in self._rooms
-        ])
-        facade = np.array([
-            float(getattr(r, "facade_solar_share", 0.0))
-            * float(getattr(r, "facade_absorptance", 0.0))
-            for r in self._rooms
-        ])
-
-        C_a = fc * C_tot
-        C_w = (1.0 - fc) * C_tot
-        g_inf = f_inf * ua
-        g_cond = (1.0 - f_inf) * ua
-        g_aw = g_cond / rf
-        g_we = g_cond / (1.0 - rf)
-
-        heater_scales = np.ones(self._n_u)
-        for k_la, s_idx in enumerate(layout.identifiable_sources):
-            heater_scales[s_idx] = float(np.exp(log_alpha[k_la]))
-        g_ij_vec = np.exp(-log_r_ij) if len(log_r_ij) else np.array([])
-
-        return {
-            "C_a": C_a, "C_w": C_w, "fc": fc, "rf": rf, "s": s,
-            "g_inf": g_inf, "g_aw": g_aw, "g_we": g_we,
-            "facade": facade, "wall_frac": float(SOLAR_WALL_FRACTION),
-            "heater_scales": heater_scales, "g_ij": g_ij_vec,
-        }
+        return _theta_model_quantities(self, layout, theta)
 
     def _dfdtheta_step(
         self,
@@ -2145,70 +1828,9 @@ class KalmanMLEstimator:
         layout: "_ThetaLayout",
         identifiable_pairs: List[Tuple[int, int]],
     ) -> np.ndarray:
-        """
-        Return ∂reg/∂θ where reg(θ) is the Gaussian regularisation term
-        from :meth:`_compute_regularization_theta`.
-        """
-        (log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
-         log_solar, c_air, r_aw) = layout.unpack(theta)
-        lam = self._regularization
-        grad = np.zeros_like(theta)
-
-        a, b = layout.idx_log_mass
-        grad[a:b] = 2.0 * lam * (log_mass - self._log_mass_prior)
-
-        a, b = layout.idx_log_r
-        grad[a:b] = 2.0 * lam * (log_r - self._log_r_prior)
-
-        a, b = layout.idx_q_int
-        grad[a:b] = 2.0 * lam * (q_int - self._q_int_prior) / (100.0 ** 2)
-
-        lam_tw = max(lam, _T_WALL_MIN_LAM)
-        a, b = layout.idx_t_wall_init
-        all_t_wall = theta[a:b]
-        all_t_wall_prior = np.tile(self._t_wall_init_prior, layout.n_wall_segs)
-        grad[a:b] = (
-            2.0 * lam_tw * (all_t_wall - all_t_wall_prior)
-            / (_T_WALL_PRIOR_STD ** 2)
+        return _compute_regularization_gradient(
+            self, theta, layout, identifiable_pairs,
         )
-
-        a, b = layout.idx_log_alpha
-        if a < b:
-            la_prior = np.array(
-                [self._log_alpha_prior_full[s] for s in layout.identifiable_sources]
-            )
-            grad[a:b] = 2.0 * lam * self._alpha_prior_weight * (log_alpha - la_prior)
-
-        a, b = layout.idx_log_r_ij
-        if a < b:
-            r_priors = np.array([
-                self._connection_r_priors[self._connection_pairs.index(p)]
-                for p in identifiable_pairs
-            ])
-            grad[a:b] = 2.0 * lam * (log_r_ij - r_priors)
-
-        a, b = layout.idx_log_solar
-        if a < b:
-            s_prior = np.array([
-                self._log_solar_prior_full[i] for i in layout.identifiable_solar
-            ])
-            grad[a:b] = 2.0 * lam * (log_solar - s_prior)
-
-        a, b = layout.idx_c_air
-        if a < b:
-            ca_prior = np.array([
-                self._c_air_prior_full[i] for i in layout.identifiable_splits
-            ])
-            grad[a:b] = 2.0 * lam * (c_air - ca_prior) / (_SPLIT_PRIOR_STD ** 2)
-
-        a, b = layout.idx_r_aw
-        if a < b:
-            ra_prior = np.array([
-                self._r_aw_prior_full[i] for i in layout.identifiable_splits
-            ])
-            grad[a:b] = 2.0 * lam * (r_aw - ra_prior) / (_SPLIT_PRIOR_STD ** 2)
-
-        return grad
 
     def _build_rooms_from_theta(
         self,
@@ -2220,65 +1842,10 @@ class KalmanMLEstimator:
         c_air: Optional[np.ndarray] = None,
         r_aw: Optional[np.ndarray] = None,
     ) -> List[Room]:
-        """Construct Room objects with θ-dependent parameters baked in.
-
-        Gated parameters (inter-room R, solar scale, envelope splits) take
-        their θ values for the identified rooms/pairs and the configured
-        values elsewhere.  ``internal_gain`` stays 0 — q_int is applied
-        through the θ parameter vector in ``HouseThermalSDE.f``.
-        """
-        room_idx = {r.name: k for k, r in enumerate(self._rooms)}
-
-        solar_scales = np.exp(self._log_solar_prior_full).copy()
-        if log_solar is not None and len(log_solar):
-            for k, i in enumerate(layout.identifiable_solar):
-                solar_scales[i] = math.exp(float(np.clip(
-                    log_solar[k], _LOG_SOLAR_LO, _LOG_SOLAR_HI,
-                )))
-        c_air_full = self._c_air_prior_full.copy()
-        r_aw_full = self._r_aw_prior_full.copy()
-        if c_air is not None and len(c_air):
-            for k, i in enumerate(layout.identifiable_splits):
-                c_air_full[i] = float(np.clip(c_air[k], _C_AIR_LO, _C_AIR_HI))
-                r_aw_full[i] = float(np.clip(r_aw[k], _R_AW_LO, _R_AW_HI))
-
-        new_rooms = []
-        for i, r in enumerate(self._rooms):
-            new_conns = copy.deepcopy(r.connections)
-            if log_r_ij_map:
-                for conn in new_conns:
-                    j = room_idx.get(conn.connected_room)
-                    if j is not None:
-                        pair = (min(i, j), max(i, j))
-                        if pair in log_r_ij_map:
-                            conn.r_value = float(math.exp(
-                                float(np.clip(
-                                    log_r_ij_map[pair],
-                                    _LOG_R_IJ_LO, _LOG_R_IJ_HI,
-                                ))
-                            ))
-            new_rooms.append(Room(
-                name=r.name,
-                thermal_mass=float(math.exp(log_mass[i])),
-                r_external=float(math.exp(log_r[i])),
-                connections=new_conns,
-                windows=r.windows,
-                temperature=r.temperature,
-                setpoint=r.setpoint,
-                # Internal gain is applied via the θ parameter vector during
-                # the forward pass; keep the rebuilt model neutral.
-                internal_gain=0.0,
-                solar_scale=float(solar_scales[i]),
-                c_air_fraction=float(c_air_full[i]),
-                r_aw_fraction=float(r_aw_full[i]),
-                # Configured typology presets — not identified.
-                infiltration_fraction=r.infiltration_fraction,
-                sky_radiative_ua=r.sky_radiative_ua,
-                facade_absorptance=r.facade_absorptance,
-                facade_solar_share=r.facade_solar_share,
-                thermal_bridge_psi_l=r.thermal_bridge_psi_l,
-            ))
-        return new_rooms
+        return _build_rooms_from_theta(
+            self, layout, log_mass, log_r, log_r_ij_map,
+            log_solar=log_solar, c_air=c_air, r_aw=r_aw,
+        )
 
     def _build_system(
         self,
@@ -2286,72 +1853,14 @@ class KalmanMLEstimator:
         log_rs: np.ndarray,
         log_r_ij: Optional[Dict[Tuple[int, int], float]] = None,
     ) -> Optional[HouseThermalSystem]:
-        """Build a :class:`HouseThermalSystem` for the supplied parameters.
-
-        Internal-gain and heater-scale parameters are *not* baked into the
-        rebuilt system; they are applied externally during the Kalman
-        forward pass.  Solar scales and envelope splits stay at their
-        configured values (this entry point predates those parameters and
-        is kept for callers that only vary C / R / R_ij).
-        """
-        try:
-            layout = _ThetaLayout(self._n, [], [])
-            new_rooms = self._build_rooms_from_theta(
-                layout, log_masses, log_rs, log_r_ij,
-            )
-            model = HouseModel(new_rooms)
-            return HouseThermalSystem(model, self._sources, self._dt)
-        except Exception as exc:
-            _LOGGER.debug("Failed to build thermal system: %s", exc, exc_info=True)
-            return None
+        return _build_system(self, log_masses, log_rs, log_r_ij)
 
     def _build_parametric_system(
         self,
         layout: _ThetaLayout,
         theta: np.ndarray,
     ) -> Optional[HouseThermalSystem]:
-        """
-        Build a parametric HouseThermalSDE from theta for estimation.
-
-        All structural parameters (C, R_ext, R_ij, solar scale, envelope
-        splits) are baked into the model matrices; q_int and the heater
-        scales remain in θ and are applied inside ``HouseThermalSDE.f``.
-        """
-        try:
-            (log_mass, log_r, _q_int, _t_wall_init, _log_alpha, log_r_ij,
-             log_solar, c_air, r_aw) = layout.unpack(theta)
-
-            log_r_ij_map: Optional[Dict[Tuple[int, int], float]] = None
-            if len(log_r_ij):
-                log_r_ij_map = {
-                    pair: float(log_r_ij[k])
-                    for k, pair in enumerate(layout.identifiable_pairs)
-                }
-
-            new_rooms = self._build_rooms_from_theta(
-                layout, log_mass, log_r, log_r_ij_map,
-                log_solar=log_solar, c_air=c_air, r_aw=r_aw,
-            )
-            model = HouseModel(new_rooms)
-            # HouseThermalSystem._get_heater_scales expects the OLD layout:
-            #   [log_mass(n), log_r(n), q_int(n), log_alpha(*), ...]
-            # Our _ThetaLayout inserts t_wall_init at [3n, 4n), so we strip
-            # that block before handing theta to the model, ensuring the
-            # hardcoded offset 3*n lands on log_alpha as expected.
-            a_tw, b_tw = layout.idx_t_wall_init
-            theta_for_model = np.concatenate([theta[:a_tw], theta[b_tw:]])
-            return HouseThermalSystem(
-                model, self._sources, self._dt,
-                sigma_w=math.sqrt(self._Q_var),
-                sigma_v=math.sqrt(self._R_var),
-                augment_offsets=False,
-                n_int_steps=10,
-                identifiable_sources=layout.identifiable_sources,
-                theta=theta_for_model,
-            )
-        except Exception as exc:
-            _LOGGER.debug("Failed to build parametric system: %s", exc, exc_info=True)
-            return None
+        return _build_parametric_system(self, layout, theta)
 
     def _convert_history_std(
         self,
@@ -2376,88 +1885,17 @@ class KalmanMLEstimator:
         identifiable_pairs: List[Tuple[int, int]],
         identifiable_sources: Optional[List[int]] = None,
     ) -> float:
-        """Gaussian regularisation toward priors for all parameters.
-
-        Internal-gain and α priors use unit-scale weights; the linear-space
-        q_int penalty is divided by 100² so the prior std corresponds to
-        ~100 W rather than 1 W.
-        """
-        if identifiable_sources is not None and len(log_alpha):
-            log_alpha_prior = np.array(
-                [self._log_alpha_prior_full[s] for s in identifiable_sources]
-            )
-        else:
-            log_alpha_prior = np.array([]) if not len(log_alpha) else np.array(
-                [self._log_alpha_prior_full[s] for s in range(len(log_alpha))]
-            )
-
-        r_ij_priors = np.array([
-            self._connection_r_priors[self._connection_pairs.index(p)]
-            for p in identifiable_pairs
-        ]) if identifiable_pairs else np.array([])
-
-        reg = self._regularization * (
-            float(np.sum((log_mass - self._log_mass_prior) ** 2))
-            + float(np.sum((log_r - self._log_r_prior) ** 2))
-            + float(np.sum((q_int - self._q_int_prior) ** 2)) / (100.0 ** 2)
+        return _compute_regularization(
+            self, log_mass, log_r, q_int, log_alpha, log_r_ij,
+            identifiable_pairs, identifiable_sources,
         )
-        if len(log_alpha):
-            reg += self._regularization * self._alpha_prior_weight * float(
-                np.sum((log_alpha - log_alpha_prior) ** 2)
-            )
-        if len(log_r_ij):
-            reg += self._regularization * float(
-                np.sum((log_r_ij - r_ij_priors) ** 2)
-            )
-        return reg
 
     def _compute_regularization_theta(
         self,
         theta: np.ndarray,
         layout: "_ThetaLayout",
     ) -> float:
-        """Gaussian regularisation toward priors for the full θ vector.
-
-        Wraps :meth:`_compute_regularization` (the always-present blocks)
-        and adds the gated blocks: unit-scale priors for the log solar
-        scale, and tight ``_SPLIT_PRIOR_STD`` priors for the linear-space
-        envelope split fractions.
-        """
-        (log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
-         log_solar, c_air, r_aw) = layout.unpack(theta)
-        reg = self._compute_regularization(
-            log_mass, log_r, q_int, log_alpha, log_r_ij,
-            layout.identifiable_pairs, layout.identifiable_sources,
-        )
-        lam = self._regularization
-        lam_tw = max(lam, _T_WALL_MIN_LAM)
-        # Wall initial temperatures (all segments): Gaussian prior toward
-        # first air temp.  Uses lam_tw ≥ _T_WALL_MIN_LAM so even under the
-        # default weak regularisation the parameters stay in a physically
-        # plausible range.
-        a, b = layout.idx_t_wall_init
-        all_t_wall = theta[a:b]
-        all_t_wall_prior = np.tile(self._t_wall_init_prior, layout.n_wall_segs)
-        reg += lam_tw * float(
-            np.sum((all_t_wall - all_t_wall_prior) ** 2)
-        ) / (_T_WALL_PRIOR_STD ** 2)
-        if len(log_solar):
-            prior = np.array([
-                self._log_solar_prior_full[i] for i in layout.identifiable_solar
-            ])
-            reg += lam * float(np.sum((log_solar - prior) ** 2))
-        if len(c_air):
-            ca_prior = np.array([
-                self._c_air_prior_full[i] for i in layout.identifiable_splits
-            ])
-            ra_prior = np.array([
-                self._r_aw_prior_full[i] for i in layout.identifiable_splits
-            ])
-            reg += lam * float(
-                np.sum((c_air - ca_prior) ** 2)
-                + np.sum((r_aw - ra_prior) ** 2)
-            ) / (_SPLIT_PRIOR_STD ** 2)
-        return reg
+        return _compute_regularization_theta(self, theta, layout)
 
     def _initial_state_and_covariance(
         self,
@@ -2466,51 +1904,6 @@ class KalmanMLEstimator:
         u: Optional[np.ndarray] = None,
         d: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Build x0/P0 matching system dimensions (supports augmented states).
-
-        When the first record's control ``u`` / disturbance ``d`` are supplied
-        the state is seeded via the system's ``initial_state_from_measurement``
-        helper — the single source of truth shared with the open-loop
-        diagnostic and the simulation objective — so the wall nodes start at
-        the (T_a, T_out) steady state and the emitter-lag states are
-        warm-started to the commanded fraction.  Without ``u``/``d`` (or for
-        legacy system objects) it falls back to seeding the wall block at the
-        air temperature; the latent states never start at 0.
-        """
-        nx = int(system.nx)
-        nym = int(system.nym)
-        n = self._n
-
-        x0: Optional[np.ndarray] = None
-        init_fn = getattr(system, "initial_state_from_measurement", None)
-        if callable(init_fn) and u is not None:
-            try:
-                x0 = np.asarray(
-                    init_fn(
-                        np.asarray(first_measurement, dtype=float),
-                        np.asarray(u, dtype=float),
-                        np.asarray(d, dtype=float) if d is not None else None,
-                    ),
-                    dtype=float,
-                )
-                if x0.shape[0] != nx or not np.all(np.isfinite(x0)):
-                    x0 = None
-            except Exception:
-                x0 = None
-
-        if x0 is None:
-            x0 = np.zeros(nx, dtype=float)
-            n_copy = min(nym, len(first_measurement), nx)
-            x0[:n_copy] = np.array(first_measurement[:n_copy], dtype=float)
-            # Wall block warm-starts at the air temperature; the emitter-lag
-            # block (and any further augmentation) stays at zero.
-            if nx >= 2 * n and n_copy >= n:
-                x0[n: 2 * n] = x0[:n]
-
-        P0 = np.eye(nx, dtype=float) * self._R_var * 10.0
-        if nx > nym:
-            # Latent states (wall nodes, emitter lags) are not directly
-            # observed at startup, so start them with higher uncertainty
-            # than the measured temperature components.
-            P0[nym:, nym:] *= 4.0
-        return x0, P0
+        return _initial_state_and_covariance(
+            self, system, first_measurement, u=u, d=d,
+        )
