@@ -30,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '94';
+  return '95';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -38,6 +38,24 @@ const PANEL_VERSION = (() => {
 // retries so the panel can never get permanently stuck requiring a manual page
 // reload.  Generous enough that a slow first-ever asset fetch is not interrupted.
 const BOOT_WATCHDOG_MS = 6000;
+
+// Page stylesheets are linked explicitly in the shadow root.  Do NOT load them
+// via @import inside industrial.css — that pattern is unreliable inside shadow
+// DOM (especially mobile Safari) and leaves climate/schedule cards unstyled.
+const PANEL_STYLESHEETS = [
+  'css/industrial.css',
+  'css/pages/tuning.css',
+  'css/pages/identification.css',
+  'css/pages/schedules.css',
+  'css/pages/climate-card.css',
+  'css/pages/configuration.css',
+];
+
+function panelStylesheetLinks(version) {
+  return PANEL_STYLESHEETS
+    .map((path) => `<link rel="stylesheet" href="${BASE_PATH}/${path}?v=${version}">`)
+    .join('\n      ');
+}
 
 const PANEL_PATH = '/ha-industrial';
 const PANEL_HASH_PREFIXES = ['overview', 'room', 'schedules', 'tuning', 'identification', 'config'];
@@ -300,7 +318,7 @@ class HaIndustrialPanel extends HTMLElement {
 
   _renderShell() {
     this.shadowRoot.innerHTML = `
-      <link rel="stylesheet" href="${BASE_PATH}/css/industrial.css?v=${PANEL_VERSION}">
+      ${panelStylesheetLinks(PANEL_VERSION)}
       <div class="shell">
         <div id="top-bar"></div>
         <nav class="panel-nav" id="panel-nav">

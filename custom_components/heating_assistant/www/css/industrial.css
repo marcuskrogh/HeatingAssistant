@@ -1065,16 +1065,9 @@
   color: var(--text-secondary);
 }
 
-/* See pages/tuning.css */
-/* See pages/identification.css */
-/* See pages/schedules.css */
-/* See pages/climate-card.css */
-/* Configuration page styles — see pages/configuration.css */
-@import url('./pages/tuning.css');
-@import url('./pages/identification.css');
-@import url('./pages/schedules.css');
-@import url('./pages/climate-card.css');
-@import url('./pages/configuration.css');
+/* Page stylesheets (tuning, identification, schedules, climate-card,
+   configuration) are linked explicitly from industrial-dashboard.js.  Avoid
+   @import here — it is unreliable inside the panel shadow root on mobile. */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    EXPERIMENT CARDS  — used in schedules detail page
