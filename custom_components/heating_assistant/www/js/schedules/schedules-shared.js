@@ -1,5 +1,5 @@
-import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=93';
-import { experimentStatusInfo } from '../experiment-utils.js?v=93';
+import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=94';
+import { experimentStatusInfo } from '../experiment-utils.js?v=94';
 
 export const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
