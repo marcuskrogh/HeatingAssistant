@@ -164,8 +164,6 @@ from ..const import (
     DOMAIN,
     ESTIMATION_HISTORY_SIZE,
     HISTORY_BUFFER_SIZE,
-    CLOUD_SMOOTHING_TAU_S,
-    RUNTIME_STATE_SAVE_DELAY_S,
     SOURCE_TYPE_ELECTRIC,
     SOURCE_TYPE_HEAT_PUMP,
     SOURCE_TYPE_GENERIC_THERMOSTAT,
@@ -214,7 +212,10 @@ from . import (
     disturbances,
     enablement,
     forecast_payload,
+    live_refresh,
+    runtime_state,
     schedule_control,
+    tuning_preview,
     window,
 )
 from .model_builders import build_heat_sources, build_house_model
@@ -252,13 +253,6 @@ _LOGGER = logging.getLogger(__name__)
 # obtained — i.e., the entity was never reachable since startup).
 # With the default 15-minute update interval this gives ~45 minutes of grace.
 _OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
-
-# Maximum number of EKF prediction steps to propagate when filling a stop/start
-# gap.  Beyond this limit the persisted state is still restored (better than a
-# cold start) but no forward propagation is attempted.  At a 15-minute update
-# interval this caps the gap at 4 days.
-_MAX_EKF_GAP_STEPS = 384
-
 
 class HeatingAssistantCoordinator(DataUpdateCoordinator):
     """
@@ -835,86 +829,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # Cloud-cover smoothing & runtime-state persistence
     # ------------------------------------------------------------------
     async def _ensure_runtime_state_loaded(self) -> None:
-        """Load persisted smoothed runtime weather state once, on first use.
-
-        Seeds the cloud-cover EMA from the value saved by the previous session
-        so the first cycle after a restart attenuates the solar model instead of
-        emitting an unattenuated clear-sky spike.
-        """
-        if self._runtime_state_loaded:
-            return
-        self._runtime_state_loaded = True
-        try:
-            data = await self._runtime_store.async_load()
-        except Exception:  # pragma: no cover - defensive; never block a cycle
-            data = None
-        if isinstance(data, dict):
-            if self._cloud_cover_filtered is None:
-                cc = data.get("cloud_cover_filtered")
-                if cc is not None:
-                    try:
-                        self._cloud_cover_filtered = max(0.0, min(1.0, float(cc)))
-                    except (TypeError, ValueError):
-                        pass
-            ekf_x_hat = data.get("ekf_x_hat")
-            ekf_P = data.get("ekf_P")
-            ekf_save_ts = data.get("ekf_save_ts")
-            ekf_u_prev = data.get("ekf_u_prev")
-            ekf_d_prev = data.get("ekf_d_prev")
-            if ekf_x_hat is not None and ekf_P is not None:
-                try:
-                    x_hat = np.array(ekf_x_hat, dtype=float)
-                    P_mat = np.array(ekf_P, dtype=float)
-                    save_ts = float(ekf_save_ts) if ekf_save_ts is not None else 0.0
-                    u_prev = (
-                        np.array(ekf_u_prev, dtype=float)
-                        if ekf_u_prev is not None else None
-                    )
-                    d_prev = (
-                        np.array(ekf_d_prev, dtype=float)
-                        if ekf_d_prev is not None else None
-                    )
-                    self._pending_ekf_state = (x_hat, P_mat, save_ts, u_prev, d_prev)
-                except (TypeError, ValueError):
-                    pass
+        await runtime_state.ensure_runtime_state_loaded(self)
 
     def _smooth_cloud_cover(self, cc_obs: Optional[float]) -> Optional[float]:
-        """Exponentially smooth the live cloud-cover observation.
-
-        Clouds change gradually, so the instantaneous weather reading is
-        low-pass filtered with a ``CLOUD_SMOOTHING_TAU_S`` time constant.  The
-        EMA is seeded on the first valid observation (no startup transient).
-        When the observation is missing (entity briefly unavailable) the last
-        filtered value is held rather than reverting to an unattenuated model.
-        """
-        self._cloud_cover_filtered = _weather.smooth_cloud_cover_step(
-            self._cloud_cover_filtered, cc_obs, self.dt, CLOUD_SMOOTHING_TAU_S
-        )
-        return self._cloud_cover_filtered
+        return runtime_state.smooth_cloud_cover(self, cc_obs)
 
     def _save_runtime_state(self) -> None:
-        """Persist cloud cover and EKF state (throttled) so they survive restarts."""
-        try:
-            def _snapshot() -> Dict[str, Any]:
-                payload: Dict[str, Any] = {
-                    "cloud_cover_filtered": self._cloud_cover_filtered,
-                }
-                try:
-                    import time as _time
-                    x_hat, P = self.controller.ekf_state
-                    u_prev, d_prev = self.controller.ekf_inputs
-                    payload["ekf_x_hat"] = x_hat.tolist()
-                    payload["ekf_P"] = P.tolist()
-                    payload["ekf_save_ts"] = _time.time()
-                    payload["ekf_u_prev"] = u_prev.tolist()
-                    payload["ekf_d_prev"] = d_prev.tolist()
-                except Exception:  # pragma: no cover - defensive
-                    pass
-                return payload
-
-            self._runtime_store.async_delay_save(_snapshot, RUNTIME_STATE_SAVE_DELAY_S)
-        except Exception:  # pragma: no cover - defensive; never block a cycle
-            pass
+        runtime_state.save_runtime_state(self)
 
     def _propagate_ekf_gap(
         self,
@@ -922,65 +843,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         u_prev: Optional[np.ndarray],
         d_prev: Optional[np.ndarray],
     ) -> None:
-        """Propagate the EKF forward from save_ts to now without measurement updates.
-
-        Fills the time gap that accumulates during a system stop or HA restart
-        so the restored state is consistent with the current wall-clock time.
-        The actuator signal for each gap step is chosen by priority:
-
-        1. Experiment excitation — if an identification experiment was scheduled
-           to run at that step it prescribes the exact actuator fraction.
-        2. Schedule off-period — rooms in an off period contribute u=0 for those
-           sources (heating was logically off, so propagating as if it were on
-           would bias the wall-temperature estimate).
-        3. Fallback — the last commanded actuator (u_prev) is used, which is the
-           best available proxy for what was actually delivered during the gap.
-
-        The disturbance (outdoor temp + solar gains) is held constant at the
-        last saved value (d_prev) since we have no measurements for the gap.
-        """
-        if save_ts <= 0.0:
-            return
-        import time as _time
-        now_ts = _time.time()
-        gap_s = now_ts - save_ts
-        if gap_s <= 0.0:
-            return
-        dt = float(self.dt)
-        n_gap = min(round(gap_s / dt), _MAX_EKF_GAP_STEPS)
-        if n_gap <= 0:
-            return
-
-        u_default = (
-            np.asarray(u_prev, dtype=float)
-            if u_prev is not None
-            else np.zeros(len(self.heat_sources), dtype=float)
-        )
-        d_arr = (
-            np.asarray(d_prev, dtype=float)
-            if d_prev is not None
-            else np.zeros(self._system_nd(), dtype=float)
-        )
-
-        try:
-            u_seq = self._build_gap_u_sequence(save_ts, n_gap, dt, u_default)
-            self.controller.propagate_ekf(u_seq, d_arr)
-            _LOGGER.debug(
-                "EKF gap propagation: %.0f s gap → %d steps (max %d)",
-                gap_s, n_gap, _MAX_EKF_GAP_STEPS,
-            )
-        except Exception:  # pragma: no cover - defensive; never block startup
-            _LOGGER.debug(
-                "EKF gap propagation failed; state restored without propagation",
-                exc_info=True,
-            )
+        runtime_state.propagate_ekf_gap(self, save_ts, u_prev, d_prev)
 
     def _system_nd(self) -> int:
-        """Return the disturbance dimension of the current controller model."""
-        try:
-            return self.controller._mpc._model.nd
-        except Exception:
-            return 1 + 2 * len(self.model.room_names)
+        return runtime_state.system_nd(self)
 
     def _build_gap_u_sequence(
         self,
@@ -989,47 +855,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         dt: float,
         u_default: np.ndarray,
     ) -> np.ndarray:
-        """Build per-step actuator commands for EKF gap propagation.
-
-        For each step k at time t_k = start_ts + k*dt:
-        - Uses experiment excitation fractions where an experiment was active.
-        - Uses u=0 for sources whose room was in an off-period (comfort schedule).
-        - Falls back to u_default everywhere else.
-        """
-        from ..dashboard import slugify as _slugify
-
-        n_sources = len(self.heat_sources)
-        u_seq = np.empty((n_steps, n_sources), dtype=float)
-        u_seq[:] = u_default  # broadcast default over all steps
-
-        manager = getattr(self, "experiment_manager", None)
-
-        for k in range(n_steps):
-            t_k = start_ts + k * dt
-
-            for i, src in enumerate(self.heat_sources):
-                room_slug = _slugify(src.room)
-                can_cool = bool(getattr(src, "can_cool", False))
-
-                # Priority 1: active experiment prescribes the exact fraction
-                if manager is not None:
-                    exp = manager.active_for_room(room_slug, t_k)
-                    if exp is not None:
-                        u_seq[k, i] = excitation_fraction(exp, t_k, can_cool=can_cool)
-                        continue
-
-                # Priority 2: comfort schedule off-period → zero input
-                room_name = src.room
-                schedule = self._room_schedule.get(room_name)
-                if schedule is not None and self._schedule_enabled.get(room_name, True):
-                    base_sp = self._base_setpoint.get(room_name, DEFAULT_SETPOINT)
-                    default_off = self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
-                    t_local = datetime.fromtimestamp(t_k)
-                    params = control_params_at(schedule, base_sp, t_local, default_off)
-                    if params is None:  # off period
-                        u_seq[k, i] = 0.0
-
-        return u_seq
+        return runtime_state.build_gap_u_sequence(
+            self, start_ts, n_steps, dt, u_default
+        )
 
     @property
     def estimated_params_snapshot(self) -> Optional[Dict[str, Any]]:
@@ -1421,124 +1249,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         plot_forecast_steps: Optional[int] = None,
         weather: Optional[Dict[str, Any]] = None,
     ) -> dict:
-        """Run a one-off MPC solve with proposed tuning parameters.
-
-        Does not persist or apply the overrides.  Returns the same forecast
-        payload shape as :meth:`build_forecast_payload` so the dashboard can
-        render room-view plots for every room from a single solve.
-        """
-        from ..controller import HeatingMPCController
-        from ..ground_temp import ground_temperature
-
-        overrides = dict(tuning_overrides or {})
-        weather = dict(weather or {})
-
-        outdoor_temp = self.outdoor_temp
-        if outdoor_temp is None:
-            outdoor_temp = self._last_valid_outdoor_temp
-        if outdoor_temp is None:
-            return {"error": "outdoor_temperature_unavailable"}
-
-        preview_horizon = int(overrides.get(CONF_HORIZON, self._horizon))
-        preview_dt = float(overrides.get(CONF_UPDATE_INTERVAL, self._update_interval_s))
-        comfort_override = overrides.get(CONF_COMFORT_OFFSET)
-
-        preview_ctrl = build_mpc_controller(
-            ControllerBuildConfig.from_coordinator(self, overrides=overrides)
-        )
-
-        if hasattr(self, "controller"):
-            try:
-                x_hat, P = self.controller.ekf_state
-                preview_ctrl.restore_ekf_state(x_hat, P)
-            except Exception:
-                _LOGGER.debug(
-                    "preview_tuning_forecast: could not copy EKF state",
-                    exc_info=True,
-                )
-
-        now = getattr(self, "now_utc", None) or datetime.now(tz=timezone.utc)
-        now_local = now.astimezone()
-
-        if comfort_override is not None:
-            saved_offsets = dict(self._room_comfort_offset)
-            try:
-                preview_comfort = float(comfort_override)
-                for room_name in self._room_comfort_offset:
-                    self._room_comfort_offset[room_name] = preview_comfort
-                preview_traj = self._compute_control_trajectory(
-                    now_local, preview_horizon, preview_dt
-                )
-            finally:
-                self._room_comfort_offset = saved_offsets
-        else:
-            preview_traj = self._compute_control_trajectory(
-                now_local, preview_horizon, preview_dt
-            )
-
-        disabled_src_names = {
-            src.name
-            for src in self.heat_sources
-            if not self.is_room_enabled(src.room)
-            or self.is_window_override_active(src.room)
-        }
-        experiment_clamps = (
-            self._build_experiment_clamps(now) if self._system_enabled else {}
-        )
-
-        cloud_cover_now = weather.get("cloud_cover_now")
-        cloud_forecast = weather.get("cloud_forecast")
-        ghi_now = weather.get("ghi_now")
-        ghi_forecast = weather.get("ghi_forecast")
-        wind_forecast = weather.get("wind_forecast")
-
-        if hasattr(preview_ctrl, "set_wind_speed"):
-            preview_ctrl.set_wind_speed(self._read_wind_speed_now())
-        if hasattr(preview_ctrl, "set_cloud_cover"):
-            preview_ctrl.set_cloud_cover(cloud_cover_now)
-        if hasattr(preview_ctrl, "set_ground_temp"):
-            preview_ctrl.set_ground_temp(ground_temperature(now))
-        if hasattr(preview_ctrl, "set_room_process_noise_covariance_scales"):
-            q_scale = {
-                room_name: (
-                    self._window_open_q_inflation
-                    if self.is_window_override_active(room_name)
-                    else 1.0
-                )
-                for room_name in self.model.room_names
-            }
-            preview_ctrl.set_room_process_noise_covariance_scales(q_scale)
-
-        outdoor_fc = list(self.outdoor_forecast or [])
-        price_fc = list(self.price_forecast or [])
-
-        preview_ctrl.compute(
-            outdoor_temp=outdoor_temp,
-            solar_gains=self.solar_gains,
-            now=now,
-            outdoor_forecast=outdoor_fc if outdoor_fc else None,
-            cloud_forecast=cloud_forecast,
-            cloud_cover_now=cloud_cover_now,
-            ghi_forecast=ghi_forecast,
-            ghi_now=ghi_now,
-            wind_forecast=wind_forecast,
-            disabled_sources=disabled_src_names or None,
-            control_trajectory=preview_traj,
-            price_forecast=price_fc if price_fc else None,
-            input_clamps=experiment_clamps or None,
-            run_optimization=True,
-        )
-
-        return self.build_forecast_payload(
-            plot_forecast_steps=plot_forecast_steps,
-            predictions=preview_ctrl.predictions,
-            linearised_predictions=preview_ctrl.linearised_predictions,
-            heating_schedule=preview_ctrl.heating_schedule,
-            outdoor_forecast=preview_ctrl.outdoor_forecast,
-            solar_forecast=preview_ctrl.solar_forecast,
-            price_forecast=preview_ctrl.price_forecast or price_fc,
-            control_trajectory=preview_traj,
-            step_dt=preview_dt,
+        return tuning_preview.preview_tuning_forecast(
+            self, tuning_overrides, plot_forecast_steps, weather
         )
 
     def reset_estimated_parameters(self) -> None:
@@ -2089,15 +1801,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             # gap respects experiment prescriptions and schedule off-periods
             # (timing unification) rather than blindly using the last command.
             if self._pending_ekf_state is not None:
-                x_hat, P, save_ts, u_prev, d_prev = self._pending_ekf_state
-                self._pending_ekf_state = None
-                if self.controller.restore_ekf_state(x_hat, P):
-                    self._propagate_ekf_gap(save_ts, u_prev, d_prev)
-                else:
-                    _LOGGER.debug(
-                        "Persisted EKF state has incompatible dimensions — "
-                        "starting from cold initial conditions"
-                    )
+                runtime_state.restore_pending_ekf_state(self)
             # Low-pass the live cloud cover so the solar attenuation is
             # continuous and robust to the weather entity being briefly
             # unavailable right after a restart (which previously produced an
@@ -2649,115 +2353,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         actuation.set_source_power(self, src, frac, outdoor_temp)
 
     def _refresh_live_state(self) -> Optional[float]:
-        """Re-read live inputs and recompute cheap visualisation state.
-
-        This is the lightweight counterpart to ``_async_update_data`` used by
-        the fast UI refresh and the window-override push.  It updates everything
-        the dashboard needs to stay live between scheduled MPC ticks WITHOUT
-        running the MPC controller or advancing the EKF:
-
-          * measured room temperatures (from HA sensor states),
-          * the active schedule (live setpoints / enabled flags),
-          * the window state machine,
-          * the outdoor temperature,
-          * solar gains and the heat-flow breakdown (pure model evaluations).
-
-        The MPC-derived fields (predictions, filtered temperatures, forecasts,
-        heating schedule) are deliberately left untouched — they only advance at
-        the scheduled update interval.
-
-        Returns the effective outdoor temperature (the fresh reading, or the last
-        valid value when the entity is transiently unavailable), or ``None`` when
-        no valid reading has ever been obtained.
-        """
-        # Stamp a fresh "now" so forecast-timestamp calculations in entity
-        # extra_state_attributes use the current time, not the last tick's.
-        self.now_utc = datetime.now(tz=timezone.utc)
-
-        # Measured room temperatures.
-        self.measured_temperatures = {}
-        for room_name, entity_ids in self._temp_sensors.items():
-            readings: List[float] = []
-            for entity_id in entity_ids:
-                state = self.hass.states.get(entity_id)
-                if state and state.state not in ("unknown", "unavailable"):
-                    try:
-                        readings.append(float(state.state))
-                    except (ValueError, TypeError):
-                        pass
-            if readings:
-                avg = sum(readings) / len(readings)
-                self.model.rooms[room_name].temperature = avg
-                self.measured_temperatures[room_name] = avg
-        self._rooms_ever_measured.update(self.measured_temperatures.keys())
-
-        # Live setpoints / enabled flags from the active schedule.
-        try:
-            self._apply_schedule(self.now_utc.astimezone())
-        except Exception:
-            _LOGGER.debug("UI refresh: schedule apply failed", exc_info=True)
-
-        # Advance the window debounce/settle state machine.
-        self._update_window_state_machine(self.now_utc)
-
-        # Outdoor temperature: expose the raw reading (None → "unknown") but use
-        # the last valid value for the model evaluations below.
-        _outdoor = self._read_outdoor_temp()
-        self.outdoor_temp = _outdoor
-        if _outdoor is not None:
-            self._last_valid_outdoor_temp = _outdoor
-        outdoor_temp = _outdoor if _outdoor is not None else self._last_valid_outdoor_temp
-
-        # Solar gains (clear-sky / forecast model — no MPC involved).  Computed
-        # unconditionally because solar gain does not depend on the outdoor
-        # temperature: gating it on a valid outdoor reading made the value drop
-        # to 0 right after a restart while the outdoor entity was still
-        # unavailable.  ``_publish_current_solar_gains`` resolves a non-None
-        # cloud cover (last published value, then the EMA seeded from
-        # persistence, then a fresh live read) so the clear-sky model is
-        # attenuated and never emits an unattenuated spike either.
-        self._publish_current_solar_gains()
-
-        if outdoor_temp is not None:
-            # Instantaneous heat-flow breakdown (this one genuinely needs the
-            # outdoor temperature).
-            try:
-                self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
-            except Exception:
-                _LOGGER.debug("UI refresh: heat-flow recompute failed", exc_info=True)
-
-        return outdoor_temp
+        return live_refresh.refresh_live_state(self)
 
     async def async_refresh_ui(self) -> None:
-        """Refresh live UI state without running the MPC.
-
-        Scheduled on a fast cadence (see ``setup_entry``) so the dashboard's
-        measurements, setpoints, solar gains, and KPI cards stay live between
-        scheduled MPC ticks.  The MPC and EKF advance strictly at the coordinator's
-        ``update_interval``; this path never touches them.
-        """
-        # Seed the cloud-cover EMA from persisted runtime state before the very
-        # first refresh so the fast path attenuates the clear-sky model from the
-        # start.  Without this, a fast refresh that runs before the first full
-        # MPC cycle (common right after a restart) has no cloud cover to apply
-        # and emits an unattenuated clear-sky solar-gain spike.
-        await self._ensure_runtime_state_loaded()
-        try:
-            outdoor_temp = self._refresh_live_state()
-        except Exception:
-            _LOGGER.warning("Fast UI refresh failed", exc_info=True)
-            return
-        # Re-anchor climate setpoints to the units' current internal
-        # temperatures so the delivered power tracks the MPC's constant-input
-        # assumption between scheduled ticks (see _reapply_climate_setpoints).
-        if outdoor_temp is not None:
-            try:
-                await self._reapply_climate_setpoints(outdoor_temp)
-            except Exception:
-                _LOGGER.debug(
-                    "Fast UI refresh: setpoint re-apply failed", exc_info=True,
-                )
-        self.async_update_listeners()
+        await live_refresh.async_refresh_ui(self)
 
     async def _async_push_window_override(self) -> None:
         await window.async_push_window_override(self)
