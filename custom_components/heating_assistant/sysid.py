@@ -33,6 +33,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from .history.records import record_d, record_u, record_window_open
+
 _LOGGER = logging.getLogger(__name__)
 
 # Deferred imports so the module loads even if mbc / controller is absent
@@ -240,8 +242,8 @@ def run_sysid_ekf(
     #     the actual outage duration, which is then corrected by the update).
     # ------------------------------------------------------------------
     y0 = window[0].get("y", [])
-    u_prev = _record_u(window[0], n_u)
-    d_prev = _record_d(window[0], sde, room_list, n_d)
+    u_prev = record_u(window[0], n_u)
+    d_prev = record_d(window[0], sde, room_list, n_d)
 
     # If the caller supplied identified wall initial temperatures (via room_params
     # key "t_wall_initial"), use them instead of the default T_wall = T_air seed.
@@ -267,7 +269,7 @@ def run_sysid_ekf(
     # excluded data, so neither the point nor the prediction is shown.
     _has_wall = n_x > n  # 2R2C: wall states at x[n:2n]
     ts0 = float(window[0].get("timestamp", 0.0))
-    open0 = _record_window_open(window[0], room_names)
+    open0 = record_window_open(window[0], room_names)
     for i, name in enumerate(room_names):
         if open0[i]:
             per_room_sim[name].append({
@@ -312,14 +314,14 @@ def run_sysid_ekf(
         # room's air state to the true reading afterwards so the state stays
         # physical and the prediction reinitialises cleanly once the window
         # closes.
-        excluded = _record_window_open(record, room_names)
+        excluded = record_window_open(record, room_names)
         # ``y_meas`` is the display/score copy (None where excluded → chart gap,
         # skipped by the RMSE/MAE reducer).
         y_meas: List[Optional[float]] = [
             None if excluded[i] else raw_meas[i] for i in range(n)
         ]
-        u_curr = _record_u(record, n_u)
-        d_curr = _record_d(record, sde, room_list, n_d)
+        u_curr = record_u(record, n_u)
+        d_curr = record_d(record, sde, room_list, n_d)
 
         # Build an EKF for this specific interval length.
         # n_steps scales with dt_step so the sub-step size stays ≤ dt/10
@@ -556,59 +558,6 @@ def _init_state_from_measurement(
         else:
             x[n:2 * n] = air
     return x
-
-
-def _record_window_open(
-    record: Dict[str, Any],
-    room_names: List[str],
-) -> List[bool]:
-    """Per-room open-window flags for a history record, ordered by ``room_names``.
-
-    The coordinator stores ``{"window_open": {room_name: bool}}`` (True while a
-    window override is active).  Records that pre-date the field — seeded or
-    legacy history — return all-``False`` (treated as good data).
-    """
-    wo = record.get("window_open") or {}
-    return [bool(wo.get(name, False)) for name in room_names]
-
-
-def _record_u(record: Dict[str, Any], n_u: int) -> np.ndarray:
-    """Extract control fractions from a history record as a float64 array."""
-    u_raw = record.get("u", [])
-    return np.array(
-        [float(u_raw[k]) if k < len(u_raw) else 0.0 for k in range(n_u)],
-        dtype=float,
-    )
-
-
-def _record_d(
-    record: Dict[str, Any],
-    sde: Any,
-    room_list: List[str],
-    n_d: int,
-) -> np.ndarray:
-    """Build the disturbance vector for a history record.
-
-    Layout matches ``HouseThermalSDE.nd``: ``d = [T_out, q_solar(n), q_air(n)]``
-    — outdoor temperature, the per-room *unscaled* modelled solar gain, and the
-    per-room air-node heat (internal gain).  The SDE's own
-    ``disturbance_vector`` is used so the reconstruction folds in each room's
-    identified ``internal_gain`` exactly as the live CD-EKF / MPC does; without
-    it the internal-gain field had no effect on the reconstruction.
-    """
-    outdoor = float(record.get("d_outdoor", 10.0))
-    solar = record.get("d_solar", {}) or {}
-    builder = getattr(sde, "disturbance_vector", None)
-    if builder is not None:
-        return np.asarray(builder(outdoor, solar), dtype=float)
-
-    # Fallback for SDEs without a disturbance builder: solar only.
-    d = np.zeros(n_d, dtype=float)
-    d[0] = outdoor
-    for i, name in enumerate(room_list):
-        if 1 + i < n_d:
-            d[1 + i] = float(solar.get(name, 0.0))
-    return d
 
 
 # Per-room thermal-model attributes that a sysid / open-loop run may override

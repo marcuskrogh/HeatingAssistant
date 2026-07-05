@@ -8,7 +8,7 @@ import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from './room-detail.js?v=88';
+} from '../charts/mpc-preview-charts.js?v=88';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 

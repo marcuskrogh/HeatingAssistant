@@ -77,6 +77,7 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    ALL_SOURCE_TYPES,
     CONF_COMFORT_OFFSET,
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
@@ -373,18 +374,7 @@ _ROOM_SCHEMA = vol.Schema(
 _SOURCE_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SOURCE_NAME): str,
-        vol.Required(CONF_SOURCE_TYPE): vol.In(
-            [
-                SOURCE_TYPE_ELECTRIC,
-                SOURCE_TYPE_ELECTRIC_FLOOR,
-                SOURCE_TYPE_GAS_HEATER,
-                SOURCE_TYPE_GENERIC_THERMOSTAT,
-                SOURCE_TYPE_HEAT_PUMP,
-                SOURCE_TYPE_HYDRONIC_FLOOR,
-                SOURCE_TYPE_HYDRONIC_RADIATOR,
-                SOURCE_TYPE_OIL_RADIATOR,
-            ]
-        ),
+        vol.Required(CONF_SOURCE_TYPE): vol.In(list(ALL_SOURCE_TYPES)),
         vol.Required(CONF_SOURCE_ROOM): str,
         vol.Required(CONF_SOURCE_MAX_POWER): vol.Coerce(float),
         vol.Optional(CONF_SOURCE_EFFICIENCY, default=DEFAULT_EFFICIENCY): vol.Coerce(float),

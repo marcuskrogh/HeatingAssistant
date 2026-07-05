@@ -90,19 +90,10 @@ class DashboardSpec:
 
 
 def slugify(value: str) -> str:
-    """Slugify a string the same way Home Assistant does for entity IDs.
+    """Backward-compatible re-export; prefer :func:`naming.slugify`."""
+    from .naming import slugify as _slugify
 
-    Lowercases, applies NFKD Unicode normalisation, strips non-ASCII bytes,
-    removes punctuation (e.g. apostrophes), and collapses runs of
-    whitespace/hyphens to underscores.  This matches the slug HA derives from
-    ``_attr_name`` for the integration's entities: "Erik's Room" → "eriks_room"
-    rather than "erik_s_room".
-    """
-    text = unicodedata.normalize("NFKD", value.lower())
-    text = text.encode("ascii", "ignore").decode("ascii")
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[-\s]+", "_", text).strip("_")
-    return text or "_"
+    return _slugify(value)
 
 
 def _climate_eid(room_name: str) -> str:

@@ -209,6 +209,7 @@ from .heat_sources import (
 )
 from .thermal_model import HouseModel, Room, RoomConnection, Window
 from .controller import HeatingMPCController
+from .controller.factory import ControllerBuildConfig, build_mpc_controller
 from .ground_temp import ground_temperature
 from .solar_model import (
     room_solar_gains,
@@ -815,28 +816,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
         self._temp_sensors: Dict[str, List[str]] = self._build_temp_sensor_map(rooms_cfg)
 
-        self.controller = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=self._horizon,
-            dt=self.dt,
-            measurement_dt=self.dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=self._tracking_weight,
-            energy_weight=self._energy_weight,
-            smoothing_weight=self._smoothing_weight,
-            soft_constraint_weight=self._soft_constraint_weight,
-            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
-            terminal_weight=self._terminal_weight,
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=self._energy_price_weight,
+        self.controller = build_mpc_controller(
+            ControllerBuildConfig.from_coordinator(self)
         )
-
-        self._init_room_state(rooms_cfg)
         self._init_runtime_buffers(hass)
 
         super().__init__(
@@ -1568,30 +1550,42 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             except Exception:
                 pass
 
-        self.controller = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=self._horizon,
-            dt=self.dt,
-            measurement_dt=self.dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=self._tracking_weight,
-            energy_weight=self._energy_weight,
-            smoothing_weight=self._smoothing_weight,
-            soft_constraint_weight=self._soft_constraint_weight,
-            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
-            terminal_weight=self._terminal_weight,
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=self._energy_price_weight,
+        self.controller = build_mpc_controller(
+            ControllerBuildConfig.from_coordinator(self)
         )
 
         if _prior_ekf is not None:
             x_hat, P = _prior_ekf
             self.controller.restore_ekf_state(x_hat, P)
+
+    def get_controller_config_snapshot(self) -> Dict[str, Any]:
+        """Return JSON-serialisable MPC tuning parameters for UI / WebSocket.
+
+        Single source of truth for controller config exposed via WebSocket and
+        mirrored in :class:`ControllerConfigSensor` attributes.
+        """
+        ui = self.update_interval
+        return {
+            "comfort_offset": float(
+                next(iter(getattr(self, "_room_comfort_offset", {}).values()), 2.0)
+            ),
+            "tracking_weight": float(self._tracking_weight),
+            "energy_weight": float(self._energy_weight),
+            "energy_price_weight": float(self._energy_price_weight),
+            "smoothing_weight": float(self._smoothing_weight),
+            "soft_constraint_weight": float(self._soft_constraint_weight),
+            "soft_constraint_linear_weight": float(
+                self._soft_constraint_linear_weight
+            ),
+            "terminal_weight": float(self._terminal_weight),
+            "horizon": int(self._horizon),
+            "update_interval": int(
+                ui.total_seconds() if hasattr(ui, "total_seconds") else ui
+            ),
+            "window_open_debounce": int(self._window_open_debounce),
+            "window_open_close_settle": int(self._window_open_close_settle),
+            "window_open_q_inflation": float(self._window_open_q_inflation),
+        }
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
         """Queue non-structural config changes for the next regular tick.
@@ -2205,44 +2199,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         preview_dt = float(overrides.get(CONF_UPDATE_INTERVAL, self._update_interval_s))
         comfort_override = overrides.get(CONF_COMFORT_OFFSET)
 
-        preview_ctrl = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=preview_horizon,
-            dt=preview_dt,
-            measurement_dt=preview_dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=float(
-                overrides.get(CONF_TRACKING_WEIGHT, self._tracking_weight)
-            ),
-            energy_weight=float(
-                overrides.get(CONF_ENERGY_WEIGHT, self._energy_weight)
-            ),
-            smoothing_weight=float(
-                overrides.get(CONF_SMOOTHING_WEIGHT, self._smoothing_weight)
-            ),
-            soft_constraint_weight=float(
-                overrides.get(
-                    CONF_SOFT_CONSTRAINT_WEIGHT, self._soft_constraint_weight
-                )
-            ),
-            soft_constraint_linear_weight=float(
-                overrides.get(
-                    CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
-                    self._soft_constraint_linear_weight,
-                )
-            ),
-            terminal_weight=float(
-                overrides.get(CONF_TERMINAL_WEIGHT, self._terminal_weight)
-            ),
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=float(
-                overrides.get(CONF_ENERGY_PRICE_WEIGHT, self._energy_price_weight)
-            ),
+        preview_ctrl = build_mpc_controller(
+            ControllerBuildConfig.from_coordinator(self, overrides=overrides)
         )
 
         if hasattr(self, "controller"):
@@ -2372,26 +2330,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.model.rooms[_room_name].setpoint = _sp
         self._rebuild_sources_by_room()
 
-        self.controller = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=self._horizon,
-            dt=self.dt,
-            measurement_dt=self.dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=self._tracking_weight,
-            energy_weight=self._energy_weight,
-            smoothing_weight=self._smoothing_weight,
-            soft_constraint_weight=self._soft_constraint_weight,
-            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
-            terminal_weight=self._terminal_weight,
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=self._energy_price_weight,
-        )
+        self._build_controller()
 
         self._estimation_timestamp = None
         self._estimation_log_likelihood = None
@@ -2437,26 +2376,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             return
 
         # Rebuild MPC controller so the new scales feed into the QP.
-        self.controller = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=self._horizon,
-            dt=self.dt,
-            measurement_dt=self.dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=self._tracking_weight,
-            energy_weight=self._energy_weight,
-            smoothing_weight=self._smoothing_weight,
-            soft_constraint_weight=self._soft_constraint_weight,
-            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
-            terminal_weight=self._terminal_weight,
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=self._energy_price_weight,
-        )
+        self._build_controller()
 
         # Persist the updated power scales in the estimated-params snapshot so
         # they survive a restart.
@@ -2561,26 +2481,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         ) = self.model._build_matrices()
 
         # Rebuild MPC controller
-        self.controller = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=self._horizon,
-            dt=self.dt,
-            measurement_dt=self.dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=self._tracking_weight,
-            energy_weight=self._energy_weight,
-            smoothing_weight=self._smoothing_weight,
-            soft_constraint_weight=self._soft_constraint_weight,
-            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
-            terminal_weight=self._terminal_weight,
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=self._energy_price_weight,
-        )
+        self._build_controller()
 
         # --- Build new active snapshot ---
         # Persist the full per-room parameter set (not just C / R_ext) so the
@@ -2715,26 +2616,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         ) = self.model._build_matrices()
 
         # Rebuild MPC controller
-        self.controller = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=self._horizon,
-            dt=self.dt,
-            measurement_dt=self.dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=self._tracking_weight,
-            energy_weight=self._energy_weight,
-            smoothing_weight=self._smoothing_weight,
-            soft_constraint_weight=self._soft_constraint_weight,
-            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
-            terminal_weight=self._terminal_weight,
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=self._energy_price_weight,
-        )
+        self._build_controller()
 
         # Build the new active reflecting actual model state
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -5409,26 +5291,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         ) = self.model._build_matrices()
 
         # Rebuild the MPC controller with the updated model
-        self.controller = HeatingMPCController(
-            model=self.model,
-            heat_sources=self.heat_sources,
-            horizon=self._horizon,
-            dt=self.dt,
-            measurement_dt=self.dt,
-            latitude=self._latitude,
-            longitude=self._longitude,
-            albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            tracking_weight=self._tracking_weight,
-            energy_weight=self._energy_weight,
-            smoothing_weight=self._smoothing_weight,
-            soft_constraint_weight=self._soft_constraint_weight,
-            soft_constraint_linear_weight=self._soft_constraint_linear_weight,
-            terminal_weight=self._terminal_weight,
-            sigma_w=self._sigma_w,
-            sigma_v=self._sigma_v,
-            sigma_b=self._sigma_b,
-            energy_price_weight=self._energy_price_weight,
-        )
+        self._build_controller()
 
         _LOGGER.info(
             "Applied estimated thermal parameters: %s",

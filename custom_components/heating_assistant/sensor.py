@@ -54,7 +54,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HeatingAssistantCoordinator
-from .dashboard import slugify
+from .naming import slugify
 from .heat_sources import HeatPump
 from .kpi import (
     RoomSnapshot,
@@ -2840,33 +2840,15 @@ class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
     def extra_state_attributes(self) -> dict:
         c = self._coordinator
 
-        # Core tuning parameters — set in coordinator __init__, always accessible.
-        attrs: dict = {
-            "comfort_offset": next(iter(c._room_comfort_offset.values()), 2.0),
-            "tracking_weight": c._tracking_weight,
-            "energy_weight": c._energy_weight,
-            "energy_price_weight": c._energy_price_weight,
-            "smoothing_weight": c._smoothing_weight,
-            "soft_constraint_weight": c._soft_constraint_weight,
-            "soft_constraint_linear_weight": c._soft_constraint_linear_weight,
-            "terminal_weight": c._terminal_weight,
-            "horizon": c._horizon,
-            # Always expose as a plain number of seconds.  ``_update_interval``
-            # can end up as a ``datetime.timedelta`` (e.g. when the config entry
-            # stored it that way), and a single non-JSON-serialisable attribute
-            # makes Home Assistant's WebSocket API fail to serialise the *whole*
-            # state payload — which silently starves the dashboard of every
-            # heating_assistant entity.  ``coordinator.dt`` is the coerced value.
-            "update_interval": c.dt,
+        # Core tuning parameters — single source via coordinator snapshot.
+        attrs: dict = dict(c.get_controller_config_snapshot())
+        attrs.update({
             "sigma_w": c._sigma_w,
             "sigma_v": c._sigma_v,
             "sigma_b": c._sigma_b,
             "identification_horizon_hours": float(
                 getattr(c, "_identification_horizon_hours", 6.0)
             ),
-            "window_open_debounce": c._window_open_debounce,
-            "window_open_close_settle": c._window_open_close_settle,
-            "window_open_q_inflation": c._window_open_q_inflation,
             # Heater power-scale factors — identified vs applied
             "identified_heater_scales": dict(
                 getattr(c, "_last_identified_heater_scales", {})
@@ -2879,7 +2861,7 @@ class ControllerConfigSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnt
                 }
                 for src in getattr(c, "heat_sources", [])
             },
-        }
+        })
 
         # Schedule, setpoint and room data — requires model to be initialised.
         try:

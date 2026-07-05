@@ -42,36 +42,7 @@ DEFAULT_LEADING_HOURS: float = 6.0
 _MAX_PREFIX_FRACTION: float = 0.25
 
 
-def _record_u(record: Dict[str, Any], n_u: int) -> np.ndarray:
-    u = np.zeros(n_u, dtype=float)
-    for k, v in enumerate(record.get("u", [])):
-        if k < n_u:
-            u[k] = float(v)
-    return u
-
-
-def _record_d(
-    record: Dict[str, Any],
-    system: Any,
-    room_list: List[str],
-    n_d: int,
-) -> np.ndarray:
-    outdoor = float(record.get("d_outdoor", 0.0))
-    d_solar = record.get("d_solar", {}) or {}
-    if hasattr(system, "disturbance_vector"):
-        return np.asarray(system.disturbance_vector(outdoor, d_solar), dtype=float)
-    d = np.zeros(n_d, dtype=float)
-    d[0] = outdoor
-    n = len(room_list)
-    for i, name in enumerate(room_list):
-        if 1 + i < n_d:
-            d[1 + i] = float(d_solar.get(name, 0.0))
-    return d
-
-
-def _record_window_open(record: Dict[str, Any], room_names: List[str]) -> List[bool]:
-    wo = record.get("window_open") or {}
-    return [bool(wo.get(name, False)) for name in room_names]
+from .history.records import record_d, record_u, record_window_open
 
 
 def ekf_state_at_end_of_history(
@@ -108,8 +79,8 @@ def ekf_state_at_end_of_history(
     p = np.array([])
 
     y0 = history[0].get("y", [])
-    u_prev = _record_u(history[0], n_u)
-    d_prev = _record_d(history[0], system, room_list, n_d)
+    u_prev = record_u(history[0], n_u)
+    d_prev = record_d(history[0], system, room_list, n_d)
 
     if x0 is None:
         init_fn = getattr(system, "initial_state_from_measurement", None)
@@ -145,13 +116,13 @@ def ekf_state_at_end_of_history(
             continue
 
         y_raw = record.get("y", [])
-        excluded = _record_window_open(record, room_names)
+        excluded = record_window_open(record, room_names)
         y_meas = [
             float(y_raw[i]) if i < len(y_raw) and not excluded[i] else None
             for i in range(n)
         ]
-        u_curr = _record_u(record, n_u)
-        d_curr = _record_d(record, system, room_list, n_d)
+        u_curr = record_u(record, n_u)
+        d_curr = record_d(record, system, room_list, n_d)
 
         n_steps_step = max(1, min(200, round(dt_step * 10.0 / dt)))
         prev_ts = getattr(system, "_ts", dt)
@@ -324,8 +295,8 @@ def estimate_simulation_initial_state(
 
     # ── Steady-state fallback for any missing room ───────────────────────
     init_fn = getattr(system, "initial_state_from_measurement", None)
-    u0 = _record_u(simulation_history[0], int(getattr(system, "nu", 0)))
-    d0 = _record_d(
+    u0 = record_u(simulation_history[0], int(getattr(system, "nu", 0)))
+    d0 = record_d(
         simulation_history[0],
         system,
         list(getattr(system, "_room_list", room_names)),
