@@ -47,7 +47,7 @@ def _patch_setup_stores(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        "custom_components.heating_assistant.identification_history.IdentificationHistoryStore",
+        "custom_components.heating_assistant.history.store.IdentificationHistoryStore",
         lambda *_a, **_kw: _FakeIdHistoryStore(),
     )
     monkeypatch.setattr(
@@ -215,7 +215,10 @@ async def test_coordinator_uses_horizon_from_options(monkeypatch):
         def __init__(self, *_a, **_kw):
             pass
 
-    monkeypatch.setattr(coord_mod, "HeatingMPCController", _FakeController)
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.coordinator.core.HeatingMPCController",
+        _FakeController,
+    )
 
     coord = coord_mod.HeatingAssistantCoordinator.__new__(
         coord_mod.HeatingAssistantCoordinator
@@ -244,7 +247,10 @@ async def test_coordinator_falls_back_to_data_horizon_when_options_absent(monkey
         def __init__(self, *_a, **_kw):
             pass
 
-    monkeypatch.setattr(coord_mod, "HeatingMPCController", _FakeController)
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.coordinator.core.HeatingMPCController",
+        _FakeController,
+    )
 
     coord = coord_mod.HeatingAssistantCoordinator.__new__(
         coord_mod.HeatingAssistantCoordinator
@@ -280,7 +286,10 @@ async def test_coordinator_builds_runtime_store_during_init(monkeypatch):
         def __init__(self, *_a, **_kw):
             pass
 
-    monkeypatch.setattr(coord_mod, "HeatingMPCController", _FakeController)
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.coordinator.core.HeatingMPCController",
+        _FakeController,
+    )
 
     coord = coord_mod.HeatingAssistantCoordinator.__new__(
         coord_mod.HeatingAssistantCoordinator

@@ -65,10 +65,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
-from .thermal_model import HouseModel
-from .heat_sources import HeatSource
-from .solar_model import room_solar_gains, room_solar_gains_from_exposure
-from .solar_forecast import select_ghi_for_step
+from ..thermal_model import HouseModel
+from ..heat_sources import HeatSource
+from ..solar_model import room_solar_gains, room_solar_gains_from_exposure
+from ..solar_forecast import select_ghi_for_step
 
 
 def _select_cloud_for_step(
@@ -86,7 +86,7 @@ def _select_cloud_for_step(
     if k < len(cloud_forecast):
         return cloud_forecast[k]
     return cloud_forecast[-1]
-from .const import MPC_STATS_BUFFER_SIZE
+from ..const import MPC_STATS_BUFFER_SIZE
 
 # ── Import model-based control components from mbc ────────────────────────────
 from mbc.models import ContinuousDiscreteSDE
@@ -97,7 +97,7 @@ from mbc.estimation import (
 )
 from mbc.control import StandardLinearisedContinuousMPC
 
-from .const import (
+from ..const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
     AIR_RHO_CP,
@@ -105,8 +105,8 @@ from .const import (
     SHERMAN_GRIMSRUD_WIND_COEF,
     SOLAR_WALL_FRACTION,
 )
-from .integrator import implicit_euler_substeps
-from .thermal_model import _SG_FACTOR_TYPICAL
+from ..integrator import implicit_euler_substeps
+from ..thermal_model import _SG_FACTOR_TYPICAL
 
 _LOGGER = logging.getLogger(__name__)
 

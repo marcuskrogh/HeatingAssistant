@@ -16,14 +16,20 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=88';
-import { setPanelHash } from '../panel-hash.js?v=88';
-import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=88';
+import { entityValue } from '../utils.js?v=93';
+import { setPanelHash } from '../panel-hash.js?v=93';
+import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=93';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=88';
+} from '../experiment-utils.js?v=93';
+import {
+  setClimateTemperature,
+  setRoomComfortOffset,
+  turnClimateOff,
+  turnClimateOn,
+} from '../ha-services.js?v=93';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -249,10 +255,11 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
       st.commitTimer = null;
       st.editing = false;
       if (st.hass) {
-        st.hass.callService('climate', 'set_temperature', {
-          entity_id: `climate.heating_assistant_${room.slug}`,
-          temperature: st.setpoint,
-        }).catch(() => {});
+        setClimateTemperature(
+          st.hass,
+          `climate.heating_assistant_${room.slug}`,
+          st.setpoint,
+        ).catch(() => {});
       }
     }, COMMIT_DEBOUNCE_MS);
   }
@@ -273,10 +280,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
       st.offsetCommitTimer = null;
       st.offsetEditing = false;
       if (st.hass) {
-        st.hass.callService('heating_assistant', 'set_room_comfort_offset', {
-          room_name: room.slug,
-          comfort_offset: st.comfortOffset,
-        }).catch(() => {});
+        setRoomComfortOffset(st.hass, room.slug, st.comfortOffset).catch(() => {});
       }
     }, COMMIT_DEBOUNCE_MS);
   }
@@ -329,9 +333,9 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     }, POWER_OPTIMISTIC_MS);
     paint();
     if (st.hass) {
-      st.hass.callService('climate', turnOff ? 'turn_off' : 'turn_on', {
-        entity_id: `climate.heating_assistant_${room.slug}`,
-      }).catch(() => {});
+      const entityId = `climate.heating_assistant_${room.slug}`;
+      (turnOff ? turnClimateOff(st.hass, entityId) : turnClimateOn(st.hass, entityId))
+        .catch(() => {});
     }
   }
 

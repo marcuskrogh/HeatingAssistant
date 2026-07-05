@@ -18,6 +18,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.climate import RoomClimateEntity
+from custom_components.heating_assistant.const import DOMAIN
 from custom_components.heating_assistant.heat_sources import (
     ElectricHeater,
     HeatPump,
@@ -158,14 +159,19 @@ class TestHvacModes:
 
 
 @pytest.mark.asyncio
-async def test_set_temperature_does_not_force_immediate_refresh():
+async def test_set_temperature_calls_setpoint_service():
     heater = ElectricHeater("h1", "living_room", max_power=2000.0)
-    ent, coord = _make_entity([heater])
-    coord.async_request_refresh = AsyncMock()
+    ent, _coord = _make_entity([heater])
+    ent.hass = MagicMock()
+    ent.hass.services.async_call = AsyncMock()
     ent.async_write_ha_state = MagicMock()
 
     await ent.async_set_temperature(**{ATTR_TEMPERATURE: 23.5})
 
-    assert coord.get_room_setpoint("living_room") == 23.5
-    coord.async_request_refresh.assert_not_awaited()
+    ent.hass.services.async_call.assert_awaited_once_with(
+        DOMAIN,
+        "set_room_setpoint",
+        {"room_name": "living_room", "setpoint": 23.5},
+        blocking=True,
+    )
     ent.async_write_ha_state.assert_called_once()

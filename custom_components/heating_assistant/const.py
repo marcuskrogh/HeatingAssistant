@@ -530,6 +530,23 @@ SOURCE_TYPE_GROUND_SOURCE_HP = "ground_source_heat_pump"
 SOURCE_TYPE_PELLET_STOVE = "pellet_stove"
 SOURCE_TYPE_ELECTRIC_STORAGE = "electric_storage_heater"
 
+# Canonical list of all supported heat-source types (YAML schema, UI enums,
+# and build_heat_sources must stay aligned with this tuple).
+ALL_SOURCE_TYPES: tuple[str, ...] = (
+    SOURCE_TYPE_ELECTRIC,
+    SOURCE_TYPE_ELECTRIC_FLOOR,
+    SOURCE_TYPE_ELECTRIC_STORAGE,
+    SOURCE_TYPE_GAS_HEATER,
+    SOURCE_TYPE_GENERIC_THERMOSTAT,
+    SOURCE_TYPE_GROUND_SOURCE_HP,
+    SOURCE_TYPE_HEAT_PUMP,
+    SOURCE_TYPE_HYDRONIC_FLOOR,
+    SOURCE_TYPE_HYDRONIC_RADIATOR,
+    SOURCE_TYPE_OIL_BOILER,
+    SOURCE_TYPE_OIL_RADIATOR,
+    SOURCE_TYPE_PELLET_STOVE,
+)
+
 # Default combustion efficiency for gas heaters (condensing ≈ 0.95; conventional ≈ 0.80–0.85).
 DEFAULT_GAS_EFFICIENCY = 0.90
 # Default efficiency for oil boilers (non-condensing; condensing units reach ≈ 0.93).
@@ -616,6 +633,9 @@ ESTIMATION_HISTORY_SIZE = 20
 SERVICE_ESTIMATE_PARAMETERS_ML = "estimate_parameters_ml"
 #: Service name for runtime comfort-schedule suspend/resume
 SERVICE_SET_SCHEDULE_ENABLED = "set_schedule_enabled"
+#: Service names for per-room climate control from platform entities / dashboard
+SERVICE_SET_ROOM_SETPOINT = "set_room_setpoint"
+SERVICE_SET_ROOM_ENABLED = "set_room_enabled"
 #: entry.data key that stores the latest persisted estimation snapshot so that
 #: estimated parameters survive a full Home Assistant restart.
 CONF_ESTIMATED_PARAMS = "estimated_params"

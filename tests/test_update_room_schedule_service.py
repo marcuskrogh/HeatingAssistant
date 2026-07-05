@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
+import custom_components.heating_assistant.services.control as svc_mod
 from custom_components.heating_assistant.const import (
     CONF_ROOMS,
     CONF_SCHEDULE,
@@ -69,7 +70,7 @@ async def test_schedule_persisted_to_options_when_rooms_in_options(monkeypatch):
         async_get_entry=lambda _eid: entry,
         async_update_entry=lambda e, **kwargs: update_calls.append(kwargs),
     )
-    monkeypatch.setattr(init_mod, "_get_coordinator", lambda _h: coordinator)
+    monkeypatch.setattr(svc_mod, "get_coordinator", lambda _h: coordinator)
 
     handler = _capture_handler(hass)
     await handler(SimpleNamespace(data={"room_name": "living_room", "periods": PERIODS}))
@@ -105,7 +106,7 @@ async def test_schedule_persisted_to_data_when_options_empty(monkeypatch):
         async_get_entry=lambda _eid: entry,
         async_update_entry=lambda e, **kwargs: update_calls.append(kwargs),
     )
-    monkeypatch.setattr(init_mod, "_get_coordinator", lambda _h: coordinator)
+    monkeypatch.setattr(svc_mod, "get_coordinator", lambda _h: coordinator)
 
     handler = _capture_handler(hass)
     await handler(SimpleNamespace(data={"room_name": "bedroom", "periods": PERIODS}))
@@ -132,7 +133,7 @@ async def test_unknown_room_raises(monkeypatch):
         async_get_entry=lambda _eid: entry,
         async_update_entry=lambda e, **kwargs: None,
     )
-    monkeypatch.setattr(init_mod, "_get_coordinator", lambda _h: coordinator)
+    monkeypatch.setattr(svc_mod, "get_coordinator", lambda _h: coordinator)
 
     handler = _capture_handler(hass)
     with pytest.raises(ValueError):

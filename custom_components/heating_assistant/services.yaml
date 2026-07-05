@@ -1180,6 +1180,62 @@ set_room_comfort_offset:
           step: 0.1
           unit_of_measurement: "°C"
 
+set_room_setpoint:
+  name: Set room setpoint
+  description: >
+    Set the target temperature for a single room. The change is applied to the
+    live model immediately and persisted so it survives restarts and scheduled
+    off periods.
+  fields:
+    room_name:
+      name: Room name
+      description: Name or slug of the room (must match a configured room).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    setpoint:
+      name: Setpoint
+      description: Target room temperature.
+      required: true
+      example: 21.0
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+
+set_room_enabled:
+  name: Set room enabled
+  description: >
+    Enable or disable heating control for a single room. When re-enabling, an
+    optional flag can restore the default setpoint if the stored value is at or
+    below the frost-protection floor.
+  fields:
+    room_name:
+      name: Room name
+      description: Name or slug of the room (must match a configured room).
+      required: true
+      example: "living_room"
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: Whether heating control should run for this room.
+      required: true
+      selector:
+        boolean:
+    restore_default_setpoint:
+      name: Restore default setpoint
+      description: >
+        When enabling, restore the default setpoint if the stored value is at
+        or below the frost-protection floor.
+      required: false
+      default: false
+      selector:
+        boolean:
+
 update_ui_settings:
   name: Update dashboard display settings
   description: >

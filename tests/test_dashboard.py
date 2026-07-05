@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.const import DOMAIN
-from custom_components.heating_assistant.dashboard import (
+from custom_components.heating_assistant.lovelace_dashboard import (
     DASHBOARD_VARIANT_INDUSTRIAL,
     DashboardSpec,
     HeatSourceSpec,
@@ -20,8 +20,8 @@ from custom_components.heating_assistant.dashboard import (
     build_dashboard_variant_from_coordinator,
     build_dashboard_from_coordinator,
     dashboard_to_yaml,
-    slugify,
 )
+from custom_components.heating_assistant.naming import slugify
 
 
 # ---------------------------------------------------------------------------
@@ -862,7 +862,7 @@ def test_build_variant_from_coordinator_supports_industrial():
 
 
 def test_room_detail_js_price_series_use_stepped_before():
-    """The Price and Price Forecast datasets in room-detail.js must use
+    """The Price and Price Forecast datasets in room-charts.js must use
     ``stepped: 'before'`` so electricity prices render as a zero-order-hold
     step line rather than a linear (bezier) interpolation."""
     js_path = os.path.join(
@@ -872,8 +872,8 @@ def test_room_detail_js_price_series_use_stepped_before():
         "heating_assistant",
         "www",
         "js",
-        "pages",
-        "room-detail.js",
+        "charts",
+        "room-charts.js",
     )
     with open(js_path) as fh:
         source = fh.read()
@@ -884,7 +884,7 @@ def test_room_detail_js_price_series_use_stepped_before():
     import re
 
     price_dataset_blocks = re.findall(
-        r"makeDataset\('Price[^']*'.*?\)",
+        r"makeDataset\((?:'Price[^']*'|forecastOnly \? 'Price' : 'Price Forecast').*?\)",
         source,
         re.DOTALL,
     )
@@ -908,6 +908,16 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
         "heating_assistant",
         "www",
         "js",
+        "charts",
+        "room-charts.js",
+    )
+    room_detail_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "custom_components",
+        "heating_assistant",
+        "www",
+        "js",
         "pages",
         "room-detail.js",
     )
@@ -922,6 +932,8 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
         "time-series-chart.js",
     )
     with open(js_path) as fh:
+        room_charts = fh.read()
+    with open(room_detail_path) as fh:
         room_detail = fh.read()
     with open(chart_js_path) as fh:
         chart_js = fh.read()
@@ -943,14 +955,14 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
         raise AssertionError(f"Could not parse makeDataset block for {label!r}")
 
     for label in ("Constraint Upper", "Constraint Lower", "Heating Capacity", "Cooling Capacity"):
-        block = dataset_block(room_detail, label)
+        block = dataset_block(room_charts, label)
         assert "'transparent'" in block, f"{label} should use a transparent stroke"
         assert "borderWidth: 0" in block, f"{label} should hide its boundary line"
         assert "borderDash" not in block and "dashed: true" not in block, (
             f"{label} should not render a dashed reference line:\n{block}"
         )
 
-    sensor_range_block = dataset_block(room_detail, "Sensor Range")
+    sensor_range_block = dataset_block(room_charts, "Sensor Range")
     assert "'transparent'" in sensor_range_block
 
     for label in (
@@ -969,11 +981,12 @@ def test_room_detail_js_shading_datasets_hide_reference_lines():
         "Chart options must reattach legend/tooltip filters after JSON cloning"
     )
 
-    assert "13 * 3600 * 1000" not in room_detail, (
+    assert "13 * 3600 * 1000" not in room_charts, (
         "Capacity shading must follow the configured history window, not a hardcoded 13 h offset"
     )
-    assert "buildCapacityPoints(roomForecast, windowStart)" in room_detail
-    assert "buildPowerChart(powerChart" in room_detail and "windowStart" in room_detail
+    assert "buildCapacityPoints(roomForecast, windowStart" in room_charts
+    assert "buildPowerChart(" in room_charts and "windowStart" in room_charts
+    assert "from '../charts/room-charts.js" in room_detail
 
 
 def test_room_detail_js_extends_temperature_history_on_live_updates(two_room_spec):
