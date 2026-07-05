@@ -1,11 +1,10 @@
 /**
  * MPC preview chart builders shared by room detail and tuning pages.
  *
- * Implementation lives in room-detail.js today; this module provides a stable
- * import path so tuning does not depend on the full room page.
+ * Re-exports from room-charts.js so tuning does not depend on the full room page.
  */
 export {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../pages/room-detail.js?v=89';
+} from './room-charts.js?v=90';

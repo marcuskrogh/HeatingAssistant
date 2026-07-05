@@ -1,7 +1,7 @@
-import { createGauge, updateGauge } from '../components/gauge.js?v=89';
-import { createRoomClimateTile } from '../components/room-climate-tile.js?v=89';
-import { createCountdown, updateCountdown } from '../components/countdown.js?v=89';
-import { indexExperimentsByRoom } from '../experiment-utils.js?v=89';
+import { createGauge, updateGauge } from '../components/gauge.js?v=90';
+import { createRoomClimateTile } from '../components/room-climate-tile.js?v=90';
+import { createCountdown, updateCountdown } from '../components/countdown.js?v=90';
+import { indexExperimentsByRoom } from '../experiment-utils.js?v=90';
 import {
   KPI_SEVERITY,
   DAILY_ENERGY_GAUGE_MAX_KWH,
@@ -12,11 +12,11 @@ import {
   houseMeanTrackingError,
   houseModelFit,
   mpcLoadPercent,
-} from '../kpi-engine.js?v=89';
+} from '../kpi-engine.js?v=90';
 import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
   entityValue,
-} from '../utils.js?v=89';
+} from '../utils.js?v=90';
 
 export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';

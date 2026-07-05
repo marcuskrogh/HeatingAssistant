@@ -10,8 +10,8 @@
 //   #config/sources/<i>  → edit a heat source (i = index, or "new")
 //   #config/system       → environment sensors + site location
 
-import { createCollapsible } from '../components/collapsible.js?v=89';
-import { setPanelHash } from '../panel-hash.js?v=89';
+import { createCollapsible } from '../components/collapsible.js?v=90';
+import { setPanelHash } from '../panel-hash.js?v=90';
 
 // ---------------------------------------------------------------------------
 // Teal line-art icons (same design language as the panel logo: teal strokes on
