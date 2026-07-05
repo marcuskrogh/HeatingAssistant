@@ -556,23 +556,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 mapping[room_name] = sensors
         return mapping
 
-    @staticmethod
-    def _build_window_sensor_map(
-        rooms_cfg: List[Dict[str, Any]],
-    ) -> Dict[str, List[str]]:
-        """Return ``{room_name: [binary_sensor_id, ...]}`` for window/door override."""
-        mapping: Dict[str, List[str]] = {}
-        for rc in rooms_cfg:
-            room_name = rc[CONF_ROOM_NAME]
-            sensors = [s for s in rc.get(CONF_WINDOW_SENSORS, []) if isinstance(s, str)]
-            # Deduplicate while preserving order.
-            deduped: List[str] = []
-            for sensor_id in sensors:
-                if sensor_id not in deduped:
-                    deduped.append(sensor_id)
-            if deduped:
-                mapping[room_name] = deduped
-        return mapping
+    _build_window_sensor_map = staticmethod(window.build_window_sensor_map)
 
     def _init_room_state(self, rooms_cfg: List[Dict[str, Any]]) -> None:
         """Initialise per-room flags and parsed comfort schedules.
@@ -601,7 +585,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # Per-room default comfort_offset, used as fallback when no schedule
         # period overrides it and to seed the control trajectory builder.
         self._room_comfort_offset: Dict[str, float] = {}
-        self._window_sensors: Dict[str, List[str]] = self._build_window_sensor_map(rooms_cfg)
+        self._window_sensors: Dict[str, List[str]] = window.build_window_sensor_map(rooms_cfg)
         self._window_state: Dict[str, str] = {name: "closed" for name in room_names}
         self._window_state_since: Dict[str, datetime] = {}
         # Last applied effective control params per room — exposed for diagnostics.
@@ -646,11 +630,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self._room_schedule[room_name] = build_schedule(periods_raw)
 
     def _read_binary_sensor_on(self, entity_id: str) -> bool:
-        """Return True when the given binary sensor is currently ``on``."""
-        state = self.hass.states.get(entity_id)
-        if state is None:
-            return False
-        return str(state.state).lower() == "on"
+        return window.read_binary_sensor_on(self, entity_id)
 
     def _set_window_state(
         self,
@@ -658,59 +638,16 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         state: str,
         now_utc: datetime,
     ) -> None:
-        """Set per-room window state and timestamp the transition."""
-        self._window_state[room_name] = state
-        self._window_state_since[room_name] = now_utc
+        window.set_window_state(self, room_name, state, now_utc)
 
     def _update_window_state_machine(self, now_utc: datetime) -> None:
-        """Advance the per-room window state machine for Phase 3 W1."""
-        for room_name in self.model.room_names:
-            sensors = self._window_sensors.get(room_name, [])
-            if not sensors:
-                self._window_state[room_name] = "closed"
-                self._window_state_since.pop(room_name, None)
-                continue
-
-            any_open = any(self._read_binary_sensor_on(entity_id) for entity_id in sensors)
-            state = self._window_state.get(room_name, "closed")
-            since = self._window_state_since.get(room_name, now_utc)
-            elapsed = (now_utc - since).total_seconds()
-
-            if state == "closed":
-                if any_open:
-                    self._set_window_state(room_name, "pending_open", now_utc)
-                continue
-            if state == "pending_open":
-                if not any_open:
-                    self._set_window_state(room_name, "closed", now_utc)
-                elif elapsed >= self._window_open_debounce:
-                    self._set_window_state(room_name, "open", now_utc)
-                continue
-            if state == "open":
-                if not any_open:
-                    self._set_window_state(room_name, "pending_closed", now_utc)
-                continue
-            if state == "pending_closed":
-                if any_open:
-                    self._set_window_state(room_name, "open", now_utc)
-                elif elapsed >= self._window_open_close_settle:
-                    self._set_window_state(room_name, "closed", now_utc)
+        window.update_window_state_machine(self, now_utc)
 
     def get_window_state(self, room_name: str) -> str:
-        """Return the current window override state for a room."""
-        return self._window_state.get(room_name, "closed")
+        return window.get_window_state(self, room_name)
 
     def is_window_override_active(self, room_name: str) -> bool:
-        """Return True while the room's heater must be held off for a window.
-
-        The override is active for the whole period the heater is suppressed:
-        from the moment the open-debounce expires (state ``open``) until the
-        close-settle timer expires (leaving ``pending_closed`` for ``closed``).
-        It is **not** active during ``pending_open`` — opening a window starts
-        the debounce timer but the heater keeps running until it elapses — nor
-        once the room returns to ``closed``.
-        """
-        return self.get_window_state(room_name) in ("open", "pending_closed")
+        return window.is_window_override_active(self, room_name)
 
     def _init_runtime_buffers(self, hass: HomeAssistant) -> None:
         """Initialise per-cycle and visualisation state.
@@ -1289,31 +1226,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         }
 
     def serialize_room_schedules(self) -> Dict[str, Any]:
-        """Return slug-keyed room schedule payloads for UI / WebSocket consumers."""
-        from ..naming import slugify
-
-        schedules: dict = {}
-        for room_name, room_schedule in self._room_schedule.items():
-            if room_schedule and not room_schedule.is_empty:
-                schedules[slugify(room_name)] = {
-                    "enabled": self._schedule_enabled.get(room_name, True),
-                    "periods": [
-                        {
-                            "name": p.name,
-                            "start": p.start.strftime("%H:%M"),
-                            "end": p.end.strftime("%H:%M"),
-                            "mode": p.mode,
-                            "setpoint": p.setpoint,
-                            "frost_protection": p.frost_protection,
-                            "days": sorted(p.days),
-                            "comfort_offset": p.comfort_offset,
-                            "tracking_weight": p.tracking_weight,
-                            "energy_weight": p.energy_weight,
-                        }
-                        for p in room_schedule.periods
-                    ],
-                }
-        return schedules
+        return schedule_control.serialize_room_schedules(self)
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
         """Queue non-structural config changes for the next regular tick.
@@ -2028,13 +1941,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         _LOGGER.info("Deleted parameter history entry at index %d", history_index)
 
     def reload_room_schedule(self, room_name: str, periods_raw: list) -> None:
-        """Rebuild a single room's schedule from raw period definitions.
-
-        Called by the ``update_room_schedule`` service after the config entry
-        has been persisted with the new periods list.
-        """
-        new_schedule = build_schedule(periods_raw)
-        self._room_schedule[room_name] = new_schedule
+        schedule_control.reload_room_schedule(self, room_name, periods_raw)
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """
@@ -2652,193 +2559,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         return cancel
 
     def setup_window_listeners(self) -> Optional[Callable]:
-        """Set up window-sensor listeners for event-driven debounce/settle timing.
-
-        The state machine is advanced DIRECTLY from the event callbacks rather
-        than relying on coordinator refreshes to check elapsed time.  Actuator
-        commands are pushed via ``_async_push_window_override()`` rather than
-        ``async_request_refresh()`` so the MPC and EKF are never triggered by
-        window events — they run strictly at the scheduled update interval.
-
-        * Sensor opens  → ``closed → pending_open`` and start the
-          ``window_open_debounce`` timer.  The heater keeps running until it
-          elapses; only then does the room advance to ``open`` and the
-          heater-off override get pushed.
-        * Sensor closes before the debounce elapses → cancel the timer and
-          revert to ``closed``; the heater was never turned off.
-        * All room sensors close while ``open`` → ``open → pending_closed``
-          and start the ``window_open_close_settle`` timer.  The heater stays
-          off until it elapses; only then does the room return to ``closed``
-          and the heater resume at the actuation the MPC kept solving for in
-          the background.
-        * A sensor re-opens while ``pending_closed`` → cancel the settle timer
-          and return to ``open`` immediately; the heater stays off.
-
-        Each running timer cancels only on the transition that ends it, so a
-        second sensor opening/closing in the same direction leaves the
-        in-flight debounce/settle timer untouched rather than restarting it.
-
-        Returns a cancel callable suitable for ``entry.async_on_unload``,
-        or ``None`` when no window sensors are configured.
-        """
-        # Build sensor_id → room_name reverse lookup.
-        sensor_to_room: Dict[str, str] = {
-            sid: room_name
-            for room_name, sensors in self._window_sensors.items()
-            for sid in sensors
-        }
-        all_sensor_ids = list(sensor_to_room)
-        if not all_sensor_ids:
-            return None
-
-        # Pending timer cancel-handles keyed by room_name (one timer per room).
-        _pending: Dict[str, Callable] = {}
-
-        @callback
-        def _on_window_changed(event) -> None:
-            sensor_id = event.data.get("entity_id", "")
-            room_name = sensor_to_room.get(sensor_id)
-            if room_name is None:
-                return
-
-            new_state_obj = event.data.get("new_state")
-            old_state_obj = event.data.get("old_state")
-            if new_state_obj is None:
-                return
-
-            new_open = str(new_state_obj.state).lower() == "on"
-            old_open = (
-                old_state_obj is not None
-                and str(old_state_obj.state).lower() == "on"
-            )
-            if new_open == old_open:
-                return
-
-            now_utc = datetime.now(tz=timezone.utc)
-
-            def _cancel_pending() -> None:
-                """Cancel this room's in-flight debounce/settle timer, if any."""
-                if room_name in _pending:
-                    _pending.pop(room_name)()
-
-            current = self._window_state.get(room_name, "closed")
-            sensors = self._window_sensors.get(room_name, [])
-            any_open_now = any(self._read_binary_sensor_on(s) for s in sensors)
-
-            if new_open:
-                # ── A sensor in this room just opened ──────────────────────
-                if current in ("open", "pending_open"):
-                    # Already open, or already counting down the open debounce:
-                    # a second window opening changes nothing and must NOT
-                    # restart the in-flight timer.
-                    return
-
-                if current == "pending_closed":
-                    # Re-opened during the close-settle window — stop the
-                    # settle timer and return to the open override at once.
-                    # The heater stays off; no debounce is re-run.
-                    _cancel_pending()
-                    self._set_window_state(room_name, "open", now_utc)
-                    _LOGGER.debug(
-                        "Window sensor %s re-opened during settle for %s — "
-                        "back to open (heater stays off)",
-                        sensor_id, room_name,
-                    )
-                    self.hass.async_create_task(self._async_push_window_override())
-                    return
-
-                # current == "closed": start the open-debounce timer.  The
-                # heater keeps running until it elapses.
-                _cancel_pending()
-                self._set_window_state(room_name, "pending_open", now_utc)
-                _LOGGER.debug(
-                    "Window sensor %s opened for %s — pending_open (debounce %.0fs)",
-                    sensor_id, room_name, self._window_open_debounce,
-                )
-
-                @callback
-                def _advance_open(_now=None, _rn=room_name) -> None:
-                    _pending.pop(_rn, None)
-                    _now_inner = datetime.now(tz=timezone.utc)
-                    sensors_in = self._window_sensors.get(_rn, [])
-                    any_open = any(self._read_binary_sensor_on(s) for s in sensors_in)
-                    if any_open and self._window_state.get(_rn) == "pending_open":
-                        self._set_window_state(_rn, "open", _now_inner)
-                        _LOGGER.debug(
-                            "Window debounce elapsed for %s — heater override active",
-                            _rn,
-                        )
-                    self.hass.async_create_task(self._async_push_window_override())
-
-                _pending[room_name] = async_call_later(
-                    self.hass, self._window_open_debounce, _advance_open
-                )
-
-            else:
-                # ── A sensor in this room just closed ──────────────────────
-                if any_open_now:
-                    # Another sensor in the room is still open — the override
-                    # state and any running timer are unaffected.
-                    return
-
-                if current == "pending_open":
-                    # Closed before the open debounce elapsed — stop the timer
-                    # and revert to closed; the heater was never turned off.
-                    _cancel_pending()
-                    self._set_window_state(room_name, "closed", now_utc)
-                    _LOGGER.debug(
-                        "Window sensor %s closed before debounce for %s — reverted",
-                        sensor_id, room_name,
-                    )
-                    self.hass.async_create_task(self._async_push_window_override())
-                    return
-
-                if current == "open":
-                    # All sensors closed while open — start the close-settle
-                    # timer.  The heater stays off until it elapses.
-                    _cancel_pending()
-                    self._set_window_state(room_name, "pending_closed", now_utc)
-                    _LOGGER.debug(
-                        "Window sensor %s closed for %s — pending_closed (settle %.0fs)",
-                        sensor_id, room_name, self._window_open_close_settle,
-                    )
-
-                    @callback
-                    def _advance_closed(_now=None, _rn=room_name) -> None:
-                        _pending.pop(_rn, None)
-                        _now_inner = datetime.now(tz=timezone.utc)
-                        sensors_in = self._window_sensors.get(_rn, [])
-                        any_open2 = any(
-                            self._read_binary_sensor_on(s) for s in sensors_in
-                        )
-                        if (
-                            not any_open2
-                            and self._window_state.get(_rn) == "pending_closed"
-                        ):
-                            self._set_window_state(_rn, "closed", _now_inner)
-                            _LOGGER.debug(
-                                "Window settle elapsed for %s — heater override "
-                                "cleared, resuming MPC actuation",
-                                _rn,
-                            )
-                        self.hass.async_create_task(self._async_push_window_override())
-
-                    _pending[room_name] = async_call_later(
-                        self.hass, self._window_open_close_settle, _advance_closed
-                    )
-                # current in ("closed", "pending_closed"): nothing to do.
-
-        cancel_listener = async_track_state_change_event(
-            self.hass, all_sensor_ids, _on_window_changed
-        )
-
-        def _cleanup() -> None:
-            cancel_listener()
-            for cancel_cb in list(_pending.values()):
-                cancel_cb()
-            _pending.clear()
-
-        return _cleanup
+        return window.setup_window_listeners(self)
 
     def _read_outdoor_temp(self) -> Optional[float]:
         return disturbances.read_outdoor_temp(self)
@@ -3039,58 +2760,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self.async_update_listeners()
 
     async def _async_push_window_override(self) -> None:
-        """Apply window overrides, push actuator commands, and refresh entity states.
-
-        Called directly by window-sensor callbacks so that the heater-off (window
-        open) or heater-on (window closed) command is issued immediately, without
-        triggering a coordinator refresh and without disturbing the MPC or EKF.
-
-        Live inputs are re-read via ``_refresh_live_state()`` so entities report
-        current values, and ``async_update_listeners()`` is always called at the
-        end so the UI refreshes immediately regardless of whether actuator
-        commands could be applied.
-
-        The MPC runs strictly at the scheduled update interval via the coordinator
-        timer.  This method is the sole path for window events to affect actuators
-        between those scheduled ticks.
-        """
-        outdoor_temp = self._refresh_live_state()
-
-        # Push actuator commands only when we have an MPC solution and a valid
-        # outdoor temperature.  Missing either means we're still in startup or
-        # the outdoor sensor is transiently unavailable — in both cases the last
-        # commanded state is the safest thing to leave the heaters in.
-        if self.actions and outdoor_temp is not None:
-            # A room whose window-override just cleared (open/pending_closed →
-            # closed) must come back on at the actuation the MPC kept solving
-            # for while the heater was off, not the 0 it was clamped to.  Pull
-            # that value from the shadow optimum before the override clamp
-            # below.  Rooms disabled for other reasons (user toggle / schedule)
-            # are still forced off by ``_apply_actions``.
-            for src in self.heat_sources:
-                if (
-                    not self.is_window_override_active(src.room)
-                    and self.is_room_enabled(src.room)
-                    and src.name in self._mpc_shadow_actions
-                ):
-                    self.actions[src.name] = self._mpc_shadow_actions[src.name]
-
-            for src in self.heat_sources:
-                if self.is_window_override_active(src.room):
-                    self.actions[src.name] = 0.0
-
-            if self._system_enabled:
-                try:
-                    await self._apply_actions(outdoor_temp)
-                except Exception:
-                    _LOGGER.warning(
-                        "Window override: failed to push actuator commands",
-                        exc_info=True,
-                    )
-
-        # Always notify entity subscribers so the UI immediately reflects both
-        # the new window-override state and the freshly read sensor values.
-        self.async_update_listeners()
+        await window.async_push_window_override(self)
 
     def _climate_internal_temp(self, src: HeatSource, state: Any) -> float:
         return actuation.climate_internal_temp(self, src, state)
@@ -3435,51 +3105,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def _apply_schedule(self, now: datetime) -> None:
-        """Resolve the active schedule for every room and update live state.
-
-        Sets ``room.setpoint`` to the period's effective value and toggles
-        ``_schedule_disabled`` so heat sources stop running during ``off``
-        periods.  The user's manual on/off toggle (``_room_enabled``) is
-        preserved — both flags are AND'ed together by
-        :meth:`is_room_enabled`.
-
-        Rooms whose schedule has been suspended (``_schedule_enabled`` is
-        False) are left at their base setpoint and the schedule-disable is
-        cleared.
-        """
-        for room_name in self.model.room_names:
-            schedule = self._room_schedule.get(room_name)
-            base = self._base_setpoint.get(
-                room_name, self.model.rooms[room_name].setpoint
-            )
-            measured = self.model.rooms[room_name].temperature
-            default_offset = self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
-
-            if schedule is None or schedule.is_empty or not self._schedule_enabled.get(
-                room_name, True
-            ):
-                effective = EffectiveControlParams(
-                    setpoint=base,
-                    comfort_offset=default_offset,
-                    tracking_weight=1.0,
-                    energy_weight=1.0,
-                    enabled=True,
-                    period_name=None,
-                    mode=None,
-                )
-            else:
-                effective = resolve_effective_control_params(
-                    schedule=schedule,
-                    base_setpoint=base,
-                    measured_temp=measured,
-                    now=now,
-                    default_comfort_offset=default_offset,
-                )
-
-            self.model.rooms[room_name].setpoint = effective.setpoint
-            self.model.rooms[room_name].comfort_offset = effective.comfort_offset
-            self._schedule_disabled[room_name] = not effective.enabled
-            self._effective_setpoint[room_name] = effective
+        schedule_control.apply_schedule(self, now)
 
     def _compute_control_trajectory(
         self,
@@ -3487,125 +3113,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         N: int,
         dt_seconds: float,
     ) -> ControlTrajectory:
-        """Build per-step control parameters for the full MPC horizon.
-
-        For each room and each horizon step k the resolved comfort setpoint,
-        corridor half-width, tracking-weight multiplier and energy-weight
-        multiplier are projected forward by consulting the room's schedule at
-        ``now_local + k * dt_seconds``.
-
-        Off periods are transparent: when a future step falls in an ``off``
-        period the last known comfort values are carried forward unchanged.
-        This produces the same reference the static (non-schedule-aware) MPC
-        would use while leaving the ``disabled_sources`` zeroing mechanism
-        fully responsible for off-period execution.
-        """
-        traj = ControlTrajectory(
-            setpoints={},
-            comfort_offsets={},
-            q_scales={},
-            r_scales={},
-            enabled_steps={},
+        return schedule_control.compute_control_trajectory(
+            self, now_local, N, dt_seconds
         )
 
-        for room_name in self.model.room_names:
-            schedule = self._room_schedule.get(room_name)
-            base_sp = self._base_setpoint.get(room_name, DEFAULT_SETPOINT)
-            default_offset = self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
-
-            sp_seq = np.empty(N, dtype=float)
-            off_seq = np.empty(N, dtype=float)
-            qw_seq = np.empty(N, dtype=float)
-            rw_seq = np.empty(N, dtype=float)
-            enabled_seq = np.ones(N, dtype=bool)
-
-            # Anchor: current effective params (already resolved by _apply_schedule)
-            current = self._effective_setpoint.get(room_name)
-            last_sp = current.setpoint if current is not None else base_sp
-            last_off = current.comfort_offset if current is not None else default_offset
-            last_qw = current.tracking_weight if current is not None else 1.0
-            last_rw = current.energy_weight if current is not None else 1.0
-
-            for k in range(N):
-                t_k = now_local + timedelta(seconds=k * dt_seconds)
-                if not self._schedule_enabled.get(room_name, True):
-                    # Schedule suspended — use current effective values throughout.
-                    pass
-                else:
-                    params = control_params_at(
-                        schedule=schedule,
-                        base_setpoint=base_sp,
-                        t_future=t_k,
-                        default_comfort_offset=default_offset,
-                    )
-                    if params is not None:
-                        last_sp = params.setpoint
-                        last_off = params.comfort_offset
-                        last_qw = params.tracking_weight
-                        last_rw = params.energy_weight
-                    else:
-                        # Off period: carry forward values but mark step as disabled.
-                        enabled_seq[k] = False
-
-                sp_seq[k] = last_sp
-                off_seq[k] = last_off
-                qw_seq[k] = last_qw
-                rw_seq[k] = last_rw
-
-            # Manual off (user toggle) disables all horizon steps.
-            if not self._room_enabled.get(room_name, True):
-                enabled_seq[:] = False
-
-            traj.setpoints[room_name] = sp_seq
-            traj.comfort_offsets[room_name] = off_seq
-            traj.q_scales[room_name] = qw_seq
-            traj.r_scales[room_name] = rw_seq
-            traj.enabled_steps[room_name] = enabled_seq
-
-        return traj
-
     def has_schedule(self, room_name: str) -> bool:
-        """Return True when ``room_name`` has at least one schedule period."""
-        schedule = self._room_schedule.get(room_name)
-        return bool(schedule and not schedule.is_empty)
+        return schedule_control.has_schedule(self, room_name)
 
     def is_schedule_enabled(self, room_name: str) -> bool:
-        """Return whether the comfort schedule is active for the room.
-
-        A True result with no configured periods means the schedule "would
-        run" if periods were defined; use :meth:`has_schedule` to test for
-        actual configuration.
-        """
-        return self._schedule_enabled.get(room_name, True)
+        return schedule_control.is_schedule_enabled(self, room_name)
 
     def set_schedule_enabled(self, room_name: str, enabled: bool) -> None:
-        """Suspend or resume the comfort schedule for one room.
-
-        Suspending the schedule restores the room's base setpoint and
-        re-enables heating immediately, so e.g. an evening "off" period
-        can be skipped without editing YAML.  The configured periods are
-        preserved and resume control on the next call to ``set_schedule_enabled``
-        or after a Home Assistant restart.
-        """
-        self._schedule_enabled[room_name] = bool(enabled)
-        # Re-apply now so the next tick already reflects the change in the
-        # MPC reference; otherwise the user would have to wait one cycle.
-        self._apply_schedule(datetime.now())
+        schedule_control.set_schedule_enabled(self, room_name, enabled)
 
     def active_schedule_period(self, room_name: str) -> Optional[EffectiveControlParams]:
-        """Return the most recently resolved effective setpoint for the room."""
-        return self._effective_setpoint.get(room_name)
+        return schedule_control.active_schedule_period(self, room_name)
 
     def next_schedule_transition(self, room_name: str) -> Optional[datetime]:
-        """Return the timestamp of the next schedule boundary for the room."""
-        schedule = self._room_schedule.get(room_name)
-        if schedule is None or schedule.is_empty:
-            return None
-        return next_transition(schedule, datetime.now())
-
-    # ------------------------------------------------------------------
-    # Setup helpers (used by services)
-    # ------------------------------------------------------------------
+        return schedule_control.next_schedule_transition(self, room_name)
 
     def simulate_thermal_response(
         self,
