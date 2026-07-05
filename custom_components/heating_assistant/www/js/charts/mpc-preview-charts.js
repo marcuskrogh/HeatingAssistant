@@ -8,4 +8,4 @@ export {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../pages/room-detail.js?v=88';
+} from '../pages/room-detail.js?v=89';

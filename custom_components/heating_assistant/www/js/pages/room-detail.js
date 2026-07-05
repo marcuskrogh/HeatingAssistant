@@ -1,10 +1,10 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=88';
-import { createGauge, updateGauge } from '../components/gauge.js?v=88';
-import { createClimateCard } from '../components/climate-card.js?v=88';
-import { createCountdown } from '../components/countdown.js?v=88';
-import { createScheduleOverview } from '../components/schedule-overview.js?v=88';
-import { getRoomScheduleData } from '../schedule-utils.js?v=88';
-import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=88';
+import { TimeSeriesChart, makeDataset, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=89';
+import { createGauge, updateGauge } from '../components/gauge.js?v=89';
+import { createClimateCard } from '../components/climate-card.js?v=89';
+import { createCountdown } from '../components/countdown.js?v=89';
+import { createScheduleOverview } from '../components/schedule-overview.js?v=89';
+import { getRoomScheduleData } from '../schedule-utils.js?v=89';
+import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=89';
 import {
   KPI_SEVERITY,
   isRoomActive,
@@ -13,13 +13,19 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-} from '../kpi-engine.js?v=88';
-import { setPanelHash } from '../panel-hash.js?v=88';
+} from '../kpi-engine.js?v=89';
+import { setPanelHash } from '../panel-hash.js?v=89';
+import {
+  setClimateTemperature,
+  setRoomComfortOffset,
+  turnClimateOff,
+  turnClimateOn,
+} from '../ha-services.js?v=89';
 import {
   formatPower, formatPowerKw, formatPrice,
   entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
-} from '../utils.js?v=88';
+} from '../utils.js?v=89';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
@@ -109,29 +115,22 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     off: offVal,
     onSetpointChange: async (newSp) => {
       try {
-        await hass.callService('climate', 'set_temperature', {
-          entity_id: climateEntityId,
-          temperature: newSp,
-        });
+        await setClimateTemperature(hass, climateEntityId, newSp);
       } catch (err) {
         // Service call failed; the display self-corrects on the next state update.
       }
     },
     onComfortOffsetChange: async (newOffset) => {
       try {
-        await hass.callService('heating_assistant', 'set_room_comfort_offset', {
-          room_name: roomSlug,
-          comfort_offset: newOffset,
-        });
+        await setRoomComfortOffset(hass, roomSlug, newOffset);
       } catch (err) {
         // Service call failed; the display self-corrects on the next state update.
       }
     },
     onPowerToggle: async (turnOff) => {
       try {
-        await hass.callService('climate', turnOff ? 'turn_off' : 'turn_on', {
-          entity_id: climateEntityId,
-        });
+        if (turnOff) await turnClimateOff(hass, climateEntityId);
+        else await turnClimateOn(hass, climateEntityId);
       } catch (err) {
         // Service call failed; the display self-corrects on the next state update.
       }

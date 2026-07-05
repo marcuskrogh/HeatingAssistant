@@ -3,12 +3,16 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=88';
+} from '../components/time-series-chart.js?v=89';
 import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../charts/mpc-preview-charts.js?v=88';
+} from '../charts/mpc-preview-charts.js?v=89';
+import {
+  updateControllerTuning,
+  updateEstimationParams,
+} from '../ha-services.js?v=89';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -348,16 +352,11 @@ function renderTuningIndex(container, rooms, connection, hass) {
     return null;
   }
 
-  async function fromWebSocket() {
-    const h = liveHass();
-    if (typeof h?.callWS !== 'function') return null;
-    try {
-      const result = await h.callWS({ type: 'heating_assistant/get_controller_config' });
-      const cfg = result?.config;
-      if (cfg && typeof cfg === 'object' && Object.keys(cfg).length > 0) return cfg;
-      console.warn('[TuningPage] WS returned empty config:', result);
-    } catch (e) {
-      console.error('[TuningPage] WS call failed:', e);
+  async function loadConfigFromConnection() {
+    const cfg = await connection.getControllerConfig();
+    if (cfg && typeof cfg === 'object' && Object.keys(cfg).length > 0) return cfg;
+    if (cfg && typeof cfg === 'object') {
+      console.warn('[TuningPage] WS returned empty config');
     }
     return null;
   }
@@ -393,7 +392,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
       if (destroyed) return;
       if (delay) await sleep(delay);
       if (destroyed) return;
-      if (applyConfig(await fromWebSocket())) return;
+      if (applyConfig(await loadConfigFromConnection())) return;
       if (applyConfig(fromEntityState())) return;
     }
     setStatus(
@@ -526,13 +525,13 @@ function renderTuningIndex(container, rooms, connection, hass) {
     btnApply.disabled = true;
     try {
       const mpcData = collectMpcParams();
-      await hass.callService('heating_assistant', 'update_controller_tuning', mpcData);
+      await updateControllerTuning(hass, mpcData);
 
       const estData = {};
       for (const def of WINDOW_DEFS) estData[def.key] = def.parse(windowInputs[def.key].value);
-      await hass.callService('heating_assistant', 'update_estimation_params', estData);
+      await updateEstimationParams(hass, estData);
 
-      applyConfig(await fromWebSocket()) || applyConfig(fromEntityState());
+      applyConfig(await loadConfigFromConnection()) || applyConfig(fromEntityState());
       userEditing = false;
       previewPayload = null;
       previewChartsEl.hidden = true;

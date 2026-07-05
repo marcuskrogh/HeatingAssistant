@@ -30,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '88';
+  return '89';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -408,7 +408,8 @@ class HaIndustrialPanel extends HTMLElement {
     this._systemRunning = newEnabled;
     this._updateRunButton();
     try {
-      await this._hass.callService('heating_assistant', 'set_system_enabled', { enabled: newEnabled });
+      const { setSystemEnabled } = await import(`${BASE_PATH}/js/ha-services.js?v=${PANEL_VERSION}`);
+      await setSystemEnabled(this._hass, newEnabled);
     } catch (e) {
       // Revert on failure
       this._systemRunning = !newEnabled;
