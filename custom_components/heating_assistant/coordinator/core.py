@@ -213,6 +213,8 @@ from . import (
     enablement,
     forecast_payload,
     live_refresh,
+    mpc_cycle,
+    parameter_lifecycle,
     runtime_state,
     schedule_control,
     tuning_preview,
@@ -224,10 +226,6 @@ from .types import (
     ControllerConfigSnapshot,
     _coerce_interval_seconds,
     _coerce_opt_float,
-)
-from ..ground_temp import ground_temperature
-from ..solar_model import (
-    horizontal_irradiance,
 )
 from ..schedule import (
     EffectiveControlParams,
@@ -248,11 +246,6 @@ from ..datasets import build_dataset
 
 _LOGGER = logging.getLogger(__name__)
 
-# Number of consecutive coordinator cycles with no valid outdoor temperature
-# before an UpdateFailed is raised (only applies when no prior reading was ever
-# obtained — i.e., the entity was never reachable since startup).
-# With the default 15-minute update interval this gives ~45 minutes of grace.
-_OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
 
 class HeatingAssistantCoordinator(DataUpdateCoordinator):
     """
@@ -877,76 +870,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def _restore_estimated_parameters(self, snapshot: Dict[str, Any]) -> None:
-        """Apply a persisted estimation snapshot to the in-memory model objects.
-
-        Called from ``__init__`` before the MPC controller is built so the
-        controller always starts with the most recently identified values.
-        Note: ``self.hass`` is **not** available at this point — this method
-        only modifies Python objects in memory.
-
-        Two on-disk snapshot layouts are supported:
-
-        * the flat layout (``{"rooms": ..., "sources": ..., "connections": ...}``)
-          written by the ML estimation path, and
-        * the nested layout (``{"active": {"rooms": ...}, "history": [...]}``)
-          written by ``store_identified_parameters`` / ``revert_parameters``.
-
-        New snapshots from the nested path also mirror the flat keys at the top
-        level (see those methods), but older entries only carry the nested
-        form, so unwrap ``active`` here when the flat ``rooms`` key is absent.
-        """
-        if "rooms" not in snapshot and isinstance(snapshot.get("active"), dict):
-            snapshot = snapshot["active"]
-        for room_name, params in snapshot.get("rooms", {}).items():
-            if room_name not in self.model.rooms:
-                continue
-            room = self.model.rooms[room_name]
-            if "thermal_mass" in params:
-                room.thermal_mass = float(params["thermal_mass"])
-            if "r_external" in params:
-                room.r_external = float(params["r_external"])
-            if "internal_gain" in params:
-                room.internal_gain = float(params["internal_gain"])
-            if "solar_scale" in params:
-                room.solar_scale = float(params["solar_scale"])
-            if "c_air_fraction" in params:
-                room.c_air_fraction = float(params["c_air_fraction"])
-            if "r_aw_fraction" in params:
-                room.r_aw_fraction = float(params["r_aw_fraction"])
-
-        for src_name, src_params in snapshot.get("sources", {}).items():
-            for src in self.heat_sources:
-                if src.name == src_name:
-                    src.power_scale = float(src_params.get("power_scale", 1.0))
-
-        for key, r_val in snapshot.get("connections", {}).items():
-            parts = key.split(":", 1)
-            if len(parts) != 2:
-                continue
-            room_a, room_b = parts
-            for name in (room_a, room_b):
-                if name not in self.model.rooms:
-                    continue
-                other = room_b if name == room_a else room_a
-                for conn in self.model.rooms[name].connections:
-                    if conn.connected_room == other:
-                        conn.r_value = float(r_val)
-
-        # Rebuild state-space matrices to reflect the updated parameters.
-        # Must call rebuild_derived_parameters() first so the cached per-room
-        # arrays (_leakage_area, _B_sky_offset) are re-derived from the new
-        # room.thermal_mass / room.r_external values before _build_matrices()
-        # reads them.
-        self.model.rebuild_derived_parameters()
-        (
-            self.model._C,
-            self.model._A,
-            self.model._B_ext,
-        ) = self.model._build_matrices()
-
-        self._estimation_timestamp = snapshot.get("estimated_at")
-        self._estimation_log_likelihood = snapshot.get("log_likelihood")
-        _LOGGER.info("Restored persisted estimated parameters from entry.data")
+        parameter_lifecycle.restore_estimated_parameters(self, snapshot)
 
     def _drop_orphaned_sources(
         self, sources: List[HeatSource]
@@ -1254,43 +1178,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
 
     def reset_estimated_parameters(self) -> None:
-        """Discard persisted estimation and revert the live model to the
-        configured (YAML / config-entry default) parameter values.
-
-        The ``CONF_ESTIMATED_PARAMS`` key is removed from ``entry.data`` so
-        subsequent restarts also use the original values.  The MPC controller
-        is rebuilt immediately.
-        """
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            new_data = {
-                k: v for k, v in real_entry.data.items()
-                if k != CONF_ESTIMATED_PARAMS
-            }
-            self.hass.config_entries.async_update_entry(real_entry, data=new_data)
-
-        # Rebuild the model from the original YAML / config values (these are
-        # stored in _entry.data independent of any in-memory estimation).
-        rooms_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_ROOMS, [])
-        sources_cfg: List[Dict[str, Any]] = self._entry.data.get(CONF_HEAT_SOURCES, [])
-        self.model = build_house_model(rooms_cfg)
-        self.heat_sources = self._drop_orphaned_sources(
-            build_heat_sources(sources_cfg)
-        )
-
-        # Restore user-controlled setpoints so that "Reset to Defaults"
-        # only affects estimated thermal parameters (thermal_mass,
-        # r_external) and not the user's chosen comfort setpoints.
-        for _room_name, _sp in self._base_setpoint.items():
-            if _room_name in self.model.rooms:
-                self.model.rooms[_room_name].setpoint = _sp
-        self._rebuild_sources_by_room()
-
-        self._build_controller()
-
-        self._estimation_timestamp = None
-        self._estimation_log_likelihood = None
-        _LOGGER.info("Estimated parameters reset to configured defaults")
+        parameter_lifecycle.reset_estimated_parameters(self)
 
     def apply_manual_parameters(
         self,
@@ -1298,57 +1186,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         thermal_mass: float,
         r_external: float,
     ) -> None:
-        """Apply manually tuned parameters for a single room.
-
-        Delegates to ``store_identified_parameters`` so that all parameter
-        applications go through the history mechanism.
-        """
-        self.store_identified_parameters(
-            room_name, thermal_mass, r_external, source="manual"
+        parameter_lifecycle.apply_manual_parameters(
+            self, room_name, thermal_mass, r_external
         )
 
     def apply_heater_scales(
         self,
         heater_scales: Dict[str, float],
     ) -> None:
-        """Apply heater power-scale factors to heat sources and rebuild MPC.
-
-        Parameters
-        ----------
-        heater_scales:
-            Mapping of source name → dimensionless scale factor (1.0 = 100%).
-            Sources not present in the dict are left unchanged.
-        """
-        if not heater_scales:
-            return
-
-        applied: Dict[str, float] = {}
-        for src in self.heat_sources:
-            if src.name in heater_scales:
-                src.power_scale = float(heater_scales[src.name])
-                applied[src.name] = src.power_scale
-
-        if not applied:
-            return
-
-        # Rebuild MPC controller so the new scales feed into the QP.
-        self._build_controller()
-
-        # Persist the updated power scales in the estimated-params snapshot so
-        # they survive a restart.
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            snap = dict(self.estimated_params_snapshot or {})
-            snap["sources"] = {
-                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
-                for src in self.heat_sources
-            }
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snap},
-            )
-
-        _LOGGER.info("Applied heater power scales: %s", applied)
+        parameter_lifecycle.apply_heater_scales(self, heater_scales)
 
     def store_identified_parameters(
         self,
@@ -1363,294 +1209,25 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         r_aw_fraction: Optional[float] = None,
         heater_scales: Optional[Dict[str, float]] = None,
     ) -> None:
-        """Store and apply identified parameters with history tracking.
-
-        Applies the full set of per-room thermal-model parameters — not just
-        ``thermal_mass`` / ``r_external`` but also the internal gain, solar
-        scale and 2R2C envelope split fractions — plus the per-source heater
-        power scales.  Each optional argument is applied only when provided so
-        callers can update a subset.
-
-        1. Get current active params as a history entry.
-        2. Push current active to history list (prepend).
-        3. Cap history at 10 entries.
-        4. Set new params as active.
-        5. Apply to the model (room parameters + heater scales).
-        6. Persist via ``async_update_entry``.
-        7. Rebuild MPC controller.
-        """
-        if room_name not in self.model.rooms:
-            raise ValueError(f"Room '{room_name}' not found in model")
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        # --- Read existing persisted structure ---
-        existing_snap = {}
-        try:
-            existing_snap = self.estimated_params_snapshot or {}
-        except Exception:
-            pass
-
-        # Migrate old format (flat snapshot) to new format with active/history
-        if "active" not in existing_snap:
-            # Old format: { "rooms": {...}, "estimated_at": ... }
-            old_active = {
-                "rooms": existing_snap.get("rooms", {}),
-                "estimated_at": existing_snap.get("estimated_at", now_iso),
-                "source": "manual",
-            }
-            history: list = []
-        else:
-            old_active = dict(existing_snap["active"])
-            history = list(existing_snap.get("history", []))
-
-        # Push current active to history (prepend)
-        if old_active.get("rooms"):
-            history.insert(0, old_active)
-            # Cap history at 10 entries
-            history = history[:10]
-
-        # --- Apply to in-memory model ---
-        room = self.model.rooms[room_name]
-        room.thermal_mass = float(thermal_mass)
-        room.r_external = float(r_external)
-        if internal_gain is not None:
-            room.internal_gain = float(internal_gain)
-        if solar_scale is not None:
-            room.solar_scale = float(solar_scale)
-        if c_air_fraction is not None:
-            room.c_air_fraction = float(c_air_fraction)
-        if r_aw_fraction is not None:
-            room.r_aw_fraction = float(r_aw_fraction)
-
-        # Apply per-source heater power scales (only sources that were supplied).
-        if heater_scales:
-            for src in self.heat_sources:
-                if src.name in heater_scales:
-                    src.power_scale = float(heater_scales[src.name])
-
-        self.model.rebuild_derived_parameters()
-        (
-            self.model._C,
-            self.model._A,
-            self.model._B_ext,
-        ) = self.model._build_matrices()
-
-        # Rebuild MPC controller
-        self._build_controller()
-
-        # --- Build new active snapshot ---
-        # Persist the full per-room parameter set (not just C / R_ext) so the
-        # restart-time restore re-applies the identified envelope split, solar
-        # scale and internal gain rather than reverting them to defaults.
-        prev_rooms = old_active.get("rooms", {}) or existing_snap.get("rooms", {})
-
-        def _room_snapshot_entry(r_name: str, r_obj: Any) -> Dict[str, Any]:
-            prev = prev_rooms.get(r_name, {}) if isinstance(prev_rooms.get(r_name), dict) else {}
-            just_estimated = r_name == room_name
-            entry: Dict[str, Any] = {
-                "thermal_mass": r_obj.thermal_mass,
-                "r_external": r_obj.r_external,
-                "internal_gain": float(getattr(r_obj, "internal_gain", 0.0)),
-                "solar_scale": float(getattr(r_obj, "solar_scale", 1.0)),
-                "c_air_fraction": float(getattr(r_obj, "c_air_fraction", 0.05)),
-                "r_aw_fraction": float(getattr(r_obj, "r_aw_fraction", 0.05)),
-                "is_estimated": bool(just_estimated or prev.get("is_estimated", False)),
-            }
-            if just_estimated:
-                entry["estimated_at"] = now_iso
-                entry["estimation_source"] = source
-            elif prev.get("estimated_at"):
-                entry["estimated_at"] = prev.get("estimated_at")
-                if prev.get("estimation_source"):
-                    entry["estimation_source"] = prev.get("estimation_source")
-            return entry
-
-        new_active: Dict[str, Any] = {
-            "rooms": {
-                name: _room_snapshot_entry(name, r)
-                for name, r in self.model.rooms.items()
-            },
-            "estimated_at": now_iso,
-            "source": source,
-        }
-        if rmse is not None:
-            new_active["rmse"] = rmse
-
-        self._estimation_timestamp = now_iso
-
-        # --- Persist with new structure ---
-        # The ``active``/``history`` layout drives the dashboard's revert
-        # history.  We also mirror the flat ``rooms``/``sources``/``connections``
-        # keys at the top level because ``_restore_estimated_parameters`` (run on
-        # restart/reload) and the dashboard sensors read that flat layout — without
-        # the mirror, manually-stored parameters were never restored and silently
-        # reverted to the configured room defaults.
-        snapshot: Dict[str, Any] = {
-            "active": new_active,
-            "history": history,
-            "rooms": new_active["rooms"],
-            "sources": {
-                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
-                for src in self.heat_sources
-            },
-            "connections": {},
-            "estimated_at": now_iso,
-            "log_likelihood": None,
-        }
-
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
-            )
-        _LOGGER.info(
-            "Stored identified parameters for room '%s': thermal_mass=%.0f J/K, "
-            "r_external=%.5f K/W (source=%s)",
+        parameter_lifecycle.store_identified_parameters(
+            self,
             room_name,
             thermal_mass,
             r_external,
-            source,
+            source=source,
+            rmse=rmse,
+            internal_gain=internal_gain,
+            solar_scale=solar_scale,
+            c_air_fraction=c_air_fraction,
+            r_aw_fraction=r_aw_fraction,
+            heater_scales=heater_scales,
         )
 
     def revert_parameters(self, room_name: str, history_index: int) -> None:
-        """Revert to a previous parameter set from history.
-
-        1. Get the history entry at the given index.
-        2. Make it the new active.
-        3. Push the current active to history.
-        4. Apply to model + rebuild MPC.
-        """
-        if room_name not in self.model.rooms:
-            raise ValueError(f"Room '{room_name}' not found in model")
-
-        existing_snap = {}
-        try:
-            existing_snap = self.estimated_params_snapshot or {}
-        except Exception:
-            pass
-
-        # Migrate old format if needed
-        if "active" not in existing_snap:
-            raise ValueError("No parameter history available (old format)")
-
-        current_active = dict(existing_snap["active"])
-        history = list(existing_snap.get("history", []))
-
-        if history_index < 0 or history_index >= len(history):
-            raise ValueError(
-                f"history_index {history_index} out of range "
-                f"(0..{len(history) - 1})"
-            )
-
-        # Pop the target entry from history
-        target_entry = history.pop(history_index)
-
-        # Push current active to history (prepend)
-        history.insert(0, current_active)
-        # Cap history at 10 entries
-        history = history[:10]
-
-        # Apply target parameters to in-memory model
-        target_rooms = target_entry.get("rooms", {})
-        if room_name in target_rooms:
-            params = target_rooms[room_name]
-            room = self.model.rooms[room_name]
-            room.thermal_mass = float(params["thermal_mass"])
-            room.r_external = float(params["r_external"])
-        else:
-            raise ValueError(
-                f"Room '{room_name}' not found in history entry"
-            )
-
-        self.model.rebuild_derived_parameters()
-        (
-            self.model._C,
-            self.model._A,
-            self.model._B_ext,
-        ) = self.model._build_matrices()
-
-        # Rebuild MPC controller
-        self._build_controller()
-
-        # Build the new active reflecting actual model state
-        now_iso = datetime.now(timezone.utc).isoformat()
-        new_active: Dict[str, Any] = {
-            "rooms": {
-                name: {
-                    "thermal_mass": r.thermal_mass,
-                    "r_external": r.r_external,
-                    "internal_gain": float(getattr(r, "internal_gain", 0.0)),
-                }
-                for name, r in self.model.rooms.items()
-            },
-            "estimated_at": now_iso,
-            "source": target_entry.get("source", "reverted"),
-        }
-        self._estimation_timestamp = now_iso
-
-        # Persist.  Mirror the flat rooms/sources/connections keys at the top
-        # level so the restart-time restore and the dashboard sensors (which read
-        # the flat layout) see the reverted values — see store_identified_parameters.
-        snapshot: Dict[str, Any] = {
-            "active": new_active,
-            "history": history,
-            "rooms": new_active["rooms"],
-            "sources": {
-                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
-                for src in self.heat_sources
-            },
-            "connections": {},
-            "estimated_at": now_iso,
-            "log_likelihood": None,
-        }
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
-            )
-        _LOGGER.info(
-            "Reverted parameters for room '%s' to history index %d",
-            room_name,
-            history_index,
-        )
+        parameter_lifecycle.revert_parameters(self, room_name, history_index)
 
     def delete_parameter_history(self, history_index: int) -> None:
-        """Delete a single entry from the persisted parameter history.
-
-        The parameter history is a system-wide list of past parameter snapshots
-        (most recent first), shared by every room.  ``history_index`` is the
-        zero-based position in that list.  The active parameter set is never
-        touched — only a stored historical entry is removed — so this is purely a
-        housekeeping operation and does not rebuild the model or controller.
-        """
-        existing_snap = {}
-        try:
-            existing_snap = self.estimated_params_snapshot or {}
-        except Exception:
-            pass
-
-        history = list(existing_snap.get("history", []))
-        if history_index < 0 or history_index >= len(history):
-            raise ValueError(
-                f"history_index {history_index} out of range "
-                f"(0..{len(history) - 1})"
-            )
-
-        history.pop(history_index)
-
-        new_snap = dict(existing_snap)
-        new_snap["history"] = history
-
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: new_snap},
-            )
-        _LOGGER.info("Deleted parameter history entry at index %d", history_index)
+        parameter_lifecycle.delete_parameter_history(self, history_index)
 
     def reload_room_schedule(self, room_name: str, periods_raw: list) -> None:
         schedule_control.reload_room_schedule(self, room_name, periods_raw)
@@ -1661,55 +1238,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         and returns a snapshot of the system state.
         """
         try:
-            # 0. Stamp a single UTC "now" for this cycle so every sensor that
-            #    anchors a forecast trace to the current instant uses the same
-            #    timestamp (and avoids redundant ``datetime.now()`` calls in
-            #    each sensor's ``extra_state_attributes`` getter).
             self.now_utc = datetime.now(tz=timezone.utc)
             self._apply_pending_runtime_reconfiguration()
 
-            # 1. Update measured room temperatures from HA sensor states.
-            #    When multiple sensors are configured for a room, use the
-            #    average of all valid readings.
-            self.measured_temperatures = {}
-            for room_name, entity_ids in self._temp_sensors.items():
-                readings: List[float] = []
-                for entity_id in entity_ids:
-                    state = self.hass.states.get(entity_id)
-                    if state and state.state not in ("unknown", "unavailable"):
-                        try:
-                            readings.append(float(state.state))
-                        except (ValueError, TypeError):
-                            _LOGGER.warning(
-                                "Cannot parse temperature from entity %s: %r",
-                                entity_id,
-                                state.state,
-                            )
-                if readings:
-                    averaged = sum(readings) / len(readings)
-                    self.model.rooms[room_name].temperature = averaged
-                    self.measured_temperatures[room_name] = averaged
+            rooms_not_ready = mpc_cycle.read_measurements(self)
 
-            # Update the set of rooms that have ever had a valid reading.
-            self._rooms_ever_measured.update(self.measured_temperatures.keys())
-
-            # Rooms with sensors configured but no reading yet (typically
-            # during HA startup before entities leave "unknown" state) must
-            # not drive heating or seed the EKF with the 20 °C model default.
-            rooms_not_ready: set = {
-                name for name in self._temp_sensors
-                if name not in self._rooms_ever_measured
-            }
-            if rooms_not_ready:
-                _LOGGER.debug(
-                    "Waiting for first valid temperature reading for: %s",
-                    ", ".join(sorted(rooms_not_ready)),
-                )
-
-            # 1b. Apply comfort schedules: resolve the active period for each
-            #     room and update the live setpoint / enabled flag accordingly.
-            #     Done after measurements are read so frost-protection logic
-            #     sees the current temperature.
             now_local = self.now_utc.astimezone()
             try:
                 self._apply_schedule(now_local)
@@ -1727,431 +1260,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self._control_trajectory = None
             self._update_window_state_machine(self.now_utc)
 
-            # 2. Read outdoor temperature
-            outdoor_temp = self._read_outdoor_temp()
-            self.outdoor_temp = outdoor_temp  # sensor reports None = "unknown"
+            outdoor_temp, early = await mpc_cycle.resolve_outdoor_temperature(self)
+            if early is not None:
+                return early
 
-            if outdoor_temp is not None:
-                # Fresh valid reading — update persistence cache and reset counter.
-                self._last_valid_outdoor_temp = outdoor_temp
-                self._outdoor_temp_startup_failures = 0
-            elif self._last_valid_outdoor_temp is not None:
-                # Transient failure mid-run: persist the last valid reading so
-                # MPC continues without interruption.  The sensor entity will
-                # report "unknown" while self.outdoor_temp is None.
-                _LOGGER.debug(
-                    "Outdoor temperature entity unavailable; "
-                    "persisting last known value %.1f °C for MPC",
-                    self._last_valid_outdoor_temp,
-                )
-                outdoor_temp = self._last_valid_outdoor_temp
-            else:
-                # No valid reading has ever been obtained — still starting up
-                # or entity is misconfigured / permanently unavailable.
-                self._outdoor_temp_startup_failures += 1
-                if self._outdoor_temp_startup_failures >= _OUTDOOR_TEMP_MAX_STARTUP_FAILURES:
-                    raise UpdateFailed(
-                        "Outdoor temperature is unavailable: neither "
-                        f"outdoor_temp_entity {self._outdoor_entity!r} nor "
-                        f"weather_entity {self._weather_entity!r} has produced "
-                        f"a valid reading after "
-                        f"{self._outdoor_temp_startup_failures} coordinator cycles. "
-                        "Check that the configured entities exist and are "
-                        "reporting a numeric state."
-                    )
-                _LOGGER.debug(
-                    "Outdoor temperature unavailable — startup cycle %d/%d; "
-                    "skipping MPC until entity becomes ready",
-                    self._outdoor_temp_startup_failures,
-                    _OUTDOOR_TEMP_MAX_STARTUP_FAILURES,
-                )
-                if not self.actions:
-                    self.actions = {src.name: 0.0 for src in self.heat_sources}
-                # Solar gain does not depend on the outdoor temperature, so
-                # publish it even on this startup path instead of leaving the
-                # dashboard's solar value at 0 until the outdoor entity comes
-                # online.  Seed the cloud-cover EMA from persistence first so the
-                # clear-sky model is attenuated.
-                await self._ensure_runtime_state_loaded()
-                self._publish_current_solar_gains()
-                return {
-                    "temperatures": dict(self.model.temperatures),
-                    "outdoor_temp": None,
-                    "actions": dict(self.actions),
-                    "solar_gains": dict(self.solar_gains),
-                    "predictions": [],
-                    "heat_flows": {},
-                    "outdoor_forecast": [],
-                    "solar_forecast": [],
-                    "heating_schedule": [],
-                }
+            ctx = await mpc_cycle.gather_disturbances(self)
+            mpc_cycle.publish_cycle_solar_gains(self, ctx)
 
-            # 2b. Read electricity price forecast from Nord Pool / price entity.
-            self.price_forecast = await self._async_read_price_forecast(self.now_utc)
-
-            # 2c. Read weather forecast for outdoor temperature prediction
-            #     and cloud-cover (used to attenuate the clear-sky solar model)
-            outdoor_forecast = await self._async_read_weather_forecast()
-            await self._ensure_runtime_state_loaded()
-            # Restore persisted EKF state (x̂, P) on the first cycle after a
-            # stop/start so the wall/envelope temperature estimate is not lost.
-            # If there is a gap between the save time and now, propagate the
-            # EKF forward through it so the state is consistent with the
-            # current wall-clock time.  The actuator sequence used for the
-            # gap respects experiment prescriptions and schedule off-periods
-            # (timing unification) rather than blindly using the last command.
-            if self._pending_ekf_state is not None:
-                runtime_state.restore_pending_ekf_state(self)
-            # Low-pass the live cloud cover so the solar attenuation is
-            # continuous and robust to the weather entity being briefly
-            # unavailable right after a restart (which previously produced an
-            # unattenuated clear-sky spike on the first cycle).
-            cloud_cover_raw = self._read_cloud_cover_now()
-            cloud_cover_now = self._smooth_cloud_cover(cloud_cover_raw)
-            # Anchor the forecast on the smoothed current value so the current
-            # solar gain and its forecast transition continuously into each other.
-            cloud_forecast = await self._async_read_cloud_forecast(cloud_cover_now=cloud_cover_now)
-            # Cold-start fallback: with no live reading and no persisted EMA,
-            # adopt the first forecast value rather than an unattenuated model.
-            if cloud_cover_now is None and cloud_forecast:
-                cloud_cover_now = max(0.0, min(1.0, float(cloud_forecast[0])))
-                self._cloud_cover_filtered = cloud_cover_now
-
-            # 2c'. Read the optional solar forecast and derive a GHI series.
-            #      When no entity is configured (or it is unavailable / stale /
-            #      unparseable / lacks the peak power needed to scale PV power to
-            #      irradiance) both values are ``None`` and the solar model falls
-            #      back to the cloud-cover attenuation above — today's behaviour.
-            ghi_now, ghi_forecast = self._read_ghi(self.now_utc)
-
-            # 2d. Read current wind speed for the Sherman–Grimsrud
-            #     infiltration overlay.  When the weather entity does not
-            #     expose ``wind_speed`` this returns ``None`` and the
-            #     controller's external conductance falls back to its
-            #     typical-conditions baseline.  The wind *forecast* (when
-            #     the weather entity provides one) is also parsed and
-            #     handed to the controller: the QP linearisation uses its
-            #     horizon mean and the prediction rollout the per-step
-            #     values.
-            wind_speed_now = self._read_wind_speed_now()
-            self.wind_speed = wind_speed_now
-            if hasattr(self.controller, "set_wind_speed"):
-                self.controller.set_wind_speed(wind_speed_now)
-            wind_forecast = await self._async_read_wind_forecast(wind_speed_now)
-            # Attenuate the (optional) sky radiative cooling drift by the
-            # current cloud cover — clear nights cool harder than overcast.
-            if hasattr(self.controller, "set_cloud_cover"):
-                self.controller.set_cloud_cover(cloud_cover_now)
-            self.model.set_cloud_cover(cloud_cover_now)
-            if hasattr(self.controller, "set_room_process_noise_covariance_scales"):
-                q_scale = {
-                    room_name: (
-                        self._window_open_q_inflation
-                        if self.is_window_override_active(room_name)
-                        else 1.0
-                    )
-                    for room_name in self.model.room_names
-                }
-                self.controller.set_room_process_noise_covariance_scales(q_scale)
-
-            # 2e. Compute the current ground temperature from the
-            #     built-in sinusoidal model (Phase 1 A2).  No external
-            #     data needed — only the day of year.  Pushed to the
-            #     controller and held constant over the cycle, in line
-            #     with the wind-speed plumbing above.  Use
-            #     ``self.now_utc`` (stamped at the start of this update
-            #     cycle) rather than a fresh ``datetime.now`` so the
-            #     value stays consistent with every other "now" the
-            #     cycle uses.
-            ground_temp_now = ground_temperature(self.now_utc)
-            self.ground_temp = ground_temp_now
-            if hasattr(self.controller, "set_ground_temp"):
-                self.controller.set_ground_temp(ground_temp_now)
-
-            # 3. Compute current solar gains for visualization.  The forecast
-            #    GHI (when available) drives the intensity and takes precedence
-            #    over cloud cover; a room with no enumerated windows falls back
-            #    to its single solar-exposure aperture.
-            now = self.now_utc
-            self.cloud_cover = cloud_cover_now
-            self.ghi_now = ghi_now
-            self.ghi_forecast = list(ghi_forecast or [])
-            self.solar_source = (
-                "forecast" if ghi_forecast or ghi_now is not None
-                else "analytical"
+            kalman_innovation = mpc_cycle.run_controller_compute(
+                self, outdoor_temp, control_traj, rooms_not_ready, ctx
             )
-            # Effective GHI for display: fall back to the modeled clear-sky GHI
-            # (cloud-attenuated) when no sensor value is available. Mirrors the
-            # intensity the analytical gains path uses, so the KPI and the gains
-            # tell a consistent story.
-            try:
-                self.ghi_now_effective = horizontal_irradiance(
-                    now, self._latitude, self._longitude,
-                    cloud_cover=cloud_cover_now, ghi=ghi_now,
-                )
-            except Exception:  # pragma: no cover - defensive; never block a cycle
-                self.ghi_now_effective = ghi_now
-            self.solar_gains = {
-                name: self._room_solar_gain(
-                    name, now, cloud_cover_now, ghi_now
-                )
-                for name in self.model.room_names
-            }
-            # Persist the smoothed cloud cover so the next restart seeds from it.
-            self._save_runtime_state()
+            mpc_cycle.finalize_actions(self, outdoor_temp)
 
-            # 4. Run MPC controller
-            # Collect heat sources whose rooms are currently off so the
-            # controller can zero them out in both the first-step action and
-            # the full predicted heating schedule before returning.  Also
-            # disable sources for rooms that have never had a valid sensor
-            # reading so we never actuate based on the 20 °C model default.
-            disabled_src_names = {
-                src.name
-                for src in self.heat_sources
-                if not self.is_room_enabled(src.room)
-                or self.is_window_override_active(src.room)
-                or src.room in rooms_not_ready
-            }
-            # System-identification experiments: advance their lifecycle and build
-            # per-room input clamps over the horizon.  Passing these into the MPC
-            # makes it plan *around* the prescribed excitation (so the actuator
-            # forecast already shows the experiment) instead of overriding the
-            # chosen action afterwards.  Only while the controller is engaged.
-            if self._system_enabled:
-                experiment_clamps = self._build_experiment_clamps(self.now_utc)
-                self._relax_experiment_comfort(control_traj)
-            else:
-                experiment_clamps = {}
-                self._experiment_active_rooms = set()
-                self._experiment_horizon_steps = {}
-            try:
-                self.actions = self.controller.compute(
-                    outdoor_temp=outdoor_temp,
-                    solar_gains=self.solar_gains,
-                    now=now,
-                    outdoor_forecast=outdoor_forecast,
-                    cloud_forecast=cloud_forecast,
-                    cloud_cover_now=cloud_cover_now,
-                    ghi_forecast=ghi_forecast,
-                    ghi_now=ghi_now,
-                    wind_forecast=wind_forecast,
-                    disabled_sources=disabled_src_names or None,
-                    control_trajectory=control_traj,
-                    price_forecast=self.price_forecast,
-                    input_clamps=experiment_clamps or None,
-                    # While stopped, run state estimation only — the MPC
-                    # optimisation is skipped so no control trajectory is solved.
-                    run_optimization=self._system_enabled,
-                )
-                # Mirror the unconstrained MPC optimum (before window-override
-                # zeroing) so a heater can resume at the planned level the
-                # instant its window-close settle timer expires between solves.
-                self._mpc_shadow_actions = dict(self.controller.mpc_actions)
-                self.predictions = self.controller.predictions
-                self.linearised_predictions = self.controller.linearised_predictions
-                self.outdoor_forecast = self.controller.outdoor_forecast
-                self.solar_forecast = self.controller.solar_forecast
-                self.heating_schedule = self.controller.heating_schedule
-                self.filtered_temperatures = dict(self.controller.filtered_temperatures)
-                # EKF-reconstructed wall/mass-node temperatures and their
-                # posterior stds — the 2R2C observability health signals.
-                self.wall_temperatures = dict(
-                    getattr(self.controller, "wall_temperatures", {}) or {}
-                )
-                self.wall_temperature_stds = dict(
-                    getattr(self.controller, "wall_temperature_stds", {}) or {}
-                )
-                # Online internal-gain estimates [W] per room (nominal + Δĝ).
-                self.estimated_internal_gains = dict(
-                    self.controller.estimated_internal_gains
-                )
-                # Rooms that have never had a valid reading expose "unknown"
-                # so the dashboard falls back to the raw sensor value.
-                for _r in rooms_not_ready:
-                    self.filtered_temperatures.pop(_r, None)
-                # Mirror the price forecast that was actually used so sensors can
-                # expose it (may differ from self.price_forecast if the controller
-                # truncated / padded it).
-                self.price_forecast = self.controller.price_forecast or self.price_forecast
-
-                # Capture Kalman innovation for diagnostics (may be None on first step)
-                # controller.last_innovation is populated by compute() after splitting
-                # the EKF predict/update steps to record ν = y − hm(x̂⁻).
-                kalman_innovation: Optional[List[float]] = self.controller.last_innovation
-
-                # Record the instant the MPC actually solved so the dashboard
-                # countdown reflects the true internal schedule.  Only set on a
-                # successful solve — a failed cycle leaves the previous value so
-                # the countdown keeps ticking toward the next scheduled attempt.
-                # While stopped the MPC does not solve, so the timestamp is left
-                # untouched and the countdown stays paused.
-                if self._system_enabled:
-                    self._last_mpc_run_ts = now.timestamp()
-            except Exception:
-                _LOGGER.warning(
-                    "Failed to compute MPC actions; clearing forecast data so "
-                    "dashboards show a visible gap at the failure point",
-                    exc_info=True,
-                )
-                # Keep previous actions if available; otherwise default to all-off
-                # so the applied heater commands stay safe.
-                if not self.actions:
-                    self.actions = {src.name: 0.0 for src in self.heat_sources}
-
-                # Pass the weather forecast through (it's read independently of
-                # the MPC), but clear all forecast/filtered fields so the
-                # visualization sensors expose "unknown" instead of fabricating
-                # a thermal-model trajectory.  This makes failures plot as a
-                # visible gap rather than a silent fake forecast.
-                if outdoor_forecast:
-                    self.outdoor_forecast = list(outdoor_forecast[:self._horizon])
-                    if len(self.outdoor_forecast) < self._horizon:
-                        self.outdoor_forecast.extend(
-                            [outdoor_temp] * (self._horizon - len(self.outdoor_forecast))
-                        )
-                else:
-                    self.outdoor_forecast = [outdoor_temp] * self._horizon
-                self.predictions = []
-                self.linearised_predictions = []
-                self.heating_schedule = []
-                self.solar_forecast = []
-                self.filtered_temperatures = {}
-                self.estimated_internal_gains = {}
-                kalman_innovation = None
-
-            # Dispatch-layer W1 override: clamp all sources in open-window
-            # rooms to u=0 before history write and actuator commands.
-            for src in self.heat_sources:
-                if self.is_window_override_active(src.room):
-                    self.actions[src.name] = 0.0
-
-            # System STOPPED: the MPC optimisation was skipped above (only the
-            # CD-EKF state estimation ran), so there is no fresh control
-            # trajectory and the dashboard stop switch means we must not push
-            # any signal to the heater entities this cycle.  Replace the
-            # commanded actions and power with what each heater is actually
-            # delivering — read back from its real entity state — and tell the
-            # EKF the true applied input (via notify_applied_u inside the
-            # helper) so the next cycle's state estimate stays grounded in
-            # reality instead of drifting on inputs that were never applied.
-            if not self._system_enabled:
-                self.actions = self._read_delivered_actions(outdoor_temp)
-
-            # 4c. System-identification experiments are now applied *inside* the
-            # MPC via per-room input clamps (built above and passed to
-            # ``compute``), so the chosen action, recorded input ``u`` and the
-            # planned trajectory all already reflect the excitation — no
-            # post-solve override is needed.
-
-            # 5. Store heat-flow breakdown (independent of MPC solve success)
-            self.heat_flows = self.model.compute_heat_flows(outdoor_temp)
-
-            # 6. Record observation in the rolling history buffer for ML
-            #    parameter estimation and model fit analysis.
-            #
-            # Rate-limit to the scheduled update interval.  Window events no
-            # longer call _async_update_data (they use _async_push_window_override
-            # directly), but startup listeners may still trigger a refresh shortly
-            # after the coordinator's own first scheduled tick.  Guard against
-            # that by skipping the append when fewer than 0.5 × update_interval
-            # seconds have elapsed since the last history entry.
-            _last_history_ts = (
-                float(self._history_buffer[-1].get("timestamp", 0.0))
-                if self._history_buffer else 0.0
+            await mpc_cycle.record_observation_history(
+                self, outdoor_temp, ctx, kalman_innovation
             )
-            _should_record_history = (
-                now.timestamp() - _last_history_ts >= 0.5 * self._update_interval_s
-            )
-
-            if _should_record_history:
-                # y_pred alignment: the MPC predictions[0] is the one-step-ahead
-                # prediction for time k+1 (not time k).  To get a properly aligned
-                # diagnostic (prediction vs measurement at the *same* timestep) we
-                # store that forward prediction as "y_pred_for_next" and retrieve
-                # the *previous* record's "y_pred_for_next" as the aligned y_pred
-                # for the current step.
-                y_pred_aligned = None
-                if len(self._history_buffer) > 0:
-                    y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
-
-                # Compute the one-step-ahead prediction for the NEXT cycle.
-                y_pred_for_next: List[float]
-                if self.predictions and len(self.predictions) > 0:
-                    first_pred = self.predictions[0]
-                    y_pred_for_next = [
-                        first_pred.get(name, self.model.rooms[name].temperature)
-                        for name in self.model.room_names
-                    ]
-                else:
-                    y_pred_for_next = [
-                        self.model.rooms[name].temperature
-                        for name in self.model.room_names
-                    ]
-
-                self._history_buffer.append({
-                    # Store the raw sensor measurements as y so the open-loop
-                    # simulation and EKF diagnostics start from what the sensor
-                    # actually read, not from any model-internal estimate.  For
-                    # rooms without a sensor configured the model temperature is
-                    # used as a fallback, but those rooms have no meaningful
-                    # simulation target anyway.
-                    "y": [
-                        self.measured_temperatures.get(
-                            name, self.model.rooms[name].temperature
-                        )
-                        for name in self.model.room_names
-                    ],
-                    # y_pred: prediction made at k-1 FOR step k — aligned with y.
-                    # None for the very first record (no prior prediction exists yet).
-                    "y_pred": y_pred_aligned,
-                    # y_pred_for_next: prediction made NOW (at k) FOR step k+1.
-                    # Retrieved by the next cycle as y_pred_aligned.
-                    "y_pred_for_next": y_pred_for_next,
-                    "u": [
-                        self.actions.get(src.name, 0.0)
-                        for src in self.heat_sources
-                    ],
-                    "d_outdoor": outdoor_temp,
-                    "d_solar": dict(self.solar_gains),
-                    "cloud_cover": cloud_cover_now,
-                    # Scalar only — the full horizon-length GHI array is kept off
-                    # the bounded history buffer (it lives on the diagnostic
-                    # SolarRadiationStatusSensor instead) to limit recorder growth.
-                    "ghi_now": ghi_now,
-                    "solar_source": self.solar_source,
-                    "timestamp": now.timestamp(),
-                    # Kalman innovation ν = y − C x̂⁻  (None on the very first step)
-                    "kalman_innovation": kalman_innovation,
-                    # Per-room data-quality label: True while a window override is
-                    # active (state ``open``/``pending_closed``).  These samples
-                    # carry unmodelled air-exchange losses, so system
-                    # identification excludes the affected room at those steps and
-                    # the reconstruction/open-loop diagnostics render them as gaps.
-                    # Uses the *same* predicate as the real-time EKF Q-inflation so
-                    # "don't trust the model here" has a single definition.
-                    "window_open": {
-                        name: self.is_window_override_active(name)
-                        for name in self.model.room_names
-                    },
-                })
-
-                if self.id_history_store is not None:
-                    await self.id_history_store.async_append(
-                        self._history_buffer[-1]
-                    )
-                    await self.id_history_store.async_purge_old()
-
             await self._async_refresh_time_in_range_kpis_if_due()
 
-            # 7. Write set-points to heater entities. Keep the latest
-            # forecast/prediction entities available even if HA service calls
-            # fail for a specific heater entity.
-            #
-            # Skipped entirely while the system is stopped: the MPC optimisation
-            # does not run, so there is nothing to apply — heaters are left in
-            # whatever state they were last commanded to, since the dashboard
-            # stop relinquishes control.
             if self._system_enabled:
                 try:
                     await self._apply_actions(outdoor_temp)
@@ -2162,17 +1287,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                         exc_info=True,
                     )
 
-            return {
-                "temperatures": dict(self.model.temperatures),
-                "outdoor_temp": outdoor_temp,
-                "actions": dict(self.actions),
-                "solar_gains": dict(self.solar_gains),
-                "predictions": list(self.predictions),
-                "heat_flows": dict(self.heat_flows),
-                "outdoor_forecast": list(self.outdoor_forecast),
-                "solar_forecast": list(self.solar_forecast),
-                "heating_schedule": list(self.heating_schedule),
-            }
+            return mpc_cycle.build_cycle_result(self, outdoor_temp)
 
         except Exception as exc:
             raise UpdateFailed(f"Heating Assistant update failed: {exc}") from exc
@@ -2867,117 +1982,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         history_override: Optional[List[Dict[str, Any]]] = None,
         dataset_start_timestamps: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
-        """
-        Estimate thermal parameters via open-loop simulation MSE minimisation.
-
-        Runs :class:`~.parameter_estimator.KalmanMLEstimator` joint IPOPT
-        optimisation over the rolling observation history buffer in a
-        thread-executor so that the HA event loop is not blocked.  The
-        objective is multi-step free-run simulation error (not CD-EKF PED
-        log-likelihood).
-
-        Parameters
-        ----------
-        apply_params : bool
-            When *True* (default) the estimated parameters are immediately
-            applied to the live model and the MPC controller is rebuilt.
-            When *False* the result is only reported (dry run).
-        horizon_hours : float or None
-            When provided, only the most recent ``horizon_hours`` of data
-            (wall-clock) are passed to the estimator.  Use the same value
-            as the sysid simulation horizon so identification and fit
-            evaluation cover identical data.  ``None`` uses the full buffer.
-
-        Returns
-        -------
-        dict – the result dict from :class:`~.parameter_estimator.KalmanMLEstimator`.
-        """
-        from ..parameter_estimator import KalmanMLEstimator
-        from ..history_window import select_recent_window
-
-        dt = _coerce_interval_seconds(self._update_interval_s)
-
-        # Resolve the identification window.  When the caller does not pass an
-        # explicit horizon (e.g. the Estimate-Parameters button) fall back to
-        # the configured identification horizon rather than the entire rolling
-        # buffer: identification must only ever see the configured data
-        # horizon, never a multi-day backlog that no longer reflects the
-        # current operating regime.
-        eff_horizon_hours = (
-            float(horizon_hours)
-            if horizon_hours is not None
-            else float(getattr(
-                self, "_identification_horizon_hours",
-                DEFAULT_IDENTIFICATION_HORIZON_HOURS,
-            ))
-        )
-
-        if history_override is not None:
-            # Caller pre-fetched the data (e.g. from HA Recorder for a custom
-            # window that extends beyond the in-memory buffer).
-            history = list(history_override)
-        else:
-            history = list(self._history_buffer)
-            if eff_horizon_hours > 0 and history:
-                history = select_recent_window(
-                    history, eff_horizon_hours * 3600.0
-                )
-
-        # NOTE: the configured horizon controls only *which* data is used (the
-        # most recent ``eff_horizon_hours`` of history, sliced above).  It does
-        # NOT set the open-loop simulation window length: the estimator splits
-        # the data into short fixed-length open-loop windows internally, because
-        # a single multi-hour free-run of the thermal model is numerically
-        # ill-conditioned and the optimiser lands in degenerate basins (mass
-        # and resistance off by orders of magnitude, scales pinned to bounds).
-        # The short-window default is therefore left to the estimator.
-        estimator = KalmanMLEstimator(
-            rooms=list(self.model.rooms.values()),
-            sources=self.heat_sources,
-            dt=dt,  # must match history buffer sampling interval, not MPC horizon
-        )
-
-        # Optimisation may take a few seconds; run in a thread executor.
-        _estimate = lambda: estimator.estimate(  # noqa: E731
-            history,
+        return await parameter_lifecycle.async_estimate_parameters_ml(
+            self,
+            apply_params=apply_params,
+            horizon_hours=horizon_hours,
             locked_params=locked_params,
+            history_override=history_override,
             dataset_start_timestamps=dataset_start_timestamps,
         )
-        result: Dict[str, Any] = await self.hass.async_add_executor_job(_estimate)
-
-        if result["success"] and apply_params:
-            self._apply_estimated_parameters(
-                result["estimated_params"],
-                result.get("estimated_inter_room_r", {}),
-                estimated_internal_gains=result.get("estimated_internal_gains", {}),
-                estimated_heater_scales=result.get("estimated_heater_scales", {}),
-                estimated_solar_scales=result.get("estimated_solar_scales", {}),
-                estimated_envelope_splits=result.get(
-                    "estimated_envelope_splits", {}
-                ),
-                log_likelihood=result.get("log_likelihood"),
-            )
-
-        # Record the run in the rolling history – dry-runs included – so the
-        # Diagnostics dashboard shows every estimation the user kicked off.
-        history_buf = getattr(self, "_estimation_history", None)
-        if history_buf is not None:
-            history_buf.append(
-                {
-                    "estimated_at": datetime.now(timezone.utc).isoformat(),
-                    "success": bool(result.get("success")),
-                    "log_likelihood": (
-                        float(result.get("log_likelihood"))
-                        if isinstance(result.get("log_likelihood"), (int, float))
-                        else None
-                    ),
-                    "applied": bool(result.get("success")) and apply_params,
-                    "n_rooms": len(self.model.room_names),
-                    "n_sources": len(self.heat_sources),
-                }
-            )
-
-        return result
 
     async def async_compute_loglik_slice(
         self,
@@ -3030,138 +2042,13 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         estimated_envelope_splits: Optional[Dict[str, Dict[str, float]]] = None,
         log_likelihood: Optional[float] = None,
     ) -> None:
-        """
-        Apply estimated parameters to the house model and rebuild the
-        MPC controller so that the new values take effect immediately.
-
-        The existing Kalman filter state is discarded when the controller
-        is rebuilt; it will be re-bootstrapped on the next update cycle.
-        The full parameter snapshot is also persisted to ``entry.data`` via
-        ``async_update_entry`` so that values survive a full HA restart.
-        """
-        for room_name, params in estimated_params.items():
-            if room_name not in self.model.rooms:
-                continue
-            room = self.model.rooms[room_name]
-            room.thermal_mass = float(params["thermal_mass"])
-            room.r_external = float(params["r_external"])
-            if estimated_internal_gains and room_name in estimated_internal_gains:
-                room.internal_gain = float(estimated_internal_gains[room_name])
-            if estimated_solar_scales and room_name in estimated_solar_scales:
-                room.solar_scale = float(estimated_solar_scales[room_name])
-            if estimated_envelope_splits and room_name in estimated_envelope_splits:
-                splits = estimated_envelope_splits[room_name]
-                if "c_air_fraction" in splits:
-                    room.c_air_fraction = float(splits["c_air_fraction"])
-                if "r_aw_fraction" in splits:
-                    room.r_aw_fraction = float(splits["r_aw_fraction"])
-
-        # Apply per-source heater power-scale factors.
-        if estimated_heater_scales:
-            for src in self.heat_sources:
-                if src.name in estimated_heater_scales:
-                    src.power_scale = float(estimated_heater_scales[src.name])
-
-        # Apply inter-room resistances if estimated (Stage 2 result)
-        if estimated_inter_room_r:
-            for key, r_val in estimated_inter_room_r.items():
-                parts = key.split(":")
-                if len(parts) != 2:
-                    continue
-                room_a, room_b = parts
-                for name in (room_a, room_b):
-                    if name not in self.model.rooms:
-                        continue
-                    other = room_b if name == room_a else room_a
-                    for conn in self.model.rooms[name].connections:
-                        if conn.connected_room == other:
-                            conn.r_value = float(r_val)
-            _LOGGER.info(
-                "Applied estimated inter-room resistances: %s", estimated_inter_room_r
-            )
-
-        # Rebuild the internal model matrices (A, B_ext, C).
-        # Must call rebuild_derived_parameters() first so the cached per-room
-        # arrays (_leakage_area, _B_sky_offset) are re-derived from the new
-        # room.thermal_mass / room.r_external values before _build_matrices()
-        # reads them.
-        self.model.rebuild_derived_parameters()
-        (
-            self.model._C,
-            self.model._A,
-            self.model._B_ext,
-        ) = self.model._build_matrices()
-
-        # Rebuild the MPC controller with the updated model
-        self._build_controller()
-
-        _LOGGER.info(
-            "Applied estimated thermal parameters: %s",
-            {
-                name: {
-                    "thermal_mass": self.model.rooms[name].thermal_mass,
-                    "r_external": self.model.rooms[name].r_external,
-                }
-                for name in estimated_params
-                if name in self.model.rooms
-            },
+        parameter_lifecycle.apply_estimated_parameters(
+            self,
+            estimated_params,
+            estimated_inter_room_r,
+            estimated_internal_gains=estimated_internal_gains,
+            estimated_heater_scales=estimated_heater_scales,
+            estimated_solar_scales=estimated_solar_scales,
+            estimated_envelope_splits=estimated_envelope_splits,
+            log_likelihood=log_likelihood,
         )
-
-        # --- Persist the snapshot so values survive a full HA restart -------
-        now_iso = datetime.now(timezone.utc).isoformat()
-        prev_rooms: Dict[str, Any] = {}
-        try:
-            prev_rooms = (self.estimated_params_snapshot or {}).get("rooms", {})
-        except Exception:
-            pass
-
-        snapshot_rooms: Dict[str, Any] = {}
-        for name in self.model.room_names:
-            prev = prev_rooms.get(name, {}) if isinstance(prev_rooms.get(name), dict) else {}
-            just_estimated = name in estimated_params
-            entry: Dict[str, Any] = {
-                "thermal_mass": self.model.rooms[name].thermal_mass,
-                "r_external": self.model.rooms[name].r_external,
-                "internal_gain": float(
-                    getattr(self.model.rooms[name], "internal_gain", 0.0)
-                ),
-                "solar_scale": float(
-                    getattr(self.model.rooms[name], "solar_scale", 1.0)
-                ),
-                "c_air_fraction": float(
-                    getattr(self.model.rooms[name], "c_air_fraction", 0.05)
-                ),
-                "r_aw_fraction": float(
-                    getattr(self.model.rooms[name], "r_aw_fraction", 0.05)
-                ),
-                "is_estimated": bool(just_estimated or prev.get("is_estimated", False)),
-            }
-            if just_estimated:
-                entry["estimated_at"] = now_iso
-                entry["estimation_source"] = "ml"
-            elif prev.get("estimated_at"):
-                entry["estimated_at"] = prev.get("estimated_at")
-                if prev.get("estimation_source"):
-                    entry["estimation_source"] = prev.get("estimation_source")
-            snapshot_rooms[name] = entry
-
-        snapshot: Dict[str, Any] = {
-            "rooms": snapshot_rooms,
-            "sources": {
-                src.name: {"power_scale": float(getattr(src, "power_scale", 1.0))}
-                for src in self.heat_sources
-            },
-            "connections": dict(estimated_inter_room_r) if estimated_inter_room_r else {},
-            "estimated_at": now_iso,
-            "log_likelihood": log_likelihood,
-        }
-        self._estimation_timestamp = now_iso
-        self._estimation_log_likelihood = log_likelihood
-
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={**dict(real_entry.data), CONF_ESTIMATED_PARAMS: snapshot},
-            )
-            _LOGGER.debug("Persisted estimated parameter snapshot to entry.data")
