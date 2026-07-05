@@ -12,7 +12,6 @@ The coordinator
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import time
 from collections import deque
@@ -27,7 +26,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import (
+from ..const import (
     CONF_COMFORT_OFFSET,
     CONF_ENERGY_WEIGHT,
     CONF_ENERGY_PRICE_WEIGHT,
@@ -196,7 +195,7 @@ from .const import (
     SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
     UPDATE_INTERVAL,
 )
-from .heat_sources import (
+from ..heat_sources import (
     ElectricHeater,
     ElectricStorageHeater,
     GasHeater,
@@ -207,17 +206,23 @@ from .heat_sources import (
     HydronicRadiator,
     PelletStove,
 )
-from .thermal_model import HouseModel, Room, RoomConnection, Window
-from .controller import HeatingMPCController
-from .controller.factory import ControllerBuildConfig, build_mpc_controller
-from .ground_temp import ground_temperature
-from .solar_model import (
+from ..thermal_model import HouseModel, Room, RoomConnection, Window
+from ..controller import HeatingMPCController
+from ..controller.factory import ControllerBuildConfig, build_mpc_controller
+from .model_builders import build_heat_sources, build_house_model
+from .types import (
+    ControlTrajectory,
+    _coerce_interval_seconds,
+    _coerce_opt_float,
+)
+from ..ground_temp import ground_temperature
+from ..solar_model import (
     room_solar_gains,
     room_solar_gains_from_exposure,
     horizontal_irradiance,
 )
-from . import solar_forecast as _solar_fc
-from .schedule import (
+from .. import solar_forecast as _solar_fc
+from ..schedule import (
     EffectiveControlParams,
     EffectiveSetpoint,
     RoomSchedule,
@@ -227,15 +232,15 @@ from .schedule import (
     resolve_effective_control_params,
     resolve_effective_setpoint,
 )
-from . import electricity_price as _electricity_price
-from . import weather as _weather
-from .experiments import (
+from .. import electricity_price as _electricity_price
+from .. import weather as _weather
+from ..experiments import (
     ExperimentManager,
     apply_safety_bounds,
     ceil_to_grid,
     excitation_fraction,
 )
-from .datasets import build_dataset
+from ..datasets import build_dataset
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -250,313 +255,6 @@ _OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
 # cold start) but no forward propagation is attempted.  At a 15-minute update
 # interval this caps the gap at 4 days.
 _MAX_EKF_GAP_STEPS = 384
-
-
-@dataclasses.dataclass
-class ControlTrajectory:
-    """Per-step schedule-projected control parameters for the MPC horizon.
-
-    All arrays have shape ``(N,)`` where N is the prediction horizon.
-    Room-keyed dicts contain one array per configured room.
-    """
-
-    setpoints: Dict[str, "np.ndarray"]        # room → per-step setpoint [°C]
-    comfort_offsets: Dict[str, "np.ndarray"]  # room → per-step corridor half-width [°C]
-    q_scales: Dict[str, "np.ndarray"]         # room → per-step Q multiplier [–]
-    r_scales: Dict[str, "np.ndarray"]         # room → per-step R multiplier [–]
-    enabled_steps: Dict[str, "np.ndarray"]    # room → per-step enabled flag [bool]
-
-
-def _coerce_interval_seconds(value: Any) -> float:
-    """Return a numeric interval in seconds from int/float/str/timedelta values."""
-    if isinstance(value, timedelta):
-        return float(value.total_seconds())
-    return float(value)
-
-
-
-
-def _coerce_opt_float(value: Any) -> Optional[float]:
-    """Return ``float(value)`` or ``None`` for missing/blank/unparsable input."""
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def build_house_model(rooms_cfg: List[Dict[str, Any]]) -> HouseModel:
-    """
-    Construct a :class:`HouseModel` from the YAML / config-entry rooms list.
-
-    Inter-room connections reference the adjacent room by name.  Deleting or
-    renaming a room can leave other rooms with a connection pointing at a name
-    that no longer exists; such a dangling connection (or one with a
-    non-positive R-value) is dropped here with a warning rather than allowed to
-    raise — a stale link must never take down the whole integration on setup.
-    """
-    known_rooms = {
-        rc.get(CONF_ROOM_NAME)
-        for rc in rooms_cfg
-        if isinstance(rc, dict) and rc.get(CONF_ROOM_NAME)
-    }
-    rooms = []
-    for rc in rooms_cfg:
-        connections = []
-        for c in rc.get(CONF_CONNECTIONS, []) or []:
-            target = c.get(CONF_CONNECTED_ROOM)
-            try:
-                r_value = float(c.get(CONF_R_VALUE))
-            except (TypeError, ValueError):
-                r_value = None
-            if target not in known_rooms or r_value is None or r_value <= 0:
-                _LOGGER.warning(
-                    "Heating Assistant: dropping invalid connection %r on room "
-                    "%r (target unknown or R-value non-positive)",
-                    c,
-                    rc.get(CONF_ROOM_NAME),
-                )
-                continue
-            connections.append(
-                RoomConnection(connected_room=target, r_value=r_value)
-            )
-        windows = []
-        for w in rc.get(CONF_WINDOWS, []) or []:
-            try:
-                area = float(w[CONF_WINDOW_AREA])
-                orientation = float(w[CONF_WINDOW_ORIENTATION])
-            except (KeyError, TypeError, ValueError):
-                _LOGGER.warning(
-                    "Heating Assistant: dropping invalid window %r on room %r "
-                    "(missing/invalid area or orientation)",
-                    w,
-                    rc.get(CONF_ROOM_NAME),
-                )
-                continue
-            windows.append(
-                Window(
-                    area=area,
-                    orientation=orientation,
-                    tilt=w.get(CONF_WINDOW_TILT, DEFAULT_WINDOW_TILT),
-                )
-            )
-        rooms.append(
-            Room(
-                name=rc[CONF_ROOM_NAME],
-                thermal_mass=rc.get(CONF_THERMAL_MASS, DEFAULT_THERMAL_MASS),
-                r_external=rc.get(CONF_R_EXTERNAL, DEFAULT_R_EXTERNAL),
-                connections=connections,
-                windows=windows,
-                setpoint=rc.get(CONF_SETPOINT, DEFAULT_SETPOINT),
-                comfort_offset=rc.get(CONF_COMFORT_OFFSET, DEFAULT_COMFORT_OFFSET),
-                infiltration_fraction=rc.get(
-                    CONF_INFILTRATION_FRACTION, DEFAULT_INFILTRATION_FRACTION,
-                ),
-                # Phase 1 A2: optional floor / slab parameters.
-                # ``floor_type`` drives the typology defaults applied
-                # inside ``Room.__init__`` for the three slab numerics
-                # (``c_slab_fraction``, ``r_sa``, ``r_sg``); per-field
-                # overrides take precedence over the typology defaults
-                # when both are present.
-                floor_type=rc.get(CONF_FLOOR_TYPE, DEFAULT_FLOOR_TYPE),
-                c_slab_fraction=rc.get(CONF_C_SLAB_FRACTION),
-                r_sa=rc.get(CONF_R_SA),
-                r_sg=rc.get(CONF_R_SG),
-                # Phase 1 C3 / C4 / C5 — finishing-pass envelope
-                # corrections.  ``facade_colour`` resolves into
-                # ``facade_absorptance`` via the colour preset map;
-                # an explicit ``facade_absorptance`` always wins.
-                # All three default off (zero) so existing installs
-                # see no behaviour change.
-                sky_radiative_ua=rc.get(
-                    CONF_SKY_RADIATIVE_UA, DEFAULT_SKY_RADIATIVE_UA,
-                ),
-                facade_absorptance=rc.get(
-                    CONF_FACADE_ABSORPTANCE,
-                    FACADE_COLOUR_TO_ABSORPTANCE.get(
-                        rc.get(CONF_FACADE_COLOUR, DEFAULT_FACADE_COLOUR),
-                        DEFAULT_FACADE_ABSORPTANCE,
-                    ),
-                ),
-                facade_solar_share=rc.get(
-                    CONF_FACADE_SOLAR_SHARE, DEFAULT_FACADE_SOLAR_SHARE,
-                ),
-                thermal_bridge_psi_l=rc.get(
-                    CONF_THERMAL_BRIDGE_PSI_L, DEFAULT_THERMAL_BRIDGE_PSI_L,
-                ),
-                # Optional per-room solar-exposure preset — the no-geometry
-                # fallback used when the room has no enumerated windows.
-                solar_exposure_aperture=SOLAR_EXPOSURE_TO_APERTURE.get(
-                    rc.get(CONF_SOLAR_EXPOSURE, DEFAULT_SOLAR_EXPOSURE),
-                    SOLAR_EXPOSURE_TO_APERTURE[DEFAULT_SOLAR_EXPOSURE],
-                ),
-                solar_facing=rc.get(CONF_SOLAR_FACING, DEFAULT_SOLAR_FACING),
-                # Identified multiplicative correction on the modelled
-                # solar gain (refined by the parameter estimator).
-                solar_scale=rc.get(CONF_SOLAR_SCALE, DEFAULT_SOLAR_SCALE),
-                # 2R2C envelope split fractions (typology defaults; the
-                # parameter estimator refines them when identifiable).
-                c_air_fraction=rc.get(
-                    CONF_C_AIR_FRACTION, DEFAULT_C_AIR_FRACTION,
-                ),
-                r_aw_fraction=rc.get(
-                    CONF_R_AW_FRACTION, DEFAULT_R_AW_FRACTION,
-                ),
-            )
-        )
-    return HouseModel(rooms)
-
-
-def build_heat_sources(
-    sources_cfg: List[Dict[str, Any]],
-) -> List[HeatSource]:
-    """
-    Construct heat-source objects from the configuration list.
-    """
-    sources: List[HeatSource] = []
-    for sc in sources_cfg:
-        src_type = sc[CONF_SOURCE_TYPE]
-        name = sc[CONF_SOURCE_NAME]
-        room = sc[CONF_SOURCE_ROOM]
-        max_power = sc[CONF_SOURCE_MAX_POWER]
-        entity = sc.get(CONF_SOURCE_HEATER_ENTITY)
-        # Phase 1 B2 emitter-filter time constant.  Per-source override
-        # via ``emitter_time_constant``; otherwise the typology default
-        # from ``SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU`` (electric → 0;
-        # heat-pump → 60 s).  Users on hydronic radiators can override
-        # with τ ≈ 600 s.
-        tau_em = float(sc.get(
-            CONF_SOURCE_EMITTER_TIME_CONSTANT,
-            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU.get(src_type, 0.0),
-        ))
-
-        if src_type == SOURCE_TYPE_ELECTRIC:
-            sources.append(
-                ElectricHeater(
-                    name=name,
-                    room=room,
-                    max_power=max_power,
-                    efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_EFFICIENCY),
-                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    heater_entity=entity,
-                    emitter_time_constant=tau_em,
-                )
-            )
-        elif src_type == SOURCE_TYPE_HEAT_PUMP:
-            sources.append(
-                HeatPump(
-                    name=name,
-                    room=room,
-                    max_power=max_power,
-                    cop_rated=sc.get(CONF_SOURCE_COP_RATED, DEFAULT_COP_RATED),
-                    cop_temp_ref=sc.get(CONF_SOURCE_COP_TEMP_REF, DEFAULT_COP_TEMP_REF),
-                    min_power=sc.get(CONF_SOURCE_MIN_POWER, DEFAULT_MIN_POWER),
-                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    hvac_mode=sc.get(CONF_SOURCE_HVAC_MODE, DEFAULT_SOURCE_HVAC_MODE),
-                    cooling_cop=sc.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP),
-                    cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
-                    heating_efficiency=sc.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY),
-                    heater_entity=entity,
-                    emitter_time_constant=tau_em,
-                )
-            )
-        elif src_type == SOURCE_TYPE_GENERIC_THERMOSTAT:
-            sources.append(
-                GenericThermostat(
-                    name=name,
-                    room=room,
-                    max_power=max_power,
-                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    heater_entity=entity,
-                    emitter_time_constant=tau_em,
-                )
-            )
-        elif src_type in (SOURCE_TYPE_OIL_RADIATOR, SOURCE_TYPE_ELECTRIC_FLOOR):
-            # These are electric heaters with typology-specific emitter time constants
-            # defined in SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU; no separate class needed.
-            sources.append(
-                ElectricHeater(
-                    name=name,
-                    room=room,
-                    max_power=max_power,
-                    efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_EFFICIENCY),
-                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    heater_entity=entity,
-                    emitter_time_constant=tau_em,
-                )
-            )
-        elif src_type == SOURCE_TYPE_GAS_HEATER:
-            sources.append(
-                GasHeater(
-                    name=name,
-                    room=room,
-                    max_power=max_power,
-                    efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_GAS_EFFICIENCY),
-                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    heater_entity=entity,
-                    emitter_time_constant=tau_em,
-                )
-            )
-        elif src_type in (SOURCE_TYPE_HYDRONIC_RADIATOR, SOURCE_TYPE_HYDRONIC_FLOOR):
-            # hydronic_floor_heating is an alias with a longer default τ_em (7200 s vs 600 s),
-            # applied via SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU above.
-            sources.append(
-                HydronicRadiator(
-                    name=name,
-                    room=room,
-                    max_power=max_power,
-                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    heater_entity=entity,
-                    emitter_time_constant=tau_em,
-                )
-            )
-        elif src_type == SOURCE_TYPE_OIL_BOILER:
-            sources.append(
-                GasHeater(
-                    name=name,
-                    room=room,
-                    max_power=max_power,
-                    efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_OIL_BOILER_EFFICIENCY),
-                    max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                    heater_entity=entity,
-                    emitter_time_constant=tau_em,
-                )
-            )
-        elif src_type == SOURCE_TYPE_GROUND_SOURCE_HP:
-            sources.append(GroundSourceHeatPump(
-                name=name, room=room, max_power=max_power,
-                cop_rated=sc.get(CONF_SOURCE_COP_RATED, DEFAULT_GROUND_SOURCE_COP),
-                max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                delta_sat=sc.get(CONF_SOURCE_DELTA_SAT, DEFAULT_DELTA_SAT),
-                hvac_mode=sc.get(CONF_SOURCE_HVAC_MODE, DEFAULT_SOURCE_HVAC_MODE),
-                heater_entity=entity,
-                cooling_cop=sc.get(CONF_SOURCE_COOLING_COP, DEFAULT_COOLING_COP),
-                cooling_efficiency=sc.get(CONF_SOURCE_COOLING_EFFICIENCY, DEFAULT_COOLING_EFFICIENCY),
-                heating_efficiency=sc.get(CONF_SOURCE_HEATING_EFFICIENCY, DEFAULT_HEATING_EFFICIENCY),
-                emitter_time_constant=tau_em,
-            ))
-        elif src_type == SOURCE_TYPE_PELLET_STOVE:
-            sources.append(PelletStove(
-                name=name, room=room, max_power=max_power,
-                efficiency=sc.get(CONF_SOURCE_EFFICIENCY, DEFAULT_PELLET_EFFICIENCY),
-                min_power_fraction=sc.get(CONF_SOURCE_MIN_POWER_FRACTION, DEFAULT_PELLET_MIN_POWER_FRACTION),
-                max_temp_offset=sc.get(CONF_SOURCE_MAX_TEMP_OFFSET, DEFAULT_MAX_TEMP_OFFSET),
-                heater_entity=entity,
-                emitter_time_constant=tau_em,
-            ))
-        elif src_type == SOURCE_TYPE_ELECTRIC_STORAGE:
-            sources.append(ElectricStorageHeater(
-                name=name, room=room, max_power=max_power,
-                charge_power=sc.get(CONF_SOURCE_CHARGE_POWER, DEFAULT_STORAGE_CHARGE_POWER),
-                storage_capacity_kwh=sc.get(CONF_SOURCE_STORAGE_CAPACITY_KWH, DEFAULT_STORAGE_CAPACITY_KWH),
-                passive_discharge_rate=sc.get(CONF_SOURCE_PASSIVE_DISCHARGE_RATE, DEFAULT_STORAGE_DISCHARGE_RATE),
-                heater_entity=entity,
-                emitter_time_constant=tau_em,
-            ))
-        else:
-            _LOGGER.warning("Unknown heat source type %r – skipping %r", src_type, name)
-    return sources
 
 
 class HeatingAssistantCoordinator(DataUpdateCoordinator):
@@ -1358,7 +1056,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         - Uses u=0 for sources whose room was in an off-period (comfort schedule).
         - Falls back to u_default everywhere else.
         """
-        from ..naming import slugify as _slugify
+        from ..dashboard import slugify as _slugify
 
         n_sources = len(self.heat_sources)
         u_seq = np.empty((n_steps, n_sources), dtype=float)
@@ -1498,7 +1196,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         in-memory so the controller sees the right name.  This handles setups
         where heat sources were originally configured with slug-style room names.
         """
-        from ..naming import slugify as _slugify
+        from ..dashboard import slugify as _slugify
 
         known_rooms = set(self.model.rooms)
         slug_to_canonical: Dict[str, str] = {
@@ -1586,6 +1284,33 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             "window_open_close_settle": int(self._window_open_close_settle),
             "window_open_q_inflation": float(self._window_open_q_inflation),
         }
+
+    def serialize_room_schedules(self) -> Dict[str, Any]:
+        """Return slug-keyed room schedule payloads for UI / WebSocket consumers."""
+        from ..naming import slugify
+
+        schedules: dict = {}
+        for room_name, room_schedule in self._room_schedule.items():
+            if room_schedule and not room_schedule.is_empty:
+                schedules[slugify(room_name)] = {
+                    "enabled": self._schedule_enabled.get(room_name, True),
+                    "periods": [
+                        {
+                            "name": p.name,
+                            "start": p.start.strftime("%H:%M"),
+                            "end": p.end.strftime("%H:%M"),
+                            "mode": p.mode,
+                            "setpoint": p.setpoint,
+                            "frost_protection": p.frost_protection,
+                            "days": sorted(p.days),
+                            "comfort_offset": p.comfort_offset,
+                            "tracking_weight": p.tracking_weight,
+                            "energy_weight": p.energy_weight,
+                        }
+                        for p in room_schedule.periods
+                    ],
+                }
+        return schedules
 
     def apply_runtime_reconfiguration(self, config: Dict[str, Any]) -> bool:
         """Queue non-structural config changes for the next regular tick.
@@ -1783,7 +1508,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         payload from a one-off MPC solve without mutating the live coordinator
         state.
         """
-        from ..naming import slugify as _slugify
+        from ..dashboard import slugify as _slugify
 
         if room_names is None:
             room_names = self.model.room_names
@@ -2183,8 +1908,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         payload shape as :meth:`build_forecast_payload` so the dashboard can
         render room-view plots for every room from a single solve.
         """
-        from .controller import HeatingMPCController
-        from .ground_temp import ground_temperature
+        from ..controller import HeatingMPCController
+        from ..ground_temp import ground_temperature
 
         overrides = dict(tuning_overrides or {})
         weather = dict(weather or {})
@@ -3241,7 +2966,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     async def _async_refresh_time_in_range_kpis_if_due(self) -> None:
         """Rate-limited refresh of per-room 24 h time-in-range KPI cache."""
-        from .kpi_history import (  # noqa: PLC0415 — HA import boundary
+        from ..kpi_history import (  # noqa: PLC0415 — HA import boundary
             TIME_IN_RANGE_REFRESH_S,
             async_refresh_time_in_range_kpis,
         )
@@ -4490,7 +4215,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         Reflects the set computed for the current cycle by
         ``_build_experiment_clamps`` (keyed by room slug).
         """
-        from ..naming import slugify as _slugify
+        from ..dashboard import slugify as _slugify
 
         active = getattr(self, "_experiment_active_rooms", None)
         if not active:
@@ -4522,7 +4247,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         room whose window is open is left unclamped — the window override forces it
         off and its air-exchange is unmodelled.
         """
-        from ..naming import slugify as _slugify
+        from ..dashboard import slugify as _slugify
 
         active_rooms: Set[str] = set()
         manager = self.experiment_manager
@@ -5090,8 +4815,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         -------
         dict – the result dict from :class:`~.parameter_estimator.KalmanMLEstimator`.
         """
-        from .parameter_estimator import KalmanMLEstimator
-        from .history_window import select_recent_window
+        from ..parameter_estimator import KalmanMLEstimator
+        from ..history_window import select_recent_window
 
         dt = _coerce_interval_seconds(self._update_interval_s)
 
@@ -5190,7 +4915,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         and cached on ``self._loglik_slices[room_name]`` so the matching
         :class:`LoglikSliceSensor` can expose it without recomputing.
         """
-        from .parameter_estimator import KalmanMLEstimator
+        from ..parameter_estimator import KalmanMLEstimator
 
         estimator = KalmanMLEstimator(
             rooms=list(self.model.rooms.values()),
