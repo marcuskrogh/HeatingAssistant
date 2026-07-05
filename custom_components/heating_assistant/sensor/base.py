@@ -231,7 +231,7 @@ def _closed_loop_fit_for_room(
     room_name: str,
 ) -> tuple[Optional[float], Optional[float], Optional[int]]:
     """Return (r_squared, rmse, n_samples) from the history buffer, if available."""
-    from .model_diagnostics import compute_model_fit_metrics
+    from ..model_diagnostics import compute_model_fit_metrics
 
     try:
         room_idx = coordinator.model.room_names.index(room_name)

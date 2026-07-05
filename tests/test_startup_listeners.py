@@ -3,12 +3,13 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import custom_components.heating_assistant.coordinator as coord_mod
+import custom_components.heating_assistant.coordinator.core as core_mod
 
 
 def test_setup_startup_listeners_refreshes_when_entities_already_available(monkeypatch):
     """Entities restored before the listener registers must still trigger MPC."""
     scheduled = []
+    cancel = MagicMock()
 
     class _FakeCoordinator:
         _outdoor_entity = "sensor.outdoor"
@@ -26,14 +27,13 @@ def test_setup_startup_listeners_refreshes_when_entities_already_available(monke
         async def async_request_refresh(self):
             return None
 
-    cancel = MagicMock()
     monkeypatch.setattr(
-        coord_mod,
+        core_mod,
         "async_track_state_change_event",
         lambda *_a, **_kw: cancel,
     )
 
-    result = coord_mod.HeatingAssistantCoordinator.setup_startup_listeners(
+    result = core_mod.HeatingAssistantCoordinator.setup_startup_listeners(
         _FakeCoordinator()
     )
 
@@ -60,11 +60,11 @@ def test_setup_startup_listeners_waits_when_entities_unavailable(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        coord_mod,
+        core_mod,
         "async_track_state_change_event",
         lambda *_a, **_kw: MagicMock(),
     )
 
-    coord_mod.HeatingAssistantCoordinator.setup_startup_listeners(_FakeCoordinator())
+    core_mod.HeatingAssistantCoordinator.setup_startup_listeners(_FakeCoordinator())
 
     assert scheduled == []

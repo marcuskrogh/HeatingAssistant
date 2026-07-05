@@ -1228,17 +1228,17 @@ class TestReadOutdoorTemp:
         )
         assert coord._read_outdoor_temp() == pytest.approx(11.0)
 
-    def test_falls_back_to_default_when_no_entities_configured(self):
-        """Returns 5.0 when neither outdoor entity nor weather entity is configured."""
+    def test_returns_none_when_no_entities_configured(self):
+        """Returns None when neither outdoor entity nor weather entity is configured."""
         coord = _make_coordinator_for_outdoor_temp(
             outdoor_entity=None,
             weather_entity=None,
             entity_states={},
         )
-        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+        assert coord._read_outdoor_temp() is None
 
-    def test_falls_back_to_default_when_weather_entity_unavailable(self):
-        """Returns 5.0 when weather entity is unavailable and no outdoor entity exists."""
+    def test_returns_none_when_weather_entity_unavailable(self):
+        """Returns None when weather entity is unavailable and no outdoor entity exists."""
         coord = _make_coordinator_for_outdoor_temp(
             outdoor_entity=None,
             weather_entity="weather.home",
@@ -1249,19 +1249,19 @@ class TestReadOutdoorTemp:
                 }
             },
         )
-        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+        assert coord._read_outdoor_temp() is None
 
-    def test_falls_back_to_default_when_weather_entity_missing(self):
-        """Returns 5.0 when weather entity is configured but does not exist in HA states."""
+    def test_returns_none_when_weather_entity_missing(self):
+        """Returns None when weather entity is configured but does not exist in HA states."""
         coord = _make_coordinator_for_outdoor_temp(
             outdoor_entity=None,
             weather_entity="weather.home",
             entity_states={},  # entity not present
         )
-        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+        assert coord._read_outdoor_temp() is None
 
-    def test_falls_back_to_default_when_weather_temperature_attribute_missing(self):
-        """Returns 5.0 when weather entity has no temperature attribute."""
+    def test_returns_none_when_weather_temperature_attribute_missing(self):
+        """Returns None when weather entity has no temperature attribute."""
         coord = _make_coordinator_for_outdoor_temp(
             outdoor_entity=None,
             weather_entity="weather.home",
@@ -1272,4 +1272,4 @@ class TestReadOutdoorTemp:
                 }
             },
         )
-        assert coord._read_outdoor_temp() == pytest.approx(5.0)
+        assert coord._read_outdoor_temp() is None

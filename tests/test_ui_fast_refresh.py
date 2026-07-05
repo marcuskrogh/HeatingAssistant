@@ -11,11 +11,16 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+from tests.helpers.coordinator_stubs import wire_room_enablement
+
+_DISTURBANCES_ROOM_SOLAR = (
+    "custom_components.heating_assistant.coordinator.disturbances.room_solar_gain"
+)
 
 
 def _make_hass(temp_states: dict[str, str]) -> SimpleNamespace:
@@ -66,9 +71,24 @@ def _make_live_coord(
     coord._apply_schedule = MagicMock()
     coord._update_window_state_machine = MagicMock()
     coord._read_outdoor_temp = MagicMock(return_value=outdoor)
-    coord._read_cloud_cover_now = MagicMock(return_value=None)
+    coord._outdoor_entity = None
+    coord._weather_entity = None
+    coord._solar_radiation_entity = None
+    coord._price_entity = None
+    coord._weather_warn_thresholds = {3, 10}
+    coord.weather_consecutive_failures = 0
+    coord.weather_last_error = None
+    coord.weather_last_error_at = None
+    coord.weather_last_success_at = None
+    coord.solar_fc_consecutive_failures = 0
+    coord.solar_fc_last_error = None
+    coord.solar_fc_last_error_at = None
+    coord.solar_fc_last_success_at = None
+    coord.now_utc = datetime.now(tz=timezone.utc)
     coord._ensure_runtime_state_loaded = AsyncMock()
     coord._room_solar_gain = MagicMock(return_value=123.0)
+    coord._latitude = 55.0
+    coord._longitude = 12.0
 
     # The controller must NOT be touched by the fast path; make any access fail.
     def _boom(*_a, **_k):  # pragma: no cover - only hit on regression
@@ -85,7 +105,8 @@ def test_refresh_live_state_reads_measurements_without_mpc():
         outdoor=4.0,
     )
 
-    outdoor = coord._refresh_live_state()
+    with patch(_DISTURBANCES_ROOM_SOLAR, return_value=123.0):
+        outdoor = coord._refresh_live_state()
 
     assert outdoor == pytest.approx(4.0)
     assert coord.measured_temperatures["living_room"] == pytest.approx(19.5)
@@ -141,13 +162,12 @@ def test_fast_refresh_uses_persisted_cloud_cover_not_unattenuated():
 
     captured: dict = {}
 
-    def _capture(name, now, cloud_cover, ghi):
+    def _capture(_coord, name, now, cloud_cover, ghi):
         captured["cloud_cover"] = cloud_cover
         return 50.0
 
-    coord._room_solar_gain = _capture
-
-    coord._refresh_live_state()
+    with patch(_DISTURBANCES_ROOM_SOLAR, side_effect=_capture):
+        coord._refresh_live_state()
 
     # The persisted cloud cover drove the attenuation — NOT None.
     assert captured["cloud_cover"] == pytest.approx(0.9)
@@ -172,7 +192,8 @@ def test_fast_refresh_computes_solar_even_when_outdoor_unavailable():
     coord._last_valid_outdoor_temp = None  # never had a valid outdoor reading
     coord._cloud_cover_filtered = 0.5
 
-    outdoor = coord._refresh_live_state()
+    with patch(_DISTURBANCES_ROOM_SOLAR, return_value=123.0):
+        outdoor = coord._refresh_live_state()
 
     assert outdoor is None
     # Solar gain is published rather than left empty (which the sensor reports
@@ -194,13 +215,12 @@ def test_publish_current_solar_gains_uses_resolved_cloud_cover():
 
     seen: dict = {}
 
-    def _gain(name, now, cloud_cover, ghi):
+    def _gain(_coord, name, now, cloud_cover, ghi):
         seen["cloud_cover"] = cloud_cover
         return 200.0
 
-    coord._room_solar_gain = _gain
-
-    coord._publish_current_solar_gains()
+    with patch(_DISTURBANCES_ROOM_SOLAR, side_effect=_gain):
+        coord._publish_current_solar_gains()
 
     assert seen["cloud_cover"] == pytest.approx(0.3)
     assert coord.solar_gains["living_room"] == pytest.approx(200.0)
@@ -279,6 +299,10 @@ def _make_forecast_coord() -> HeatingAssistantCoordinator:
         rooms={"living_room": room},
     )
     coord._sources_by_room = {}  # used by sources_for_room()
+    wire_room_enablement(coord)
+    coord.build_forecast_payload = (
+        HeatingAssistantCoordinator.build_forecast_payload.__get__(coord)
+    )
     return coord
 
 
@@ -387,6 +411,12 @@ def test_controller_config_update_interval_is_json_serialisable():
         _window_open_debounce = 60.0
         _window_open_close_settle = 30.0
         _window_open_q_inflation = 1.0
+
+        def get_controller_config_snapshot(self):
+            return {
+                "update_interval": self.dt,
+                "horizon": self._horizon,
+            }
 
         @property
         def dt(self):

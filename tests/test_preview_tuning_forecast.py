@@ -97,7 +97,7 @@ def test_preview_returns_error_when_outdoor_unavailable():
     assert result == {"error": "outdoor_temperature_unavailable"}
 
 
-@patch("custom_components.heating_assistant.controller.HeatingMPCController")
+@patch("custom_components.heating_assistant.controller.factory.HeatingMPCController")
 def test_preview_runs_mpc_and_builds_payload(mock_controller_cls):
     coord = _make_preview_coordinator()
     preview_ctrl = MagicMock()

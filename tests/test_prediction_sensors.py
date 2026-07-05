@@ -55,6 +55,7 @@ def _make_room_coordinator():
         last_update_success=False,  # simulate a recent UpdateFailed
     )
     coord.sources_for_room = lambda r: [s for s in coord.heat_sources if s.room == r]
+    coord.is_room_enabled = lambda _name: True
     return coord
 
 

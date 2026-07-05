@@ -171,7 +171,7 @@ class ModelFitQualitySensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
     @property
     def native_value(self) -> Optional[float]:
         """Return R² score as the main quality metric."""
-        from .model_diagnostics import compute_model_fit_metrics
+        from ..model_diagnostics import compute_model_fit_metrics
 
         # Extract predictions and measurements from history
         room_idx = self._coordinator.model.room_names.index(self._room_name)
@@ -202,7 +202,7 @@ class ModelFitQualitySensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
     @property
     def extra_state_attributes(self) -> dict:
         """Expose detailed fit metrics."""
-        from .model_diagnostics import compute_model_fit_metrics
+        from ..model_diagnostics import compute_model_fit_metrics
 
         # Extract predictions and measurements from history
         room_idx = self._coordinator.model.room_names.index(self._room_name)
@@ -280,7 +280,7 @@ class ParameterConfidenceSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
     @property
     def native_value(self) -> Optional[float]:
         """Return confidence score [0-100]."""
-        from .model_diagnostics import validate_parameters
+        from ..model_diagnostics import validate_parameters
 
         room = self._coordinator.model.rooms[self._room_name]
 
@@ -313,7 +313,7 @@ class ParameterConfidenceSensor(_LiveValueSensorMixin, CoordinatorEntity, Sensor
     @property
     def extra_state_attributes(self) -> dict:
         """Expose detailed parameter validation."""
-        from .model_diagnostics import (
+        from ..model_diagnostics import (
             build_identification_warnings,
             validate_parameters,
         )
@@ -590,7 +590,7 @@ class ResidualACFSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEntity):
             return None
 
     def _compute_acf(self) -> dict:
-        from .model_diagnostics import compute_autocorrelation_function
+        from ..model_diagnostics import compute_autocorrelation_function
 
         room_idx = self._coordinator.model.room_names.index(self._room_name)
         residuals = []

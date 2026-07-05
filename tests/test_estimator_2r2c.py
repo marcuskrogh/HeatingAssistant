@@ -85,16 +85,16 @@ class TestThetaLayout:
             identifiable_solar=[0, 1],
             identifiable_splits=[1],
         )
-        # 3n legacy + 1 alpha + 1 r_ij + 2 solar + 1 c_air + 1 r_aw
-        assert layout.size == 6 + 1 + 1 + 2 + 1 + 1
-        assert layout.idx_log_solar == (8, 10)
-        assert layout.idx_c_air == (10, 11)
-        assert layout.idx_r_aw == (11, 12)
+        # 3n legacy + t_wall_init (n) + alpha + r_ij + solar + c_air + r_aw
+        assert layout.size == 8 + 1 + 1 + 2 + 1 + 1
+        assert layout.idx_log_solar == (10, 12)
+        assert layout.idx_c_air == (12, 13)
+        assert layout.idx_r_aw == (13, 14)
 
     def test_all_gates_closed_reproduces_legacy_size(self):
         layout = _ThetaLayout(n_rooms=3, identifiable_sources=[],
                               identifiable_pairs=[])
-        assert layout.size == 9
+        assert layout.size == 12
 
 
 class TestIdentifiabilityGates:
@@ -135,6 +135,7 @@ class TestAnalyticGradient2R2C:
             est._log_mass_prior + 0.1,
             est._log_r_prior - 0.05,
             np.array([30.0, -20.0]),          # q_int
+            np.array([0.0, 0.0]),             # t_wall_init (per room)
             np.array([0.05, -0.04]),          # log_alpha
             np.array([math.log(0.5)]),        # log_r_ij
             np.array([0.1]),                  # log_solar room a

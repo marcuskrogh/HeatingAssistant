@@ -15,6 +15,7 @@ import pytest
 import custom_components.heating_assistant.__init__ as init_mod
 import custom_components.heating_assistant.services.control as svc_mod
 from custom_components.heating_assistant.const import (
+    CONF_PERSISTED_SCHEDULES,
     CONF_ROOMS,
     CONF_SCHEDULE,
     DOMAIN,
@@ -77,11 +78,9 @@ async def test_schedule_persisted_to_options_when_rooms_in_options(monkeypatch):
 
     assert len(update_calls) == 1
     call = update_calls[0]
-    # Schedule must be persisted to BOTH stores so the options→data override
-    # at setup cannot discard it.
-    assert call["data"][CONF_ROOMS][0][CONF_SCHEDULE] == PERIODS
-    assert "options" in call, "options must be updated when rooms live in options"
-    assert call["options"][CONF_ROOMS][0][CONF_SCHEDULE] == PERIODS
+    # Schedules persist in a dedicated key so YAML/options merging cannot discard them.
+    assert call["data"][CONF_PERSISTED_SCHEDULES]["Living Room"] == PERIODS
+    assert "options" not in call
 
     coordinator.reload_room_schedule.assert_called_once_with("Living Room", PERIODS)
     coordinator.async_update_listeners.assert_called_once()
@@ -113,8 +112,7 @@ async def test_schedule_persisted_to_data_when_options_empty(monkeypatch):
 
     assert len(update_calls) == 1
     call = update_calls[0]
-    assert call["data"][CONF_ROOMS][0][CONF_SCHEDULE] == PERIODS
-    # No options rooms existed, so we must not invent an options-based config.
+    assert call["data"][CONF_PERSISTED_SCHEDULES]["Bedroom"] == PERIODS
     assert "options" not in call
 
 

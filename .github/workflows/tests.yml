@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y nodejs
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
+
+      - name: Run unit and integration tests
+        run: python -m pytest tests/ -v -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
+
+      - name: Run panel harness smoke tests
+        run: |
+          for harness in tests/panel_*.harness.mjs; do
+            echo "Running $harness"
+            node "$harness"
+          done
