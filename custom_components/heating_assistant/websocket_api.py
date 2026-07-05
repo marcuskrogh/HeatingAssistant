@@ -55,11 +55,6 @@ _LOGGER = logging.getLogger(__name__)
 
 def register_websocket_api(hass: HomeAssistant) -> None:
     """Register WebSocket commands for the dashboard frontend."""
-    """Register WebSocket commands for the dashboard frontend."""
-    from homeassistant.components import websocket_api
-
-    from .dashboard import slugify as _slugify
-
     @websocket_api.websocket_command(
         {vol.Required("type"): "heating_assistant/get_schedules"}
     )
@@ -69,28 +64,10 @@ def register_websocket_api(hass: HomeAssistant) -> None:
     ) -> None:
         """Return current schedule data directly from the coordinator."""
         coordinator = get_coordinator(hass)
-        schedules: dict = {}
-        for room_name, room_schedule in coordinator._room_schedule.items():
-            if room_schedule and not room_schedule.is_empty:
-                schedules[slugify(room_name)] = {
-                    "enabled": coordinator._schedule_enabled.get(room_name, True),
-                    "periods": [
-                        {
-                            "name": p.name,
-                            "start": p.start.strftime("%H:%M"),
-                            "end": p.end.strftime("%H:%M"),
-                            "mode": p.mode,
-                            "setpoint": p.setpoint,
-                            "frost_protection": p.frost_protection,
-                            "days": sorted(p.days),
-                            "comfort_offset": p.comfort_offset,
-                            "tracking_weight": p.tracking_weight,
-                            "energy_weight": p.energy_weight,
-                        }
-                        for p in room_schedule.periods
-                    ],
-                }
-        connection.send_result(msg["id"], {"room_schedules": schedules})
+        connection.send_result(
+            msg["id"],
+            {"room_schedules": coordinator.serialize_room_schedules()},
+        )
 
     websocket_api.async_register_command(hass, ws_get_schedules)
 

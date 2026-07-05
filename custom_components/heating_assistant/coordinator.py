@@ -1358,7 +1358,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         - Uses u=0 for sources whose room was in an off-period (comfort schedule).
         - Falls back to u_default everywhere else.
         """
-        from .dashboard import slugify as _slugify
+        from ..naming import slugify as _slugify
 
         n_sources = len(self.heat_sources)
         u_seq = np.empty((n_steps, n_sources), dtype=float)
@@ -1498,7 +1498,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         in-memory so the controller sees the right name.  This handles setups
         where heat sources were originally configured with slug-style room names.
         """
-        from .dashboard import slugify as _slugify
+        from ..naming import slugify as _slugify
 
         known_rooms = set(self.model.rooms)
         slug_to_canonical: Dict[str, str] = {
@@ -1783,7 +1783,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         payload from a one-off MPC solve without mutating the live coordinator
         state.
         """
-        from .dashboard import slugify as _slugify
+        from ..naming import slugify as _slugify
 
         if room_names is None:
             room_names = self.model.room_names
@@ -4490,7 +4490,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         Reflects the set computed for the current cycle by
         ``_build_experiment_clamps`` (keyed by room slug).
         """
-        from .dashboard import slugify as _slugify
+        from ..naming import slugify as _slugify
 
         active = getattr(self, "_experiment_active_rooms", None)
         if not active:
@@ -4522,7 +4522,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         room whose window is open is left unclamped — the window override forces it
         off and its air-exchange is unmodelled.
         """
-        from .dashboard import slugify as _slugify
+        from ..naming import slugify as _slugify
 
         active_rooms: Set[str] = set()
         manager = self.experiment_manager

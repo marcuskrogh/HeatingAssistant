@@ -245,7 +245,30 @@ from .const import (
     SOURCE_HVAC_MODE_HEAT,
     SOURCE_HVAC_MODE_HEAT_COOL,
 )
+from .config_schema import CONFIG_SCHEMA
 from .coordinator import HeatingAssistantCoordinator
+from .persistence import persist_tuning_updates, write_entry_config
+from .services.context import get_coordinator
+from .services.history_access import (
+    dataset_boundaries,
+    get_history_for_horizon,
+    get_history_for_window,
+    get_history_with_leading,
+    records_for_dataset,
+    records_for_datasets,
+)
+from .services.register import register_all_services
+from .websocket_api import register_websocket_api
+from .services.simulation import (
+    compute_open_loop_rmse_by_horizon,
+    effective_heater_scales,
+    estimate_simulation_initial_state,
+    extract_sim_room_params,
+    inject_identified_t_wall_initial,
+    merge_per_room_into_sysid_results,
+    open_loop_t_wall_initial_dict,
+    patched_heat_sources,
+)
 from .yaml_merge import MergedEntry as _MergedEntry, merge_yaml_into_entry_data as _merge_yaml_into_entry_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -265,217 +288,6 @@ SERVICE_APPLY_HEATER_SCALES = "apply_heater_scales"
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
 DEFAULT_INDUSTRIAL_DASHBOARD_FILENAME = "heating_assistant_industrial.yaml"
-
-# ---------------------------------------------------------------------------
-# YAML schema
-# ---------------------------------------------------------------------------
-
-_WINDOW_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_WINDOW_AREA): vol.Coerce(float),
-        vol.Required(CONF_WINDOW_ORIENTATION): vol.Coerce(float),
-        vol.Optional(CONF_WINDOW_TILT, default=DEFAULT_WINDOW_TILT): vol.Coerce(float),
-    }
-)
-
-_CONNECTION_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_CONNECTED_ROOM): str,
-        vol.Required(CONF_R_VALUE): vol.Coerce(float),
-    }
-)
-
-_SCHEDULE_PERIOD_SCHEMA = vol.Schema(
-    {
-        vol.Optional(CONF_SCHEDULE_NAME): str,
-        vol.Required(CONF_SCHEDULE_START): str,
-        vol.Required(CONF_SCHEDULE_END): str,
-        vol.Optional(CONF_SCHEDULE_DAYS): [str],
-        vol.Optional(CONF_SCHEDULE_SETPOINT): vol.Coerce(float),
-        vol.Optional(CONF_SCHEDULE_MODE, default=SCHEDULE_MODE_COMFORT): vol.In(
-            [SCHEDULE_MODE_COMFORT, SCHEDULE_MODE_OFF]
-        ),
-        vol.Optional(
-            CONF_SCHEDULE_FROST_PROTECTION, default=DEFAULT_FROST_PROTECTION
-        ): vol.Coerce(float),
-        # Per-period overrides written by the schedule editor.  Optional so a
-        # period round-tripped through update_rooms (which carries the room's
-        # full schedule) validates instead of being rejected as an extra key.
-        vol.Optional(CONF_SCHEDULE_COMFORT_OFFSET): vol.Any(None, vol.Coerce(float)),
-        vol.Optional(CONF_SCHEDULE_TRACKING_WEIGHT): vol.Any(None, vol.Coerce(float)),
-        vol.Optional(CONF_SCHEDULE_ENERGY_WEIGHT): vol.Any(None, vol.Coerce(float)),
-    }
-)
-
-_ROOM_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_ROOM_NAME): str,
-        vol.Optional(CONF_THERMAL_MASS, default=DEFAULT_THERMAL_MASS): vol.Coerce(float),
-        vol.Optional(CONF_R_EXTERNAL, default=DEFAULT_R_EXTERNAL): vol.Coerce(float),
-        # Sherman–Grimsrud infiltration share (Phase 1 C1).  See
-        # const.ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION for typology
-        # defaults exposed by the config flow.
-        vol.Optional(
-            CONF_INFILTRATION_FRACTION,
-            default=DEFAULT_INFILTRATION_FRACTION,
-        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
-        # Slab / floor parameters (Phase 1 A2 + B1).
-        # ``floor_type`` is the typology switch; the three numeric
-        # fields below override the typology defaults from
-        # const.FLOOR_TYPE_DEFAULTS when explicitly set.  Leave them
-        # unset (or null) to use the typology defaults for the chosen
-        # floor type.
-        vol.Optional(CONF_FLOOR_TYPE, default=DEFAULT_FLOOR_TYPE): vol.In(
-            list(FLOOR_TYPE_DEFAULTS)
-        ),
-        vol.Optional(CONF_C_SLAB_FRACTION): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0, max=1.0),
-        ),
-        vol.Optional(CONF_R_SA): vol.All(vol.Coerce(float), vol.Range(min=1e-9)),
-        vol.Optional(CONF_R_SG): vol.All(vol.Coerce(float), vol.Range(min=1e-9)),
-        # Phase 1 C3 / C4 / C5 — finishing-pass envelope corrections.
-        # All default off (zero) so existing installs see no behaviour
-        # change; opt in per room as desired.  ``facade_colour`` is a
-        # convenience preset that resolves into ``facade_absorptance``
-        # via ``FACADE_COLOUR_TO_ABSORPTANCE``; an explicit
-        # ``facade_absorptance`` always wins.
-        vol.Optional(
-            CONF_SKY_RADIATIVE_UA, default=DEFAULT_SKY_RADIATIVE_UA,
-        ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-        vol.Optional(
-            CONF_FACADE_COLOUR, default=DEFAULT_FACADE_COLOUR,
-        ): vol.In(list(FACADE_COLOUR_TO_ABSORPTANCE)),
-        vol.Optional(CONF_FACADE_ABSORPTANCE): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0, max=1.0),
-        ),
-        vol.Optional(
-            CONF_FACADE_SOLAR_SHARE, default=DEFAULT_FACADE_SOLAR_SHARE,
-        ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
-        vol.Optional(
-            CONF_THERMAL_BRIDGE_PSI_L, default=DEFAULT_THERMAL_BRIDGE_PSI_L,
-        ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-        vol.Optional(CONF_SOLAR_EXPOSURE, default=DEFAULT_SOLAR_EXPOSURE): vol.In(
-            list(SOLAR_EXPOSURE_TO_APERTURE),
-        ),
-        vol.Optional(CONF_SOLAR_FACING, default=DEFAULT_SOLAR_FACING): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0, max=360.0),
-        ),
-        vol.Optional(CONF_SETPOINT, default=DEFAULT_SETPOINT): vol.Coerce(float),
-        vol.Optional(CONF_COMFORT_OFFSET, default=DEFAULT_COMFORT_OFFSET): vol.Coerce(float),
-        vol.Optional(CONF_TEMP_SENSOR): str,
-        vol.Optional(CONF_TEMP_SENSORS, default=[]): [str],
-        vol.Optional(CONF_WINDOW_SENSORS, default=[]): [str],
-        vol.Optional(CONF_CONNECTIONS, default=[]): [_CONNECTION_SCHEMA],
-        vol.Optional(CONF_WINDOWS, default=[]): [_WINDOW_SCHEMA],
-        vol.Optional(CONF_SCHEDULE, default=[]): [_SCHEDULE_PERIOD_SCHEMA],
-    }
-)
-
-_SOURCE_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_SOURCE_NAME): str,
-        vol.Required(CONF_SOURCE_TYPE): vol.In(list(ALL_SOURCE_TYPES)),
-        vol.Required(CONF_SOURCE_ROOM): str,
-        vol.Required(CONF_SOURCE_MAX_POWER): vol.Coerce(float),
-        vol.Optional(CONF_SOURCE_EFFICIENCY, default=DEFAULT_EFFICIENCY): vol.Coerce(float),
-        vol.Optional(CONF_SOURCE_COP_RATED, default=DEFAULT_COP_RATED): vol.Coerce(float),
-        vol.Optional(CONF_SOURCE_COP_TEMP_REF, default=DEFAULT_COP_TEMP_REF): vol.Coerce(float),
-        vol.Optional(CONF_SOURCE_MIN_POWER, default=DEFAULT_MIN_POWER): vol.Coerce(float),
-        vol.Optional(CONF_SOURCE_MAX_TEMP_OFFSET, default=DEFAULT_MAX_TEMP_OFFSET): vol.Coerce(float),
-        vol.Optional(CONF_SOURCE_TURN_OFF_DEADBAND, default=DEFAULT_TURN_OFF_DEADBAND): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0)
-        ),
-        vol.Optional(CONF_SOURCE_COOLING_COP, default=DEFAULT_COOLING_COP): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0)
-        ),
-        vol.Optional(CONF_SOURCE_COOLING_EFFICIENCY, default=DEFAULT_COOLING_EFFICIENCY): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0, max=1.0)
-        ),
-        # Phase 1 B2 per-source emitter time constant.  When omitted the
-        # coordinator picks the typology default from
-        # ``SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU`` (electric → 0 s;
-        # heat-pump → 60 s).  Users on hydronic radiators driven by
-        # either source can override with τ ≈ 600 s here.
-        vol.Optional(CONF_SOURCE_EMITTER_TIME_CONSTANT): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0),
-        ),
-        vol.Optional(CONF_SOURCE_HEATING_EFFICIENCY, default=DEFAULT_HEATING_EFFICIENCY): vol.All(
-            vol.Coerce(float), vol.Range(min=0.0, max=1.0)
-        ),
-        vol.Optional(CONF_SOURCE_HEATER_ENTITY): str,
-    }
-)
-
-CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema(
-            {
-                vol.Optional(CONF_ROOMS, default=[]): [_ROOM_SCHEMA],
-                vol.Optional(CONF_HEAT_SOURCES, default=[]): [_SOURCE_SCHEMA],
-                vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): str,
-                vol.Optional(CONF_WEATHER_ENTITY): str,
-                vol.Optional(CONF_SOLAR_RADIATION_ENTITY): str,
-                vol.Optional(CONF_LATITUDE): vol.Coerce(float),
-                vol.Optional(CONF_LONGITUDE): vol.Coerce(float),
-                vol.Optional(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
-                    vol.Coerce(int), vol.Range(min=60)
-                ),
-                vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
-                    vol.Coerce(int), vol.Range(min=1)
-                ),
-                vol.Optional(
-                    CONF_TRACKING_WEIGHT, default=DEFAULT_TRACKING_WEIGHT
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-                vol.Optional(
-                    CONF_ENERGY_WEIGHT, default=DEFAULT_ENERGY_WEIGHT
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-                vol.Optional(
-                    CONF_SMOOTHING_WEIGHT, default=DEFAULT_SMOOTHING_WEIGHT
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-                vol.Optional(
-                    CONF_SOFT_CONSTRAINT_WEIGHT, default=DEFAULT_SOFT_CONSTRAINT_WEIGHT
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-                vol.Optional(
-                    CONF_TERMINAL_WEIGHT, default=DEFAULT_TERMINAL_WEIGHT
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                vol.Optional(CONF_SIGMA_W, default=DEFAULT_SIGMA_W): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6)
-                ),
-                vol.Optional(CONF_SIGMA_V, default=DEFAULT_SIGMA_V): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-6)
-                ),
-                vol.Optional(CONF_SIGMA_B, default=DEFAULT_SIGMA_B): vol.All(
-                    vol.Coerce(float), vol.Range(min=1e-8)
-                ),
-                vol.Optional(
-                    CONF_WINDOW_OPEN_DEBOUNCE,
-                    default=DEFAULT_WINDOW_OPEN_DEBOUNCE,
-                ): vol.All(vol.Coerce(int), vol.Range(min=0)),
-                vol.Optional(
-                    CONF_WINDOW_OPEN_CLOSE_SETTLE,
-                    default=DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
-                ): vol.All(vol.Coerce(int), vol.Range(min=0)),
-                vol.Optional(
-                    CONF_WINDOW_OPEN_Q_INFLATION,
-                    default=DEFAULT_WINDOW_OPEN_Q_INFLATION,
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                vol.Optional(
-                    CONF_PLOT_HISTORY_HOURS,
-                    default=DEFAULT_PLOT_HISTORY_HOURS,
-                ): vol.All(vol.Coerce(float), vol.Range(min=1.0)),
-                vol.Optional(
-                    CONF_PLOT_FORECAST_HOURS,
-                    default=DEFAULT_PLOT_FORECAST_HOURS,
-                ): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
-                vol.Optional(
-                    CONF_IDENTIFICATION_HISTORY_DAYS,
-                    default=DEFAULT_IDENTIFICATION_HISTORY_DAYS,
-                ): vol.All(vol.Coerce(int), vol.Range(min=7)),
-            }
-        )
-    },
-    extra=vol.ALLOW_EXTRA,
-)
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -509,408 +321,6 @@ async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
     async_register_admin_service(hass, DOMAIN, SERVICE_RELOAD, _async_reload_service)
 
     return True
-
-
-def _register_websocket_api(hass: HomeAssistant) -> None:
-    """Register WebSocket commands for the dashboard frontend."""
-    from homeassistant.components import websocket_api
-
-    from .dashboard import slugify as _slugify
-
-    @websocket_api.websocket_command(
-        {vol.Required("type"): "heating_assistant/get_schedules"}
-    )
-    @websocket_api.async_response
-    async def ws_get_schedules(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return current schedule data directly from the coordinator."""
-        coordinator = _get_coordinator(hass)
-        schedules: dict = {}
-        for room_name, room_schedule in coordinator._room_schedule.items():
-            if room_schedule and not room_schedule.is_empty:
-                schedules[_slugify(room_name)] = {
-                    "enabled": coordinator._schedule_enabled.get(room_name, True),
-                    "periods": [
-                        {
-                            "name": p.name,
-                            "start": p.start.strftime("%H:%M"),
-                            "end": p.end.strftime("%H:%M"),
-                            "mode": p.mode,
-                            "setpoint": p.setpoint,
-                            "frost_protection": p.frost_protection,
-                            "days": sorted(p.days),
-                            "comfort_offset": p.comfort_offset,
-                            "tracking_weight": p.tracking_weight,
-                            "energy_weight": p.energy_weight,
-                        }
-                        for p in room_schedule.periods
-                    ],
-                }
-        connection.send_result(msg["id"], {"room_schedules": schedules})
-
-    websocket_api.async_register_command(hass, ws_get_schedules)
-
-    @websocket_api.websocket_command(
-        {vol.Required("type"): "heating_assistant/get_controller_config"}
-    )
-    @websocket_api.async_response
-    async def ws_get_controller_config(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return current controller tuning parameters directly from the coordinator."""
-        try:
-            c = _get_coordinator(hass)
-            # float()/int() casts required: coordinator attrs may be numpy scalars,
-            # which HA's JSON serialiser cannot handle.
-            # update_interval: DataUpdateCoordinator stores self._update_interval as
-            # a timedelta (its property setter overwrites our int), so read the public
-            # property and convert via total_seconds().
-            ui = c.update_interval
-            config = {
-                "comfort_offset": float(next(
-                    iter(getattr(c, "_room_comfort_offset", {}).values()), 2.0
-                )),
-                "tracking_weight": float(getattr(c, "_tracking_weight", DEFAULT_TRACKING_WEIGHT)),
-                "energy_weight": float(getattr(c, "_energy_weight", DEFAULT_ENERGY_WEIGHT)),
-                "energy_price_weight": float(getattr(c, "_energy_price_weight", DEFAULT_ENERGY_PRICE_WEIGHT)),
-                "smoothing_weight": float(getattr(c, "_smoothing_weight", DEFAULT_SMOOTHING_WEIGHT)),
-                "soft_constraint_weight": float(getattr(c, "_soft_constraint_weight", DEFAULT_SOFT_CONSTRAINT_WEIGHT)),
-                "soft_constraint_linear_weight": float(getattr(c, "_soft_constraint_linear_weight", DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT)),
-                "terminal_weight": float(getattr(c, "_terminal_weight", DEFAULT_TERMINAL_WEIGHT)),
-                "horizon": int(getattr(c, "_horizon", DEFAULT_HORIZON)),
-                "update_interval": int(ui.total_seconds() if hasattr(ui, "total_seconds") else ui),
-                "window_open_debounce": int(getattr(c, "_window_open_debounce", DEFAULT_WINDOW_OPEN_DEBOUNCE)),
-                "window_open_close_settle": int(getattr(c, "_window_open_close_settle", DEFAULT_WINDOW_OPEN_CLOSE_SETTLE)),
-                "window_open_q_inflation": float(getattr(c, "_window_open_q_inflation", DEFAULT_WINDOW_OPEN_Q_INFLATION)),
-            }
-            _LOGGER.debug("Heating Assistant: get_controller_config -> %s", config)
-            connection.send_result(msg["id"], {"config": config})
-        except Exception as err:
-            _LOGGER.error("Heating Assistant: get_controller_config WS failed: %s", err)
-            connection.send_error(msg["id"], "config_fetch_failed", str(err))
-
-    websocket_api.async_register_command(hass, ws_get_controller_config)
-
-    @websocket_api.websocket_command(
-        {
-            vol.Required("type"): "heating_assistant/get_forecasts",
-            # Optional display horizon (hours) requested by the dashboard.  When
-            # absent or 0 the full controller horizon is used; when larger than
-            # the controller horizon the final actuation is held flat and the
-            # trajectory is simulated forward (see build_forecast_payload).
-            vol.Optional("plot_forecast_hours"): vol.Coerce(float),
-        }
-    )
-    @websocket_api.async_response
-    async def ws_get_forecasts(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return current forecast arrays directly from the coordinator.
-
-        Forecast data is no longer stored in sensor attributes (to avoid the
-        HA Recorder 16 KB size limit), so the dashboard frontend fetches it
-        via this endpoint instead.
-        """
-        try:
-            coordinator = _get_coordinator(hass)
-            plot_hours = msg.get("plot_forecast_hours")
-            plot_steps: Optional[int] = None
-            if plot_hours is not None and float(plot_hours) > 0:
-                dt = coordinator.dt or DEFAULT_UPDATE_INTERVAL
-                import math
-                plot_steps = max(1, math.ceil(float(plot_hours) * 3600.0 / float(dt)))
-            payload = coordinator.build_forecast_payload(
-                plot_forecast_steps=plot_steps
-            )
-            connection.send_result(msg["id"], payload)
-        except Exception as err:
-            _LOGGER.error("Heating Assistant: get_forecasts WS failed: %s", err)
-            connection.send_error(msg["id"], "forecasts_fetch_failed", str(err))
-
-    websocket_api.async_register_command(hass, ws_get_forecasts)
-
-    _PREVIEW_TUNING_SCHEMA = {
-        vol.Required("type"): "heating_assistant/preview_tuning_forecast",
-        vol.Optional("plot_forecast_hours"): vol.Coerce(float),
-        vol.Optional(CONF_TRACKING_WEIGHT): vol.Coerce(float),
-        vol.Optional(CONF_ENERGY_WEIGHT): vol.Coerce(float),
-        vol.Optional(CONF_ENERGY_PRICE_WEIGHT): vol.Coerce(float),
-        vol.Optional(CONF_SMOOTHING_WEIGHT): vol.Coerce(float),
-        vol.Optional(CONF_SOFT_CONSTRAINT_WEIGHT): vol.Coerce(float),
-        vol.Optional(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT): vol.Coerce(float),
-        vol.Optional(CONF_TERMINAL_WEIGHT): vol.Coerce(float),
-        vol.Optional(CONF_HORIZON): vol.Coerce(int),
-        vol.Optional(CONF_UPDATE_INTERVAL): vol.Coerce(int),
-        vol.Optional(CONF_COMFORT_OFFSET): vol.Coerce(float),
-    }
-    _PREVIEW_TUNING_KEYS = {
-        CONF_TRACKING_WEIGHT, CONF_ENERGY_WEIGHT, CONF_ENERGY_PRICE_WEIGHT,
-        CONF_SMOOTHING_WEIGHT, CONF_SOFT_CONSTRAINT_WEIGHT,
-        CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, CONF_TERMINAL_WEIGHT,
-        CONF_HORIZON, CONF_UPDATE_INTERVAL, CONF_COMFORT_OFFSET,
-    }
-
-    @websocket_api.websocket_command(_PREVIEW_TUNING_SCHEMA)
-    @websocket_api.async_response
-    async def ws_preview_tuning_forecast(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Run a one-off MPC solve with proposed tuning and return forecast plots."""
-        import math
-        from datetime import datetime, timezone
-
-        try:
-            coordinator = _get_coordinator(hass)
-            tuning = {
-                k: msg[k] for k in _PREVIEW_TUNING_KEYS if k in msg
-            }
-            plot_hours = msg.get("plot_forecast_hours")
-            plot_steps: Optional[int] = None
-            if plot_hours is not None and float(plot_hours) > 0:
-                preview_dt = float(
-                    tuning.get(CONF_UPDATE_INTERVAL, coordinator._update_interval_s)
-                )
-                plot_steps = max(
-                    1, math.ceil(float(plot_hours) * 3600.0 / preview_dt)
-                )
-
-            now = getattr(coordinator, "now_utc", None) or datetime.now(
-                tz=timezone.utc
-            )
-            cloud_cover_raw = coordinator._read_cloud_cover_now()
-            cloud_cover_now = coordinator._smooth_cloud_cover(cloud_cover_raw)
-            cloud_forecast = await coordinator._async_read_cloud_forecast(
-                cloud_cover_now=cloud_cover_now
-            )
-            wind_forecast = await coordinator._async_read_wind_forecast(
-                coordinator._read_wind_speed_now()
-            )
-            ghi_now, ghi_forecast = coordinator._read_ghi(now)
-            if cloud_cover_now is None and cloud_forecast:
-                cloud_cover_now = max(0.0, min(1.0, float(cloud_forecast[0])))
-
-            weather = {
-                "cloud_forecast": cloud_forecast,
-                "cloud_cover_now": cloud_cover_now,
-                "ghi_now": ghi_now,
-                "ghi_forecast": ghi_forecast,
-                "wind_forecast": wind_forecast,
-            }
-
-            payload = await hass.async_add_executor_job(
-                coordinator.preview_tuning_forecast,
-                tuning,
-                plot_steps,
-                weather,
-            )
-            connection.send_result(msg["id"], payload)
-        except Exception as err:
-            _LOGGER.error(
-                "Heating Assistant: preview_tuning_forecast WS failed: %s", err
-            )
-            connection.send_error(
-                msg["id"], "preview_tuning_failed", str(err)
-            )
-
-    websocket_api.async_register_command(hass, ws_preview_tuning_forecast)
-
-    @websocket_api.websocket_command(
-        {vol.Required("type"): "heating_assistant/get_ui_settings"}
-    )
-    @websocket_api.async_response
-    async def ws_get_ui_settings(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return the industrial-panel display settings (plot windows)."""
-        try:
-            c = _get_coordinator(hass)
-            connection.send_result(
-                msg["id"],
-                {
-                    "ui_settings": {
-                        CONF_PLOT_HISTORY_HOURS: float(
-                            getattr(c, "_plot_history_hours", DEFAULT_PLOT_HISTORY_HOURS)
-                        ),
-                        CONF_PLOT_FORECAST_HOURS: float(
-                            getattr(c, "_plot_forecast_hours", DEFAULT_PLOT_FORECAST_HOURS)
-                        ),
-                    }
-                },
-            )
-        except Exception as err:
-            _LOGGER.error("Heating Assistant: get_ui_settings WS failed: %s", err)
-            connection.send_error(msg["id"], "ui_settings_fetch_failed", str(err))
-
-    websocket_api.async_register_command(hass, ws_get_ui_settings)
-
-    @websocket_api.websocket_command(
-        {vol.Required("type"): "heating_assistant/get_model_config"}
-    )
-    @websocket_api.async_response
-    async def ws_get_model_config(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return the full editable model configuration for the Configuration UI.
-
-        Reads the live config entry (options shadowing data, matching the
-        coordinator's precedence) so the dashboard always edits the values that
-        are actually in force.  Returns the rooms list, heat-source list, the
-        environment/system entities, the display settings, and the enum choices
-        used to populate dropdowns.
-        """
-        try:
-            c = _get_coordinator(hass)
-            entry = hass.config_entries.async_get_entry(c._entry.entry_id)
-            data = dict(entry.data) if entry else {}
-            options = dict(entry.options) if entry else {}
-
-            def _merged(key, default=None):
-                if key in options:
-                    return options[key]
-                return data.get(key, default)
-
-            rooms = _merged(CONF_ROOMS, []) or []
-            sources = _merged(CONF_HEAT_SOURCES, []) or []
-
-            system = {
-                CONF_OUTDOOR_TEMP_ENTITY: _merged(CONF_OUTDOOR_TEMP_ENTITY) or "",
-                CONF_WEATHER_ENTITY: _merged(CONF_WEATHER_ENTITY) or "",
-                CONF_SOLAR_RADIATION_ENTITY: _merged(CONF_SOLAR_RADIATION_ENTITY) or "",
-                CONF_PRICE_ENTITY: _merged(CONF_PRICE_ENTITY) or "",
-                CONF_LATITUDE: _merged(CONF_LATITUDE, hass.config.latitude),
-                CONF_LONGITUDE: _merged(CONF_LONGITUDE, hass.config.longitude),
-            }
-
-            ui = {
-                CONF_PLOT_HISTORY_HOURS: float(
-                    _merged(CONF_PLOT_HISTORY_HOURS, DEFAULT_PLOT_HISTORY_HOURS)
-                ),
-                CONF_PLOT_FORECAST_HOURS: float(
-                    _merged(CONF_PLOT_FORECAST_HOURS, DEFAULT_PLOT_FORECAST_HOURS)
-                ),
-            }
-
-            system_params = {
-                CONF_IDENTIFICATION_HISTORY_DAYS: int(
-                    _merged(CONF_IDENTIFICATION_HISTORY_DAYS, DEFAULT_IDENTIFICATION_HISTORY_DAYS)
-                ),
-            }
-
-            enums = {
-                "floor_types": list(FLOOR_TYPE_DEFAULTS.keys()),
-                "facade_colours": list(FACADE_COLOUR_TO_ABSORPTANCE.keys()),
-                "solar_exposures": list(SOLAR_EXPOSURE_TO_APERTURE.keys()),
-                "envelope_tightness": list(
-                    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION.keys()
-                ),
-                "envelope_tightness_map": dict(
-                    ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION
-                ),
-                "source_types": [
-                    SOURCE_TYPE_ELECTRIC,
-                    SOURCE_TYPE_ELECTRIC_FLOOR,
-                    SOURCE_TYPE_GAS_HEATER,
-                    SOURCE_TYPE_GENERIC_THERMOSTAT,
-                    SOURCE_TYPE_GROUND_SOURCE_HP,
-                    SOURCE_TYPE_HEAT_PUMP,
-                    SOURCE_TYPE_HYDRONIC_FLOOR,
-                    SOURCE_TYPE_HYDRONIC_RADIATOR,
-                    SOURCE_TYPE_OIL_BOILER,
-                    SOURCE_TYPE_OIL_RADIATOR,
-                    SOURCE_TYPE_PELLET_STOVE,
-                    SOURCE_TYPE_ELECTRIC_STORAGE,
-                ],
-                "hvac_modes": [
-                    SOURCE_HVAC_MODE_HEAT,
-                    SOURCE_HVAC_MODE_COOL,
-                    SOURCE_HVAC_MODE_HEAT_COOL,
-                ],
-            }
-
-            connection.send_result(
-                msg["id"],
-                {
-                    "rooms": rooms,
-                    "heat_sources": sources,
-                    "system": system,
-                    "ui_settings": ui,
-                    "system_params": system_params,
-                    "enums": enums,
-                },
-            )
-        except Exception as err:
-            _LOGGER.error("Heating Assistant: get_model_config WS failed: %s", err)
-            connection.send_error(msg["id"], "model_config_fetch_failed", str(err))
-
-    websocket_api.async_register_command(hass, ws_get_model_config)
-
-    @websocket_api.websocket_command(
-        {
-            vol.Required("type"): "heating_assistant/list_datasets",
-            vol.Optional("room_slug"): str,
-        }
-    )
-    @websocket_api.async_response
-    async def ws_list_datasets(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return metadata for stored identification datasets (no records).
-
-        When *room_slug* is present only datasets for that room are returned.
-        """
-        try:
-            coordinator = _get_coordinator(hass)
-            store = getattr(coordinator, "dataset_store", None)
-            room_slug = msg.get("room_slug")
-            datasets = store.list_meta(room_slug=room_slug) if store is not None else []
-            connection.send_result(msg["id"], {"datasets": datasets})
-        except Exception as err:
-            _LOGGER.error("Heating Assistant: list_datasets WS failed: %s", err)
-            connection.send_error(msg["id"], "datasets_fetch_failed", str(err))
-
-    websocket_api.async_register_command(hass, ws_list_datasets)
-
-    @websocket_api.websocket_command(
-        {
-            vol.Required("type"): "heating_assistant/get_dataset",
-            vol.Required("dataset_id"): str,
-        }
-    )
-    @websocket_api.async_response
-    async def ws_get_dataset(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return a single stored dataset including its snapshotted records."""
-        try:
-            coordinator = _get_coordinator(hass)
-            store = getattr(coordinator, "dataset_store", None)
-            dataset = store.get(msg["dataset_id"]) if store is not None else None
-            connection.send_result(msg["id"], {"dataset": dataset})
-        except Exception as err:
-            _LOGGER.error("Heating Assistant: get_dataset WS failed: %s", err)
-            connection.send_error(msg["id"], "dataset_fetch_failed", str(err))
-
-    websocket_api.async_register_command(hass, ws_get_dataset)
-
-    @websocket_api.websocket_command(
-        {vol.Required("type"): "heating_assistant/list_experiments"}
-    )
-    @websocket_api.async_response
-    async def ws_list_experiments(
-        hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
-    ) -> None:
-        """Return all scheduled / running / completed experiments."""
-        try:
-            coordinator = _get_coordinator(hass)
-            manager = getattr(coordinator, "experiment_manager", None)
-            experiments = manager.to_list() if manager is not None else []
-            connection.send_result(msg["id"], {"experiments": experiments})
-        except Exception as err:
-            _LOGGER.error("Heating Assistant: list_experiments WS failed: %s", err)
-            connection.send_error(msg["id"], "experiments_fetch_failed", str(err))
-
-    websocket_api.async_register_command(hass, ws_list_experiments)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -1116,7 +526,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register WebSocket API (only once for the domain)
     if not hass.data[DOMAIN].get("_ws_registered"):
-        _register_websocket_api(hass)
+        register_websocket_api(hass)
         hass.data[DOMAIN]["_ws_registered"] = True
 
     # Auto-reload when the user changes options via the integration UI.
@@ -1556,479 +966,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 # ---------------------------------------------------------------------------
 
 def _get_coordinator(hass: HomeAssistant) -> HeatingAssistantCoordinator:
-    """Return the first available coordinator instance."""
-    for entry_id, obj in hass.data.get(DOMAIN, {}).items():
-        if isinstance(obj, HeatingAssistantCoordinator):
-            return obj
-    raise ValueError("No Heating Assistant coordinator found")
-
-
-async def _get_history_for_window(
-    hass: HomeAssistant,
-    coordinator: HeatingAssistantCoordinator,
-    window_start: Optional[float],
-    window_end: Optional[float],
-) -> List[Dict[str, Any]]:
-    """Return history records for a time window.
-
-    Priority order:
-    1. In-memory buffer when it already covers the requested window (fast path).
-    2. Integration-managed JSONL store (covers up to ``retention_days`` back).
-    3. HA Recorder (fallback for the period before the JSONL store existed).
-    4. In-memory buffer as a last resort (with a debug log).
-    """
-    buf = list(coordinator.history_buffer)
-
-    if window_start is None or window_end is None:
-        return buf
-
-    oldest_buf_ts = float(buf[0]["timestamp"]) if buf else None
-    if oldest_buf_ts is not None and oldest_buf_ts <= window_start:
-        return buf  # fast path: buffer already covers the window
-
-    # Try the integration-managed JSONL store first.
-    if coordinator.id_history_store is not None:
-        try:
-            records = await coordinator.id_history_store.async_query_range(
-                window_start, window_end
-            )
-            if records:
-                return records
-        except Exception:
-            _LOGGER.warning(
-                "ID history store query failed for window [%s, %s]",
-                window_start, window_end, exc_info=True,
-            )
-
-    # Fall back to HA Recorder (works for the initial period before the store
-    # was populated, or if the store files were deleted).
-    try:
-        from .history_seed import async_fetch_history_range
-
-        records = await async_fetch_history_range(
-            hass, coordinator, window_start, window_end
-        )
-        if records:
-            return records
-    except Exception:
-        _LOGGER.debug(
-            "Recorder fallback for window [%s, %s] failed",
-            window_start, window_end, exc_info=True,
-        )
-
-    _LOGGER.debug(
-        "No long-term history found for window [%s, %s]; using in-memory buffer",
-        window_start, window_end,
-    )
-    return buf
-
-
-async def _get_history_for_horizon(
-    hass: HomeAssistant,
-    coordinator: HeatingAssistantCoordinator,
-    horizon_hours: float,
-) -> List[Dict[str, Any]]:
-    """Return history for a trailing recent-horizon window.
-
-    Uses the in-memory buffer when it already covers the requested span;
-    otherwise fetches older records from the JSONL store / Recorder.
-    """
-    from .history_window import select_recent_window
-
-    horizon_s = float(horizon_hours) * 3600.0
-    buf = list(coordinator.history_buffer)
-    if not buf or horizon_s <= 0:
-        return buf
-
-    latest_ts = float(buf[-1]["timestamp"])
-    window_start = latest_ts - horizon_s
-    oldest_buf_ts = float(buf[0]["timestamp"])
-
-    if oldest_buf_ts <= window_start:
-        return select_recent_window(buf, horizon_s, coordinator.dt)
-
-    history = await _get_history_for_window(
-        hass, coordinator, window_start, latest_ts
-    )
-    return select_recent_window(history, horizon_s, coordinator.dt)
-
-
-async def _get_history_with_leading(
-    hass: HomeAssistant,
-    coordinator: HeatingAssistantCoordinator,
-    window_start: float,
-    window_end: float,
-    leading_hours: float = 6.0,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Fetch leading calibration data and the simulation window.
-
-    Returns ``(full_history, leading_history, simulation_history)``.
-    """
-    from .history_window import (
-        select_leading_window,
-        select_window_by_timestamps,
-    )
-
-    leading_s = float(leading_hours) * 3600.0
-    fetch_start = float(window_start) - leading_s
-    fetch_end = float(window_end)
-    full = await _get_history_for_window(hass, coordinator, fetch_start, fetch_end)
-    simulation = select_window_by_timestamps(full, window_start, window_end)
-    leading = select_leading_window(full, window_start, leading_s)
-    return full, leading, simulation
-
-
-async def _estimate_simulation_initial_state(
-    hass: HomeAssistant,
-    coordinator: HeatingAssistantCoordinator,
-    simulation_history: List[Dict[str, Any]],
-    system: Any,
-    *,
-    leading_history: Optional[List[Dict[str, Any]]] = None,
-    room_params: Optional[Dict[str, Dict[str, float]]] = None,
-    sigma_w: float = 0.1,
-    sigma_v: float = 0.5,
-    leading_hours: float = 6.0,
-) -> Dict[str, Any]:
-    """Estimate optimal air / wall temperatures at a simulation-window start."""
-    from .initial_state_estimator import (
-        DEFAULT_LEADING_HOURS,
-        estimate_simulation_initial_state,
-    )
-    from .parameter_estimator import KalmanMLEstimator
-
-    dt = coordinator.dt
-    fast_estimator = KalmanMLEstimator(
-        rooms=list(coordinator.model.rooms.values()),
-        sources=coordinator.heat_sources,
-        dt=dt,
-    )
-
-    def _run() -> Dict[str, Any]:
-        return estimate_simulation_initial_state(
-            simulation_history,
-            system,
-            coordinator.model.room_names,
-            dt,
-            leading_history=leading_history,
-            sigma_w=sigma_w,
-            sigma_v=sigma_v,
-            room_params=room_params,
-            wall_optimizer=fast_estimator,
-            leading_hours=leading_hours or DEFAULT_LEADING_HOURS,
-        )
-
-    return await hass.async_add_executor_job(_run)
-
-
-def _records_for_dataset(
-    coordinator: HeatingAssistantCoordinator,
-    dataset_id: Optional[str],
-) -> Optional[List[Dict[str, Any]]]:
-    """Return the snapshotted records for a stored dataset, or ``None``.
-
-    Used by the identification / simulation services so a stored dataset can be
-    referenced directly (by ``dataset_id``) instead of a time window — the data
-    is read from the dataset's own permanent snapshot, so it works even after the
-    rolling history that produced it has been pruned.
-    """
-    if not dataset_id:
-        return None
-    store = getattr(coordinator, "dataset_store", None)
-    if store is None:
-        return None
-    records = store.get_records(dataset_id)
-    return records if records else None
-
-
-def _records_for_datasets(
-    coordinator: HeatingAssistantCoordinator,
-    dataset_ids: Optional[List[str]],
-) -> Optional[List[Dict[str, Any]]]:
-    """Return the concatenated records of several stored datasets, or ``None``.
-
-    Each dataset's snapshotted records are gathered and merged into a single,
-    timestamp-sorted history list.  The estimator splits the merged history into
-    contiguous segments wherever the inter-record gap is large, so combining
-    disjoint datasets (e.g. several overnight experiments) just yields several
-    independent identification segments — exactly what we want for a joint fit.
-    """
-    if not dataset_ids:
-        return None
-    store = getattr(coordinator, "dataset_store", None)
-    if store is None:
-        return None
-    merged: List[Dict[str, Any]] = []
-    for ds_id in dataset_ids:
-        recs = store.get_records(ds_id)
-        if recs:
-            merged.extend(recs)
-    if not merged:
-        return None
-    merged.sort(key=lambda r: float(r.get("timestamp", 0.0)))
-    return merged
-
-
-def _dataset_boundaries(
-    coordinator: HeatingAssistantCoordinator,
-    dataset_ids: Optional[List[str]],
-) -> Optional[List[float]]:
-    """Return the first timestamp of each stored dataset, sorted ascending.
-
-    Passed to the multi-dataset estimator so it can assign an independent
-    per-dataset wall-temperature parameter block to each dataset segment.
-    Returns ``None`` when ``dataset_ids`` is empty or the store is unavailable.
-    """
-    if not dataset_ids:
-        return None
-    store = getattr(coordinator, "dataset_store", None)
-    if store is None:
-        return None
-    starts: List[float] = []
-    for ds_id in dataset_ids:
-        recs = store.get_records(ds_id)
-        if recs:
-            ts = recs[0].get("timestamp")
-            if ts is not None:
-                starts.append(float(ts))
-    return sorted(starts) if starts else None
-
-
-def _persist_tuning_updates(
-    hass: HomeAssistant,
-    coordinator: HeatingAssistantCoordinator,
-    updates: Dict[str, Any],
-) -> None:
-    """Persist dashboard tuning changes so they survive a reload/restart.
-
-    The coordinator reads tuning/estimation parameters with **options-first**
-    precedence (see ``HeatingAssistantCoordinator.__init__``): an ``options``
-    value always shadows the matching ``data`` value.  The options flow
-    ("Configure") snapshots the whole config into ``entry.options`` the first
-    time it is saved, so writing dashboard updates to ``entry.data`` alone left
-    a stale ``entry.options`` value that re-won on the next restart — the
-    parameters silently reverted to the previously-configured set.
-
-    Writing the updates to **both** stores keeps them consistent and ensures the
-    options-first read picks up the latest dashboard values after a restart.
-
-    ``CONF_COMFORT_OFFSET`` is a special case: the Tuning dashboard sends it as
-    a single global value that applies to every room, but the coordinator reads
-    it **per-room** from the rooms list (``CONF_ROOMS[i][CONF_COMFORT_OFFSET]``),
-    not from a top-level key.  Writing only the top-level key therefore has no
-    effect on restart.  We propagate the value into every room entry in both
-    stores so that a restart correctly reflects the user's intent.
-    """
-    entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
-    if entry is None:
-        return
-    new_data = {**dict(entry.data), **updates}
-    new_options = {**dict(entry.options), **updates}
-
-    if CONF_COMFORT_OFFSET in updates:
-        new_co = float(updates[CONF_COMFORT_OFFSET])
-        new_data[CONF_ROOMS] = [
-            {**r, CONF_COMFORT_OFFSET: new_co}
-            for r in new_data.get(CONF_ROOMS, [])
-        ]
-        # Propagate into CONF_PERSISTED_COMFORT_OFFSETS so that the global
-        # tuning value also takes effect after a restart.  Without this the
-        # persisted per-room values would silently win over the global setting
-        # on the next startup, making in-session and post-restart behaviour
-        # inconsistent.
-        new_data[CONF_PERSISTED_COMFORT_OFFSETS] = {
-            r[CONF_ROOM_NAME]: new_co
-            for r in new_data.get(CONF_ROOMS, [])
-            if CONF_ROOM_NAME in r
-        }
-        # Update options rooms only when they already exist; if options has no
-        # CONF_ROOMS yet the coordinator falls back to the updated data rooms.
-        if CONF_ROOMS in new_options:
-            new_options[CONF_ROOMS] = [
-                {**r, CONF_COMFORT_OFFSET: new_co}
-                for r in new_options.get(CONF_ROOMS, [])
-            ]
-
-    hass.config_entries.async_update_entry(
-        entry, data=new_data, options=new_options
-    )
-
-
-# Per-room thermal-model parameters the System Identification panel can preview
-# in the EKF reconstruction / open-loop simulation.  Each is passed as a
-# ``<param>_<room_slug>`` service-data key (e.g. ``thermal_mass_living_room``)
-# so a parameter set can be tried without applying it to the live model.
-_SIM_ROOM_PARAM_KEYS = (
-    "thermal_mass",
-    "r_external",
-    "internal_gain",
-    "solar_scale",
-    "c_air_fraction",
-    "r_aw_fraction",
-    # t_wall_initial is identified per-dataset but never shown in the UI
-    # parameter list. It is injected automatically from sysid_results by the
-    # EKF and open-loop handlers below so reconstruction uses the last
-    # identified value without any user interaction.
-)
-
-
-def _extract_sim_room_params(
-    call: ServiceCall,
-    room_names: Any,
-) -> Dict[str, Dict[str, float]]:
-    """Collect per-room parameter overrides from a simulation service call.
-
-    Reads every ``<param>_<room_slug>`` key present in ``call.data`` into a
-    ``{room_name: {param: value}}`` mapping so the EKF reconstruction and
-    open-loop simulation use the full set of values currently shown in the UI,
-    not just ``thermal_mass`` / ``r_external``.
-    """
-    from .dashboard import slugify  # noqa: PLC0415
-
-    room_params: Dict[str, Dict[str, float]] = {}
-    for room_name in room_names:
-        room_key = slugify(room_name)
-        overrides: Dict[str, float] = {}
-        for param in _SIM_ROOM_PARAM_KEYS:
-            key = f"{param}_{room_key}"
-            if key in call.data:
-                overrides[param] = float(call.data[key])
-        if overrides:
-            room_params[room_name] = overrides
-    return room_params
-
-
-def _merge_per_room_into_sysid_results(
-    sysid_results: Dict[str, Any],
-    per_room: Dict[str, Any],
-) -> None:
-    """Merge per-room simulation results into the coordinator cache.
-
-    Preserves fields already stored for a room (e.g. ML-identified
-    t_wall_initial, internal_gain, heater_scales) while adding or
-    updating simulation diagnostics (simulation, rmse, mae).
-    """
-    for room_name, room_data in per_room.items():
-        existing = sysid_results.get(room_name, {})
-        existing.update(room_data)
-        sysid_results[room_name] = existing
-
-
-def _inject_identified_t_wall_initial(
-    room_params: Dict[str, Dict[str, float]],
-    coordinator: HeatingAssistantCoordinator,
-) -> None:
-    """Add identified t_wall_initial from sysid_results into room_params.
-
-    The wall envelope initial temperature is identified per dataset but is
-    not shown in the UI parameter list.  This function ensures that every
-    EKF/open-loop reconstruction run automatically uses the last identified
-    value for each room, falling back to the steady-state seed when no
-    identified value is available.  Explicit overrides already present in
-    room_params (e.g. from a direct service call) are never overwritten.
-    """
-    for room_name in coordinator.model.room_names:
-        sysid = coordinator.sysid_results.get(room_name, {})
-        t_wall = sysid.get("t_wall_initial")
-        if t_wall is not None:
-            room_params.setdefault(room_name, {}).setdefault(
-                "t_wall_initial", float(t_wall)
-            )
-
-
-def _open_loop_t_wall_initial_dict(
-    room_params: Dict[str, Dict[str, float]],
-    coordinator: HeatingAssistantCoordinator,
-    fast_estimated: Optional[Dict[str, float]] = None,
-) -> Dict[str, float]:
-    """Resolve per-room wall initial temperatures for open-loop simulation.
-
-    Injects cached ML-identified values from ``sysid_results`` first, then
-    merges *fast_estimated* only for rooms that still lack ``t_wall_initial``.
-    """
-    _inject_identified_t_wall_initial(room_params, coordinator)
-    room_names = coordinator.model.room_names
-    result: Dict[str, float] = {
-        name: float(room_params[name]["t_wall_initial"])
-        for name in room_names
-        if room_params.get(name, {}).get("t_wall_initial") is not None
-    }
-    if fast_estimated:
-        for name in room_names:
-            if name not in result and name in fast_estimated:
-                result[name] = float(fast_estimated[name])
-    return result
-
-
-async def _compute_open_loop_rmse_by_horizon(
-    hass: Any,
-    history: List[Dict[str, Any]],
-    system: Any,
-    room_names: List[str],
-    n_rooms: int,
-    dt: float,
-    t_wall_initial: Optional[Dict[str, float]],
-) -> Dict[str, Dict[str, Any]]:
-    """Run segmented open-loop RMSE at ~4 h / 12 h / 24 h horizons."""
-    from .model_diagnostics import compute_open_loop_predictions
-
-    rmse_by_horizon: Dict[str, Dict[str, Any]] = {name: {} for name in room_names}
-    t_wall = t_wall_initial or None
-    for hours in (4, 12, 24):
-        steps = max(2, int(round(hours * 3600.0 / dt)))
-        res_h = await hass.async_add_executor_job(
-            compute_open_loop_predictions,
-            history,
-            system,
-            room_names,
-            n_rooms,
-            dt,
-            steps,
-            t_wall,
-        )
-        if "error" in res_h:
-            continue
-        for name, room_res in res_h.get("per_room", {}).items():
-            rmse_by_horizon[name][f"{hours}h"] = room_res.get("rmse")
-    return rmse_by_horizon
-
-
-def _effective_heater_scales(
-    call: ServiceCall,
-    coordinator: HeatingAssistantCoordinator,
-) -> Dict[str, float]:
-    """Resolve the heater power scales a simulation should use.
-
-    Prefers the explicit ``heater_scales`` mapping supplied by the
-    identification panel (so manual edits take effect without clicking Apply);
-    falls back to the last auto-identified scales cached on the coordinator for
-    direct service calls that omit it.
-    """
-    ui_scales = call.data.get("heater_scales") or {}
-    if ui_scales:
-        return {str(k): float(v) for k, v in ui_scales.items()}
-    return dict(getattr(coordinator, "_last_identified_heater_scales", {}))
-
-
-def _patched_heat_sources(
-    coordinator: HeatingAssistantCoordinator,
-    scales: Dict[str, float],
-) -> Any:
-    """Return heat sources with *scales* applied to shallow copies.
-
-    The live heat sources are never mutated — when ``scales`` is empty the live
-    list is returned unchanged (fast path), otherwise each affected source is
-    shallow-copied and its ``power_scale`` overridden for the simulation only.
-    """
-    if not scales:
-        return coordinator.heat_sources
-    import copy as _copy  # noqa: PLC0415
-
-    patched = [_copy.copy(src) for src in coordinator.heat_sources]
-    for src in patched:
-        if src.name in scales:
-            src.power_scale = float(scales[src.name])
-    return patched
+    return get_coordinator(hass)
 
 
 # ---------------------------------------------------------------------------
@@ -2125,7 +1063,7 @@ def _migrate_room_entities(
     """
     from homeassistant.helpers import entity_registry as er
 
-    from .dashboard import slugify as _slugify
+    from .naming import slugify as _slugify
 
     registry = er.async_get(hass)
     entries = er.async_entries_for_config_entry(registry, entry.entry_id)
@@ -2228,25 +1166,25 @@ def _register_services(hass: HomeAssistant) -> None:
         #   3. an explicit ``window_start``/``window_end`` (JSONL / Recorder).
         # Each takes precedence over the trailing ``horizon_hours`` window.
         dataset_ids = call.data.get("dataset_ids")
-        history_override = _records_for_datasets(coordinator, dataset_ids)
+        history_override = records_for_datasets(coordinator, dataset_ids)
         # Collect each dataset's first timestamp so the estimator assigns an
         # independent per-dataset wall-temperature parameter block.
         dataset_start_timestamps: Optional[List[float]] = (
-            _dataset_boundaries(coordinator, dataset_ids)
+            dataset_boundaries(coordinator, dataset_ids)
             if history_override is not None
             else None
         )
         if history_override is None:
-            history_override = _records_for_dataset(
+            history_override = records_for_dataset(
                 coordinator, call.data.get("dataset_id")
             )
         if history_override is None and window_start_ml is not None and window_end_ml is not None:
-            history_override = await _get_history_for_window(
+            history_override = await get_history_for_window(
                 hass, coordinator, window_start_ml, window_end_ml
             )
 
         if history_override is None and horizon_hours is not None:
-            history_override = await _get_history_for_horizon(
+            history_override = await get_history_for_horizon(
                 hass, coordinator, float(horizon_hours)
             )
 
@@ -2396,7 +1334,7 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_run_open_loop_simulation(call: ServiceCall) -> None:
         """Run open-loop simulation diagnostic and report RMSE per room."""
         from .model_diagnostics import compute_open_loop_predictions
-        from .sysid import _build_sim_model
+        from .simulation.model_patch import build_sim_model
 
         coordinator = _get_coordinator(hass)
         horizon_hours: Optional[float] = call.data.get("horizon_hours")
@@ -2417,24 +1355,24 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # A stored dataset takes precedence over a window / horizon and supplies
         # its snapshotted records directly.
-        dataset_records = _records_for_dataset(coordinator, call.data.get("dataset_id"))
+        dataset_records = records_for_dataset(coordinator, call.data.get("dataset_id"))
         if dataset_records is not None:
             history = dataset_records
         # Explicit window: fetch leading calibration data plus the window.
         elif window_start_ol is not None and window_end_ol is not None:
-            _full, leading_history, history = await _get_history_with_leading(
+            _full, leading_history, history = await get_history_with_leading(
                 hass, coordinator, window_start_ol, window_end_ol,
             )
             from .history_window import select_window_by_timestamps
             history = select_window_by_timestamps(history, window_start_ol, window_end_ol)
         elif horizon_hours is not None:
-            history = await _get_history_for_horizon(
+            history = await get_history_for_horizon(
                 hass, coordinator, float(horizon_hours)
             )
             from .history_window import history_time_range, select_leading_window
             min_ts, _max_ts = history_time_range(history)
             if min_ts is not None:
-                _full, leading_history, _sim = await _get_history_with_leading(
+                _full, leading_history, _sim = await get_history_with_leading(
                     hass,
                     coordinator,
                     min_ts,
@@ -2447,7 +1385,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Build per-room parameter overrides from service data (same keys as
         # run_sysid_simulation) so the open-loop diagnostic uses the full
         # parameter set the user configured in the identification panel.
-        room_params = _extract_sim_room_params(call, coordinator.model.room_names)
+        room_params = extract_sim_room_params(call, coordinator.model.room_names)
 
         # When room-parameter overrides are given, build a temporary
         # HouseThermalSDE from a patched model copy so the open-loop
@@ -2461,13 +1399,13 @@ def _register_services(hass: HomeAssistant) -> None:
         # Patch heat-source copies with the heater power scales currently shown
         # in the UI (falling back to the last auto-identified scales) so the
         # open-loop simulation uses them even when the user hasn't clicked Apply.
-        heater_scales = _effective_heater_scales(call, coordinator)
-        base_heat_sources = _patched_heat_sources(coordinator, heater_scales)
+        heater_scales = effective_heater_scales(call, coordinator)
+        base_heat_sources = patched_heat_sources(coordinator, heater_scales)
 
         if room_params or heater_scales:
             from .controller import HouseThermalSDE  # noqa: PLC0415
             try:
-                sim_model = _build_sim_model(
+                sim_model = build_sim_model(
                     coordinator.model, room_params, room_names
                 )
                 system = HouseThermalSDE(
@@ -2491,7 +1429,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # calibration window (or a short prefix when no leading data exists).
         t_wall_initial_identified: Dict[str, float] = {}
         try:
-            init_state = await _estimate_simulation_initial_state(
+            init_state = await estimate_simulation_initial_state(
                 hass,
                 coordinator,
                 history,
@@ -2514,7 +1452,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 "Open-loop: initial-state estimation failed (%s); "
                 "falling back to cached or air-temperature seed.", exc,
             )
-            t_wall_initial_identified = _open_loop_t_wall_initial_dict(
+            t_wall_initial_identified = open_loop_t_wall_initial_dict(
                 room_params, coordinator
             )
 
@@ -2548,7 +1486,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 # that matters for price-driven anticipatory heating, where
                 # the plan spans many hours.  Each run reuses the same
                 # history and model; only the segment slicing differs.
-                rmse_by_horizon = await _compute_open_loop_rmse_by_horizon(
+                rmse_by_horizon = await compute_open_loop_rmse_by_horizon(
                     hass,
                     history,
                     system,
@@ -2570,179 +1508,7 @@ def _register_services(hass: HomeAssistant) -> None:
         except Exception as exc:
             _LOGGER.error("Open-loop simulation failed: %s", exc, exc_info=True)
 
-    async def handle_analyze_model_fit(call: ServiceCall) -> ServiceResponse:
-        """Analyze model-fit quality for all or a specific room.
-
-        The fit metrics (R², RMSE, MAE, bias, …) are continuously exposed by
-        the per-room ``…_model_fit_quality`` sensor. This service refreshes
-        those sensors and returns the full report as service-response data so
-        Developer Tools → Actions shows it inline; no persistent notification
-        is raised.
-        """
-        from .model_diagnostics import generate_model_fit_report
-
-        coordinator = _get_coordinator(hass)
-        room_name_filter = call.data.get("room_name")
-
-        # Build room parameters dict
-        room_params = {}
-        setpoints = {}
-        for name, room in coordinator.model.rooms.items():
-            room_params[name] = (room.thermal_mass, room.r_external)
-            setpoints[name] = room.setpoint
-
-        try:
-            report = generate_model_fit_report(
-                coordinator.history_buffer,
-                coordinator.model.room_names,
-                room_params,
-                setpoints,
-            )
-        except Exception as exc:
-            _LOGGER.error("Model fit analysis failed: %s", exc, exc_info=True)
-            return {"error": str(exc)}
-
-        # Filter to specific room if requested
-        if room_name_filter and room_name_filter in report.get("rooms", {}):
-            report["rooms"] = {room_name_filter: report["rooms"][room_name_filter]}
-
-        # Refresh the model-fit sensors so the dashboard reflects the latest data.
-        coordinator.async_update_listeners()
-        return report
-
-    async def handle_validate_parameters(call: ServiceCall) -> ServiceResponse:
-        """Validate thermal parameters for all or a specific room.
-
-        Returns the validation result as service-response data (visible in
-        Developer Tools → Actions); no persistent notification is raised.
-        """
-        from .model_diagnostics import validate_parameters
-
-        coordinator = _get_coordinator(hass)
-        room_name_filter = call.data.get("room_name")
-
-        rooms_to_check = (
-            [room_name_filter]
-            if room_name_filter and room_name_filter in coordinator.model.rooms
-            else coordinator.model.room_names
-        )
-
-        rooms: Dict[str, Any] = {}
-        for room_name in rooms_to_check:
-            room = coordinator.model.rooms[room_name]
-            try:
-                validation = validate_parameters(
-                    room_name, room.thermal_mass, room.r_external
-                )
-                rooms[room_name] = {
-                    "valid": all([
-                        validation.mass_valid,
-                        validation.r_external_valid,
-                        validation.time_constant_valid,
-                    ]),
-                    "thermal_mass": validation.thermal_mass,
-                    "thermal_mass_valid": validation.mass_valid,
-                    "r_external": validation.r_external,
-                    "r_external_valid": validation.r_external_valid,
-                    "time_constant_hours": validation.time_constant_hours,
-                    "time_constant_valid": validation.time_constant_valid,
-                    "warnings": list(validation.warnings),
-                }
-            except Exception as exc:
-                _LOGGER.error("Parameter validation failed for %s: %s", room_name, exc)
-                rooms[room_name] = {"error": str(exc)}
-
-        return {"rooms": rooms}
-
-    async def handle_controller_performance(call: ServiceCall) -> ServiceResponse:
-        """Generate a controller performance report for all or a specific room.
-
-        Returns the report as service-response data (visible in Developer
-        Tools → Actions); no persistent notification is raised.
-        """
-        from .model_diagnostics import compute_controller_performance
-
-        coordinator = _get_coordinator(hass)
-        room_name_filter = call.data.get("room_name")
-
-        rooms_to_check = (
-            [room_name_filter]
-            if room_name_filter and room_name_filter in coordinator.model.rooms
-            else coordinator.model.room_names
-        )
-
-        rooms: Dict[str, Any] = {}
-        for room_name in rooms_to_check:
-            room = coordinator.model.rooms[room_name]
-
-            # Extract temperature history for this room
-            room_idx = coordinator.model.room_names.index(room_name)
-            temperatures = []
-            for record in coordinator.history_buffer:
-                y = record.get("y", [])
-                if room_idx < len(y):
-                    temperatures.append(y[room_idx])
-
-            if len(temperatures) < 2:
-                rooms[room_name] = {"error": "insufficient_data"}
-                continue
-
-            try:
-                perf = compute_controller_performance(
-                    temperatures, room.setpoint, room_name
-                )
-                rooms[room_name] = {
-                    "setpoint": room.setpoint,
-                    "mean_tracking_error": perf.mean_tracking_error,
-                    "tracking_error_std": perf.tracking_error_std,
-                    "time_above_setpoint": perf.time_above_setpoint,
-                    "time_below_setpoint": perf.time_below_setpoint,
-                    "time_in_deadband": perf.time_in_deadband,
-                    "max_overshoot": perf.max_overshoot,
-                    "max_undershoot": perf.max_undershoot,
-                    "n_samples": perf.n_samples,
-                }
-            except Exception as exc:
-                _LOGGER.error("Controller performance analysis failed for %s: %s", room_name, exc)
-                rooms[room_name] = {"error": str(exc)}
-
-        return {"rooms": rooms}
-
-    hass.services.async_register(
-        DOMAIN,
-        "analyze_model_fit",
-        handle_analyze_model_fit,
-        schema=vol.Schema(
-            {
-                vol.Optional("room_name"): cv.string,
-            }
-        ),
-        supports_response=SupportsResponse.OPTIONAL,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        "validate_parameters",
-        handle_validate_parameters,
-        schema=vol.Schema(
-            {
-                vol.Optional("room_name"): cv.string,
-            }
-        ),
-        supports_response=SupportsResponse.OPTIONAL,
-    )
-
-    hass.services.async_register(
-        DOMAIN,
-        "controller_performance_report",
-        handle_controller_performance,
-        schema=vol.Schema(
-            {
-                vol.Optional("room_name"): cv.string,
-            }
-        ),
-        supports_response=SupportsResponse.OPTIONAL,
-    )
+    register_all_services(hass)
 
     hass.services.async_register(
         DOMAIN,
@@ -2808,7 +1574,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Build per-room parameter overrides from service data (full parameter
         # set, keyed by ``<param>_<room_slug>``).
-        room_params = _extract_sim_room_params(call, coordinator.model.room_names)
+        room_params = extract_sim_room_params(call, coordinator.model.room_names)
 
         leading_history: Optional[List[Dict[str, Any]]] = None
 
@@ -2816,37 +1582,37 @@ def _register_services(hass: HomeAssistant) -> None:
         # snapshotted records directly; otherwise use the JSONL store / Recorder
         # for out-of-buffer windows.  With a dataset the whole snapshot is used
         # (window_spec cleared) since it was captured for exactly this purpose.
-        dataset_records = _records_for_dataset(coordinator, call.data.get("dataset_id"))
+        dataset_records = records_for_dataset(coordinator, call.data.get("dataset_id"))
         if dataset_records is not None:
             history = dataset_records
             window_spec = None
         else:
             if window_spec is not None:
-                _full, leading_history, history = await _get_history_with_leading(
+                _full, leading_history, history = await get_history_with_leading(
                     hass, coordinator, window_start, window_end,
                 )
             else:
-                history = await _get_history_for_horizon(
+                history = await get_history_for_horizon(
                     hass, coordinator, horizon_hours
                 )
                 from .history_window import history_time_range
                 min_ts, max_ts = history_time_range(history)
                 if min_ts is not None and max_ts is not None:
-                    _full, leading_history, _sim = await _get_history_with_leading(
+                    _full, leading_history, _sim = await get_history_with_leading(
                         hass, coordinator, min_ts, max_ts, leading_hours=6.0,
                     )
 
         # Patch heat-source copies with the heater power scales currently shown
         # in the UI (falling back to the last auto-identified scales) so the EKF
         # reconstruction uses them even when the user hasn't clicked Apply yet.
-        heater_scales = _effective_heater_scales(call, coordinator)
-        sim_heat_sources = _patched_heat_sources(coordinator, heater_scales)
+        heater_scales = effective_heater_scales(call, coordinator)
+        sim_heat_sources = patched_heat_sources(coordinator, heater_scales)
 
         # Build the SDE used for initial-state estimation (matches sysid run).
         from .controller import HouseThermalSDE  # noqa: PLC0415
-        from .sysid import _build_sim_model  # noqa: PLC0415
+        from .simulation.model_patch import build_sim_model  # noqa: PLC0415
         try:
-            sim_model = _build_sim_model(
+            sim_model = build_sim_model(
                 coordinator.model, room_params, coordinator.model.room_names
             )
             init_system = HouseThermalSDE(
@@ -2867,7 +1633,7 @@ def _register_services(hass: HomeAssistant) -> None:
         # Estimate optimal initial wall temperatures from a leading calibration
         # window (or a short prefix when no leading data exists).
         try:
-            init_state = await _estimate_simulation_initial_state(
+            init_state = await estimate_simulation_initial_state(
                 hass,
                 coordinator,
                 history,
@@ -2889,7 +1655,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 "EKF sim: initial-state estimation failed (%s); "
                 "falling back to cached or air-temperature seed.", exc,
             )
-            _inject_identified_t_wall_initial(room_params, coordinator)
+            inject_identified_t_wall_initial(room_params, coordinator)
 
         try:
             result = await hass.async_add_executor_job(
@@ -2924,7 +1690,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 # model.  Accept both exact and slug matches so rooms with
                 # capital letters or spaces are not silently dropped.
                 if room_name_filter:
-                    from .dashboard import slugify as _slugify  # noqa: PLC0415
+                    from .naming import slugify as _slugify  # noqa: PLC0415
                     per_room = {
                         k: v for k, v in per_room.items()
                         if k == room_name_filter or _slugify(k) == room_name_filter
@@ -2933,7 +1699,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 # Results are surfaced via the per-room SysID diagnostic
                 # sensors, so this service stores them on the coordinator and
                 # refreshes listeners instead of raising a notification.
-                _merge_per_room_into_sysid_results(coordinator.sysid_results, per_room)
+                merge_per_room_into_sysid_results(coordinator.sysid_results, per_room)
                 coordinator.async_update_listeners()
 
         except Exception as exc:
@@ -2970,58 +1736,6 @@ def _register_services(hass: HomeAssistant) -> None:
         ),
     )
 
-    async def handle_set_schedule_enabled(call: ServiceCall) -> None:
-        """Suspend or resume the comfort schedule for one or more rooms."""
-        coordinator = _get_coordinator(hass)
-        enabled = bool(call.data["enabled"])
-        room_name = call.data.get("room_name")
-        if room_name:
-            targets = [room_name]
-        else:
-            targets = list(coordinator.model.room_names)
-
-        for name in targets:
-            if name not in coordinator.model.rooms:
-                continue
-            coordinator.set_schedule_enabled(name, enabled)
-
-        # Push an immediate state_changed event so the overview tiles refresh.
-        # The new schedule state is visible on those tiles, so no persistent
-        # notification is raised.
-        coordinator.async_update_listeners()
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_SET_SCHEDULE_ENABLED,
-        handle_set_schedule_enabled,
-        schema=vol.Schema(
-            {
-                vol.Optional("room_name"): cv.string,
-                vol.Required("enabled"): cv.boolean,
-            }
-        ),
-    )
-
-    async def handle_set_system_enabled(call: ServiceCall) -> None:
-        """Enable or disable the heating assistant controller globally."""
-        coordinator = _get_coordinator(hass)
-        enabled = call.data["enabled"]
-        coordinator.set_system_enabled(enabled)
-        if enabled:
-            # Engage the controller immediately on START rather than waiting for
-            # the next scheduled tick — this runs the MPC and pushes commands to
-            # the heaters right away so the action feels responsive.
-            await coordinator.async_request_refresh()
-        else:
-            coordinator.async_update_listeners()
-
-    hass.services.async_register(
-        DOMAIN,
-        "set_system_enabled",
-        handle_set_system_enabled,
-        schema=vol.Schema({vol.Required("enabled"): cv.boolean}),
-    )
-
     # ------------------------------------------------------------------
     # Runtime configuration services (called from the Heating Assistant UI)
     # ------------------------------------------------------------------
@@ -3046,7 +1760,7 @@ def _register_services(hass: HomeAssistant) -> None:
         updates = {k: v for k, v in call.data.items() if k in _CONTROLLER_TUNING_KEYS}
         if not updates:
             return
-        _persist_tuning_updates(hass, coordinator, updates)
+        persist_tuning_updates(hass, coordinator, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
@@ -3134,7 +1848,7 @@ def _register_services(hass: HomeAssistant) -> None:
         updates = {k: v for k, v in call.data.items() if k in _ESTIMATION_PARAM_KEYS}
         if not updates:
             return
-        _persist_tuning_updates(hass, coordinator, updates)
+        persist_tuning_updates(hass, coordinator, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
@@ -3171,7 +1885,7 @@ def _register_services(hass: HomeAssistant) -> None:
         }
         if not updates:
             return
-        _persist_tuning_updates(hass, coordinator, updates)
+        persist_tuning_updates(hass, coordinator, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
@@ -3199,7 +1913,7 @@ def _register_services(hass: HomeAssistant) -> None:
         updates = {k: v for k, v in call.data.items() if k in _SYSTEM_PARAM_KEYS}
         if not updates:
             return
-        _persist_tuning_updates(hass, coordinator, updates)
+        persist_tuning_updates(hass, coordinator, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
@@ -3216,24 +1930,6 @@ def _register_services(hass: HomeAssistant) -> None:
         ),
     )
 
-    def _write_entry_config(updates: Dict[str, Any]) -> None:
-        """Write ``updates`` to both entry.data and entry.options.
-
-        Writing to both stores keeps the coordinator's options-first reads
-        consistent across restarts.  The registered update-listener reloads the
-        integration when a structural key (rooms / heat sources) changes and
-        applies the rest in-place.
-        """
-        coordinator = _get_coordinator(hass)
-        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
-        if entry is None:
-            return
-        new_data = {**dict(entry.data), **updates}
-        new_options = {**dict(entry.options), **updates}
-        hass.config_entries.async_update_entry(
-            entry, data=new_data, options=new_options
-        )
-
     async def handle_update_rooms(call: ServiceCall) -> None:
         """Replace the configured room list (triggers an integration reload).
 
@@ -3249,7 +1945,7 @@ def _register_services(hass: HomeAssistant) -> None:
             if k and v and str(k) != str(v)
         }
         if not renames:
-            _write_entry_config({CONF_ROOMS: rooms})
+            write_entry_config(hass, {CONF_ROOMS: rooms})
             return
 
         coordinator = _get_coordinator(hass)
@@ -3316,7 +2012,7 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_update_heat_sources(call: ServiceCall) -> None:
         """Replace the configured heat-source list (triggers a reload)."""
         sources = call.data["heat_sources"]
-        _write_entry_config({CONF_HEAT_SOURCES: sources})
+        write_entry_config(hass, {CONF_HEAT_SOURCES: sources})
 
     hass.services.async_register(
         DOMAIN,
@@ -3352,7 +2048,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 updates[key] = float(call.data[key])
         if not updates:
             return
-        _persist_tuning_updates(hass, coordinator, updates)
+        persist_tuning_updates(hass, coordinator, updates)
         coordinator.apply_tuning_updates(updates)
         coordinator.async_update_listeners()
 
@@ -3487,7 +2183,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_update_room_schedule(call: ServiceCall) -> None:
         """Update the schedule for a single room and persist to config entry."""
-        from .dashboard import slugify as _slugify
+        from .naming import slugify as _slugify
 
         coordinator = _get_coordinator(hass)
         room_name: str = call.data["room_name"]
@@ -3567,7 +2263,7 @@ def _register_services(hass: HomeAssistant) -> None:
         canonical room name from the slug sent by the frontend, applies the
         change to the live model and persists it (mirroring set_room_setpoint).
         """
-        from .dashboard import slugify as _slugify
+        from .naming import slugify as _slugify
 
         coordinator = _get_coordinator(hass)
         room_name: str = call.data["room_name"]
@@ -3675,63 +2371,13 @@ def _register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.OPTIONAL,
     )
 
-    async def handle_compute_loglik_slice(call: ServiceCall) -> dict:
-        """Compute a 2-D log-likelihood slice for a room.
-
-        The slice is stored on the coordinator and exposed via the
-        per-room ``…_loglik_slice`` sensor so dashboards can visualise it
-        without re-running the computation, giving Lovelace button presses
-        immediate feedback through the sensor state.
-
-        The service intentionally has no ``supports_response`` registration
-        so Lovelace button cards can fire it without the frontend requiring
-        ``return_response=true``.  The full grid is always available via
-        ``state_attr('sensor.heating_assistant_<room>_loglik_slice',
-        'log_likelihood')``.
-        """
-        coordinator = _get_coordinator(hass)
-        room_name = call.data["room_name"]
-        n_grid = int(call.data.get("n_grid", 11))
-        span_log = float(call.data.get("span_log", 1.0))
-
-        result = await coordinator.async_compute_loglik_slice(
-            room_name, n_grid=n_grid, span_log=span_log
-        )
-        if result is None:
-            return {
-                "room": room_name,
-                "error": "history_too_short_or_unknown_room",
-            }
-
-        # The computed grid is stored on the per-room ``…_loglik_slice`` sensor
-        # (and returned here for callers using ``return_response: true``), so no
-        # persistent notification is raised.
-        return result
-
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_COMPUTE_LOGLIK_SLICE,
-        handle_compute_loglik_slice,
-        schema=vol.Schema(
-            {
-                vol.Required("room_name"): cv.string,
-                vol.Optional("n_grid", default=11): vol.All(
-                    vol.Coerce(int), vol.Range(min=3, max=41)
-                ),
-                vol.Optional("span_log", default=1.0): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.1, max=4.0)
-                ),
-            }
-        ),
-    )
-
     # ------------------------------------------------------------------
     # System-identification experiments and stored datasets
     # ------------------------------------------------------------------
 
     def _resolve_room(coordinator: "HeatingAssistantCoordinator", name: str) -> str:
         """Return the canonical room name for a name-or-slug, or raise."""
-        from .dashboard import slugify as _slugify
+        from .naming import slugify as _slugify
 
         for rn in coordinator.model.room_names:
             if rn == name or _slugify(rn) == name:
@@ -3740,7 +2386,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_schedule_experiment(call: ServiceCall) -> ServiceResponse:
         """Schedule a system-identification experiment for one room/time window."""
-        from .dashboard import slugify as _slugify
+        from .naming import slugify as _slugify
         from .experiments import Experiment, validate_signal_params
         from .const import (
             DEFAULT_EXCITATION_PERIOD_S,
@@ -3859,7 +2505,7 @@ def _register_services(hass: HomeAssistant) -> None:
         """Snapshot a custom data window into a named, permanent dataset."""
         from .datasets import build_dataset
         from .history_window import select_window_by_timestamps
-        from .dashboard import slugify as _slugify
+        from .naming import slugify as _slugify
         from .const import DATASET_SOURCE_MANUAL
 
         coordinator = _get_coordinator(hass)
@@ -3882,7 +2528,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
         # Pull the actual records for the window (JSONL store → Recorder
         # fallback), then clip to the exact bounds.
-        records = await _get_history_for_window(
+        records = await get_history_for_window(
             hass, coordinator, window_start, window_end
         )
         records = select_window_by_timestamps(records, window_start, window_end)
