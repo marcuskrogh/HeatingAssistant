@@ -55,356 +55,51 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from .controller import HouseThermalSDE as HouseThermalSystem
+from .estimation.constants import (
+    MIN_HISTORY_STEPS,
+    _ALPHA_PRIOR_WEIGHT,
+    _ALPHA_PRIOR_WEIGHT_EXCITED,
+    _C_AIR_HI,
+    _C_AIR_LO,
+    _EMPTY_IDX,
+    _LOG_ALPHA_HI,
+    _LOG_ALPHA_LO,
+    _LOG_MASS_HI,
+    _LOG_MASS_LO,
+    _LOG_R_HI,
+    _LOG_R_IJ_HI,
+    _LOG_R_IJ_LO,
+    _LOG_R_LO,
+    _LOG_SOLAR_HI,
+    _LOG_SOLAR_LO,
+    _MIN_HISTORY_TIME_S,
+    _MIN_SEGMENT_TIME_S,
+    _Q_INT_HI,
+    _Q_INT_LO,
+    _R_AW_HI,
+    _R_AW_LO,
+    _SPLIT_PRIOR_STD,
+    _T_WALL_HI,
+    _T_WALL_LO,
+    _T_WALL_MIN_LAM,
+    _T_WALL_PRIOR_STD,
+    _nelder_mead,
+)
+from .estimation.history_std import convert_history_std
+from .estimation.identifiability import (
+    _adaptive_alpha_prior_weight,
+    _check_identifiable_connections,
+    _check_identifiable_sources,
+    _check_identifiable_solar,
+    _identifiable_split_rooms,
+)
+from .estimation.theta_layout import _ThetaLayout
 from .heat_sources import HeatSource
 from .thermal_model import HouseModel, Room
 from mbc.control import IpoptNLPBackend, NLPProblem, ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
-from mbc.identification import nelder_mead as _nelder_mead  # for test compatibility
 
 _LOGGER = logging.getLogger(__name__)
-
-# ── Constants ────────────────────────────────────────────────────────────────
-
-#: Minimum number of history steps before attempting estimation.
-#: 60 steps ≈ 1 hour at the default 60 s sampling interval — the
-#: minimum needed to see meaningful thermal dynamics.
-#: NOTE: This constant was calibrated for 60 s sampling.  At the default
-#: 900 s sampling interval the effective bar is 15 hours, which exceeds
-#: any realistic identification window.  Instance methods therefore use
-#: ``self._min_history_steps`` (computed from ``dt`` in the constructor)
-#: instead of this module-level constant.  It is kept for backward
-#: compatibility with external importers (e.g. test suites).
-MIN_HISTORY_STEPS = 60
-
-#: Minimum wall-clock time [s] of data required before attempting estimation.
-#: Corresponds to ≈ 1 hour — enough to observe meaningful thermal dynamics
-#: for rooms with time constants of 2–6 hours.
-_MIN_HISTORY_TIME_S: float = 3600.0
-
-#: Minimum wall-clock time [s] for a contiguous simulation window to be used
-#: in the open-loop MSE objective.  Short windows cannot constrain slow
-#: parameters (R_ext, q_int); 20 minutes is a practical lower bound.
-_MIN_SEGMENT_TIME_S: float = 1200.0
-
-#: Shared empty integer index array, returned by the per-room open-window
-#: bookkeeping when no room is excluded at a step (avoids per-step allocation).
-_EMPTY_IDX: np.ndarray = np.array([], dtype=int)
-
-#: Log-space parameter bounds (hard limits).
-_LOG_MASS_LO = math.log(1e4)    # ~10 kJ/K
-_LOG_MASS_HI = math.log(5e8)    # ~500 MJ/K
-_LOG_R_LO = math.log(1e-5)      # 0.00001 K/W
-_LOG_R_HI = math.log(10.0)      # 10 K/W
-
-#: Log-space bounds for inter-room resistances.
-_LOG_R_IJ_LO = math.log(1e-4)   # 0.0001 K/W (very thin interior partition)
-_LOG_R_IJ_HI = math.log(5.0)    # 5 K/W (well-insulated internal wall)
-
-#: Linear bounds for per-room internal heat gain [W].
-_Q_INT_LO = -2_000.0   # allow small negative to absorb model bias
-_Q_INT_HI =  5_000.0   # large internal source (server room, sauna…)
-
-#: Log-space bounds for heater power-scale α (multiplicative on max_power).
-_LOG_ALPHA_LO = math.log(0.3)   # 30 % of rated
-_LOG_ALPHA_HI = math.log(3.0)   # 300 % of rated
-
-#: Relative MAP-prior weight for the heater power-scale α when heater duty
-#: cycle variation is weak (unexcited / constant-on).  A heater's rated
-#: power is usually known to within ~±20 %, so α carries real prior
-#: information and this weight keeps the joint optimum off the documented
-#: "C huge / R huge" degenerate ridge.
-_ALPHA_PRIOR_WEIGHT = 25.0
-
-#: Reduced α prior weight when duty-cycle excitation is strong enough that
-#: the data can identify the scale without being pinned to the rated value.
-#: Underestimating heater influence was traced to this prior dominating the
-#: open-loop MSE gradient on excited windows.
-_ALPHA_PRIOR_WEIGHT_EXCITED = 4.0
-
-#: Minimum std of inter-room temperature difference for R_ij identifiability.
-_MIN_TEMP_DIFF_STD = 0.3   # °C
-
-#: Minimum std of source duty-cycle for α_s identifiability.
-_MIN_HEATER_USAGE_STD = 0.05
-
-#: Minimum std of a room's recorded solar gain [W] for the per-room solar
-#: scale s_i to be identifiable.  A room with no windows / aperture (or a
-#: window covering only the night hours) carries no solar information.
-_MIN_SOLAR_STD = 30.0
-
-#: Log-space bounds for the per-room solar-gain scale s_i.
-_LOG_SOLAR_LO = math.log(0.2)   # heavy unmodelled shading
-_LOG_SOLAR_HI = math.log(3.0)   # preset badly underestimates the aperture
-
-#: Linear-space bounds for the 2R2C envelope split fractions.  Kept inside
-#: the hard clips in ``thermal_model.Room`` so the estimator can never
-#: construct a degenerate room.
-_C_AIR_LO, _C_AIR_HI = 0.02, 0.60
-_R_AW_LO, _R_AW_HI = 0.02, 0.90
-
-#: Prior standard deviation for the split fractions (linear space).  The
-#: splits are deliberately held on a tight leash: they are only weakly
-#: identified, and the typology defaults are decent.  The data must carry
-#: real multi-hour excitation to move them.
-_SPLIT_PRIOR_STD = 0.1
-
-#: Linear-space bounds for the wall-envelope initial temperature [°C].
-_T_WALL_LO = -30.0
-_T_WALL_HI =  60.0
-
-#: Prior standard deviation for the wall initial temperature [°C].  A
-#: 5 °C width says "the wall probably started close to the measured air
-#: temperature, but could be a few degrees off."  The prior mean is set
-#: to the first measured air temperature at estimation time.
-_T_WALL_PRIOR_STD = 5.0
-
-#: Minimum regularisation weight for the wall initial temperature.  With
-#: default regularisation ≤ 0.01 the Gaussian prior on t_wall_init is too
-#: weak to keep the parameter in a physically plausible range: the MSE
-#: gradient (~4 per window) dwarfs the prior gradient (0.008 at 10 °C off),
-#: and the optimiser drives t_wall to ±60 °C, corrupting every other
-#: gradient.  A floor of 10 limits the maximum drift from the prior to
-#: ~±5 °C while still being negligibly small compared to the strong
-#: (1e6) regularisation used in validation tests.
-_T_WALL_MIN_LAM = 10.0
-
-#: Number of random restarts in multistart Nelder–Mead.
-_N_RESTARTS = 3
-
-#: Standard deviation of the random log-space perturbation between restarts.
-_RESTART_PERT = 0.5
-
-
-# ── Nelder–Mead — now provided by mbc.identification ─────────────────────────
-# _nelder_mead is re-exported above from mbc.identification._nelder_mead for
-# backward compatibility with callers that import it from this module.
-
-
-# ── Identifiability gates ────────────────────────────────────────────────────
-
-
-def _check_identifiable_connections(
-    history: List[Dict[str, Any]],
-    room_names: List[str],
-    connections: List[Tuple[int, int]],
-    min_std: float = _MIN_TEMP_DIFF_STD,
-    min_history_steps: int = MIN_HISTORY_STEPS,
-) -> List[Tuple[int, int]]:
-    """
-    Return the subset of room-index pairs (i, j) for which the inter-room
-    temperature difference has sufficient variance for R_ij to be identifiable.
-    """
-    if len(history) < min_history_steps:
-        return []
-
-    identifiable = []
-    for i, j in connections:
-        diffs = []
-        for record in history:
-            y = record.get("y", [])
-            if i < len(y) and j < len(y):
-                diffs.append(float(y[i]) - float(y[j]))
-        if len(diffs) >= min_history_steps and float(np.std(diffs)) > min_std:
-            identifiable.append((i, j))
-    return identifiable
-
-
-def _check_identifiable_sources(
-    history: List[Dict[str, Any]],
-    n_sources: int,
-    min_std: float = _MIN_HEATER_USAGE_STD,
-    min_history_steps: int = MIN_HISTORY_STEPS,
-) -> List[int]:
-    """
-    Return the indices of heat sources whose duty-cycle ``u`` shows enough
-    variation for the power-scale parameter α_s to be identifiable.
-    """
-    if len(history) < min_history_steps:
-        return []
-
-    identifiable = []
-    for s in range(n_sources):
-        u_vals = []
-        for record in history:
-            u = record.get("u", [])
-            if s < len(u):
-                u_vals.append(float(u[s]))
-        if len(u_vals) >= min_history_steps and float(np.std(u_vals)) > min_std:
-            identifiable.append(s)
-    return identifiable
-
-
-def _check_identifiable_solar(
-    history: List[Dict[str, Any]],
-    room_names: List[str],
-    min_std: float = _MIN_SOLAR_STD,
-    min_history_steps: int = MIN_HISTORY_STEPS,
-) -> List[int]:
-    """
-    Return the room indices whose recorded solar-gain disturbance varies
-    enough for the per-room solar scale ``s_i`` to be identifiable.
-    """
-    if len(history) < min_history_steps:
-        return []
-
-    identifiable = []
-    for i, name in enumerate(room_names):
-        gains = [
-            float(record.get("d_solar", {}).get(name, 0.0))
-            for record in history
-        ]
-        if len(gains) >= min_history_steps and float(np.std(gains)) > min_std:
-            identifiable.append(i)
-    return identifiable
-
-
-def _identifiable_split_rooms(
-    identifiable_sources: List[int],
-    sources: List[Any],
-    room_names: List[str],
-) -> List[int]:
-    """
-    Return the room indices whose 2R2C split fractions are identifiable.
-
-    The fast/slow split is only visible through heater step responses, so a
-    room qualifies when at least one of its own heat sources passed the
-    duty-cycle excitation gate.  Passive rooms keep their typology defaults.
-    """
-    rooms_with_excited_source = {
-        getattr(sources[s], "room", None) for s in identifiable_sources
-    }
-    return [
-        i for i, name in enumerate(room_names)
-        if name in rooms_with_excited_source
-    ]
-
-
-def _heater_excitation_score(
-    history: List[Dict[str, Any]],
-    n_u: int,
-    min_history_steps: int = MIN_HISTORY_STEPS,
-) -> float:
-    """Return the maximum std of any source duty cycle in ``history``."""
-    if len(history) < min_history_steps or n_u <= 0:
-        return 0.0
-    u_matrix = []
-    for rec in history:
-        u = rec.get("u", [])
-        if not u:
-            continue
-        row = [float(u[j]) if j < len(u) else 0.0 for j in range(n_u)]
-        u_matrix.append(row)
-    if len(u_matrix) < 2:
-        return 0.0
-    arr = np.asarray(u_matrix, dtype=float)
-    return float(np.max(np.std(arr, axis=0)))
-
-
-def _adaptive_alpha_prior_weight(
-    history: List[Dict[str, Any]],
-    n_u: int,
-    min_history_steps: int = MIN_HISTORY_STEPS,
-) -> float:
-    """Weaker α prior when heater duty cycle varies enough to identify scale."""
-    score = _heater_excitation_score(history, n_u, min_history_steps)
-    if score >= _MIN_HEATER_USAGE_STD:
-        return _ALPHA_PRIOR_WEIGHT_EXCITED
-    return _ALPHA_PRIOR_WEIGHT
-
-
-# ── Main estimator class ─────────────────────────────────────────────────────
-
-
-class _ThetaLayout:
-    """
-    Index layout of the packed parameter vector ``θ``:
-
-        [ log_mass_1..n
-          log_r_ext_1..n
-          q_int_1..n
-          t_wall_init_seg0_1..n          (first dataset / single dataset)
-          [t_wall_init_seg1_1..n]        (second dataset, when n_wall_segs>1)
-          ...
-          log_alpha_{s_k} for s_k in identifiable_sources
-          log_r_ij_{p_k} for p_k in identifiable_pairs
-          log_solar_{i_k} for i_k in identifiable_solar
-          c_air_{i_k}    for i_k in identifiable_splits   (linear space)
-          r_aw_{i_k}     for i_k in identifiable_splits   (linear space) ]
-
-    The first three blocks always exist (one entry per room); the gated
-    blocks are present only for the rooms / sources / pairs that passed
-    their identifiability gates, so an old 3n-element θ remains a valid
-    layout with all gates closed.  ``n_wall_segs`` controls how many
-    dataset-level initial-wall-temperature blocks are included; each block
-    covers all rooms.
-    """
-
-    def __init__(
-        self,
-        n_rooms: int,
-        identifiable_sources: List[int],
-        identifiable_pairs: List[Tuple[int, int]],
-        identifiable_solar: Optional[List[int]] = None,
-        identifiable_splits: Optional[List[int]] = None,
-        n_wall_segs: int = 1,
-    ) -> None:
-        self.n_rooms = n_rooms
-        self.identifiable_sources = list(identifiable_sources)
-        self.identifiable_pairs = list(identifiable_pairs)
-        self.identifiable_solar = list(identifiable_solar or [])
-        self.identifiable_splits = list(identifiable_splits or [])
-        self.n_wall_segs = max(1, int(n_wall_segs))
-
-        n = n_rooms
-        self.idx_log_mass = (0, n)
-        self.idx_log_r = (n, 2 * n)
-        self.idx_q_int = (2 * n, 3 * n)
-        # t_wall_init block: n_wall_segs blocks of n rooms each.
-        self.idx_t_wall_init = (3 * n, 3 * n + self.n_wall_segs * n)
-
-        off = 3 * n + self.n_wall_segs * n
-        self.idx_log_alpha = (off, off + len(identifiable_sources))
-        off = self.idx_log_alpha[1]
-        self.idx_log_r_ij = (off, off + len(identifiable_pairs))
-        off = self.idx_log_r_ij[1]
-        self.idx_log_solar = (off, off + len(self.identifiable_solar))
-        off = self.idx_log_solar[1]
-        self.idx_c_air = (off, off + len(self.identifiable_splits))
-        off = self.idx_c_air[1]
-        self.idx_r_aw = (off, off + len(self.identifiable_splits))
-
-        self.size = self.idx_r_aw[1]
-
-    def get_t_wall_seg(self, theta: np.ndarray, seg: int) -> np.ndarray:
-        """Return the t_wall_init block for dataset segment ``seg``."""
-        n = self.n_rooms
-        a = self.idx_t_wall_init[0] + seg * n
-        return theta[a: a + n]
-
-    def unpack(self, theta: np.ndarray):
-        a, b = self.idx_log_mass
-        log_mass = theta[a:b]
-        a, b = self.idx_log_r
-        log_r = theta[a:b]
-        a, b = self.idx_q_int
-        q_int = theta[a:b]
-        # Return FIRST segment's wall temps for backward compatibility.
-        a = self.idx_t_wall_init[0]
-        t_wall_init = theta[a: a + self.n_rooms]
-        a, b = self.idx_log_alpha
-        log_alpha = theta[a:b]
-        a, b = self.idx_log_r_ij
-        log_r_ij = theta[a:b]
-        a, b = self.idx_log_solar
-        log_solar = theta[a:b]
-        a, b = self.idx_c_air
-        c_air = theta[a:b]
-        a, b = self.idx_r_aw
-        r_aw = theta[a:b]
-        return (
-            log_mass, log_r, q_int, t_wall_init, log_alpha, log_r_ij,
-            log_solar, c_air, r_aw,
-        )
 
 
 class KalmanMLEstimator:
@@ -2663,62 +2358,13 @@ class KalmanMLEstimator:
         history: List[Dict[str, Any]],
         use_ym: bool = False,
     ) -> List[Dict[str, np.ndarray]]:
-        """Convert the HA history buffer to the standardised mbc format.
-
-        Each record is converted to ``{"y": ndarray, "u": ndarray, "d": ndarray}``
-        for discrete-time estimator, or ``{"ym": ndarray, "u": ndarray, "d": ndarray}``
-        for continuous-discrete estimator.
-
-        where ``d = [T_out, solar_1 … solar_n, q_air_1 … q_air_n]`` with the
-        recorded (raw, unscaled) solar gains in slots 1…n and zeros in the
-        air-heat slots — the q_int contribution is applied parametrically
-        through θ inside ``HouseThermalSDE.f``.
-
-        Parameters
-        ----------
-        history : list of dicts
-            HA history buffer records.
-        use_ym : bool, optional
-            If True, use "ym" key for measurements (CD-EKF convention).
-            If False, use "y" key (discrete-time convention). Default: False.
-        """
-        n = self._n
-        n_u = self._n_u
-        room_idx = {name: i for i, name in enumerate(self._room_names)}
-        std: List[Dict[str, Any]] = []
-        meas_key = "ym" if use_ym else "y"
-        for record in history:
-            y = np.array(record["y"][:n], dtype=float)
-            u = np.zeros(n_u)
-            for k, val in enumerate(record.get("u", [])):
-                if k < n_u:
-                    u[k] = float(val)
-            d = np.zeros(1 + 2 * n)
-            d[0] = float(record["d_outdoor"])
-            for name, gain in record.get("d_solar", {}).items():
-                if name in room_idx:
-                    d[1 + room_idx[name]] = float(gain)
-            # Carry the Unix timestamp so _simulation_mse_and_grad can detect
-            # gaps from controller restarts and treat them as segment boundaries.
-            t_val = record.get("timestamp")
-            # Per-room window-open data-quality label.  When a room's window was
-            # open at this step its air-exchange loss is unmodelled, so the
-            # open-loop objective must neither score that room's residual nor let
-            # its (cooling) air node leak into the coupled neighbours.  Missing
-            # key (old records / seeded history) ⇒ all-closed.
-            wo_map = record.get("window_open") or {}
-            window_open = np.array(
-                [bool(wo_map.get(name, False)) for name in self._room_names],
-                dtype=bool,
-            )
-            std.append({
-                meas_key: y,
-                "u": u,
-                "d": d,
-                "t": float(t_val) if t_val is not None else None,
-                "window_open": window_open,
-            })
-        return std
+        return convert_history_std(
+            history,
+            self._n,
+            self._n_u,
+            self._room_names,
+            use_ym=use_ym,
+        )
 
     def _compute_regularization(
         self,
