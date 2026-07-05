@@ -1,4 +1,4 @@
-import { isOnPanelPath, readPanelRoute, setPanelHash } from './panel-hash.js?v=90';
+import { isOnPanelPath, readPanelRoute, setPanelHash } from './panel-hash.js?v=91';
 
 export class Router {
   constructor(container, routes) {

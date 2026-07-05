@@ -1,6 +1,13 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=90';
-import { signalLabel, experimentRowHtml, findNextScheduledExperiment, experimentStatusInfo } from '../experiment-utils.js?v=90';
-import { setPanelHash } from '../panel-hash.js?v=90';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, getRoomScheduleData, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=91';
+import { signalLabel, experimentRowHtml, findNextScheduledExperiment, experimentStatusInfo } from '../experiment-utils.js?v=91';
+import { setPanelHash } from '../panel-hash.js?v=91';
+import {
+  cancelExperiment,
+  deleteExperiment,
+  scheduleExperiment,
+  setScheduleEnabled,
+  updateRoomSchedule,
+} from '../ha-services.js?v=91';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -392,7 +399,7 @@ function renderExperimentsSection(container, room, connection, hass) {
       setFormStatus(statusEl, updatingId ? 'Updating…' : 'Scheduling…', 'running');
       submitBtn.disabled = true;
       try {
-        await hass.callService('heating_assistant', 'schedule_experiment', {
+        await scheduleExperiment(hass, {
           room_name: room.slug,
           start: startTs,
           end: endTs,
@@ -407,7 +414,7 @@ function renderExperimentsSection(container, room, connection, hass) {
         });
         if (updatingId) {
           try {
-            await hass.callService('heating_assistant', 'delete_experiment', { experiment_id: updatingId });
+            await deleteExperiment(hass, updatingId);
           } catch (_) { /* leave original if removal fails */ }
         }
         hideForm();
@@ -557,9 +564,7 @@ function renderExperimentsSection(container, room, connection, hass) {
           e.stopPropagation();
           deleteBtn.disabled = true;
           try {
-            await hass.callService('heating_assistant', 'delete_experiment', {
-              experiment_id: deleteBtn.dataset.delete,
-            });
+            await deleteExperiment(hass, deleteBtn.dataset.delete);
             await refresh();
           } catch (_) { deleteBtn.disabled = false; }
         });
@@ -572,9 +577,7 @@ function renderExperimentsSection(container, room, connection, hass) {
           e.stopPropagation();
           cancelBtn.disabled = true;
           try {
-            await hass.callService('heating_assistant', 'cancel_experiment', {
-              experiment_id: cancelBtn.dataset.cancel,
-            });
+            await cancelExperiment(hass, cancelBtn.dataset.cancel);
             await refresh();
           } catch (_) { cancelBtn.disabled = false; }
         });
@@ -932,10 +935,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
     toggleStatus.textContent = 'Saving…';
     toggleStatus.className = 'tuning-actions__status tuning-actions__status--running';
     try {
-      await hass.callService('heating_assistant', 'set_schedule_enabled', {
-        room_name: room.slug,
-        enabled: !currentEnabled,
-      });
+      await setScheduleEnabled(hass, room.slug, !currentEnabled);
       // Patch state optimistically for the enabled flag
       patchStateSchedule(state, room.slug, localPeriods, !currentEnabled);
       toggleStatus.textContent = '';
@@ -987,10 +987,7 @@ function renderScheduleDetail(container, roomSlug, rooms, state, connection, has
         }
         return out;
       });
-      await hass.callService('heating_assistant', 'update_room_schedule', {
-        room_name: room.slug,
-        periods,
-      });
+      await updateRoomSchedule(hass, room.slug, periods);
 
       // Patch the shared state object immediately — prevents any intermediate
       // state_changed events (from other entities) from wiping localPeriods

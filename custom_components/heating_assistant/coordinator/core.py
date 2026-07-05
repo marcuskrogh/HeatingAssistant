@@ -114,7 +114,6 @@ from ..const import (
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_TILT,
     DEFAULT_COMFORT_OFFSET,
-    EXPERIMENT_RELAXED_COMFORT_OFFSET,
     DEFAULT_ENERGY_PRICE_WEIGHT,
     DEFAULT_PRICE_NET_TARIFF,
     DEFAULT_PRICE_SPOT_SURCHARGE,
@@ -211,6 +210,7 @@ from . import (
     actuation,
     disturbances,
     enablement,
+    experiments_mpc,
     forecast_payload,
     live_refresh,
     mpc_cycle,
@@ -236,13 +236,7 @@ from ..schedule import (
     resolve_effective_setpoint,
 )
 from .. import weather as _weather
-from ..experiments import (
-    ExperimentManager,
-    apply_safety_bounds,
-    ceil_to_grid,
-    excitation_fraction,
-)
-from ..datasets import build_dataset
+from ..experiments import ExperimentManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1547,272 +1541,40 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def is_experiment_active(self, room_name: str) -> bool:
-        """Return whether an identification experiment is exciting ``room_name``.
-
-        Reflects the set computed for the current cycle by
-        ``_build_experiment_clamps`` (keyed by room slug).
-        """
-        from ..dashboard import slugify as _slugify
-
-        active = getattr(self, "_experiment_active_rooms", None)
-        if not active:
-            return False
-        return _slugify(room_name) in active
+        return experiments_mpc.is_experiment_active(self, room_name)
 
     def _build_experiment_clamps(
         self, now: datetime
     ) -> Dict[str, "np.ndarray"]:
-        """Advance experiments and build per-source horizon input clamps for the MPC.
-
-        Rather than overriding the MPC's chosen actions after the solve, an active
-        experiment pins its room's heater inputs over the whole prediction horizon
-        by handing the controller a ``{source_name: ndarray(N,)}`` clamp: each
-        entry is the *signed power* fraction (``+`` heat / ``-`` cool, of capacity)
-        the excitation signal requests at ``now + k·dt`` (``NaN`` where no
-        experiment is active at that step); the controller converts each to the
-        control input that delivers it, so the step is linear in delivered power.
-        The clamp is built per source so a reversible (heat/cool) unit gets the
-        cool phases while a heat-only unit gets the heat-only pattern.  The MPC then
-        treats the signal as a hard input constraint, planning the rest of the
-        house around it, and the resulting plan — and thus the actuator forecast
-        plot — already reflects the experiment.
-
-        The applied (k=0) entry is additionally passed through the experiment's
-        safety temperature band (frost floor / overheat ceiling) using the current
-        measurement, so the realised action is safe; future steps use the raw
-        signal (their temperatures are only known to the MPC's own rollout).  A
-        room whose window is open is left unclamped — the window override forces it
-        off and its air-exchange is unmodelled.
-        """
-        from ..dashboard import slugify as _slugify
-
-        active_rooms: Set[str] = set()
-        manager = self.experiment_manager
-        now_ts = now.timestamp()
-
-        # Advance lifecycle states; auto-save any experiment that just finished.
-        transitions = manager.advance(now_ts)
-        for finished in transitions.get("completed", []):
-            self._on_experiment_completed(finished)
-        if transitions.get("started") or transitions.get("completed"):
-            self._persist_experiments()
-
-        clamps: Dict[str, "np.ndarray"] = {}
-        horizon_steps: Dict[str, List[bool]] = {}
-        N = int(self._horizon)
-        dt = float(self.dt)
-        horizon_end = now_ts + N * dt
-        # Nothing to do unless an experiment overlaps the horizon window.
-        if not any(
-            e.start_ts < horizon_end and now_ts < e.end_ts and not e.is_terminal()
-            for e in manager.experiments
-        ):
-            self._experiment_active_rooms = active_rooms
-            self._experiment_horizon_steps = horizon_steps
-            return clamps
-
-        slug_to_room = {_slugify(rn): rn for rn in self.model.room_names}
-
-        for src in self.heat_sources:
-            room_slug = _slugify(src.room)
-            # An open window makes the room's air-exchange unmodelled, so the
-            # excitation is suppressed there; the window override forces u=0.
-            if self.is_window_override_active(src.room):
-                continue
-
-            room_name = slug_to_room.get(room_slug, src.room)
-            can_cool = bool(getattr(src, "can_cool", False))
-            arr = np.full(N, np.nan, dtype=float)
-            clamped_any = False
-            measured = self.measured_temperatures.get(room_name)
-            for k in range(N):
-                t_k = now_ts + k * dt
-                exp = manager.active_for_room(room_slug, t_k)
-                if exp is None:
-                    continue
-                frac = excitation_fraction(exp, t_k, can_cool=can_cool)
-                if k == 0:
-                    frac = apply_safety_bounds(
-                        frac, measured, exp.min_temp, exp.max_temp,
-                        exp.step_pct,
-                    )
-                    active_rooms.add(room_slug)
-                arr[k] = frac
-                clamped_any = True
-            if clamped_any:
-                clamps[src.name] = arr
-                # Per-room mask of horizon steps the experiment governs (any of
-                # the room's sources), keyed by canonical room name — drives the
-                # comfort-relaxation below and the forecast ``experiment`` flag.
-                mask = horizon_steps.setdefault(room_name, [False] * N)
-                for k in range(N):
-                    if not np.isnan(arr[k]):
-                        mask[k] = True
-
-        self._experiment_active_rooms = active_rooms
-        self._experiment_horizon_steps = horizon_steps
-        return clamps
+        return experiments_mpc.build_experiment_clamps(self, now)
 
     def _relax_experiment_comfort(self, control_traj: Any) -> None:
-        """Neutralise comfort penalties on the steps an experiment governs.
-
-        Over those steps the room's input is pinned to the excitation signal, so
-        penalising its comfort is meaningless — and leaving it on makes the MPC
-        *anticipate* the experiment (aggressively pre-heating just before it),
-        which both produces odd actions at the border and contaminates the
-        baseline.  Both comfort penalties are removed per governed step: the
-        setpoint-tracking weight is zeroed and the soft comfort corridor is opened
-        wide so leaving it costs nothing.  The widened corridor is kept out of the
-        displayed forecast (see :meth:`build_forecast_payload`) so the temperature
-        plot does not zoom out.
-        """
-        if control_traj is None or not self._experiment_horizon_steps:
-            return
-        for room_name, mask in self._experiment_horizon_steps.items():
-            q_seq = control_traj.q_scales.get(room_name)
-            off_seq = control_traj.comfort_offsets.get(room_name)
-            for k, governed in enumerate(mask):
-                if not governed:
-                    continue
-                if q_seq is not None and k < len(q_seq):
-                    q_seq[k] = 0.0
-                if off_seq is not None and k < len(off_seq):
-                    off_seq[k] = EXPERIMENT_RELAXED_COMFORT_OFFSET
+        experiments_mpc.relax_experiment_comfort(self, control_traj)
 
     def _on_experiment_completed(self, exp: Any) -> None:
-        """React to an experiment finishing: auto-save its window as a dataset.
-
-        The snapshot is taken asynchronously (it queries the JSONL history store)
-        so the control cycle is never blocked.
-        """
-        if not getattr(exp, "auto_save", False) or exp.dataset_id is not None:
-            return
-        if self.dataset_store is None:
-            return
-        try:
-            self.hass.async_create_task(self._async_autosave_experiment(exp))
-        except Exception:  # pragma: no cover - defensive
-            _LOGGER.warning(
-                "Experiment %s: failed to schedule dataset auto-save", exp.id,
-                exc_info=True,
-            )
+        experiments_mpc.on_experiment_completed(self, exp)
 
     async def _async_autosave_experiment(self, exp: Any) -> None:
-        """Snapshot a completed experiment's window into a stored dataset."""
-        records = await self._async_collect_window_records(exp.start_ts, exp.end_ts)
-        if not records:
-            _LOGGER.info(
-                "Experiment %s finished with no captured records; no dataset saved",
-                exp.id,
-            )
-            return
-        name = exp.name or f"Experiment {exp.room_name}"
-        dataset = build_dataset(
-            name,
-            records,
-            room_name=exp.room_name,
-            room_slug=exp.room_slug,
-            source="experiment",
-            notes=f"Auto-saved {exp.signal_type} experiment",
-            window_start=exp.start_ts,
-            window_end=exp.end_ts,
-            experiment=exp.to_dict(),
-        )
-        await self.dataset_store.async_add(dataset)
-        exp.dataset_id = dataset["id"]
-        self._persist_experiments()
-        self.async_update_listeners()
-        _LOGGER.info(
-            "Experiment %s auto-saved as dataset '%s' (%d records)",
-            exp.id, name, dataset["record_count"],
-        )
+        await experiments_mpc.async_autosave_experiment(self, exp)
 
     async def _async_collect_window_records(
         self, start_ts: float, end_ts: float
     ) -> List[Dict[str, Any]]:
-        """Return observation records covering ``[start_ts, end_ts]``.
-
-        Prefers the integration-managed JSONL store (durable across restarts),
-        falling back to the in-memory buffer filtered to the window.
-        """
-        records: List[Dict[str, Any]] = []
-        if self.id_history_store is not None:
-            try:
-                records = await self.id_history_store.async_query_range(
-                    start_ts, end_ts
-                )
-            except Exception:
-                _LOGGER.warning(
-                    "Dataset snapshot: JSONL query failed for [%s, %s]",
-                    start_ts, end_ts, exc_info=True,
-                )
-        if not records:
-            records = [
-                dict(r)
-                for r in self._history_buffer
-                if start_ts <= float(r.get("timestamp", 0.0)) < end_ts
-            ]
-        return records
+        return await experiments_mpc.async_collect_window_records(
+            self, start_ts, end_ts
+        )
 
     def schedule_experiment(self, exp: Any) -> Any:
-        """Register a new experiment and persist the experiment list."""
-        interval_s = int(self._update_interval_s)
-        # Use the most recent coordinator run-time as the grid reference so
-        # snapped timestamps land on actual ZOH boundaries (actuator steps).
-        ref_ts = (
-            self.now_utc.timestamp()
-            if getattr(self, "now_utc", None) is not None
-            else time.time()
-        )
-        # Snap start to the first actuator step at or after the configured time.
-        # Snap end to the first actuator step at or after the configured end,
-        # so the last full step before the configured end is included.
-        exp.start_ts = ceil_to_grid(exp.start_ts, ref_ts, interval_s)
-        exp.end_ts = ceil_to_grid(exp.end_ts, ref_ts, interval_s)
-        self.experiment_manager.add(exp)
-        self.experiment_manager.prune_terminal()
-        self._persist_experiments()
-        return exp
+        return experiments_mpc.schedule_experiment(self, exp)
 
     def cancel_experiment(self, experiment_id: str) -> bool:
-        """Cancel a scheduled/running experiment.  Returns True if it changed."""
-        cancelled = self.experiment_manager.cancel(experiment_id)
-        if cancelled is None:
-            # Allow removing terminal entries from the list entirely.
-            removed = self.experiment_manager.remove(experiment_id)
-            if removed:
-                self._persist_experiments()
-            return removed
-        self._experiment_active_rooms.discard(cancelled.room_slug)
-        self._persist_experiments()
-        return True
+        return experiments_mpc.cancel_experiment(self, experiment_id)
 
     def delete_experiment(self, experiment_id: str) -> bool:
-        """Remove an experiment from the list outright, regardless of status.
-
-        A running/scheduled experiment is first cancelled so it stops driving the
-        room, then dropped entirely (no lingering ``cancelled`` record to remove
-        separately).  Returns True if an experiment was removed.
-        """
-        exp = self.experiment_manager.get(experiment_id)
-        if exp is not None and not exp.is_terminal():
-            self.experiment_manager.cancel(experiment_id)
-            self._experiment_active_rooms.discard(exp.room_slug)
-        removed = self.experiment_manager.remove(experiment_id)
-        if removed:
-            self._persist_experiments()
-        return removed
+        return experiments_mpc.delete_experiment(self, experiment_id)
 
     def _persist_experiments(self) -> None:
-        """Persist the experiment list (best-effort, never blocks a cycle)."""
-        if self.experiment_store is None:
-            return
-        try:
-            self.hass.async_create_task(
-                self.experiment_store.async_save(self.experiment_manager)
-            )
-        except Exception:  # pragma: no cover - defensive
-            _LOGGER.debug("Failed to persist experiments", exc_info=True)
+        experiments_mpc.persist_experiments(self)
 
     # ------------------------------------------------------------------
     # Comfort schedule helpers

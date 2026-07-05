@@ -10,8 +10,15 @@
 //   #config/sources/<i>  → edit a heat source (i = index, or "new")
 //   #config/system       → environment sensors + site location
 
-import { createCollapsible } from '../components/collapsible.js?v=90';
-import { setPanelHash } from '../panel-hash.js?v=90';
+import { createCollapsible } from '../components/collapsible.js?v=91';
+import { setPanelHash } from '../panel-hash.js?v=91';
+import {
+  updateHeatSources,
+  updateRooms,
+  updateSystemConfig,
+  updateSystemParams,
+  updateUiSettings,
+} from '../ha-services.js?v=91';
 
 // ---------------------------------------------------------------------------
 // Teal line-art icons (same design language as the panel logo: teal strokes on
@@ -548,7 +555,7 @@ function renderDisplay(container, connection, hass) {
         const data = {};
         if (working.plot_history_hours != null) data.plot_history_hours = Number(working.plot_history_hours);
         if (working.plot_forecast_hours != null) data.plot_forecast_hours = Number(working.plot_forecast_hours);
-        await hass.callService('heating_assistant', 'update_ui_settings', data);
+        await updateUiSettings(hass, data);
         setStatus(statusEl, 'Applied. Reopen a room to see the new window.', 'success');
       } catch (err) {
         setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
@@ -848,7 +855,7 @@ function renderRoomEditor(container, connection, hass, idxParam) {
         if (originalName && originalName !== cleaned.name) {
           payload.renames = { [originalName]: cleaned.name };
         }
-        await hass.callService('heating_assistant', 'update_rooms', payload);
+        await updateRooms(hass, payload);
         setStatus(statusEl, 'Saved. Restarting model…', 'success');
         navTimers.push(schedulePanelNav('#config/rooms', 800));
       } catch (err) {
@@ -865,7 +872,7 @@ function renderRoomEditor(container, connection, hass, idxParam) {
         setStatus(statusEl, 'Deleting…', 'running');
         try {
           const next = allRooms.filter((_, i) => i !== idx).map((r) => ({ ...r }));
-          await hass.callService('heating_assistant', 'update_rooms', { rooms: next });
+          await updateRooms(hass, { rooms: next });
           setStatus(statusEl, 'Deleted. Restarting model…', 'success');
           navTimers.push(schedulePanelNav('#config/rooms', 800));
         } catch (err) {
@@ -1222,7 +1229,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
         const cleaned = cleanSource(src);
         const next = allSources.map((s) => ({ ...s }));
         if (isNew) next.push(cleaned); else next[idx] = cleaned;
-        await hass.callService('heating_assistant', 'update_heat_sources', { heat_sources: next });
+        await updateHeatSources(hass, { heat_sources: next });
         setStatus(statusEl, 'Saved. Restarting model…', 'success');
         navTimers.push(schedulePanelNav('#config/sources', 800));
       } catch (err) {
@@ -1239,7 +1246,7 @@ function renderSourceEditor(container, connection, hass, idxParam) {
         setStatus(statusEl, 'Deleting…', 'running');
         try {
           const next = allSources.filter((_, i) => i !== idx).map((s) => ({ ...s }));
-          await hass.callService('heating_assistant', 'update_heat_sources', { heat_sources: next });
+          await updateHeatSources(hass, { heat_sources: next });
           setStatus(statusEl, 'Deleted. Restarting model…', 'success');
           navTimers.push(schedulePanelNav('#config/sources', 800));
         } catch (err) {
@@ -1331,7 +1338,7 @@ function renderSystemParams(container, connection, hass) {
         if (working.identification_history_days != null) {
           data.identification_history_days = Math.round(Number(working.identification_history_days));
         }
-        await hass.callService('heating_assistant', 'update_system_params', data);
+        await updateSystemParams(hass, data);
         setStatus(statusEl, 'Applied.', 'success');
       } catch (err) {
         setStatus(statusEl, 'Error: ' + (err.message || err), 'error');
@@ -1388,7 +1395,7 @@ function renderSystem(container, connection, hass) {
           solar_radiation_entity: working.solar_radiation_entity || '',
           price_entity: working.price_entity || '',
         };
-        await hass.callService('heating_assistant', 'update_system_config', data);
+        await updateSystemConfig(hass, data);
         setStatus(statusEl, 'Applied.', 'success');
       } catch (err) {
         setStatus(statusEl, 'Error: ' + (err.message || err), 'error');

@@ -1,8 +1,18 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=90';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=90';
-import { createCollapsible } from '../components/collapsible.js?v=90';
-import { formatNumber, modelFitLabel } from '../utils.js?v=90';
-import { setPanelHash } from '../panel-hash.js?v=90';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=91';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=91';
+import { createCollapsible } from '../components/collapsible.js?v=91';
+import { formatNumber, modelFitLabel } from '../utils.js?v=91';
+import { setPanelHash } from '../panel-hash.js?v=91';
+import {
+  createDataset,
+  deleteDataset,
+  deleteParameterHistory,
+  estimateParametersMl,
+  runOpenLoopSimulation,
+  runSysidSimulation,
+  storeIdentifiedParameters,
+  updateEstimationParams,
+} from '../ha-services.js?v=91';
 
 // Default parameter values — must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
@@ -1323,9 +1333,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         if (!window.confirm('Delete this parameter history entry? This cannot be undone.')) return;
         btn.disabled = true;
         try {
-          await hass.callService('heating_assistant', 'delete_parameter_history', {
-            history_index: parseInt(btn.dataset.del, 10),
-          });
+          await deleteParameterHistory(hass, parseInt(btn.dataset.del, 10));
           // The config sensor updates and update() re-renders the list.
         } catch (err) {
           btn.disabled = false;
@@ -1347,7 +1355,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     setStatus(statusEl, 'Running identification…', 'running');
     try {
       const lp = buildLockedParams();
-      await hass.callService('heating_assistant', 'estimate_parameters_ml', {
+      await estimateParametersMl(hass, {
         apply_parameters: false,
         ...idData,
         ...(lp ? { locked_params: lp } : {}),
@@ -1379,7 +1387,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         const val = parseFloat(inp.value);
         if (isFinite(val)) heaterScales[srcName] = val;
       }
-      await hass.callService('heating_assistant', 'store_identified_parameters', {
+      await storeIdentifiedParameters(hass, {
         room_name: roomSlug,
         thermal_mass: parseFloat(thermalMassInput.value),
         r_external: parseFloat(rExternalInput.value),
@@ -1390,7 +1398,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
         ...(Object.keys(heaterScales).length ? { heater_scales: heaterScales } : {}),
         source: 'manual',
       });
-      await hass.callService('heating_assistant', 'update_estimation_params', {
+      await updateEstimationParams(hass, {
         sigma_w: parseFloat(sigmaWInput.value),
         sigma_v: parseFloat(sigmaVInput.value),
         identification_horizon_hours: parseFloat(horizonInput.value),
@@ -1431,7 +1439,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
-      await hass.callService('heating_assistant', 'run_sysid_simulation', collectSimParams());
+      await runSysidSimulation(hass, collectSimParams());
       // Let the websocket state event with the fresh results arrive, then plot
       // the temperature fit and the input/disturbance signals over its horizon.
       await new Promise((res) => setTimeout(res, 800));
@@ -1453,7 +1461,7 @@ function renderIdentificationDetail(container, roomSlug, rooms, state, connectio
     btnSysid.disabled = true;
     btnOpenLoop.disabled = true;
     try {
-      await hass.callService('heating_assistant', 'run_open_loop_simulation', {
+      await runOpenLoopSimulation(hass, {
         ...collectSimParams(),
       });
       await new Promise((res) => setTimeout(res, 800));
@@ -1724,13 +1732,13 @@ function setupDatasetsAndExperiments(ctx) {
     const { startTs, endTs } = currentWindowBounds();
     setStatus(dsStatus, 'Saving…', 'running');
     try {
-      const resp = await hass.callService('heating_assistant', 'create_dataset', {
+      const resp = await createDataset(hass, {
         name,
         window_start: startTs,
         window_end: endTs,
         room_name: roomSlug,
         notes: dsNotesInput.value || '',
-      }, undefined, undefined, true);
+      });
       const count = resp?.response?.record_count;
       setStatus(dsStatus, count != null ? `Saved (${count} records).` : 'Saved.', 'success');
       dsNameInput.value = '';
@@ -1842,9 +1850,7 @@ function setupDatasetsAndExperiments(ctx) {
         if (!window.confirm('Delete this dataset? This cannot be undone.')) return;
         btn.disabled = true;
         try {
-          await hass.callService('heating_assistant', 'delete_dataset', {
-            dataset_id: btn.dataset.del,
-          });
+          await deleteDataset(hass, btn.dataset.del);
           selectedIds.delete(btn.dataset.del);
           await refreshDatasets();
         } catch (_) { btn.disabled = false; }
