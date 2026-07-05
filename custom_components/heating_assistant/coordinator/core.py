@@ -22,7 +22,7 @@ import numpy as np
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -209,10 +209,18 @@ from ..heat_sources import (
 from ..thermal_model import HouseModel, Room, RoomConnection, Window
 from ..controller import HeatingMPCController
 from ..controller.factory import ControllerBuildConfig, build_mpc_controller
-from . import actuation, disturbances, enablement, forecast_payload
+from . import (
+    actuation,
+    disturbances,
+    enablement,
+    forecast_payload,
+    schedule_control,
+    window,
+)
 from .model_builders import build_heat_sources, build_house_model
 from .types import (
     ControlTrajectory,
+    ControllerConfigSnapshot,
     _coerce_interval_seconds,
     _coerce_opt_float,
 )
@@ -226,8 +234,6 @@ from ..schedule import (
     RoomSchedule,
     build_schedule,
     control_params_at,
-    next_transition,
-    resolve_effective_control_params,
     resolve_effective_setpoint,
 )
 from .. import weather as _weather
@@ -1253,7 +1259,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             x_hat, P = _prior_ekf
             self.controller.restore_ekf_state(x_hat, P)
 
-    def get_controller_config_snapshot(self) -> Dict[str, Any]:
+    def get_controller_config_snapshot(self) -> ControllerConfigSnapshot:
         """Return JSON-serialisable MPC tuning parameters for UI / WebSocket.
 
         Single source of truth for controller config exposed via WebSocket and

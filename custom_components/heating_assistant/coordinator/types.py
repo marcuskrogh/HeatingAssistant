@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 
 import numpy as np
 
@@ -22,6 +22,35 @@ class ControlTrajectory:
     q_scales: Dict[str, "np.ndarray"]         # room → per-step Q multiplier [–]
     r_scales: Dict[str, "np.ndarray"]         # room → per-step R multiplier [–]
     enabled_steps: Dict[str, "np.ndarray"]    # room → per-step enabled flag [bool]
+
+
+class ControllerConfigSnapshot(TypedDict):
+    """JSON-serialisable MPC tuning parameters for UI / WebSocket consumers."""
+
+    comfort_offset: float
+    tracking_weight: float
+    energy_weight: float
+    energy_price_weight: float
+    smoothing_weight: float
+    soft_constraint_weight: float
+    soft_constraint_linear_weight: float
+    terminal_weight: float
+    horizon: int
+    update_interval: int
+    window_open_debounce: int
+    window_open_close_settle: int
+    window_open_q_inflation: float
+
+
+class HistoryRecord(TypedDict, total=False):
+    """Minimal identification-history record shape stored in the history buffer."""
+
+    timestamp: float
+    y: List[float]
+    u: List[float]
+    d_outdoor: float
+    d_solar: Dict[str, float]
+    window_open: Dict[str, bool]
 
 
 def _coerce_interval_seconds(value: Any) -> float:
