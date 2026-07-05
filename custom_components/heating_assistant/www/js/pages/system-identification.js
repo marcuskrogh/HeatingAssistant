@@ -1,8 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=91';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=91';
-import { createCollapsible } from '../components/collapsible.js?v=91';
-import { formatNumber, modelFitLabel } from '../utils.js?v=91';
-import { setPanelHash } from '../panel-hash.js?v=91';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=92';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=92';
+import { createCollapsible } from '../components/collapsible.js?v=92';
+import { formatNumber, modelFitLabel } from '../utils.js?v=92';
+import { setPanelHash } from '../panel-hash.js?v=92';
 import {
   createDataset,
   deleteDataset,
@@ -12,7 +12,7 @@ import {
   runSysidSimulation,
   storeIdentifiedParameters,
   updateEstimationParams,
-} from '../ha-services.js?v=91';
+} from '../ha-services.js?v=92';
 
 // Default parameter values — must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {

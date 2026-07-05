@@ -113,8 +113,12 @@ class ResetParametersButton(ButtonEntity):
         The reset is reflected immediately in the UI via the entity state and
         the per-room parameter sensors, so no notification is raised.
         """
-        self._coordinator.reset_estimated_parameters()
-        self._coordinator.async_update_listeners()
+        await self.hass.services.async_call(
+            DOMAIN,
+            "reset_estimated_parameters",
+            {},
+            blocking=False,
+        )
 
 
 class RunSysIdWithWindowButton(ButtonEntity):
