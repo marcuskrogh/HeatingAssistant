@@ -1,31 +1,6 @@
 import { setPanelHash } from '../panel-hash.js?v=93';
 import {
-  updateHeatSources,
-  updateRooms,
-  updateSystemConfig,
-  updateSystemParams,
-  updateUiSettings,
-} from '../ha-services.js?v=93';
-import { ICONS } from './config-icons.js?v=93';
-import {
-  el,
-  schedulePanelNav,
-  sectionCard,
-  advancedSubsection,
-  configListHeader,
-  configPageShell,
-  actionsBar,
-  editorActionsBar,
-  setStatus,
-  numberField,
-  textField,
-  selectField,
-  paramGrid,
-  prettify,
-  loadingNode,
-  fmt,
-  entitySelectorField,
-  listEditor,
+  el, configPageShell, configListHeader, loadingNode,
 } from './config-ui.js?v=93';
 
 // Rooms — list

@@ -50,12 +50,7 @@ SERVICE_RESET_ESTIMATED_PARAMETERS = "reset_estimated_parameters"
 SERVICE_APPLY_HEATER_SCALES = "apply_heater_scales"
 
 
-def _coordinator(hass: HomeAssistant) -> HeatingAssistantCoordinator:
-    import importlib
-
-    return importlib.import_module(
-        "custom_components.heating_assistant.__init__"
-    )._get_coordinator(hass)
+from .context import get_coordinator
 
 
 def _resolve_room(coordinator: HeatingAssistantCoordinator, name: str) -> str:
@@ -69,7 +64,7 @@ def _resolve_room(coordinator: HeatingAssistantCoordinator, name: str) -> str:
 
 
 async def handle_simulate(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     result = coordinator.simulate_thermal_response(
         room_name=call.data["room_name"],
         initial_temp=call.data["initial_temp"],
@@ -88,7 +83,7 @@ async def handle_simulate(hass: HomeAssistant, call: ServiceCall) -> ServiceResp
 
 
 async def handle_estimate(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     result = coordinator.estimate_parameters(
         room_name=call.data["room_name"],
         heating_power=call.data["heating_power"],
@@ -108,7 +103,7 @@ async def handle_estimate(hass: HomeAssistant, call: ServiceCall) -> ServiceResp
 
 async def handle_estimate_ml(hass: HomeAssistant, call: ServiceCall) -> None:
     """Run ML parameter estimation using the Kalman filter log-likelihood."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     apply_params: bool = call.data.get("apply_parameters", False)
     horizon_hours: Optional[float] = call.data.get("horizon_hours")
     locked_params: Optional[Dict] = call.data.get("locked_params")
@@ -241,7 +236,7 @@ async def handle_run_open_loop_simulation(hass: HomeAssistant, call: ServiceCall
     from ..model_diagnostics import compute_open_loop_predictions
     from ..simulation.model_patch import build_sim_model
 
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     horizon_hours: Optional[float] = call.data.get("horizon_hours")
     window_start_ol: Optional[float] = (
         float(call.data["window_start"]) if "window_start" in call.data else None
@@ -268,13 +263,13 @@ async def handle_run_open_loop_simulation(hass: HomeAssistant, call: ServiceCall
         _full, leading_history, history = await get_history_with_leading(
             hass, coordinator, window_start_ol, window_end_ol,
         )
-        from ..history_window import select_window_by_timestamps
+        from ..history.window import select_window_by_timestamps
         history = select_window_by_timestamps(history, window_start_ol, window_end_ol)
     elif horizon_hours is not None:
         history = await get_history_for_horizon(
             hass, coordinator, float(horizon_hours)
         )
-        from ..history_window import history_time_range, select_leading_window
+        from ..history.window import history_time_range, select_leading_window
         min_ts, _max_ts = history_time_range(history)
         if min_ts is not None:
             _full, leading_history, _sim = await get_history_with_leading(
@@ -418,7 +413,7 @@ async def handle_run_sysid_simulation(hass: HomeAssistant, call: ServiceCall) ->
     """Run system-identification open-loop simulation with configurable params."""
     from ..sysid import run_sysid_simulation
 
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     room_name_filter: Optional[str] = call.data.get("room_name")
     horizon_hours: float = float(call.data.get("horizon_hours", 6.0))
     sigma_w: float = float(call.data.get(
@@ -468,7 +463,7 @@ async def handle_run_sysid_simulation(hass: HomeAssistant, call: ServiceCall) ->
             history = await get_history_for_horizon(
                 hass, coordinator, horizon_hours
             )
-            from ..history_window import history_time_range
+            from ..history.window import history_time_range
             min_ts, max_ts = history_time_range(history)
             if min_ts is not None and max_ts is not None:
                 _full, leading_history, _sim = await get_history_with_leading(
@@ -581,7 +576,7 @@ async def handle_run_sysid_simulation(hass: HomeAssistant, call: ServiceCall) ->
 
 async def handle_apply_manual_parameters(hass: HomeAssistant, call: ServiceCall) -> None:
     """Apply manually tuned thermal parameters for a single room."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     room_name: str = call.data["room_name"]
     thermal_mass: float = call.data["thermal_mass"]
     r_external: float = call.data["r_external"]
@@ -597,7 +592,7 @@ async def handle_apply_heater_scales(hass: HomeAssistant, call: ServiceCall) -> 
     run) are used.  An explicit ``scales`` dict can override this for
     testing or manual correction.
     """
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     scales: Optional[Dict[str, float]] = call.data.get("scales")
     if not scales:
         scales = getattr(coordinator, "_last_identified_heater_scales", {})
@@ -613,14 +608,14 @@ async def handle_apply_heater_scales(hass: HomeAssistant, call: ServiceCall) -> 
 
 async def handle_reset_estimated_parameters(hass: HomeAssistant, call: ServiceCall) -> None:
     """Reset the active model back to configured (YAML) default parameters."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     coordinator.reset_estimated_parameters()
     coordinator.async_update_listeners()
 
 
 async def handle_store_identified_parameters(hass: HomeAssistant, call: ServiceCall) -> None:
     """Store identified parameters with history tracking."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     room_name: str = _resolve_room(coordinator, call.data["room_name"])
     thermal_mass: float = call.data["thermal_mass"]
     r_external: float = call.data["r_external"]
@@ -640,7 +635,7 @@ async def handle_store_identified_parameters(hass: HomeAssistant, call: ServiceC
 
 async def handle_revert_parameters(hass: HomeAssistant, call: ServiceCall) -> None:
     """Revert parameters to a previous history entry."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     room_name: str = _resolve_room(coordinator, call.data["room_name"])
     history_index: int = call.data["history_index"]
     coordinator.revert_parameters(room_name, history_index)
@@ -649,7 +644,7 @@ async def handle_revert_parameters(hass: HomeAssistant, call: ServiceCall) -> No
 
 async def handle_delete_parameter_history(hass: HomeAssistant, call: ServiceCall) -> None:
     """Delete a single entry from the parameter history."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     history_index: int = call.data["history_index"]
     coordinator.delete_parameter_history(history_index)
     coordinator.async_update_listeners()
@@ -669,7 +664,7 @@ async def handle_schedule_experiment(hass: HomeAssistant, call: ServiceCall) -> 
         MAX_EXPERIMENT_DURATION_S,
     )
 
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     canonical = _resolve_room(coordinator, call.data["room_name"])
 
     start_ts = float(call.data["start"])
@@ -721,14 +716,14 @@ async def handle_schedule_experiment(hass: HomeAssistant, call: ServiceCall) -> 
 
 async def handle_cancel_experiment(hass: HomeAssistant, call: ServiceCall) -> None:
     """Cancel (or remove) a scheduled / running experiment."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     coordinator.cancel_experiment(call.data["experiment_id"])
     coordinator.async_update_listeners()
 
 
 async def handle_delete_experiment(hass: HomeAssistant, call: ServiceCall) -> None:
     """Delete an experiment outright, regardless of its status."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     coordinator.delete_experiment(call.data["experiment_id"])
     coordinator.async_update_listeners()
 
@@ -736,11 +731,11 @@ async def handle_delete_experiment(hass: HomeAssistant, call: ServiceCall) -> No
 async def handle_create_dataset(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     """Snapshot a custom data window into a named, permanent dataset."""
     from ..datasets import build_dataset
-    from ..history_window import select_window_by_timestamps
+    from ..history.window import select_window_by_timestamps
     from ..naming import slugify as _slugify
     from ..const import DATASET_SOURCE_MANUAL
 
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     if coordinator.dataset_store is None:
         raise ValueError("Dataset store is not available")
 
@@ -787,7 +782,7 @@ async def handle_create_dataset(hass: HomeAssistant, call: ServiceCall) -> Servi
 
 async def handle_delete_dataset(hass: HomeAssistant, call: ServiceCall) -> None:
     """Delete a stored dataset by id."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     if coordinator.dataset_store is None:
         return
     await coordinator.dataset_store.async_delete(call.data["dataset_id"])

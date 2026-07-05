@@ -1,36 +1,6 @@
-import { setPanelHash } from '../panel-hash.js?v=93';
+import { updateUiSettings } from '../ha-services.js?v=93';
 import {
-  updateHeatSources,
-  updateRooms,
-  updateSystemConfig,
-  updateSystemParams,
-  updateUiSettings,
-} from '../ha-services.js?v=93';
-import { ICONS } from './config-icons.js?v=93';
-import {
-  ROOM_SIZE_PRESETS,
-  HOUSE_AGE_PRESETS,
-  nearestPreset,
-} from './config-presets.js?v=93';
-import {
-  el,
-  schedulePanelNav,
-  sectionCard,
-  advancedSubsection,
-  configListHeader,
-  configPageShell,
-  actionsBar,
-  editorActionsBar,
-  setStatus,
-  numberField,
-  textField,
-  selectField,
-  paramGrid,
-  prettify,
-  loadingNode,
-  fmt,
-  entitySelectorField,
-  listEditor,
+  configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid, loadingNode,
 } from './config-ui.js?v=93';
 
 // Display settings

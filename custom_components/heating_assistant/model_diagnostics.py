@@ -1043,7 +1043,7 @@ def compute_open_loop_predictions(
     # fixed-length windows for N-step-ahead accuracy analysis.  The final stride
     # covers the trailing records too (a partial last segment) so the most recent
     # samples are not dropped.
-    from .history_window import split_contiguous_runs
+    from .history.window import split_contiguous_runs
 
     contiguous_runs = list(split_contiguous_runs(history, dt))
     if segment_length is None:

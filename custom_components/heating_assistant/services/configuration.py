@@ -51,15 +51,7 @@ from ..room_migration import (
 )
 
 
-def _coordinator(hass: HomeAssistant):
-    import importlib
-
-    return importlib.import_module(
-        "custom_components.heating_assistant.__init__"
-    )._get_coordinator(hass)
-
-
-_LOGGER = logging.getLogger(__name__)
+from .context import get_coordinator
 
 DEFAULT_DASHBOARD_FILENAME = "heating_assistant.yaml"
 DEFAULT_INDUSTRIAL_DASHBOARD_FILENAME = "heating_assistant_industrial.yaml"
@@ -93,7 +85,7 @@ _SYSTEM_PARAM_KEYS = {CONF_IDENTIFICATION_HISTORY_DAYS}
 
 async def handle_update_controller_tuning(hass: HomeAssistant, call: ServiceCall) -> None:
     """Update MPC controller tuning parameters from the dashboard."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     updates = {k: v for k, v in call.data.items() if k in _CONTROLLER_TUNING_KEYS}
     if not updates:
         return
@@ -104,7 +96,7 @@ async def handle_update_controller_tuning(hass: HomeAssistant, call: ServiceCall
 
 async def handle_update_estimation_params(hass: HomeAssistant, call: ServiceCall) -> None:
     """Update state estimation parameters from the dashboard."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     updates = {k: v for k, v in call.data.items() if k in _ESTIMATION_PARAM_KEYS}
     if not updates:
         return
@@ -115,7 +107,7 @@ async def handle_update_estimation_params(hass: HomeAssistant, call: ServiceCall
 
 async def handle_update_ui_settings(hass: HomeAssistant, call: ServiceCall) -> None:
     """Persist industrial-panel display settings (plot history / horizon)."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     updates = {
         k: v
         for k, v in call.data.items()
@@ -130,7 +122,7 @@ async def handle_update_ui_settings(hass: HomeAssistant, call: ServiceCall) -> N
 
 async def handle_update_system_params(hass: HomeAssistant, call: ServiceCall) -> None:
     """Persist system-level parameters (e.g. history retention)."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     updates = {k: v for k, v in call.data.items() if k in _SYSTEM_PARAM_KEYS}
     if not updates:
         return
@@ -154,11 +146,11 @@ async def handle_update_rooms(hass: HomeAssistant, call: ServiceCall) -> None:
         if k and v and str(k) != str(v)
     }
     if not renames:
-        coordinator = _coordinator(hass)
+        coordinator = get_coordinator(hass)
         write_entry_config(hass, {CONF_ROOMS: rooms}, coordinator=coordinator)
         return
 
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
     if entry is None:
         return
@@ -198,7 +190,7 @@ async def handle_update_rooms(hass: HomeAssistant, call: ServiceCall) -> None:
 
 async def handle_update_heat_sources(hass: HomeAssistant, call: ServiceCall) -> None:
     """Replace the configured heat-source list (triggers a reload)."""
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     sources = call.data["heat_sources"]
     write_entry_config(hass, {CONF_HEAT_SOURCES: sources}, coordinator=coordinator)
 
@@ -209,7 +201,7 @@ async def handle_update_system_config(hass: HomeAssistant, call: ServiceCall) ->
     Entity keys are applied in-place by the coordinator's runtime
     reconfiguration; an empty string clears the entity.
     """
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     _entity_keys = (
         CONF_OUTDOOR_TEMP_ENTITY,
         CONF_WEATHER_ENTITY,
@@ -247,7 +239,7 @@ async def handle_regenerate_dashboard(hass: HomeAssistant, call: ServiceCall) ->
         dashboard_to_yaml,
     )
 
-    coordinator = _coordinator(hass)
+    coordinator = get_coordinator(hass)
     # ``build_dashboard_from_coordinator`` is a pure read over coordinator
     # state; run it inline to avoid racing with the next update cycle.
     variant = str(call.data.get("variant") or DASHBOARD_VARIANT_CLASSIC)

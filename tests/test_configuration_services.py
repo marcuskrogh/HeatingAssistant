@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
+import custom_components.heating_assistant.services.configuration as svc_mod
 from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
     CONF_LATITUDE,
@@ -48,7 +49,7 @@ def _make_hass(entry, coordinator, update_calls, monkeypatch):
         async_get_entry=lambda _eid: entry,
         async_update_entry=lambda e, **kwargs: update_calls.append(kwargs),
     )
-    monkeypatch.setattr(init_mod, "_get_coordinator", lambda _h: coordinator)
+    monkeypatch.setattr(svc_mod, "get_coordinator", lambda _h: coordinator)
     return hass
 
 

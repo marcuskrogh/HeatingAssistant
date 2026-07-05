@@ -1,30 +1,9 @@
-import { setPanelHash } from '../panel-hash.js?v=93';
 import {
-  updateHeatSources,
-  updateRooms,
-  updateSystemConfig,
-  updateSystemParams,
-  updateUiSettings,
+  updateSystemConfig, updateSystemParams,
 } from '../ha-services.js?v=93';
 import {
-  el,
-  schedulePanelNav,
-  sectionCard,
-  advancedSubsection,
-  configListHeader,
-  configPageShell,
-  actionsBar,
-  editorActionsBar,
-  setStatus,
-  numberField,
-  textField,
-  selectField,
-  paramGrid,
-  prettify,
-  loadingNode,
-  fmt,
-  entitySelectorField,
-  listEditor,
+  configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid,
+  loadingNode, entitySelectorField,
 } from './config-ui.js?v=93';
 
 // System Parameters

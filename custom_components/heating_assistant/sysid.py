@@ -143,7 +143,7 @@ def run_sysid_ekf(
 
     # Window selection: explicit range takes priority over the trailing window.
     if window_spec is not None:
-        from .history_window import select_window_by_timestamps  # noqa: PLC0415
+        from .history.window import select_window_by_timestamps  # noqa: PLC0415
         try:
             start_ts, end_ts = float(window_spec[0]), float(window_spec[1])
         except (TypeError, IndexError, ValueError) as exc:
@@ -167,7 +167,7 @@ def run_sysid_ekf(
         # buffer may contain gaps (standby, restarts).  Wall-clock selection
         # ensures the window never exceeds the configured horizon regardless
         # of sample density; the CD-EKF bridges each gap using the true dt.
-        from .history_window import select_recent_window  # noqa: PLC0415
+        from .history.window import select_recent_window  # noqa: PLC0415
 
         window = select_recent_window(history, horizon_steps * dt, dt)
         if len(window) < 2:

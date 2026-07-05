@@ -52,7 +52,7 @@ async def get_history_for_window(
     # Fall back to HA Recorder (works for the initial period before the store
     # was populated, or if the store files were deleted).
     try:
-        from ..history_seed import async_fetch_history_range
+        from ..history.seed import async_fetch_history_range
 
         records = await async_fetch_history_range(
             hass, coordinator, window_start, window_end
@@ -82,7 +82,7 @@ async def get_history_for_horizon(
     Uses the in-memory buffer when it already covers the requested span;
     otherwise fetches older records from the JSONL store / Recorder.
     """
-    from ..history_window import select_recent_window
+    from ..history.window import select_recent_window
 
     horizon_s = float(horizon_hours) * 3600.0
     buf = list(coordinator.history_buffer)
@@ -113,7 +113,7 @@ async def get_history_with_leading(
 
     Returns ``(full_history, leading_history, simulation_history)``.
     """
-    from ..history_window import (
+    from ..history.window import (
         select_leading_window,
         select_window_by_timestamps,
     )

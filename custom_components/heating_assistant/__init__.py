@@ -244,7 +244,6 @@ from .const import (
 )
 from .config_schema import CONFIG_SCHEMA
 from .coordinator import HeatingAssistantCoordinator
-from .services.context import get_coordinator
 from .services.history_access import (
     records_for_dataset,
     records_for_datasets,
@@ -372,7 +371,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Set up the integration-managed identification history store so it is
     # available before the first update cycle and before history is restored.
-    from .identification_history import IdentificationHistoryStore
+    from .history.store import IdentificationHistoryStore
     _history_days = int(
         merged_entry.options.get(
             CONF_IDENTIFICATION_HISTORY_DAYS,
@@ -393,108 +392,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.experiment_store = ExperimentStore(hass, entry.entry_id)
     coordinator.experiment_manager = await coordinator.experiment_store.async_load()
 
-    # Restore runtime state stashed by a prior unload (in-memory only; survives
-    # a reload but not a full HA restart). Only keys still present in the new
-    # configuration are restored — rooms removed by the YAML edit drop their
-    # state, which is the right outcome.
-    reload_state = hass.data[DOMAIN].get("_reload_state", {}).pop(entry.entry_id, None)
-    if reload_state is not None:
-        # A room rename queued by update_rooms remaps the stashed runtime state
-        # (keyed by the old name) onto the new name so the toggle / setpoint
-        # state follows the rename instead of resetting to defaults.
-        _renames = hass.data[DOMAIN].pop("_pending_room_renames", {}) or {}
+    from .history.startup_restore import async_restore_history_buffer
 
-        def _remap(state_dict: Dict[str, Any]) -> Dict[str, Any]:
-            return {_renames.get(k, k): v for k, v in state_dict.items()}
-
-        coordinator._history_buffer.extend(reload_state.get("history_buffer", []))
-        if "system_enabled" in reload_state:
-            coordinator._system_enabled = bool(reload_state["system_enabled"])
-        for room, value in _remap(reload_state.get("room_enabled", {})).items():
-            if room in coordinator._room_enabled:
-                coordinator._room_enabled[room] = value
-        for room, value in _remap(reload_state.get("schedule_enabled", {})).items():
-            if room in coordinator._schedule_enabled:
-                coordinator._schedule_enabled[room] = value
-        for room, value in _remap(reload_state.get("base_setpoint", {})).items():
-            if room in coordinator._base_setpoint:
-                coordinator._base_setpoint[room] = float(value)
-                coordinator.model.rooms[room].setpoint = float(value)
-    else:
-        # No in-memory state means this is a full HA restart (not a reload).
-        # Priority: JSONL store (integration-managed, long-term) → HA Recorder
-        # (covers the period before the JSONL store existed) → legacy JSON store.
-        rebuilt = []
-        try:
-            rebuilt = await coordinator.id_history_store.async_query_recent(
-                HISTORY_BUFFER_SIZE
-            )
-        except Exception:
-            _LOGGER.warning(
-                "Heating Assistant: JSONL history store query failed on startup",
-                exc_info=True,
-            )
-
-        if rebuilt:
-            coordinator._history_buffer.extend(rebuilt[-HISTORY_BUFFER_SIZE:])
-            _LOGGER.debug(
-                "Restored %d history steps from JSONL store",
-                len(coordinator._history_buffer),
-            )
-        else:
-            # JSONL store empty (first run or files deleted): try HA Recorder.
-            try:
-                from .history_seed import async_rebuild_history_from_recorder
-
-                rebuilt = await async_rebuild_history_from_recorder(
-                    hass, coordinator, HISTORY_BUFFER_SIZE
-                )
-            except Exception:
-                _LOGGER.warning(
-                    "Heating Assistant: history rebuild from recorder failed",
-                    exc_info=True,
-                )
-
-            if rebuilt:
-                coordinator._history_buffer.extend(rebuilt[-HISTORY_BUFFER_SIZE:])
-                _LOGGER.debug(
-                    "Rebuilt %d history steps from the recorder",
-                    len(coordinator._history_buffer),
-                )
-            else:
-                # Fall back to the persisted buffer (recorder unavailable or empty).
-                try:
-                    store = Store(
-                        hass,
-                        version=1,
-                        key=f"{DOMAIN}_history_{entry.entry_id}",
-                    )
-                    stored_history = await store.async_load()
-                    if stored_history and isinstance(stored_history, list):
-                        # Drop records older than the buffer's nominal time span so a
-                        # previous session's stale (e.g. week-old) data cannot survive
-                        # across a restart, linger at the front of the count-bounded
-                        # deque, and pollute the identification diagnostics.
-                        from .history_window import prune_stale_records
-
-                        _now = getattr(coordinator, "now_utc", None)
-                        _now_ts = _now.timestamp() if _now is not None else time.time()
-                        coordinator._history_buffer.extend(
-                            prune_stale_records(
-                                stored_history[-HISTORY_BUFFER_SIZE:],
-                                _now_ts,
-                                HISTORY_BUFFER_SIZE * coordinator.dt,
-                            )
-                        )
-                        _LOGGER.debug(
-                            "Restored %d history steps from persistent storage",
-                            len(coordinator._history_buffer),
-                        )
-                except Exception:
-                    _LOGGER.warning(
-                        "Heating Assistant: failed to load persisted history buffer",
-                        exc_info=True,
-                    )
+    await async_restore_history_buffer(hass, entry, coordinator)
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -613,39 +513,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         coordinator = hass.data[DOMAIN].get(entry.entry_id)
         if isinstance(coordinator, HeatingAssistantCoordinator):
-            reload_state = hass.data[DOMAIN].setdefault("_reload_state", {})
-            reload_state[entry.entry_id] = {
-                "history_buffer": list(coordinator._history_buffer),
-                "system_enabled": coordinator._system_enabled,
-                "room_enabled": dict(coordinator._room_enabled),
-                "schedule_enabled": dict(coordinator._schedule_enabled),
-                "base_setpoint": dict(coordinator._base_setpoint),
-            }
-            # Persist the history buffer to HA's persistent storage so that it
-            # survives a full Home Assistant restart (not just an in-memory reload).
-            try:
-                store = Store(
-                    hass,
-                    version=1,
-                    key=f"{DOMAIN}_history_{entry.entry_id}",
-                )
-                await store.async_save(list(coordinator._history_buffer))
-            except Exception:
-                _LOGGER.warning(
-                    "Heating Assistant: failed to persist history buffer",
-                    exc_info=True,
-                )
+            from .history.startup_restore import async_stash_reload_state
+
+            await async_stash_reload_state(hass, entry, coordinator)
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unloaded
 
 
 # ---------------------------------------------------------------------------
-# Service helpers
+# Service registration
 # ---------------------------------------------------------------------------
-
-def _get_coordinator(hass: HomeAssistant) -> HeatingAssistantCoordinator:
-    return get_coordinator(hass)
-
 
 def _register_services(hass: HomeAssistant) -> None:
     """Register domain services for setup assistance."""

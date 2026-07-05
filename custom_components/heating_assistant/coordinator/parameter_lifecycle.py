@@ -536,7 +536,7 @@ async def async_estimate_parameters_ml(
     history_override: Optional[List[Dict[str, Any]]] = None,
     dataset_start_timestamps: Optional[List[float]] = None,
 ) -> Dict[str, Any]:
-    from ..history_window import select_recent_window
+    from ..history.window import select_recent_window
     from ..parameter_estimator import KalmanMLEstimator
 
     dt = _coerce_interval_seconds(coordinator._update_interval_s)

@@ -16,6 +16,46 @@ export async function updateEstimationParams(hass, data) {
   return ha(hass, 'update_estimation_params', data);
 }
 
+export async function revertParameters(hass, historyIndex) {
+  return ha(hass, 'revert_parameters', { history_index: historyIndex });
+}
+
+export async function applyHeaterScales(hass, scales) {
+  return ha(hass, 'apply_heater_scales', { scales });
+}
+
+export async function resetEstimatedParameters(hass) {
+  return ha(hass, 'reset_estimated_parameters', {});
+}
+
+export async function regenerateDashboard(hass) {
+  return ha(hass, 'regenerate_dashboard', {});
+}
+
+export async function simulateThermalResponse(hass, data) {
+  return ha(hass, 'simulate_thermal_response', data);
+}
+
+export async function estimateParameters(hass, data) {
+  return ha(hass, 'estimate_parameters', data);
+}
+
+export async function analyzeModelFit(hass, data = {}) {
+  return ha(hass, 'analyze_model_fit', data);
+}
+
+export async function validateParameters(hass, data = {}) {
+  return ha(hass, 'validate_parameters', data);
+}
+
+export async function controllerPerformanceReport(hass, data = {}) {
+  return ha(hass, 'controller_performance_report', data);
+}
+
+export async function computeLoglikSlice(hass, data) {
+  return ha(hass, 'compute_loglik_slice', data);
+}
+
 export async function setRoomComfortOffset(hass, roomName, comfortOffset) {
   return ha(hass, 'set_room_comfort_offset', {
     room_name: roomName,

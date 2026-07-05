@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
+import custom_components.heating_assistant.services.control as svc_mod
 
 
 def _capture_handler(hass):
@@ -35,7 +36,7 @@ def _make_coordinator(room_names):
 def _make_hass(coordinator, monkeypatch):
     hass = SimpleNamespace()
     hass.data = {}
-    monkeypatch.setattr(init_mod, "_get_coordinator", lambda _h: coordinator)
+    monkeypatch.setattr(svc_mod, "get_coordinator", lambda _h: coordinator)
     return hass
 
 

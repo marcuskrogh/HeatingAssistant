@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .naming import slugify
-from .history_seed import _samples_from_states
+from .history.seed import _samples_from_states
 from .kpi import TIME_IN_RANGE_WINDOW_S, room_time_in_range_pct
 
 _LOGGER = logging.getLogger(__name__)
