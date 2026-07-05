@@ -196,7 +196,7 @@ class WallTemperatureSensor(_LiveValueSensorMixin, CoordinatorEntity, SensorEnti
             self._room_name
         )
         try:
-            from .model_diagnostics import wall_state_observability
+            from ..model_diagnostics import wall_state_observability
             obs = wall_state_observability(room, dt=self._coordinator.dt)
         except Exception:
             obs = None

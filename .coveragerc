@@ -1,0 +1,13 @@
+[run]
+source = custom_components/heating_assistant
+omit =
+    */tests/*
+    */benchmarks/*
+branch = True
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+show_missing = True
+precision = 1

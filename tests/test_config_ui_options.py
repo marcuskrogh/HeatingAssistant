@@ -110,22 +110,20 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
         "outdoor_temp_entity",
         "weather_entity",
         "update_interval",
-        "sigma_w",
-        "sigma_v",
-        "sigma_b",
-        "window_open_debounce",
-        "window_open_close_settle",
-        "window_open_q_inflation",
     ):
         assert key in global_data
         assert key in global_desc
         assert global_data[key]  # non-empty label
         assert global_desc[key]  # non-empty description
 
-    # Labels stay friendly — no greek / "SDE" jargon.
+    # Estimation noise (sigma_w/v/b) is configured from the industrial panel, not
+    # the HA options-flow global step.
     for key in ("sigma_w", "sigma_v", "sigma_b"):
+        assert key not in global_data
+
+    # Labels stay friendly — no greek / "SDE" jargon in global settings.
+    for key in ("outdoor_temp_entity", "weather_entity"):
         assert "σ" not in global_data[key]
-        assert not global_data[key].startswith("SDE")
 
     assert "optional" in global_desc["outdoor_temp_entity"].lower()
     assert "outdoor temperature sensor" in global_desc["weather_entity"].lower()
@@ -178,7 +176,10 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
     assert "comfort_corridor_low" not in add_room_data
     assert "comfort_corridor_high" not in add_room_data
 
-    assert "manage_room_windows" in manage_rooms_menu
+    # Windows and heat sources are configured from the industrial panel, not the
+    # manage-rooms submenu.
+    assert "manage_room_windows" not in manage_rooms_menu
+    assert "manage_room_heaters" not in manage_rooms_menu
 
     # ── Schedule periods use the time picker (no HH:MM in labels). ──
     period = strings["options"]["step"]["add_period"]
@@ -409,15 +410,15 @@ def test_tuning_page_splits_live_and_restart_parameters() -> None:
 def test_sysid_pending_banner_hides_when_empty() -> None:
     """Sysid pending banner must respect [hidden] so empty orange box is not shown."""
     css = (
-        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "css"
-        / "industrial.css"
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "css" / "pages"
+        / "tuning.css"
     ).read_text(encoding="utf-8")
     assert ".tuning-pending-banner[hidden]" in css
     assert "display: none !important" in css
 
     source = (
-        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js" / "pages"
-        / "system-identification.js"
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
+        / "identification" / "sysid-detail.js"
     ).read_text(encoding="utf-8")
     assert "pendingBanner.hidden = !pending" in source
     assert "tuning-pending-banner--actions" in source
@@ -598,14 +599,19 @@ def test_kpi_engine_exports_room_time_in_range() -> None:
 def test_sysid_index_cards_show_core_kpis_and_dismissible_warnings() -> None:
     """System identification index cards must show R²/RMSE/Estimated and dismissible warnings."""
     source = (
-        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js" / "pages"
-        / "system-identification.js"
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
+        / "identification" / "sysid-index.js"
     ).read_text(encoding="utf-8")
     assert "identificationStat('R²'" in source
     assert "identificationStat('RMSE'" in source
     assert "identificationStat('Estimated'" in source
     assert "card_warnings" in source
     assert "data-dismiss-warning" in source
-    assert "DISMISSED_WARNINGS_KEY" in source
+    shared = (
+        REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
+        / "identification" / "sysid-shared.js"
+    ).read_text(encoding="utf-8")
+    assert "DISMISSED_WARNINGS_KEY" in shared
+    assert "loadDismissedWarnings" in source
     assert "identificationStat('MAE'" not in source
     assert "identificationStat('Confidence'" not in source

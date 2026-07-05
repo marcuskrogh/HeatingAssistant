@@ -157,10 +157,11 @@ def test_read_outdoor_temp_falls_back_to_weather_attribute():
     assert w.read_outdoor_temp(hass, "sensor.outdoor", "weather.home") == pytest.approx(4.1)
 
 
-def test_read_outdoor_temp_returns_fallback_when_all_unavailable():
+def test_read_outdoor_temp_returns_none_when_all_unavailable():
+    """Unavailable readings return None so the coordinator can skip MPC."""
     hass = MagicMock()
     hass.states.get.return_value = None
-    assert w.read_outdoor_temp(hass, "sensor.outdoor", "weather.home") == 5.0
+    assert w.read_outdoor_temp(hass, "sensor.outdoor", "weather.home") is None
 
 
 def test_read_cloud_cover_now_returns_none_without_entity():

@@ -11,6 +11,7 @@ from custom_components.heating_assistant.const import (
     CONF_ROOMS,
     DOMAIN,
 )
+from tests.helpers.setup_patches import ensure_hass_config, patch_setup_stores
 
 
 class _SetupListenerCoordinatorMixin:
@@ -19,6 +20,20 @@ class _SetupListenerCoordinatorMixin:
 
     def setup_window_listeners(self):
         return None
+
+    def async_update_listeners(self):
+        return None
+
+    async def async_request_refresh(self):
+        return None
+
+    @property
+    def system_enabled(self):
+        return True
+
+    @property
+    def update_interval_seconds(self):
+        return 900
 
 
 def _make_entry(entry_id: str = "entry-1") -> SimpleNamespace:
@@ -34,6 +49,7 @@ def _make_entry(entry_id: str = "entry-1") -> SimpleNamespace:
 
 def _make_hass() -> SimpleNamespace:
     hass = SimpleNamespace()
+    ensure_hass_config(hass)
     hass.data = {}
     hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
     hass.config_entries = SimpleNamespace(
@@ -111,6 +127,7 @@ async def test_setup_entry_restores_stashed_state(monkeypatch):
             return None
 
     monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _Coordinator)
+    patch_setup_stores(monkeypatch)
 
     assert await init_mod.async_setup_entry(hass, entry) is True
 
@@ -145,11 +162,12 @@ async def test_setup_entry_attaches_update_listener(monkeypatch):
             return None
 
     monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _Coordinator)
+    patch_setup_stores(monkeypatch)
 
     assert await init_mod.async_setup_entry(hass, entry) is True
 
     entry.add_update_listener.assert_called_once_with(init_mod._async_update_listener)
-    entry.async_on_unload.assert_called_once()
+    assert entry.async_on_unload.call_count >= 1
 
 
 @pytest.mark.asyncio

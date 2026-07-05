@@ -23,45 +23,27 @@ class _SetupListenerCoordinatorMixin:
     def setup_window_listeners(self):
         return None
 
+    def async_update_listeners(self):
+        return None
+
+    async def async_request_refresh(self):
+        return None
+
+    @property
+    def system_enabled(self):
+        return True
+
     @property
     def update_interval_seconds(self):
         return 900
 
 
-def _patch_setup_stores(monkeypatch):
-    """Stub heavy stores so async_setup_entry can run without HA."""
-
-    class _FakeIdHistoryStore:
-        async def async_setup(self):
-            return None
-
-        async def async_query_recent(self, _n):
-            return []
-
-    class _FakeDatasetStore:
-        async def async_load(self):
-            return None
-
-    class _FakeExperimentStore:
-        async def async_load(self):
-            return None
-
-    monkeypatch.setattr(
-        "custom_components.heating_assistant.history.store.IdentificationHistoryStore",
-        lambda *_a, **_kw: _FakeIdHistoryStore(),
-    )
-    monkeypatch.setattr(
-        "custom_components.heating_assistant.datasets.DatasetStore",
-        lambda *_a, **_kw: _FakeDatasetStore(),
-    )
-    monkeypatch.setattr(
-        "custom_components.heating_assistant.experiments.ExperimentStore",
-        lambda *_a, **_kw: _FakeExperimentStore(),
-    )
+from tests.helpers.setup_patches import ensure_hass_config, patch_setup_stores
 
 
 def _make_setup_hass():
     hass = SimpleNamespace()
+    ensure_hass_config(hass)
     hass.data = {DOMAIN: {"yaml_config": {CONF_ROOMS: [], CONF_HEAT_SOURCES: []}}}
     hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
     hass.config_entries = SimpleNamespace(
@@ -92,6 +74,7 @@ async def test_setup_entry_continues_on_first_refresh_failure(monkeypatch):
     }
 
     hass = SimpleNamespace()
+    ensure_hass_config(hass)
     hass.data = {DOMAIN: {"yaml_config": yaml_cfg}}
     hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
     hass.config_entries = SimpleNamespace(
@@ -107,6 +90,7 @@ async def test_setup_entry_continues_on_first_refresh_failure(monkeypatch):
             raise init_mod.ConfigEntryNotReady()
 
     monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _FailingCoordinator)
+    patch_setup_stores(monkeypatch)
 
     assert await init_mod.async_setup_entry(hass, entry) is True
 
@@ -134,6 +118,7 @@ async def test_setup_entry_uses_rooms_from_options_when_no_yaml(monkeypatch):
     )
 
     hass = SimpleNamespace()
+    ensure_hass_config(hass)
     hass.data = {DOMAIN: {}}  # no yaml_config
     hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
     hass.config_entries = SimpleNamespace(
@@ -151,6 +136,7 @@ async def test_setup_entry_uses_rooms_from_options_when_no_yaml(monkeypatch):
             pass
 
     monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _CapturingCoordinator)
+    patch_setup_stores(monkeypatch)
 
     assert await init_mod.async_setup_entry(hass, entry) is True
 
@@ -173,6 +159,7 @@ async def test_setup_entry_yaml_overrides_options_rooms(monkeypatch):
     )
 
     hass = SimpleNamespace()
+    ensure_hass_config(hass)
     hass.data = {DOMAIN: {"yaml_config": {CONF_ROOMS: yaml_rooms}}}
     hass.services = SimpleNamespace(has_service=MagicMock(return_value=True))
     hass.config_entries = SimpleNamespace(
@@ -190,6 +177,7 @@ async def test_setup_entry_yaml_overrides_options_rooms(monkeypatch):
             pass
 
     monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _CapturingCoordinator)
+    patch_setup_stores(monkeypatch)
 
     assert await init_mod.async_setup_entry(hass, entry) is True
 
@@ -346,7 +334,7 @@ async def test_setup_entry_engages_controller_from_persisted_state(
             return None
 
     monkeypatch.setattr(init_mod, "HeatingAssistantCoordinator", _Coordinator)
-    _patch_setup_stores(monkeypatch)
+    patch_setup_stores(monkeypatch)
 
     assert await init_mod.async_setup_entry(hass, entry) is True
     assert len(refresh_calls) == expect_refresh

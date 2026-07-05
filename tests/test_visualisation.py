@@ -19,6 +19,7 @@ from custom_components.heating_assistant.thermal_model import (
 from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
 from custom_components.heating_assistant.controller import HeatingMPCController as MPCController
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+from tests.helpers.coordinator_stubs import wire_room_enablement
 from custom_components.heating_assistant.sensor import (
     HeatingPowerForecastSensor,
     SolarGainForecastSensor,
@@ -532,241 +533,135 @@ class TestForecastSensorsReportUnknownOnEmpty:
 
 
 # ---------------------------------------------------------------------------
-# Tests: forecast sensor timestamp correctness
+# Tests: forecast payload timestamp correctness (WS API)
 # ---------------------------------------------------------------------------
 
-class TestForecastSensorTimestamps:
-    """Verify that forecast attribute timestamps match the solar forecast values."""
+def _make_forecast_payload_coord(*, horizon: int = 4, dt: int = 900):
+    """Coordinator stub for build_forecast_payload timestamp tests."""
+    room = SimpleNamespace(temperature=20.0, setpoint=21.0, comfort_offset=2.0, windows=[])
+    n_plus_one = horizon + 1
+    solar = [{"studio": float(k * 100)} for k in range(n_plus_one)]
+    coord = SimpleNamespace(
+        solar_forecast=solar,
+        solar_gains={"studio": solar[0]["studio"]},
+        outdoor_forecast=[5.0] * horizon,
+        heating_schedule=[{"studio": 1000.0 + k} for k in range(horizon)],
+        predictions=[{"studio": 21.0 + k * 0.1} for k in range(horizon)],
+        linearised_predictions=[],
+        price_forecast=[0.10] * horizon,
+        model=SimpleNamespace(
+            rooms={"studio": room},
+            room_names=["studio"],
+            predict=MagicMock(return_value=[]),
+        ),
+        heat_sources=[SimpleNamespace(room="studio", max_power=2000.0, current_power=500.0)],
+        outdoor_temp=5.0,
+        filtered_temperatures={"studio": 19.8},
+        dt=dt,
+        _update_interval_s=dt,
+        now_utc=datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc),
+        _control_trajectory=None,
+    )
+    coord.sources_for_room = lambda r: [
+        s for s in coord.heat_sources if getattr(s, "room", None) == r
+    ]
+    wire_room_enablement(coord)
+    coord.build_forecast_payload = (
+        HeatingAssistantCoordinator.build_forecast_payload.__get__(coord)
+    )
+    return coord
 
-    _DT = 900  # seconds per step
 
-    def _make_coordinator(self, horizon: int, solar_values: list):
-        """Create a minimal coordinator stub with populated solar_forecast."""
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        # solar_forecast has N+1 entries (k=0...N), one per time step from now
-        return SimpleNamespace(
-            solar_forecast=solar_values,
-            solar_gains={"studio": solar_values[0].get("studio", 0.0)},
-            outdoor_forecast=[5.0] * horizon,
-            heating_schedule=[{"studio": 1000.0}] * horizon,
-            predictions=[{"studio": 21.0}] * horizon,
-            model=SimpleNamespace(rooms={"studio": room}),
-            heat_sources=[],
-            outdoor_temp=5.0,
-            dt=self._DT,
-            controller=SimpleNamespace(constraint_offset=2.0),
-        )
+class TestForecastPayloadTimestamps:
+    """Timestamped forecasts are served via build_forecast_payload (not HA attributes)."""
 
-    def test_solar_forecast_entry_count(self):
-        """SolarGainForecastSensor forecast list must have N+1 entries (bridge + N steps)."""
-        solar = [{"studio": float(k * 100)} for k in range(5)]  # N+1 = 5 → N=4
-        coordinator = self._make_coordinator(horizon=4, solar_values=solar)
-        sensor = SolarGainForecastSensor(coordinator, "studio")
+    _DT = 900
 
-        attrs = sensor.extra_state_attributes
-        assert len(attrs["forecast"]) == 5  # N+1 entries
+    def test_solar_forecast_entry_count_in_payload(self):
+        coord = _make_forecast_payload_coord(horizon=4)
+        payload = coord.build_forecast_payload()
+        room_fc = payload["rooms"]["studio"]["forecast"]
+        assert len(room_fc) == 5  # bridge + 4 horizon steps
 
-    def test_solar_forecast_first_entry_at_now(self):
-        """First forecast entry must be at 'now' (the bridge point)."""
-        solar = [{"studio": 50.0}]
-        coordinator = self._make_coordinator(horizon=0, solar_values=solar)
-        sensor = SolarGainForecastSensor(coordinator, "studio")
+    def test_forecast_first_entry_at_now(self):
+        coord = _make_forecast_payload_coord(horizon=2)
+        payload = coord.build_forecast_payload()
+        t0 = datetime.fromisoformat(payload["rooms"]["studio"]["forecast"][0]["time"])
+        assert t0 == coord.now_utc
 
-        before = datetime.now(tz=timezone.utc)
-        attrs = sensor.extra_state_attributes
-        after = datetime.now(tz=timezone.utc)
-
-        t0 = datetime.fromisoformat(attrs["forecast"][0]["time"])
-        assert before <= t0 <= after
-
-    def test_solar_forecast_timestamps_spaced_by_dt(self):
-        """Each consecutive forecast entry must be exactly dt seconds apart."""
-        dt = self._DT
-        solar = [{"studio": float(k * 10)} for k in range(5)]  # N+1 = 5
-        coordinator = self._make_coordinator(horizon=4, solar_values=solar)
-        sensor = SolarGainForecastSensor(coordinator, "studio")
-
-        attrs = sensor.extra_state_attributes
-        fc = attrs["forecast"]
+    def test_forecast_timestamps_spaced_by_dt(self):
+        coord = _make_forecast_payload_coord(horizon=4, dt=self._DT)
+        payload = coord.build_forecast_payload()
+        fc = payload["rooms"]["studio"]["forecast"]
         for i in range(1, len(fc)):
             t_prev = datetime.fromisoformat(fc[i - 1]["time"])
             t_curr = datetime.fromisoformat(fc[i]["time"])
-            gap = (t_curr - t_prev).total_seconds()
-            assert gap == pytest.approx(dt, abs=1.0)
+            assert (t_curr - t_prev).total_seconds() == pytest.approx(self._DT, abs=1.0)
 
-    def test_solar_forecast_values_match_source(self):
-        """Each entry's solar_gain must come from the corresponding solar_forecast slot."""
-        solar = [{"studio": float(k * 10)} for k in range(5)]
-        coordinator = self._make_coordinator(horizon=4, solar_values=solar)
-        sensor = SolarGainForecastSensor(coordinator, "studio")
+    def test_solar_gain_values_match_source(self):
+        coord = _make_forecast_payload_coord(horizon=4)
+        payload = coord.build_forecast_payload()
+        fc = payload["rooms"]["studio"]["forecast"]
+        assert fc[0]["solar_gain"] == pytest.approx(coord.solar_gains["studio"], abs=0.11)
+        for i in range(1, len(fc)):
+            slot = coord.solar_forecast[i - 1]
+            assert fc[i]["solar_gain"] == pytest.approx(slot["studio"], abs=0.11)
 
+    def test_forecast_sensor_attributes_are_metadata_only(self):
+        """Sensor attributes must not embed large timestamped forecast arrays."""
+        coord = _make_forecast_payload_coord(horizon=6)
+        sensor = SolarGainForecastSensor(coord, "studio")
         attrs = sensor.extra_state_attributes
-        fc = attrs["forecast"]
-        for i, expected in enumerate(solar):
-            assert fc[i]["solar_gain"] == pytest.approx(expected["studio"], abs=0.11)
-
-    def test_solar_forecast_horizon_steps_attribute(self):
-        """horizon_steps must equal N (the OCP horizon), not N+1."""
-        solar = [{"studio": 0.0}] * 7  # N+1 = 7 → N = 6
-        coordinator = self._make_coordinator(horizon=6, solar_values=solar)
-        sensor = SolarGainForecastSensor(coordinator, "studio")
-
-        attrs = sensor.extra_state_attributes
+        assert "forecast" not in attrs
         assert attrs["horizon_steps"] == 6
 
-    def test_solar_forecast_fallback_when_empty(self):
-        """When solar_forecast is empty, a single bridge entry at now is returned."""
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        coordinator = SimpleNamespace(
-            solar_forecast=[],
-            solar_gains={"studio": 123.4},
-            model=SimpleNamespace(rooms={"studio": room}),
-            heat_sources=[],
-            predictions=[],
-            outdoor_forecast=[],
-            heating_schedule=[],
-            outdoor_temp=5.0,
-            dt=self._DT,
-        )
-        sensor = SolarGainForecastSensor(coordinator, "studio")
-
+    def test_heating_power_sensor_metadata_matches_schedule(self):
+        coord = _make_forecast_payload_coord(horizon=8)
+        sensor = HeatingPowerForecastSensor(coord, "studio")
         attrs = sensor.extra_state_attributes
-        assert len(attrs["forecast"]) == 1
-        assert attrs["forecast"][0]["solar_gain"] == pytest.approx(123.4, abs=0.1)
-
-
-# ---------------------------------------------------------------------------
-# Tests: heating plan forecast timestamp correctness
-# ---------------------------------------------------------------------------
-
-class TestHeatingPlanForecastTimestamps:
-    """Verify that HeatingPowerForecastSensor forecast timestamps use start-of-interval labelling."""
-
-    _DT = 900  # seconds per step
-
-    def _make_coordinator(self, horizon: int, power: float = 1000.0):
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        return SimpleNamespace(
-            heating_schedule=[{"studio": power}] * horizon,
-            heat_sources=[SimpleNamespace(room="studio", current_power=power)],
-            model=SimpleNamespace(rooms={"studio": room}),
-            solar_forecast=[],
-            solar_gains={},
-            predictions=[],
-            outdoor_forecast=[],
-            outdoor_temp=5.0,
-            dt=self._DT,
-        )
-
-    def test_heating_plan_entry_count_equals_horizon(self):
-        """forecast list must have exactly N entries for an N-step schedule."""
-        coordinator = self._make_coordinator(horizon=6)
-        sensor = HeatingPowerForecastSensor(coordinator, "studio")
-
-        attrs = sensor.extra_state_attributes
-        assert len(attrs["forecast"]) == 6
-
-    def test_heating_plan_first_entry_at_now(self):
-        """First forecast entry must be labelled at 'now' (bridges history)."""
-        coordinator = self._make_coordinator(horizon=4)
-        sensor = HeatingPowerForecastSensor(coordinator, "studio")
-
-        before = datetime.now(tz=timezone.utc)
-        attrs = sensor.extra_state_attributes
-        after = datetime.now(tz=timezone.utc)
-
-        t0 = datetime.fromisoformat(attrs["forecast"][0]["time"])
-        assert before <= t0 <= after
-
-    def test_heating_plan_timestamps_spaced_by_dt(self):
-        """Consecutive forecast entries must be exactly dt seconds apart."""
-        coordinator = self._make_coordinator(horizon=5)
-        sensor = HeatingPowerForecastSensor(coordinator, "studio")
-
-        attrs = sensor.extra_state_attributes
-        fc = attrs["forecast"]
-        for i in range(1, len(fc)):
-            t_prev = datetime.fromisoformat(fc[i - 1]["time"])
-            t_curr = datetime.fromisoformat(fc[i]["time"])
-            gap = (t_curr - t_prev).total_seconds()
-            assert gap == pytest.approx(self._DT, abs=1.0)
-
-    def test_heating_plan_values_match_schedule(self):
-        """Each entry's heating_power must come from the corresponding schedule slot."""
-        powers = [100.0 * (i + 1) for i in range(4)]
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        coordinator = SimpleNamespace(
-            heating_schedule=[{"studio": p} for p in powers],
-            heat_sources=[],
-            model=SimpleNamespace(rooms={"studio": room}),
-            solar_forecast=[],
-            solar_gains={},
-            predictions=[],
-            outdoor_forecast=[],
-            outdoor_temp=5.0,
-            dt=self._DT,
-        )
-        sensor = HeatingPowerForecastSensor(coordinator, "studio")
-
-        attrs = sensor.extra_state_attributes
-        fc = attrs["forecast"]
-        for i, expected in enumerate(powers):
-            assert fc[i]["heating_power"] == pytest.approx(expected, abs=0.11)
-
-    def test_heating_plan_horizon_steps_attribute(self):
-        """horizon_steps must equal N (the OCP horizon length)."""
-        coordinator = self._make_coordinator(horizon=8)
-        sensor = HeatingPowerForecastSensor(coordinator, "studio")
-
-        attrs = sensor.extra_state_attributes
+        assert "forecast" not in attrs
         assert attrs["horizon_steps"] == 8
+        assert attrs["max_power"] == pytest.approx(2000.0)
 
-    def test_heating_plan_fallback_when_empty(self):
-        """When schedule is empty, a single bridge entry from current_power is returned."""
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        sources = [SimpleNamespace(room="studio", current_power=432.0)]
-        coordinator = SimpleNamespace(
-            heating_schedule=[],
-            heat_sources=sources,
-            model=SimpleNamespace(rooms={"studio": room}),
-            solar_forecast=[],
-            solar_gains={},
-            predictions=[],
-            outdoor_forecast=[],
-            outdoor_temp=5.0,
-            dt=self._DT,
-        )
-        coordinator.sources_for_room = (
-            lambda r: [s for s in coordinator.heat_sources if s.room == r]
-        )
-        sensor = HeatingPowerForecastSensor(coordinator, "studio")
+    def test_empty_solar_forecast_yields_unknown_state(self):
+        coord = _make_forecast_payload_coord(horizon=0)
+        coord.solar_forecast = []
+        sensor = SolarGainForecastSensor(coord, "studio")
+        assert sensor.native_value is None
 
-        attrs = sensor.extra_state_attributes
-        assert len(attrs["forecast"]) == 1
-        assert attrs["forecast"][0]["heating_power"] == pytest.approx(432.0, abs=0.1)
 
-    def test_heating_plan_fallback_missing_current_power(self):
-        """Fallback must use getattr guard — missing current_power defaults to 0."""
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        sources = [SimpleNamespace(room="studio")]  # no current_power attr
-        coordinator = SimpleNamespace(
-            heating_schedule=[],
-            heat_sources=sources,
-            model=SimpleNamespace(rooms={"studio": room}),
-            solar_forecast=[],
-            solar_gains={},
-            predictions=[],
-            outdoor_forecast=[],
-            outdoor_temp=5.0,
-            dt=self._DT,
-        )
-        coordinator.sources_for_room = (
-            lambda r: [s for s in coordinator.heat_sources if s.room == r]
-        )
-        sensor = HeatingPowerForecastSensor(coordinator, "studio")
-
-        attrs = sensor.extra_state_attributes
-        assert attrs["forecast"][0]["heating_power"] == pytest.approx(0.0, abs=0.1)
+def _wire_mpc_resilience_coordinator(coordinator) -> None:
+    """Attach mocks required by the post-refactor mpc_cycle orchestration."""
+    coordinator._rooms_ever_measured = set(
+        getattr(coordinator, "measured_temperatures", {}) or {}
+    )
+    coordinator._outdoor_entity = None
+    coordinator._system_enabled = True
+    coordinator._apply_pending_runtime_reconfiguration = MagicMock()
+    coordinator._compute_control_trajectory = MagicMock(return_value=None)
+    coordinator._update_window_state_machine = MagicMock()
+    coordinator._async_read_price_forecast = AsyncMock(return_value=None)
+    coordinator._async_read_wind_forecast = AsyncMock(return_value=None)
+    coordinator._smooth_cloud_cover = MagicMock(side_effect=lambda x: x)
+    coordinator._read_ghi = MagicMock(return_value=(None, None))
+    coordinator._read_wind_speed_now = MagicMock(return_value=None)
+    coordinator._ensure_runtime_state_loaded = AsyncMock()
+    coordinator._async_refresh_time_in_range_kpis_if_due = AsyncMock()
+    coordinator.is_window_override_active = MagicMock(return_value=False)
+    coordinator._read_cloud_cover_now = MagicMock(return_value=None)
+    coordinator._async_read_cloud_forecast = AsyncMock(return_value=None)
+    coordinator.experiment_manager = MagicMock()
+    coordinator.experiment_manager.advance.return_value = {
+        "completed": [],
+        "started": [],
+    }
+    coordinator._apply_schedule = MagicMock()
+    coordinator.id_history_store = MagicMock()
+    coordinator.id_history_store.async_append = AsyncMock()
+    coordinator.id_history_store.async_purge_old = AsyncMock()
+    coordinator.solar_source = "analytical"
+    coordinator.estimated_internal_gains = {}
+    coordinator._pending_ekf_state = None
 
 
 # ---------------------------------------------------------------------------
@@ -828,6 +723,7 @@ class TestCoordinatorUpdateResilience:
         coordinator.controller.heating_schedule = [{"studio": 900.0}]
         coordinator.controller.last_innovation = [0.0]
         coordinator.controller.filtered_temperatures = {"studio": 15.05}
+        _wire_mpc_resilience_coordinator(coordinator)
 
         result = await coordinator._async_update_data()
 
@@ -896,6 +792,7 @@ class TestCoordinatorUpdateResilience:
         coordinator.controller.last_innovation = None
         coordinator.controller.filtered_temperatures = {}
 
+        _wire_mpc_resilience_coordinator(coordinator)
         assert coordinator.measured_temperatures == {"studio": 15.0}
         await coordinator._async_update_data()
 
@@ -957,6 +854,7 @@ class TestCoordinatorUpdateResilience:
         coordinator.controller.last_innovation = None
         coordinator.controller.filtered_temperatures = {}
 
+        _wire_mpc_resilience_coordinator(coordinator)
         await coordinator._async_update_data()
 
         assert coordinator.measured_temperatures == {}
@@ -1017,6 +915,7 @@ class TestCoordinatorUpdateResilience:
         coordinator._apply_actions = AsyncMock()
         coordinator.controller = MagicMock()
         coordinator.controller.compute.side_effect = RuntimeError("OCP failed")
+        _wire_mpc_resilience_coordinator(coordinator)
 
         result = await coordinator._async_update_data()
 
@@ -1083,6 +982,7 @@ class TestCoordinatorUpdateResilience:
         coordinator._apply_actions = AsyncMock()
         coordinator.controller = MagicMock()
         coordinator.controller.compute.side_effect = RuntimeError("OCP failed")
+        _wire_mpc_resilience_coordinator(coordinator)
 
         result = await coordinator._async_update_data()
 

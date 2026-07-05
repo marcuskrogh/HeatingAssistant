@@ -34,6 +34,7 @@ def _make_room(name="living_room", thermal_mass=5_000_000.0, r_external=0.05, in
     room.thermal_mass = thermal_mass
     room.r_external = r_external
     room.internal_gain = internal_gain
+    room.solar_scale = 1.0
     room.connections = []
     room.temperature = 21.0
     room.setpoint = 21.0
@@ -50,14 +51,16 @@ def _make_source(name="heater", power_scale=1.0, max_power=2000.0, room="lr"):
 
 
 def _make_model(rooms):
+    import numpy as np
+
     model = SimpleNamespace()
     model.rooms = {r.name: r for r in rooms}
     model.room_names = [r.name for r in rooms]
-    model._C = None
-    model._A = None
-    model._B_ext = None
-    model._B_ground = None
-    model._build_matrices = lambda: ("C", "A", "B_ext")
+    model._C = np.array([float(r.thermal_mass) for r in rooms])
+    model._A = np.zeros((2 * len(rooms), 2 * len(rooms)))
+    model._B_ext = np.zeros(2 * len(rooms))
+    model._B_ground = np.zeros(2 * len(rooms))
+    model._build_matrices = lambda: (model._C, model._A, model._B_ext)
     model.rebuild_derived_parameters = lambda: None
     return model
 
@@ -143,6 +146,12 @@ class _FakeCoordinator:
             index.setdefault(src.room, []).append(src)
         self._sources_by_room = index
 
+    def _build_controller(self) -> None:
+        from custom_components.heating_assistant.controller import factory as factory_mod
+
+        config = factory_mod.ControllerBuildConfig.from_coordinator(self)
+        self.controller = factory_mod.build_mpc_controller(config)
+
     def _drop_orphaned_sources(self, sources):
         """Mirror the real coordinator: keep only sources with a known room."""
         known_rooms = set(self.model.rooms)
@@ -163,7 +172,7 @@ def test_apply_estimated_parameters_sets_internal_gain_and_power_scale():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.coordinator.HeatingMPCController",
+        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ) as m_controller:
         coord_mod.HeatingAssistantCoordinator._apply_estimated_parameters(
@@ -200,7 +209,7 @@ def test_apply_estimated_parameters_persists_snapshot():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.coordinator.HeatingMPCController",
+        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator._apply_estimated_parameters(
@@ -229,7 +238,7 @@ def test_apply_estimated_parameters_updates_instance_vars():
     coordinator = _FakeCoordinator()
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.coordinator.HeatingMPCController",
+        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator._apply_estimated_parameters(
@@ -277,9 +286,10 @@ def test_restore_estimated_parameters_applies_to_model():
     assert coordinator.model.rooms["lr"].r_external == pytest.approx(0.02)
     assert coordinator.model.rooms["lr"].internal_gain == pytest.approx(80.0)
     assert src.power_scale == pytest.approx(1.4)
-    assert coordinator.model._C == "C"
-    assert coordinator.model._A == "A"
-    assert coordinator.model._B_ext == "B_ext"
+    assert coordinator.model._C is not None
+    assert len(coordinator.model._C) == 1
+    assert coordinator.model._A is not None
+    assert coordinator.model._B_ext is not None
     assert coordinator._estimation_timestamp == "2025-01-01T00:00:00+00:00"
     assert coordinator._estimation_log_likelihood == pytest.approx(-55.0)
 
@@ -333,7 +343,7 @@ def test_store_identified_parameters_snapshot_survives_restart():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.coordinator.HeatingMPCController",
+        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator.store_identified_parameters(
@@ -371,7 +381,7 @@ def test_store_identified_parameters_applies_full_parameter_set():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.coordinator.HeatingMPCController",
+        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator.store_identified_parameters(
@@ -484,7 +494,7 @@ def test_reset_estimated_parameters_removes_snapshot_and_rebuilds():
             return_value=[_make_source()],
         ),
         patch(
-            "custom_components.heating_assistant.coordinator.HeatingMPCController",
+            "custom_components.heating_assistant.controller.factory.HeatingMPCController",
             return_value=mock_controller,
         ) as m_controller,
     ):
@@ -685,23 +695,12 @@ async def test_async_estimate_ml_passes_internal_gains_and_heater_scales():
 
     captured: dict = {}
 
-    def _fake_apply(
-        self_,
-        estimated_params,
-        estimated_inter_room_r=None,
-        estimated_internal_gains=None,
-        estimated_heater_scales=None,
-        estimated_solar_scales=None,
-        estimated_envelope_splits=None,
-        log_likelihood=None,
-    ):
-        captured["internal_gains"] = estimated_internal_gains
-        captured["heater_scales"] = estimated_heater_scales
-        captured["log_likelihood"] = log_likelihood
+    def _fake_apply(coordinator, estimated_params, estimated_inter_room_r=None, **kwargs):
+        captured["internal_gains"] = kwargs.get("estimated_internal_gains")
+        captured["heater_scales"] = kwargs.get("estimated_heater_scales")
+        captured["log_likelihood"] = kwargs.get("log_likelihood")
 
     coordinator = _FakeCoordinator()
-    # Add the method so the bound call works
-    coordinator._apply_estimated_parameters = lambda *a, **kw: _fake_apply(coordinator, *a, **kw)
 
     ml_result = {
         "success": True,
@@ -715,7 +714,7 @@ async def test_async_estimate_ml_passes_internal_gains_and_heater_scales():
     class _FakeEstimator:
         def __init__(self, **kw):
             pass
-        def estimate(self, history):
+        def estimate(self, history, locked_params=None, **kwargs):
             return ml_result
 
     coordinator.hass = SimpleNamespace(
@@ -728,6 +727,9 @@ async def test_async_estimate_ml_passes_internal_gains_and_heater_scales():
     with patch(
         "custom_components.heating_assistant.parameter_estimator.KalmanMLEstimator",
         _FakeEstimator,
+    ), patch(
+        "custom_components.heating_assistant.coordinator.parameter_lifecycle.apply_estimated_parameters",
+        _fake_apply,
     ):
         await coord_mod.HeatingAssistantCoordinator.async_estimate_parameters_ml(
             coordinator, apply_params=True

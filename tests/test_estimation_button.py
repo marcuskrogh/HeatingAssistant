@@ -30,7 +30,7 @@ async def test_estimate_parameters_ml_passes_float_dt():
             captured["dt_type"] = type(dt)
             captured["max_window_steps"] = max_window_steps
 
-        def estimate(self, history):
+        def estimate(self, history, locked_params=None, **kwargs):
             return {"success": False}
 
     # Minimal coordinator stand-in – only the attributes used by the method.
@@ -75,7 +75,7 @@ async def test_estimate_parameters_ml_accepts_timedelta_update_interval():
             captured["dt_type"] = type(dt)
             captured["max_window_steps"] = max_window_steps
 
-        def estimate(self, history):
+        def estimate(self, history, locked_params=None, **kwargs):
             return {"success": False}
 
     coordinator = SimpleNamespace()

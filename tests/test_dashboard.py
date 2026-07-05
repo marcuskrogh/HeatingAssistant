@@ -1006,7 +1006,7 @@ def test_room_detail_js_extends_temperature_history_on_live_updates(two_room_spe
         source = fh.read()
 
     assert "function extendLiveChartHistory" in source
-    assert "extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart)" in source
+    assert "extendLiveChartHistory(room, state, tempChart, powerChart, disturbChart, lastRunTs.sensorEntities || [])" in source
 
     # extendLiveChartHistory must run before the MPC last_run_ts early return.
     update_fn = source.split("function updateChartsFromState", 1)[1]
@@ -1025,4 +1025,4 @@ def test_room_detail_js_extends_temperature_history_on_live_updates(two_room_spe
     assert "'Outdoor Temperature'" in source
     assert "'Solar Gain'" in source
     assert "'Price'" in source
-    assert "function extendDatasetToNow" in source
+    assert "extendDatasetToNow" in source

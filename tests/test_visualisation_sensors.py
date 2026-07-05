@@ -58,7 +58,9 @@ def _make_coordinator(
         last_update_success=True,
         _horizon=6,
         dt=900,
+        _room_enabled={"living_room": True},
     )
+    coord.is_room_enabled = lambda name: coord._room_enabled.get(name, True)
     coord.sources_for_room = lambda r: [s for s in coord.heat_sources if s.room == r]
     return coord
 

@@ -52,10 +52,13 @@ def test_mpc_performance_sensor_remains_available_with_controller(last_update_su
             terminal_weight=100.0,
         ),
         dt=900,
+        filtered_temperatures={"living_room": 20.0},
+        measured_temperatures={"living_room": 20.0},
         model=SimpleNamespace(
             room_names=["living_room"],
             rooms={"living_room": SimpleNamespace(temperature=20.0, setpoint=21.5)},
         ),
+        is_room_enabled=lambda _name: True,
     )
 
     sensor = MPCPerformanceSensor(coordinator)
