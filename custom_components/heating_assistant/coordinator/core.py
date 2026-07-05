@@ -209,7 +209,7 @@ from ..heat_sources import (
 from ..thermal_model import HouseModel, Room, RoomConnection, Window
 from ..controller import HeatingMPCController
 from ..controller.factory import ControllerBuildConfig, build_mpc_controller
-from . import actuation
+from . import actuation, disturbances, enablement, forecast_payload
 from .model_builders import build_heat_sources, build_house_model
 from .types import (
     ControlTrajectory,
@@ -218,11 +218,8 @@ from .types import (
 )
 from ..ground_temp import ground_temperature
 from ..solar_model import (
-    room_solar_gains,
-    room_solar_gains_from_exposure,
     horizontal_irradiance,
 )
-from .. import solar_forecast as _solar_fc
 from ..schedule import (
     EffectiveControlParams,
     EffectiveSetpoint,
@@ -233,7 +230,6 @@ from ..schedule import (
     resolve_effective_control_params,
     resolve_effective_setpoint,
 )
-from .. import electricity_price as _electricity_price
 from .. import weather as _weather
 from ..experiments import (
     ExperimentManager,
@@ -1486,416 +1482,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         control_trajectory: Optional["ControlTrajectory"] = None,
         step_dt: Optional[float] = None,
     ) -> dict:
-        """Build the full forecast payload for WebSocket delivery.
-
-        Returns per-room trajectory/forecast arrays plus the outdoor and price
-        forecasts.  This is the authoritative source used by the custom
-        ``heating_assistant/get_forecasts`` WS command; sensor attributes only
-        keep lightweight metadata to stay under HA Recorder's 16 KB limit.
-
-        ``plot_forecast_steps`` lets the dashboard request a plot horizon that
-        differs from the controller (MPC) horizon.  This is purely a *display*
-        horizon and never changes the control problem:
-
-        * ``None`` (default) → use the full controller horizon (legacy
-          behaviour).
-        * ``<= len(predictions)`` → truncate to that many steps.
-        * ``> len(predictions)`` → extend past the controller horizon by
-          **holding the final actuation flat** and simulating the thermal
-          model forward, so the plotted trajectory continues smoothly.  The
-          extended steps are flagged with ``"extended": True``.
-
-        Optional keyword overrides let :meth:`preview_tuning_forecast` build a
-        payload from a one-off MPC solve without mutating the live coordinator
-        state.
-        """
-        from ..dashboard import slugify as _slugify
-
-        if room_names is None:
-            room_names = self.model.room_names
-
-        now = getattr(self, "now_utc", None) or datetime.now(tz=timezone.utc)
-        dt = float(step_dt if step_dt is not None else self.dt)
-        predictions = self.predictions if predictions is None else predictions
-        outdoor_forecast = (
-            self.outdoor_forecast if outdoor_forecast is None else outdoor_forecast
+        return forecast_payload.build_forecast_payload(
+            self,
+            room_names,
+            plot_forecast_steps,
+            predictions=predictions,
+            linearised_predictions=linearised_predictions,
+            heating_schedule=heating_schedule,
+            outdoor_forecast=outdoor_forecast,
+            solar_forecast=solar_forecast,
+            price_forecast=price_forecast,
+            control_trajectory=control_trajectory,
+            step_dt=step_dt,
         )
-        solar_forecast = (
-            self.solar_forecast if solar_forecast is None else solar_forecast
-        )
-        heating_schedule = (
-            self.heating_schedule if heating_schedule is None else heating_schedule
-        )
-        linearised_predictions = (
-            self.linearised_predictions
-            if linearised_predictions is None
-            else linearised_predictions
-        )
-        if price_forecast is None:
-            price_forecast = self.price_forecast or []
-        traj = (
-            getattr(self, "_control_trajectory", None)
-            if control_trajectory is None
-            else control_trajectory
-        )
-
-        # Resolve the requested display horizon and precompute the (house-wide)
-        # forward simulation used to extend the plot beyond the MPC horizon.
-        n_pred = len(predictions)
-        n_outdoor_all = len(outdoor_forecast)
-        if plot_forecast_steps is None:
-            target_steps = n_pred
-        else:
-            target_steps = max(0, int(plot_forecast_steps))
-        main_n = min(target_steps, n_pred)
-        # Extension needs a base trajectory to simulate forward from; with no
-        # controller predictions yet there is nothing to hold flat.
-        extra = max(0, target_steps - n_pred) if n_pred > 0 else 0
-
-        extended_predictions: List[Dict[str, float]] = []
-        outdoor_ext: List[float] = []
-        last_heat_step: Dict[str, float] = {}
-        last_solar_step: Dict[str, float] = {}
-        if extra > 0 and n_pred > 0:
-            last_heat_step = dict(heating_schedule[-1]) if heating_schedule else {}
-            last_solar_step = dict(solar_forecast[-1]) if solar_forecast else {}
-            last_outdoor = (
-                outdoor_forecast[-1] if outdoor_forecast
-                else (self.outdoor_temp if self.outdoor_temp is not None else 0.0)
-            )
-            for k in range(extra):
-                idx = n_pred + k
-                outdoor_ext.append(
-                    outdoor_forecast[idx] if idx < n_outdoor_all else last_outdoor
-                )
-            try:
-                extended_predictions = self.model.predict(
-                    horizon=extra,
-                    dt=dt,
-                    heat_schedule=[last_heat_step] * extra,
-                    outdoor_temps=outdoor_ext,
-                    solar_gain_schedule=[last_solar_step] * extra,
-                    initial_temps=predictions[-1],
-                )
-            except Exception:  # pragma: no cover - defensive: never break the plot
-                _LOGGER.debug(
-                    "Forecast plot extension failed; showing controller horizon only",
-                    exc_info=True,
-                )
-                extended_predictions = []
-                extra = 0
-
-        rooms_payload: dict = {}
-        for room_name in room_names:
-            room = self.model.rooms[room_name]
-            step_sp = traj.setpoints.get(room_name) if traj is not None else None
-            step_off = traj.comfort_offsets.get(room_name) if traj is not None else None
-            step_enabled = traj.enabled_steps.get(room_name) if traj is not None else None
-            comfort_offset = float(getattr(room, "comfort_offset", 2.0))
-            # Horizon steps an experiment governs this cycle (control at now+i·dt),
-            # so the frontend can shade the experiment region exactly on the same
-            # grid the actuator signal is drawn on.
-            exp_steps = getattr(self, "_experiment_horizon_steps", {}).get(room_name)
-
-            room_sources = self.sources_for_room(room_name)
-            outdoor_now = self.outdoor_temp if self.outdoor_temp is not None else 0.0
-
-            def _rated_heat_cap(src: Any, t_out: float) -> float:
-                fn = getattr(src, "rated_heating_capacity", None)
-                if callable(fn):
-                    return float(fn(t_out))
-                if hasattr(src, "thermal_power"):
-                    return float(src.thermal_power(1.0, t_out))
-                return float(getattr(src, "max_power", 0.0) or 0.0)
-
-            def _delivered_heat_cap(src: Any, t_out: float) -> float:
-                return _rated_heat_cap(src, t_out)
-
-            def _heat_cap(t_out: float, _src=room_sources) -> float:
-                return round(sum(_rated_heat_cap(s, t_out) for s in _src), 1)
-
-            def _cool_cap(t_out: float, _src=room_sources) -> float:
-                return round(sum(
-                    s.rated_cooling_power
-                    for s in _src
-                    if getattr(s, "can_cool", False)
-                    and hasattr(s, "rated_cooling_power")
-                ), 1)
-
-            current_heating = sum(
-                getattr(s, "current_power", 0.0)
-                for s in room_sources
-            )
-            current_solar = self.solar_gains.get(room_name, 0.0)
-            filtered_now = self.filtered_temperatures.get(room_name)
-            now_temp = (
-                round(float(filtered_now), 2)
-                if filtered_now is not None
-                else round(room.temperature, 2)
-            )
-            now_sp = round(float(room.setpoint), 2)
-            now_enabled = self.is_room_enabled(room_name)
-
-            _now_heat_cap = _heat_cap(outdoor_now)
-            _now_cool_cap = _cool_cap(outdoor_now)
-            forecast: List[Dict[str, Any]] = [{
-                "time": now.isoformat(),
-                "temperature": now_temp,
-                "heating_power": round(current_heating, 1),
-                "solar_gain": round(current_solar, 1),
-                "outdoor_temp": (
-                    None if self.outdoor_temp is None
-                    else round(self.outdoor_temp, 2)
-                ),
-                "heating_capacity": _now_heat_cap,
-                **( {"cooling_capacity": _now_cool_cap} if _now_cool_cap > 0 else {} ),
-                "setpoint": now_sp if now_enabled else None,
-                "constraint_upper": round(now_sp + comfort_offset, 2) if now_enabled else None,
-                "constraint_lower": round(now_sp - comfort_offset, 2) if now_enabled else None,
-                "enabled": now_enabled,
-            }]
-
-            trajectory: List[float] = []
-            n_sched = len(heating_schedule)
-            n_solar = len(solar_forecast)
-            n_outdoor = len(outdoor_forecast)
-            n_lin = len(linearised_predictions)
-            for i in range(main_n):
-                pred = predictions[i]
-                temp = pred.get(room_name)
-                step_time = now + timedelta(seconds=dt * (i + 1))
-                have_traj = (
-                    step_sp is not None and step_off is not None
-                    and i < len(step_sp) and i < len(step_off)
-                )
-                have_enabled = (step_enabled is not None and i < len(step_enabled))
-                step_on = bool(step_enabled[i]) if have_enabled else now_enabled
-                s = (
-                    round(float(step_sp[i]), 2) if have_traj
-                    else round(float(room.setpoint), 2)
-                )
-                o = float(step_off[i]) if have_traj else comfort_offset
-                # While an experiment governs this step the MPC's comfort corridor
-                # is relaxed wide open (so it doesn't react to the forced input);
-                # don't surface that widened band on the plot — it would zoom the
-                # temperature axis right out — so omit the corridor on those steps.
-                governed = (
-                    exp_steps is not None and i < len(exp_steps) and exp_steps[i]
-                )
-                show_corridor = step_on and not governed
-                entry: Dict[str, Any] = {
-                    "time": step_time.isoformat(),
-                    "setpoint": s if step_on else None,
-                    "constraint_upper": round(s + o, 2) if show_corridor else None,
-                    "constraint_lower": round(s - o, 2) if show_corridor else None,
-                    "enabled": step_on,
-                }
-                if temp is not None:
-                    temp_r = round(temp, 2)
-                    trajectory.append(temp_r)
-                    entry["temperature"] = temp_r
-                if i < n_sched:
-                    entry["heating_power"] = round(
-                        heating_schedule[i].get(room_name, 0.0), 1
-                    )
-                # ``heating_schedule[i]`` is the control at now+i·dt; flag it when
-                # an experiment governs that step so the shaded plot region lines
-                # up exactly with the experiment signal.
-                if governed:
-                    entry["experiment"] = True
-                if i < n_solar:
-                    entry["solar_gain"] = round(
-                        solar_forecast[i].get(room_name, 0.0), 1
-                    )
-                if i < n_outdoor:
-                    _t_out_i = outdoor_forecast[i]
-                    entry["outdoor_temp"] = round(_t_out_i, 2)
-                    entry["heating_capacity"] = _heat_cap(_t_out_i)
-                    _cc_i = _cool_cap(_t_out_i)
-                    if _cc_i > 0:
-                        entry["cooling_capacity"] = _cc_i
-                if i < n_lin:
-                    lin_temp = linearised_predictions[i].get(room_name)
-                    if lin_temp is not None:
-                        entry["linearised_temperature"] = round(lin_temp, 2)
-                forecast.append(entry)
-
-            # Plot horizon extends past the controller horizon: hold the final
-            # actuation (heating power, setpoint, comfort band) flat and use the
-            # forward-simulated temperatures from ``extended_predictions``.
-            if extra > 0:
-                if step_sp is not None and len(step_sp) > 0:
-                    last_s = round(float(step_sp[-1]), 2)
-                    last_o = (
-                        float(step_off[-1])
-                        if step_off is not None and len(step_off) > 0
-                        else comfort_offset
-                    )
-                else:
-                    last_s = round(float(room.setpoint), 2)
-                    last_o = comfort_offset
-                last_on = (
-                    bool(step_enabled[-1])
-                    if step_enabled is not None and len(step_enabled) > 0
-                    else now_enabled
-                )
-                last_power = (
-                    round(last_heat_step.get(room_name, 0.0), 1)
-                    if heating_schedule else None
-                )
-                last_solar_room = round(last_solar_step.get(room_name, 0.0), 1)
-                for k in range(extra):
-                    step_time = now + timedelta(seconds=dt * (n_pred + k + 1))
-                    entry = {
-                        "time": step_time.isoformat(),
-                        "setpoint": last_s if last_on else None,
-                        "constraint_upper": round(last_s + last_o, 2) if last_on else None,
-                        "constraint_lower": round(last_s - last_o, 2) if last_on else None,
-                        "enabled": last_on,
-                        "extended": True,
-                    }
-                    if k < len(extended_predictions):
-                        t = extended_predictions[k].get(room_name)
-                        if t is not None:
-                            t_r = round(float(t), 2)
-                            trajectory.append(t_r)
-                            entry["temperature"] = t_r
-                    if last_power is not None:
-                        entry["heating_power"] = last_power
-                    entry["solar_gain"] = last_solar_room
-                    if k < len(outdoor_ext):
-                        _t_out_k = outdoor_ext[k]
-                        entry["outdoor_temp"] = round(_t_out_k, 2)
-                        entry["heating_capacity"] = _heat_cap(_t_out_k)
-                        _cc_k = _cool_cap(_t_out_k)
-                        if _cc_k > 0:
-                            entry["cooling_capacity"] = _cc_k
-                    forecast.append(entry)
-
-            # Scalar capacity summary exposed as room-level fields.
-            # max_power / max_cooling_power: rated (configured) output — used to
-            #   anchor the Y-axis scale regardless of outdoor temperature.
-            # current_max_power / current_max_cooling_power: COP-limited capacity
-            #   at the present outdoor temperature — used by the power gauge so the
-            #   bar reads 100 % at the limit the unit can currently deliver.
-            # Per-step heating_capacity / cooling_capacity in each forecast entry
-            #   let the frontend draw a dynamic corridor that moves with the outdoor
-            #   temperature forecast.  These use rated_heating_capacity /
-            #   rated_cooling_power (configured datasheet limits, no identified
-            #   power_scale) so the bound reflects what COP allows.
-            # current_max_power / current_rated_max_power: COP-limited rated
-            #   capacity at the present outdoor temperature for the power gauge
-            #   and chart Y-axis (heater scale is MPC-internal only).
-            # Rated capacity — configured datasheet maximum at the rated COP
-            # point (independent of current outdoor temperature).
-            max_power = sum(s.max_power for s in room_sources)
-            # Current capacity at the present outdoor temperature — used for the
-            # power gauge so the bar reads 100 % when the heater is at the limit
-            # it can actually deliver right now (a heat pump's output drops at
-            # cold outdoor temps because COP falls with the temperature delta).
-            # current_max_power / current_max_cooling_power: COP-limited rated
-            # capacity at the present outdoor temperature (no power_scale) for
-            # the power gauge and plot scale — heater scale is internal to the
-            # MPC model only and must not cap what the UI shows.
-            current_max_power = sum(
-                _delivered_heat_cap(s, outdoor_now) for s in room_sources
-            )
-            # COP-limited rated capacity at the present outdoor temperature (no
-            # power_scale).  The room power chart Y-axis anchors here so full
-            # command fills the scale; ``max_power`` alone can be much higher
-            # in cold weather and makes traces look capped around half the axis.
-            current_rated_max_power = sum(
-                _rated_heat_cap(s, outdoor_now) for s in room_sources
-            )
-            # Rated cooling capacity (without power_scale) — used for the plot
-            # Y-axis bound so it matches the configured values just like
-            # max_power does for heating.
-            max_cooling_power = sum(
-                s.rated_cooling_power
-                for s in room_sources
-                if getattr(s, "can_cool", False) and hasattr(s, "rated_cooling_power")
-            )
-            # Current cooling capacity (rated, no power_scale) — mirrors heating.
-            current_max_cooling_power = sum(
-                s.rated_cooling_power
-                for s in room_sources
-                if getattr(s, "can_cool", False)
-                and hasattr(s, "rated_cooling_power")
-            )
-
-            rooms_payload[_slugify(room_name)] = {
-                "trajectory": trajectory,
-                "forecast": forecast,
-                "setpoint": now_sp,
-                "comfort_offset": comfort_offset,
-                "horizon_steps": len(predictions),
-                "plot_horizon_steps": target_steps,
-                "step_seconds": dt,
-                "horizon_minutes": round(len(predictions) * dt / 60, 1),
-                "max_power": max_power if max_power > 0 else None,
-                "current_max_power": current_max_power if current_max_power > 0 else None,
-                "current_rated_max_power": (
-                    current_rated_max_power if current_rated_max_power > 0 else None
-                ),
-                "max_cooling_power": max_cooling_power if max_cooling_power > 0 else None,
-                "current_max_cooling_power": current_max_cooling_power if current_max_cooling_power > 0 else None,
-            }
-
-        # Outdoor forecast — limited to the display horizon, then held flat for
-        # any extension steps so the disturbance plot spans the full window.
-        outdoor_data: List[Dict[str, Any]] = [{
-            "time": now.isoformat(),
-            "outdoor_temp": (
-                None if self.outdoor_temp is None
-                else round(self.outdoor_temp, 2)
-            ),
-        }]
-        for i in range(min(main_n, n_outdoor_all)):
-            step_time = now + timedelta(seconds=dt * (i + 1))
-            outdoor_data.append({
-                "time": step_time.isoformat(),
-                "outdoor_temp": round(outdoor_forecast[i], 2),
-            })
-        for k in range(len(outdoor_ext)):
-            step_time = now + timedelta(seconds=dt * (n_pred + k + 1))
-            outdoor_data.append({
-                "time": step_time.isoformat(),
-                "outdoor_temp": round(outdoor_ext[k], 2),
-            })
-
-        # Price forecast — bounded to the display horizon so the power/price
-        # plot's price line spans the same window as the heating-power line
-        # (truncated when shorter, held flat when the plot extends past it).
-        price_data: List[Dict[str, Any]] = []
-        price_len = len(price_forecast)
-        if plot_forecast_steps is None:
-            n_price_points = price_len
-        else:
-            n_price_points = target_steps + 1
-        last_price = price_forecast[-1] if price_len else None
-        for i in range(n_price_points):
-            if i < price_len:
-                price = price_forecast[i]
-            elif last_price is not None:
-                price = last_price
-            else:
-                break
-            step_time = now + timedelta(seconds=dt * i)
-            try:
-                price_data.append({
-                    "time": step_time.isoformat(),
-                    "price": round(float(price), 5),
-                })
-            except (TypeError, ValueError):
-                pass
-
-        return {
-            "rooms": rooms_payload,
-            "outdoor_forecast": outdoor_data,
-            "price_forecast": price_data,
-            "step_seconds": dt,
-            "horizon_steps": len(predictions),
-        }
 
     def preview_tuning_forecast(
         self,
@@ -3236,202 +2835,51 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         return _cleanup
 
     def _read_outdoor_temp(self) -> Optional[float]:
-        return _weather.read_outdoor_temp(
-            self.hass, self._outdoor_entity, self._weather_entity
-        )
+        return disturbances.read_outdoor_temp(self)
 
     async def _async_read_weather_forecast(self) -> Optional[List[float]]:
-        """Read outdoor temperature forecast from a weather entity.
-
-        Returns a list of N outdoor temperature values aligned to the MPC
-        horizon steps, or None if no weather entity is configured or no
-        forecast data is available.
-        """
-        forecast_data = await self._async_get_forecast_entries()
-        if not forecast_data:
-            return None
-        return _weather.parse_temperature_forecast(forecast_data, self._horizon, self.dt)
+        return await disturbances.async_read_weather_forecast(self)
 
     async def _async_read_cloud_forecast(
         self, cloud_cover_now: Optional[float] = None
     ) -> Optional[List[float]]:
-        """Read cloud-cover forecast (fraction in [0, 1]) from the weather entity.
-
-        When ``cloud_cover_now`` is provided it is used as an anchor in the
-        interpolation (smooth ramp from the current observation to the first
-        forecast entry) and as a persistence fallback when no forecast data
-        is available.
-        """
-        forecast_data = await self._async_get_forecast_entries()
-        return _weather.parse_cloud_forecast(
-            forecast_data or [], self._horizon, self.dt,
-            current_cloud_cover=cloud_cover_now,
-        )
+        return await disturbances.async_read_cloud_forecast(self, cloud_cover_now)
 
     async def _async_read_wind_forecast(
         self, wind_speed_now: Optional[float] = None
     ) -> Optional[List[float]]:
-        """Read the wind-speed forecast [m/s] from the weather entity.
-
-        ``wind_speed_now`` (already in m/s) anchors the interpolation at
-        k = 0.  Returns ``None`` when the forecast carries no usable
-        ``wind_speed`` field — the controller then holds the current wind
-        over the horizon, exactly the previous behaviour.
-        """
-        forecast_data = await self._async_get_forecast_entries()
-        if not forecast_data:
-            return None
-        unit = None
-        if self._weather_entity:
-            state = self.hass.states.get(self._weather_entity)
-            if state is not None:
-                unit = state.attributes.get("wind_speed_unit")
-        return _weather.parse_wind_forecast(
-            forecast_data, self._horizon, self.dt,
-            now=self.now_utc, current_wind=wind_speed_now, unit=unit,
-        )
+        return await disturbances.async_read_wind_forecast(self, wind_speed_now)
 
     async def _async_get_forecast_entries(self) -> Optional[list]:
-        """Fetch raw forecast entries from the configured weather entity and
-        record success / failure on the coordinator for the diagnostic
-        ``WeatherForecastStatusSensor``.
-        """
-        forecast_data, error = await _weather.fetch_forecast_entries(
-            self.hass, self._weather_entity
-        )
-        if not self._weather_entity:
-            # Not configured — neither success nor failure.
-            return None
-        if forecast_data is not None:
-            self._record_weather_success()
-            return forecast_data
-        self._record_weather_failure(error or "unknown error")
-        return None
+        return await disturbances.async_get_forecast_entries(self)
 
     async def _async_read_price_forecast(
         self, now: datetime
     ) -> Optional[List[float]]:
-        """Read the electricity price forecast from the configured price entity.
-
-        Delegates to :mod:`electricity_price`, which merges known day-ahead
-        prices (``raw_today``/``raw_tomorrow``, ``today``/``tomorrow``) with
-        the optional extended ``forecast`` attribute.  Supports Nord Pool,
-        Energi Data Service (hourly and quarterly resolution), and generic
-        price sensors.
-
-        Returns a list of N prices [currency/kWh] aligned to horizon steps,
-        or None when no price entity is configured or the sensor is unavailable.
-        """
-        if not self._price_entity:
-            return None
-        state = self.hass.states.get(self._price_entity)
-        adder = self._price_net_tariff + self._price_spot_surcharge
-        return _electricity_price.build_price_forecast(
-            state,
-            now=now,
-            horizon=self._horizon,
-            dt_s=float(self.dt),
-            adder=adder,
-        )
+        return await disturbances.async_read_price_forecast(self, now)
 
     def _record_weather_success(self) -> None:
-        """Mark the most recent forecast fetch as successful."""
-        if self.weather_consecutive_failures > 0:
-            _LOGGER.info(
-                "Weather forecast recovered for %s after %d consecutive failures",
-                self._weather_entity,
-                self.weather_consecutive_failures,
-            )
-        self.weather_last_error = None
-        self.weather_last_error_at = None
-        self.weather_last_success_at = self.now_utc
-        self.weather_consecutive_failures = 0
+        disturbances.record_weather_success(self)
 
     def _record_weather_failure(self, reason: str) -> None:
-        """Record a forecast-fetch failure and log on threshold crossings."""
-        self.weather_consecutive_failures += 1
-        self.weather_last_error = reason
-        self.weather_last_error_at = self.now_utc
-        if self.weather_consecutive_failures in self._weather_warn_thresholds:
-            _LOGGER.warning(
-                "Weather forecast unavailable for %s (failure #%d): %s",
-                self._weather_entity,
-                self.weather_consecutive_failures,
-                reason,
-            )
+        disturbances.record_weather_failure(self, reason)
 
     def _read_cloud_cover_now(self) -> Optional[float]:
-        return _weather.read_cloud_cover_now(self.hass, self._weather_entity)
+        return disturbances.read_cloud_cover_now(self)
 
     def _read_wind_speed_now(self) -> Optional[float]:
-        return _weather.read_wind_speed_now(self.hass, self._weather_entity)
+        return disturbances.read_wind_speed_now(self)
 
     def _record_solar_fc_success(self) -> None:
-        """Mark the most recent solar-forecast read as successful."""
-        if self.solar_fc_consecutive_failures > 0:
-            _LOGGER.info(
-                "Solar forecast recovered for %s after %d consecutive failures",
-                self._solar_radiation_entity,
-                self.solar_fc_consecutive_failures,
-            )
-        self.solar_fc_last_error = None
-        self.solar_fc_last_error_at = None
-        self.solar_fc_last_success_at = self.now_utc
-        self.solar_fc_consecutive_failures = 0
+        disturbances.record_solar_fc_success(self)
 
     def _record_solar_fc_failure(self, reason: str) -> None:
-        """Record a solar-forecast read failure and log on threshold crossings."""
-        self.solar_fc_consecutive_failures += 1
-        self.solar_fc_last_error = reason
-        self.solar_fc_last_error_at = self.now_utc
-        if self.solar_fc_consecutive_failures in self._weather_warn_thresholds:
-            _LOGGER.warning(
-                "Solar forecast unavailable for %s (failure #%d): %s",
-                self._solar_radiation_entity,
-                self.solar_fc_consecutive_failures,
-                reason,
-            )
+        disturbances.record_solar_fc_failure(self, reason)
 
     def _read_ghi(
         self, now: datetime,
     ) -> Tuple[Optional[float], Optional[List[Optional[float]]]]:
-        """Read the solar-radiation entity and derive a GHI series [W/m²].
-
-        Returns ``(ghi_now, ghi_forecast)``.  Both are ``None`` when no entity
-        is configured, it is unavailable / stale, or it carries no usable
-        irradiance — in which case the solar model falls back to the analytical
-        clear-sky model (today's behaviour).
-        """
-        self._solar_provider = "none"
-        if not self._solar_radiation_entity:
-            return None, None
-
-        state = self.hass.states.get(self._solar_radiation_entity)
-        if state is None or getattr(state, "state", None) in _solar_fc._UNAVAILABLE_STATES:
-            self._record_solar_fc_failure("entity unavailable")
-            return None, None
-        if _solar_fc.is_stale(state, now):
-            self._record_solar_fc_failure("forecast stale")
-            return None, None
-
-        series = _solar_fc.parse_irradiance_forecast(state)
-        value_now = _solar_fc.read_irradiance_now(
-            self.hass, self._solar_radiation_entity, now=now,
-        )
-        if not series and value_now is None:
-            self._record_solar_fc_failure("no irradiance data")
-            return None, None
-
-        self._solar_provider = "irradiance"
-        forecast, ghi_now = _solar_fc.compute_ghi_series(
-            series, value_now, self._horizon, float(self.dt), now,
-        )
-        if forecast is None and ghi_now is None:
-            self._record_solar_fc_failure("no usable irradiance")
-            return None, None
-
-        self._record_solar_fc_success()
-        return ghi_now, forecast
+        return disturbances.read_ghi(self, now)
 
     def _room_solar_gain(
         self,
@@ -3440,57 +2888,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         cloud_cover: Optional[float],
         ghi: Optional[float],
     ) -> float:
-        """Per-room solar gain [W]: windows when present, else exposure preset.
-
-        Mirrors the controller's per-room selection so the coordinator's
-        current-step ``solar_gains`` snapshot matches the forecast path.
-        """
-        room = self.model.rooms[name]
-        if room.windows:
-            return room_solar_gains(
-                room.windows, now, self._latitude, self._longitude,
-                cloud_cover=cloud_cover, ghi=ghi, albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-            )
-        return room_solar_gains_from_exposure(
-            room.solar_exposure_aperture, room.solar_facing,
-            now, self._latitude, self._longitude,
-            cloud_cover=cloud_cover, ghi=ghi, albedo=getattr(self, "_ground_albedo", DEFAULT_GROUND_ALBEDO),
-        )
+        return disturbances.room_solar_gain(self, name, now, cloud_cover, ghi)
 
     def _resolve_display_cloud_cover(self) -> Optional[float]:
-        """Best-effort cloud cover for an out-of-cycle solar-gain snapshot.
-
-        Prefers the value the last full MPC cycle published, then the EMA
-        (seeded from persistence on restart), then a fresh live read.  Returns
-        ``None`` only when there is genuinely no cloud information available.
-        """
-        cloud_cover = self.cloud_cover
-        if cloud_cover is None:
-            cloud_cover = self._cloud_cover_filtered
-        if cloud_cover is None:
-            cloud_cover = self._read_cloud_cover_now()
-        return cloud_cover
+        return disturbances.resolve_display_cloud_cover(self)
 
     def _publish_current_solar_gains(self) -> None:
-        """Recompute and publish ``self.solar_gains`` / ``self.cloud_cover`` for now.
+        disturbances.publish_current_solar_gains(self)
 
-        Solar gain depends only on the time, the site location, the cloud cover
-        and (optionally) the GHI — never on the outdoor temperature.  Keeping
-        this out of the outdoor-temperature gate means the dashboard shows the
-        real, sun-driven (and cloud-attenuated) value right after a restart
-        instead of dropping to 0 while the outdoor entity is still unavailable.
-        """
-        cloud_cover = self._resolve_display_cloud_cover()
-        self.cloud_cover = cloud_cover
-        try:
-            self.solar_gains = {
-                name: self._room_solar_gain(
-                    name, self.now_utc, cloud_cover, self.ghi_now
-                )
-                for name in self.model.room_names
-            }
-        except Exception:  # pragma: no cover - defensive; never block a cycle
-            _LOGGER.debug("Solar-gain recompute failed", exc_info=True)
 
     # Backwards-compatible aliases for any caller / test that imported the
     # static helpers from the coordinator before the U3 weather extraction.
@@ -3719,128 +3124,33 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     def set_room_setpoint(self, room_name: str, setpoint: float) -> None:
-        """Update the temperature setpoint for a room.
-
-        The change is recorded as the *base* setpoint (the value the user
-        wants when no schedule period is active).  When a schedule period
-        is currently active, the change still overrides the live setpoint
-        until the next coordinator tick re-applies the schedule.  This way
-        users can nudge the temperature mid-period without their request
-        being silently dropped.
-        """
-        if room_name not in self.model.rooms:
-            return
-        value = float(setpoint)
-        self._base_setpoint[room_name] = value
-        self.model.rooms[room_name].setpoint = value
-        # Persist so the setpoint survives HA restarts and scheduled off periods.
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={**dict(real_entry.data), CONF_PERSISTED_SETPOINTS: dict(self._base_setpoint)},
-            )
+        enablement.set_room_setpoint(self, room_name, setpoint)
 
     def get_room_setpoint(self, room_name: str) -> float:
-        """Return the current (live) setpoint for a room."""
-        if room_name in self.model.rooms:
-            return self.model.rooms[room_name].setpoint
-        return DEFAULT_SETPOINT
+        return enablement.get_room_setpoint(self, room_name)
 
     def get_base_setpoint(self, room_name: str) -> float:
-        """Return the user-chosen setpoint used outside any schedule period."""
-        if room_name in self._base_setpoint:
-            return self._base_setpoint[room_name]
-        return self.get_room_setpoint(room_name)
+        return enablement.get_base_setpoint(self, room_name)
 
     def set_room_comfort_offset(self, room_name: str, comfort_offset: float) -> None:
-        """Update the default comfort-band half-width (°C) for a room.
-
-        Mirrors :meth:`set_room_setpoint`: the value becomes the room's
-        default comfort offset — the symmetric ±band around the setpoint the
-        controller keeps the room inside — used whenever no schedule period
-        overrides it.  It is applied to the live model immediately (so the
-        controller corridor updates on the next plan) and persisted so the
-        choice survives HA restarts.  When a schedule period is currently
-        active with its own ``comfort_offset`` the live value still reverts to
-        the schedule on the next coordinator tick, exactly like the setpoint.
-        """
-        if room_name not in self.model.rooms:
-            return
-        value = float(comfort_offset)
-        self._room_comfort_offset[room_name] = value
-        self.model.rooms[room_name].comfort_offset = value
-        # Rebuild the controller so the widened/narrowed corridor takes effect.
-        self._build_controller()
-        # Persist so the offset survives HA restarts (same pattern as setpoints).
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={
-                    **dict(real_entry.data),
-                    CONF_PERSISTED_COMFORT_OFFSETS: dict(self._room_comfort_offset),
-                },
-            )
+        enablement.set_room_comfort_offset(self, room_name, comfort_offset)
 
     def get_room_comfort_offset(self, room_name: str) -> float:
-        """Return the default comfort-band half-width [°C] for a room."""
-        return self._room_comfort_offset.get(room_name, DEFAULT_COMFORT_OFFSET)
-
-    # ------------------------------------------------------------------
-    # System-level enable/disable
-    # ------------------------------------------------------------------
+        return enablement.get_room_comfort_offset(self, room_name)
 
     @property
     def system_enabled(self) -> bool:
-        """Return whether the heating assistant controller is active."""
-        return self._system_enabled
+        return enablement.system_enabled(self)
 
     def set_system_enabled(self, enabled: bool) -> None:
-        """Enable or disable the entire heating assistant controller."""
-        self._system_enabled = bool(enabled)
-        # Persist so the START/STOP toggle survives a full HA restart.
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={
-                    **dict(real_entry.data),
-                    CONF_PERSISTED_SYSTEM_ENABLED: self._system_enabled,
-                },
-            )
-
-    # ------------------------------------------------------------------
-    # Room enable/disable helpers (called by climate platform)
-    # ------------------------------------------------------------------
+        enablement.set_system_enabled(self, enabled)
 
     def set_room_enabled(self, room_name: str, enabled: bool) -> None:
-        """Enable or disable heating control for a room (user toggle)."""
-        self._room_enabled[room_name] = enabled
-        # Persist so the toggle survives a full HA restart (same pattern as setpoints).
-        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
-        if real_entry is not None:
-            self.hass.config_entries.async_update_entry(
-                real_entry,
-                data={
-                    **dict(real_entry.data),
-                    CONF_PERSISTED_ROOM_ENABLED: dict(self._room_enabled),
-                },
-            )
+        enablement.set_room_enabled(self, room_name, enabled)
 
     def is_room_enabled(self, room_name: str) -> bool:
-        """Return whether heating control should run for a room *right now*.
+        return enablement.is_room_enabled(self, room_name)
 
-        The room runs when the user has not switched it off **and** no
-        active comfort schedule period requests it to be off.  Schedule and
-        user toggle are tracked independently so toggling one cannot
-        silently override the other.
-        """
-        if not self._room_enabled.get(room_name, True):
-            return False
-        if self._schedule_disabled.get(room_name, False):
-            return False
-        return True
 
     # ------------------------------------------------------------------
     # System-identification experiments
