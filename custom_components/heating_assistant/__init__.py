@@ -678,7 +678,7 @@ async def _async_auto_write_default_dashboard(
     import os
     from datetime import datetime, timezone
 
-    from .dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
+    from .lovelace_dashboard import build_dashboard_from_coordinator, dashboard_to_yaml
 
     # Bump this when the generated entity-id formula or card structure changes
     # in a way that makes old files incorrect.  Existing installs will have
@@ -770,7 +770,7 @@ async def _async_auto_write_industrial_dashboard(
     import os
     from datetime import datetime, timezone
 
-    from .dashboard import (
+    from .lovelace_dashboard import (
         DASHBOARD_VARIANT_INDUSTRIAL,
         build_dashboard_variant_from_coordinator,
         dashboard_to_yaml,

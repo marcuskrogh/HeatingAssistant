@@ -240,7 +240,7 @@ async def handle_regenerate_dashboard(hass: HomeAssistant, call: ServiceCall) ->
     written to ``<config>/dashboards/<filename>`` (relative paths
     outside the config directory are rejected).
     """
-    from ..dashboard import (
+    from ..lovelace_dashboard import (
         DASHBOARD_VARIANT_CLASSIC,
         DASHBOARD_VARIANT_INDUSTRIAL,
         build_dashboard_variant_from_coordinator,

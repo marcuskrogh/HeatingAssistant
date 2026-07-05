@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.const import DOMAIN
-from custom_components.heating_assistant.dashboard import (
+from custom_components.heating_assistant.lovelace_dashboard import (
     DASHBOARD_VARIANT_INDUSTRIAL,
     DashboardSpec,
     HeatSourceSpec,
@@ -20,8 +20,8 @@ from custom_components.heating_assistant.dashboard import (
     build_dashboard_variant_from_coordinator,
     build_dashboard_from_coordinator,
     dashboard_to_yaml,
-    slugify,
 )
+from custom_components.heating_assistant.naming import slugify
 
 
 # ---------------------------------------------------------------------------
