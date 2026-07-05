@@ -7,6 +7,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..coordinator import HeatingAssistantCoordinator
+from ..const import DOMAIN
 from ..naming import slugify
 from .base import _LiveValueSensorMixin
 

@@ -473,6 +473,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if stored_est:
             self._restore_estimated_parameters(stored_est)
 
+        self._init_room_state(rooms_cfg)
+
         self._temp_sensors: Dict[str, List[str]] = self._build_temp_sensor_map(rooms_cfg)
 
         self.controller = build_mpc_controller(
