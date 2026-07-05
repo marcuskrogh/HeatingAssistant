@@ -130,7 +130,7 @@ async def async_refresh_time_in_range_kpis(
     window_end_ts: float,
 ) -> Dict[str, Optional[float]]:
     """Refresh the 24 h time-in-range cache for every model room."""
-    from .sensor import _kpi_room_snapshot  # noqa: PLC0415 — HA import boundary
+    from .sensor.base import _kpi_room_snapshot  # noqa: PLC0415 — HA import boundary
 
     results: Dict[str, Optional[float]] = {}
     for room_name in coordinator.model.room_names:
