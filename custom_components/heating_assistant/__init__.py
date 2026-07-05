@@ -1945,7 +1945,8 @@ def _register_services(hass: HomeAssistant) -> None:
             if k and v and str(k) != str(v)
         }
         if not renames:
-            write_entry_config(hass, {CONF_ROOMS: rooms})
+            coordinator = _get_coordinator(hass)
+            write_entry_config(hass, {CONF_ROOMS: rooms}, coordinator=coordinator)
             return
 
         coordinator = _get_coordinator(hass)
@@ -2011,8 +2012,9 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_update_heat_sources(call: ServiceCall) -> None:
         """Replace the configured heat-source list (triggers a reload)."""
+        coordinator = _get_coordinator(hass)
         sources = call.data["heat_sources"]
-        write_entry_config(hass, {CONF_HEAT_SOURCES: sources})
+        write_entry_config(hass, {CONF_HEAT_SOURCES: sources}, coordinator=coordinator)
 
     hass.services.async_register(
         DOMAIN,
@@ -2176,120 +2178,6 @@ def _register_services(hass: HomeAssistant) -> None:
             {
                 vol.Required("history_index"): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=9)
-                ),
-            }
-        ),
-    )
-
-    async def handle_update_room_schedule(call: ServiceCall) -> None:
-        """Update the schedule for a single room and persist to config entry."""
-        from .naming import slugify as _slugify
-
-        coordinator = _get_coordinator(hass)
-        room_name: str = call.data["room_name"]
-        periods: list = call.data["periods"]
-
-        # Resolve the canonical room name from the slug sent by the frontend.
-        entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
-        if entry is None:
-            raise ValueError("Config entry not found")
-
-        # Rooms can live in either ``entry.options`` (when configured via the
-        # UI options flow) or ``entry.data`` (YAML / initial config flow).
-        # Check both stores for room name resolution.
-        opts = entry.options
-        source_rooms = opts.get(CONF_ROOMS) if opts.get(CONF_ROOMS) else entry.data.get(CONF_ROOMS)
-        rooms_list = source_rooms or []
-
-        canonical_name: str | None = None
-        for room_cfg in rooms_list:
-            cfg_name = room_cfg.get(CONF_ROOM_NAME, "")
-            if cfg_name == room_name or _slugify(cfg_name) == room_name:
-                canonical_name = cfg_name
-                break
-
-        if canonical_name is None:
-            raise ValueError(f"Room '{room_name}' not found in configuration")
-
-        # Rebuild schedule in coordinator and update entity states BEFORE
-        # persisting — this ensures the HA state machine has the correct
-        # attributes before _async_update_listener fires.
-        coordinator.reload_room_schedule(canonical_name, periods)
-        coordinator.async_update_listeners()
-
-        # Persist schedules in a dedicated key that won't be overwritten by
-        # YAML/options merging during integration reload (same pattern as
-        # CONF_PERSISTED_SETPOINTS).
-        persisted: dict = dict(entry.data.get(CONF_PERSISTED_SCHEDULES) or {})
-        persisted[canonical_name] = periods
-
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**dict(entry.data), CONF_PERSISTED_SCHEDULES: persisted},
-        )
-
-    hass.services.async_register(
-        DOMAIN,
-        "update_room_schedule",
-        handle_update_room_schedule,
-        schema=vol.Schema(
-            {
-                vol.Required("room_name"): cv.string,
-                vol.Required("periods"): [
-                    vol.Schema(
-                        {
-                            vol.Required("name"): cv.string,
-                            vol.Required("mode"): vol.In(["comfort", "off"]),
-                            vol.Required("start"): cv.string,
-                            vol.Required("end"): cv.string,
-                            vol.Optional("days"): [vol.Any(vol.Coerce(int), cv.string)],
-                            vol.Optional("setpoint"): vol.Coerce(float),
-                            vol.Optional("frost_protection", default=12.0): vol.Coerce(float),
-                            vol.Optional("comfort_offset"): vol.Coerce(float),
-                            vol.Optional("tracking_weight"): vol.Coerce(float),
-                            vol.Optional("energy_weight"): vol.Coerce(float),
-                        }
-                    )
-                ],
-            }
-        ),
-    )
-
-    async def handle_set_room_comfort_offset(call: ServiceCall) -> None:
-        """Set the default comfort-band half-width for a single room.
-
-        Called from the dashboard climate cards so users can widen or narrow a
-        room's comfort corridor without editing a schedule.  Resolves the
-        canonical room name from the slug sent by the frontend, applies the
-        change to the live model and persists it (mirroring set_room_setpoint).
-        """
-        from .naming import slugify as _slugify
-
-        coordinator = _get_coordinator(hass)
-        room_name: str = call.data["room_name"]
-        comfort_offset: float = call.data["comfort_offset"]
-
-        canonical_name: str | None = None
-        for name in coordinator.model.room_names:
-            if name == room_name or _slugify(name) == room_name:
-                canonical_name = name
-                break
-
-        if canonical_name is None:
-            raise ValueError(f"Room '{room_name}' not found in configuration")
-
-        coordinator.set_room_comfort_offset(canonical_name, comfort_offset)
-        coordinator.async_update_listeners()
-
-    hass.services.async_register(
-        DOMAIN,
-        "set_room_comfort_offset",
-        handle_set_room_comfort_offset,
-        schema=vol.Schema(
-            {
-                vol.Required("room_name"): cv.string,
-                vol.Required("comfort_offset"): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.1)
                 ),
             }
         ),

@@ -71,7 +71,12 @@ def persist_tuning_updates(
     )
 
 
-def write_entry_config(hass: HomeAssistant, updates: Dict[str, Any]) -> None:
+def write_entry_config(
+    hass: HomeAssistant,
+    updates: Dict[str, Any],
+    *,
+    coordinator: HeatingAssistantCoordinator | None = None,
+) -> None:
     """Write ``updates`` to both entry.data and entry.options.
 
     Writing to both stores keeps the coordinator's options-first reads
@@ -79,7 +84,8 @@ def write_entry_config(hass: HomeAssistant, updates: Dict[str, Any]) -> None:
     integration when a structural key (rooms / heat sources) changes and
     applies the rest in-place.
     """
-    coordinator = get_coordinator(hass)
+    if coordinator is None:
+        coordinator = get_coordinator(hass)
     entry = hass.config_entries.async_get_entry(coordinator._entry.entry_id)
     if entry is None:
         return
