@@ -1,6 +1,8 @@
 import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=93';
 import { experimentStatusInfo } from '../experiment-utils.js?v=93';
 
+export const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+
 export const getScheduleDataForRoom = getRoomScheduleData;
 
 /** Robust lookup: tries slug, name, and case-insensitive normalised match. */
@@ -55,4 +57,29 @@ export function expCardModifier(status) {
   if (status === 'running') return ' schedule-form__period--exp-running';
   if (status === 'scheduled') return ' schedule-form__period--exp-scheduled';
   return '';
+}
+
+/** Optimistically patch controller-config room_schedules in panel state. */
+export function patchStateSchedule(state, slug, periods, enabled) {
+  const existingEntity = state[CONFIG_ENTITY] || {
+    entity_id: CONFIG_ENTITY,
+    state: 'ok',
+    attributes: {},
+  };
+  const existingAttrs = existingEntity.attributes || {};
+  const existingSchedules = existingAttrs.room_schedules || {};
+  const resolvedEnabled = enabled !== undefined
+    ? enabled
+    : (existingSchedules[slug]?.enabled ?? true);
+
+  state[CONFIG_ENTITY] = {
+    ...existingEntity,
+    attributes: {
+      ...existingAttrs,
+      room_schedules: {
+        ...existingSchedules,
+        [slug]: { enabled: resolvedEnabled, periods },
+      },
+    },
+  };
 }
