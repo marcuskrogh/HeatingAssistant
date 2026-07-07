@@ -1334,8 +1334,8 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
     async def _apply_actions(self, outdoor_temp: float) -> None:
         await actuation.apply_actions(self, outdoor_temp)
 
-    async def _async_reconcile_actuation(self, outdoor_temp: float) -> bool:
-        return await actuation.async_reconcile_actuation(self, outdoor_temp)
+    async def _async_verify_heater_entities(self, outdoor_temp: float) -> bool:
+        return await actuation.async_verify_heater_entities(self, outdoor_temp)
 
     # ------------------------------------------------------------------
     # Setpoint helpers (called by climate platform)
