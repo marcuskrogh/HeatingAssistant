@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
-from ..const import DEFAULT_IDLE_OFFSET
+from ..const import ACTUATION_WATCHDOG_MIN_INTERVAL_S, DEFAULT_IDLE_OFFSET
 from ..heat_sources import HeatPump, HeatSource
 from .types import _coerce_opt_float
 
@@ -13,6 +13,95 @@ if TYPE_CHECKING:
     from .core import HeatingAssistantCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _heater_should_be_off(
+    coordinator: HeatingAssistantCoordinator, src: HeatSource
+) -> bool:
+    """Return True when ``apply_actions`` would turn this source off."""
+    room_enabled = coordinator.is_room_enabled(src.room)
+    window_override_active = coordinator.is_window_override_active(src.room)
+    experiment_active = coordinator.is_experiment_active(src.room)
+    return not (
+        coordinator._system_enabled
+        and (room_enabled or experiment_active)
+        and not window_override_active
+    )
+
+
+def heater_entity_matches_expected(
+    coordinator: HeatingAssistantCoordinator, src: HeatSource
+) -> bool:
+    """Return True when the heater entity state/mode matches what we expect."""
+    entity_id = src.heater_entity
+    if not entity_id:
+        return True
+
+    ha_state = coordinator.hass.states.get(entity_id)
+    if ha_state is None or ha_state.state in ("unknown", "unavailable"):
+        return True
+
+    actual = str(ha_state.state).lower()
+    domain = entity_id.split(".")[0]
+
+    if _heater_should_be_off(coordinator, src):
+        return actual == "off"
+
+    fraction = float(coordinator.actions.get(src.name, 0.0))
+    if domain == "switch":
+        return (actual == "on") == (fraction > 0.5)
+    if domain == "number":
+        value = _coerce_opt_float(ha_state.state)
+        expected = round(fraction * 100)
+        return value is not None and int(round(value)) == expected
+    if domain == "climate":
+        return actual != "off"
+    return True
+
+
+async def async_verify_heater_entities(
+    coordinator: HeatingAssistantCoordinator, outdoor_temp: float
+) -> bool:
+    """Re-apply commands when a heater entity state/mode does not match intent.
+
+    Compares each configured heater entity's live HA state against the
+    setting ``apply_actions`` would write (on/off for switches, value for
+    numbers, off vs active mode for climate).  Runs on the fast UI cadence
+    so a missed command — e.g. after a restart during window override — is
+    corrected without waiting for the next MPC tick.
+
+    Returns True when a corrective ``apply_actions`` call was made.
+    """
+    if not coordinator._system_enabled or not coordinator.actions:
+        return False
+
+    mismatched = [
+        src.name
+        for src in coordinator.heat_sources
+        if not heater_entity_matches_expected(coordinator, src)
+    ]
+    if not mismatched:
+        return False
+
+    now_ts = coordinator.now_utc.timestamp()
+    last_ts = float(getattr(coordinator, "_actuation_watchdog_last_ts", 0.0))
+    if now_ts - last_ts < ACTUATION_WATCHDOG_MIN_INTERVAL_S:
+        return False
+
+    coordinator._actuation_watchdog_last_ts = now_ts
+    _LOGGER.warning(
+        "Heater watchdog: entity state mismatch for %s — re-applying commands",
+        ", ".join(mismatched),
+    )
+    try:
+        await apply_actions(coordinator, outdoor_temp)
+    except Exception:
+        _LOGGER.warning(
+            "Heater watchdog: failed to re-apply commands",
+            exc_info=True,
+        )
+        return False
+    return True
 
 
 def read_delivered_actions(
@@ -319,6 +408,7 @@ async def reapply_climate_setpoints(
                 entity_id,
                 exc_info=True,
             )
+
 
 
 async def apply_actions(

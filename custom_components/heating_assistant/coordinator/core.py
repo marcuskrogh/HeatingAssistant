@@ -634,6 +634,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # planning all along.
         self._mpc_shadow_actions: Dict[str, float] = {}
 
+        # Monotonic timestamp of the last actuation-watchdog re-apply.  Used to
+        # rate-limit corrective ``apply_actions`` calls when commanded and
+        # delivered heater states diverge.
+        self._actuation_watchdog_last_ts: float = 0.0
+
         # Visualization data
         self.solar_gains: Dict[str, float] = {}
         # Current cloud-cover fraction in [0, 1], or None when unavailable;
@@ -1328,6 +1333,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     async def _apply_actions(self, outdoor_temp: float) -> None:
         await actuation.apply_actions(self, outdoor_temp)
+
+    async def _async_verify_heater_entities(self, outdoor_temp: float) -> bool:
+        return await actuation.async_verify_heater_entities(self, outdoor_temp)
 
     # ------------------------------------------------------------------
     # Setpoint helpers (called by climate platform)
