@@ -84,4 +84,10 @@ async def async_refresh_ui(coordinator: HeatingAssistantCoordinator) -> None:
             _LOGGER.debug(
                 "Fast UI refresh: setpoint re-apply failed", exc_info=True,
             )
+        try:
+            await coordinator._async_reconcile_actuation(outdoor_temp)
+        except Exception:
+            _LOGGER.debug(
+                "Fast UI refresh: actuation watchdog failed", exc_info=True,
+            )
     coordinator.async_update_listeners()

@@ -607,6 +607,10 @@ UPDATE_INTERVAL = DEFAULT_UPDATE_INTERVAL
 # at the update interval so it never fires more often than the MPC on very short
 # intervals.
 UI_REFRESH_INTERVAL = 60
+#: Minimum interval [s] between actuation-watchdog re-apply attempts for the
+#: same coordinator.  Matches the UI refresh cadence so a detected command vs
+#: hardware mismatch is corrected at most once per fast-refresh tick.
+ACTUATION_WATCHDOG_MIN_INTERVAL_S = 60
 
 # Parameter estimation
 #: Number of update steps to keep in the rolling history buffer.

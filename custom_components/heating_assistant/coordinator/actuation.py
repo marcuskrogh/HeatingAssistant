@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-from ..const import DEFAULT_IDLE_OFFSET
+from ..const import ACTUATION_WATCHDOG_MIN_INTERVAL_S, DEFAULT_IDLE_OFFSET
 from ..heat_sources import HeatPump, HeatSource
 from .types import _coerce_opt_float
 
@@ -13,6 +13,12 @@ if TYPE_CHECKING:
     from .core import HeatingAssistantCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+# Tolerances for comparing commanded vs read-back fractions.
+_NUMBER_MISMATCH_TOLERANCE = 0.05
+_CLIMATE_DELIVERING_THRESHOLD = 0.1
+_CLIMATE_COMMAND_HEAT_THRESHOLD = 0.2
+_CLIMATE_OFF_THRESHOLD = 0.05
 
 
 def read_delivered_actions(
@@ -319,6 +325,112 @@ async def reapply_climate_setpoints(
                 entity_id,
                 exc_info=True,
             )
+
+
+def effective_commanded_fraction(
+    coordinator: HeatingAssistantCoordinator, src: HeatSource
+) -> float:
+    """Return the fraction ``apply_actions`` would command for a source."""
+    fraction = float(coordinator.actions.get(src.name, 0.0))
+    room_enabled = coordinator.is_room_enabled(src.room)
+    window_override_active = coordinator.is_window_override_active(src.room)
+    experiment_active = coordinator.is_experiment_active(src.room)
+    effective_room_enabled = (
+        coordinator._system_enabled
+        and (room_enabled or experiment_active)
+        and not window_override_active
+    )
+    if not effective_room_enabled:
+        return 0.0
+    return fraction
+
+
+def has_actuation_mismatch(
+    coordinator: HeatingAssistantCoordinator, src: HeatSource
+) -> bool:
+    """Return True when the heater entity state disagrees with the command."""
+    entity_id = src.heater_entity
+    if not entity_id:
+        return False
+
+    state = coordinator.hass.states.get(entity_id)
+    if state is None or state.state in ("unknown", "unavailable"):
+        return False
+
+    commanded = effective_commanded_fraction(coordinator, src)
+    delivered = read_delivered_fraction(coordinator, src)
+    domain = entity_id.split(".")[0]
+
+    if domain == "switch":
+        return (commanded > 0.5) != (delivered > 0.5)
+
+    if domain == "number":
+        return abs(commanded - delivered) > _NUMBER_MISMATCH_TOLERANCE
+
+    if domain == "climate":
+        if commanded <= 0.01:
+            return delivered > _CLIMATE_DELIVERING_THRESHOLD
+        if commanded >= _CLIMATE_COMMAND_HEAT_THRESHOLD:
+            return delivered < _CLIMATE_OFF_THRESHOLD
+        return False
+
+    return False
+
+
+def find_actuation_mismatches(
+    coordinator: HeatingAssistantCoordinator,
+) -> List[str]:
+    """Return heat-source names whose hardware state disagrees with commands."""
+    if not coordinator._system_enabled or not coordinator.actions:
+        return []
+
+    mismatched: List[str] = []
+    for src in coordinator.heat_sources:
+        if has_actuation_mismatch(coordinator, src):
+            mismatched.append(src.name)
+    return mismatched
+
+
+async def async_reconcile_actuation(
+    coordinator: HeatingAssistantCoordinator, outdoor_temp: float
+) -> bool:
+    """Re-apply MPC commands when hardware read-back disagrees with intent.
+
+    While the system is running there is otherwise no feedback path that
+    verifies heater entities actually reached the commanded state.  This
+    lightweight watchdog runs on the fast UI cadence and issues a fresh
+    ``apply_actions`` when a clear mismatch is detected (e.g. a switch
+    still off after a window override cleared).
+
+    Returns True when a corrective ``apply_actions`` call was made.
+    """
+    if not coordinator._system_enabled or not coordinator.actions:
+        return False
+
+    mismatched = find_actuation_mismatches(coordinator)
+    if not mismatched:
+        return False
+
+    now_ts = coordinator.now_utc.timestamp()
+    last_ts = float(getattr(coordinator, "_actuation_watchdog_last_ts", 0.0))
+    if now_ts - last_ts < ACTUATION_WATCHDOG_MIN_INTERVAL_S:
+        return False
+
+    coordinator._actuation_watchdog_last_ts = now_ts
+    _LOGGER.warning(
+        "Actuation watchdog: re-applying heater commands for %s "
+        "(commanded state does not match hardware read-back)",
+        ", ".join(mismatched),
+    )
+    try:
+        await apply_actions(coordinator, outdoor_temp)
+    except Exception:
+        _LOGGER.warning(
+            "Actuation watchdog: failed to re-apply heater commands",
+            exc_info=True,
+        )
+        return False
+    return True
 
 
 async def apply_actions(
