@@ -32,6 +32,15 @@ from custom_components.heating_assistant.controller import (
 
 # -- Helpers ------------------------------------------------------------------
 
+_MPC_NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(scope="class")
+def two_room():
+    """Shared two-room model and heat sources (read-only across a test class)."""
+    return _make_model_and_sources()
+
+
 def _make_model_and_sources():
     """Simple two-room model with one electric heater per room."""
     living = Room(
@@ -106,13 +115,13 @@ def _central_difference_jacobian(
 class TestHouseThermalSDE:
     """Tests for HouseThermalSDE as a ContinuousDiscreteSDE implementation."""
 
-    def test_is_continuous_discrete_model(self):
-        model, sources = _make_model_and_sources()
+    def test_is_continuous_discrete_model(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         assert isinstance(sde, ContinuousDiscreteSDE)
 
-    def test_dimensions(self):
-        model, sources = _make_model_and_sources()
+    def test_dimensions(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         n = 2  # two rooms
         # 2R2C augmented: state is [T_a(n), T_w(n), b(n)].  nx = 3n = 6.
@@ -123,8 +132,8 @@ class TestHouseThermalSDE:
         assert sde.nz == 2           # controlled output = room temperature
         assert sde.nym == 2          # measured output = room temperature
 
-    def test_drift_shape(self):
-        model, sources = _make_model_and_sources()
+    def test_drift_shape(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.0, 17.0])
         u = np.array([0.5, 0.3])
@@ -134,10 +143,10 @@ class TestHouseThermalSDE:
         # 2R2C augmented drift: 3n = 6 entries [T_a(n), T_w(n), b(n)].
         assert f.shape == (6,)
 
-    def test_drift_heating_increases_temperature(self):
+    def test_drift_heating_increases_temperature(self, two_room):
         """Full heating (u=1) on a room should give positive drift on the
         air block when the room is cold."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([15.0, 14.0])   # cold rooms (air; wall starts at air temp)
         u = np.array([1.0, 1.0])       # full heating
@@ -151,10 +160,10 @@ class TestHouseThermalSDE:
         # Offset block (last n entries) has zero drift.
         assert np.allclose(f[sde._offset_block_start:], 0.0)
 
-    def test_drift_no_heat_cold_outside(self):
+    def test_drift_no_heat_cold_outside(self, two_room):
         """No heating and cold outside: warm rooms should cool down
         (negative temperature drift on the air block)."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([20.0, 20.0])
         u = np.zeros(sde.nu)
@@ -167,8 +176,8 @@ class TestHouseThermalSDE:
         # Offset block (last n entries) has zero drift.
         assert np.allclose(f[sde._offset_block_start:], 0.0)
 
-    def test_sigma_shape(self):
-        model, sources = _make_model_and_sources()
+    def test_sigma_shape(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.0, 17.0])
         u = np.zeros(sde.nu)
@@ -179,8 +188,8 @@ class TestHouseThermalSDE:
         n = sde._n_rooms
         assert sig.shape == (3 * n, 3 * n)
 
-    def test_sigma_is_scaled_identity(self):
-        model, sources = _make_model_and_sources()
+    def test_sigma_is_scaled_identity(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, sigma_w=0.1)
         x = _aug_state([18.0, 17.0])
         u = np.zeros(sde.nu)
@@ -197,8 +206,8 @@ class TestHouseThermalSDE:
         expected[b_start:b_start + n, b_start:b_start + n] = 0.002 * np.eye(n)
         np.testing.assert_array_almost_equal(sig, expected)
 
-    def test_sigma_applies_per_room_process_noise_covariance_scales(self):
-        model, sources = _make_model_and_sources()
+    def test_sigma_applies_per_room_process_noise_covariance_scales(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, sigma_w=0.1)
         sde.set_room_process_noise_covariance_scales(
             {"living_room": 9.0, "bedroom": 1.0}
@@ -216,8 +225,8 @@ class TestHouseThermalSDE:
         assert diag[0] == pytest.approx(0.3)  # 0.1 * sqrt(9) = 0.3
         assert diag[1] == pytest.approx(0.1)  # 0.1 * sqrt(1) = 0.1
 
-    def test_controlled_output_equals_state(self):
-        model, sources = _make_model_and_sources()
+    def test_controlled_output_equals_state(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.5, 17.5])
         u = np.zeros(sde.nu)
@@ -226,8 +235,8 @@ class TestHouseThermalSDE:
         z = sde.g(x, u, d, p, 0.0)
         np.testing.assert_array_equal(z, np.array([18.5, 17.5]))
 
-    def test_controlled_output_includes_offset_state(self):
-        model, sources = _make_model_and_sources()
+    def test_controlled_output_includes_offset_state(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.5, 17.5], [1.0, -0.25])
         u = np.zeros(sde.nu)
@@ -236,8 +245,8 @@ class TestHouseThermalSDE:
         z = sde.g(x, u, d, p, 0.0)
         np.testing.assert_array_equal(z, np.array([19.5, 17.25]))
 
-    def test_measurement_equals_state(self):
-        model, sources = _make_model_and_sources()
+    def test_measurement_equals_state(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.5, 17.5])
         u = np.zeros(sde.nu)
@@ -246,8 +255,8 @@ class TestHouseThermalSDE:
         ym = sde.hm(x, u, d, p, 0.0)
         np.testing.assert_array_equal(ym, np.array([18.5, 17.5]))
 
-    def test_measurement_includes_offset_state(self):
-        model, sources = _make_model_and_sources()
+    def test_measurement_includes_offset_state(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.5, 17.5], [1.0, -0.25])
         u = np.zeros(sde.nu)
@@ -256,24 +265,24 @@ class TestHouseThermalSDE:
         ym = sde.hm(x, u, d, p, 0.0)
         np.testing.assert_array_equal(ym, np.array([19.5, 17.25]))
 
-    def test_measurement_noise_covariance_shape(self):
-        model, sources = _make_model_and_sources()
+    def test_measurement_noise_covariance_shape(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         Rm = sde.Rm
         assert Rm.shape == (2, 2)
         assert np.allclose(Rm, Rm.T)
 
-    def test_measurement_noise_covariance_positive_definite(self):
-        model, sources = _make_model_and_sources()
+    def test_measurement_noise_covariance_positive_definite(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, sigma_v=0.5)
         Rm = sde.Rm
         eigvals = np.linalg.eigvalsh(Rm)
         assert np.all(eigvals > 0)
 
-    def test_analytic_state_jacobian(self):
+    def test_analytic_state_jacobian(self, two_room):
         """``dfdx`` mirrors the 2n×2n matrix ``_F`` on the top-left
         physical block and is zero on the offset rows/columns."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.0, 17.0])
         u = np.array([0.3, 0.5])
@@ -297,12 +306,12 @@ class TestHouseThermalSDE:
             J_analytic[b_start:, :], np.zeros((n, sde.nx))
         )
 
-    def test_observation_jacobian_is_identity(self):
+    def test_observation_jacobian_is_identity(self, two_room):
         """``dhm/dx`` for the 2R2C measurement ``y = T_a + b`` has shape
         (n, nx) with I_n on the air block and I_n on the offset block;
         wall and filter blocks are zero (unobserved).
         """
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([18.0, 17.0])
         u = np.zeros(sde.nu)
@@ -318,8 +327,8 @@ class TestHouseThermalSDE:
         expected[:, b_start:b_start + n] = np.eye(n)
         np.testing.assert_array_equal(H, expected)
 
-    def test_analytic_state_jacobian_matches_finite_difference_unaugmented(self):
-        model, sources = _make_model_and_sources()
+    def test_analytic_state_jacobian_matches_finite_difference_unaugmented(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
         # Un-augmented 2R2C: state = [T_a(n), T_w(n)], length 2n=4.
         n = sde._n_rooms
@@ -335,8 +344,8 @@ class TestHouseThermalSDE:
         )
         np.testing.assert_allclose(J_analytic, J_fd, rtol=5e-4, atol=5e-6)
 
-    def test_observation_jacobian_matches_finite_difference_unaugmented(self):
-        model, sources = _make_model_and_sources()
+    def test_observation_jacobian_matches_finite_difference_unaugmented(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
         # Un-augmented 2R2C: state = [T_a(n), T_w(n)], length 2n=4.
         n = sde._n_rooms
@@ -352,8 +361,8 @@ class TestHouseThermalSDE:
         )
         np.testing.assert_allclose(H_analytic, H_fd, rtol=1e-6, atol=1e-8)
 
-    def test_disturbance_vector_shape(self):
-        model, sources = _make_model_and_sources()
+    def test_disturbance_vector_shape(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         d = sde.disturbance_vector(5.0, {"living_room": 200.0, "bedroom": 50.0})
         n = sde._n_rooms
@@ -361,20 +370,20 @@ class TestHouseThermalSDE:
         assert d.shape == (1 + 2 * n,)
         assert d[0] == pytest.approx(5.0)
 
-    def test_x_ref_matches_setpoints(self):
-        model, sources = _make_model_and_sources()
+    def test_x_ref_matches_setpoints(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         ref = sde.x_ref
         np.testing.assert_array_equal(ref, [21.0, 20.0])
 
-    def test_u_bounds(self):
-        model, sources = _make_model_and_sources()
+    def test_u_bounds(self, two_room):
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         lb, ub = sde.u_bounds
         np.testing.assert_array_equal(lb, [0.0, 0.0])
         np.testing.assert_array_equal(ub, [1.0, 1.0])
 
-    def test_u_bounds_heat_pump_cooling_capable(self):
+    def test_u_bounds_heat_pump_cooling_capable(self, two_room):
         """A HeatPump with cooling_cop > 0 should have lower bound -1."""
         living = Room("living_room", 5_000_000.0, 0.05, temperature=22.0, setpoint=21.0)
         model = HouseModel([living])
@@ -384,7 +393,7 @@ class TestHouseThermalSDE:
         assert lb[0] == pytest.approx(-1.0)
         assert ub[0] == pytest.approx(1.0)
 
-    def test_u_bounds_heat_pump_heat_only_mode(self):
+    def test_u_bounds_heat_pump_heat_only_mode(self, two_room):
         """hvac_mode='heat' → lower bound 0, upper bound 1."""
         living = Room("living_room", 5_000_000.0, 0.05, temperature=22.0, setpoint=21.0)
         model = HouseModel([living])
@@ -394,7 +403,7 @@ class TestHouseThermalSDE:
         assert lb[0] == pytest.approx(0.0)
         assert ub[0] == pytest.approx(1.0)
 
-    def test_u_bounds_heat_pump_cool_only_mode(self):
+    def test_u_bounds_heat_pump_cool_only_mode(self, two_room):
         """hvac_mode='cool' → lower bound -1, upper bound 0."""
         living = Room("living_room", 5_000_000.0, 0.05, temperature=22.0, setpoint=21.0)
         model = HouseModel([living])
@@ -404,7 +413,7 @@ class TestHouseThermalSDE:
         assert lb[0] == pytest.approx(-1.0)
         assert ub[0] == pytest.approx(0.0)
 
-    def test_drift_cooling_decreases_temperature(self):
+    def test_drift_cooling_decreases_temperature(self, two_room):
         """With u = -1 (full cooling via smooth sigmoid), drift must be negative
         for a warm room even when the outdoor temperature is also warm."""
         living = Room("living_room", 5_000_000.0, 0.05, temperature=25.0, setpoint=21.0)
@@ -418,7 +427,7 @@ class TestHouseThermalSDE:
         f = sde.f(x, u, d, p, 0.0)
         assert f[0] < 0.0, f"Expected negative drift with full cooling, got {f}"
 
-    def test_drift_smooth_zero_at_u_zero(self):
+    def test_drift_smooth_zero_at_u_zero(self, two_room):
         """At u = 0, a cooling-capable source must contribute zero thermal power
         to the drift (smooth_thermal_power(0) = 0)."""
         living = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
@@ -434,9 +443,9 @@ class TestHouseThermalSDE:
             f"Expected ~0 drift at u=0 with no temperature differential, got {f}"
         )
 
-    def test_drift_no_cooling_when_not_capable(self):
+    def test_drift_no_cooling_when_not_capable(self, two_room):
         """A heating-only source must not produce cooling drift when u < 0."""
-        model, sources = _make_model_and_sources()  # ElectricHeaters, can_cool=False
+        model, sources = two_room  # ElectricHeaters, can_cool=False
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([25.0, 24.0])
         u = np.array([-1.0, -1.0])   # negative, but sources can't cool
@@ -451,9 +460,9 @@ class TestHouseThermalSDE:
 
     # ── Analytical Jacobian (dfdu) tests ─────────────────────────────────
 
-    def test_dfdu_shape(self):
+    def test_dfdu_shape(self, two_room):
         """dfdu must return an (nx, nu) matrix."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([20.0, 19.0])
         u = np.array([0.5, 0.3])
@@ -462,9 +471,9 @@ class TestHouseThermalSDE:
         J = sde.dfdu(x, u, d, p, 0.0)
         assert J.shape == (sde.nx, sde.nu)
 
-    def test_dfdu_matches_central_differences_electric_heaters(self):
+    def test_dfdu_matches_central_differences_electric_heaters(self, two_room):
         """Analytical dfdu must match FD Jacobian for heating-only sources."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([20.0, 19.0])
         u = np.array([0.5, 0.3])  # strictly positive (feasible region)
@@ -476,7 +485,7 @@ class TestHouseThermalSDE:
         )
         np.testing.assert_allclose(J_analytic, J_fd, atol=1e-4, rtol=1e-3)
 
-    def test_dfdu_matches_central_differences_heat_pump(self):
+    def test_dfdu_matches_central_differences_heat_pump(self, two_room):
         """Analytical dfdu must match FD Jacobian for a cooling-capable source."""
         living = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
         model = HouseModel([living])
@@ -494,9 +503,9 @@ class TestHouseThermalSDE:
             np.testing.assert_allclose(J_analytic, J_fd, atol=1e-4, rtol=1e-3,
                                        err_msg=f"u={u_val}")
 
-    def test_dgmdx_const_shape_unaugmented(self):
+    def test_dgmdx_const_shape_unaugmented(self, two_room):
         """dgmdx_const must have shape (nz, nx) for un-augmented model."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=False)
         n = sde._n_rooms
         H = sde.dgmdx_const
@@ -505,9 +514,9 @@ class TestHouseThermalSDE:
         np.testing.assert_array_equal(H[:, :n], np.eye(n))
         np.testing.assert_array_equal(H[:, n:], np.zeros((n, sde.nx - n)))
 
-    def test_dgmdx_const_shape_augmented(self):
+    def test_dgmdx_const_shape_augmented(self, two_room):
         """dgmdx_const must have shape (nz, nx) for augmented model."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=True)
         n = sde._n_rooms
         H = sde.dgmdx_const
@@ -523,9 +532,9 @@ class TestHouseThermalSDE:
         mask[b_start:b_start + n] = True
         np.testing.assert_array_equal(H[:, ~mask], np.zeros((n, (~mask).sum())))
 
-    def test_dgmdx_const_matches_gm_finite_diff(self):
+    def test_dgmdx_const_matches_gm_finite_diff(self, two_room):
         """dgmdx_const must equal the finite-difference Jacobian of gm."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=True)
         x = _aug_state([20.0, 19.0])
         u_dummy = np.zeros(sde.nu)
@@ -539,9 +548,9 @@ class TestHouseThermalSDE:
 
     # ── Analytical Jacobians via new mbc API ─────────────────────────────
 
-    def test_dgmdx_method_called_by_mbc_eocp(self):
+    def test_dgmdx_method_called_by_mbc_eocp(self, two_room):
         """dgmdx() returns the same constant matrix as dgmdx_const."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=True)
         x = _aug_state([20.0, 19.0])
         u = np.zeros(sde.nu)
@@ -551,9 +560,9 @@ class TestHouseThermalSDE:
         H_prop = sde.dgmdx_const
         np.testing.assert_array_equal(H_method, H_prop)
 
-    def test_dgmdu_returns_zeros(self):
+    def test_dgmdu_returns_zeros(self, two_room):
         """dgmdu() must return a zero (nz, nu) matrix — gm is independent of u."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         x = _aug_state([20.0, 19.0])
         u = np.array([0.5, 0.3])
@@ -563,7 +572,7 @@ class TestHouseThermalSDE:
         assert G.shape == (sde.nz, sde.nu)
         np.testing.assert_array_equal(G, np.zeros((sde.nz, sde.nu)))
 
-    def test_mbc_eocp_uses_analytical_jacs(self):
+    def test_mbc_eocp_uses_analytical_jacs(self, two_room):
         """New mbc EOCP always uses analytical Jacobians when model supplies them.
 
         After upgrading to mbc v0.1+, analytical Jacobians for equality and
@@ -572,7 +581,7 @@ class TestHouseThermalSDE:
         and dgmdu are callable and return the correct shapes so mbc can
         use them.
         """
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0, augment_offsets=True)
         x = _aug_state([20.0, 19.0])
         u = np.array([0.5, 0.3])
@@ -587,9 +596,9 @@ class TestHouseThermalSDE:
 class TestContinuousDiscreteEKF:
     """Tests for the continuous-discrete EKF with HouseThermalSDE."""
 
-    def _make_ekf(self, sde=None):
+    def _make_ekf(self, two_room, sde=None):
         if sde is None:
-            model, sources = _make_model_and_sources()
+            model, sources = two_room
             sde = HouseThermalSDE(model, sources, dt=900.0)
         x0 = np.array(sde.x)
         P0 = np.eye(sde.nx)
@@ -601,17 +610,17 @@ class TestContinuousDiscreteEKF:
             ),
         ), sde
 
-    def test_initial_state(self):
-        ekf, sde = self._make_ekf()
+    def test_initial_state(self, two_room):
+        ekf, sde = self._make_ekf(two_room)
         np.testing.assert_array_equal(ekf.x_hat, np.array(sde.x))
 
-    def test_initial_covariance_shape(self):
-        ekf, sde = self._make_ekf()
+    def test_initial_covariance_shape(self, two_room):
+        ekf, sde = self._make_ekf(two_room)
         assert ekf.P.shape == (sde.nx, sde.nx)
 
-    def test_update_with_measurement(self):
+    def test_update_with_measurement(self, two_room):
         """After update the estimate should be close to the measurement."""
-        ekf, sde = self._make_ekf()
+        ekf, sde = self._make_ekf(two_room)
         y = np.array([18.5, 17.5])
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
@@ -619,9 +628,9 @@ class TestContinuousDiscreteEKF:
         x_hat, P = ekf.step(y, u, d, p, 0.0)
         np.testing.assert_array_almost_equal(x_hat[:sde.nym], y, decimal=1)
 
-    def test_covariance_propagates(self):
+    def test_covariance_propagates(self, two_room):
         """P should change after a predict-update cycle."""
-        ekf, sde = self._make_ekf()
+        ekf, sde = self._make_ekf(two_room)
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
@@ -630,9 +639,9 @@ class TestContinuousDiscreteEKF:
         ekf.step(np.array([18.1, 17.1]), u, d, p, 900.0)
         assert not np.allclose(P_before, ekf.P)
 
-    def test_covariance_stays_symmetric(self):
+    def test_covariance_stays_symmetric(self, two_room):
         """P must remain symmetric after multiple updates."""
-        ekf, sde = self._make_ekf()
+        ekf, sde = self._make_ekf(two_room)
         u = np.zeros(sde.nu)
         d = sde.disturbance_vector(5.0, {})
         p = np.array([])
@@ -640,9 +649,9 @@ class TestContinuousDiscreteEKF:
             ekf.step(np.array([temp, temp - 1.0]), u, d, p, 0.0)
         np.testing.assert_array_almost_equal(ekf.P, ekf.P.T)
 
-    def test_covariance_positive_semidefinite(self):
+    def test_covariance_positive_semidefinite(self, two_room):
         """All eigenvalues of P should be non-negative."""
-        ekf, sde = self._make_ekf()
+        ekf, sde = self._make_ekf(two_room)
         u = np.array([0.5, 0.3])
         d = sde.disturbance_vector(0.0, {})
         p = np.array([])
@@ -678,7 +687,7 @@ class TestCDTrackingOCP:
         )
         return ocp, sde
 
-    def test_solve_returns_correct_shapes(self):
+    def test_solve_returns_correct_shapes(self, two_room):
         ocp, sde = self._make_ocp(horizon=3)
         x0 = np.array(sde.x)
         d = sde.disturbance_vector(5.0, {})
@@ -730,40 +739,40 @@ class TestCDTrackingOCP:
 # -- HeatingMPCController (application facade) tests -------------------------
 
 class TestHeatingMPCController:
-    def test_actions_cover_all_sources(self):
-        model, sources = _make_model_and_sources()
+    def test_actions_cover_all_sources(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=0.0, now=now)
         for src in sources:
             assert src.name in actions
 
-    def test_fractions_in_range(self):
-        model, sources = _make_model_and_sources()
+    def test_fractions_in_range(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=0.0, now=now)
         for name, frac in actions.items():
             assert 0.0 <= frac <= 1.0, f"Fraction out of range for {name}: {frac}"
 
-    def test_fractions_are_continuous(self):
+    def test_fractions_are_continuous(self, two_room):
         """QP optimisation; fractions are continuous, not grid-restricted."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900,
                                     energy_weight=0.001)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=-5.0, now=now)
         assert all(isinstance(f, float) for f in actions.values())
         assert all(0.0 <= f <= 1.0 for f in actions.values())
 
-    def test_heats_when_below_setpoint(self):
-        model, sources = _make_model_and_sources()
+    def test_heats_when_below_setpoint(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=-10.0, now=now)
         assert any(frac > 0.0 for frac in actions.values())
 
-    def test_no_heat_when_warm_enough(self):
+    def test_no_heat_when_warm_enough(self, two_room):
         living = Room("living_room", 5e6, 0.05, temperature=25.0, setpoint=21.0)
         bedroom = Room("bedroom", 3e6, 0.08, temperature=24.0, setpoint=20.0)
         model = HouseModel([living, bedroom])
@@ -772,40 +781,40 @@ class TestHeatingMPCController:
             ElectricHeater("br_heater", "bedroom", max_power=1500.0),
         ]
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=22.0, now=now)
         assert all(frac == pytest.approx(0.0, abs=1e-4) for frac in actions.values())
 
-    def test_solar_gains_provided_externally(self):
-        model, sources = _make_model_and_sources()
+    def test_solar_gains_provided_externally(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         gains = {"living_room": 300.0, "bedroom": 100.0}
         actions = ctrl.compute(outdoor_temp=5.0, solar_gains=gains, now=now)
         for src in sources:
             assert src.name in actions
             assert 0.0 <= actions[src.name] <= 1.0
 
-    def test_controller_updates_source_state(self):
-        model, sources = _make_model_and_sources()
+    def test_controller_updates_source_state(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=-5.0, now=now)
         for src in sources:
             expected = src.thermal_power(actions[src.name])
             assert src.current_power == pytest.approx(expected, rel=1e-6)
 
-    def test_visualisation_properties_populated(self):
-        model, sources = _make_model_and_sources()
+    def test_visualisation_properties_populated(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         ctrl.compute(outdoor_temp=5.0, now=now)
         assert len(ctrl.predictions) == 3
         assert len(ctrl.outdoor_forecast) == 3
         assert len(ctrl.solar_forecast) == 4  # N+1: covers now through now+N*dt
         assert len(ctrl.heating_schedule) == 3
 
-    def test_input_clamps_pin_applied_action_over_horizon(self):
+    def test_input_clamps_pin_applied_action_over_horizon(self, two_room):
         """An input clamp forces the room's heater to the prescribed signal even
         when the unconstrained MPC would idle, and the plan reflects it."""
         living = Room("living_room", 5e6, 0.05, temperature=25.0, setpoint=21.0)
@@ -816,7 +825,7 @@ class TestHeatingMPCController:
             ElectricHeater("br_heater", "bedroom", max_power=1500.0),
         ]
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
 
         clamps = {"lr_heater": np.full(3, 1.0)}
         actions = ctrl.compute(outdoor_temp=22.0, now=now, input_clamps=clamps)
@@ -830,12 +839,12 @@ class TestHeatingMPCController:
         for step in ctrl.heating_schedule:
             assert step["living_room"] == pytest.approx(2000.0, rel=1e-2)
 
-    def test_input_clamp_survives_disabled_source(self):
+    def test_input_clamp_survives_disabled_source(self, two_room):
         """A clamped step overrides a disabled (schedule-off) source so an
         experiment can run during the comfort schedule's off periods."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
 
         actions = ctrl.compute(
             outdoor_temp=5.0, now=now,
@@ -844,7 +853,7 @@ class TestHeatingMPCController:
         )
         assert actions["lr_heater"] == pytest.approx(0.8, abs=1e-3)
 
-    def test_input_clamp_is_linear_in_delivered_power_for_heat_pump(self):
+    def test_input_clamp_is_linear_in_delivered_power_for_heat_pump(self, two_room):
         """The clamp value is a *power* fraction: a reversible heat pump delivers
         exactly that fraction of capacity (the sigmoid is inverted), so the step
         is linear in power — including the negative (cool) direction."""
@@ -852,7 +861,7 @@ class TestHeatingMPCController:
         model = HouseModel([room])
         hp = HeatPump("hp", "living_room", max_power=5000.0, cooling_cop=2.5)
         ctrl = HeatingMPCController(model, [hp], horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         outdoor = 5.0
         q_heat = hp.thermal_power(1.0, outdoor)
         q_cool = abs(hp.cooling_power(outdoor))
@@ -863,12 +872,12 @@ class TestHeatingMPCController:
             delivered = ctrl.heating_schedule[0]["living_room"]
             assert delivered == pytest.approx(pf * q, rel=2e-2)
 
-    def test_input_clamp_partial_horizon_zeros_unclamped_disabled_steps(self):
+    def test_input_clamp_partial_horizon_zeros_unclamped_disabled_steps(self, two_room):
         """With a clamp only on the first step, a disabled source is pinned for
         that step and zeroed for the released tail."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
 
         clamp = np.array([1.0, np.nan, np.nan])
         ctrl.compute(
@@ -881,7 +890,7 @@ class TestHeatingMPCController:
         assert sched[1]["living_room"] == pytest.approx(0.0, abs=1e-6)
         assert sched[2]["living_room"] == pytest.approx(0.0, abs=1e-6)
 
-    def test_input_clamp_with_experiment_comfort_relaxation_and_disabled_source(self):
+    def test_input_clamp_with_experiment_comfort_relaxation_and_disabled_source(self, two_room):
         """Experiment clamps must still force the prescribed signal even when
         the coordinator applies full comfort relaxation (Q=0, offset=1000 °C)
         AND the room is schedule-disabled.
@@ -928,8 +937,8 @@ class TestHeatingMPCController:
         # Settle phase must be off.
         assert sched[3]["living_room"] == pytest.approx(0.0, abs=1e-6)
 
-    def test_controller_uses_unaugmented_states_for_runtime_efficiency(self):
-        model, sources = _make_model_and_sources()
+    def test_controller_uses_unaugmented_states_for_runtime_efficiency(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert ctrl._system._augment_offsets is False
         assert ctrl._control_system._augment_offsets is False
@@ -937,7 +946,7 @@ class TestHeatingMPCController:
         # 2R2C un-augmented: [T_a(n), T_w(n)] = 2n states, no filter states
         assert ctrl._system.nx == 2 * n
 
-    def test_filtered_temperatures_use_air_state_when_offsets_disabled(self):
+    def test_filtered_temperatures_use_air_state_when_offsets_disabled(self, two_room):
         room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
         model = HouseModel([room])
         ctrl = HeatingMPCController(
@@ -950,7 +959,7 @@ class TestHeatingMPCController:
 
         assert ctrl.filtered_temperatures["living_room"] == pytest.approx(20.0)
 
-    def test_predictions_use_air_state_when_offsets_disabled(self):
+    def test_predictions_use_air_state_when_offsets_disabled(self, two_room):
         room = Room("living_room", 5_000_000.0, 0.05, temperature=20.0, setpoint=21.0)
         model = HouseModel([room])
         ctrl = HeatingMPCController(
@@ -984,16 +993,16 @@ class TestHeatingMPCController:
 
         assert [step["living_room"] for step in ctrl.predictions] == pytest.approx([20.0, 20.0])
 
-    def test_predictions_contain_all_rooms(self):
-        model, sources = _make_model_and_sources()
+    def test_predictions_contain_all_rooms(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         ctrl.compute(outdoor_temp=5.0, now=now)
         for step in ctrl.predictions:
             assert "living_room" in step
             assert "bedroom" in step
 
-    def test_heat_pump_cop_varies_with_temperature(self):
+    def test_heat_pump_cop_varies_with_temperature(self, two_room):
         """Higher outdoor temperature -> higher COP."""
         hp = HeatPump("hp", "lr", max_power=6100.0, cop_rated=3.5, cop_temp_ref=7.0)
         assert hp.cop(10.0) > hp.cop(-10.0)
@@ -1003,7 +1012,7 @@ class TestHeatingMPCController:
         be smaller or equal to the unsmoothed case."""
         model_a, sources_a = _make_model_and_sources()
         model_b, sources_b = _make_model_and_sources()
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
 
         ctrl_no_smooth = HeatingMPCController(model_a, sources_a, horizon=3, dt=900,
                                               smoothing_weight=0.0)
@@ -1024,7 +1033,7 @@ class TestHeatingMPCController:
         """smoothing_weight=0.0 gives the same result for identical initial conditions."""
         model_a, sources_a = _make_model_and_sources()
         model_b, sources_b = _make_model_and_sources()
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
 
         ctrl_a = HeatingMPCController(model_a, sources_a, horizon=2, dt=900,
                                       smoothing_weight=0.0)
@@ -1037,20 +1046,20 @@ class TestHeatingMPCController:
         for name in actions_a:
             assert actions_a[name] == pytest.approx(actions_b[name], abs=1e-4)
 
-    def test_default_smoothing_weight(self):
+    def test_default_smoothing_weight(self, two_room):
         """Default smoothing_weight is 0.1."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=0.0, now=now)
         assert all(0.0 <= f <= 1.0 for f in actions.values())
 
-    def test_soft_constraint_weight_configurable(self):
+    def test_soft_constraint_weight_configurable(self, two_room):
         """soft_constraint_weight should be accepted and affect behaviour."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900,
                                     soft_constraint_weight=1000.0)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=0.0, now=now)
         assert all(0.0 <= f <= 1.0 for f in actions.values())
 
@@ -1080,7 +1089,7 @@ class TestHeatingMPCController:
         np.testing.assert_allclose(z_min, np.array([19.5, 18.5]))
         np.testing.assert_allclose(z_max, np.array([22.5, 21.5]))
 
-    def test_weak_setpoint_pull_no_chasing_inside_comfort_corridor(self):
+    def test_weak_setpoint_pull_no_chasing_inside_comfort_corridor(self, two_room):
         room = Room(
             "living_room",
             5_000_000.0,
@@ -1103,22 +1112,22 @@ class TestHeatingMPCController:
             energy_weight=0.01,
             terminal_weight=1,
         )
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         actions = ctrl.compute(outdoor_temp=20.0, now=now)
         assert actions["heater"] == pytest.approx(0.0, abs=2e-2)
 
-    def test_outdoor_forecast_used(self):
+    def test_outdoor_forecast_used(self, two_room):
         """When an outdoor forecast is provided, it should be stored."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=3, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         forecast = [-5.0, -6.0, -7.0]
         ctrl.compute(outdoor_temp=-4.0, now=now, outdoor_forecast=forecast)
         assert ctrl.outdoor_forecast == forecast
 
-    def test_uses_linearised_mpc(self):
+    def test_uses_linearised_mpc(self, two_room):
         """HeatingMPCController should use the forecast-aware linearised MPC."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl._system, HouseThermalSDE)
         assert isinstance(ctrl._control_system, HouseThermalSDE)
@@ -1126,21 +1135,21 @@ class TestHeatingMPCController:
         assert isinstance(ctrl._ekf, ContinuousDiscreteEKF)
         assert isinstance(ctrl._mpc, HeatingLinearisedMPC)
 
-    def test_negative_smoothing_weight_raises(self):
-        model, sources = _make_model_and_sources()
+    def test_negative_smoothing_weight_raises(self, two_room):
+        model, sources = two_room
         with pytest.raises(ValueError, match="smoothing_weight"):
             HeatingMPCController(model, sources, horizon=2, dt=900,
                                  smoothing_weight=-0.1)
 
-    def test_solver_and_derivative_flags_exposed(self):
+    def test_solver_and_derivative_flags_exposed(self, two_room):
         """solver_requested, solver_active and use_analytic_derivatives are readable."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl.solver_requested, str)
         assert isinstance(ctrl.solver_active, str)
         assert ctrl.use_analytic_derivatives is True
 
-    def test_mpc_requests_cooling_when_above_setpoint(self):
+    def test_mpc_requests_cooling_when_above_setpoint(self, two_room):
         """When a cooling-capable heat pump room is well above setpoint, the
         MPC should output a negative fraction (active cooling request)."""
         living = Room(
@@ -1156,7 +1165,7 @@ class TestHeatingMPCController:
             f"setpoint, got {actions['hp']}"
         )
 
-    def test_mpc_cooling_source_power_is_negative(self):
+    def test_mpc_cooling_source_power_is_negative(self, two_room):
         """After a cooling step, the source's current_power should be negative."""
         living = Room(
             "living_room", 5_000_000.0, 0.05, temperature=27.0, setpoint=21.0,
@@ -1170,7 +1179,7 @@ class TestHeatingMPCController:
             "Expected negative current_power on heat pump in cooling mode"
         )
 
-    def test_no_cooling_when_heat_only_mode(self):
+    def test_no_cooling_when_heat_only_mode(self, two_room):
         """A heat pump configured with hvac_mode='heat' must not receive negative fractions."""
         living = Room(
             "living_room", 5_000_000.0, 0.05, temperature=27.0, setpoint=21.0,
@@ -1184,7 +1193,7 @@ class TestHeatingMPCController:
             "Heat-only heat pump must not receive a negative (cooling) fraction"
         )
 
-    def test_heat_pump_filter_state_cooling_reduced_inside_comfort(self):
+    def test_heat_pump_filter_state_cooling_reduced_inside_comfort(self, two_room):
         """Regression: mbc _np_to_cvx transposition bug caused Ad to be stored
         column-swapped in the OCP, breaking the filter-state → temperature
         coupling.  The OCP therefore failed to predict that a large negative
@@ -1236,28 +1245,28 @@ class TestHeatingMPCController:
 class TestTotalComputes:
     """total_computes increments on every compute() call and never saturates."""
 
-    def test_starts_at_zero(self):
-        model, sources = _make_model_and_sources()
+    def test_starts_at_zero(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert ctrl.total_computes == 0
 
-    def test_increments_each_call(self):
-        model, sources = _make_model_and_sources()
+    def test_increments_each_call(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         for expected in range(1, 5):
             ctrl.compute(outdoor_temp=0.0, now=now)
             assert ctrl.total_computes == expected, (
                 f"Expected total_computes={expected}, got {ctrl.total_computes}"
             )
 
-    def test_exceeds_rolling_window(self):
+    def test_exceeds_rolling_window(self, two_room):
         """total_computes must exceed MPC_STATS_BUFFER_SIZE (rolling deque cap)."""
         from custom_components.heating_assistant.controller import MPC_STATS_BUFFER_SIZE
 
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
-        now = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
+        now = _MPC_NOW
         # Run one more than the buffer size
         for _ in range(MPC_STATS_BUFFER_SIZE + 1):
             ctrl.compute(outdoor_temp=0.0, now=now)
@@ -1555,19 +1564,19 @@ class TestRunOptimizationGate:
 class TestTerminalWeight:
     """HeatingMPCController.terminal_weight exposes the configured weight."""
 
-    def test_default_terminal_weight(self):
-        model, sources = _make_model_and_sources()
+    def test_default_terminal_weight(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert ctrl.terminal_weight == pytest.approx(100.0)
 
-    def test_custom_terminal_weight(self):
-        model, sources = _make_model_and_sources()
+    def test_custom_terminal_weight(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900,
                                     terminal_weight=50.0)
         assert ctrl.terminal_weight == pytest.approx(50.0)
 
-    def test_terminal_weight_is_float(self):
-        model, sources = _make_model_and_sources()
+    def test_terminal_weight_is_float(self, two_room):
+        model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
         assert isinstance(ctrl.terminal_weight, float)
 
@@ -1700,9 +1709,9 @@ def _make_hp_model_and_sources():
 class TestComputeUEq:
     """compute_u_eq should invert the power function exactly and stay in bounds."""
 
-    def test_heating_only_source_equilibrium_in_bounds(self):
+    def test_heating_only_source_equilibrium_in_bounds(self, two_room):
         """Electric heater equilibrium must lie in [0, 1]."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         # 2R2C state: [T_a(2), T_w(2)] for un-augmented
         x = np.array([18.0, 17.0, 18.0, 17.0], dtype=float)
@@ -1713,7 +1722,7 @@ class TestComputeUEq:
         for j in range(sde.nu):
             assert 0.0 <= u_eq[j] <= 1.0, f"u_eq[{j}]={u_eq[j]} out of [0,1]"
 
-    def test_heat_pump_equilibrium_in_bounds(self):
+    def test_heat_pump_equilibrium_in_bounds(self, two_room):
         """Heat pump equilibrium must lie in [-1, 1]."""
         model, sources = _make_hp_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
@@ -1725,7 +1734,7 @@ class TestComputeUEq:
         assert u_eq.shape == (1,)
         assert -1.0 <= u_eq[0] <= 1.0
 
-    def test_equilibrium_maintains_temperature(self):
+    def test_equilibrium_maintains_temperature(self, two_room):
         """f evaluated at u_eq should have near-zero temperature drift."""
         model, sources = _make_hp_model_and_sources()
         sde = HouseThermalSDE(model, sources, dt=900.0)
@@ -1739,10 +1748,10 @@ class TestComputeUEq:
         # Air-temperature block drift should be close to zero.
         assert abs(drift[0]) < 0.5, f"Temperature drift at u_eq too large: {drift[0]:.4f} °C/s"
 
-    def test_equilibrium_zero_when_room_warm_heating_only(self):
+    def test_equilibrium_zero_when_room_warm_heating_only(self, two_room):
         """A heating-only source should have u_eq = 0 when the room is warm
         enough that thermal losses are zero or negative (e.g. warm outdoor)."""
-        model, sources = _make_model_and_sources()
+        model, sources = two_room
         sde = HouseThermalSDE(model, sources, dt=900.0)
         # 2R2C un-augmented two rooms: [T_a(2), T_w(2)]
         x = np.array([25.0, 25.0, 25.0, 25.0], dtype=float)
