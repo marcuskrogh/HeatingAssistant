@@ -14,11 +14,13 @@ from custom_components.heating_assistant.sensor import (
     EstimatedParametersStatusSensor,
     HeaterScaleSensor,
     KalmanInnovationSensor,
+    LoglikSliceSensor,
     MPCPerformanceSensor,
     ModelFitQualitySensor,
     OpenLoopRMSESensor,
     ParameterConfidenceSensor,
     PredictionErrorSensor,
+    ResidualACFSensor,
     SolarRadiationStatusSensor,
     SysIdSimulationSensor,
     WeatherForecastStatusSensor,
@@ -210,6 +212,17 @@ def test_model_fit_quality_native_value_none_with_insufficient_data():
     assert sensor.native_value is None
 
 
+def test_model_fit_quality_attributes_report_insufficient_history():
+    coord = _make_coordinator()
+    coord.history_buffer = deque(
+        [{"y": [20.0], "y_pred": [20.1]}], maxlen=50
+    )
+    sensor = ModelFitQualitySensor(coord, "living_room")
+    attrs = sensor.extra_state_attributes
+    assert attrs["error"] == "Insufficient data"
+    assert attrs["n_samples"] == 1
+
+
 def test_parameter_confidence_native_value_reflects_valid_params():
     coord = _make_coordinator(thermal_mass=1_000_000.0, r_external=0.05)
     sensor = ParameterConfidenceSensor(coord, "living_room")
@@ -232,6 +245,35 @@ def test_open_loop_rmse_native_value_none_before_first_run():
     assert sensor.native_value is None
 
 
+def test_open_loop_rmse_attributes_format_simulation_trace():
+    coord = _make_coordinator(
+        open_loop_results={
+            "living_room": {
+                "rmse": 0.18,
+                "mae": 0.14,
+                "rmse_by_horizon": {"4h": 0.2},
+                "simulation": [
+                    {
+                        "time": 1_700_000_000.0,
+                        "measured": 20.0,
+                        "predicted": 20.1,
+                        "predicted_wall": 19.5,
+                    }
+                ],
+                "error": "stale cache",
+            }
+        }
+    )
+    sensor = OpenLoopRMSESensor(coord, "living_room")
+    attrs = sensor.extra_state_attributes
+    assert attrs["open_loop_rmse"] == pytest.approx(0.18)
+    assert attrs["rmse_by_horizon"] == {"4h": 0.2}
+    assert attrs["error"] == "stale cache"
+    assert len(attrs["simulation"]) == 1
+    assert "T" in attrs["simulation"][0]["time"]
+    assert attrs["simulation"][0]["predicted_wall"] == pytest.approx(19.5)
+
+
 def test_kalman_innovation_native_value_from_history():
     coord = _make_coordinator()
     coord.history_buffer = deque(
@@ -243,6 +285,24 @@ def test_kalman_innovation_native_value_from_history():
     )
     sensor = KalmanInnovationSensor(coord, "living_room")
     assert sensor.native_value == pytest.approx(-0.12)
+
+
+def test_kalman_innovation_attributes_include_consistency_stats():
+    coord = _make_coordinator()
+    coord.history_buffer = deque(
+        [
+            {"kalman_innovation": [0.05], "timestamp": 1_000.0},
+            {"kalman_innovation": [-0.05], "timestamp": 1_900.0},
+            {"kalman_innovation": [0.04], "timestamp": 2_800.0},
+        ],
+        maxlen=50,
+    )
+    sensor = KalmanInnovationSensor(coord, "living_room")
+    attrs = sensor.extra_state_attributes
+    assert attrs["n_samples"] == 3
+    assert "mean" in attrs
+    assert "is_consistent" in attrs
+    assert len(attrs["innovations"]) == 3
 
 
 def test_heater_scale_native_value_as_percentage():
@@ -288,6 +348,32 @@ def test_mpc_performance_native_value_returns_last_solve_time():
     assert sensor.available is True
 
 
+def test_mpc_performance_ignores_invalid_solve_time_samples():
+    coord = _make_coordinator()
+    coord.controller.last_solve_time = "not-a-number"
+    coord.controller.solve_times = [0.2, "bad", 0.3]
+    sensor = MPCPerformanceSensor(coord)
+    assert sensor.native_value is None
+    attrs = sensor.extra_state_attributes
+    assert attrs["last_solve_time_s"] is None
+    assert attrs["n_solves"] == 5
+    assert "current_tracking_errors" in attrs
+
+
+def test_parameter_confidence_native_value_none_when_validation_raises(monkeypatch):
+    coord = _make_coordinator()
+    sensor = ParameterConfidenceSensor(coord, "living_room")
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("validation failed")
+
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.model_diagnostics.validate_parameters",
+        _boom,
+    )
+    assert sensor.native_value is None
+
+
 def test_weather_forecast_status_disabled_without_entity():
     coord = _make_coordinator()
     sensor = WeatherForecastStatusSensor(coord)
@@ -316,6 +402,128 @@ def test_solar_radiation_status_failing_reports_error():
     attrs = sensor.extra_state_attributes
     assert attrs["last_error"] == "timeout"
     assert attrs["ghi_now"] == pytest.approx(350.0)
+
+
+def test_prediction_error_extra_state_attributes_compute_statistics():
+    coord = _make_coordinator()
+    coord.history_buffer = deque(
+        [
+            {"y": [20.0], "y_pred": [20.2]},
+            {"y": [20.1], "y_pred": [20.5]},
+            {"y": [20.2], "y_pred": [20.0]},
+        ],
+        maxlen=50,
+    )
+    sensor = PredictionErrorSensor(coord, "living_room")
+    attrs = sensor.extra_state_attributes
+    assert attrs["n_samples"] == 3
+    assert attrs["rmse"] == pytest.approx(0.283, abs=0.01)
+    assert len(attrs["recent_errors"]) == 3
+
+
+def test_model_fit_quality_native_value_none_when_metrics_raise(monkeypatch):
+    coord = _make_coordinator()
+    coord.history_buffer = deque(
+        [
+            {"y": [20.0], "y_pred": [20.0]},
+            {"y": [20.5], "y_pred": [20.5]},
+        ],
+        maxlen=50,
+    )
+    sensor = ModelFitQualitySensor(coord, "living_room")
+
+    def _boom(*_args, **_kwargs):
+        raise ValueError("bad fit")
+
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.model_diagnostics.compute_model_fit_metrics",
+        _boom,
+    )
+    assert sensor.native_value is None
+    attrs = sensor.extra_state_attributes
+    assert "bad fit" in attrs["error"]
+
+
+def test_residual_acf_native_value_from_prediction_residuals():
+    coord = _make_coordinator()
+    coord.history_buffer = deque(
+        [
+            {"y": [20.0], "y_pred": [20.1]},
+            {"y": [20.2], "y_pred": [20.0]},
+            {"y": [20.4], "y_pred": [20.3]},
+            {"y": [20.1], "y_pred": [20.2]},
+        ],
+        maxlen=50,
+    )
+    sensor = ResidualACFSensor(coord, "living_room")
+    value = sensor.native_value
+    assert value is not None
+    assert -1.0 <= value <= 1.0
+    attrs = sensor.extra_state_attributes
+    assert "acf" in attrs
+    assert attrs["n_samples"] >= 2
+
+
+def test_residual_acf_native_value_none_with_single_sample():
+    coord = _make_coordinator()
+    coord.history_buffer = deque(
+        [{"y": [20.0], "y_pred": [20.1]}], maxlen=50
+    )
+    sensor = ResidualACFSensor(coord, "living_room")
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes["n_samples"] == 1
+
+
+def test_prediction_error_native_value_skips_records_without_prediction():
+    coord = _make_coordinator()
+    coord.history_buffer = deque(
+        [
+            {"y": [20.0]},
+            {"y": [20.1], "y_pred": [20.4]},
+        ],
+        maxlen=50,
+    )
+    sensor = PredictionErrorSensor(coord, "living_room")
+    assert sensor.native_value == pytest.approx(0.3)
+
+
+def test_loglik_slice_native_value_none_before_computation():
+    coord = _make_coordinator()
+    coord._loglik_slices = {}
+    sensor = LoglikSliceSensor(coord, "living_room")
+    assert sensor.native_value is None
+    attrs = sensor.extra_state_attributes
+    assert attrs["status"] == "not_computed"
+    assert attrs["room"] == "living_room"
+
+
+def test_loglik_slice_native_value_and_attributes_from_coordinator_cache():
+    coord = _make_coordinator()
+    coord._loglik_slices = {
+        "living_room": {
+            "computed_at": "2026-05-16T09:00:00+00:00",
+            "room": "living_room",
+            "grid": [[0.0, 1.0], [0.1, 0.9]],
+            "loglik": -12.5,
+        }
+    }
+    sensor = LoglikSliceSensor(coord, "living_room")
+    assert sensor.native_value == "2026-05-16T09:00:00+00:00"
+    attrs = sensor.extra_state_attributes
+    assert attrs["loglik"] == pytest.approx(-12.5)
+    assert attrs["grid"] == [[0.0, 1.0], [0.1, 0.9]]
+
+
+def test_residual_acf_attributes_surface_compute_errors(monkeypatch):
+    coord = _make_coordinator()
+    sensor = ResidualACFSensor(coord, "living_room")
+
+    def _boom():
+        raise RuntimeError("acf failed")
+
+    monkeypatch.setattr(sensor, "_compute_acf", _boom)
+    attrs = sensor.extra_state_attributes
+    assert attrs["error"] == "acf failed"
 
 
 def test_sysid_simulation_native_value_from_sysid_results():
