@@ -47,6 +47,7 @@ jobs:
         with:
           name: coverage-fast-${{ matrix.shard }}
           path: .coverage.fast-${{ matrix.shard }}
+          include-hidden-files: true
 
   pytest-slow:
     runs-on: ubuntu-latest
@@ -79,6 +80,7 @@ jobs:
         with:
           name: coverage-slow
           path: .coverage.slow
+          include-hidden-files: true
 
   coverage:
     needs: [pytest-fast, pytest-slow]
