@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-*Generated: 2026-06-24 04:26 UTC*
+*Generated: 2026-07-09 17:18 UTC*
 
 All timings are wall-clock milliseconds measured on the CI runner (single
 process, single thread).  Each cell shows the result of running the
@@ -18,14 +18,14 @@ One control step consists of:
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | SLSQP    | qp             |       5.0 |         5.0 |      5.3 |   15 |
-| studio-1room           | IPOPT    | qp             |       5.1 |         5.0 |      5.2 |   15 |
-| two-bedroom-2room      | SLSQP    | qp             |       5.7 |         5.6 |      7.8 |   15 |
-| two-bedroom-2room      | IPOPT    | qp             |       5.6 |         5.6 |      6.1 |   15 |
-| full-house-5room       | SLSQP    | qp             |      10.1 |        10.0 |     10.5 |   15 |
-| full-house-5room       | IPOPT    | qp             |      10.0 |        10.0 |     10.2 |   15 |
-| full-house-5room-N16   | SLSQP    | qp             |      86.2 |        87.7 |    132.3 |   15 |
-| full-house-5room-N16   | IPOPT    | qp             |      66.7 |        72.4 |     94.4 |   15 |
+| studio-1room           | SLSQP    | qp             |       6.7 |         6.1 |     10.1 |   15 |
+| studio-1room           | IPOPT    | qp             |       6.6 |         6.2 |      9.3 |   15 |
+| two-bedroom-2room      | SLSQP    | qp             |       6.7 |         6.5 |      9.1 |   15 |
+| two-bedroom-2room      | IPOPT    | qp             |       6.6 |         6.6 |      6.8 |   15 |
+| full-house-5room       | SLSQP    | qp             |      12.0 |        11.3 |     15.5 |   15 |
+| full-house-5room       | IPOPT    | qp             |      12.1 |        11.4 |     16.7 |   15 |
+| full-house-5room-N16   | SLSQP    | qp             |      96.9 |        95.8 |    104.4 |   15 |
+| full-house-5room-N16   | IPOPT    | qp             |      94.4 |        95.4 |    109.5 |   15 |
 
 **Configurations:**
 
@@ -49,9 +49,9 @@ History buffer: 90 steps (1-minute samples) of synthetic data.
 
 | Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |
 |------------------------|------------|----------------|------------|-------------|----------|-----|
-| studio-1room           | IPOPT    | IPOPT          |    2669.6 |      2669.6 |   2669.6 |    1 |
-| two-bedroom-2room      | IPOPT    | SLSQP          |   11188.9 |     11188.9 |  11188.9 |    1 |
-| full-house-5room       | IPOPT    | IPOPT          |   13996.0 |     13996.0 |  13996.0 |    1 |
+| studio-1room           | IPOPT    | IPOPT          |   13782.5 |     13782.5 |  13782.5 |    1 |
+| two-bedroom-2room      | IPOPT    | SLSQP          |   23810.2 |     23810.2 |  23810.2 |    1 |
+| full-house-5room       | IPOPT    | IPOPT          |   28740.3 |     28740.3 |  28740.3 |    1 |
 
 **Configurations:**
 
@@ -67,17 +67,17 @@ History buffer: 90 steps (1-minute samples) of synthetic data.
 
 | Routine                     | Scenario               | Solver req | old median (ms) | new median (ms) | Δ median |
 |-----------------------------|------------------------|------------|-----------------|-----------------|----------|
-| MPC.compute                 | studio-1room           | SLSQP    |         6.6 |         5.0 |    -24.1% (faster) |
-| MPC.compute                 | studio-1room           | IPOPT    |         6.6 |         5.0 |    -23.7% (faster) |
-| MPC.compute                 | two-bedroom-2room      | SLSQP    |         7.6 |         5.6 |    -26.5% (faster) |
-| MPC.compute                 | two-bedroom-2room      | IPOPT    |         7.9 |         5.6 |    -29.4% (faster) |
-| MPC.compute                 | full-house-5room       | SLSQP    |        13.8 |        10.0 |    -27.2% (faster) |
-| MPC.compute                 | full-house-5room       | IPOPT    |        13.7 |        10.0 |    -26.8% (faster) |
-| MPC.compute                 | full-house-5room-N16   | SLSQP    |        70.4 |        87.7 |     24.5% (slower) |
-| MPC.compute                 | full-house-5room-N16   | IPOPT    |        59.3 |        72.4 |     22.2% (slower) |
-| KalmanMLEstimator.estimate  | studio-1room           | IPOPT    |      3462.4 |      2669.6 |    -22.9% (faster) |
-| KalmanMLEstimator.estimate  | two-bedroom-2room      | IPOPT    |     14499.4 |     11188.9 |    -22.8% (faster) |
-| KalmanMLEstimator.estimate  | full-house-5room       | IPOPT    |      6593.2 |     13996.0 |    112.3% (slower) |
+| MPC.compute                 | studio-1room           | SLSQP    |         6.2 |         6.1 |     -1.8% (faster) |
+| MPC.compute                 | studio-1room           | IPOPT    |         6.3 |         6.2 |     -1.5% (faster) |
+| MPC.compute                 | two-bedroom-2room      | SLSQP    |         6.8 |         6.5 |     -3.7% (faster) |
+| MPC.compute                 | two-bedroom-2room      | IPOPT    |         6.8 |         6.6 |     -2.7% (faster) |
+| MPC.compute                 | full-house-5room       | SLSQP    |        11.6 |        11.3 |     -2.8% (faster) |
+| MPC.compute                 | full-house-5room       | IPOPT    |        11.4 |        11.4 |      0.3% (slower) |
+| MPC.compute                 | full-house-5room-N16   | SLSQP    |        79.4 |        95.8 |     20.6% (slower) |
+| MPC.compute                 | full-house-5room-N16   | IPOPT    |        79.9 |        95.4 |     19.4% (slower) |
+| KalmanMLEstimator.estimate  | studio-1room           | IPOPT    |     14539.1 |     13782.5 |     -5.2% (faster) |
+| KalmanMLEstimator.estimate  | two-bedroom-2room      | IPOPT    |     26160.3 |     23810.2 |     -9.0% (faster) |
+| KalmanMLEstimator.estimate  | full-house-5room       | IPOPT    |     30147.8 |     28740.3 |     -4.7% (faster) |
 
 ---
 
@@ -89,8 +89,8 @@ History buffer: 90 steps (1-minute samples) of synthetic data.
   first call (warm-up) is typically the slowest and is excluded.
 - Parameter estimation timing depends heavily on the number of identifiable
   parameters (which the estimator detects automatically from the data).
-- Parameter estimation tests are marked `slow` and can be skipped in
-  quick CI passes with `pytest -m "not slow"`.
+- MPC and parameter-estimation benchmark tests are marked `slow` and
+  can be skipped in quick CI passes with `pytest -m "not slow"`.
 - Run all benchmarks yourself:
   ```bash
   python -m pytest tests/test_performance.py -v -s

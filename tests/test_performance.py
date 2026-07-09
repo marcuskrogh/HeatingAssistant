@@ -63,7 +63,8 @@ _BENCHMARKS_FILE = os.path.join(_REPO_ROOT, "BENCHMARKS.md")
 # 15 reps gives stable mean/median/p95 estimates for the fast MPC call while
 # keeping each benchmark run under a few seconds for the 1-room and 2-room
 # cases.  The 5-room case takes ~1.1s per call, so 15 reps ≈ 17s total.
-_MPC_REPS = 15
+# Set FAST_TESTS=1 (see tests/conftest.py) to use fewer reps in quick passes.
+_MPC_REPS = 3 if os.environ.get("FAST_TESTS") == "1" else 15
 # Parameter estimation is slow (multi-start IPOPT with a Kalman filter
 # objective); a single timed call is sufficient to track regressions.
 _ESTIM_REPS = 1
@@ -276,8 +277,13 @@ def _full_house():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 class TestMPCPerformance:
-    """Benchmark HeatingMPCController.compute() for different house sizes."""
+    """Benchmark HeatingMPCController.compute() for different house sizes.
+
+    Marked ``slow`` because each scenario runs many timed repetitions for
+    ``BENCHMARKS.md``; skip in quick CI with ``-m "not slow"``.
+    """
 
     _NOW = datetime(2024, 1, 15, 12, 0, tzinfo=timezone.utc)
     _SOLVERS = ("SLSQP", "IPOPT")
@@ -679,8 +685,8 @@ def _write_benchmarks_md() -> None:
         "  first call (warm-up) is typically the slowest and is excluded.",
         "- Parameter estimation timing depends heavily on the number of identifiable",
         "  parameters (which the estimator detects automatically from the data).",
-        "- Parameter estimation tests are marked `slow` and can be skipped in",
-        "  quick CI passes with `pytest -m \"not slow\"`.",
+        "- MPC and parameter-estimation benchmark tests are marked `slow` and",
+        "  can be skipped in quick CI passes with `pytest -m \"not slow\"`.",
         "- Run all benchmarks yourself:",
         "  ```bash",
         "  python -m pytest tests/test_performance.py -v -s",

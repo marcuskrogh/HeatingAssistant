@@ -14,6 +14,8 @@ import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from custom_components.heating_assistant import (
     _compute_open_loop_rmse_by_horizon,
     _merge_per_room_into_sysid_results,
@@ -179,7 +181,7 @@ def _sde_synthetic_history(
     true_r,
     true_scale,
     *,
-    n=192,
+    n=128,
     dt=900.0,
     t_air0=20.0,
     t_wall0=20.0,
@@ -285,6 +287,7 @@ def _open_loop_rmse(history, room_params, heater_scales, t_wall_initial, dt=900.
     return result["per_room"][room_names[0]]["rmse"]
 
 
+@pytest.mark.slow
 def test_small_synthetic_auto_id_near_zero_open_loop_rmse():
     """Auto-ID on SDE-consistent synthetic data → near-zero continuous open-loop RMSE.
 

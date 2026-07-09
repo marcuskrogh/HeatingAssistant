@@ -4,7 +4,7 @@ Heating Assistant uses **pytest** with a three-tier layout:
 
 | Tier | Directory | Marker | What it covers |
 |------|-----------|--------|----------------|
-| Unit | `tests/test_*.py` | `@pytest.mark.unit` (optional) | Pure physics, estimation math, parsers |
+| Unit | `tests/test_*.py` | `@pytest.mark.unit` (auto-applied) | Pure physics, estimation math, parsers |
 | Integration | `tests/integration/` | `@pytest.mark.integration` | Package boundaries: `mpc_cycle`, `controller/factory`, `services/` |
 | System | `tests/system/` | `@pytest.mark.system` | Full stack smoke: model → MPC → forecast payload |
 
@@ -13,20 +13,30 @@ Heating Assistant uses **pytest** with a three-tier layout:
 ```bash
 pip install -r requirements-dev.txt
 pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
-python -m pytest tests/ -v -m "not slow"
+python3 -m pytest tests/ -v -m "not slow"
 ```
 
 ## Useful commands
 
 ```bash
-# Fast default (excludes slow Nelder-Mead benchmarks)
-python -m pytest tests/ -m "not slow"
+# Fast default (excludes slow IPOPT/MPC benchmarks)
+python3 -m pytest tests/ -m "not slow"
+
+# Slow tier (IPOPT estimation regressions and MPC benchmarks)
+python3 -m pytest tests/ -m slow
+
+# Even faster benchmarks (3 MPC reps instead of 15)
+FAST_TESTS=1 python3 -m pytest tests/test_performance.py -m slow -v -s
+
+# Unit tier only (auto-tagged for tests/test_*.py)
+python3 -m pytest tests/ -m unit
 
 # Integration + system tiers only
-python -m pytest tests/integration tests/system -v
+python3 -m pytest tests/integration tests/system -v
 
-# With coverage
-python -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
+# With coverage (fast + slow, same as CI)
+python3 -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
+python3 -m pytest tests/ -m slow --cov=custom_components/heating_assistant --cov-append --cov-report=term-missing
 
 # Panel harnesses (also run in CI)
 node tests/panel_watchdog.harness.mjs
@@ -38,10 +48,13 @@ Post-refactor coordinator stubs live in `tests/helpers/`:
 
 - `coordinator_stubs.py` — `make_minimal_coordinator()`, `make_hass_stub()`, `wire_room_enablement()`
 - `setup_patches.py` — `patch_setup_stores()` for `async_setup_entry` tests
+- `estimation_fixtures.py` — `make_single_room()`, `generate_history()`, `make_kalman_ml_estimator()`, plus module-scoped pytest fixtures
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/tests.yml` runs on push/PR to `main`:
-- pytest on Python 3.11 and 3.12
-- coverage report
-- Node.js panel harness smoke tests
+GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to `main` only**:
+
+- **Fast tests** — single job, `pytest tests/ -m "not slow"`
+- **Slow tests** — single job, `pytest tests/ -m slow`
+- **Coverage** — combines fast + slow fragments, checked against `scripts/coverage_baseline.json`
+- **Panel harnesses** — serial Node smoke scripts

@@ -164,6 +164,7 @@ class TestAnalyticGradient2R2C:
 
 
 class TestSolarScaleRecovery:
+    @pytest.mark.slow
     def test_estimator_recovers_solar_scale(self):
         """Truth generated with solar_scale = 0.5; prior says 1.0.
 
@@ -183,7 +184,7 @@ class TestSolarScaleRecovery:
         t0 = 1_700_000_000.0
         history = []
         temps = {"a": 20.0}
-        for k in range(192):   # 48 h at 900 s
+        for k in range(128):   # ~32 h at 900 s — enough diurnal cycles for solar ID
             u = 0.5 if (k // 10) % 2 == 0 else 0.0
             solar_raw = max(0.0, 800.0 * math.sin(2 * math.pi * (k % 96) / 96.0))
             history.append({

@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 jobs:
-  pytest:
+  pytest-fast:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,8 +25,89 @@ jobs:
           pip install -r requirements-dev.txt
           pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
 
-      - name: Run unit and integration tests
-        run: python -m pytest tests/ -v -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
+      - name: Run fast tests
+        env:
+          COVERAGE_FILE: .coverage.fast
+        run: |
+          python3 -m pytest tests/ -m "not slow" \
+            --cov=custom_components/heating_assistant \
+            --cov-report= \
+            -q
+
+      - name: Upload coverage fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-fast
+          path: .coverage.fast
+          include-hidden-files: true
+
+  pytest-slow:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
+
+      - name: Run slow tests
+        env:
+          COVERAGE_FILE: .coverage.slow
+        run: |
+          python3 -m pytest tests/ -m slow \
+            --cov=custom_components/heating_assistant \
+            --cov-report= \
+            -q
+
+      - name: Upload coverage fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-slow
+          path: .coverage.slow
+          include-hidden-files: true
+
+  coverage:
+    needs: [pytest-fast, pytest-slow]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage tool
+        run: pip install coverage
+
+      - name: Download coverage fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine and report coverage
+        run: |
+          chmod +x scripts/combine_coverage.sh
+          ./scripts/combine_coverage.sh
+
+  panel-harness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        run: sudo apt-get update && sudo apt-get install -y nodejs
 
       - name: Run panel harness smoke tests
         run: |

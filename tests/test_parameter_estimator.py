@@ -110,6 +110,26 @@ def _generate_history(rooms, sources, dt=60.0, n_steps=60,
     return history
 
 
+@pytest.fixture(scope="module")
+def single_room_estimate_result():
+    """One successful single-room estimate shared by structure/positivity checks."""
+    rooms = [_make_single_room()]
+    sources = _make_sources(rooms)
+    estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+    history = _generate_history(rooms, sources, n_steps=60)
+    return estimator.estimate(history)
+
+
+@pytest.fixture(scope="module")
+def two_room_estimate_result():
+    """One successful two-room estimate shared by multi-room checks."""
+    rooms = _make_two_rooms()
+    sources = _make_sources(rooms)
+    estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
+    history = _generate_history(rooms, sources, n_steps=60)
+    return estimator.estimate(history)
+
+
 # ---------------------------------------------------------------------------
 # Tests for _nelder_mead
 # ---------------------------------------------------------------------------
@@ -187,44 +207,28 @@ class TestKalmanMLEstimator:
         assert result["success"] is True
         assert result["n_steps"] >= MIN_HISTORY_STEPS
 
-    def test_estimated_params_are_positive(self):
-        rooms = [_make_single_room()]
-        sources = _make_sources(rooms)
-        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
-        history = _generate_history(rooms, sources, n_steps=60)
-        result = estimator.estimate(history)
+    def test_estimated_params_are_positive(self, single_room_estimate_result):
+        result = single_room_estimate_result
         assert result["success"] is True
         p = result["estimated_params"]["living_room"]
         assert p["thermal_mass"] > 0
         assert p["r_external"] > 0
 
-    def test_estimated_params_within_bounds(self):
-        rooms = [_make_single_room()]
-        sources = _make_sources(rooms)
-        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
-        history = _generate_history(rooms, sources, n_steps=60)
-        result = estimator.estimate(history)
+    def test_estimated_params_within_bounds(self, single_room_estimate_result):
+        result = single_room_estimate_result
         assert result["success"] is True
         p = result["estimated_params"]["living_room"]
         assert math.exp(_LOG_MASS_LO) <= p["thermal_mass"] <= math.exp(_LOG_MASS_HI)
         assert math.exp(_LOG_R_LO) <= p["r_external"] <= math.exp(_LOG_R_HI)
 
-    def test_log_likelihood_is_finite(self):
-        rooms = [_make_single_room()]
-        sources = _make_sources(rooms)
-        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
-        history = _generate_history(rooms, sources, n_steps=60)
-        result = estimator.estimate(history)
+    def test_log_likelihood_is_finite(self, single_room_estimate_result):
+        result = single_room_estimate_result
         assert result["success"] is True
         assert result["log_likelihood"] is not None
         assert math.isfinite(result["log_likelihood"])
 
-    def test_two_room_model_succeeds(self):
-        rooms = _make_two_rooms()
-        sources = _make_sources(rooms)
-        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
-        history = _generate_history(rooms, sources, n_steps=60)
-        result = estimator.estimate(history)
+    def test_two_room_model_succeeds(self, two_room_estimate_result):
+        result = two_room_estimate_result
         assert result["success"] is True
         for room in ["living_room", "bedroom"]:
             assert result["estimated_params"][room]["thermal_mass"] > 0
@@ -265,6 +269,7 @@ class TestKalmanMLEstimator:
         estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
         assert estimator._regularization <= 0.01
 
+    @pytest.mark.slow
     def test_default_prior_is_responsive_to_excited_data(self):
         """With the default (light) prior, excited data moves the heater scale
         and thermal parameters substantially off a wrong prior.
@@ -306,12 +311,8 @@ class TestKalmanMLEstimator:
             f"heater scale stayed pinned near the unit prior: {scale}"
         )
 
-    def test_result_contains_required_keys(self):
-        rooms = [_make_single_room()]
-        sources = _make_sources(rooms)
-        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
-        history = _generate_history(rooms, sources, n_steps=60)
-        result = estimator.estimate(history)
+    def test_result_contains_required_keys(self, single_room_estimate_result):
+        result = single_room_estimate_result
         for key in ("success", "estimated_params", "current_params",
                     "n_steps", "log_likelihood", "message"):
             assert key in result, f"missing key: {key}"
@@ -409,15 +410,12 @@ def _generate_history_with_extras(
     return history
 
 
+@pytest.mark.slow
 class TestJointInternalGainAndHeaterScale:
     """Recovery of the new joint parameters from synthetic data."""
 
-    def test_result_contains_new_keys(self):
-        rooms = [_make_single_room()]
-        sources = _make_sources(rooms)
-        estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
-        history = _generate_history(rooms, sources, n_steps=60)
-        result = estimator.estimate(history)
+    def test_result_contains_new_keys(self, single_room_estimate_result):
+        result = single_room_estimate_result
         for key in (
             "estimated_internal_gains",
             "estimated_heater_scales",
