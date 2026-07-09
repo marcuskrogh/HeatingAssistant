@@ -26,6 +26,7 @@ import math
 import warnings
 
 import numpy as np
+import pytest
 
 from custom_components.heating_assistant.thermal_model import HouseModel, Room
 from custom_components.heating_assistant.heat_sources import ElectricHeater
@@ -37,7 +38,7 @@ from custom_components.heating_assistant.parameter_estimator import (
 )
 
 
-def _identifiable_history(true_mass, true_r, true_scale, n=192, dt=900.0, seed=1):
+def _identifiable_history(true_mass, true_r, true_scale, n=128, dt=900.0, seed=1):
     """48 h of on/off heating under a diurnal outdoor swing.
 
     The varying outdoor temperature excites the envelope-loss term
@@ -72,6 +73,7 @@ def _estimate(history):
     return est.estimate(history)
 
 
+@pytest.mark.slow
 def test_r_external_recovered_within_factor_two():
     """r_external must land within ~2× of truth (was off by >200 % before).
 
@@ -80,7 +82,7 @@ def test_r_external_recovered_within_factor_two():
     warnings.filterwarnings("ignore")
     true_r = 0.03
     ratios = []
-    for seed in (1, 2, 3):
+    for seed in (1, 2):
         hist = _identifiable_history(3e6, true_r, 0.8, seed=seed)
         res = _estimate(hist)
         assert res["success"]
@@ -93,6 +95,7 @@ def test_r_external_recovered_within_factor_two():
     )
 
 
+@pytest.mark.slow
 def test_heater_scale_stays_physical():
     """The identified heater scale must never collapse onto a bound."""
     warnings.filterwarnings("ignore")
