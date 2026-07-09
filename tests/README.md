@@ -20,6 +20,14 @@ Heating Assistant uses **pytest** with a three-tier layout:
 | Identification service handlers | `tests/test_identification_services.py` |
 | History store / records / restore | `tests/test_history_store.py`, `test_history_records.py`, `test_history_startup_restore.py` |
 | Coordinator update orchestration | `tests/integration/test_coordinator_update_cycle.py` |
+| Button/datetime entities, HA diagnostics, KPI history | `tests/test_button_entities.py`, `test_datetime_entities.py`, `test_ha_integration_diagnostics.py`, `test_kpi_history.py` |
+| Runtime state/reconfig, setup simulation | `tests/test_runtime_state.py`, `test_runtime_reconfig.py`, `test_setup_simulation.py` |
+| History access services, simulation helpers | `tests/test_history_access_services.py`, `test_services_simulation.py` |
+| Identification handlers (full) | `tests/test_identification_services.py` |
+| Diagnostic + room_live + forecast sensors | `tests/test_sensor_diagnostics.py`, `test_sensor_room_live.py`, `test_sensor_forecasts.py` |
+| WebSocket API (all handlers) | `tests/test_websocket_api.py` |
+| Parameter lifecycle, core helpers | `tests/test_parameter_lifecycle.py`, `test_coordinator_core_helpers.py` |
+| Config flow, lovelace dashboard gaps | `tests/test_config_flow.py`, `test_lovelace_dashboard_gaps.py` |
 
 ## Quick start
 
