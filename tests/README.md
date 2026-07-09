@@ -72,13 +72,12 @@ Post-refactor coordinator stubs live in `tests/helpers/`:
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/tests.yml` runs on pull requests to `main`:
+GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to `main` only** (no push/merge or scheduled triggers):
 
 - **4 parallel fast shards** (`-m "not slow"`) via `scripts/test_shards.sh`
 - **Slow tier** job (`-m slow`) for IPOPT estimation regressions and MPC benchmarks
 - **Coverage combine** across shards with regression check (`scripts/check_coverage.py`)
 - **Panel harnesses** run in parallel with `xargs -P 4`
-- **Nightly** (`cron`) full suite including all markers
 
 ```bash
 # Local parallel run (pytest-xdist)
