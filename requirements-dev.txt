@@ -5,7 +5,6 @@
 pytest>=8.0
 pytest-asyncio>=0.23
 pytest-cov>=4.1
-pytest-xdist>=3.5
 PyYAML>=6.0
 
 # Home Assistant is only needed for type-checking imports in some IDE setups;

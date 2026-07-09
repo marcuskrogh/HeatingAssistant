@@ -13,53 +13,33 @@ Heating Assistant uses **pytest** with a three-tier layout:
 ```bash
 pip install -r requirements-dev.txt
 pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
-python -m pytest tests/ -v -m "not slow"
+python3 -m pytest tests/ -v -m "not slow"
 ```
 
 ## Useful commands
 
 ```bash
-# Fast default (excludes slow Nelder-Mead benchmarks)
-python -m pytest tests/ -m "not slow"
+# Fast default (excludes slow IPOPT/MPC benchmarks)
+python3 -m pytest tests/ -m "not slow"
+
+# Slow tier (IPOPT estimation regressions and MPC benchmarks)
+python3 -m pytest tests/ -m slow
 
 # Even faster benchmarks (3 MPC reps instead of 15)
-FAST_TESTS=1 python -m pytest tests/test_performance.py -m "not slow" -v -s
+FAST_TESTS=1 python3 -m pytest tests/test_performance.py -m slow -v -s
 
 # Unit tier only (auto-tagged for tests/test_*.py)
-python -m pytest tests/ -m unit
+python3 -m pytest tests/ -m unit
 
 # Integration + system tiers only
-python -m pytest tests/integration tests/system -v
+python3 -m pytest tests/integration tests/system -v
 
-# With coverage
-python -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
+# With coverage (fast + slow, same as CI)
+python3 -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
+python3 -m pytest tests/ -m slow --cov=custom_components/heating_assistant --cov-append --cov-report=term-missing
 
 # Panel harnesses (also run in CI)
 node tests/panel_watchdog.harness.mjs
-```
-
-## Parallel CI shards
-
-Four balanced shards are defined in `tests/shards.json` (≈ by runtime weight):
-
-| Shard | Focus |
-|-------|--------|
-| 1 | estimation / sysid (heavy) |
-| 2 | controller / MPC / integration / system |
-| 3 | heat sources, thermal, solar, weather |
-| 4 | coordinator, services, dashboard, KPI, misc |
-
-```bash
-chmod +x scripts/test_shards.sh
-
-# Run one shard (pass through extra pytest flags)
-./scripts/test_shards.sh 1 -m "not slow"
-./scripts/test_shards.sh 2 -m "not slow"
-./scripts/test_shards.sh 3 -m "not slow"
-./scripts/test_shards.sh 4 -m "not slow"
-
-# GitHub Actions matrix example (shard-id: 1..4)
-# ./scripts/test_shards.sh ${{ matrix.shard }} -m "not slow" --cov=...
 ```
 
 ## Shared helpers
@@ -72,14 +52,9 @@ Post-refactor coordinator stubs live in `tests/helpers/`:
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to `main` only** (no push/merge or scheduled triggers):
+GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to `main` only**:
 
-- **4 parallel fast shards** (`-m "not slow"`) via `scripts/test_shards.sh`
-- **Slow tier** job (`-m slow`) for IPOPT estimation regressions and MPC benchmarks
-- **Coverage combine** across shards with regression check (`scripts/check_coverage.py`)
-- **Panel harnesses** run in parallel with `xargs -P 4`
-
-```bash
-# Local parallel run (pytest-xdist)
-python3 -m pytest tests/ -m "not slow" -n auto
-```
+- **Fast tests** — single job, `pytest tests/ -m "not slow"`
+- **Slow tests** — single job, `pytest tests/ -m slow`
+- **Coverage** — combines fast + slow fragments, checked against `scripts/coverage_baseline.json`
+- **Panel harnesses** — serial Node smoke scripts

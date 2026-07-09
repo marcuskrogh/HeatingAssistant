@@ -7,10 +7,6 @@ on:
 jobs:
   pytest-fast:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
 
     steps:
       - uses: actions/checkout@v4
@@ -29,12 +25,11 @@ jobs:
           pip install -r requirements-dev.txt
           pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
 
-      - name: Run fast pytest shard
+      - name: Run fast tests
         env:
-          COVERAGE_FILE: .coverage.fast-${{ matrix.shard }}
+          COVERAGE_FILE: .coverage.fast
         run: |
-          chmod +x scripts/test_shards.sh
-          ./scripts/test_shards.sh ${{ matrix.shard }} -m "not slow" \
+          python3 -m pytest tests/ -m "not slow" \
             --cov=custom_components/heating_assistant \
             --cov-report= \
             -q
@@ -42,8 +37,8 @@ jobs:
       - name: Upload coverage fragment
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-fast-${{ matrix.shard }}
-          path: .coverage.fast-${{ matrix.shard }}
+          name: coverage-fast
+          path: .coverage.fast
           include-hidden-files: true
 
   pytest-slow:
@@ -63,7 +58,7 @@ jobs:
           pip install -r requirements-dev.txt
           pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
 
-      - name: Run slow pytest tier
+      - name: Run slow tests
         env:
           COVERAGE_FILE: .coverage.slow
         run: |
@@ -114,7 +109,9 @@ jobs:
       - name: Install Node.js
         run: sudo apt-get update && sudo apt-get install -y nodejs
 
-      - name: Run panel harness smoke tests in parallel
+      - name: Run panel harness smoke tests
         run: |
-          find tests -maxdepth 1 -name 'panel_*.harness.mjs' -print0 \
-            | xargs -0 -P 4 -I{} sh -c 'echo "Running {}"; node {}'
+          for harness in tests/panel_*.harness.mjs; do
+            echo "Running $harness"
+            node "$harness"
+          done
