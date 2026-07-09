@@ -54,7 +54,22 @@ Post-refactor coordinator stubs live in `tests/helpers/`:
 
 GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to `main` only**:
 
-- **Fast tests** — single job, `pytest tests/ -m "not slow"`
-- **Slow tests** — single job, `pytest tests/ -m slow`
-- **Coverage** — combines fast + slow fragments, checked against `scripts/coverage_baseline.json`
-- **Panel harnesses** — serial Node smoke scripts
+| Job | Purpose |
+|-----|---------|
+| `pytest-fast` | `pytest tests/ -m "not slow"` with per-job coverage fragment |
+| `pytest-slow` | `pytest tests/ -m slow` with per-job coverage fragment |
+| `coverage` | Combines fast + slow fragments, reports, checks `scripts/coverage_baseline.json` |
+| `panel-harness` | Serial Node smoke scripts (`tests/panel_*.harness.mjs`) |
+
+**Fast/slow split:** slow tests (multi-start Nelder-Mead estimation, IPOPT/MPC benchmarks) dominate wall time. Running them in a separate parallel job keeps PR feedback fast without skipping coverage.
+
+**Efficiency:** Python jobs use `actions/setup-python` with `cache: pip` (keyed off `requirements-dev.txt`). Node.js is installed only in `panel-harness`; Python jobs do not need it.
+
+**Coverage baseline:** `scripts/check_coverage.py` enforces the floor recorded in `scripts/coverage_baseline.json`. Maintainers can regenerate that file from a combined local report:
+
+```bash
+coverage report -m | tee coverage_report.txt
+python3 scripts/update_coverage_baseline.py coverage_report.txt
+```
+
+Optional flags: `--tests-passed`, `--tests-skipped`, `--wall-time-seconds`, `--dry-run`.

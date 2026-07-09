@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Compare pytest-cov totals against the recorded baseline."""
+"""Compare pytest-cov totals against the recorded baseline.
+
+To refresh the baseline after a full local run, see ``update_coverage_baseline.py``.
+"""
 
 from __future__ import annotations
 
