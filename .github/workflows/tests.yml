@@ -103,9 +103,8 @@ jobs:
 
       - name: Combine and report coverage
         run: |
-          coverage combine
-          coverage report -m | tee coverage_report.txt
-          python3 scripts/check_coverage.py coverage_report.txt
+          chmod +x scripts/combine_coverage.sh
+          ./scripts/combine_coverage.sh
 
   panel-harness:
     runs-on: ubuntu-latest
