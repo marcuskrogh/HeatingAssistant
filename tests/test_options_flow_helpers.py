@@ -13,22 +13,39 @@ from custom_components.heating_assistant._options_flow import (
     BUILDING_AGE_TO_R_EXTERNAL,
     COMPASS_TO_DEGREES,
     ROOM_SIZE_TO_THERMAL_MASS,
+    HeaterFlowHelper,
     RoomFlowHelper,
     ScheduleFlowHelper,
     WindowFlowHelper,
+    _apply_advanced_envelope,
     degrees_to_compass,
     format_entity_ids,
+    heater_display,
     nearest_choice,
     parse_entity_ids,
     window_display,
 )
 from custom_components.heating_assistant.const import (
     CONF_COMFORT_OFFSET,
+    CONF_FACADE_COLOUR,
+    CONF_FACADE_SOLAR_SHARE,
+    CONF_FLOOR_TYPE,
+    CONF_HEAT_SOURCES,
     CONF_ROOM_NAME,
     CONF_SETPOINT,
     CONF_R_EXTERNAL,
+    CONF_SKY_RADIATIVE_UA,
+    CONF_SOLAR_EXPOSURE,
+    CONF_SOLAR_FACING,
+    CONF_SOURCE_COP_RATED,
+    CONF_SOURCE_EFFICIENCY,
+    CONF_SOURCE_HEATER_ENTITY,
+    CONF_SOURCE_MAX_POWER,
+    CONF_SOURCE_NAME,
+    CONF_SOURCE_TYPE,
     CONF_TEMP_SENSOR,
     CONF_TEMP_SENSORS,
+    CONF_THERMAL_BRIDGE_PSI_L,
     CONF_THERMAL_MASS,
     CONF_SCHEDULE,
     CONF_SCHEDULE_NAME,
@@ -45,8 +62,19 @@ from custom_components.heating_assistant.const import (
     CONF_WINDOW_ORIENTATION,
     CONF_WINDOW_SENSORS,
     CONF_WINDOW_TILT,
+    DEFAULT_FACADE_COLOUR,
+    DEFAULT_FACADE_SOLAR_SHARE,
+    DEFAULT_FLOOR_TYPE,
+    DEFAULT_SKY_RADIATIVE_UA,
+    DEFAULT_SOLAR_EXPOSURE,
+    DEFAULT_SOLAR_FACING,
+    DEFAULT_THERMAL_BRIDGE_PSI_L,
+    FLOOR_TYPE_CONCRETE,
+    FACADE_COLOUR_DARK,
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
+    SOURCE_TYPE_ELECTRIC,
+    SOURCE_TYPE_HEAT_PUMP,
 )
 
 
@@ -460,3 +488,181 @@ def test_schedule_helper_period_display_includes_off_frost_override():
     label = helper.period_display(room[CONF_SCHEDULE][0])
     assert "(off" in label
     assert "frost 11.5°C" in label
+
+
+def test_schedule_helper_add_update_remove():
+    room = {CONF_ROOM_NAME: "bedroom", CONF_SCHEDULE: []}
+    helper = ScheduleFlowHelper(room)
+
+    period = {
+        CONF_SCHEDULE_NAME: "morning",
+        CONF_SCHEDULE_START: "06:00",
+        CONF_SCHEDULE_END: "08:00",
+        CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+        CONF_SCHEDULE_SETPOINT: 21.0,
+    }
+    helper.add(period)
+    assert len(helper) == 1
+    assert helper.periods[0][CONF_SCHEDULE_NAME] == "morning"
+
+    updated = {**period, CONF_SCHEDULE_SETPOINT: 22.0}
+    assert helper.update(0, updated) is True
+    assert helper.periods[0][CONF_SCHEDULE_SETPOINT] == 22.0
+    assert helper.update(99, updated) is False
+
+    assert helper.remove(0) is True
+    assert len(helper) == 0
+    assert helper.remove(0) is False
+
+
+def test_schedule_helper_display_options_indexes_periods():
+    room = {
+        CONF_ROOM_NAME: "bedroom",
+        CONF_SCHEDULE: [
+            {
+                CONF_SCHEDULE_NAME: "morning",
+                CONF_SCHEDULE_START: "06:00",
+                CONF_SCHEDULE_END: "08:00",
+                CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+            }
+        ],
+    }
+    helper = ScheduleFlowHelper(room)
+    options = helper.display_options()
+    assert list(options) == ["0"]
+    assert "morning: 06:00–08:00" in options["0"]
+
+
+# ── HeaterFlowHelper ──────────────────────────────────────────────────────
+
+
+def test_heater_display_known_and_unknown_types():
+    label = heater_display(
+        "kitchen",
+        0,
+        {CONF_SOURCE_NAME: "Radiator", CONF_SOURCE_TYPE: SOURCE_TYPE_HEAT_PUMP},
+    )
+    assert label == "kitchen · Radiator (Air-source heat pump)"
+
+    fallback = heater_display(
+        "kitchen",
+        1,
+        {CONF_SOURCE_TYPE: "custom_boiler"},
+    )
+    assert fallback == "kitchen · Heater 2 (Custom Boiler)"
+
+
+def test_heater_helper_initialises_empty_sources_for_room():
+    room = {CONF_ROOM_NAME: "kitchen"}
+    helper = HeaterFlowHelper(room)
+    assert len(helper) == 0
+    assert room[CONF_HEAT_SOURCES] == []
+
+
+def test_heater_helper_add_stores_required_and_optional_fields():
+    room = {CONF_ROOM_NAME: "kitchen"}
+    helper = HeaterFlowHelper(room)
+    helper.add(
+        name="  Radiator  ",
+        source_type=SOURCE_TYPE_ELECTRIC,
+        max_power=1500.0,
+        heater_entity="climate.radiator",
+        efficiency=0.98,
+        cop_rated=3.5,
+    )
+
+    heater = helper.heat_sources[0]
+    assert heater[CONF_SOURCE_NAME] == "Radiator"
+    assert heater[CONF_SOURCE_TYPE] == SOURCE_TYPE_ELECTRIC
+    assert heater[CONF_SOURCE_MAX_POWER] == 1500.0
+    assert heater[CONF_SOURCE_HEATER_ENTITY] == "climate.radiator"
+    assert heater[CONF_SOURCE_EFFICIENCY] == 0.98
+    assert heater[CONF_SOURCE_COP_RATED] == 3.5
+
+
+def test_heater_helper_update_and_remove():
+    helper = HeaterFlowHelper(
+        [
+            {
+                CONF_SOURCE_NAME: "old",
+                CONF_SOURCE_TYPE: SOURCE_TYPE_ELECTRIC,
+                CONF_SOURCE_MAX_POWER: 1000.0,
+                CONF_SOURCE_HEATER_ENTITY: "climate.old",
+            }
+        ]
+    )
+
+    assert helper.update(
+        0,
+        name="new",
+        source_type=SOURCE_TYPE_HEAT_PUMP,
+        max_power=2000.0,
+        heater_entity="climate.new",
+        cop_rated=4.0,
+    ) is True
+    assert helper.heat_sources[0][CONF_SOURCE_NAME] == "new"
+    assert helper.heat_sources[0][CONF_SOURCE_COP_RATED] == 4.0
+    assert helper.update(5, name="x", source_type=SOURCE_TYPE_ELECTRIC, max_power=1.0, heater_entity="y") is False
+
+    assert helper.remove(0) is True
+    assert len(helper) == 0
+    assert helper.remove(0) is False
+
+
+def test_heater_helper_display_options():
+    room = {
+        CONF_ROOM_NAME: "kitchen",
+        CONF_HEAT_SOURCES: [
+            {
+                CONF_SOURCE_NAME: "UFH",
+                CONF_SOURCE_TYPE: SOURCE_TYPE_ELECTRIC,
+            }
+        ],
+    }
+    helper = HeaterFlowHelper(room)
+    options = helper.display_options("kitchen")
+    assert options == {"0": "kitchen · UFH (Electric heater)"}
+
+
+# ── Advanced envelope helper ──────────────────────────────────────────────
+
+
+def test_apply_advanced_envelope_stores_non_defaults_and_strips_defaults():
+    room: dict = {CONF_FLOOR_TYPE: FLOOR_TYPE_CONCRETE, CONF_FACADE_COLOUR: FACADE_COLOUR_DARK}
+
+    _apply_advanced_envelope(
+        room,
+        floor_type=DEFAULT_FLOOR_TYPE,
+        facade_colour=DEFAULT_FACADE_COLOUR,
+        facade_solar_share=0.25,
+        thermal_bridge_psi_l=DEFAULT_THERMAL_BRIDGE_PSI_L,
+        sky_radiative_ua=12.0,
+        solar_exposure=DEFAULT_SOLAR_EXPOSURE,
+        solar_facing=DEFAULT_SOLAR_FACING,
+    )
+
+    assert CONF_FLOOR_TYPE not in room
+    assert CONF_FACADE_COLOUR not in room
+    assert room[CONF_FACADE_SOLAR_SHARE] == 0.25
+    assert CONF_THERMAL_BRIDGE_PSI_L not in room
+    assert room[CONF_SKY_RADIATIVE_UA] == 12.0
+    assert CONF_SOLAR_EXPOSURE not in room
+    assert CONF_SOLAR_FACING not in room
+
+
+def test_room_helper_add_applies_advanced_envelope():
+    helper = RoomFlowHelper()
+    err = helper.add(
+        name="study",
+        sensors=["sensor.study"],
+        thermal_mass=ROOM_SIZE_TO_THERMAL_MASS["small"],
+        r_external=BUILDING_AGE_TO_R_EXTERNAL["pre_1940"],
+        setpoint=21.0,
+        floor_type=FLOOR_TYPE_CONCRETE,
+        facade_solar_share=0.3,
+    )
+    assert err is None
+    room = helper.rooms[0]
+    assert room[CONF_FLOOR_TYPE] == FLOOR_TYPE_CONCRETE
+    assert room[CONF_FACADE_SOLAR_SHARE] == 0.3
+    assert room[CONF_FACADE_SOLAR_SHARE] != DEFAULT_FACADE_SOLAR_SHARE
