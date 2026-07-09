@@ -1,0 +1,8 @@
+{
+  "tolerance_percent": 2.0,
+  "packages": {
+    "custom_components/heating_assistant/services/": 55.0,
+    "custom_components/heating_assistant/history/": 66.0,
+    "custom_components/heating_assistant/coordinator/": 70.0
+  }
+}

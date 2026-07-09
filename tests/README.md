@@ -17,6 +17,9 @@ Heating Assistant uses **pytest** with a three-tier layout:
 | `estimation/{sensitivity,warmstart,model_build}.py` | `tests/test_estimation_internals.py` |
 | `services/{context,diagnostics}.py` | `tests/test_services_diagnostics.py` |
 | Full mpc_cycle orchestration | `tests/system/test_control_loop_smoke.py` |
+| Identification service handlers | `tests/test_identification_services.py` |
+| History store / records / restore | `tests/test_history_store.py`, `test_history_records.py`, `test_history_startup_restore.py` |
+| Coordinator update orchestration | `tests/integration/test_coordinator_update_cycle.py` |
 
 ## Quick start
 
@@ -75,7 +78,7 @@ GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to
 
 **Efficiency:** Python jobs use `actions/setup-python` with `cache: pip` (keyed off `requirements-dev.txt`). Node.js is installed only in `panel-harness`; Python jobs do not need it.
 
-**Coverage baseline:** `scripts/check_coverage.py` enforces the floor recorded in `scripts/coverage_baseline.json`. Maintainers can regenerate that file from a combined local report:
+**Coverage baseline:** `scripts/check_coverage.py` enforces the floor recorded in `scripts/coverage_baseline.json`. Package-level floors for `services/`, `history/`, and `coordinator/` are defined in `scripts/coverage_package_floors.json` (2 pp tolerance). Maintainers can regenerate the baseline from a combined local report:
 
 ```bash
 coverage report -m | tee coverage_report.txt

@@ -2,11 +2,11 @@
   "captured_at": "2026-07-09",
   "pytest_filter": "not slow",
   "total_statements": 11819,
-  "total_missed": 2980,
+  "total_missed": 2804,
   "total_branches": 3440,
-  "partial_branches": 471,
-  "line_coverage_percent": 71.6,
-  "tests_passed": 1354,
+  "partial_branches": 481,
+  "line_coverage_percent": 73.1,
+  "tests_passed": 1381,
   "tests_skipped": 5,
-  "wall_time_seconds": 20.09
+  "wall_time_seconds": 20.21
 }
