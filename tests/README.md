@@ -8,6 +8,16 @@ Heating Assistant uses **pytest** with a three-tier layout:
 | Integration | `tests/integration/` | `@pytest.mark.integration` | Package boundaries: `mpc_cycle`, `controller/factory`, `services/` |
 | System | `tests/system/` | `@pytest.mark.system` | Full stack smoke: model → MPC → forecast payload |
 
+**New in this pass (coverage + tier gaps):**
+
+| Module | Tests |
+|--------|-------|
+| `coordinator/mpc_cycle.py` | `tests/integration/test_mpc_cycle.py` — disturbances, compute, finalize, history |
+| `config_schema.py` | `tests/test_config_schema.py` |
+| `estimation/{sensitivity,warmstart,model_build}.py` | `tests/test_estimation_internals.py` |
+| `services/{context,diagnostics}.py` | `tests/test_services_diagnostics.py` |
+| Full mpc_cycle orchestration | `tests/system/test_control_loop_smoke.py` |
+
 ## Quick start
 
 ```bash
