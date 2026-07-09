@@ -3,10 +3,17 @@ name: Tests
 on:
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly full suite including slow benchmarks and estimation regressions.
+    - cron: "0 3 * * *"
 
 jobs:
-  pytest:
+  pytest-fast:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - uses: actions/checkout@v4
@@ -25,12 +32,112 @@ jobs:
           pip install -r requirements-dev.txt
           pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
 
-      - name: Run unit and integration tests
-        run: python -m pytest tests/ -v -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
-
-      - name: Run panel harness smoke tests
+      - name: Run fast pytest shard
+        env:
+          COVERAGE_FILE: .coverage.fast-${{ matrix.shard }}
         run: |
-          for harness in tests/panel_*.harness.mjs; do
-            echo "Running $harness"
-            node "$harness"
-          done
+          chmod +x scripts/test_shards.sh
+          ./scripts/test_shards.sh ${{ matrix.shard }} -m "not slow" \
+            --cov=custom_components/heating_assistant \
+            --cov-report= \
+            -q
+
+      - name: Upload coverage fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-fast-${{ matrix.shard }}
+          path: .coverage.fast-${{ matrix.shard }}
+
+  pytest-slow:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
+
+      - name: Run slow pytest tier
+        env:
+          COVERAGE_FILE: .coverage.slow
+        run: |
+          python3 -m pytest tests/ -m slow \
+            --cov=custom_components/heating_assistant \
+            --cov-report= \
+            -q
+
+      - name: Upload coverage fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-slow
+          path: .coverage.slow
+
+  coverage:
+    needs: [pytest-fast, pytest-slow]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install coverage tool
+        run: pip install coverage
+
+      - name: Download coverage fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine and report coverage
+        run: |
+          coverage combine
+          coverage report -m | tee coverage_report.txt
+          python3 scripts/check_coverage.py coverage_report.txt
+
+  panel-harness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        run: sudo apt-get update && sudo apt-get install -y nodejs
+
+      - name: Run panel harness smoke tests in parallel
+        run: |
+          find tests -maxdepth 1 -name 'panel_*.harness.mjs' -print0 \
+            | xargs -0 -P 4 -I{} sh -c 'echo "Running {}"; node {}'
+
+  nightly-full:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
+
+      - name: Run full suite (all markers)
+        run: python3 -m pytest tests/ -v --durations=20

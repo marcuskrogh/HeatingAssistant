@@ -1,0 +1,112 @@
+{
+  "shards": [
+    {
+      "id": 1,
+      "name": "estimation-sysid",
+      "description": "Heavy estimation / sysid / history tests",
+      "paths": [
+        "tests/test_2r2c.py",
+        "tests/test_adaptive_alpha_prior.py",
+        "tests/test_delete_parameter_history.py",
+        "tests/test_estimation_button.py",
+        "tests/test_estimator_2r2c.py",
+        "tests/test_estimator_stability.py",
+        "tests/test_experiment_excitation.py",
+        "tests/test_experiments.py",
+        "tests/test_history_seed.py",
+        "tests/test_history_window.py",
+        "tests/test_history_window_leading.py",
+        "tests/test_initial_state_estimator.py",
+        "tests/test_model_diagnostics.py",
+        "tests/test_no_online_gain_estimation.py",
+        "tests/test_parameter_estimator.py",
+        "tests/test_performance.py",
+        "tests/test_persist_estimated_params.py",
+        "tests/test_preview_tuning_forecast.py",
+        "tests/test_sysid_cache_consistency.py",
+        "tests/test_sysid_initial_state.py",
+        "tests/test_sysid_param_overrides.py",
+        "tests/test_window_data_quality.py",
+        "tests/test_window_override.py"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "controller-mpc-integration",
+      "description": "Controller, MPC, integrator, integration, and system smoke",
+      "paths": [
+        "tests/test_actuation_watchdog.py",
+        "tests/test_build_house_model_resilience.py",
+        "tests/test_controller.py",
+        "tests/test_integrator.py",
+        "tests/test_qp_solver_robustness.py",
+        "tests/integration/test_configuration_services.py",
+        "tests/integration/test_controller_factory.py",
+        "tests/integration/test_mpc_cycle.py",
+        "tests/system/test_control_loop_smoke.py"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "thermal-weather-solar",
+      "description": "Heat sources, thermal model, solar, and weather",
+      "paths": [
+        "tests/test_climate.py",
+        "tests/test_emitter_filter.py",
+        "tests/test_finishing_pass.py",
+        "tests/test_forecast_power_bounds.py",
+        "tests/test_forecast_plot_extension.py",
+        "tests/test_heat_sources.py",
+        "tests/test_infiltration.py",
+        "tests/test_slab_ufh.py",
+        "tests/test_solar_forecast.py",
+        "tests/test_solar_model.py",
+        "tests/test_thermal_model.py",
+        "tests/test_weather_module.py",
+        "tests/test_weather_smoothing.py",
+        "tests/test_weather_status.py"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "coordinator-services-misc",
+      "description": "Coordinator, HA services, dashboard, KPI, and misc",
+      "paths": [
+        "tests/test_config_ui_options.py",
+        "tests/test_configuration_services.py",
+        "tests/test_coordinator_apply_actions.py",
+        "tests/test_coordinator_init_regression.py",
+        "tests/test_coordinator_solar_forecast.py",
+        "tests/test_dashboard.py",
+        "tests/test_dashboard_auto_write.py",
+        "tests/test_dataset_merge.py",
+        "tests/test_datasets.py",
+        "tests/test_init_reload.py",
+        "tests/test_init_setup_entry.py",
+        "tests/test_init_yaml_merge.py",
+        "tests/test_kpi.py",
+        "tests/test_kpi_sensors.py",
+        "tests/test_naming.py",
+        "tests/test_options_flow_helpers.py",
+        "tests/test_persist_system_enabled.py",
+        "tests/test_prediction_sensors.py",
+        "tests/test_price_forecast.py",
+        "tests/test_recorder_resample.py",
+        "tests/test_room_rename_migration.py",
+        "tests/test_schedule.py",
+        "tests/test_schedule_awareness.py",
+        "tests/test_sensor_metadata.py",
+        "tests/test_set_room_comfort_offset_service.py",
+        "tests/test_set_room_enabled_service.py",
+        "tests/test_set_room_setpoint_service.py",
+        "tests/test_startup_listeners.py",
+        "tests/test_tuning_persistence_service.py",
+        "tests/test_ui_fast_refresh.py",
+        "tests/test_update_room_schedule_service.py",
+        "tests/test_visualisation.py",
+        "tests/test_visualisation_sensors.py",
+        "tests/test_websocket_api.py"
+      ]
+    }
+  ]
+}

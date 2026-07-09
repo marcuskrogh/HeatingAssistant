@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-07-09",
+  "pytest_filter": "not slow",
+  "total_statements": 11819,
+  "total_missed": 3092,
+  "total_branches": 3440,
+  "partial_branches": 484,
+  "line_coverage_percent": 70.6,
+  "tests_passed": 1306,
+  "tests_skipped": 5,
+  "wall_time_seconds": 474.32
+}

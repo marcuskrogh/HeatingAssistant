@@ -10,8 +10,50 @@ test module is collected, so that imports of the HA-independent submodules
 
 from __future__ import annotations
 
+import os
 import sys
 import types
+from pathlib import Path
+
+import pytest
+
+pytest_plugins = ["tests.helpers.estimation_fixtures"]
+
+_TIER_MARKERS = frozenset({"unit", "integration", "system"})
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register tier markers and expose FAST_TESTS for benchmark modules."""
+    config.addinivalue_line(
+        "markers",
+        "unit: pure logic tests with no coordinator/HA wiring",
+    )
+    config.addinivalue_line(
+        "markers",
+        "integration: multi-module tests with coordinator stubs or mocked HA",
+    )
+    config.addinivalue_line(
+        "markers",
+        "system: end-to-end smoke tests across package boundaries",
+    )
+    config.addinivalue_line(
+        "markers",
+        "slow: marks tests as slow (multi-start Nelder-Mead parameter estimation)",
+    )
+    config.FAST_TESTS = os.environ.get("FAST_TESTS") == "1"
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Auto-mark top-level ``tests/test_*.py`` items as unit unless tier-tagged."""
+    tests_dir = Path(__file__).resolve().parent
+    for item in items:
+        if any(item.get_closest_marker(name) for name in _TIER_MARKERS):
+            continue
+        path = Path(str(item.fspath))
+        if path.parent == tests_dir and path.name.startswith("test_"):
+            item.add_marker(pytest.mark.unit)
 
 
 def _stub_module(name: str) -> types.ModuleType:

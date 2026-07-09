@@ -269,6 +269,7 @@ class TestKalmanMLEstimator:
         estimator = KalmanMLEstimator(rooms, sources, dt=60.0)
         assert estimator._regularization <= 0.01
 
+    @pytest.mark.slow
     def test_default_prior_is_responsive_to_excited_data(self):
         """With the default (light) prior, excited data moves the heater scale
         and thermal parameters substantially off a wrong prior.
@@ -409,6 +410,7 @@ def _generate_history_with_extras(
     return history
 
 
+@pytest.mark.slow
 class TestJointInternalGainAndHeaterScale:
     """Recovery of the new joint parameters from synthetic data."""
 
