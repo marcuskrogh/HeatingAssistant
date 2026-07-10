@@ -111,7 +111,7 @@ globalThis.document = {
 };
 
 // ---- load climate-card with real transitive imports -------------------------
-const climateCardUrl = `${pathToFileURL(join(WWW, 'components/climate-card.js')).href}?v=95`;
+const climateCardUrl = `${pathToFileURL(join(WWW, 'components/climate-card.js')).href}?v=96`;
 const { createClimateCard } = await import(climateCardUrl);
 
 // Power click must invoke the onPowerToggle callback.
@@ -155,6 +155,40 @@ const { createClimateCard } = await import(climateCardUrl);
   );
 }
 
+// Optimistic OFF must persist until the backend confirms — no timed revert.
+{
+  const card = createClimateCard({
+    temperature: 20,
+    setpoint: 21,
+    power: 0,
+    off: false,
+    onPowerToggle: () => {},
+  });
+  card.element.querySelector('.climate-card__power').click();
+  await new Promise((r) => setTimeout(r, 50));
+  assert(
+    card.element.classList.contains('climate-card--off'),
+    'card must stay OFF while waiting for backend confirmation',
+  );
+}
+
+// Service failure must revert the optimistic override.
+{
+  const card = createClimateCard({
+    temperature: 20,
+    setpoint: 21,
+    power: 0,
+    off: false,
+    onPowerToggle: () => Promise.reject(new Error('service failed')),
+  });
+  card.element.querySelector('.climate-card__power').click();
+  await new Promise((r) => setTimeout(r, 0));
+  assert(
+    !card.element.classList.contains('climate-card--off'),
+    'card must revert to ON when the power service call fails',
+  );
+}
+
 // ---- static source regressions for overview tile + backend ------------------
 const tileSrc = readFileSync(join(WWW, 'components/room-climate-tile.js'), 'utf8');
 assert(
@@ -170,6 +204,14 @@ const cardSrc = readFileSync(join(WWW, 'components/climate-card.js'), 'utf8');
 assert(
   /reconcileOptimisticPower/.test(cardSrc),
   'climate-card must reconcile optimistic power state on update',
+);
+assert(
+  !/POWER_OPTIMISTIC_MS/.test(cardSrc),
+  'climate-card must not use a timed optimistic power revert',
+);
+assert(
+  !/POWER_OPTIMISTIC_MS/.test(tileSrc),
+  'room-climate-tile must not use a timed optimistic power revert',
 );
 
 const controlSrc = readFileSync(

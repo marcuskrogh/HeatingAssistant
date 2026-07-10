@@ -24,11 +24,11 @@
  *   card.destroy();                                  // on teardown
  */
 
-import { formatTemperature } from '../utils.js?v=95';
+import { formatTemperature } from '../utils.js?v=96';
 import {
   experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress, experimentProgress,
-} from '../experiment-utils.js?v=95';
+} from '../experiment-utils.js?v=96';
 
 const SP_STEP = 0.5;
 const SP_MIN = 5;
@@ -40,9 +40,6 @@ const OFFSET_MIN = 0.1;
 const OFFSET_MAX = 5.0;
 const DEFAULT_OFFSET = 2.0;
 const COMMIT_DEBOUNCE_MS = 700;
-// After toggling power we optimistically hold the new state for a short window
-// so the card reacts instantly; backend truth resumes once this elapses.
-const POWER_OPTIMISTIC_MS = 6000;
 const TRACK_HALF_WIDTH = 3; // minimum °C either side of the setpoint shown on the track
 // Cadence at which the experiment progress bar self-advances between updates.
 const PROGRESS_TICK_MS = 1000;
@@ -96,7 +93,6 @@ export function createClimateCard({
     off: !!off,          // backend off-state (user toggle or off-schedule)
     experiment: experiment || null, // active identification experiment, or null
     optimisticOff: null, // optimistic power override (null = follow backend)
-    powerTimer: null,    // clears optimisticOff after POWER_OPTIMISTIC_MS
     progressTimer: null, // ticks the experiment progress bar while a run is live
     editing: false,      // true while the user is mid setpoint adjustment
     commitTimer: null,   // pending setpoint debounce timer id
@@ -171,10 +167,6 @@ export function createClimateCard({
   /** Drop the optimistic power override once the backend reports the same state. */
   function reconcileOptimisticPower(backendOff) {
     if (st.optimisticOff !== null && st.optimisticOff === backendOff) {
-      if (st.powerTimer) {
-        clearTimeout(st.powerTimer);
-        st.powerTimer = null;
-      }
       st.optimisticOff = null;
     }
   }
@@ -196,14 +188,13 @@ export function createClimateCard({
   function togglePower() {
     const turnOff = !currentOff();
     st.optimisticOff = turnOff;
-    if (st.powerTimer) clearTimeout(st.powerTimer);
-    st.powerTimer = setTimeout(() => {
-      st.powerTimer = null;
-      st.optimisticOff = null;
-      paint();
-    }, POWER_OPTIMISTIC_MS);
     paint();
-    if (typeof onPowerToggle === 'function') onPowerToggle(turnOff);
+    if (typeof onPowerToggle === 'function') {
+      Promise.resolve(onPowerToggle(turnOff)).catch(() => {
+        st.optimisticOff = null;
+        paint();
+      });
+    }
   }
 
   els.power.addEventListener('click', togglePower);
@@ -387,10 +378,6 @@ export function createClimateCard({
       if (st.offsetCommitTimer) {
         clearTimeout(st.offsetCommitTimer);
         st.offsetCommitTimer = null;
-      }
-      if (st.powerTimer) {
-        clearTimeout(st.powerTimer);
-        st.powerTimer = null;
       }
       if (st.progressTimer) {
         clearInterval(st.progressTimer);
