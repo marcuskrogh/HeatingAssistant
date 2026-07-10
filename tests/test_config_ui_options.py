@@ -605,6 +605,20 @@ def test_panel_climate_power_toggle_regression() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+def test_panel_state_sync_detects_controller_config_attrs() -> None:
+    """Panel hass sync must notice room_active/room_enabled attribute changes."""
+    harness = REPO_ROOT / "tests" / "panel_state_sync.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_panel_relative_imports_use_cache_bust_suffix() -> None:
     """Transitive ES module imports must carry ?v= or browsers serve stale modules."""
     token = _panel_cache_bust_token()

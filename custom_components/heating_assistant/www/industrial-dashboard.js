@@ -30,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '95';
+  return '96';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -123,6 +123,52 @@ function _installPanelHashGuard() {
 
 _installPanelHashGuard();
 
+const CONTROLLER_CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+
+/** Return true when room on/off maps on the controller-config sensor differ. */
+function controllerConfigAttrsChanged(prevAttrs, nextAttrs) {
+  const pa = prevAttrs || {};
+  const na = nextAttrs || {};
+  for (const key of ['room_active', 'room_enabled']) {
+    const pv = pa[key];
+    const nv = na[key];
+    if (pv === nv) continue;
+    if (!pv || !nv) return true;
+    const slugs = new Set([...Object.keys(pv), ...Object.keys(nv)]);
+    for (const slug of slugs) {
+      if (pv[slug] !== nv[slug]) return true;
+    }
+  }
+  return false;
+}
+
+/** Shallow snapshot of the controller-config attrs that drive climate power UI. */
+function snapshotConfigAttrs(attrs) {
+  const a = attrs || {};
+  const snap = {};
+  for (const key of ['room_active', 'room_enabled']) {
+    if (a[key]) snap[key] = { ...a[key] };
+  }
+  return snap;
+}
+
+/** Detect HA sensor state changes, including in-place attribute mutations. */
+function sensorStateChanged(prev, next, configSnapshot) {
+  if (!next) return false;
+  if (!prev) return true;
+  if (next.entity_id === CONTROLLER_CONFIG_ENTITY) {
+    if (controllerConfigAttrsChanged(configSnapshot, next.attributes)) return true;
+  }
+  if (prev !== next) return true;
+  // HA may mutate the same state object when only attributes change.
+  if (prev.last_updated !== next.last_updated) return true;
+  if (prev.state !== next.state) return true;
+  if (next.entity_id === CONTROLLER_CONFIG_ENTITY) {
+    return controllerConfigAttrsChanged(prev.attributes, next.attributes);
+  }
+  return false;
+}
+
 class HaIndustrialPanel extends HTMLElement {
   constructor() {
     super();
@@ -144,6 +190,9 @@ class HaIndustrialPanel extends HTMLElement {
     // START to engage the controller.  Reflect that default until the real
     // system_enabled attribute syncs in from the coordinator.
     this._systemRunning = false;
+    // Snapshot of controller-config room on/off attrs so in-place HA mutations
+    // are still detected when the cached state object is reused.
+    this._configAttrSnapshot = null;
     // Stable reference so the same listener can be added/removed across
     // disconnect/reconnect cycles without accumulating duplicates.
     this._onHashChange = () => this._updateActiveNav();
@@ -177,8 +226,13 @@ class HaIndustrialPanel extends HTMLElement {
   _applyHassState(hass) {
     let changed = false;
     for (const [id, state] of Object.entries(hass.states)) {
-      if (id.startsWith('sensor.heating_assistant_') && this._state[id] !== state) {
+      if (!id.startsWith('sensor.heating_assistant_')) continue;
+      const snapshot = id === CONTROLLER_CONFIG_ENTITY ? this._configAttrSnapshot : null;
+      if (sensorStateChanged(this._state[id], state, snapshot)) {
         this._state[id] = state;
+        if (id === CONTROLLER_CONFIG_ENTITY) {
+          this._configAttrSnapshot = snapshotConfigAttrs(state.attributes);
+        }
         changed = true;
       }
     }
@@ -248,6 +302,8 @@ class HaIndustrialPanel extends HTMLElement {
       // while modules were loading) rather than the stored connection snapshot.
       const latestStates = this._hass.states;
       this._state = { ...latestStates };
+      const cfg = this._state[CONTROLLER_CONFIG_ENTITY];
+      this._configAttrSnapshot = cfg ? snapshotConfigAttrs(cfg.attributes) : null;
       this._rooms = discoverRooms(this._state);
 
       const contentEl = this.shadowRoot.getElementById('content');
@@ -298,8 +354,13 @@ class HaIndustrialPanel extends HTMLElement {
     if (!this._hass || !this._router) return;
     let changed = false;
     for (const [id, state] of Object.entries(this._hass.states)) {
-      if (id.startsWith('sensor.heating_assistant_') && this._state[id] !== state) {
+      if (!id.startsWith('sensor.heating_assistant_')) continue;
+      const snapshot = id === CONTROLLER_CONFIG_ENTITY ? this._configAttrSnapshot : null;
+      if (sensorStateChanged(this._state[id], state, snapshot)) {
         this._state[id] = state;
+        if (id === CONTROLLER_CONFIG_ENTITY) {
+          this._configAttrSnapshot = snapshotConfigAttrs(state.attributes);
+        }
         changed = true;
       }
     }

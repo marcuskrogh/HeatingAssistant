@@ -16,20 +16,20 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=95';
-import { setPanelHash } from '../panel-hash.js?v=95';
-import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=95';
+import { entityValue } from '../utils.js?v=96';
+import { setPanelHash } from '../panel-hash.js?v=96';
+import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=96';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=95';
+} from '../experiment-utils.js?v=96';
 import {
   setClimateTemperature,
   setRoomComfortOffset,
   turnClimateOff,
   turnClimateOn,
-} from '../ha-services.js?v=95';
+} from '../ha-services.js?v=96';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -42,9 +42,6 @@ const OFFSET_MIN = 0.1;
 const OFFSET_MAX = 5.0;
 const DEFAULT_OFFSET = 2.0;
 const COMMIT_DEBOUNCE_MS = 700;
-// After toggling power we optimistically hold the new state for a short window
-// so the card reacts instantly; backend truth resumes once this elapses.
-const POWER_OPTIMISTIC_MS = 6000;
 const TRACK_HALF_WIDTH = 3;
 // Cadence at which the experiment progress bar self-advances between state
 // pushes so the fill creeps forward smoothly while a run is in progress.
@@ -171,7 +168,6 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     offsetEditing: false,    // true while the user is mid comfort-offset adjustment
     offsetCommitTimer: null, // pending comfort-offset debounce timer id
     optimisticOff: null,   // optimistic power override (null = follow backend)
-    powerTimer: null,      // clears optimisticOff after POWER_OPTIMISTIC_MS
     progressTimer: null,   // ticks the experiment progress bar while a run is live
   };
 
@@ -328,10 +324,6 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     const activePeriod = findActivePeriod((getScheduleData(st, room)?.periods) || []);
     const backendOff = resolveBackendOff(st, room, activePeriod);
     if (st.optimisticOff === backendOff) {
-      if (st.powerTimer) {
-        clearTimeout(st.powerTimer);
-        st.powerTimer = null;
-      }
       st.optimisticOff = null;
     }
   }
@@ -339,17 +331,14 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
   function togglePower() {
     const turnOff = !currentOff();
     st.optimisticOff = turnOff;
-    if (st.powerTimer) clearTimeout(st.powerTimer);
-    st.powerTimer = setTimeout(() => {
-      st.powerTimer = null;
-      st.optimisticOff = null;
-      paint();
-    }, POWER_OPTIMISTIC_MS);
     paint();
     if (st.hass) {
       const entityId = `climate.heating_assistant_${room.slug}`;
       (turnOff ? turnClimateOff(st.hass, entityId) : turnClimateOn(st.hass, entityId))
-        .catch(() => {});
+        .catch(() => {
+          st.optimisticOff = null;
+          paint();
+        });
     }
   }
 
@@ -503,10 +492,6 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
       if (st.offsetCommitTimer) {
         clearTimeout(st.offsetCommitTimer);
         st.offsetCommitTimer = null;
-      }
-      if (st.powerTimer) {
-        clearTimeout(st.powerTimer);
-        st.powerTimer = null;
       }
       if (st.progressTimer) {
         clearInterval(st.progressTimer);
