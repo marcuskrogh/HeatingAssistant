@@ -5,6 +5,9 @@ on:
     branches: [main]
 
 jobs:
+  # Fast/slow split: slow tests (Nelder-Mead multi-start estimation, IPOPT/MPC
+  # benchmarks) dominate wall time. Running them in a separate job keeps PR
+  # feedback fast while still exercising the full suite in parallel.
   pytest-fast:
     runs-on: ubuntu-latest
 
@@ -15,9 +18,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y nodejs
+          cache: pip
 
       - name: Install Python dependencies
         run: |
@@ -51,6 +52,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install Python dependencies
         run: |
@@ -85,6 +87,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install coverage tool
         run: pip install coverage

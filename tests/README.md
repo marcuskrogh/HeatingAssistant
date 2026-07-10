@@ -8,6 +8,27 @@ Heating Assistant uses **pytest** with a three-tier layout:
 | Integration | `tests/integration/` | `@pytest.mark.integration` | Package boundaries: `mpc_cycle`, `controller/factory`, `services/` |
 | System | `tests/system/` | `@pytest.mark.system` | Full stack smoke: model → MPC → forecast payload |
 
+**New in this pass (coverage + tier gaps):**
+
+| Module | Tests |
+|--------|-------|
+| `coordinator/mpc_cycle.py` | `tests/integration/test_mpc_cycle.py` — disturbances, compute, finalize, history |
+| `config_schema.py` | `tests/test_config_schema.py` |
+| `estimation/{sensitivity,warmstart,model_build}.py` | `tests/test_estimation_internals.py` |
+| `services/{context,diagnostics}.py` | `tests/test_services_diagnostics.py` |
+| Full mpc_cycle orchestration | `tests/system/test_control_loop_smoke.py` |
+| Identification service handlers | `tests/test_identification_services.py` |
+| History store / records / restore | `tests/test_history_store.py`, `test_history_records.py`, `test_history_startup_restore.py` |
+| Coordinator update orchestration | `tests/integration/test_coordinator_update_cycle.py` |
+| Button/datetime entities, HA diagnostics, KPI history | `tests/test_button_entities.py`, `test_datetime_entities.py`, `test_ha_integration_diagnostics.py`, `test_kpi_history.py` |
+| Runtime state/reconfig, setup simulation | `tests/test_runtime_state.py`, `test_runtime_reconfig.py`, `test_setup_simulation.py` |
+| History access services, simulation helpers | `tests/test_history_access_services.py`, `test_services_simulation.py` |
+| Identification handlers (full) | `tests/test_identification_services.py` |
+| Diagnostic + room_live + forecast sensors | `tests/test_sensor_diagnostics.py`, `test_sensor_room_live.py`, `test_sensor_forecasts.py` |
+| WebSocket API (all handlers) | `tests/test_websocket_api.py` |
+| Parameter lifecycle, core helpers | `tests/test_parameter_lifecycle.py`, `test_coordinator_core_helpers.py` |
+| Config flow, lovelace dashboard gaps | `tests/test_config_flow.py`, `test_lovelace_dashboard_gaps.py` |
+
 ## Quick start
 
 ```bash
@@ -54,7 +75,22 @@ Post-refactor coordinator stubs live in `tests/helpers/`:
 
 GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to `main` only**:
 
-- **Fast tests** — single job, `pytest tests/ -m "not slow"`
-- **Slow tests** — single job, `pytest tests/ -m slow`
-- **Coverage** — combines fast + slow fragments, checked against `scripts/coverage_baseline.json`
-- **Panel harnesses** — serial Node smoke scripts
+| Job | Purpose |
+|-----|---------|
+| `pytest-fast` | `pytest tests/ -m "not slow"` with per-job coverage fragment |
+| `pytest-slow` | `pytest tests/ -m slow` with per-job coverage fragment |
+| `coverage` | Combines fast + slow fragments, reports, checks `scripts/coverage_baseline.json` |
+| `panel-harness` | Serial Node smoke scripts (`tests/panel_*.harness.mjs`) |
+
+**Fast/slow split:** slow tests (multi-start Nelder-Mead estimation, IPOPT/MPC benchmarks) dominate wall time. Running them in a separate parallel job keeps PR feedback fast without skipping coverage.
+
+**Efficiency:** Python jobs use `actions/setup-python` with `cache: pip` (keyed off `requirements-dev.txt`). Node.js is installed only in `panel-harness`; Python jobs do not need it.
+
+**Coverage baseline:** `scripts/check_coverage.py` enforces the floor recorded in `scripts/coverage_baseline.json`. Package-level floors for `services/`, `history/`, and `coordinator/` are defined in `scripts/coverage_package_floors.json` (2 pp tolerance). Maintainers can regenerate the baseline from a combined local report:
+
+```bash
+coverage report -m | tee coverage_report.txt
+python3 scripts/update_coverage_baseline.py coverage_report.txt
+```
+
+Optional flags: `--tests-passed`, `--tests-skipped`, `--wall-time-seconds`, `--dry-run`.

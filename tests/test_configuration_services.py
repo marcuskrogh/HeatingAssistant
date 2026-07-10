@@ -1,10 +1,13 @@
-"""Tests for the Configuration-page service handlers.
+"""Unit tests for Configuration-page service handlers.
 
 These back the industrial-UI Configuration menu: display settings, room and
 heat-source replacement, and environment/site updates.  They assert the handlers
 persist to both ``entry.data`` and ``entry.options`` (so the coordinator's
 options-first reads survive a restart) and route runtime updates to the
 coordinator.
+
+Controller-tuning handler integration coverage lives in
+``tests/integration/test_configuration_services.py``.
 """
 
 from types import SimpleNamespace

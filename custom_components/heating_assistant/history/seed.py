@@ -38,7 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 def _slug(name: str) -> str:
     # Local import keeps this module importable without the HA-heavy dashboard
     # dependency during unit tests that exercise the pure helpers.
-    from .naming import slugify  # noqa: PLC0415
+    from ..naming import slugify  # noqa: PLC0415
 
     return slugify(name)
 
