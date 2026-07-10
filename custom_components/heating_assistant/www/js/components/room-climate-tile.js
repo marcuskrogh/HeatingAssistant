@@ -322,6 +322,20 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     return resolveBackendOff(st, room, activePeriod);
   }
 
+  /** Drop the optimistic power override once the backend reports the same state. */
+  function reconcileOptimisticPower() {
+    if (st.optimisticOff === null) return;
+    const activePeriod = findActivePeriod((getScheduleData(st, room)?.periods) || []);
+    const backendOff = resolveBackendOff(st, room, activePeriod);
+    if (st.optimisticOff === backendOff) {
+      if (st.powerTimer) {
+        clearTimeout(st.powerTimer);
+        st.powerTimer = null;
+      }
+      st.optimisticOff = null;
+    }
+  }
+
   function togglePower() {
     const turnOff = !currentOff();
     st.optimisticOff = turnOff;
@@ -478,6 +492,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
         st.comfortOffset = derived;
       }
 
+      reconcileOptimisticPower();
       paint();
     },
     destroy() {

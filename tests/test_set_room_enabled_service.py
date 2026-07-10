@@ -15,6 +15,7 @@ def _make_coordinator(room_names, setpoint=21.0):
     coordinator = MagicMock()
     coordinator.model = SimpleNamespace(room_names=list(room_names))
     coordinator.get_room_setpoint.return_value = setpoint
+    coordinator.async_update_listeners = MagicMock()
     coordinator.async_request_refresh = AsyncMock()
     return coordinator
 
@@ -32,6 +33,7 @@ async def test_disable_room(monkeypatch):
 
     coordinator.set_room_enabled.assert_called_once_with("Living Room", False)
     coordinator.set_room_setpoint.assert_not_called()
+    coordinator.async_update_listeners.assert_called_once()
     coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -54,6 +56,7 @@ async def test_enable_restores_default_setpoint_below_floor(monkeypatch):
 
     coordinator.set_room_enabled.assert_called_once_with("Bedroom", True)
     coordinator.set_room_setpoint.assert_called_once()
+    coordinator.async_update_listeners.assert_called_once()
     coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -76,3 +79,5 @@ async def test_enable_skips_restore_when_setpoint_above_floor(monkeypatch):
 
     coordinator.set_room_enabled.assert_called_once_with("Bedroom", True)
     coordinator.set_room_setpoint.assert_not_called()
+    coordinator.async_update_listeners.assert_called_once()
+    coordinator.async_request_refresh.assert_awaited_once()

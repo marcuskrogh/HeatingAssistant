@@ -156,6 +156,9 @@ async def handle_set_room_enabled(hass: HomeAssistant, call: ServiceCall) -> Non
     if enabled and call.data.get("restore_default_setpoint"):
         if coordinator.get_room_setpoint(canonical_name) <= _FROST_PROTECTION_FLOOR:
             coordinator.set_room_setpoint(canonical_name, DEFAULT_SETPOINT)
+    # Push room_enabled / room_active to the dashboard immediately so the
+    # climate-card power toggle does not revert while a full MPC cycle runs.
+    coordinator.async_update_listeners()
     await coordinator.async_request_refresh()
 
 
