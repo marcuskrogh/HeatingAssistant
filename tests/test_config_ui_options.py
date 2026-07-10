@@ -591,6 +591,20 @@ def test_panel_stylesheets_linked_explicitly() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+def test_panel_climate_power_toggle_regression() -> None:
+    """Climate-card power toggles must reconcile optimistic state; backend must push listeners."""
+    harness = REPO_ROOT / "tests" / "panel_climate_power.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_panel_relative_imports_use_cache_bust_suffix() -> None:
     """Transitive ES module imports must carry ?v= or browsers serve stale modules."""
     token = _panel_cache_bust_token()

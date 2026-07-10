@@ -168,6 +168,17 @@ export function createClimateCard({
     return st.optimisticOff !== null ? st.optimisticOff : st.off;
   }
 
+  /** Drop the optimistic power override once the backend reports the same state. */
+  function reconcileOptimisticPower(backendOff) {
+    if (st.optimisticOff !== null && st.optimisticOff === backendOff) {
+      if (st.powerTimer) {
+        clearTimeout(st.powerTimer);
+        st.powerTimer = null;
+      }
+      st.optimisticOff = null;
+    }
+  }
+
   /** Keep a 1 s timer running only while an experiment is in progress so the
    *  progress bar creeps forward between the (infrequent) state pushes. */
   function syncProgressTimer() {
@@ -348,7 +359,10 @@ export function createClimateCard({
     update({ temperature, setpoint, power, comfortLower, comfortUpper, off, experiment } = {}) {
       if (temperature !== undefined) st.temperature = temperature;
       if (power !== undefined) st.power = power;
-      if (off !== undefined) st.off = !!off;
+      if (off !== undefined) {
+        st.off = !!off;
+        reconcileOptimisticPower(st.off);
+      }
       if (experiment !== undefined) st.experiment = experiment || null;
       // Never overwrite the setpoint while the user is mid-edit or a commit is
       // still pending — the optimistic value must win until HA confirms it.
