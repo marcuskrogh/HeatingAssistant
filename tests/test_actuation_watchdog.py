@@ -12,6 +12,9 @@ from custom_components.heating_assistant.coordinator import actuation
 from custom_components.heating_assistant.coordinator.core import HeatingAssistantCoordinator
 from custom_components.heating_assistant.heat_sources import ElectricHeater
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _make_coord(
     *,

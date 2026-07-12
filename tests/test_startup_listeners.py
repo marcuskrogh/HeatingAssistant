@@ -39,6 +39,9 @@ def test_setup_startup_listeners_refreshes_when_entities_already_available(monke
 
     assert result is cancel
     assert len(scheduled) == 1
+    # Close the captured coroutine so it doesn't surface as an un-awaited
+    # RuntimeWarning during garbage collection in an unrelated later test.
+    scheduled[0].close()
 
 
 def test_setup_startup_listeners_waits_when_entities_unavailable(monkeypatch):

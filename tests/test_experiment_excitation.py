@@ -20,6 +20,10 @@ import numpy as np
 from custom_components.heating_assistant import experiments as E
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from custom_components.heating_assistant.experiments import Experiment, ExperimentManager
+import pytest
+
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
 
 
 def _slug(name):

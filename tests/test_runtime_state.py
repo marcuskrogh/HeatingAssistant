@@ -14,6 +14,9 @@ from custom_components.heating_assistant.coordinator import runtime_state as rs
 from custom_components.heating_assistant.const import CLOUD_SMOOTHING_TAU_S
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _runtime_coord(**kwargs):
     coord = make_minimal_coordinator(**kwargs)
@@ -102,34 +105,21 @@ async def test_ensure_runtime_state_loaded_preserves_existing_cloud_cover():
     assert coord._cloud_cover_filtered == pytest.approx(0.3)
 
 
-def test_smooth_cloud_cover_seeds_on_first_observation():
+def test_smooth_cloud_cover_wrapper_persists_filtered_state_on_coordinator():
+    """The EMA math itself is covered by test_weather_smoothing.py; this only
+    checks the coordinator wrapper feeds ``coord.dt`` / CLOUD_SMOOTHING_TAU_S
+    into the pure step and persists the result on ``_cloud_cover_filtered``."""
     coord = _runtime_coord(dt=900)
 
-    result = rs.smooth_cloud_cover(coord, 0.55)
-
-    assert result == pytest.approx(0.55)
-    assert coord._cloud_cover_filtered == pytest.approx(0.55)
-
-
-def test_smooth_cloud_cover_ema_filters_subsequent_observations():
-    coord = _runtime_coord(dt=900)
-    rs.smooth_cloud_cover(coord, 0.0)
+    first = rs.smooth_cloud_cover(coord, 0.0)
+    assert first == pytest.approx(0.0)
+    assert coord._cloud_cover_filtered == pytest.approx(0.0)
 
     result = rs.smooth_cloud_cover(coord, 1.0)
 
     alpha = 1.0 - math.exp(-coord.dt / CLOUD_SMOOTHING_TAU_S)
-    expected = alpha * 1.0 + (1.0 - alpha) * 0.0
-    assert result == pytest.approx(expected)
-    assert coord._cloud_cover_filtered == pytest.approx(expected)
-
-
-def test_smooth_cloud_cover_holds_previous_when_observation_missing():
-    coord = _runtime_coord(dt=900)
-    rs.smooth_cloud_cover(coord, 0.4)
-
-    result = rs.smooth_cloud_cover(coord, None)
-
-    assert result == pytest.approx(0.4)
+    assert result == pytest.approx(alpha)
+    assert coord._cloud_cover_filtered == pytest.approx(alpha)
 
 
 def test_save_runtime_state_persists_cloud_cover_and_ekf_snapshot():

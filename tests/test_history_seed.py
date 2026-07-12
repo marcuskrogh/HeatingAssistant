@@ -18,6 +18,9 @@ from custom_components.heating_assistant.history.seed import (
 )
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 class S:
     """Minimal stand-in for a recorder State."""

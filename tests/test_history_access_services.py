@@ -11,6 +11,9 @@ import pytest
 from custom_components.heating_assistant.services import history_access as ha
 from tests.helpers.coordinator_stubs import make_hass_stub, make_minimal_coordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _records(start: float, count: int, step: float = 900.0):
     return [

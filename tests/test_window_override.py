@@ -11,6 +11,9 @@ import pytest
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from custom_components.heating_assistant.heat_sources import ElectricHeater
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _make_hass(binary_states: dict[str, str]) -> SimpleNamespace:
     hass = SimpleNamespace()

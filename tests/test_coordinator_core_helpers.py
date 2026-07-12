@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,6 +24,9 @@ from custom_components.heating_assistant.const import (
 )
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
+
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
 
 
 def _bare_coordinator(entry_data=None):
@@ -260,164 +264,108 @@ class TestSourcesAndControllerHelpers:
         assert snapshot["comfort_offset"] == pytest.approx(2.0)
 
 
-class TestForecastPayloadDelegation:
-    def test_build_forecast_payload_delegates_to_module(self):
-        coord = make_minimal_coordinator()
-        expected = {"rooms": {"living_room": {"forecast": []}}}
-        with patch(
-            "custom_components.heating_assistant.coordinator.forecast_payload.build_forecast_payload",
-            return_value=expected,
-        ) as build_mock:
-            result = coord.build_forecast_payload(["living_room"], plot_forecast_steps=3)
-        build_mock.assert_called_once()
-        assert result is expected
+# ── Pure facade → module delegation tests (table-driven) ─────────────────
+# Each row exercises one thin coordinator facade method: the delegate module
+# function is patched and we assert the facade forwards ``(coord, *args)``
+# and passes the delegate's return value straight through.  Behaviour of the
+# delegates themselves is tested elsewhere (test_runtime_state.py,
+# test_window_override.py, test_parameter_lifecycle.py,
+# test_coordinator_apply_actions.py, tests/integration/test_mpc_cycle.py).
+
+_COORD_PKG = "custom_components.heating_assistant.coordinator."
+_SRC = SimpleNamespace(name="lr_hp", room="living_room")
+_STATE = SimpleNamespace(state="heat")
+_NOW = datetime(2026, 1, 5, 12, 0, tzinfo=timezone.utc)
+_U = np.array([0.5])
+_D = np.array([5.0])
+
+# (facade method, delegate target, call args, delegate return value)
+_SYNC_DELEGATIONS = [
+    ("_record_weather_success", "disturbances.record_weather_success", (), None),
+    ("_record_weather_failure", "disturbances.record_weather_failure", ("timeout",), None),
+    ("_resolve_display_cloud_cover", "disturbances.resolve_display_cloud_cover", (), 0.35),
+    ("_read_wind_speed_now", "disturbances.read_wind_speed_now", (), 3.5),
+    ("_record_solar_fc_success", "disturbances.record_solar_fc_success", (), None),
+    ("_record_solar_fc_failure", "disturbances.record_solar_fc_failure", ("timeout",), None),
+    ("_read_ghi", "disturbances.read_ghi", (_NOW,), (400.0, [350.0, 360.0])),
+    ("_room_solar_gain", "disturbances.room_solar_gain", ("living_room", _NOW, 0.2, 400.0), 120.0),
+    ("_publish_current_solar_gains", "disturbances.publish_current_solar_gains", (), None),
+    ("_read_binary_sensor_on", "window.read_binary_sensor_on", ("binary_sensor.window",), True),
+    ("_set_window_state", "window.set_window_state", ("living_room", "open", _NOW), None),
+    ("get_window_state", "window.get_window_state", ("living_room",), "open"),
+    ("apply_manual_parameters", "parameter_lifecycle.apply_manual_parameters", ("living_room", 5e6, 0.05), None),
+    ("apply_heater_scales", "parameter_lifecycle.apply_heater_scales", ({"lr_hp": 0.95},), None),
+    ("revert_parameters", "parameter_lifecycle.revert_parameters", ("living_room", 0), None),
+    ("delete_parameter_history", "parameter_lifecycle.delete_parameter_history", (1,), None),
+    ("reload_room_schedule", "schedule_control.reload_room_schedule", ("living_room", []), None),
+    ("_read_delivered_fraction", "actuation.read_delivered_fraction", (_SRC,), 0.5),
+    ("_read_delivered_fraction_climate", "actuation.read_delivered_fraction_climate", (_SRC, _STATE), 0.4),
+    ("_read_delivered_actions", "actuation.read_delivered_actions", (5.0,), {"lr_hp": 0.5}),
+    ("_set_source_power", "actuation.set_source_power", (_SRC, 0.5, 5.0), None),
+    ("_climate_internal_temp", "actuation.climate_internal_temp", (_SRC, _STATE), 35.0),
+    ("_climate_hp_command", "actuation.climate_hp_command", (_SRC, 0.5, 35.0, 5.0, _STATE), ("heat", 40.0)),
+    ("_climate_thermostat_command", "actuation.climate_thermostat_command", (_SRC, 0.5, 35.0, 20.0, 21.0), ("heat", 22.0)),
+    ("_refresh_live_state", "live_refresh.refresh_live_state", (), 5.0),
+    ("_smooth_cloud_cover", "runtime_state.smooth_cloud_cover", (0.3,), 0.25),
+    ("_save_runtime_state", "runtime_state.save_runtime_state", (), None),
+    ("_system_nd", "runtime_state.system_nd", (), 4),
+    ("_propagate_ekf_gap", "runtime_state.propagate_ekf_gap", (1_000.0, _U, _D), None),
+    ("_build_gap_u_sequence", "runtime_state.build_gap_u_sequence", (1_000.0, 3, 900.0, _U), _U),
+]
+
+_ASYNC_DELEGATIONS = [
+    ("_async_read_weather_forecast", "disturbances.async_read_weather_forecast", (), [5.0, 4.5]),
+    ("_async_read_cloud_forecast", "disturbances.async_read_cloud_forecast", (0.3,), [0.4, 0.5]),
+    ("_async_read_wind_forecast", "disturbances.async_read_wind_forecast", (1.5,), [2.0, 2.5]),
+    ("_ensure_runtime_state_loaded", "runtime_state.ensure_runtime_state_loaded", (), None),
+    ("_reapply_climate_setpoints", "actuation.reapply_climate_setpoints", (5.0,), None),
+    ("_apply_actions", "actuation.apply_actions", (5.0,), None),
+    ("_async_verify_heater_entities", "actuation.async_verify_heater_entities", (5.0,), True),
+]
 
 
-class TestDisturbanceDelegations:
-    @pytest.mark.asyncio
-    async def test_async_read_weather_forecast_delegates(self):
-        coord = make_minimal_coordinator(weather_entity="weather.home")
-        with patch(
-            "custom_components.heating_assistant.coordinator.disturbances.async_read_weather_forecast",
-            new=AsyncMock(return_value=[5.0, 4.5]),
-        ) as read_mock:
-            result = await coord._async_read_weather_forecast()
-        read_mock.assert_called_once_with(coord)
-        assert result == [5.0, 4.5]
-
-    @pytest.mark.asyncio
-    async def test_async_read_cloud_and_wind_forecast_delegate(self):
-        coord = make_minimal_coordinator(weather_entity="weather.home")
-        with patch(
-            "custom_components.heating_assistant.coordinator.disturbances.async_read_cloud_forecast",
-            new=AsyncMock(return_value=[0.4, 0.5]),
-        ) as cloud_mock, patch(
-            "custom_components.heating_assistant.coordinator.disturbances.async_read_wind_forecast",
-            new=AsyncMock(return_value=[2.0, 2.5]),
-        ) as wind_mock:
-            assert await coord._async_read_cloud_forecast(0.3) == [0.4, 0.5]
-            assert await coord._async_read_wind_forecast(1.5) == [2.0, 2.5]
-        cloud_mock.assert_called_once_with(coord, 0.3)
-        wind_mock.assert_called_once_with(coord, 1.5)
-
-    def test_record_weather_success_and_failure_delegate(self):
-        coord = make_minimal_coordinator()
-        with patch(
-            "custom_components.heating_assistant.coordinator.disturbances.record_weather_success"
-        ) as ok_mock, patch(
-            "custom_components.heating_assistant.coordinator.disturbances.record_weather_failure"
-        ) as fail_mock:
-            coord._record_weather_success()
-            coord._record_weather_failure("timeout")
-        ok_mock.assert_called_once_with(coord)
-        fail_mock.assert_called_once_with(coord, "timeout")
-
-    def test_resolve_display_cloud_cover_delegates(self):
-        coord = make_minimal_coordinator()
-        with patch(
-            "custom_components.heating_assistant.coordinator.disturbances.resolve_display_cloud_cover",
-            return_value=0.35,
-        ) as resolve_mock:
-            assert coord._resolve_display_cloud_cover() == pytest.approx(0.35)
-        resolve_mock.assert_called_once_with(coord)
+@pytest.mark.parametrize(
+    "facade_method,delegate_target,args,retval",
+    _SYNC_DELEGATIONS,
+    ids=[row[0] for row in _SYNC_DELEGATIONS],
+)
+def test_facade_method_delegates_to_module(facade_method, delegate_target, args, retval):
+    coord = make_minimal_coordinator()
+    with patch(_COORD_PKG + delegate_target, return_value=retval) as delegate_mock:
+        result = getattr(coord, facade_method)(*args)
+    delegate_mock.assert_called_once_with(coord, *args)
+    assert result is retval
 
 
-class TestWindowDelegations:
-    def test_window_helpers_delegate_to_window_module(self):
-        coord = make_minimal_coordinator()
-        now = coord.now_utc
-        with patch(
-            "custom_components.heating_assistant.coordinator.window.read_binary_sensor_on",
-            return_value=True,
-        ) as read_mock, patch(
-            "custom_components.heating_assistant.coordinator.window.set_window_state"
-        ) as set_mock, patch(
-            "custom_components.heating_assistant.coordinator.window.get_window_state",
-            return_value="open",
-        ) as get_mock:
-            assert coord._read_binary_sensor_on("binary_sensor.window") is True
-            coord._set_window_state("living_room", "open", now)
-            assert coord.get_window_state("living_room") == "open"
-        read_mock.assert_called_once_with(coord, "binary_sensor.window")
-        set_mock.assert_called_once_with(coord, "living_room", "open", now)
-        get_mock.assert_called_once_with(coord, "living_room")
+@pytest.mark.parametrize(
+    "facade_method,delegate_target,args,retval",
+    _ASYNC_DELEGATIONS,
+    ids=[row[0] for row in _ASYNC_DELEGATIONS],
+)
+async def test_async_facade_method_delegates_to_module(
+    facade_method, delegate_target, args, retval
+):
+    coord = make_minimal_coordinator()
+    with patch(
+        _COORD_PKG + delegate_target, new=AsyncMock(return_value=retval)
+    ) as delegate_mock:
+        result = await getattr(coord, facade_method)(*args)
+    delegate_mock.assert_called_once_with(coord, *args)
+    assert result is retval
 
 
-class TestParameterLifecycleDelegations:
-    def test_parameter_lifecycle_methods_delegate(self):
-        coord = make_minimal_coordinator()
-        with patch(
-            "custom_components.heating_assistant.coordinator.parameter_lifecycle.apply_manual_parameters"
-        ) as manual_mock, patch(
-            "custom_components.heating_assistant.coordinator.parameter_lifecycle.apply_heater_scales"
-        ) as scales_mock, patch(
-            "custom_components.heating_assistant.coordinator.parameter_lifecycle.revert_parameters"
-        ) as revert_mock, patch(
-            "custom_components.heating_assistant.coordinator.parameter_lifecycle.delete_parameter_history"
-        ) as delete_mock, patch(
-            "custom_components.heating_assistant.coordinator.schedule_control.reload_room_schedule"
-        ) as schedule_mock:
-            coord.apply_manual_parameters("living_room", 5e6, 0.05)
-            coord.apply_heater_scales({"lr_hp": 0.95})
-            coord.revert_parameters("living_room", 0)
-            coord.delete_parameter_history(1)
-            coord.reload_room_schedule("living_room", [])
-        manual_mock.assert_called_once_with(coord, "living_room", 5e6, 0.05)
-        scales_mock.assert_called_once_with(coord, {"lr_hp": 0.95})
-        revert_mock.assert_called_once_with(coord, "living_room", 0)
-        delete_mock.assert_called_once_with(coord, 1)
-        schedule_mock.assert_called_once_with(coord, "living_room", [])
-
-
-class TestActuationDelegations:
-    def test_actuation_helpers_delegate(self):
-        coord = make_minimal_coordinator()
-        src = SimpleNamespace(name="lr_hp", room="living_room")
-        state = SimpleNamespace(state="heat")
-        with patch(
-            "custom_components.heating_assistant.coordinator.actuation.read_delivered_fraction",
-            return_value=0.5,
-        ) as frac_mock, patch(
-            "custom_components.heating_assistant.coordinator.actuation.climate_internal_temp",
-            return_value=35.0,
-        ) as temp_mock, patch(
-            "custom_components.heating_assistant.coordinator.actuation.climate_thermostat_command",
-            return_value=("heat", 22.0),
-        ) as thermo_mock:
-            assert coord._read_delivered_fraction(src) == pytest.approx(0.5)
-            assert coord._climate_internal_temp(src, state) == pytest.approx(35.0)
-            assert coord._climate_thermostat_command(
-                src, 0.5, 35.0, 20.0, 21.0
-            ) == ("heat", 22.0)
-        frac_mock.assert_called_once_with(coord, src)
-        temp_mock.assert_called_once_with(coord, src, state)
-        thermo_mock.assert_called_once_with(coord, src, 0.5, 35.0, 20.0, 21.0)
-
-
-class TestRuntimeStateDelegations:
-    @pytest.mark.asyncio
-    async def test_runtime_state_helpers_delegate(self):
-        coord = make_minimal_coordinator()
-        with patch(
-            "custom_components.heating_assistant.coordinator.runtime_state.ensure_runtime_state_loaded",
-            new=AsyncMock(),
-        ) as load_mock, patch(
-            "custom_components.heating_assistant.coordinator.runtime_state.smooth_cloud_cover",
-            return_value=0.25,
-        ) as smooth_mock, patch(
-            "custom_components.heating_assistant.coordinator.runtime_state.save_runtime_state"
-        ) as save_mock, patch(
-            "custom_components.heating_assistant.coordinator.runtime_state.system_nd",
-            return_value=4,
-        ) as nd_mock:
-            await coord._ensure_runtime_state_loaded()
-            assert coord._smooth_cloud_cover(0.3) == pytest.approx(0.25)
-            coord._save_runtime_state()
-            assert coord._system_nd() == 4
-        load_mock.assert_called_once_with(coord)
-        smooth_mock.assert_called_once_with(coord, 0.3)
-        save_mock.assert_called_once_with(coord)
-        nd_mock.assert_called_once_with(coord)
+def test_build_forecast_payload_delegates_to_module():
+    # Kept separate from the table: the facade forwards a long kwargs
+    # signature, so only delegation + return passthrough are asserted.
+    coord = make_minimal_coordinator()
+    expected = {"rooms": {"living_room": {"forecast": []}}}
+    with patch(
+        _COORD_PKG + "forecast_payload.build_forecast_payload",
+        return_value=expected,
+    ) as build_mock:
+        result = coord.build_forecast_payload(["living_room"], plot_forecast_steps=3)
+    build_mock.assert_called_once()
+    assert result is expected
 
 
 class TestStartupListenerCallback:
@@ -437,7 +385,10 @@ class TestStartupListenerCallback:
                 async_create_task=lambda _coro: scheduled.append("refreshed"),
             )
 
-            async def async_request_refresh(self):
+            # Sync stand-in: the fake async_create_task above never awaits its
+            # argument, so a real coroutine here would leak a "never awaited"
+            # RuntimeWarning.
+            def async_request_refresh(self):
                 return None
 
         captured = {}
@@ -555,107 +506,6 @@ class TestExperimentDelegations:
             assert coord._build_experiment_clamps(now) == {"living_room": []}
         active_mock.assert_called_once_with(coord, "living_room")
         clamps_mock.assert_called_once_with(coord, now)
-
-
-class TestAdditionalRuntimeAndActuationDelegations:
-    def test_runtime_gap_helpers_delegate(self):
-        coord = make_minimal_coordinator()
-        u = np.array([0.5])
-        d = np.array([5.0])
-        with patch(
-            "custom_components.heating_assistant.coordinator.runtime_state.propagate_ekf_gap"
-        ) as gap_mock, patch(
-            "custom_components.heating_assistant.coordinator.runtime_state.build_gap_u_sequence",
-            return_value=u,
-        ) as seq_mock:
-            coord._propagate_ekf_gap(1_000.0, u, d)
-            assert coord._build_gap_u_sequence(1_000.0, 3, 900.0, u) is u
-        gap_mock.assert_called_once_with(coord, 1_000.0, u, d)
-        seq_mock.assert_called_once_with(coord, 1_000.0, 3, 900.0, u)
-
-    def test_additional_actuation_helpers_delegate(self):
-        coord = make_minimal_coordinator()
-        src = SimpleNamespace(name="lr_hp", room="living_room")
-        state = SimpleNamespace(state="heat")
-        with patch(
-            "custom_components.heating_assistant.coordinator.actuation.read_delivered_actions",
-            return_value={"lr_hp": 0.5},
-        ) as delivered_mock, patch(
-            "custom_components.heating_assistant.coordinator.actuation.read_delivered_fraction_climate",
-            return_value=0.4,
-        ) as frac_climate_mock, patch(
-            "custom_components.heating_assistant.coordinator.actuation.set_source_power"
-        ) as set_power_mock, patch(
-            "custom_components.heating_assistant.coordinator.actuation.climate_hp_command",
-            return_value=("heat", 40.0),
-        ) as hp_mock:
-            assert coord._read_delivered_actions(5.0) == {"lr_hp": 0.5}
-            assert coord._read_delivered_fraction_climate(src, state) == pytest.approx(0.4)
-            coord._set_source_power(src, 0.5, 5.0)
-            assert coord._climate_hp_command(src, 0.5, 35.0, 5.0, state) == ("heat", 40.0)
-        delivered_mock.assert_called_once_with(coord, 5.0)
-        frac_climate_mock.assert_called_once_with(coord, src, state)
-        set_power_mock.assert_called_once_with(coord, src, 0.5, 5.0)
-        hp_mock.assert_called_once_with(coord, src, 0.5, 35.0, 5.0, state)
-
-    @pytest.mark.asyncio
-    async def test_async_actuation_helpers_delegate(self):
-        coord = make_minimal_coordinator()
-        with patch(
-            "custom_components.heating_assistant.coordinator.actuation.reapply_climate_setpoints",
-            new=AsyncMock(),
-        ) as reapply_mock, patch(
-            "custom_components.heating_assistant.coordinator.actuation.apply_actions",
-            new=AsyncMock(),
-        ) as apply_mock, patch(
-            "custom_components.heating_assistant.coordinator.actuation.async_verify_heater_entities",
-            new=AsyncMock(return_value=True),
-        ) as verify_mock, patch(
-            "custom_components.heating_assistant.coordinator.live_refresh.refresh_live_state",
-            return_value=5.0,
-        ) as refresh_mock:
-            await coord._reapply_climate_setpoints(5.0)
-            await coord._apply_actions(5.0)
-            assert await coord._async_verify_heater_entities(5.0) is True
-            assert coord._refresh_live_state() == pytest.approx(5.0)
-        reapply_mock.assert_called_once_with(coord, 5.0)
-        apply_mock.assert_called_once_with(coord, 5.0)
-        verify_mock.assert_called_once_with(coord, 5.0)
-        refresh_mock.assert_called_once_with(coord)
-
-
-class TestRemainingDisturbanceDelegations:
-    def test_remaining_disturbance_helpers_delegate(self):
-        coord = make_minimal_coordinator()
-        now = coord.now_utc
-        with patch(
-            "custom_components.heating_assistant.coordinator.disturbances.read_wind_speed_now",
-            return_value=3.5,
-        ) as wind_mock, patch(
-            "custom_components.heating_assistant.coordinator.disturbances.record_solar_fc_success"
-        ) as solar_ok_mock, patch(
-            "custom_components.heating_assistant.coordinator.disturbances.record_solar_fc_failure"
-        ) as solar_fail_mock, patch(
-            "custom_components.heating_assistant.coordinator.disturbances.read_ghi",
-            return_value=(400.0, [350.0, 360.0]),
-        ) as ghi_mock, patch(
-            "custom_components.heating_assistant.coordinator.disturbances.room_solar_gain",
-            return_value=120.0,
-        ) as gain_mock, patch(
-            "custom_components.heating_assistant.coordinator.disturbances.publish_current_solar_gains"
-        ) as publish_mock:
-            assert coord._read_wind_speed_now() == pytest.approx(3.5)
-            coord._record_solar_fc_success()
-            coord._record_solar_fc_failure("timeout")
-            assert coord._read_ghi(now) == (400.0, [350.0, 360.0])
-            assert coord._room_solar_gain("living_room", now, 0.2, 400.0) == pytest.approx(120.0)
-            coord._publish_current_solar_gains()
-        wind_mock.assert_called_once_with(coord)
-        solar_ok_mock.assert_called_once_with(coord)
-        solar_fail_mock.assert_called_once_with(coord, "timeout")
-        ghi_mock.assert_called_once_with(coord, now)
-        gain_mock.assert_called_once_with(coord, "living_room", now, 0.2, 400.0)
-        publish_mock.assert_called_once_with(coord)
 
 
 class TestAsyncLoglikSlice:

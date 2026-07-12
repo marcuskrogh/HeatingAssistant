@@ -26,6 +26,9 @@ from custom_components.heating_assistant.const import (
 from custom_components.heating_assistant.coordinator import runtime_reconfig as rr
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _reconfig_coord():
     coord = make_minimal_coordinator(room_names=["living_room"])

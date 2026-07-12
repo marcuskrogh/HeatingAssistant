@@ -22,6 +22,9 @@ import pytest
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from custom_components.heating_assistant import electricity_price as ep
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 # ---------------------------------------------------------------------------
 # Helpers

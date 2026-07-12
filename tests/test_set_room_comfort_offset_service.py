@@ -40,24 +40,14 @@ def _make_hass(coordinator, monkeypatch):
     return hass
 
 
-@pytest.mark.asyncio
-async def test_offset_applied_resolving_slug(monkeypatch):
-    """A slug sent by the frontend resolves to the canonical room name."""
-    coordinator = _make_coordinator(["Living Room"])
-    hass = _make_hass(coordinator, monkeypatch)
-
-    handler = _capture_handler(hass)
-    await handler(
-        SimpleNamespace(data={"room_name": "living_room", "comfort_offset": 1.5})
-    )
-
-    coordinator.set_room_comfort_offset.assert_called_once_with("Living Room", 1.5)
-    coordinator.async_update_listeners.assert_called_once()
+# Slug resolution and the unknown-room error are covered for this handler by
+# the shared parametrized tests in tests/test_set_room_setpoint_service.py.
 
 
-@pytest.mark.asyncio
 async def test_offset_applied_with_exact_name(monkeypatch):
-    """An exact configured room name is accepted as well as the slug."""
+    """An exact configured room name is accepted as well as the slug, and the
+    handler registered by ``_register_services`` is wired to the real
+    implementation."""
     coordinator = _make_coordinator(["Bedroom"])
     hass = _make_hass(coordinator, monkeypatch)
 
@@ -67,16 +57,3 @@ async def test_offset_applied_with_exact_name(monkeypatch):
     )
 
     coordinator.set_room_comfort_offset.assert_called_once_with("Bedroom", 2.5)
-
-
-@pytest.mark.asyncio
-async def test_unknown_room_raises(monkeypatch):
-    coordinator = _make_coordinator(["Kitchen"])
-    hass = _make_hass(coordinator, monkeypatch)
-
-    handler = _capture_handler(hass)
-    with pytest.raises(ValueError):
-        await handler(
-            SimpleNamespace(data={"room_name": "nonexistent", "comfort_offset": 2.0})
-        )
-    coordinator.set_room_comfort_offset.assert_not_called()

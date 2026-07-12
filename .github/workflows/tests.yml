@@ -3,13 +3,25 @@ name: Tests
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same PR obsoletes any run still in flight.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # Fast/slow split: slow tests (Nelder-Mead multi-start estimation, IPOPT/MPC
-  # benchmarks) dominate wall time. Running them in a separate job keeps PR
-  # feedback fast while still exercising the full suite in parallel.
+  # Fast/slow split: slow tests (multi-start Nelder-Mead estimation) dominate
+  # wall time, so they run in parallel shards while the fast tier gives quick
+  # PR feedback. mbc comes from requirements.txt at the pinned SHA — do not
+  # add a floating `git+` install here, it would test a different mbc than
+  # the one Home Assistant deploys.
   pytest-fast:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -21,10 +33,7 @@ jobs:
           cache: pip
 
       - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
+        run: pip install -r requirements-dev.txt
 
       - name: Run fast tests
         env:
@@ -33,6 +42,7 @@ jobs:
           python3 -m pytest tests/ -m "not slow" \
             --cov=custom_components/heating_assistant \
             --cov-report= \
+            --durations=20 \
             -q
 
       - name: Upload coverage fragment
@@ -42,8 +52,21 @@ jobs:
           path: .coverage.fast
           include-hidden-files: true
 
+  # Slow tier sharded across two runners. Shard "stability" is the single
+  # heaviest file; shard "rest" runs every other slow test via the marker,
+  # so newly added slow tests are always picked up without editing this file.
   pytest-slow:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: stability
+            pytest_args: tests/test_estimator_stability.py -m slow
+          - shard: rest
+            pytest_args: tests/ -m slow --ignore=tests/test_estimator_stability.py
 
     steps:
       - uses: actions/checkout@v4
@@ -55,30 +78,29 @@ jobs:
           cache: pip
 
       - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
+        run: pip install -r requirements-dev.txt
 
-      - name: Run slow tests
+      - name: Run slow tests (${{ matrix.shard }})
         env:
-          COVERAGE_FILE: .coverage.slow
+          COVERAGE_FILE: .coverage.slow-${{ matrix.shard }}
         run: |
-          python3 -m pytest tests/ -m slow \
+          python3 -m pytest ${{ matrix.pytest_args }} \
             --cov=custom_components/heating_assistant \
             --cov-report= \
+            --durations=10 \
             -q
 
       - name: Upload coverage fragment
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-slow
-          path: .coverage.slow
+          name: coverage-slow-${{ matrix.shard }}
+          path: .coverage.slow-${{ matrix.shard }}
           include-hidden-files: true
 
   coverage:
     needs: [pytest-fast, pytest-slow]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -103,17 +125,24 @@ jobs:
           chmod +x scripts/combine_coverage.sh
           ./scripts/combine_coverage.sh
 
+      - name: Upload combined report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_report.txt
+
+  # Node is preinstalled on ubuntu-latest runners; the harnesses are plain
+  # node scripts with no npm dependencies, so no setup step is needed.
   panel-harness:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Node.js
-        run: sudo apt-get update && sudo apt-get install -y nodejs
-
       - name: Run panel harness smoke tests
         run: |
+          node --version
           for harness in tests/panel_*.harness.mjs; do
             echo "Running $harness"
             node "$harness"
