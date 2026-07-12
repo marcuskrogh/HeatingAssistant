@@ -1,12 +1,12 @@
 {
-  "captured_at": "2026-07-09",
-  "pytest_filter": "not slow",
-  "total_statements": 11819,
-  "total_missed": 1427,
+  "captured_at": "2026-07-12",
+  "pytest_filter": "combined (not slow + slow)",
+  "total_statements": 11820,
+  "total_missed": 1386,
   "total_branches": 3440,
-  "partial_branches": 584,
-  "line_coverage_percent": 85.0,
-  "tests_passed": 1674,
-  "tests_skipped": 5,
-  "wall_time_seconds": 20.7
+  "partial_branches": 583,
+  "line_coverage_percent": 85.3,
+  "tests_passed": 1707,
+  "tests_skipped": 6,
+  "wall_time_seconds": 506.0
 }

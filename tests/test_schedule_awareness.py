@@ -22,6 +22,9 @@ from custom_components.heating_assistant.sensor import (
 )
 from custom_components.heating_assistant.thermal_model import HouseModel, Room
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _make_coordinator_stub_for_trajectory() -> HeatingAssistantCoordinator:
     coord = object.__new__(HeatingAssistantCoordinator)

@@ -23,7 +23,7 @@ _TIER_MARKERS = frozenset({"unit", "integration", "system"})
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register tier markers and expose FAST_TESTS for benchmark modules."""
+    """Register tier markers."""
     config.addinivalue_line(
         "markers",
         "unit: pure logic tests with no coordinator/HA wiring",
@@ -40,8 +40,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "slow: marks tests as slow (multi-start Nelder-Mead parameter estimation)",
     )
-    config.FAST_TESTS = os.environ.get("FAST_TESTS") == "1"
-
 
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]

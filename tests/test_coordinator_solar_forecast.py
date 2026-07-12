@@ -18,6 +18,9 @@ import pytest
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from custom_components.heating_assistant.thermal_model import HouseModel, Room, Window
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 LAT, LON = 55.0, 12.0
 NOW = datetime(2024, 6, 21, 11, 0, tzinfo=timezone.utc)

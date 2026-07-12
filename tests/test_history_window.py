@@ -19,6 +19,7 @@ from custom_components.heating_assistant.history_window import (
     DEFAULT_MAX_GAP_FACTOR,
     history_time_range,
     prune_stale_records,
+    select_leading_window,
     select_recent_window,
     select_window_by_timestamps,
     split_contiguous_runs,
@@ -353,3 +354,22 @@ def test_open_loop_stays_in_recent_24h_and_keeps_latest():
     assert span <= 24.0, f"open-loop spans {span:.1f} h"
     # The latest sample must be represented (within one sample of the window end).
     assert window[-1]["timestamp"] - sim[-1]["time"] <= dt + 1.0
+
+
+# ---------------------------------------------------------------------------
+# select_leading_window
+# ---------------------------------------------------------------------------
+
+def test_select_leading_window_empty_when_no_data():
+    assert select_leading_window([], 1000.0, 3600.0) == []
+
+
+def test_select_leading_window_respects_bounds():
+    hist = [
+        {"timestamp": 1000.0, "y": [20.0]},
+        {"timestamp": 4600.0, "y": [20.5]},
+        {"timestamp": 8200.0, "y": [21.0]},
+    ]
+    leading = select_leading_window(hist, 8200.0, 3600.0)
+    assert len(leading) == 1
+    assert leading[0]["timestamp"] == 4600.0

@@ -1,96 +1,130 @@
 # Test Suite
 
-Heating Assistant uses **pytest** with a three-tier layout:
+Heating Assistant uses **pytest** (Python) plus **Node harnesses** (panel JS)
+with a three-tier layout:
 
-| Tier | Directory | Marker | What it covers |
-|------|-----------|--------|----------------|
-| Unit | `tests/test_*.py` | `@pytest.mark.unit` (auto-applied) | Pure physics, estimation math, parsers |
-| Integration | `tests/integration/` | `@pytest.mark.integration` | Package boundaries: `mpc_cycle`, `controller/factory`, `services/` |
-| System | `tests/system/` | `@pytest.mark.system` | Full stack smoke: model → MPC → forecast payload |
+| Tier | Marker | What it covers |
+|------|--------|----------------|
+| Unit | `unit` (auto-applied to top-level `tests/test_*.py`) | Pure physics, estimation math, parsers — no coordinator/HA wiring |
+| Integration | `integration` | Multi-module tests using coordinator stubs or mocked HA. Applied via module-level `pytestmark` to top-level files that build coordinators, and per-test in `tests/integration/` |
+| System | `system` | Full-stack smoke across package boundaries (`tests/system/`) |
 
-**New in this pass (coverage + tier gaps):**
+Files whose tests construct a coordinator (via `tests/helpers/coordinator_stubs`
+or `object.__new__(HeatingAssistantCoordinator)`) carry an explicit
+`pytestmark = pytest.mark.integration`, so `-m unit` really does select only
+pure-logic tests. If you add a coordinator-based test to a new top-level file,
+add that marker.
 
-| Module | Tests |
-|--------|-------|
-| `coordinator/mpc_cycle.py` | `tests/integration/test_mpc_cycle.py` — disturbances, compute, finalize, history |
-| `config_schema.py` | `tests/test_config_schema.py` |
-| `estimation/{sensitivity,warmstart,model_build}.py` | `tests/test_estimation_internals.py` |
-| `services/{context,diagnostics}.py` | `tests/test_services_diagnostics.py` |
-| Full mpc_cycle orchestration | `tests/system/test_control_loop_smoke.py` |
-| Identification service handlers | `tests/test_identification_services.py` |
-| History store / records / restore | `tests/test_history_store.py`, `test_history_records.py`, `test_history_startup_restore.py` |
-| Coordinator update orchestration | `tests/integration/test_coordinator_update_cycle.py` |
-| Button/datetime entities, HA diagnostics, KPI history | `tests/test_button_entities.py`, `test_datetime_entities.py`, `test_ha_integration_diagnostics.py`, `test_kpi_history.py` |
-| Runtime state/reconfig, setup simulation | `tests/test_runtime_state.py`, `test_runtime_reconfig.py`, `test_setup_simulation.py` |
-| History access services, simulation helpers | `tests/test_history_access_services.py`, `test_services_simulation.py` |
-| Identification handlers (full) | `tests/test_identification_services.py` |
-| Diagnostic + room_live + forecast sensors | `tests/test_sensor_diagnostics.py`, `test_sensor_room_live.py`, `test_sensor_forecasts.py` |
-| WebSocket API (all handlers) | `tests/test_websocket_api.py` |
-| Parameter lifecycle, core helpers | `tests/test_parameter_lifecycle.py`, `test_coordinator_core_helpers.py` |
-| Config flow, lovelace dashboard gaps | `tests/test_config_flow.py`, `test_lovelace_dashboard_gaps.py` |
+The orthogonal `slow` marker tags multi-start estimation and benchmark tests
+(~17 tests, minutes of wall time); everything else runs in seconds.
 
 ## Quick start
 
 ```bash
 pip install -r requirements-dev.txt
-pip install "mbc @ git+https://github.com/marcuskrogh/mbc.git"
-python3 -m pytest tests/ -v -m "not slow"
+python3 -m pytest tests/ -m "not slow"      # fast tier, ~20 s
 ```
+
+`mbc` installs from the SHA pinned in `requirements.txt`. Do not install a
+floating `mbc@main` on top — CI deliberately tests the pinned version that
+Home Assistant deploys.
 
 ## Useful commands
 
 ```bash
-# Fast default (excludes slow IPOPT/MPC benchmarks)
+# Fast default (excludes slow estimation/benchmark tests)
 python3 -m pytest tests/ -m "not slow"
 
-# Slow tier (IPOPT estimation regressions and MPC benchmarks)
+# Slow tier (multi-start estimation regressions and MPC benchmarks)
 python3 -m pytest tests/ -m slow
 
-# Even faster benchmarks (3 MPC reps instead of 15)
+# Faster benchmarks (3 MPC reps instead of 15)
 FAST_TESTS=1 python3 -m pytest tests/test_performance.py -m slow -v -s
 
-# Unit tier only (auto-tagged for tests/test_*.py)
+# Single tiers
 python3 -m pytest tests/ -m unit
+python3 -m pytest tests/ -m integration
+python3 -m pytest tests/ -m system
 
-# Integration + system tiers only
-python3 -m pytest tests/integration tests/system -v
-
-# With coverage (fast + slow, same as CI)
-python3 -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=term-missing
+# With coverage (fast + slow combined, same as CI)
+python3 -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=
 python3 -m pytest tests/ -m slow --cov=custom_components/heating_assistant --cov-append --cov-report=term-missing
 
-# Panel harnesses (also run in CI)
-node tests/panel_watchdog.harness.mjs
+# Panel harnesses (all of them, also run in CI)
+for h in tests/panel_*.harness.mjs; do node "$h"; done
 ```
+
+## Panel JS harnesses
+
+The panel frontend (`custom_components/heating_assistant/www`) is tested by
+self-contained Node scripts (`tests/panel_*.harness.mjs`) that stub the DOM/HA
+surface and load the **real** source files. Notable:
+
+- `panel_syntax.harness.mjs` — parse gate over every non-vendor `www` JS file,
+  so a syntax error anywhere fails CI even if no behaviour harness loads the
+  file.
+- `panel_overview_page.harness.mjs`, `panel_ha_services.harness.mjs`,
+  `panel_kpi_engine.harness.mjs` — behaviour coverage for the overview page,
+  the service/WebSocket wrappers (including their `{}` vs `null` failure
+  contracts), and the KPI math.
+
+New harnesses dropped into `tests/` matching `panel_*.harness.mjs` are picked
+up by CI automatically. Keep each under ~2 s.
+
+## Solver backend visibility
+
+`tests/test_solver_backend.py` asserts the IPOPT backend actually engages when
+`cyipopt` is installed, and **skips loudly** when it isn't — in that case every
+estimation test (including the slow-tier "IPOPT" regressions) runs on the
+scipy L-BFGS-B fallback. Watch for that skip in CI output before trusting
+IPOPT-specific conclusions. `cyipopt` ships no wheels, so CI currently runs
+the fallback path.
 
 ## Shared helpers
 
-Post-refactor coordinator stubs live in `tests/helpers/`:
+Coordinator stubs and estimation fixtures live in `tests/helpers/` — import
+them instead of copy-pasting local stubs:
 
 - `coordinator_stubs.py` — `make_minimal_coordinator()`, `make_hass_stub()`, `wire_room_enablement()`
 - `setup_patches.py` — `patch_setup_stores()` for `async_setup_entry` tests
-- `estimation_fixtures.py` — `make_single_room()`, `generate_history()`, `make_kalman_ml_estimator()`, plus module-scoped pytest fixtures
+- `estimation_fixtures.py` — `make_single_room()`, `make_electric_heaters()`,
+  `generate_history()`, `make_kalman_ml_estimator()`, plus module-scoped
+  pytest fixtures
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests to `main` only**:
+GitHub Actions workflow `.github/workflows/tests.yml` runs on **pull requests
+to `main`** (plus manual `workflow_dispatch`):
 
 | Job | Purpose |
 |-----|---------|
-| `pytest-fast` | `pytest tests/ -m "not slow"` with per-job coverage fragment |
-| `pytest-slow` | `pytest tests/ -m slow` with per-job coverage fragment |
-| `coverage` | Combines fast + slow fragments, reports, checks `scripts/coverage_baseline.json` |
-| `panel-harness` | Serial Node smoke scripts (`tests/panel_*.harness.mjs`) |
+| `pytest-fast` | `pytest tests/ -m "not slow"` with a coverage fragment (~20 s of test time) |
+| `pytest-slow` (×2 shards) | Slow tier split across two runners: the heaviest file (`test_estimator_stability.py`) alone, and `-m slow --ignore=` for everything else — new slow tests are picked up automatically |
+| `coverage` | Combines all fragments, reports, checks `scripts/coverage_baseline.json` and package floors |
+| `panel-harness` | Runs every `tests/panel_*.harness.mjs` serially (~3 s; Node is preinstalled on runners) |
 
-**Fast/slow split:** slow tests (multi-start Nelder-Mead estimation, IPOPT/MPC benchmarks) dominate wall time. Running them in a separate parallel job keeps PR feedback fast without skipping coverage.
+Stale runs are cancelled when a PR is force-pushed (`concurrency`), and every
+job has a `timeout-minutes` so a hung estimation can't burn hours.
 
-**Efficiency:** Python jobs use `actions/setup-python` with `cache: pip` (keyed off `requirements-dev.txt`). Node.js is installed only in `panel-harness`; Python jobs do not need it.
-
-**Coverage baseline:** `scripts/check_coverage.py` enforces the floor recorded in `scripts/coverage_baseline.json`. Package-level floors for `services/`, `history/`, and `coordinator/` are defined in `scripts/coverage_package_floors.json` (2 pp tolerance). Maintainers can regenerate the baseline from a combined local report:
+**Coverage baseline:** `scripts/check_coverage.py` enforces the floor recorded
+in `scripts/coverage_baseline.json` (captured from a **combined** fast+slow
+run) plus package-level floors in `scripts/coverage_package_floors.json`
+(2 pp tolerance). To regenerate after a deliberate change:
 
 ```bash
+python3 -m pytest tests/ -m "not slow" --cov=custom_components/heating_assistant --cov-report=
+python3 -m pytest tests/ -m slow --cov=custom_components/heating_assistant --cov-append --cov-report=
 coverage report -m | tee coverage_report.txt
 python3 scripts/update_coverage_baseline.py coverage_report.txt
 ```
 
-Optional flags: `--tests-passed`, `--tests-skipped`, `--wall-time-seconds`, `--dry-run`.
+## Known gaps (deliberate)
+
+- No true end-to-end test drives `async_setup_entry` → real coordinator
+  refresh → entity values; the system tier smoke-tests the mpc_cycle
+  orchestration with a real controller but a stubbed coordinator. Building the
+  real-coordinator scaffold is tracked follow-up work.
+- `lovelace_setup.py` is dormant and untested; add tests before reactivating.
+- Legacy `@pytest.mark.asyncio` decorators and `sys.path.insert` boilerplate
+  remain in many older files (harmless — `asyncio_mode = auto` covers the
+  former); sweep opportunistically when touching a file.

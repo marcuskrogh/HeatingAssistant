@@ -14,6 +14,9 @@ from custom_components.heating_assistant.heat_sources import (
     HeatPump,
 )
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 # ---------------------------------------------------------------------------
 # Helpers – lightweight stand-ins for the coordinator

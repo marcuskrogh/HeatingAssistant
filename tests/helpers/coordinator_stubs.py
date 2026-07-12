@@ -180,27 +180,3 @@ def make_minimal_coordinator(
     return coord
 
 
-def make_live_refresh_coordinator(
-    *,
-    temp_states: Dict[str, str],
-    temp_sensors: Dict[str, List[str]],
-    outdoor: float | None = 5.0,
-) -> HeatingAssistantCoordinator:
-    """Coordinator wired for the fast UI refresh path (no MPC)."""
-    coord = make_minimal_coordinator(
-        room_names=list(temp_sensors),
-        temp_sensors=temp_sensors,
-    )
-    coord.hass = make_hass_stub(temp_states=temp_states)
-    coord._rooms_ever_measured = set()
-    coord._read_outdoor_temp = MagicMock(return_value=outdoor)
-    coord._apply_schedule = MagicMock()
-    coord._update_window_state_machine = MagicMock()
-    coord._ensure_runtime_state_loaded = AsyncMock()
-    coord._room_solar_gain = MagicMock(return_value=123.0)
-
-    def _boom(*_a, **_k):
-        raise AssertionError("fast UI refresh must not run the MPC controller")
-
-    coord.controller = SimpleNamespace(compute=_boom)
-    return coord

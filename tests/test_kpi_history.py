@@ -24,6 +24,9 @@ from custom_components.heating_assistant.kpi_history import (
 )
 from tests.helpers.coordinator_stubs import make_hass_stub, make_minimal_coordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def test_room_comfort_entity_ids_uses_slugified_room_name():
     ids = room_comfort_entity_ids("Living Room")

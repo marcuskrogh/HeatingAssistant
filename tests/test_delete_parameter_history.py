@@ -8,6 +8,9 @@ import pytest
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 class _FakeEntry:
     def __init__(self, data):

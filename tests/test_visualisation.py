@@ -468,73 +468,10 @@ class TestOutdoorForecast:
 
 
 # ---------------------------------------------------------------------------
-# Tests: forecast sensors surface failure (or first-cycle absence) as
-# ``unknown`` instead of echoing current state, so dashboards show a gap.
-# ---------------------------------------------------------------------------
-
-class TestForecastSensorsReportUnknownOnEmpty:
-    def test_temperature_forecast_is_none_before_first_plan(self):
-        room = SimpleNamespace(temperature=20.37, setpoint=21.0, windows=[])
-        coordinator = SimpleNamespace(
-            predictions=[],
-            model=SimpleNamespace(rooms={"living_room": room}),
-            heat_sources=[],
-            solar_gains={},
-            outdoor_forecast=[],
-            solar_forecast=[],
-            heating_schedule=[],
-            outdoor_temp=5.0,
-            dt=900,
-            controller=SimpleNamespace(constraint_offset=2.0),
-        )
-
-        sensor = TemperatureForecastSensor(coordinator, "living_room")
-
-        assert sensor.native_value is None
-
-    def test_heating_power_forecast_is_none_before_first_plan(self):
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        coordinator = SimpleNamespace(
-            heating_schedule=[],
-            heat_sources=[
-                SimpleNamespace(room="living_room", current_power=432.14),
-                SimpleNamespace(room="bedroom", current_power=999.0),
-            ],
-            model=SimpleNamespace(rooms={"living_room": room}),
-            solar_gains={},
-            predictions=[],
-            outdoor_forecast=[],
-            solar_forecast=[],
-            outdoor_temp=5.0,
-            dt=900,
-        )
-
-        sensor = HeatingPowerForecastSensor(coordinator, "living_room")
-
-        assert sensor.native_value is None
-
-    def test_solar_gain_forecast_is_none_before_first_plan(self):
-        room = SimpleNamespace(temperature=20.0, setpoint=21.0, windows=[])
-        coordinator = SimpleNamespace(
-            solar_forecast=[],
-            solar_gains={"living_room": 87.64},
-            model=SimpleNamespace(rooms={"living_room": room}),
-            heat_sources=[],
-            predictions=[],
-            outdoor_forecast=[],
-            heating_schedule=[],
-            outdoor_temp=5.0,
-            dt=900,
-        )
-
-        sensor = SolarGainForecastSensor(coordinator, "living_room")
-
-        assert sensor.native_value is None
-
-
-# ---------------------------------------------------------------------------
 # Tests: forecast payload timestamp correctness (WS API)
 # ---------------------------------------------------------------------------
+# NOTE: "empty predictions → native_value is None" for the forecast sensors
+# is covered canonically in tests/test_sensor_forecasts.py.
 
 def _make_forecast_payload_coord(*, horizon: int = 4, dt: int = 900):
     """Coordinator stub for build_forecast_payload timestamp tests."""
@@ -999,6 +936,9 @@ class TestCoordinatorUpdateResilience:
 # ---------------------------------------------------------------------------
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
+
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
 
 
 class TestForecastInterpolation:

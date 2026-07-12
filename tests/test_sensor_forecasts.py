@@ -83,6 +83,17 @@ def test_temperature_forecast_native_value_none_when_room_missing_from_predictio
     assert sensor.native_value is None
 
 
+def test_temperature_forecast_reports_unknown_when_predictions_empty():
+    """The sensor stays available (so dashboards keep rendering attributes)
+    but the state is ``None`` — that's what tells the operator the MPC has
+    no trajectory."""
+    sensor = TemperatureForecastSensor(
+        _make_coordinator(predictions=[]), "living_room"
+    )
+    assert sensor.available is True
+    assert sensor.native_value is None
+
+
 def test_heating_power_forecast_native_value_uses_first_schedule_step():
     sensor = HeatingPowerForecastSensor(_make_coordinator(), "living_room")
     assert sensor.native_value == pytest.approx(1234.0)
@@ -94,6 +105,7 @@ def test_heating_power_forecast_native_value_none_when_schedule_empty():
     sensor = HeatingPowerForecastSensor(
         _make_coordinator(heating_schedule=[]), "living_room"
     )
+    assert sensor.available is True
     assert sensor.native_value is None
 
 
@@ -109,6 +121,7 @@ def test_solar_gain_forecast_native_value_none_when_forecast_empty():
     sensor = SolarGainForecastSensor(
         _make_coordinator(solar_forecast=[]), "living_room"
     )
+    assert sensor.available is True
     assert sensor.native_value is None
 
 

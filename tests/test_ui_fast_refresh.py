@@ -18,6 +18,9 @@ import pytest
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from tests.helpers.coordinator_stubs import wire_room_enablement
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 _DISTURBANCES_ROOM_SOLAR = (
     "custom_components.heating_assistant.coordinator.disturbances.room_solar_gain"
 )

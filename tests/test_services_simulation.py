@@ -11,6 +11,9 @@ from custom_components.heating_assistant.heat_sources import ElectricHeater
 from custom_components.heating_assistant.services import simulation as sim
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _service_call(**data):
     return SimpleNamespace(data=data)

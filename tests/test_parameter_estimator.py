@@ -27,22 +27,16 @@ from custom_components.heating_assistant.estimation.constants import (
     _LOG_R_LO,
 )
 from custom_components.heating_assistant.estimation.theta_layout import _ThetaLayout
+from tests.helpers.estimation_fixtures import (
+    generate_history as _generate_history,
+    make_electric_heaters as _make_sources,
+    make_single_room as _make_single_room,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
-
-def _make_single_room(thermal_mass: float = 5_000_000.0,
-                      r_external: float = 0.05) -> Room:
-    return Room(
-        name="living_room",
-        thermal_mass=thermal_mass,
-        r_external=r_external,
-        temperature=20.0,
-        setpoint=21.0,
-    )
-
 
 def _make_two_rooms(
     mass1: float = 5_000_000.0, r1: float = 0.05,
@@ -65,49 +59,6 @@ def _make_two_rooms(
         setpoint=20.0,
     )
     return [living, bedroom]
-
-
-def _make_sources(rooms):
-    return [
-        ElectricHeater(f"{r.name}_heater", r.name, max_power=2000.0)
-        for r in rooms
-    ]
-
-
-def _generate_history(rooms, sources, dt=60.0, n_steps=60,
-                      outdoor_temp=5.0, heating_fraction=0.5,
-                      noise_std=0.05, seed=42):
-    """
-    Simulate a history buffer using the true model parameters so the
-    estimator has something real to fit.
-    """
-    rng = np.random.default_rng(seed)
-    model = HouseModel(rooms)
-    n = len(rooms)
-
-    temps = {r.name: r.temperature for r in rooms}
-
-    history = []
-    for _ in range(n_steps):
-        y = [temps[r.name] + rng.normal(0, noise_std) for r in rooms]
-        u = [heating_fraction] * len(sources)
-        solar = {r.name: 0.0 for r in rooms}
-
-        history.append({
-            "y": y,
-            "u": u,
-            "d_outdoor": outdoor_temp,
-            "d_solar": solar,
-        })
-
-        # Advance model one step
-        heat_inputs = {
-            src.room: src.thermal_power(heating_fraction, outdoor_temp)
-            for src in sources
-        }
-        temps = model.step(dt, heat_inputs, outdoor_temp, solar)
-
-    return history
 
 
 @pytest.fixture(scope="module")

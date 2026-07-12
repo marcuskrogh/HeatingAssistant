@@ -8,6 +8,9 @@ from custom_components.heating_assistant.coordinator import setup_simulation as 
 from custom_components.heating_assistant.thermal_model import HouseModel, Room
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _make_sim_coord():
     room = Room(

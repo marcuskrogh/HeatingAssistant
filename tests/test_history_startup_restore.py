@@ -16,6 +16,9 @@ from custom_components.heating_assistant.history.store import IdentificationHist
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 from tests.helpers.setup_patches import ensure_hass_config
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _make_entry(entry_id: str = "entry-1"):
     return SimpleNamespace(entry_id=entry_id)

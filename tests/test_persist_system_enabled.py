@@ -12,6 +12,9 @@ from custom_components.heating_assistant.const import (
 )
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 
+# Builds real coordinator objects (tests/helpers stubs) — integration tier.
+pytestmark = pytest.mark.integration
+
 
 def _make_minimal_coordinator(entry_data=None):
     """Build a bare coordinator with only the fields _init_room_state needs."""
