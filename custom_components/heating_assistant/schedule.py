@@ -44,19 +44,24 @@ the comfort temperature on time.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .const import (
+    CONF_SCHEDULE_ALL_DAY,
     CONF_SCHEDULE_COMFORT_OFFSET,
     CONF_SCHEDULE_DAYS,
+    CONF_SCHEDULE_ENABLED,
     CONF_SCHEDULE_END,
+    CONF_SCHEDULE_END_DATE,
     CONF_SCHEDULE_ENERGY_WEIGHT,
     CONF_SCHEDULE_FROST_PROTECTION,
     CONF_SCHEDULE_MODE,
     CONF_SCHEDULE_NAME,
+    CONF_SCHEDULE_RECURRING,
     CONF_SCHEDULE_SETPOINT,
     CONF_SCHEDULE_START,
+    CONF_SCHEDULE_START_DATE,
     CONF_SCHEDULE_TRACKING_WEIGHT,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_FROST_PROTECTION,
@@ -92,6 +97,17 @@ def parse_time(value: str | time) -> time:
     if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
         raise ValueError(f"Schedule time out of range: {value!r}")
     return time(hour=hour, minute=minute, second=second)
+
+
+def _parse_date(value: str | date) -> date:
+    """Parse an ISO date string (YYYY-MM-DD) into a ``date``."""
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    try:
+        return date.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"Schedule date must be YYYY-MM-DD; got {value!r}") from exc
 
 
 def _parse_days(value: Optional[Sequence[str]]) -> frozenset[int]:
@@ -135,6 +151,11 @@ class SchedulePeriod:
     comfort_offset: Optional[float] = None   # °C half-width; None = use room default
     tracking_weight: Optional[float] = None  # Q multiplier; None = 1.0 (no change)
     energy_weight: Optional[float] = None    # R multiplier; None = 1.0 (no change)
+    all_day: bool = False
+    enabled: bool = True
+    recurring: bool = True
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
     @property
     def wraps_midnight(self) -> bool:
@@ -146,6 +167,31 @@ class SchedulePeriod:
         """True when this period requests the heat sources to be switched off."""
         return self.mode == SCHEDULE_MODE_OFF
 
+    def _date_in_range(self, when: date) -> bool:
+        """Return True when ``when`` falls inside the one-off date window."""
+        if self.start_date is None or self.end_date is None:
+            return False
+        return self.start_date <= when <= self.end_date
+
+    def _matches_time_of_day(self, now: datetime, *, apply_weekday_filter: bool) -> bool:
+        """Evaluate the time-of-day window."""
+        wall = now.time()
+        weekday = now.weekday()
+
+        if self.wraps_midnight:
+            if not apply_weekday_filter:
+                return wall >= self.start or wall < self.end
+            # First half: from start until midnight on weekdays in ``days``.
+            in_first_half = wall >= self.start and weekday in self.days
+            # Second half: from midnight until end on the *following* weekday.
+            prev_weekday = (weekday - 1) % 7
+            in_second_half = wall < self.end and prev_weekday in self.days
+            return in_first_half or in_second_half
+
+        if apply_weekday_filter and weekday not in self.days:
+            return False
+        return self.start <= wall < self.end
+
     def matches(self, now: datetime) -> bool:
         """Return True if ``now`` falls inside this period.
 
@@ -154,21 +200,25 @@ class SchedulePeriod:
         past midnight.  For wrapping periods, the ``days`` filter is applied
         to the *start* day, so a "night" period beginning Sunday 22:00 covers
         Monday 03:59 too.
+
+        Disabled periods never match.  One-off periods require ``start_date``
+        and ``end_date``; recurring periods ignore those fields.  ``all_day``
+        covers the full calendar day on matching weekdays or dates.
         """
-        wall = now.time()
-        weekday = now.weekday()
-
-        if self.wraps_midnight:
-            # First half: from start until midnight on weekdays in ``days``.
-            in_first_half = wall >= self.start and weekday in self.days
-            # Second half: from midnight until end on the *following* weekday.
-            prev_weekday = (weekday - 1) % 7
-            in_second_half = wall < self.end and prev_weekday in self.days
-            return in_first_half or in_second_half
-
-        if weekday not in self.days:
+        if not self.enabled:
             return False
-        return self.start <= wall < self.end
+
+        if not self.recurring:
+            if not self._date_in_range(now.date()):
+                return False
+            if self.all_day:
+                return True
+            return self._matches_time_of_day(now, apply_weekday_filter=False)
+
+        if self.all_day:
+            return now.weekday() in self.days
+
+        return self._matches_time_of_day(now, apply_weekday_filter=True)
 
 
 @dataclass
@@ -257,6 +307,26 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
                     f"got {energy_weight}"
                 )
 
+        all_day = bool(entry.get(CONF_SCHEDULE_ALL_DAY, False))
+        enabled = bool(entry.get(CONF_SCHEDULE_ENABLED, True))
+        recurring = bool(entry.get(CONF_SCHEDULE_RECURRING, True))
+        start_date = entry.get(CONF_SCHEDULE_START_DATE)
+        end_date = entry.get(CONF_SCHEDULE_END_DATE)
+        if start_date is not None:
+            start_date = _parse_date(start_date)
+        if end_date is not None:
+            end_date = _parse_date(end_date)
+        if not recurring:
+            if start_date is None or end_date is None:
+                raise ValueError(
+                    f"Schedule entry {name!r}: one-off periods require "
+                    f"{CONF_SCHEDULE_START_DATE!r} and {CONF_SCHEDULE_END_DATE!r}"
+                )
+            if end_date < start_date:
+                raise ValueError(
+                    f"Schedule entry {name!r}: end_date must be on or after start_date"
+                )
+
         periods.append(
             SchedulePeriod(
                 name=name,
@@ -269,6 +339,11 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
                 comfort_offset=comfort_offset,
                 tracking_weight=tracking_weight,
                 energy_weight=energy_weight,
+                all_day=all_day,
+                enabled=enabled,
+                recurring=recurring,
+                start_date=start_date,
+                end_date=end_date,
             )
         )
 

@@ -244,6 +244,15 @@ def serialize_room_schedules(
                         "comfort_offset": p.comfort_offset,
                         "tracking_weight": p.tracking_weight,
                         "energy_weight": p.energy_weight,
+                        "all_day": p.all_day,
+                        "enabled": p.enabled,
+                        "recurring": p.recurring,
+                        "start_date": (
+                            p.start_date.isoformat() if p.start_date is not None else None
+                        ),
+                        "end_date": (
+                            p.end_date.isoformat() if p.end_date is not None else None
+                        ),
                     }
                     for p in room_schedule.periods
                 ],
