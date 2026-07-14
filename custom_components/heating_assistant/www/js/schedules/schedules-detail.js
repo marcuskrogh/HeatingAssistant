@@ -77,11 +77,60 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   let localPeriods = [];
   let dirty = false;
   let scheduleLoadGen = 0;
+  /** Periods last persisted successfully; held until WS confirms the same payload. */
+  let savedScheduleSnapshot = null;
   // Tracks which period indices are currently expanded in the UI
   let expandedSet = new Set();
 
   function getScheduleFromWS(roomSchedules) {
     return getScheduleDataForRoom(roomSchedules, room);
+  }
+
+  function getScheduleFromState() {
+    return getScheduleDataForRoom(state[CONFIG_ENTITY]?.attributes?.room_schedules, room);
+  }
+
+  function periodsMatch(a, b) {
+    const left = a ?? [];
+    const right = b ?? [];
+    if (left.length !== right.length) return false;
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  /**
+   * Prefer WebSocket data when authoritative; fall back to patched config-entity
+   * state (or the last successful save) when WS is stale, empty, or errored.
+   */
+  function resolveScheduleData(roomSchedules) {
+    const fromWs = getScheduleFromWS(roomSchedules);
+    const wsPeriods = fromWs?.periods ?? [];
+
+    if (savedScheduleSnapshot !== null) {
+      const snapLen = savedScheduleSnapshot.length;
+      const wsLen = wsPeriods.length;
+      if (wsLen < snapLen || wsLen > snapLen) {
+        const fromState = getScheduleFromState();
+        const enabled = fromState?.enabled ?? fromWs?.enabled ?? true;
+        return { enabled, periods: [...savedScheduleSnapshot] };
+      }
+      if (periodsMatch(wsPeriods, savedScheduleSnapshot)) {
+        savedScheduleSnapshot = null;
+      } else {
+        // Same count but field ordering/extra keys differ — WS caught up.
+        savedScheduleSnapshot = null;
+      }
+    }
+
+    if (wsPeriods.length > 0) {
+      return fromWs;
+    }
+
+    const fromState = getScheduleFromState();
+    if ((fromState?.periods?.length ?? 0) > 0) {
+      return fromState;
+    }
+
+    return fromWs ?? fromState ?? null;
   }
 
   function getDefaults(st) {
@@ -115,7 +164,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   }
 
   function applySchedulePayload(roomSchedules) {
-    const newData = getScheduleFromWS(roomSchedules);
+    const newData = resolveScheduleData(roomSchedules);
     renderToggle(newData);
     if (!dirty) {
       initLocalPeriods(newData);
@@ -448,6 +497,10 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       const defaults = getDefaults(state);
       const periods = localPeriods.map((p) => serializeSchedulePeriod(p, defaults));
       await updateRoomSchedule(hass, room.slug, periods);
+
+      // Hold the saved payload until WS confirms it — prevents stale/empty
+      // getSchedules() responses from wiping the form after save.
+      savedScheduleSnapshot = periods.map((p) => ({ ...p, days: [...(p.days || [])] }));
 
       // Invalidate in-flight schedule reloads started before this save.
       scheduleLoadGen++;
