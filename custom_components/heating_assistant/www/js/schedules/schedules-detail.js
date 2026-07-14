@@ -1,4 +1,4 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay } from '../schedule-utils.js?v=96';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=96';
 import { setPanelHash } from '../panel-hash.js?v=96';
 import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=96';
 import { getScheduleDataForRoom, patchStateSchedule, CONFIG_ENTITY } from './schedules-shared.js?v=96';
@@ -76,11 +76,61 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
 
   let localPeriods = [];
   let dirty = false;
+  let scheduleLoadGen = 0;
+  /** Periods last persisted successfully; held until WS confirms the same payload. */
+  let savedScheduleSnapshot = null;
   // Tracks which period indices are currently expanded in the UI
   let expandedSet = new Set();
 
   function getScheduleFromWS(roomSchedules) {
     return getScheduleDataForRoom(roomSchedules, room);
+  }
+
+  function getScheduleFromState() {
+    return getScheduleDataForRoom(state[CONFIG_ENTITY]?.attributes?.room_schedules, room);
+  }
+
+  function periodsMatch(a, b) {
+    const left = a ?? [];
+    const right = b ?? [];
+    if (left.length !== right.length) return false;
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  /**
+   * Prefer WebSocket data when authoritative; fall back to patched config-entity
+   * state (or the last successful save) when WS is stale, empty, or errored.
+   */
+  function resolveScheduleData(roomSchedules) {
+    const fromWs = getScheduleFromWS(roomSchedules);
+    const wsPeriods = fromWs?.periods ?? [];
+
+    if (savedScheduleSnapshot !== null) {
+      const snapLen = savedScheduleSnapshot.length;
+      const wsLen = wsPeriods.length;
+      if (wsLen < snapLen || wsLen > snapLen) {
+        const fromState = getScheduleFromState();
+        const enabled = fromState?.enabled ?? fromWs?.enabled ?? true;
+        return { enabled, periods: [...savedScheduleSnapshot] };
+      }
+      if (periodsMatch(wsPeriods, savedScheduleSnapshot)) {
+        savedScheduleSnapshot = null;
+      } else {
+        // Same count but field ordering/extra keys differ — WS caught up.
+        savedScheduleSnapshot = null;
+      }
+    }
+
+    if (wsPeriods.length > 0) {
+      return fromWs;
+    }
+
+    const fromState = getScheduleFromState();
+    if ((fromState?.periods?.length ?? 0) > 0) {
+      return fromState;
+    }
+
+    return fromWs ?? fromState ?? null;
   }
 
   function getDefaults(st) {
@@ -105,9 +155,29 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     localPeriods = periods.map((p) => ({
       ...p,
       days: [...(p.days || [0, 1, 2, 3, 4, 5, 6])],
+      enabled: p.enabled !== false,
+      recurring: p.recurring !== false,
+      all_day: !!p.all_day,
     }));
     expandedSet = new Set();
     dirty = false;
+  }
+
+  function applySchedulePayload(roomSchedules) {
+    const newData = resolveScheduleData(roomSchedules);
+    renderToggle(newData);
+    if (!dirty) {
+      initLocalPeriods(newData);
+      renderPeriodForms();
+    }
+  }
+
+  function fetchSchedules() {
+    const gen = ++scheduleLoadGen;
+    return connection.getSchedules().then((roomSchedules) => {
+      if (gen !== scheduleLoadGen) return;
+      applySchedulePayload(roomSchedules);
+    });
   }
 
   function renderPeriodForms() {
@@ -137,13 +207,15 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       const isActive = (p === activePeriod);
       const isNext = (p === nextPeriod);
       const isExpanded = expandedSet.has(i);
+      const periodEnabled = p.enabled !== false;
       const { text: modeText, cls: modeCls } = periodModeDisplay(p);
 
       const card = document.createElement('div');
       card.className = 'card schedule-form__period' +
         (isActive ? ' schedule-form__period--active' : '') +
         (isNext ? ' schedule-form__period--next' : '') +
-        (isExpanded ? ' schedule-form__period--expanded' : '');
+        (isExpanded ? ' schedule-form__period--expanded' : '') +
+        (!periodEnabled ? ' schedule-form__period--disabled' : '');
 
       // ── Collapsed header — always visible ──────────────────────────────────
       const cardHeader = document.createElement('div');
@@ -151,8 +223,9 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       cardHeader.innerHTML = `
         ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
         ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
+        <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
         <span class="schedule-form__period-name">${p.name || 'Period'}</span>
-        <span class="schedule-form__period-time">${p.start || '—'}–${p.end || '—'}</span>
+        <span class="schedule-form__period-time">${formatPeriodTime(p)}</span>
         <span class="sched-row__mode ${modeCls}">${modeText}</span>
         <button class="schedule-form__delete" title="Delete period">×</button>
         <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
@@ -176,6 +249,12 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       }
 
       const isComfort = p.mode !== 'off';
+      const isRecurring = p.recurring !== false;
+      const isAllDay = !!p.all_day;
+      const today = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const defaultDate = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+
       const paramsHtml = isComfort ? `
         <div class="schedule-form__period-row">
           <div class="form-group">
@@ -219,6 +298,22 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
             <input class="form-input form-input--name" type="text" value="${p.name || ''}" data-field="name">
           </div>
           <div class="form-group">
+            <label class="form-label">Mode</label>
+            <select class="schedule-form__mode-select" data-field="mode">${modeOptions}</select>
+          </div>
+        </div>
+        <div class="schedule-form__flags">
+          <label class="schedule-form__flag">
+            <input type="checkbox" data-field="all_day"${isAllDay ? ' checked' : ''}>
+            <span>All day</span>
+          </label>
+          <label class="schedule-form__flag">
+            <input type="checkbox" data-field="recurring"${isRecurring ? ' checked' : ''}>
+            <span>Recurring weekly</span>
+          </label>
+        </div>
+        <div class="schedule-form__period-row schedule-form__time-row"${isAllDay ? ' hidden' : ''}>
+          <div class="form-group">
             <label class="form-label">Start</label>
             <input class="form-input form-input--time" type="time" value="${p.start || '08:00'}" data-field="start">
           </div>
@@ -226,26 +321,40 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
             <label class="form-label">End</label>
             <input class="form-input form-input--time" type="time" value="${p.end || '22:00'}" data-field="end">
           </div>
+        </div>
+        <div class="schedule-form__date-row"${isRecurring ? ' hidden' : ''}>
           <div class="form-group">
-            <label class="form-label">Mode</label>
-            <select class="schedule-form__mode-select" data-field="mode">${modeOptions}</select>
+            <label class="form-label">Start date</label>
+            <input class="form-input" type="date" value="${p.start_date || defaultDate}" data-field="start_date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">End date</label>
+            <input class="form-input" type="date" value="${p.end_date || defaultDate}" data-field="end_date">
           </div>
         </div>
-        <div class="schedule-form__days" data-period="${i}">${daysHtml}</div>
+        <div class="schedule-form__days" data-period="${i}"${isRecurring ? '' : ' hidden'}>${daysHtml}</div>
         ${paramsHtml}
       `;
 
       card.appendChild(cardBody);
       periodsContainer.appendChild(card);
 
-      // Toggle expansion on header click (except the delete button)
+      // Toggle expansion on header click (except action buttons)
       cardHeader.addEventListener('click', (e) => {
-        if (e.target.closest('.schedule-form__delete')) return;
+        if (e.target.closest('.schedule-form__delete, [data-action="toggle-enabled"]')) return;
         const willExpand = !expandedSet.has(i);
         if (willExpand) expandedSet.add(i); else expandedSet.delete(i);
         card.classList.toggle('schedule-form__period--expanded', willExpand);
         cardBody.hidden = !willExpand;
         cardHeader.querySelector('.schedule-form__expand-chevron').textContent = willExpand ? '▲' : '▼';
+      });
+
+      // Per-period enable toggle
+      cardHeader.querySelector('[data-action="toggle-enabled"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        localPeriods[i].enabled = !(localPeriods[i].enabled !== false);
+        dirty = true;
+        renderPeriodForms();
       });
 
       // Delete — rebuild expandedSet with shifted indices
@@ -265,7 +374,8 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       // Wire all [data-field] inputs/selects inside body
       cardBody.querySelectorAll('[data-field]').forEach((input) => {
         const field = input.dataset.field;
-        input.addEventListener('change', () => {
+        const eventName = input.type === 'checkbox' ? 'change' : 'change';
+        input.addEventListener(eventName, () => {
           if (field === 'mode') {
             localPeriods[i].mode = input.value;
             if (input.value === 'off') {
@@ -282,7 +392,28 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
               localPeriods[i].energy_weight = localPeriods[i].energy_weight ?? defaults.energy_weight;
             }
             dirty = true;
-            expandedSet.add(i); // keep this card open after re-render
+            expandedSet.add(i);
+            renderPeriodForms();
+          } else if (field === 'all_day') {
+            localPeriods[i].all_day = input.checked;
+            if (input.checked) {
+              localPeriods[i].start = '00:00';
+              localPeriods[i].end = '23:59';
+            }
+            dirty = true;
+            expandedSet.add(i);
+            renderPeriodForms();
+          } else if (field === 'recurring') {
+            localPeriods[i].recurring = input.checked;
+            if (!input.checked) {
+              const d = new Date();
+              const padN = (n) => String(n).padStart(2, '0');
+              const iso = `${d.getFullYear()}-${padN(d.getMonth() + 1)}-${padN(d.getDate())}`;
+              localPeriods[i].start_date = localPeriods[i].start_date || iso;
+              localPeriods[i].end_date = localPeriods[i].end_date || iso;
+            }
+            dirty = true;
+            expandedSet.add(i);
             renderPeriodForms();
           } else if (['setpoint', 'frost_protection', 'comfort_offset', 'tracking_weight', 'energy_weight'].includes(field)) {
             localPeriods[i][field] = parseFloat(input.value);
@@ -346,6 +477,9 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       tracking_weight: defaults.tracking_weight,
       energy_weight: defaults.energy_weight,
       days: [0, 1, 2, 3, 4, 5, 6],
+      enabled: true,
+      recurring: true,
+      all_day: false,
     });
     dirty = true;
     expandedSet.add(localPeriods.length - 1); // expand the new card
@@ -361,19 +495,15 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     btnSave.disabled = true;
     try {
       const defaults = getDefaults(state);
-      const periods = localPeriods.map((p) => {
-        const out = { name: p.name, start: p.start, end: p.end, mode: p.mode, days: p.days };
-        if (p.mode === 'off') {
-          out.frost_protection = p.frost_protection ?? 12;
-        } else {
-          out.setpoint = p.setpoint ?? defaults.setpoint;
-          if (p.comfort_offset != null) out.comfort_offset = p.comfort_offset;
-          if (p.tracking_weight != null) out.tracking_weight = p.tracking_weight;
-          if (p.energy_weight != null) out.energy_weight = p.energy_weight;
-        }
-        return out;
-      });
+      const periods = localPeriods.map((p) => serializeSchedulePeriod(p, defaults));
       await updateRoomSchedule(hass, room.slug, periods);
+
+      // Hold the saved payload until WS confirms it — prevents stale/empty
+      // getSchedules() responses from wiping the form after save.
+      savedScheduleSnapshot = periods.map((p) => ({ ...p, days: [...(p.days || [])] }));
+
+      // Invalidate in-flight schedule reloads started before this save.
+      scheduleLoadGen++;
 
       // Patch the shared state object immediately — prevents any intermediate
       // state_changed events (from other entities) from wiping localPeriods
@@ -397,12 +527,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   });
 
   // Initial render — fetch from WebSocket to get persisted schedule data
-  connection.getSchedules().then((roomSchedules) => {
-    const schedData = getScheduleFromWS(roomSchedules);
-    renderToggle(schedData);
-    initLocalPeriods(schedData);
-    renderPeriodForms();
-  });
+  fetchSchedules();
 
   // Add experiment section
   const expSection = renderExperimentsSection(container, room, connection, hass);
@@ -410,14 +535,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   return {
     update(newState) {
       state = newState;
-      connection.getSchedules().then((roomSchedules) => {
-        const newData = getScheduleFromWS(roomSchedules);
-        renderToggle(newData);
-        if (!dirty) {
-          initLocalPeriods(newData);
-          renderPeriodForms();
-        }
-      });
+      fetchSchedules();
     },
     destroy() { expSection.destroy(); },
   };

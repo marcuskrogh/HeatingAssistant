@@ -203,6 +203,11 @@ def register_control_services(hass: HomeAssistant) -> None:
                             vol.Optional("comfort_offset"): vol.Coerce(float),
                             vol.Optional("tracking_weight"): vol.Coerce(float),
                             vol.Optional("energy_weight"): vol.Coerce(float),
+                            vol.Optional("all_day", default=False): cv.boolean,
+                            vol.Optional("enabled", default=True): cv.boolean,
+                            vol.Optional("recurring", default=True): cv.boolean,
+                            vol.Optional("start_date"): cv.string,
+                            vol.Optional("end_date"): cv.string,
                         }
                     )
                 ],

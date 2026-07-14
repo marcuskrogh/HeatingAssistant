@@ -1,10 +1,33 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=96';
+import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=96';
 import { findNextScheduledExperiment } from '../experiment-utils.js?v=96';
 import { setPanelHash } from '../panel-hash.js?v=96';
-import { setScheduleEnabled } from '../ha-services.js?v=96';
-import { getScheduleDataForRoom, makePeriodRow } from './schedules-shared.js?v=96';
+import { updateRoomSchedule } from '../ha-services.js?v=96';
+import { getScheduleDataForRoom, makePeriodRow, patchStateSchedule } from './schedules-shared.js?v=96';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+
+function getDefaults(st, room) {
+  const config = st[CONFIG_ENTITY]?.attributes || {};
+  return {
+    setpoint: config.room_setpoints?.[room.slug] ?? 21,
+    comfort_offset: config.room_comfort_offsets?.[room.slug] ?? config.comfort_offset ?? 2.0,
+    tracking_weight: config.tracking_weight ?? 0.0,
+    energy_weight: config.energy_weight ?? 0.01,
+  };
+}
+
+async function togglePeriodEnabled(hass, state, room, periods, periodIndex) {
+  const next = periods.map((p, idx) => ({
+    ...p,
+    days: [...(p.days || [0, 1, 2, 3, 4, 5, 6])],
+    enabled: idx === periodIndex ? !(p.enabled !== false) : p.enabled !== false,
+  }));
+  const defaults = getDefaults(state, room);
+  const payload = next.map((p) => serializeSchedulePeriod(p, defaults));
+  await updateRoomSchedule(hass, room.slug, payload);
+  patchStateSchedule(state, room.slug, payload);
+  return payload;
+}
 
 export function renderScheduleIndex(container, rooms, state, connection, hass) {
   container.innerHTML = '';
@@ -24,10 +47,12 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
   container.appendChild(grid);
 
   let cachedSchedules = {};
+  let cachedExpsByRoom = {};
 
-  function buildCards(roomSchedules, expsByRoom = {}) {
+  function buildCards(roomSchedules, expsByRoom = cachedExpsByRoom) {
     grid.innerHTML = '';
     cachedSchedules = roomSchedules;
+    cachedExpsByRoom = expsByRoom;
 
     for (const room of rooms) {
       const schedData = getScheduleDataForRoom(roomSchedules, room);
@@ -70,9 +95,31 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
         const preview = periods.slice(0, 4);
         const overflow = periods.length - preview.length;
 
-        for (const p of preview) {
-          list.appendChild(makePeriodRow(p, p === activePeriod, p === nextPeriod));
-        }
+        preview.forEach((p, idx) => {
+          const row = makePeriodRow(p, p === activePeriod, p === nextPeriod, idx);
+          const toggleBtn = row.querySelector('[data-period-enable]');
+          if (toggleBtn) {
+            toggleBtn.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              toggleBtn.disabled = true;
+              try {
+                const updated = await togglePeriodEnabled(hass, state, room, periods, idx);
+                periods.splice(0, periods.length, ...updated.map((period) => ({
+                  ...period,
+                  days: [...(period.days || [0, 1, 2, 3, 4, 5, 6])],
+                })));
+                cachedSchedules = {
+                  ...cachedSchedules,
+                  [room.slug]: { enabled, periods: [...periods] },
+                };
+                buildCards(cachedSchedules, cachedExpsByRoom);
+              } catch (err) {
+                toggleBtn.disabled = false;
+              }
+            });
+          }
+          list.appendChild(row);
+        });
 
         if (overflow > 0) {
           const more = document.createElement('div');

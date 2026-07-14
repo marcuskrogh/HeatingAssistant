@@ -9,9 +9,9 @@ export const getScheduleDataForRoom = getRoomScheduleData;
 
 
 /** Renders a single period summary row element. */
-export function makePeriodRow(p, isActive, isNext) {
+export function makePeriodRow(p, isActive, isNext, periodIndex = null) {
   const row = document.createElement('div');
-  row.innerHTML = periodRowHtml(p, isActive, isNext);
+  row.innerHTML = periodRowHtml(p, isActive, isNext, periodIndex);
   return row.firstElementChild;
 }
 

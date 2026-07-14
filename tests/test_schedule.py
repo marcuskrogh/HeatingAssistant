@@ -339,3 +339,89 @@ class TestNextTransition:
         assert target is not None
         assert target.hour == 4
         assert target.minute == 0
+
+
+# ---------------------------------------------------------------------------
+# all_day, enabled, one-off periods
+# ---------------------------------------------------------------------------
+
+
+class TestScheduleExtendedFeatures:
+    def test_all_day_recurring_matches_entire_day(self):
+        period = SchedulePeriod(
+            name="weekend",
+            start=time(8, 0),
+            end=time(22, 0),
+            days=frozenset({5, 6}),
+            all_day=True,
+        )
+        saturday = datetime(2026, 1, 10, 3, 30)  # Saturday
+        assert period.matches(saturday) is True
+        assert period.matches(saturday.replace(hour=23, minute=30)) is True
+        monday = datetime(2026, 1, 5, 12, 0)
+        assert period.matches(monday) is False
+
+    def test_disabled_period_never_matches(self):
+        period = SchedulePeriod(
+            name="vacation",
+            start=time(0, 0),
+            end=time(23, 59),
+            enabled=False,
+            all_day=True,
+        )
+        assert period.matches(_at(12, 0)) is False
+
+    def test_one_off_date_range_all_day(self):
+        period = SchedulePeriod(
+            name="trip",
+            start=time(0, 0),
+            end=time(23, 59),
+            recurring=False,
+            all_day=True,
+            start_date=datetime(2026, 7, 20).date(),
+            end_date=datetime(2026, 7, 27).date(),
+            mode=SCHEDULE_MODE_OFF,
+        )
+        assert period.matches(datetime(2026, 7, 20, 15, 0)) is True
+        assert period.matches(datetime(2026, 7, 27, 23, 30)) is True
+        assert period.matches(datetime(2026, 7, 19, 12, 0)) is False
+        assert period.matches(datetime(2026, 7, 28, 12, 0)) is False
+
+    def test_one_off_time_window(self):
+        period = SchedulePeriod(
+            name="event",
+            start=time(9, 0),
+            end=time(17, 0),
+            recurring=False,
+            start_date=datetime(2026, 3, 1).date(),
+            end_date=datetime(2026, 3, 1).date(),
+        )
+        assert period.matches(datetime(2026, 3, 1, 10, 0)) is True
+        assert period.matches(datetime(2026, 3, 1, 17, 0)) is False
+        assert period.matches(datetime(2026, 3, 2, 10, 0)) is False
+
+    def test_build_schedule_parses_extended_fields(self):
+        sched = build_schedule([
+            {
+                "name": "vacation",
+                "start": "00:00",
+                "end": "23:59",
+                "mode": "off",
+                "recurring": False,
+                "all_day": True,
+                "start_date": "2026-07-20",
+                "end_date": "2026-07-27",
+                "enabled": False,
+            }
+        ])
+        period = sched.periods[0]
+        assert period.all_day is True
+        assert period.recurring is False
+        assert period.enabled is False
+        assert period.start_date == datetime(2026, 7, 20).date()
+
+    def test_build_schedule_requires_dates_for_one_off(self):
+        with pytest.raises(ValueError):
+            build_schedule([
+                {"name": "trip", "start": "08:00", "end": "10:00", "recurring": False},
+            ])
