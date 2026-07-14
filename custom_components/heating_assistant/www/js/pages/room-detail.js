@@ -1,10 +1,10 @@
-import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=96';
-import { createGauge, updateGauge } from '../components/gauge.js?v=96';
-import { createClimateCard } from '../components/climate-card.js?v=96';
-import { createCountdown } from '../components/countdown.js?v=96';
-import { createScheduleOverview } from '../components/schedule-overview.js?v=96';
-import { getRoomScheduleData } from '../schedule-utils.js?v=96';
-import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=96';
+import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=97';
+import { createGauge, updateGauge } from '../components/gauge.js?v=97';
+import { createClimateCard } from '../components/climate-card.js?v=97';
+import { createCountdown } from '../components/countdown.js?v=97';
+import { createScheduleOverview } from '../components/schedule-overview.js?v=97';
+import { getRoomScheduleData } from '../schedule-utils.js?v=97';
+import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=97';
 import {
   KPI_SEVERITY,
   isRoomActive,
@@ -13,19 +13,19 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-} from '../kpi-engine.js?v=96';
-import { setPanelHash } from '../panel-hash.js?v=96';
+} from '../kpi-engine.js?v=97';
+import { setPanelHash } from '../panel-hash.js?v=97';
 import {
   setClimateTemperature,
   setRoomComfortOffset,
   turnClimateOff,
   turnClimateOn,
-} from '../ha-services.js?v=96';
+} from '../ha-services.js?v=97';
 import {
   formatPower, formatPowerKw, formatPrice,
   entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
-} from '../utils.js?v=96';
+} from '../utils.js?v=97';
 import {
   buildTemperatureChart,
   buildPowerChart,
@@ -33,7 +33,7 @@ import {
   extendDatasetToNow,
   computeYLimits,
   updatePowerChartBounds,
-} from '../charts/room-charts.js?v=96';
+} from '../charts/room-charts.js?v=97';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.
