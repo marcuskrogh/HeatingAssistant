@@ -16,21 +16,21 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=102';
-import { setPanelHash } from '../panel-hash.js?v=102';
-import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=102';
+import { entityValue } from '../utils.js?v=103';
+import { setPanelHash } from '../panel-hash.js?v=103';
+import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=103';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=102';
+} from '../experiment-utils.js?v=103';
 import {
   setClimateTemperature,
   setRoomComfortOffset,
   turnClimateOff,
   turnClimateOn,
-} from '../ha-services.js?v=102';
-import { resolveRoomScheduleData, getRoomComfortOffset } from '../schedules/schedules-shared.js?v=102';
+} from '../ha-services.js?v=103';
+import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=103';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -269,6 +269,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
       st.offsetCommitTimer = null;
       st.offsetEditing = false;
       if (st.hass) {
+        patchStateComfortOffset(st.state, room.slug, st.comfortOffset);
         setRoomComfortOffset(st.hass, room.slug, st.comfortOffset).catch(() => {});
       }
     }, COMMIT_DEBOUNCE_MS);

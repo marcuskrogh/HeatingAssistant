@@ -1,5 +1,5 @@
-import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=102';
-import { experimentStatusInfo } from '../experiment-utils.js?v=102';
+import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=103';
+import { experimentStatusInfo } from '../experiment-utils.js?v=103';
 
 export const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -200,4 +200,25 @@ export function patchStateSchedule(state, slug, periods, enabled) {
     },
   };
   setPanelScheduleSnapshot(state, { slug }, periods);
+}
+
+/** Optimistically patch controller-config room_comfort_offsets in panel state. */
+export function patchStateComfortOffset(state, slug, offset) {
+  const existingEntity = state[CONFIG_ENTITY] || {
+    entity_id: CONFIG_ENTITY,
+    state: 'ok',
+    attributes: {},
+  };
+  const existingAttrs = existingEntity.attributes || {};
+  const existingOffsets = existingAttrs.room_comfort_offsets || {};
+  state[CONFIG_ENTITY] = {
+    ...existingEntity,
+    attributes: {
+      ...existingAttrs,
+      room_comfort_offsets: {
+        ...existingOffsets,
+        [slug]: Number(offset),
+      },
+    },
+  };
 }

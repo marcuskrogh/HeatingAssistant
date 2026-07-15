@@ -30,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '102';
+  return '103';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -141,11 +141,23 @@ function roomSchedulesChanged(prevSchedules, nextSchedules) {
   return false;
 }
 
+/** Return true when slug-keyed comfort offset maps differ. */
+function roomComfortOffsetsChanged(prevOffsets, nextOffsets) {
+  const p = prevOffsets || {};
+  const n = nextOffsets || {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
+  for (const key of keys) {
+    if (Number(p[key]) !== Number(n[key])) return true;
+  }
+  return false;
+}
+
 /** Return true when controller-config attrs that drive schedules or climate UI differ. */
 function controllerConfigAttrsChanged(prevAttrs, nextAttrs) {
   const pa = prevAttrs || {};
   const na = nextAttrs || {};
   if (roomSchedulesChanged(pa.room_schedules, na.room_schedules)) return true;
+  if (roomComfortOffsetsChanged(pa.room_comfort_offsets, na.room_comfort_offsets)) return true;
   for (const key of ['room_active', 'room_enabled']) {
     const pv = pa[key];
     const nv = na[key];
@@ -168,6 +180,9 @@ function snapshotConfigAttrs(attrs) {
   }
   if (a.room_schedules) {
     snap.room_schedules = JSON.parse(JSON.stringify(a.room_schedules));
+  }
+  if (a.room_comfort_offsets) {
+    snap.room_comfort_offsets = { ...a.room_comfort_offsets };
   }
   return snap;
 }
@@ -197,6 +212,22 @@ function mergeRoomSchedulesPreferringPrev(prevSchedules, nextSchedules) {
   return merged;
 }
 
+/** Merge room_comfort_offsets, keeping patched values when HA payload is stale. */
+function mergeComfortOffsetsPreferringPrev(prevOffsets, nextOffsets) {
+  const p = prevOffsets || {};
+  const n = nextOffsets || {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
+  const merged = { ...n };
+  for (const key of keys) {
+    if (p[key] !== undefined && n[key] !== undefined && Number(p[key]) !== Number(n[key])) {
+      merged[key] = p[key];
+    } else if (p[key] !== undefined && n[key] === undefined) {
+      merged[key] = p[key];
+    }
+  }
+  return merged;
+}
+
 /** Keep optimistic controller-config attrs when HA pushes stale data. */
 function mergeControllerConfigEntity(prevEntity, nextEntity) {
   if (!prevEntity) return nextEntity;
@@ -206,7 +237,15 @@ function mergeControllerConfigEntity(prevEntity, nextEntity) {
     prevAttrs.room_schedules,
     nextAttrs.room_schedules,
   );
-  if (JSON.stringify(mergedSchedules) === JSON.stringify(nextAttrs.room_schedules || {})) {
+  const mergedOffsets = mergeComfortOffsetsPreferringPrev(
+    prevAttrs.room_comfort_offsets,
+    nextAttrs.room_comfort_offsets,
+  );
+  const schedulesMatch = JSON.stringify(mergedSchedules)
+    === JSON.stringify(nextAttrs.room_schedules || {});
+  const offsetsMatch = JSON.stringify(mergedOffsets)
+    === JSON.stringify(nextAttrs.room_comfort_offsets || {});
+  if (schedulesMatch && offsetsMatch) {
     return nextEntity;
   }
   return {
@@ -214,6 +253,7 @@ function mergeControllerConfigEntity(prevEntity, nextEntity) {
     attributes: {
       ...nextAttrs,
       room_schedules: mergedSchedules,
+      room_comfort_offsets: mergedOffsets,
     },
   };
 }

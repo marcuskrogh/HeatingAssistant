@@ -1,10 +1,10 @@
 import {
   updateSystemConfig, updateSystemParams,
-} from '../ha-services.js?v=102';
+} from '../ha-services.js?v=103';
 import {
   configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid,
   loadingNode, entitySelectorField,
-} from './config-ui.js?v=102';
+} from './config-ui.js?v=103';
 
 // System Parameters
 // ---------------------------------------------------------------------------
