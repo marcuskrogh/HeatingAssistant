@@ -24,6 +24,18 @@ assert(
   'schedules-shared.js must export resolveRoomScheduleData',
 );
 assert(
+  /export function getPanelScheduleSnapshot/.test(source),
+  'schedules-shared.js must export getPanelScheduleSnapshot',
+);
+assert(
+  /export function getRoomComfortOffset/.test(source),
+  'schedules-shared.js must export getRoomComfortOffset',
+);
+assert(
+  /export function patchStateComfortOffset/.test(source),
+  'schedules-shared.js must export patchStateComfortOffset',
+);
+assert(
   /export function mergeRoomSchedulesWithState/.test(source),
   'schedules-shared.js must export mergeRoomSchedulesWithState',
 );
@@ -41,7 +53,7 @@ assert(
   'schedules-index.js update() must refresh state for mergeRoomSchedulesWithState fallback',
 );
 
-const mod = await import(`${pathToFileURL(SHARED).href}?v=101`);
+const mod = await import(`${pathToFileURL(SHARED).href}?v=103`);
 const room = { slug: 'living_room', name: 'Living Room' };
 const periods = [{ name: 'Morning', start: '06:00', end: '09:00', mode: 'comfort', days: [0] }];
 const state = {
@@ -87,6 +99,25 @@ const resolvedStale = mod.resolveRoomScheduleData(room, staleWs, freshState);
 assert(
   resolvedStale?.periods?.[0]?.name === 'Morning',
   'resolver must prefer config-entity when WS is stale but non-empty',
+);
+
+const panelState = { __scheduleSnapshots: { living_room: periods } };
+const fromPanel = mod.resolveRoomScheduleData(room, {}, panelState);
+assert(
+  fromPanel?.periods?.length === 1,
+  'panel schedule snapshot must survive navigation when WS is empty',
+);
+
+const comfortState = {};
+mod.patchStateComfortOffset(comfortState, 'living_room', 3.5);
+assert(
+  comfortState['sensor.heating_assistant_controller_config']?.attributes
+    ?.room_comfort_offsets?.living_room === 3.5,
+  'patchStateComfortOffset must update config-entity attrs in panel state',
+);
+assert(
+  mod.getRoomComfortOffset(comfortState, room) === 3.5,
+  'getRoomComfortOffset must read patched comfort offset',
 );
 
 console.log('panel schedule resolver harness: ok');

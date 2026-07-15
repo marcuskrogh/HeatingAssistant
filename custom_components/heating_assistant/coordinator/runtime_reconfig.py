@@ -102,6 +102,8 @@ def apply_runtime_reconfiguration(
     new_config = dict(config)
     old_persisted = coordinator._last_runtime_config.get(CONF_PERSISTED_SCHEDULES)
     new_persisted = new_config.get(CONF_PERSISTED_SCHEDULES)
+    old_offsets = coordinator._last_runtime_config.get(CONF_PERSISTED_COMFORT_OFFSETS)
+    new_offsets = new_config.get(CONF_PERSISTED_COMFORT_OFFSETS)
     changed_keys = {
         key
         for key in set(coordinator._last_runtime_config) | set(new_config)
@@ -115,6 +117,13 @@ def apply_runtime_reconfiguration(
 
         schedule_control.apply_persisted_schedules(
             coordinator, dict(new_persisted or {})
+        )
+
+    if old_offsets != new_offsets:
+        from . import enablement
+
+        enablement.apply_persisted_comfort_offsets(
+            coordinator, dict(new_offsets or {})
         )
 
     if not changed_keys:

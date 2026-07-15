@@ -16,21 +16,21 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=101';
-import { setPanelHash } from '../panel-hash.js?v=101';
-import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=101';
+import { entityValue } from '../utils.js?v=103';
+import { setPanelHash } from '../panel-hash.js?v=103';
+import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=103';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=101';
+} from '../experiment-utils.js?v=103';
 import {
   setClimateTemperature,
   setRoomComfortOffset,
   turnClimateOff,
   turnClimateOn,
-} from '../ha-services.js?v=101';
-import { resolveRoomScheduleData } from '../schedules/schedules-shared.js?v=101';
+} from '../ha-services.js?v=103';
+import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=103';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -155,10 +155,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     temperature: entityValue(state, room.entities['temperature_filtered'] || room.entities['temperature_measured']),
     setpoint: clampSetpoint(entityValue(state, room.entities['setpoint'])),
     power: entityValue(state, room.entities['heating_power_measured']),
-    comfortOffset: offsetFromCorridor(
-      numOrNull(entityValue(state, room.entities['constraint_lower'])),
-      numOrNull(entityValue(state, room.entities['constraint_upper'])),
-    ) ?? DEFAULT_OFFSET,
+    comfortOffset: getRoomComfortOffset(state, room),
     editing: false,
     commitTimer: null,
     offsetEditing: false,    // true while the user is mid comfort-offset adjustment
@@ -272,6 +269,7 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
       st.offsetCommitTimer = null;
       st.offsetEditing = false;
       if (st.hass) {
+        patchStateComfortOffset(st.state, room.slug, st.comfortOffset);
         setRoomComfortOffset(st.hass, room.slug, st.comfortOffset).catch(() => {});
       }
     }, COMMIT_DEBOUNCE_MS);
@@ -467,14 +465,9 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
         st.setpoint = clampSetpoint(newSp);
       }
 
-      // Derive the comfort offset from the live corridor, but never clobber an
-      // in-flight user adjustment (mirrors the setpoint guard above).
-      const derived = offsetFromCorridor(
-        numOrNull(entityValue(newState, room.entities['constraint_lower'])),
-        numOrNull(entityValue(newState, room.entities['constraint_upper'])),
-      );
-      if (derived !== null && !st.offsetEditing && !st.offsetCommitTimer) {
-        st.comfortOffset = derived;
+      const persistedOffset = getRoomComfortOffset(newState, room);
+      if (!st.offsetEditing && !st.offsetCommitTimer) {
+        st.comfortOffset = persistedOffset;
       }
 
       reconcileOptimisticPower();

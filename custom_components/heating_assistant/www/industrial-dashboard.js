@@ -30,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '101';
+  return '103';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -141,11 +141,23 @@ function roomSchedulesChanged(prevSchedules, nextSchedules) {
   return false;
 }
 
+/** Return true when slug-keyed comfort offset maps differ. */
+function roomComfortOffsetsChanged(prevOffsets, nextOffsets) {
+  const p = prevOffsets || {};
+  const n = nextOffsets || {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
+  for (const key of keys) {
+    if (Number(p[key]) !== Number(n[key])) return true;
+  }
+  return false;
+}
+
 /** Return true when controller-config attrs that drive schedules or climate UI differ. */
 function controllerConfigAttrsChanged(prevAttrs, nextAttrs) {
   const pa = prevAttrs || {};
   const na = nextAttrs || {};
   if (roomSchedulesChanged(pa.room_schedules, na.room_schedules)) return true;
+  if (roomComfortOffsetsChanged(pa.room_comfort_offsets, na.room_comfort_offsets)) return true;
   for (const key of ['room_active', 'room_enabled']) {
     const pv = pa[key];
     const nv = na[key];
@@ -169,7 +181,96 @@ function snapshotConfigAttrs(attrs) {
   if (a.room_schedules) {
     snap.room_schedules = JSON.parse(JSON.stringify(a.room_schedules));
   }
+  if (a.room_comfort_offsets) {
+    snap.room_comfort_offsets = { ...a.room_comfort_offsets };
+  }
   return snap;
+}
+
+/** Merge room_schedules, keeping patched data when HA payload is empty or stale. */
+function mergeRoomSchedulesPreferringPrev(prevSchedules, nextSchedules) {
+  const p = prevSchedules || {};
+  const n = nextSchedules || {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
+  const merged = { ...n };
+  for (const key of keys) {
+    const prevPeriods = p[key]?.periods ?? [];
+    const nextPeriods = n[key]?.periods ?? [];
+    if (nextPeriods.length === 0 && prevPeriods.length > 0) {
+      merged[key] = p[key];
+      continue;
+    }
+    if (
+      prevPeriods.length > 0
+      && nextPeriods.length > 0
+      && JSON.stringify(prevPeriods) !== JSON.stringify(nextPeriods)
+      && prevPeriods.length >= nextPeriods.length
+    ) {
+      merged[key] = p[key];
+    }
+  }
+  return merged;
+}
+
+/** Merge room_comfort_offsets, keeping patched values when HA payload is stale. */
+function mergeComfortOffsetsPreferringPrev(prevOffsets, nextOffsets) {
+  const p = prevOffsets || {};
+  const n = nextOffsets || {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
+  const merged = { ...n };
+  for (const key of keys) {
+    if (p[key] !== undefined && n[key] !== undefined && Number(p[key]) !== Number(n[key])) {
+      merged[key] = p[key];
+    } else if (p[key] !== undefined && n[key] === undefined) {
+      merged[key] = p[key];
+    }
+  }
+  return merged;
+}
+
+/** Keep optimistic controller-config attrs when HA pushes stale data. */
+function mergeControllerConfigEntity(prevEntity, nextEntity) {
+  if (!prevEntity) return nextEntity;
+  const prevAttrs = prevEntity.attributes || {};
+  const nextAttrs = nextEntity.attributes || {};
+  const mergedSchedules = mergeRoomSchedulesPreferringPrev(
+    prevAttrs.room_schedules,
+    nextAttrs.room_schedules,
+  );
+  const mergedOffsets = mergeComfortOffsetsPreferringPrev(
+    prevAttrs.room_comfort_offsets,
+    nextAttrs.room_comfort_offsets,
+  );
+  const schedulesMatch = JSON.stringify(mergedSchedules)
+    === JSON.stringify(nextAttrs.room_schedules || {});
+  const offsetsMatch = JSON.stringify(mergedOffsets)
+    === JSON.stringify(nextAttrs.room_comfort_offsets || {});
+  if (schedulesMatch && offsetsMatch) {
+    return nextEntity;
+  }
+  return {
+    ...nextEntity,
+    attributes: {
+      ...nextAttrs,
+      room_schedules: mergedSchedules,
+      room_comfort_offsets: mergedOffsets,
+    },
+  };
+}
+
+/** Apply one HA sensor state into panel ``panelState``; returns new config snapshot. */
+function applySensorStateToPanel(panelState, id, state, configAttrSnapshot) {
+  const snapshot = id === CONTROLLER_CONFIG_ENTITY ? configAttrSnapshot : null;
+  if (!sensorStateChanged(panelState[id], state, snapshot)) {
+    return { changed: false, configAttrSnapshot };
+  }
+  if (id === CONTROLLER_CONFIG_ENTITY) {
+    const merged = mergeControllerConfigEntity(panelState[id], state);
+    panelState[id] = merged;
+    return { changed: true, configAttrSnapshot: snapshotConfigAttrs(merged.attributes) };
+  }
+  panelState[id] = state;
+  return { changed: true, configAttrSnapshot };
 }
 
 /** Detect HA sensor state changes, including in-place attribute mutations. */
@@ -178,6 +279,9 @@ function sensorStateChanged(prev, next, configSnapshot) {
   if (!prev) return true;
   if (next.entity_id === CONTROLLER_CONFIG_ENTITY) {
     if (controllerConfigAttrsChanged(configSnapshot, next.attributes)) return true;
+    if (controllerConfigAttrsChanged(prev.attributes, next.attributes)) return true;
+    // Synthetic patches (patchStateSchedule) detach from hass.states references.
+    return false;
   }
   if (prev !== next) return true;
   // HA may mutate the same state object when only attributes change.
@@ -247,11 +351,10 @@ class HaIndustrialPanel extends HTMLElement {
     let changed = false;
     for (const [id, state] of Object.entries(hass.states)) {
       if (!id.startsWith('sensor.heating_assistant_')) continue;
-      const snapshot = id === CONTROLLER_CONFIG_ENTITY ? this._configAttrSnapshot : null;
-      if (sensorStateChanged(this._state[id], state, snapshot)) {
-        this._state[id] = state;
-        if (id === CONTROLLER_CONFIG_ENTITY) {
-          this._configAttrSnapshot = snapshotConfigAttrs(state.attributes);
+      const result = applySensorStateToPanel(this._state, id, state, this._configAttrSnapshot);
+      if (result.changed) {
+        if (result.configAttrSnapshot !== undefined) {
+          this._configAttrSnapshot = result.configAttrSnapshot;
         }
         changed = true;
       }
@@ -375,11 +478,10 @@ class HaIndustrialPanel extends HTMLElement {
     let changed = false;
     for (const [id, state] of Object.entries(this._hass.states)) {
       if (!id.startsWith('sensor.heating_assistant_')) continue;
-      const snapshot = id === CONTROLLER_CONFIG_ENTITY ? this._configAttrSnapshot : null;
-      if (sensorStateChanged(this._state[id], state, snapshot)) {
-        this._state[id] = state;
-        if (id === CONTROLLER_CONFIG_ENTITY) {
-          this._configAttrSnapshot = snapshotConfigAttrs(state.attributes);
+      const result = applySensorStateToPanel(this._state, id, state, this._configAttrSnapshot);
+      if (result.changed) {
+        if (result.configAttrSnapshot !== undefined) {
+          this._configAttrSnapshot = result.configAttrSnapshot;
         }
         changed = true;
       }

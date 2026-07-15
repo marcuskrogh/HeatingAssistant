@@ -24,11 +24,11 @@
  *   card.destroy();                                  // on teardown
  */
 
-import { formatTemperature } from '../utils.js?v=101';
+import { formatTemperature } from '../utils.js?v=103';
 import {
   experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress, experimentProgress,
-} from '../experiment-utils.js?v=101';
+} from '../experiment-utils.js?v=103';
 
 const SP_STEP = 0.5;
 const SP_MIN = 5;
@@ -77,7 +77,7 @@ function statusInfo(power) {
 }
 
 export function createClimateCard({
-  temperature, setpoint, power, comfortLower, comfortUpper, off, experiment,
+  temperature, setpoint, power, comfortLower, comfortUpper, comfortOffset, off, experiment,
   onSetpointChange, onComfortOffsetChange, onPowerToggle,
 } = {}) {
   const container = document.createElement('div');
@@ -89,7 +89,7 @@ export function createClimateCard({
     temperature,
     setpoint: clampSetpoint(setpoint),
     power,
-    comfortOffset: offsetFromCorridor(cl, cu) ?? DEFAULT_OFFSET,
+    comfortOffset: comfortOffset ?? offsetFromCorridor(cl, cu) ?? DEFAULT_OFFSET,
     off: !!off,          // backend off-state (user toggle or off-schedule)
     experiment: experiment || null, // active identification experiment, or null
     optimisticOff: null, // optimistic power override (null = follow backend)
@@ -347,7 +347,7 @@ export function createClimateCard({
 
   return {
     element: container,
-    update({ temperature, setpoint, power, comfortLower, comfortUpper, off, experiment } = {}) {
+    update({ temperature, setpoint, power, comfortLower, comfortUpper, comfortOffset, off, experiment } = {}) {
       if (temperature !== undefined) st.temperature = temperature;
       if (power !== undefined) st.power = power;
       if (off !== undefined) {
@@ -360,9 +360,10 @@ export function createClimateCard({
       if (setpoint !== undefined && setpoint !== null && !st.editing && !st.commitTimer) {
         st.setpoint = clampSetpoint(setpoint);
       }
-      // The comfort offset is derived from the live constraint corridor, but —
-      // like the setpoint — must not clobber an in-flight user adjustment.
-      if (comfortLower !== undefined || comfortUpper !== undefined) {
+      // Prefer persisted default from config sensor; fall back to live corridor.
+      if (comfortOffset !== undefined && comfortOffset !== null && !st.offsetEditing && !st.offsetCommitTimer) {
+        st.comfortOffset = Number(comfortOffset);
+      } else if (comfortLower !== undefined || comfortUpper !== undefined) {
         const derived = offsetFromCorridor(numOrNull(comfortLower), numOrNull(comfortUpper));
         if (derived !== null && !st.offsetEditing && !st.offsetCommitTimer) {
           st.comfortOffset = derived;
