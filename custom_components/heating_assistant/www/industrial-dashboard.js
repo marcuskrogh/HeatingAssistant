@@ -30,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '103';
+  return '104';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -187,7 +187,7 @@ function snapshotConfigAttrs(attrs) {
   return snap;
 }
 
-/** Merge room_schedules, keeping patched data when HA payload is empty or stale. */
+/** Merge room_schedules, keeping patched data only when HA payload is empty or shorter. */
 function mergeRoomSchedulesPreferringPrev(prevSchedules, nextSchedules) {
   const p = prevSchedules || {};
   const n = nextSchedules || {};
@@ -204,7 +204,7 @@ function mergeRoomSchedulesPreferringPrev(prevSchedules, nextSchedules) {
       prevPeriods.length > 0
       && nextPeriods.length > 0
       && JSON.stringify(prevPeriods) !== JSON.stringify(nextPeriods)
-      && prevPeriods.length >= nextPeriods.length
+      && prevPeriods.length > nextPeriods.length
     ) {
       merged[key] = p[key];
     }
@@ -212,16 +212,14 @@ function mergeRoomSchedulesPreferringPrev(prevSchedules, nextSchedules) {
   return merged;
 }
 
-/** Merge room_comfort_offsets, keeping patched values when HA payload is stale. */
+/** Merge room_comfort_offsets, keeping patched values only when HA omits a key. */
 function mergeComfortOffsetsPreferringPrev(prevOffsets, nextOffsets) {
   const p = prevOffsets || {};
   const n = nextOffsets || {};
   const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
   const merged = { ...n };
   for (const key of keys) {
-    if (p[key] !== undefined && n[key] !== undefined && Number(p[key]) !== Number(n[key])) {
-      merged[key] = p[key];
-    } else if (p[key] !== undefined && n[key] === undefined) {
+    if (p[key] !== undefined && n[key] === undefined) {
       merged[key] = p[key];
     }
   }

@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=103';
-import { setPanelHash } from '../panel-hash.js?v=103';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=103';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=103';
-import { renderExperimentsSection } from './schedules-experiments.js?v=103';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=104';
+import { setPanelHash } from '../panel-hash.js?v=104';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=104';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=104';
+import { renderExperimentsSection } from './schedules-experiments.js?v=104';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function renderScheduleDetail(container, roomSlug, rooms, state, connection, hass) {
@@ -478,6 +478,17 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       // state_changed events (from other entities) from wiping localPeriods
       // before the config entity's own state_changed arrives from the server.
       patchStateSchedule(state, room.slug, periods);
+
+      // Confirm the backend reflected the save before declaring success.
+      const wsSchedules = await connection.getSchedules();
+      const confirmed = resolveRoomScheduleData(room, wsSchedules, state, periods);
+      const confirmedPeriods = confirmed?.periods ?? [];
+      if (!periodsMatch(confirmedPeriods, periods)) {
+        const fromEntity = resolveRoomScheduleData(room, {}, state, periods)?.periods ?? [];
+        if (!periodsMatch(fromEntity, periods)) {
+          throw new Error('Backend did not confirm the saved schedule');
+        }
+      }
 
       // Re-sync localPeriods to the canonical saved data and re-render the
       // form right away so the user sees the saved state without waiting for

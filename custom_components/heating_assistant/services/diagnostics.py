@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 import logging
 from typing import Any, Dict
 
@@ -198,7 +199,7 @@ def register_diagnostic_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "analyze_model_fit",
-        lambda call: handle_analyze_model_fit(hass, call),
+        partial(handle_analyze_model_fit, hass),
         schema=vol.Schema(
             {
                 vol.Optional("room_name"): cv.string,
@@ -210,7 +211,7 @@ def register_diagnostic_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "validate_parameters",
-        lambda call: handle_validate_parameters(hass, call),
+        partial(handle_validate_parameters, hass),
         schema=vol.Schema(
             {
                 vol.Optional("room_name"): cv.string,
@@ -222,7 +223,7 @@ def register_diagnostic_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "controller_performance_report",
-        lambda call: handle_controller_performance(hass, call),
+        partial(handle_controller_performance, hass),
         schema=vol.Schema(
             {
                 vol.Optional("room_name"): cv.string,
@@ -234,7 +235,7 @@ def register_diagnostic_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_COMPUTE_LOGLIK_SLICE,
-        lambda call: handle_compute_loglik_slice(hass, call),
+        partial(handle_compute_loglik_slice, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,

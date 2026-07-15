@@ -53,7 +53,7 @@ assert(
   'schedules-index.js update() must refresh state for mergeRoomSchedulesWithState fallback',
 );
 
-const mod = await import(`${pathToFileURL(SHARED).href}?v=103`);
+const mod = await import(`${pathToFileURL(SHARED).href}?v=104`);
 const room = { slug: 'living_room', name: 'Living Room' };
 const periods = [{ name: 'Morning', start: '06:00', end: '09:00', mode: 'comfort', days: [0] }];
 const state = {

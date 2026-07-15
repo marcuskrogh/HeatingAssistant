@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -794,7 +795,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_SIMULATE_THERMAL_RESPONSE,
-        lambda call: handle_simulate(hass, call),
+        partial(handle_simulate, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -810,7 +811,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_ESTIMATE_PARAMETERS,
-        lambda call: handle_estimate(hass, call),
+        partial(handle_estimate, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -827,7 +828,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_ESTIMATE_PARAMETERS_ML,
-        lambda call: handle_estimate_ml(hass, call),
+        partial(handle_estimate_ml, hass),
         schema=vol.Schema(
             {
                 vol.Optional("apply_parameters", default=False): cv.boolean,
@@ -850,7 +851,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "run_open_loop_simulation",
-        lambda call: handle_run_open_loop_simulation(hass, call),
+        partial(handle_run_open_loop_simulation, hass),
         schema=vol.Schema(
             {
                 vol.Optional("room_name"): cv.string,
@@ -881,7 +882,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_RUN_SYSID_SIMULATION,
-        lambda call: handle_run_sysid_simulation(hass, call),
+        partial(handle_run_sysid_simulation, hass),
         schema=vol.Schema(
             {
                 vol.Optional("room_name"): cv.string,
@@ -912,7 +913,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_APPLY_MANUAL_PARAMETERS,
-        lambda call: handle_apply_manual_parameters(hass, call),
+        partial(handle_apply_manual_parameters, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -929,7 +930,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_APPLY_HEATER_SCALES,
-        lambda call: handle_apply_heater_scales(hass, call),
+        partial(handle_apply_heater_scales, hass),
         schema=vol.Schema(
             {
                 vol.Optional("scales"): {cv.string: vol.Coerce(float)},
@@ -940,14 +941,14 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_RESET_ESTIMATED_PARAMETERS,
-        lambda call: handle_reset_estimated_parameters(hass, call),
+        partial(handle_reset_estimated_parameters, hass),
         schema=vol.Schema({}),
     )
 
     hass.services.async_register(
         DOMAIN,
         "store_identified_parameters",
-        lambda call: handle_store_identified_parameters(hass, call),
+        partial(handle_store_identified_parameters, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -978,7 +979,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "revert_parameters",
-        lambda call: handle_revert_parameters(hass, call),
+        partial(handle_revert_parameters, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -992,7 +993,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "delete_parameter_history",
-        lambda call: handle_delete_parameter_history(hass, call),
+        partial(handle_delete_parameter_history, hass),
         schema=vol.Schema(
             {
                 vol.Required("history_index"): vol.All(
@@ -1005,7 +1006,7 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_SCHEDULE_EXPERIMENT,
-        lambda call: handle_schedule_experiment(hass, call),
+        partial(handle_schedule_experiment, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -1033,21 +1034,21 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_CANCEL_EXPERIMENT,
-        lambda call: handle_cancel_experiment(hass, call),
+        partial(handle_cancel_experiment, hass),
         schema=vol.Schema({vol.Required("experiment_id"): cv.string}),
     )
 
     hass.services.async_register(
         DOMAIN,
         SERVICE_DELETE_EXPERIMENT,
-        lambda call: handle_delete_experiment(hass, call),
+        partial(handle_delete_experiment, hass),
         schema=vol.Schema({vol.Required("experiment_id"): cv.string}),
     )
 
     hass.services.async_register(
         DOMAIN,
         SERVICE_CREATE_DATASET,
-        lambda call: handle_create_dataset(hass, call),
+        partial(handle_create_dataset, hass),
         schema=vol.Schema(
             {
                 vol.Required("name"): cv.string,
@@ -1063,6 +1064,6 @@ def register_identification_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_DELETE_DATASET,
-        lambda call: handle_delete_dataset(hass, call),
+        partial(handle_delete_dataset, hass),
         schema=vol.Schema({vol.Required("dataset_id"): cv.string}),
     )

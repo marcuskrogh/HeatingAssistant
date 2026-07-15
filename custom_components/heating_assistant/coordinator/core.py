@@ -38,6 +38,7 @@ from ..const import (
     CONF_PERSISTED_SCHEDULES,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_PERSISTED_ROOM_ENABLED,
+    CONF_PERSISTED_SCHEDULE_ENABLED,
     CONF_PERSISTED_SYSTEM_ENABLED,
     CONF_TRACKING_WEIGHT,
     CONF_HEAT_SOURCES,
@@ -629,6 +630,24 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self._entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
             )
         schedule_control.apply_persisted_schedules(self, persisted_schedules)
+
+        # Overlay per-room schedule suspend flags persisted from the dashboard.
+        persisted_schedule_enabled: Dict[str, Any] = {}
+        if config_entries is not None:
+            get_entry = getattr(config_entries, "async_get_entry", None)
+            if get_entry is not None:
+                real_entry = get_entry(self._entry.entry_id)
+                if real_entry is not None:
+                    persisted_schedule_enabled = dict(
+                        real_entry.data.get(CONF_PERSISTED_SCHEDULE_ENABLED) or {}
+                    )
+        if not persisted_schedule_enabled:
+            persisted_schedule_enabled = dict(
+                self._entry.data.get(CONF_PERSISTED_SCHEDULE_ENABLED) or {}
+            )
+        schedule_control.apply_persisted_schedule_enabled(
+            self, persisted_schedule_enabled
+        )
 
     def _read_binary_sensor_on(self, entity_id: str) -> bool:
         return window.read_binary_sensor_on(self, entity_id)

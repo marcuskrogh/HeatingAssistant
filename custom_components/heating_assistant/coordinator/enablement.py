@@ -149,13 +149,15 @@ def set_room_enabled(
     # Persist so the toggle survives a full HA restart (same pattern as setpoints).
     real_entry = coordinator.hass.config_entries.async_get_entry(coordinator._entry.entry_id)
     if real_entry is not None:
+        persisted = dict(coordinator._room_enabled)
         coordinator.hass.config_entries.async_update_entry(
             real_entry,
             data={
                 **dict(real_entry.data),
-                CONF_PERSISTED_ROOM_ENABLED: dict(coordinator._room_enabled),
+                CONF_PERSISTED_ROOM_ENABLED: persisted,
             },
         )
+        _sync_persisted_key_to_merged_entry(coordinator, CONF_PERSISTED_ROOM_ENABLED, persisted)
 
 
 def is_room_enabled(coordinator: HeatingAssistantCoordinator, room_name: str) -> bool:
