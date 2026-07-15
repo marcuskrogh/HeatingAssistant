@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 import voluptuous as vol
 
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -160,7 +161,7 @@ def register_control_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_SET_SCHEDULE_ENABLED,
-        lambda call: handle_set_schedule_enabled(hass, call),
+        partial(handle_set_schedule_enabled, hass),
         schema=vol.Schema(
             {
                 vol.Optional("room_name"): cv.string,
@@ -172,14 +173,14 @@ def register_control_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "set_system_enabled",
-        lambda call: handle_set_system_enabled(hass, call),
+        partial(handle_set_system_enabled, hass),
         schema=vol.Schema({vol.Required("enabled"): cv.boolean}),
     )
 
     hass.services.async_register(
         DOMAIN,
         "update_room_schedule",
-        lambda call: handle_update_room_schedule(hass, call),
+        partial(handle_update_room_schedule, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -211,7 +212,7 @@ def register_control_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "set_room_comfort_offset",
-        lambda call: handle_set_room_comfort_offset(hass, call),
+        partial(handle_set_room_comfort_offset, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -225,7 +226,7 @@ def register_control_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_SET_ROOM_SETPOINT,
-        lambda call: handle_set_room_setpoint(hass, call),
+        partial(handle_set_room_setpoint, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,
@@ -237,7 +238,7 @@ def register_control_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_SET_ROOM_ENABLED,
-        lambda call: handle_set_room_enabled(hass, call),
+        partial(handle_set_room_enabled, hass),
         schema=vol.Schema(
             {
                 vol.Required("room_name"): cv.string,

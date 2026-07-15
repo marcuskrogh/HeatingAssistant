@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 import logging
 import os
 from typing import Any, Dict
@@ -290,7 +291,7 @@ def register_configuration_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "update_controller_tuning",
-        lambda call: handle_update_controller_tuning(hass, call),
+        partial(handle_update_controller_tuning, hass),
         schema=vol.Schema(
             {
                 vol.Optional(CONF_TRACKING_WEIGHT): vol.Coerce(float),
@@ -310,7 +311,7 @@ def register_configuration_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "update_estimation_params",
-        lambda call: handle_update_estimation_params(hass, call),
+        partial(handle_update_estimation_params, hass),
         schema=vol.Schema(
             {
                 vol.Optional(CONF_SIGMA_W): vol.Coerce(float),
@@ -329,7 +330,7 @@ def register_configuration_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "update_ui_settings",
-        lambda call: handle_update_ui_settings(hass, call),
+        partial(handle_update_ui_settings, hass),
         schema=vol.Schema(
             {
                 vol.Optional(CONF_PLOT_HISTORY_HOURS): vol.All(
@@ -345,7 +346,7 @@ def register_configuration_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "update_system_params",
-        lambda call: handle_update_system_params(hass, call),
+        partial(handle_update_system_params, hass),
         schema=vol.Schema(
             {
                 vol.Optional(CONF_IDENTIFICATION_HISTORY_DAYS): vol.All(
@@ -358,7 +359,7 @@ def register_configuration_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "update_rooms",
-        lambda call: handle_update_rooms(hass, call),
+        partial(handle_update_rooms, hass),
         schema=vol.Schema(
             {
                 vol.Required(CONF_ROOMS): [dict],
@@ -372,14 +373,14 @@ def register_configuration_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         "update_heat_sources",
-        lambda call: handle_update_heat_sources(hass, call),
+        partial(handle_update_heat_sources, hass),
         schema=vol.Schema({vol.Required(CONF_HEAT_SOURCES): [dict]}),
     )
 
     hass.services.async_register(
         DOMAIN,
         "update_system_config",
-        lambda call: handle_update_system_config(hass, call),
+        partial(handle_update_system_config, hass),
         schema=vol.Schema(
             {
                 vol.Optional(CONF_OUTDOOR_TEMP_ENTITY): cv.string,
@@ -399,7 +400,7 @@ def register_configuration_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN,
         SERVICE_REGENERATE_DASHBOARD,
-        lambda call: handle_regenerate_dashboard(hass, call),
+        partial(handle_regenerate_dashboard, hass),
         schema=vol.Schema(
             {
                 vol.Optional("dry_run", default=False): cv.boolean,
