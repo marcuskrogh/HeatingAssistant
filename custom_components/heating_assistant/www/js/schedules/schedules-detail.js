@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=100';
-import { setPanelHash } from '../panel-hash.js?v=100';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=100';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=100';
-import { renderExperimentsSection } from './schedules-experiments.js?v=100';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=101';
+import { setPanelHash } from '../panel-hash.js?v=101';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=101';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=101';
+import { renderExperimentsSection } from './schedules-experiments.js?v=101';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function renderScheduleDetail(container, roomSlug, rooms, state, connection, hass) {
@@ -95,11 +95,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     );
     if (savedScheduleSnapshot !== null) {
       const wsPeriods = getScheduleFromWS(roomSchedules)?.periods ?? [];
-      const snapLen = savedScheduleSnapshot.length;
-      const wsLen = wsPeriods.length;
-      if (wsLen === snapLen && periodsMatch(wsPeriods, savedScheduleSnapshot)) {
-        savedScheduleSnapshot = null;
-      } else if (wsLen === snapLen && wsLen > 0) {
+      if (periodsMatch(wsPeriods, savedScheduleSnapshot)) {
         savedScheduleSnapshot = null;
       }
     }

@@ -371,6 +371,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             },
         )
 
+    # Consolidate legacy per-room schedules into persisted_schedules so
+    # dashboard saves and YAML-era schedules share one restart-safe store.
+    from .coordinator import schedule_control
+
+    get_entry = getattr(hass.config_entries, "async_get_entry", None)
+    if get_entry is not None:
+        entry = get_entry(entry.entry_id) or entry
+    if schedule_control.migrate_legacy_schedules_to_persisted(hass, entry):
+        if get_entry is not None:
+            entry = get_entry(entry.entry_id) or entry
+        entry_data[CONF_PERSISTED_SCHEDULES] = dict(
+            entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+        )
+
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)
 

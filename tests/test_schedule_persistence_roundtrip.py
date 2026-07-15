@@ -12,7 +12,12 @@ from unittest.mock import MagicMock
 import pytest
 
 import custom_components.heating_assistant.services.control as svc_mod
-from custom_components.heating_assistant.const import CONF_PERSISTED_SCHEDULES, CONF_ROOM_NAME, CONF_ROOMS
+from custom_components.heating_assistant.const import (
+    CONF_PERSISTED_SCHEDULES,
+    CONF_ROOM_NAME,
+    CONF_ROOMS,
+    CONF_SCHEDULE,
+)
 from custom_components.heating_assistant.coordinator import schedule_control
 from custom_components.heating_assistant.coordinator.core import HeatingAssistantCoordinator
 from custom_components.heating_assistant.coordinator import runtime_reconfig
@@ -241,3 +246,53 @@ async def test_update_listener_applies_persisted_schedules_without_reload(monkey
     assert len(coordinator._room_schedule["Living Room"].periods) == 1
     coordinator.async_update_listeners.assert_called_once()
     hass.config_entries.async_reload.assert_not_called()
+
+
+@pytest.mark.integration
+def test_migrate_legacy_schedules_to_persisted():
+    """Legacy rooms[].schedule must be copied into persisted_schedules on startup."""
+    from types import SimpleNamespace
+
+    legacy_periods = [{"name": "Legacy", "start": "08:00", "end": "22:00", "mode": "comfort", "days": [0]}]
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_ROOMS: [{CONF_ROOM_NAME: "Living Room", CONF_SCHEDULE: legacy_periods}],
+        },
+        options={},
+    )
+    stored: dict = {}
+
+    def _update_entry(e, **kwargs):
+        stored.update(kwargs.get("data", {}))
+
+    hass = SimpleNamespace()
+    hass.config_entries = SimpleNamespace(async_update_entry=_update_entry)
+
+    assert schedule_control.migrate_legacy_schedules_to_persisted(hass, entry)
+    assert stored[CONF_PERSISTED_SCHEDULES]["Living Room"] == legacy_periods
+
+
+@pytest.mark.integration
+def test_migrate_legacy_schedules_skips_when_persisted_exists():
+    """Do not overwrite existing persisted_schedules entries."""
+    from types import SimpleNamespace
+
+    existing = PERIODS
+    legacy = [{"name": "Legacy", "start": "08:00", "end": "22:00", "mode": "comfort", "days": [0]}]
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data={
+            CONF_PERSISTED_SCHEDULES: {"Living Room": existing},
+            CONF_ROOMS: [{CONF_ROOM_NAME: "Living Room", CONF_SCHEDULE: legacy}],
+        },
+        options={},
+    )
+    hass = SimpleNamespace()
+    hass.config_entries = SimpleNamespace(
+        async_update_entry=lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("must not write when persisted exists")
+        )
+    )
+
+    assert not schedule_control.migrate_legacy_schedules_to_persisted(hass, entry)
