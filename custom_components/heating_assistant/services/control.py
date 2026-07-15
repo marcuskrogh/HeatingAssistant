@@ -81,7 +81,6 @@ async def handle_update_room_schedule(hass: HomeAssistant, call: ServiceCall) ->
     # persisting — this ensures the HA state machine has the correct
     # attributes before _async_update_listener fires.
     coordinator.reload_room_schedule(canonical_name, periods)
-    coordinator.async_update_listeners()
 
     # Persist schedules in a dedicated key that won't be overwritten by
     # YAML/options merging during integration reload (same pattern as
@@ -103,6 +102,10 @@ async def handle_update_room_schedule(hass: HomeAssistant, call: ServiceCall) ->
             **dict(merged_data),
             CONF_PERSISTED_SCHEDULES: persisted,
         }
+
+    # Push updated room_schedules to the config sensor after the entry write
+    # so a browser refresh sees the same payload the coordinator serves.
+    coordinator.async_update_listeners()
 
 
 async def handle_set_room_comfort_offset(hass: HomeAssistant, call: ServiceCall) -> None:

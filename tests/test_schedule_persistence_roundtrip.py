@@ -15,6 +15,7 @@ import custom_components.heating_assistant.services.control as svc_mod
 from custom_components.heating_assistant.const import CONF_PERSISTED_SCHEDULES, CONF_ROOM_NAME, CONF_ROOMS
 from custom_components.heating_assistant.coordinator import schedule_control
 from custom_components.heating_assistant.coordinator.core import HeatingAssistantCoordinator
+from custom_components.heating_assistant.coordinator import runtime_reconfig
 from custom_components.heating_assistant.schedule import build_schedule
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
@@ -185,3 +186,58 @@ async def test_update_room_schedule_syncs_merged_entry_data(monkeypatch):
 
     payload = schedule_control.serialize_room_schedules(coordinator)
     assert len(payload["living_room"]["periods"]) == 1
+
+
+@pytest.mark.integration
+def test_runtime_reconfig_applies_persisted_schedules_in_place():
+    """Persisted schedule writes must overlay the coordinator without a reload."""
+    coord = _bare_coordinator_with_entry({CONF_PERSISTED_SCHEDULES: {}})
+    coord._room_schedule = {"Living Room": build_schedule([])}
+    coord._last_runtime_config = {CONF_PERSISTED_SCHEDULES: {}}
+
+    assert runtime_reconfig.apply_runtime_reconfiguration(
+        coord,
+        {CONF_PERSISTED_SCHEDULES: {"Living Room": PERIODS}},
+    )
+
+    assert len(coord._room_schedule["Living Room"].periods) == 1
+
+
+@pytest.mark.asyncio
+async def test_update_listener_applies_persisted_schedules_without_reload(monkeypatch):
+    """Config-entry listener must refresh schedules when only persisted_schedules changes."""
+    import custom_components.heating_assistant.__init__ as init_mod
+    from custom_components.heating_assistant.const import DOMAIN
+
+    entry_data = {
+        CONF_ROOMS: [{CONF_ROOM_NAME: "Living Room", "setpoint": 21.0}],
+        CONF_PERSISTED_SCHEDULES: {"Living Room": PERIODS},
+    }
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        data=dict(entry_data),
+        options={},
+        add_update_listener=lambda _cb: None,
+        async_on_unload=lambda _cb: None,
+    )
+    coordinator = make_minimal_coordinator(room_names=["Living Room"])
+    coordinator._entry = SimpleNamespace(entry_id="entry-1", data={})
+    coordinator._room_schedule = {"Living Room": build_schedule([])}
+    coordinator._last_runtime_config = {
+        CONF_ROOMS: entry_data[CONF_ROOMS],
+        CONF_PERSISTED_SCHEDULES: {},
+    }
+    coordinator.async_update_listeners = MagicMock()
+
+    hass = SimpleNamespace()
+    hass.data = {DOMAIN: {"entry-1": coordinator, "yaml_config": {}}}
+    hass.config_entries = SimpleNamespace(async_reload=MagicMock())
+    hass.async_create_task = MagicMock()
+
+    monkeypatch.setattr(init_mod, "_merge_yaml_into_entry_data", lambda data, _yaml: data)
+
+    await init_mod._async_update_listener(hass, entry)
+
+    assert len(coordinator._room_schedule["Living Room"].periods) == 1
+    coordinator.async_update_listeners.assert_called_once()
+    hass.config_entries.async_reload.assert_not_called()

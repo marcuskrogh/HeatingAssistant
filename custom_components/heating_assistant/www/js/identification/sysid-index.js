@@ -1,5 +1,5 @@
-import { setPanelHash } from '../panel-hash.js?v=99';
-import { loadDismissedWarnings, saveDismissedWarning } from './sysid-shared.js?v=99';
+import { setPanelHash } from '../panel-hash.js?v=100';
+import { loadDismissedWarnings, saveDismissedWarning } from './sysid-shared.js?v=100';
 
 export function renderIdentificationIndex(container, rooms, state) {
   container.innerHTML = '';

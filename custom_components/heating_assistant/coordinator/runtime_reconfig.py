@@ -100,6 +100,8 @@ def apply_runtime_reconfiguration(
         coordinator._pending_runtime_reconfiguration = {}
 
     new_config = dict(config)
+    old_persisted = coordinator._last_runtime_config.get(CONF_PERSISTED_SCHEDULES)
+    new_persisted = new_config.get(CONF_PERSISTED_SCHEDULES)
     changed_keys = {
         key
         for key in set(coordinator._last_runtime_config) | set(new_config)
@@ -107,6 +109,13 @@ def apply_runtime_reconfiguration(
     }
     changed_keys -= PERSISTED_STATE_KEYS
     coordinator._last_runtime_config = new_config
+
+    if old_persisted != new_persisted:
+        from . import schedule_control
+
+        schedule_control.apply_persisted_schedules(
+            coordinator, dict(new_persisted or {})
+        )
 
     if not changed_keys:
         return True

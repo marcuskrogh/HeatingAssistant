@@ -324,6 +324,13 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
             entry_data = _merge_yaml_into_entry_data(entry_data, yaml_cfg)
         merged_config = {**entry_data, **dict(opts)}
         if coordinator.apply_runtime_reconfiguration(merged_config):
+            # In-place updates (e.g. update_room_schedule) skip reload but still
+            # need the coordinator and config sensor to reflect persisted_schedules.
+            from .coordinator import schedule_control
+
+            persisted = dict(entry.data.get(CONF_PERSISTED_SCHEDULES) or {})
+            schedule_control.apply_persisted_schedules(coordinator, persisted)
+            coordinator.async_update_listeners()
             return
     hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
 
