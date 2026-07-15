@@ -1,4 +1,4 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=98';
+import { deleteDataset, createDataset } from '../ha-services.js?v=99';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';

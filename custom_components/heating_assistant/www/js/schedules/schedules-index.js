@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=98';
-import { findNextScheduledExperiment } from '../experiment-utils.js?v=98';
-import { setPanelHash } from '../panel-hash.js?v=98';
-import { updateRoomSchedule } from '../ha-services.js?v=98';
-import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=98';
+import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=99';
+import { findNextScheduledExperiment } from '../experiment-utils.js?v=99';
+import { setPanelHash } from '../panel-hash.js?v=99';
+import { updateRoomSchedule } from '../ha-services.js?v=99';
+import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=99';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 

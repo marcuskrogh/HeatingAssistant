@@ -16,20 +16,21 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=98';
-import { setPanelHash } from '../panel-hash.js?v=98';
-import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=98';
+import { entityValue } from '../utils.js?v=99';
+import { setPanelHash } from '../panel-hash.js?v=99';
+import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=99';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=98';
+} from '../experiment-utils.js?v=99';
 import {
   setClimateTemperature,
   setRoomComfortOffset,
   turnClimateOff,
   turnClimateOn,
-} from '../ha-services.js?v=98';
+} from '../ha-services.js?v=99';
+import { resolveRoomScheduleData } from '../schedules/schedules-shared.js?v=99';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
@@ -80,12 +81,7 @@ function statusInfo(power) {
 }
 
 function getScheduleData(st, room) {
-  if (st.scheduleData) {
-    const found = st.scheduleData[room.slug] || st.scheduleData[room.name] || null;
-    if (found) return found;
-  }
-  const roomSchedules = st.state[CONFIG_ENTITY]?.attributes?.room_schedules || {};
-  return roomSchedules[room.slug] || roomSchedules[room.name] || null;
+  return resolveRoomScheduleData(room, st.scheduleData || {}, st.state);
 }
 
 /** Resolve whether the room is currently off, combining the backend effective

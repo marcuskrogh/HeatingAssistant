@@ -1,5 +1,5 @@
-import { renderIdentificationIndex } from '../identification/sysid-index.js?v=98';
-import { renderIdentificationDetail } from '../identification/sysid-detail.js?v=98';
+import { renderIdentificationIndex } from '../identification/sysid-index.js?v=99';
+import { renderIdentificationDetail } from '../identification/sysid-detail.js?v=99';
 
 export function renderSystemIdentification(container, rooms, state, connection, hass, slug) {
   if (slug) {
