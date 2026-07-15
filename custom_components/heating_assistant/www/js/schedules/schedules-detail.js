@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=98';
-import { setPanelHash } from '../panel-hash.js?v=98';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=98';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=98';
-import { renderExperimentsSection } from './schedules-experiments.js?v=98';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=99';
+import { setPanelHash } from '../panel-hash.js?v=99';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=99';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=99';
+import { renderExperimentsSection } from './schedules-experiments.js?v=99';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function renderScheduleDetail(container, roomSlug, rooms, state, connection, hass) {
