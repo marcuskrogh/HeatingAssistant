@@ -41,7 +41,7 @@ assert(
   'schedules-index.js update() must refresh state for mergeRoomSchedulesWithState fallback',
 );
 
-const mod = await import(`${pathToFileURL(SHARED).href}?v=94`);
+const mod = await import(`${pathToFileURL(SHARED).href}?v=101`);
 const room = { slug: 'living_room', name: 'Living Room' };
 const periods = [{ name: 'Morning', start: '06:00', end: '09:00', mode: 'comfort', days: [0] }];
 const state = {
@@ -61,6 +61,32 @@ const merged = mod.mergeRoomSchedulesWithState({}, state);
 assert(
   merged.living_room?.periods?.length === 1,
   'mergeRoomSchedulesWithState must preserve config-entity periods',
+);
+
+const staleWs = {
+  living_room: {
+    enabled: true,
+    periods: [{ name: 'Old', start: '01:00', end: '02:00', mode: 'comfort', days: [0] }],
+  },
+};
+const freshState = {
+  'sensor.heating_assistant_controller_config': {
+    attributes: {
+      room_schedules: {
+        living_room: { enabled: true, periods },
+      },
+    },
+  },
+};
+const mergedStale = mod.mergeRoomSchedulesWithState(staleWs, freshState);
+assert(
+  mergedStale.living_room?.periods?.[0]?.name === 'Morning',
+  'merge must prefer config-entity when WS is stale but non-empty',
+);
+const resolvedStale = mod.resolveRoomScheduleData(room, staleWs, freshState);
+assert(
+  resolvedStale?.periods?.[0]?.name === 'Morning',
+  'resolver must prefer config-entity when WS is stale but non-empty',
 );
 
 console.log('panel schedule resolver harness: ok');

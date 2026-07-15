@@ -262,6 +262,51 @@ def apply_persisted_schedules(
             coordinator._room_schedule[canonical] = build_schedule(periods_raw)
 
 
+def migrate_legacy_schedules_to_persisted(hass: Any, entry: Any) -> bool:
+    """Copy non-empty ``rooms[].schedule`` into ``persisted_schedules`` when absent.
+
+    Older installs stored dashboard schedules under per-room config; newer saves
+    use the dedicated ``persisted_schedules`` key.  Migrating on startup ensures
+    a single authoritative path survives restarts and browser refresh.
+    """
+    from ..const import (
+        CONF_PERSISTED_SCHEDULES,
+        CONF_ROOM_NAME,
+        CONF_ROOMS,
+        CONF_SCHEDULE,
+    )
+
+    data = dict(entry.data)
+    persisted: Dict[str, Any] = dict(data.get(CONF_PERSISTED_SCHEDULES) or {})
+    changed = False
+
+    def _ingest_rooms(rooms: Any) -> None:
+        nonlocal changed
+        for room in rooms or []:
+            if not isinstance(room, dict):
+                continue
+            name = room.get(CONF_ROOM_NAME)
+            schedule = room.get(CONF_SCHEDULE)
+            if not name or not schedule:
+                continue
+            if persisted.get(name):
+                continue
+            persisted[name] = list(schedule)
+            changed = True
+
+    _ingest_rooms(data.get(CONF_ROOMS))
+    _ingest_rooms(dict(entry.options).get(CONF_ROOMS))
+
+    if not changed:
+        return False
+
+    hass.config_entries.async_update_entry(
+        entry,
+        data={**data, CONF_PERSISTED_SCHEDULES: persisted},
+    )
+    return True
+
+
 def serialize_room_schedules(
     coordinator: HeatingAssistantCoordinator,
 ) -> Dict[str, Any]:

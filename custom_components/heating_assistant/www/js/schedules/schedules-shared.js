@@ -1,5 +1,5 @@
-import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=100';
-import { experimentStatusInfo } from '../experiment-utils.js?v=100';
+import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=101';
+import { experimentStatusInfo } from '../experiment-utils.js?v=101';
 
 export const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -14,43 +14,57 @@ export function periodsMatch(a, b) {
 }
 
 /**
+ * Pick the authoritative schedule payload when WebSocket and config-entity
+ * sources disagree. Prefers config-entity state when WS is empty, shorter,
+ * or structurally different (stale WS after save).
+ */
+export function pickAuthoritativeSchedule(fromWs, fromState) {
+  const wsPeriods = fromWs?.periods ?? [];
+  const statePeriods = fromState?.periods ?? [];
+
+  if (statePeriods.length === 0) {
+    return fromWs ?? fromState ?? null;
+  }
+  if (wsPeriods.length === 0) {
+    return fromState;
+  }
+  if (periodsMatch(wsPeriods, statePeriods)) {
+    return fromWs;
+  }
+  if (statePeriods.length > wsPeriods.length) {
+    return fromState;
+  }
+  if (wsPeriods.length > statePeriods.length) {
+    return fromWs;
+  }
+  // Same count, different content — config entity is updated by the coordinator
+  // after save and is more reliable than a stale WebSocket snapshot.
+  return fromState;
+}
+
+/**
  * Resolve schedule data for one room: prefer non-empty WebSocket payload,
  * then patched config-entity state. Optional ``savedSnapshot`` holds the
  * last successful save until the coordinator confirms the same payload.
  */
 export function resolveRoomScheduleData(room, roomSchedules, state, savedSnapshot = null) {
   const fromWs = getScheduleDataForRoom(roomSchedules, room);
-  const wsPeriods = fromWs?.periods ?? [];
-
-  if (savedSnapshot !== null) {
-    const snapLen = savedSnapshot.length;
-    const wsLen = wsPeriods.length;
-    if (wsLen < snapLen || wsLen > snapLen) {
-      const fromState = getScheduleDataForRoom(
-        state[CONFIG_ENTITY]?.attributes?.room_schedules,
-        room,
-      );
-      const enabled = fromState?.enabled ?? fromWs?.enabled ?? true;
-      return { enabled, periods: [...savedSnapshot] };
-    }
-    if (periodsMatch(wsPeriods, savedSnapshot)) {
-      // WS caught up — caller may clear snapshot after this returns.
-    }
-  }
-
-  if (wsPeriods.length > 0) {
-    return fromWs;
-  }
-
   const fromState = getScheduleDataForRoom(
     state[CONFIG_ENTITY]?.attributes?.room_schedules,
     room,
   );
-  if ((fromState?.periods?.length ?? 0) > 0) {
-    return fromState;
+
+  if (savedSnapshot !== null) {
+    const wsPeriods = fromWs?.periods ?? [];
+    const snapLen = savedSnapshot.length;
+    const wsLen = wsPeriods.length;
+    if (!periodsMatch(wsPeriods, savedSnapshot)) {
+      const enabled = fromState?.enabled ?? fromWs?.enabled ?? true;
+      return { enabled, periods: [...savedSnapshot] };
+    }
   }
 
-  return fromWs ?? fromState ?? null;
+  return pickAuthoritativeSchedule(fromWs, fromState);
 }
 
 /**
@@ -64,17 +78,19 @@ export function mergeRoomSchedulesWithState(roomSchedules, state) {
     return ws;
   }
 
-  const merged = { ...fromState, ...ws };
-  for (const [key, sched] of Object.entries(fromState)) {
-    const wsSched = ws[key];
-    const wsPeriods = wsSched?.periods ?? [];
-    const statePeriods = sched?.periods ?? [];
-    if (wsPeriods.length === 0 && statePeriods.length > 0) {
-      merged[key] = sched;
+  const merged = { ...ws };
+  const allKeys = new Set([...Object.keys(ws), ...Object.keys(fromState)]);
+  for (const key of allKeys) {
+    const picked = pickAuthoritativeSchedule(ws[key], fromState[key]);
+    if (picked) {
+      merged[key] = picked;
+    } else if (fromState[key]) {
+      merged[key] = fromState[key];
     }
   }
   return merged;
 }
+
 /** Renders a single period summary row element. */
 export function makePeriodRow(p, isActive, isNext, periodIndex = null) {
   const row = document.createElement('div');
