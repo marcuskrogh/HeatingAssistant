@@ -121,6 +121,7 @@ from .const import (
     CONF_SCHEDULE_TRACKING_WEIGHT,
     CONF_SCHEDULE_ENERGY_WEIGHT,
     CONF_PERSISTED_SCHEDULES,
+    CONF_PERSISTED_SCHEDULE_ENABLED,
     CONF_SETPOINT,
     CONF_SIGMA_B,
     CONF_SIGMA_V,
@@ -334,6 +335,10 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
             offsets = dict(entry.data.get(CONF_PERSISTED_COMFORT_OFFSETS) or {})
             enablement.apply_persisted_comfort_offsets(coordinator, offsets)
+            schedule_enabled = dict(entry.data.get(CONF_PERSISTED_SCHEDULE_ENABLED) or {})
+            schedule_control.apply_persisted_schedule_enabled(
+                coordinator, schedule_enabled
+            )
             coordinator.async_update_listeners()
             return
     hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))

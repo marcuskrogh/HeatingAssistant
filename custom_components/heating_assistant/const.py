@@ -670,6 +670,10 @@ CONF_PERSISTED_ROOM_ENABLED = "persisted_room_enabled"
 #: resumes in the same running or stopped state after a full HA restart.
 CONF_PERSISTED_SYSTEM_ENABLED = "persisted_system_enabled"
 
+#: entry.data key that stores per-room schedule suspend/resume toggles from the
+#: dashboard (distinct from per-period ``enabled`` flags inside persisted_schedules).
+CONF_PERSISTED_SCHEDULE_ENABLED = "persisted_schedule_enabled"
+
 # ---------------------------------------------------------------------------
 # System-identification experiments and stored datasets
 # ---------------------------------------------------------------------------

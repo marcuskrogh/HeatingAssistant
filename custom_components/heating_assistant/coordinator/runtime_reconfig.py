@@ -19,6 +19,7 @@ from ..const import (
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_PERSISTED_ROOM_ENABLED,
+    CONF_PERSISTED_SCHEDULE_ENABLED,
     CONF_PERSISTED_SCHEDULES,
     CONF_PERSISTED_SETPOINTS,
     CONF_PERSISTED_SYSTEM_ENABLED,
@@ -58,6 +59,7 @@ PERSISTED_STATE_KEYS: Set[str] = {
     CONF_ESTIMATED_PARAMS,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_PERSISTED_ROOM_ENABLED,
+    CONF_PERSISTED_SCHEDULE_ENABLED,
     CONF_PERSISTED_SYSTEM_ENABLED,
 }
 
@@ -104,6 +106,10 @@ def apply_runtime_reconfiguration(
     new_persisted = new_config.get(CONF_PERSISTED_SCHEDULES)
     old_offsets = coordinator._last_runtime_config.get(CONF_PERSISTED_COMFORT_OFFSETS)
     new_offsets = new_config.get(CONF_PERSISTED_COMFORT_OFFSETS)
+    old_schedule_enabled = coordinator._last_runtime_config.get(
+        CONF_PERSISTED_SCHEDULE_ENABLED
+    )
+    new_schedule_enabled = new_config.get(CONF_PERSISTED_SCHEDULE_ENABLED)
     changed_keys = {
         key
         for key in set(coordinator._last_runtime_config) | set(new_config)
@@ -124,6 +130,13 @@ def apply_runtime_reconfiguration(
 
         enablement.apply_persisted_comfort_offsets(
             coordinator, dict(new_offsets or {})
+        )
+
+    if old_schedule_enabled != new_schedule_enabled:
+        from . import schedule_control
+
+        schedule_control.apply_persisted_schedule_enabled(
+            coordinator, dict(new_schedule_enabled or {})
         )
 
     if not changed_keys:

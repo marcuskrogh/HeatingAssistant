@@ -190,6 +190,39 @@ def set_schedule_enabled(
     # Re-apply now so the next tick already reflects the change in the
     # MPC reference; otherwise the user would have to wait one cycle.
     apply_schedule(coordinator, datetime.now())
+    _persist_schedule_enabled(coordinator)
+
+
+def _persist_schedule_enabled(coordinator: HeatingAssistantCoordinator) -> None:
+    """Write per-room schedule suspend flags to the config entry."""
+    from .enablement import _sync_persisted_key_to_merged_entry
+    from ..const import CONF_PERSISTED_SCHEDULE_ENABLED
+
+    real_entry = coordinator.hass.config_entries.async_get_entry(
+        coordinator._entry.entry_id
+    )
+    if real_entry is None:
+        return
+    persisted = dict(coordinator._schedule_enabled)
+    coordinator.hass.config_entries.async_update_entry(
+        real_entry,
+        data={
+            **dict(real_entry.data),
+            CONF_PERSISTED_SCHEDULE_ENABLED: persisted,
+        },
+    )
+    _sync_persisted_key_to_merged_entry(
+        coordinator, CONF_PERSISTED_SCHEDULE_ENABLED, persisted
+    )
+
+
+def apply_persisted_schedule_enabled(
+    coordinator: HeatingAssistantCoordinator, persisted_enabled: dict
+) -> None:
+    """Overlay dashboard-persisted schedule suspend flags onto coordinator state."""
+    for room_name, value in (persisted_enabled or {}).items():
+        if room_name in coordinator._schedule_enabled:
+            coordinator._schedule_enabled[room_name] = bool(value)
 
 
 def active_schedule_period(
@@ -314,33 +347,36 @@ def serialize_room_schedules(
     from ..naming import slugify
 
     schedules: dict = {}
-    for room_name, room_schedule in coordinator._room_schedule.items():
+    for room_name in coordinator.model.room_names:
+        room_schedule = coordinator._room_schedule.get(room_name)
+        periods_payload: list = []
         if room_schedule and not room_schedule.is_empty:
-            schedules[slugify(room_name)] = {
-                "enabled": coordinator._schedule_enabled.get(room_name, True),
-                "periods": [
-                    {
-                        "name": p.name,
-                        "start": p.start.strftime("%H:%M"),
-                        "end": p.end.strftime("%H:%M"),
-                        "mode": p.mode,
-                        "setpoint": p.setpoint,
-                        "frost_protection": p.frost_protection,
-                        "days": sorted(p.days),
-                        "comfort_offset": p.comfort_offset,
-                        "tracking_weight": p.tracking_weight,
-                        "energy_weight": p.energy_weight,
-                        "all_day": p.all_day,
-                        "enabled": p.enabled,
-                        "recurring": p.recurring,
-                        "start_date": (
-                            p.start_date.isoformat() if p.start_date is not None else None
-                        ),
-                        "end_date": (
-                            p.end_date.isoformat() if p.end_date is not None else None
-                        ),
-                    }
-                    for p in room_schedule.periods
-                ],
-            }
+            periods_payload = [
+                {
+                    "name": p.name,
+                    "start": p.start.strftime("%H:%M"),
+                    "end": p.end.strftime("%H:%M"),
+                    "mode": p.mode,
+                    "setpoint": p.setpoint,
+                    "frost_protection": p.frost_protection,
+                    "days": sorted(p.days),
+                    "comfort_offset": p.comfort_offset,
+                    "tracking_weight": p.tracking_weight,
+                    "energy_weight": p.energy_weight,
+                    "all_day": p.all_day,
+                    "enabled": p.enabled,
+                    "recurring": p.recurring,
+                    "start_date": (
+                        p.start_date.isoformat() if p.start_date is not None else None
+                    ),
+                    "end_date": (
+                        p.end_date.isoformat() if p.end_date is not None else None
+                    ),
+                }
+                for p in room_schedule.periods
+            ]
+        schedules[slugify(room_name)] = {
+            "enabled": coordinator._schedule_enabled.get(room_name, True),
+            "periods": periods_payload,
+        }
     return schedules
