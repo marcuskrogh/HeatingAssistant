@@ -117,7 +117,7 @@ const panelHashSrc = readFileSync(join(WWW, 'js/panel-hash.js'), 'utf8')
 const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, readPanelRoute, setPanelHash, clearPanelHash, stripLeakedPanelHash, installPanelHashGuard, isPanelHash, PANEL_PATH };`)();
 panelHashMod.installPanelHashGuard();
 const routerSrc = readFileSync(join(WWW, 'js/router.js'), 'utf8')
-  .replace(/import .*panel-hash.*\n/, '')
+  .replace(/^import\s+\{[^}]+\}\s+from\s+['"]\.\/panel-hash\.js[^'"]*['"];\r?\n/m, '')
   .replace(/export class Router/, 'class Router');
 const Router = new Function('isOnPanelPath', 'readPanelRoute', 'setPanelHash', `${routerSrc}\nreturn Router;`)(
   panelHashMod.isOnPanelPath,
