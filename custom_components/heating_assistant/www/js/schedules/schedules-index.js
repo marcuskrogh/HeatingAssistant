@@ -187,6 +187,7 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
 
   return {
     update(newState) {
+      state = newState;
       // On state update, re-fetch from WebSocket to stay in sync
       Promise.all([connection.getSchedules(), connection.listExperiments()]).then(([roomSchedules, experiments]) => {
         const expsByRoom = {};

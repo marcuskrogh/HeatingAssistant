@@ -36,6 +36,10 @@ assert(
   /resolveRoomScheduleData/.test(indexSource),
   'schedules-index.js must use resolveRoomScheduleData',
 );
+assert(
+  /update\(newState\)[\s\S]*state\s*=\s*newState/.test(indexSource),
+  'schedules-index.js update() must refresh state for mergeRoomSchedulesWithState fallback',
+);
 
 const mod = await import(`${pathToFileURL(SHARED).href}?v=94`);
 const room = { slug: 'living_room', name: 'Living Room' };

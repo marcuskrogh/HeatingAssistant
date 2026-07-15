@@ -64,6 +64,31 @@ def test_apply_persisted_schedules_resolves_slug_keys():
 
 
 @pytest.mark.integration
+def test_apply_persisted_schedules_skips_ambiguous_slug_keys():
+    """Slug lookup must not attach schedules when two rooms share the same slug."""
+    coord = _bare_coordinator_with_entry({})
+    coord._room_schedule = {
+        "Room A": build_schedule([]),
+        "Room  A": build_schedule([]),  # slugifies to the same value as "Room A"
+    }
+    coord.model.room_names = ["Room A", "Room  A"]
+
+    schedule_control.apply_persisted_schedules(
+        coord, {"room_a": PERIODS}
+    )
+
+    assert len(coord._room_schedule["Room A"].periods) == 0
+    assert len(coord._room_schedule["Room  A"].periods) == 0
+
+    schedule_control.apply_persisted_schedules(
+        coord, {"Room A": PERIODS}
+    )
+
+    assert len(coord._room_schedule["Room A"].periods) == 1
+    assert len(coord._room_schedule["Room  A"].periods) == 0
+
+
+@pytest.mark.integration
 def test_init_room_state_reads_persisted_schedules_from_real_entry():
     """Startup overlay must read authoritative config-entry data, not stale MergedEntry."""
     entry_data = {

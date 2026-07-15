@@ -236,13 +236,28 @@ def apply_persisted_schedules(
     if not persisted_schedules:
         return
 
-    room_by_slug = {slugify(name): name for name in coordinator._room_schedule}
+    room_by_slug: Dict[str, str] = {}
+    ambiguous_slugs: set[str] = set()
+    for name in coordinator._room_schedule:
+        slug = slugify(name)
+        prior = room_by_slug.get(slug)
+        if prior is not None and prior != name:
+            ambiguous_slugs.add(slug)
+        else:
+            room_by_slug[slug] = name
+    for slug in ambiguous_slugs:
+        room_by_slug.pop(slug, None)
+
     for key, periods_raw in persisted_schedules.items():
-        canonical = (
-            key
-            if key in coordinator._room_schedule
-            else room_by_slug.get(slugify(key))
-        )
+        if key in coordinator._room_schedule:
+            canonical = key
+        else:
+            key_slug = slugify(key)
+            canonical = (
+                None
+                if key_slug in ambiguous_slugs
+                else room_by_slug.get(key_slug)
+            )
         if canonical is not None:
             coordinator._room_schedule[canonical] = build_schedule(periods_raw)
 
