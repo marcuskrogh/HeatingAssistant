@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=97';
-import { setPanelHash } from '../panel-hash.js?v=97';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=97';
-import { getScheduleDataForRoom, patchStateSchedule, CONFIG_ENTITY } from './schedules-shared.js?v=97';
-import { renderExperimentsSection } from './schedules-experiments.js?v=97';
+import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod } from '../schedule-utils.js?v=98';
+import { setPanelHash } from '../panel-hash.js?v=98';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=98';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=98';
+import { renderExperimentsSection } from './schedules-experiments.js?v=98';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function renderScheduleDetail(container, roomSlug, rooms, state, connection, hass) {
@@ -86,51 +86,24 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     return getScheduleDataForRoom(roomSchedules, room);
   }
 
-  function getScheduleFromState() {
-    return getScheduleDataForRoom(state[CONFIG_ENTITY]?.attributes?.room_schedules, room);
-  }
-
-  function periodsMatch(a, b) {
-    const left = a ?? [];
-    const right = b ?? [];
-    if (left.length !== right.length) return false;
-    return JSON.stringify(left) === JSON.stringify(right);
-  }
-
-  /**
-   * Prefer WebSocket data when authoritative; fall back to patched config-entity
-   * state (or the last successful save) when WS is stale, empty, or errored.
-   */
   function resolveScheduleData(roomSchedules) {
-    const fromWs = getScheduleFromWS(roomSchedules);
-    const wsPeriods = fromWs?.periods ?? [];
-
+    const resolved = resolveRoomScheduleData(
+      room,
+      roomSchedules,
+      state,
+      savedScheduleSnapshot,
+    );
     if (savedScheduleSnapshot !== null) {
+      const wsPeriods = getScheduleFromWS(roomSchedules)?.periods ?? [];
       const snapLen = savedScheduleSnapshot.length;
       const wsLen = wsPeriods.length;
-      if (wsLen < snapLen || wsLen > snapLen) {
-        const fromState = getScheduleFromState();
-        const enabled = fromState?.enabled ?? fromWs?.enabled ?? true;
-        return { enabled, periods: [...savedScheduleSnapshot] };
-      }
-      if (periodsMatch(wsPeriods, savedScheduleSnapshot)) {
+      if (wsLen === snapLen && periodsMatch(wsPeriods, savedScheduleSnapshot)) {
         savedScheduleSnapshot = null;
-      } else {
-        // Same count but field ordering/extra keys differ — WS caught up.
+      } else if (wsLen === snapLen && wsLen > 0) {
         savedScheduleSnapshot = null;
       }
     }
-
-    if (wsPeriods.length > 0) {
-      return fromWs;
-    }
-
-    const fromState = getScheduleFromState();
-    if ((fromState?.periods?.length ?? 0) > 0) {
-      return fromState;
-    }
-
-    return fromWs ?? fromState ?? null;
+    return resolved;
   }
 
   function getDefaults(st) {

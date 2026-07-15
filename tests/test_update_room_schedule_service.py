@@ -34,9 +34,11 @@ def _capture_handler(hass):
     return handlers["update_room_schedule"]
 
 
-def _make_coordinator():
+def _make_coordinator(room_names=None):
     coordinator = MagicMock()
-    coordinator._entry = SimpleNamespace(entry_id="entry-1")
+    coordinator._entry = SimpleNamespace(entry_id="entry-1", data={})
+    names = room_names or ["Living Room"]
+    coordinator.model = SimpleNamespace(room_names=names)
     return coordinator
 
 
@@ -62,7 +64,7 @@ async def test_schedule_persisted_to_options_when_rooms_in_options(monkeypatch):
         entry_id="entry-1",
     )
 
-    coordinator = _make_coordinator()
+    coordinator = _make_coordinator(["Living Room"])
     update_calls: list = []
 
     hass = SimpleNamespace()
@@ -96,7 +98,7 @@ async def test_schedule_persisted_to_data_when_options_empty(monkeypatch):
         entry_id="entry-1",
     )
 
-    coordinator = _make_coordinator()
+    coordinator = _make_coordinator(["Bedroom"])
     update_calls: list = []
 
     hass = SimpleNamespace()
@@ -123,7 +125,7 @@ async def test_unknown_room_raises(monkeypatch):
         options={},
         entry_id="entry-1",
     )
-    coordinator = _make_coordinator()
+    coordinator = _make_coordinator(["Kitchen"])
 
     hass = SimpleNamespace()
     hass.data = {DOMAIN: {}}

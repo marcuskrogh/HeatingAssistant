@@ -221,6 +221,32 @@ def reload_room_schedule(
     coordinator._room_schedule[room_name] = new_schedule
 
 
+def apply_persisted_schedules(
+    coordinator: HeatingAssistantCoordinator,
+    persisted_schedules: Dict[str, Any],
+) -> None:
+    """Overlay dashboard-persisted schedules onto ``_room_schedule``.
+
+    Keys in ``persisted_schedules`` may be canonical room names or slugs from
+    older saves; resolve via :func:`slugify` so restarts never silently drop
+    schedules when the key format drifts.
+    """
+    from ..naming import slugify
+
+    if not persisted_schedules:
+        return
+
+    room_by_slug = {slugify(name): name for name in coordinator._room_schedule}
+    for key, periods_raw in persisted_schedules.items():
+        canonical = (
+            key
+            if key in coordinator._room_schedule
+            else room_by_slug.get(slugify(key))
+        )
+        if canonical is not None:
+            coordinator._room_schedule[canonical] = build_schedule(periods_raw)
+
+
 def serialize_room_schedules(
     coordinator: HeatingAssistantCoordinator,
 ) -> Dict[str, Any]:

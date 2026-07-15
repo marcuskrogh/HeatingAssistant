@@ -584,10 +584,19 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.model.rooms[room_name].comfort_offset = float(value)
 
         # Overlay with user-modified schedules persisted across restarts.
-        persisted_schedules: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_SCHEDULES, {})
-        for room_name, periods_raw in persisted_schedules.items():
-            if room_name in self._room_schedule:
-                self._room_schedule[room_name] = build_schedule(periods_raw)
+        # Prefer the authoritative config-entry store (disk) over the
+        # in-memory MergedEntry overlay, which can lag behind service writes.
+        persisted_schedules: Dict[str, Any] = {}
+        real_entry = self.hass.config_entries.async_get_entry(self._entry.entry_id)
+        if real_entry is not None:
+            persisted_schedules = dict(
+                real_entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+            )
+        if not persisted_schedules:
+            persisted_schedules = dict(
+                self._entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+            )
+        schedule_control.apply_persisted_schedules(self, persisted_schedules)
 
     def _read_binary_sensor_on(self, entity_id: str) -> bool:
         return window.read_binary_sensor_on(self, entity_id)

@@ -577,6 +577,20 @@ def test_panel_schedules_modules_load_without_shadowing() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+def test_panel_schedule_resolver_falls_back_to_config_state() -> None:
+    """Shared schedule resolver must use config-entity state when WS is empty."""
+    harness = REPO_ROOT / "tests" / "panel_schedule_resolver.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_panel_stylesheets_linked_explicitly() -> None:
     """Page CSS must be linked in the shadow root; @import is unreliable on mobile."""
     harness = REPO_ROOT / "tests" / "panel_stylesheets.harness.mjs"

@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=97';
-import { findNextScheduledExperiment } from '../experiment-utils.js?v=97';
-import { setPanelHash } from '../panel-hash.js?v=97';
-import { updateRoomSchedule } from '../ha-services.js?v=97';
-import { getScheduleDataForRoom, makePeriodRow, patchStateSchedule } from './schedules-shared.js?v=97';
+import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=98';
+import { findNextScheduledExperiment } from '../experiment-utils.js?v=98';
+import { setPanelHash } from '../panel-hash.js?v=98';
+import { updateRoomSchedule } from '../ha-services.js?v=98';
+import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=98';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -51,11 +51,12 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
 
   function buildCards(roomSchedules, expsByRoom = cachedExpsByRoom) {
     grid.innerHTML = '';
-    cachedSchedules = roomSchedules;
+    const mergedSchedules = mergeRoomSchedulesWithState(roomSchedules, state);
+    cachedSchedules = mergedSchedules;
     cachedExpsByRoom = expsByRoom;
 
     for (const room of rooms) {
-      const schedData = getScheduleDataForRoom(roomSchedules, room);
+      const schedData = resolveRoomScheduleData(room, mergedSchedules, state);
       const periods = schedData?.periods || [];
       const enabled = schedData?.enabled ?? true;
 

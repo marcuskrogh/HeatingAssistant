@@ -16,20 +16,20 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=97';
-import { setPanelHash } from '../panel-hash.js?v=97';
-import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=97';
+import { entityValue } from '../utils.js?v=98';
+import { setPanelHash } from '../panel-hash.js?v=98';
+import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=98';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=97';
+} from '../experiment-utils.js?v=98';
 import {
   setClimateTemperature,
   setRoomComfortOffset,
   turnClimateOff,
   turnClimateOn,
-} from '../ha-services.js?v=97';
+} from '../ha-services.js?v=98';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 const SP_STEP = 0.5;
