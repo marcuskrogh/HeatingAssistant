@@ -1,13 +1,80 @@
-import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=97';
-import { experimentStatusInfo } from '../experiment-utils.js?v=97';
+import { getRoomScheduleData, periodRowHtml } from '../schedule-utils.js?v=98';
+import { experimentStatusInfo } from '../experiment-utils.js?v=98';
 
 export const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
 export const getScheduleDataForRoom = getRoomScheduleData;
 
-/** Robust lookup: tries slug, name, and case-insensitive normalised match. */
+/** Compare two period arrays for structural equality (JSON snapshot). */
+export function periodsMatch(a, b) {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
+/**
+ * Resolve schedule data for one room: prefer non-empty WebSocket payload,
+ * then patched config-entity state. Optional ``savedSnapshot`` holds the
+ * last successful save until the coordinator confirms the same payload.
+ */
+export function resolveRoomScheduleData(room, roomSchedules, state, savedSnapshot = null) {
+  const fromWs = getScheduleDataForRoom(roomSchedules, room);
+  const wsPeriods = fromWs?.periods ?? [];
 
+  if (savedSnapshot !== null) {
+    const snapLen = savedSnapshot.length;
+    const wsLen = wsPeriods.length;
+    if (wsLen < snapLen || wsLen > snapLen) {
+      const fromState = getScheduleDataForRoom(
+        state[CONFIG_ENTITY]?.attributes?.room_schedules,
+        room,
+      );
+      const enabled = fromState?.enabled ?? fromWs?.enabled ?? true;
+      return { enabled, periods: [...savedSnapshot] };
+    }
+    if (periodsMatch(wsPeriods, savedSnapshot)) {
+      // WS caught up — caller may clear snapshot after this returns.
+    }
+  }
+
+  if (wsPeriods.length > 0) {
+    return fromWs;
+  }
+
+  const fromState = getScheduleDataForRoom(
+    state[CONFIG_ENTITY]?.attributes?.room_schedules,
+    room,
+  );
+  if ((fromState?.periods?.length ?? 0) > 0) {
+    return fromState;
+  }
+
+  return fromWs ?? fromState ?? null;
+}
+
+/**
+ * Merge WebSocket schedule payloads with config-entity fallbacks so list
+ * views stay consistent when getSchedules() is stale or empty after a save.
+ */
+export function mergeRoomSchedulesWithState(roomSchedules, state) {
+  const ws = roomSchedules || {};
+  const fromState = state?.[CONFIG_ENTITY]?.attributes?.room_schedules || {};
+  if (!fromState || Object.keys(fromState).length === 0) {
+    return ws;
+  }
+
+  const merged = { ...fromState, ...ws };
+  for (const [key, sched] of Object.entries(fromState)) {
+    const wsSched = ws[key];
+    const wsPeriods = wsSched?.periods ?? [];
+    const statePeriods = sched?.periods ?? [];
+    if (wsPeriods.length === 0 && statePeriods.length > 0) {
+      merged[key] = sched;
+    }
+  }
+  return merged;
+}
 /** Renders a single period summary row element. */
 export function makePeriodRow(p, isActive, isNext, periodIndex = null) {
   const row = document.createElement('div');

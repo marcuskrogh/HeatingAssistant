@@ -473,7 +473,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         if stored_est:
             self._restore_estimated_parameters(stored_est)
 
-        self._init_room_state(rooms_cfg)
+        self._init_room_state(rooms_cfg, hass)
 
         self._temp_sensors: Dict[str, List[str]] = self._build_temp_sensor_map(rooms_cfg)
 
@@ -518,7 +518,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
 
     _build_window_sensor_map = staticmethod(window.build_window_sensor_map)
 
-    def _init_room_state(self, rooms_cfg: List[Dict[str, Any]]) -> None:
+    def _init_room_state(
+        self,
+        rooms_cfg: List[Dict[str, Any]],
+        hass: HomeAssistant | None = None,
+    ) -> None:
         """Initialise per-room flags and parsed comfort schedules.
 
         ``_room_enabled`` / ``_schedule_disabled`` decouple the user toggle
@@ -584,10 +588,27 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self.model.rooms[room_name].comfort_offset = float(value)
 
         # Overlay with user-modified schedules persisted across restarts.
-        persisted_schedules: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_SCHEDULES, {})
-        for room_name, periods_raw in persisted_schedules.items():
-            if room_name in self._room_schedule:
-                self._room_schedule[room_name] = build_schedule(periods_raw)
+        # Prefer the authoritative config-entry store (disk) over the
+        # in-memory MergedEntry overlay, which can lag behind service writes.
+        # ``hass`` is passed explicitly when called from ``__init__`` before
+        # ``super().__init__`` assigns ``self.hass`` (same pattern as
+        # ``_init_runtime_buffers``).
+        persisted_schedules: Dict[str, Any] = {}
+        hass_ref = hass if hass is not None else getattr(self, "hass", None)
+        config_entries = (
+            getattr(hass_ref, "config_entries", None) if hass_ref is not None else None
+        )
+        if config_entries is not None:
+            real_entry = config_entries.async_get_entry(self._entry.entry_id)
+            if real_entry is not None:
+                persisted_schedules = dict(
+                    real_entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+                )
+        if not persisted_schedules:
+            persisted_schedules = dict(
+                self._entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+            )
+        schedule_control.apply_persisted_schedules(self, persisted_schedules)
 
     def _read_binary_sensor_on(self, entity_id: str) -> bool:
         return window.read_binary_sensor_on(self, entity_id)

@@ -1,7 +1,8 @@
-import { createGauge, updateGauge } from '../components/gauge.js?v=97';
-import { createRoomClimateTile } from '../components/room-climate-tile.js?v=97';
-import { createCountdown, updateCountdown } from '../components/countdown.js?v=97';
-import { indexExperimentsByRoom } from '../experiment-utils.js?v=97';
+import { createGauge, updateGauge } from '../components/gauge.js?v=98';
+import { createRoomClimateTile } from '../components/room-climate-tile.js?v=98';
+import { createCountdown, updateCountdown } from '../components/countdown.js?v=98';
+import { indexExperimentsByRoom } from '../experiment-utils.js?v=98';
+import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=98';
 import {
   KPI_SEVERITY,
   DAILY_ENERGY_GAUGE_MAX_KWH,
@@ -12,11 +13,11 @@ import {
   houseMeanTrackingError,
   houseModelFit,
   mpcLoadPercent,
-} from '../kpi-engine.js?v=97';
+} from '../kpi-engine.js?v=98';
 import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
   entityValue,
-} from '../utils.js?v=97';
+} from '../utils.js?v=98';
 
 export function renderOverview(container, rooms, state, connection, hass) {
   container.innerHTML = '';
@@ -63,17 +64,17 @@ export function renderOverview(container, rooms, state, connection, hass) {
   // at once) only triggers a single round-trip instead of one per entity.
   let _scheduleRefreshTimer = null;
   function refreshSchedules(immediate = false) {
+    const applySchedules = (scheduleData) => {
+      const merged = mergeRoomSchedulesWithState(scheduleData, latestState);
+      tiles.forEach((t) => t.tile.update(latestState, hass, merged));
+    };
     if (immediate) {
-      connection.getSchedules().then((scheduleData) => {
-        tiles.forEach((t) => t.tile.update(latestState, hass, scheduleData));
-      });
+      connection.getSchedules().then(applySchedules);
       return;
     }
     clearTimeout(_scheduleRefreshTimer);
     _scheduleRefreshTimer = setTimeout(() => {
-      connection.getSchedules().then((scheduleData) => {
-        tiles.forEach((t) => t.tile.update(latestState, hass, scheduleData));
-      });
+      connection.getSchedules().then(applySchedules);
     }, 300);
   }
 
