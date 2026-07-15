@@ -30,7 +30,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '99';
+  return '100';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -125,10 +125,27 @@ _installPanelHashGuard();
 
 const CONTROLLER_CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
-/** Return true when room on/off maps on the controller-config sensor differ. */
+/** Return true when slug-keyed room schedule payloads differ. */
+function roomSchedulesChanged(prevSchedules, nextSchedules) {
+  const p = prevSchedules || {};
+  const n = nextSchedules || {};
+  const keys = new Set([...Object.keys(p), ...Object.keys(n)]);
+  if (keys.size === 0) return false;
+  for (const key of keys) {
+    const prevPeriods = p[key]?.periods ?? [];
+    const nextPeriods = n[key]?.periods ?? [];
+    if (prevPeriods.length !== nextPeriods.length) return true;
+    if (JSON.stringify(prevPeriods) !== JSON.stringify(nextPeriods)) return true;
+    if ((p[key]?.enabled ?? true) !== (n[key]?.enabled ?? true)) return true;
+  }
+  return false;
+}
+
+/** Return true when controller-config attrs that drive schedules or climate UI differ. */
 function controllerConfigAttrsChanged(prevAttrs, nextAttrs) {
   const pa = prevAttrs || {};
   const na = nextAttrs || {};
+  if (roomSchedulesChanged(pa.room_schedules, na.room_schedules)) return true;
   for (const key of ['room_active', 'room_enabled']) {
     const pv = pa[key];
     const nv = na[key];
@@ -142,12 +159,15 @@ function controllerConfigAttrsChanged(prevAttrs, nextAttrs) {
   return false;
 }
 
-/** Shallow snapshot of the controller-config attrs that drive climate power UI. */
+/** Shallow snapshot of controller-config attrs that drive schedule and climate UI. */
 function snapshotConfigAttrs(attrs) {
   const a = attrs || {};
   const snap = {};
   for (const key of ['room_active', 'room_enabled']) {
     if (a[key]) snap[key] = { ...a[key] };
+  }
+  if (a.room_schedules) {
+    snap.room_schedules = JSON.parse(JSON.stringify(a.room_schedules));
   }
   return snap;
 }
