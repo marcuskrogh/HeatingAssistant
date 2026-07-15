@@ -1,6 +1,6 @@
-import { setPanelHash } from '../panel-hash.js?v=101';
-import { ICONS } from './config-icons.js?v=101';
-import { el } from './config-ui.js?v=101';
+import { setPanelHash } from '../panel-hash.js?v=102';
+import { ICONS } from './config-icons.js?v=102';
+import { el } from './config-ui.js?v=102';
 
 // Landing page — cards linking to each configuration area
 // ---------------------------------------------------------------------------

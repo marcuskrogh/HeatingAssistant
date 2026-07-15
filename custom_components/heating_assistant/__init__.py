@@ -330,6 +330,10 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
             persisted = dict(entry.data.get(CONF_PERSISTED_SCHEDULES) or {})
             schedule_control.apply_persisted_schedules(coordinator, persisted)
+            from .coordinator import enablement
+
+            offsets = dict(entry.data.get(CONF_PERSISTED_COMFORT_OFFSETS) or {})
+            enablement.apply_persisted_comfort_offsets(coordinator, offsets)
             coordinator.async_update_listeners()
             return
     hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))

@@ -24,6 +24,14 @@ assert(
   'schedules-shared.js must export resolveRoomScheduleData',
 );
 assert(
+  /export function getPanelScheduleSnapshot/.test(source),
+  'schedules-shared.js must export getPanelScheduleSnapshot',
+);
+assert(
+  /export function getRoomComfortOffset/.test(source),
+  'schedules-shared.js must export getRoomComfortOffset',
+);
+assert(
   /export function mergeRoomSchedulesWithState/.test(source),
   'schedules-shared.js must export mergeRoomSchedulesWithState',
 );
@@ -41,7 +49,7 @@ assert(
   'schedules-index.js update() must refresh state for mergeRoomSchedulesWithState fallback',
 );
 
-const mod = await import(`${pathToFileURL(SHARED).href}?v=101`);
+const mod = await import(`${pathToFileURL(SHARED).href}?v=102`);
 const room = { slug: 'living_room', name: 'Living Room' };
 const periods = [{ name: 'Morning', start: '06:00', end: '09:00', mode: 'comfort', days: [0] }];
 const state = {
@@ -87,6 +95,13 @@ const resolvedStale = mod.resolveRoomScheduleData(room, staleWs, freshState);
 assert(
   resolvedStale?.periods?.[0]?.name === 'Morning',
   'resolver must prefer config-entity when WS is stale but non-empty',
+);
+
+const panelState = { __scheduleSnapshots: { living_room: periods } };
+const fromPanel = mod.resolveRoomScheduleData(room, {}, panelState);
+assert(
+  fromPanel?.periods?.length === 1,
+  'panel schedule snapshot must survive navigation when WS is empty',
 );
 
 console.log('panel schedule resolver harness: ok');

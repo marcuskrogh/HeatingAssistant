@@ -572,16 +572,38 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self._room_enabled[room_name] = bool(value)
 
         # Overlay with user-modified setpoints persisted across restarts.
-        persisted: Dict[str, Any] = self._entry.data.get(CONF_PERSISTED_SETPOINTS, {})
+        persisted: Dict[str, Any] = {}
+        hass_ref = hass if hass is not None else getattr(self, "hass", None)
+        config_entries = (
+            getattr(hass_ref, "config_entries", None) if hass_ref is not None else None
+        )
+        if config_entries is not None:
+            get_entry = getattr(config_entries, "async_get_entry", None)
+            if get_entry is not None:
+                real_entry = get_entry(self._entry.entry_id)
+                if real_entry is not None:
+                    persisted = dict(real_entry.data.get(CONF_PERSISTED_SETPOINTS) or {})
+        if not persisted:
+            persisted = dict(self._entry.data.get(CONF_PERSISTED_SETPOINTS) or {})
         for room_name, value in persisted.items():
             if room_name in self._base_setpoint:
                 self._base_setpoint[room_name] = float(value)
                 self.model.rooms[room_name].setpoint = float(value)
 
         # Overlay with user-modified comfort offsets persisted across restarts.
-        persisted_offsets: Dict[str, Any] = self._entry.data.get(
-            CONF_PERSISTED_COMFORT_OFFSETS, {}
-        )
+        persisted_offsets: Dict[str, Any] = {}
+        if config_entries is not None:
+            get_entry = getattr(config_entries, "async_get_entry", None)
+            if get_entry is not None:
+                real_entry = get_entry(self._entry.entry_id)
+                if real_entry is not None:
+                    persisted_offsets = dict(
+                        real_entry.data.get(CONF_PERSISTED_COMFORT_OFFSETS) or {}
+                    )
+        if not persisted_offsets:
+            persisted_offsets = dict(
+                self._entry.data.get(CONF_PERSISTED_COMFORT_OFFSETS) or {}
+            )
         for room_name, value in persisted_offsets.items():
             if room_name in self._room_comfort_offset:
                 self._room_comfort_offset[room_name] = float(value)
@@ -594,16 +616,14 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         # ``super().__init__`` assigns ``self.hass`` (same pattern as
         # ``_init_runtime_buffers``).
         persisted_schedules: Dict[str, Any] = {}
-        hass_ref = hass if hass is not None else getattr(self, "hass", None)
-        config_entries = (
-            getattr(hass_ref, "config_entries", None) if hass_ref is not None else None
-        )
         if config_entries is not None:
-            real_entry = config_entries.async_get_entry(self._entry.entry_id)
-            if real_entry is not None:
-                persisted_schedules = dict(
-                    real_entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
-                )
+            get_entry = getattr(config_entries, "async_get_entry", None)
+            if get_entry is not None:
+                real_entry = get_entry(self._entry.entry_id)
+                if real_entry is not None:
+                    persisted_schedules = dict(
+                        real_entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+                    )
         if not persisted_schedules:
             persisted_schedules = dict(
                 self._entry.data.get(CONF_PERSISTED_SCHEDULES) or {}

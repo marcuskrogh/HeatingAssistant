@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=101';
-import { findNextScheduledExperiment } from '../experiment-utils.js?v=101';
-import { setPanelHash } from '../panel-hash.js?v=101';
-import { updateRoomSchedule } from '../ha-services.js?v=101';
-import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=101';
+import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=102';
+import { findNextScheduledExperiment } from '../experiment-utils.js?v=102';
+import { setPanelHash } from '../panel-hash.js?v=102';
+import { updateRoomSchedule } from '../ha-services.js?v=102';
+import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=102';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -48,6 +48,7 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
 
   let cachedSchedules = {};
   let cachedExpsByRoom = {};
+  let scheduleLoadGen = 0;
 
   function buildCards(roomSchedules, expsByRoom = cachedExpsByRoom) {
     grid.innerHTML = '';
@@ -173,7 +174,9 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
   }
 
   // Fetch schedules and experiments from the coordinator via WebSocket
+  const initialGen = ++scheduleLoadGen;
   Promise.all([connection.getSchedules(), connection.listExperiments()]).then(([roomSchedules, experiments]) => {
+    if (initialGen !== scheduleLoadGen) return;
     const expsByRoom = {};
     if (Array.isArray(experiments)) {
       for (const e of experiments) {
@@ -188,8 +191,9 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
   return {
     update(newState) {
       state = newState;
-      // On state update, re-fetch from WebSocket to stay in sync
+      const gen = ++scheduleLoadGen;
       Promise.all([connection.getSchedules(), connection.listExperiments()]).then(([roomSchedules, experiments]) => {
+        if (gen !== scheduleLoadGen) return;
         const expsByRoom = {};
         if (Array.isArray(experiments)) {
           for (const e of experiments) {

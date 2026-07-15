@@ -17,6 +17,26 @@ if TYPE_CHECKING:
     from .core import HeatingAssistantCoordinator
 
 
+def _sync_persisted_key_to_merged_entry(
+    coordinator: "HeatingAssistantCoordinator", key: str, value: dict
+) -> None:
+    """Keep MergedEntry.data aligned with disk after a persisted-key write."""
+    merged_data = getattr(coordinator._entry, "data", None)
+    if isinstance(merged_data, dict):
+        coordinator._entry.data = {**dict(merged_data), key: dict(value)}
+
+
+def apply_persisted_comfort_offsets(
+    coordinator: "HeatingAssistantCoordinator", persisted_offsets: dict
+) -> None:
+    """Overlay dashboard-persisted comfort offsets onto coordinator state."""
+    for room_name, value in (persisted_offsets or {}).items():
+        if room_name in coordinator._room_comfort_offset:
+            offset = float(value)
+            coordinator._room_comfort_offset[room_name] = offset
+            coordinator.model.rooms[room_name].comfort_offset = offset
+
+
 def set_room_setpoint(
     coordinator: HeatingAssistantCoordinator, room_name: str, setpoint: float
 ) -> None:
@@ -37,10 +57,12 @@ def set_room_setpoint(
     # Persist so the setpoint survives HA restarts and scheduled off periods.
     real_entry = coordinator.hass.config_entries.async_get_entry(coordinator._entry.entry_id)
     if real_entry is not None:
+        persisted = dict(coordinator._base_setpoint)
         coordinator.hass.config_entries.async_update_entry(
             real_entry,
-            data={**dict(real_entry.data), CONF_PERSISTED_SETPOINTS: dict(coordinator._base_setpoint)},
+            data={**dict(real_entry.data), CONF_PERSISTED_SETPOINTS: persisted},
         )
+        _sync_persisted_key_to_merged_entry(coordinator, CONF_PERSISTED_SETPOINTS, persisted)
 
 
 def get_room_setpoint(coordinator: HeatingAssistantCoordinator, room_name: str) -> float:
@@ -81,13 +103,15 @@ def set_room_comfort_offset(
     # Persist so the offset survives HA restarts (same pattern as setpoints).
     real_entry = coordinator.hass.config_entries.async_get_entry(coordinator._entry.entry_id)
     if real_entry is not None:
+        persisted = dict(coordinator._room_comfort_offset)
         coordinator.hass.config_entries.async_update_entry(
             real_entry,
             data={
                 **dict(real_entry.data),
-                CONF_PERSISTED_COMFORT_OFFSETS: dict(coordinator._room_comfort_offset),
+                CONF_PERSISTED_COMFORT_OFFSETS: persisted,
             },
         )
+        _sync_persisted_key_to_merged_entry(coordinator, CONF_PERSISTED_COMFORT_OFFSETS, persisted)
 
 
 def get_room_comfort_offset(
