@@ -204,6 +204,9 @@ async def test_update_listener_applies_non_structural_changes_without_reload():
         def apply_runtime_reconfiguration(self, _config):
             return apply_runtime_reconfiguration(_config)
 
+        def async_update_listeners(self):
+            return None
+
     original = init_mod.HeatingAssistantCoordinator
     init_mod.HeatingAssistantCoordinator = _Coordinator
     hass.data = {

@@ -375,9 +375,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # dashboard saves and YAML-era schedules share one restart-safe store.
     from .coordinator import schedule_control
 
-    entry = hass.config_entries.async_get_entry(entry.entry_id) or entry
+    get_entry = getattr(hass.config_entries, "async_get_entry", None)
+    if get_entry is not None:
+        entry = get_entry(entry.entry_id) or entry
     if schedule_control.migrate_legacy_schedules_to_persisted(hass, entry):
-        entry = hass.config_entries.async_get_entry(entry.entry_id) or entry
+        if get_entry is not None:
+            entry = get_entry(entry.entry_id) or entry
         entry_data[CONF_PERSISTED_SCHEDULES] = dict(
             entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
         )
