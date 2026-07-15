@@ -89,6 +89,23 @@ def test_apply_persisted_schedules_skips_ambiguous_slug_keys():
 
 
 @pytest.mark.integration
+def test_init_room_state_prefers_real_entry_over_stale_merged_overlay():
+    """MergedEntry.data can lag behind disk; startup must read the real entry."""
+    persisted = {CONF_PERSISTED_SCHEDULES: {"Living Room": PERIODS}}
+    coord = _bare_coordinator_with_entry(
+        {CONF_PERSISTED_SCHEDULES: {}}  # stale in-memory overlay
+    )
+    real_entry = SimpleNamespace(entry_id="entry-1", data=persisted)
+    coord.hass.config_entries.async_get_entry = MagicMock(return_value=real_entry)
+
+    coord._init_room_state(
+        [{CONF_ROOM_NAME: "Living Room", "setpoint": 21.0, "comfort_offset": 2.0}]
+    )
+
+    assert len(coord._room_schedule["Living Room"].periods) == 1
+
+
+@pytest.mark.integration
 def test_init_room_state_reads_persisted_schedules_from_real_entry():
     """Startup overlay must read authoritative config-entry data, not stale MergedEntry."""
     entry_data = {
