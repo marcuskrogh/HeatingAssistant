@@ -16,6 +16,7 @@ from custom_components.heating_assistant.const import (
 from custom_components.heating_assistant.schedule import build_schedule
 from custom_components.heating_assistant.schedule_migration import (
     migrate_period_dict,
+    migrate_period_list,
     migrate_persisted_schedules_dict,
     migrate_schedule_types_in_persisted,
 )
@@ -106,3 +107,18 @@ def test_migrate_schedule_types_in_persisted_rewrites_entry():
     update_kwargs = hass.config_entries.async_update_entry.call_args.kwargs
     room_periods = update_kwargs["data"][CONF_PERSISTED_SCHEDULES]["Living Room"]
     assert room_periods[0][CONF_SCHEDULE_TYPE] == SCHEDULE_TYPE_WEEKLY_RECURRING
+
+
+def test_migrate_period_list_strips_legacy_keys_from_new_shape():
+    period = {
+        "name": "Eco",
+        "schedule_type": SCHEDULE_TYPE_WEEKLY_RECURRING,
+        "time_mode": SCHEDULE_TIME_MODE_WINDOW,
+        "start": "08:00",
+        "end": "16:00",
+        "recurring": True,
+        "all_day": False,
+    }
+    migrated = migrate_period_list([period])[0]
+    assert "recurring" not in migrated
+    assert "all_day" not in migrated

@@ -68,9 +68,11 @@ async def handle_set_system_enabled(hass: HomeAssistant, call: ServiceCall) -> N
 
 async def handle_update_room_schedule(hass: HomeAssistant, call: ServiceCall) -> None:
     """Update the schedule for a single room and persist to config entry."""
+    from ..schedule_migration import migrate_period_list
+
     coordinator = get_coordinator(hass)
     room_name: str = call.data["room_name"]
-    periods: list = call.data["periods"]
+    periods: list = migrate_period_list(list(call.data["periods"]))
 
     canonical_name = _resolve_room_name(coordinator, room_name)
 

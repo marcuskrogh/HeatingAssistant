@@ -252,7 +252,7 @@ def reload_room_schedule(
     Called by the ``update_room_schedule`` service after the config entry
     has been persisted with the new periods list.
     """
-    new_schedule = build_schedule(periods_raw)
+    new_schedule = build_schedule(migrate_period_list(list(periods_raw)))
     coordinator._room_schedule[room_name] = new_schedule
 
 
