@@ -15,6 +15,10 @@ function localHhmm(now) {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
+function localDateTimeString(now) {
+  return `${localDateString(now)}T${localHhmm(now)}:00`;
+}
+
 /** Mirrors Python ``SchedulePeriod._matches_time_of_day``. */
 function periodMatchesTimeOfDay(p, now, applyWeekdayFilter) {
   const day = (now.getDay() + 6) % 7;
@@ -36,26 +40,52 @@ function periodMatchesTimeOfDay(p, now, applyWeekdayFilter) {
   return hhmm >= p.start && hhmm < p.end;
 }
 
+function matchesWeeklyRecurring(p, now) {
+  const day = (now.getDay() + 6) % 7;
+  const days = p.days || [0, 1, 2, 3, 4, 5, 6];
+  if (p.time_mode === 'all_day') {
+    return days.includes(day);
+  }
+  return periodMatchesTimeOfDay(p, now, true);
+}
+
+function matchesDateRangeDaily(p, now) {
+  const dateStr = localDateString(now);
+  if (!p.start_date || !p.end_date) return false;
+  if (dateStr < p.start_date || dateStr > p.end_date) return false;
+  if (p.time_mode === 'all_day') return true;
+  return periodMatchesTimeOfDay(p, now, false);
+}
+
+function matchesContinuousSpan(p, now) {
+  if (!p.start_at || !p.end_at) return false;
+  const current = localDateTimeString(now);
+  return current >= p.start_at && current < p.end_at;
+}
+
 /** Mirrors Python ``SchedulePeriod.matches``. */
 export function periodMatchesNow(p, now = new Date()) {
   if (p.enabled === false) return false;
 
-  const dateStr = localDateString(now);
-  const day = (now.getDay() + 6) % 7;
+  const scheduleType = p.schedule_type
+    || (p.recurring === false ? 'date_range_daily' : 'weekly_recurring');
 
-  if (p.recurring === false) {
-    if (!p.start_date || !p.end_date) return false;
-    if (dateStr < p.start_date || dateStr > p.end_date) return false;
-    if (p.all_day) return true;
-    return periodMatchesTimeOfDay(p, now, false);
+  if (scheduleType === 'continuous_span') {
+    return matchesContinuousSpan(p, now);
+  }
+  if (scheduleType === 'date_range_daily') {
+    const normalized = { ...p };
+    if (!normalized.time_mode) {
+      normalized.time_mode = p.all_day ? 'all_day' : 'window';
+    }
+    return matchesDateRangeDaily(normalized, now);
   }
 
-  if (p.all_day) {
-    const days = p.days || [0, 1, 2, 3, 4, 5, 6];
-    return days.includes(day);
+  const normalized = { ...p };
+  if (!normalized.time_mode) {
+    normalized.time_mode = p.all_day ? 'all_day' : 'window';
   }
-
-  return periodMatchesTimeOfDay(p, now, true);
+  return matchesWeeklyRecurring(normalized, now);
 }
 
 /** Returns the period active right now, or null. */
@@ -68,7 +98,7 @@ export function findActivePeriod(periods) {
   return null;
 }
 
-/** Returns the next upcoming period today, or null (recurring periods only). */
+/** Returns the next upcoming period today, or null (weekly recurring window mode). */
 export function findNextPeriod(periods) {
   if (!periods || !periods.length) return null;
   const now = new Date();
@@ -76,10 +106,14 @@ export function findNextPeriod(periods) {
   const hhmm = localHhmm(now);
   let best = null;
   for (const p of periods) {
-    if (p.enabled === false || p.recurring === false) continue;
+    if (p.enabled === false) continue;
+    const scheduleType = p.schedule_type
+      || (p.recurring === false ? 'date_range_daily' : 'weekly_recurring');
+    if (scheduleType !== 'weekly_recurring') continue;
+    const timeMode = p.time_mode || (p.all_day ? 'all_day' : 'window');
+    if (timeMode === 'all_day') continue;
     const days = p.days || [0, 1, 2, 3, 4, 5, 6];
     if (!days.includes(day)) continue;
-    if (p.all_day) continue;
     if (p.start > hhmm) {
       if (!best || p.start < best.start) best = p;
     }
@@ -89,13 +123,55 @@ export function findNextPeriod(periods) {
 
 /** Human-readable time window for a period row. */
 export function formatPeriodTime(p) {
-  if (p.all_day) return 'All day';
-  if (p.recurring === false && p.start_date && p.end_date) {
+  const scheduleType = p.schedule_type
+    || (p.recurring === false ? 'date_range_daily' : 'weekly_recurring');
+  const timeMode = p.time_mode || (p.all_day ? 'all_day' : 'window');
+
+  if (scheduleType === 'continuous_span') {
+    if (p.start_at && p.end_at) return `${p.start_at} → ${p.end_at}`;
+    return 'Continuous span';
+  }
+  if (timeMode === 'all_day') return 'All day';
+  if (scheduleType === 'date_range_daily' && p.start_date && p.end_date) {
     const timePart = `${p.start || '—'}–${p.end || '—'}`;
     if (p.start_date === p.end_date) return `${p.start_date} ${timePart}`;
     return `${p.start_date} → ${p.end_date} ${timePart}`;
   }
   return `${p.start || '—'}–${p.end || '—'}`;
+}
+
+/** Map persisted schedule_type payloads to legacy editor toggles until SWD-23. */
+export function normalizePeriodForEditor(p) {
+  const out = {
+    ...p,
+    mode: p.mode || 'comfort',
+    enabled: p.enabled !== false,
+    days: p.days ? [...p.days] : [0, 1, 2, 3, 4, 5, 6],
+    start: p.start || '08:00',
+    end: p.end || '22:00',
+  };
+
+  if (p.schedule_type === 'continuous_span') {
+    out.recurring = false;
+    out.all_day = false;
+    return out;
+  }
+
+  if (p.schedule_type === 'date_range_daily') {
+    out.recurring = false;
+    out.all_day = p.time_mode === 'all_day';
+    return out;
+  }
+
+  if (p.schedule_type === 'weekly_recurring') {
+    out.recurring = true;
+    out.all_day = p.time_mode === 'all_day';
+    return out;
+  }
+
+  out.recurring = p.recurring !== false;
+  out.all_day = !!p.all_day;
+  return out;
 }
 
 /** Robust per-room schedule lookup: tries slug, name, and a case-insensitive
@@ -155,21 +231,51 @@ export function scheduleSectionHeaderHtml(title, badgeHtml = '') {
 
 /** Serialize a local period object for the update_room_schedule service. */
 export function serializeSchedulePeriod(p, defaults) {
+  if (p.schedule_type === 'continuous_span') {
+    const out = {
+      name: p.name,
+      schedule_type: 'continuous_span',
+      mode: p.mode,
+      enabled: p.enabled !== false,
+      start_at: p.start_at,
+      end_at: p.end_at,
+    };
+    if (p.mode === 'off') {
+      out.frost_protection = p.frost_protection ?? 12;
+    } else {
+      out.setpoint = p.setpoint ?? defaults.setpoint;
+      if (p.comfort_offset != null) out.comfort_offset = p.comfort_offset;
+      if (p.tracking_weight != null) out.tracking_weight = p.tracking_weight;
+      if (p.energy_weight != null) out.energy_weight = p.energy_weight;
+    }
+    return out;
+  }
+
+  const recurring = p.recurring !== false;
+  const allDay = !!p.all_day;
+  const scheduleType = recurring ? 'weekly_recurring' : 'date_range_daily';
+  const timeMode = allDay ? 'all_day' : 'window';
+
   const out = {
     name: p.name,
-    start: p.start,
-    end: p.end,
+    schedule_type: scheduleType,
+    time_mode: timeMode,
     mode: p.mode,
     enabled: p.enabled !== false,
-    recurring: p.recurring !== false,
-    all_day: !!p.all_day,
   };
-  if (p.recurring === false) {
+
+  if (timeMode === 'window') {
+    out.start = p.start;
+    out.end = p.end;
+  }
+
+  if (scheduleType === 'date_range_daily') {
     out.start_date = p.start_date;
     out.end_date = p.end_date;
   } else if (p.days) {
     out.days = p.days;
   }
+
   if (p.mode === 'off') {
     out.frost_protection = p.frost_protection ?? 12;
   } else {

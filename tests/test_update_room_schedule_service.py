@@ -45,6 +45,8 @@ def _make_coordinator(room_names=None):
 PERIODS = [
     {
         "name": "Morning",
+        "schedule_type": "weekly_recurring",
+        "time_mode": "window",
         "mode": "comfort",
         "start": "06:00",
         "end": "09:00",

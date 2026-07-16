@@ -188,18 +188,26 @@ def register_control_services(hass: HomeAssistant) -> None:
                     vol.Schema(
                         {
                             vol.Required("name"): cv.string,
+                            vol.Required("schedule_type"): vol.In(
+                                [
+                                    "weekly_recurring",
+                                    "date_range_daily",
+                                    "continuous_span",
+                                ]
+                            ),
                             vol.Required("mode"): vol.In(["comfort", "off"]),
-                            vol.Required("start"): cv.string,
-                            vol.Required("end"): cv.string,
+                            vol.Optional("time_mode"): vol.In(["window", "all_day"]),
+                            vol.Optional("start"): cv.string,
+                            vol.Optional("end"): cv.string,
+                            vol.Optional("start_at"): cv.string,
+                            vol.Optional("end_at"): cv.string,
                             vol.Optional("days"): [vol.Any(vol.Coerce(int), cv.string)],
                             vol.Optional("setpoint"): vol.Coerce(float),
                             vol.Optional("frost_protection", default=12.0): vol.Coerce(float),
                             vol.Optional("comfort_offset"): vol.Coerce(float),
                             vol.Optional("tracking_weight"): vol.Coerce(float),
                             vol.Optional("energy_weight"): vol.Coerce(float),
-                            vol.Optional("all_day", default=False): cv.boolean,
                             vol.Optional("enabled", default=True): cv.boolean,
-                            vol.Optional("recurring", default=True): cv.boolean,
                             vol.Optional("start_date"): cv.string,
                             vol.Optional("end_date"): cv.string,
                         }

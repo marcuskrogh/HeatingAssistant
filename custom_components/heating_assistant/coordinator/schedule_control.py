@@ -13,8 +13,10 @@ from ..schedule import (
     build_schedule,
     control_params_at,
     next_transition,
+    period_to_dict,
     resolve_effective_control_params,
 )
+from ..schedule_migration import migrate_period_list
 from .types import ControlTrajectory
 
 if TYPE_CHECKING:
@@ -292,7 +294,9 @@ def apply_persisted_schedules(
                 else room_by_slug.get(key_slug)
             )
         if canonical is not None:
-            coordinator._room_schedule[canonical] = build_schedule(periods_raw)
+            coordinator._room_schedule[canonical] = build_schedule(
+                migrate_period_list(list(periods_raw))
+            )
 
 
 def migrate_legacy_schedules_to_persisted(hass: Any, entry: Any) -> bool:
@@ -352,28 +356,7 @@ def serialize_room_schedules(
         periods_payload: list = []
         if room_schedule and not room_schedule.is_empty:
             periods_payload = [
-                {
-                    "name": p.name,
-                    "start": p.start.strftime("%H:%M"),
-                    "end": p.end.strftime("%H:%M"),
-                    "mode": p.mode,
-                    "setpoint": p.setpoint,
-                    "frost_protection": p.frost_protection,
-                    "days": sorted(p.days),
-                    "comfort_offset": p.comfort_offset,
-                    "tracking_weight": p.tracking_weight,
-                    "energy_weight": p.energy_weight,
-                    "all_day": p.all_day,
-                    "enabled": p.enabled,
-                    "recurring": p.recurring,
-                    "start_date": (
-                        p.start_date.isoformat() if p.start_date is not None else None
-                    ),
-                    "end_date": (
-                        p.end_date.isoformat() if p.end_date is not None else None
-                    ),
-                }
-                for p in room_schedule.periods
+                period_to_dict(p) for p in room_schedule.periods
             ]
         schedules[slugify(room_name)] = {
             "enabled": coordinator._schedule_enabled.get(room_name, True),
