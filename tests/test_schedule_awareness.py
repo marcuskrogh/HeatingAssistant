@@ -55,6 +55,8 @@ def test_control_trajectory_carries_forward_comfort_values_through_off_period() 
         [
             {
                 "name": "morning",
+                "schedule_type": "weekly_recurring",
+                "time_mode": "window",
                 "start": "06:00",
                 "end": "08:00",
                 "mode": "comfort",
@@ -65,6 +67,8 @@ def test_control_trajectory_carries_forward_comfort_values_through_off_period() 
             },
             {
                 "name": "day_off",
+                "schedule_type": "weekly_recurring",
+                "time_mode": "window",
                 "start": "08:00",
                 "end": "10:00",
                 "mode": "off",
@@ -72,6 +76,8 @@ def test_control_trajectory_carries_forward_comfort_values_through_off_period() 
             },
             {
                 "name": "late_comfort",
+                "schedule_type": "weekly_recurring",
+                "time_mode": "window",
                 "start": "10:00",
                 "end": "12:00",
                 "mode": "comfort",
@@ -109,7 +115,14 @@ def test_control_trajectory_uses_current_effective_values_when_schedule_suspende
     coord = _make_coordinator_stub_for_trajectory()
     coord._schedule_enabled["living_room"] = False
     coord._room_schedule["living_room"] = build_schedule(
-        [{"name": "ignored", "start": "00:00", "end": "23:59", "setpoint": 25.0}]
+        [{
+            "name": "ignored",
+            "schedule_type": "weekly_recurring",
+            "time_mode": "window",
+            "start": "00:00",
+            "end": "23:59",
+            "setpoint": 25.0,
+        }]
     )
 
     traj = coord._compute_control_trajectory(

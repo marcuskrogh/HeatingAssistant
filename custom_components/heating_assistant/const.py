@@ -49,11 +49,27 @@ CONF_SCHEDULE_FROST_PROTECTION = "frost_protection"  # °C floor enforced while 
 CONF_SCHEDULE_COMFORT_OFFSET = "comfort_offset"  # °C half-width of soft constraint corridor; None = use room default
 CONF_SCHEDULE_TRACKING_WEIGHT = "tracking_weight"  # multiplier on global Q (setpoint tracking aggressiveness); None = 1.0
 CONF_SCHEDULE_ENERGY_WEIGHT = "energy_weight"    # multiplier on global R (energy use penalty); None = 1.0
-CONF_SCHEDULE_ALL_DAY = "all_day"                # cover the full day on matching weekdays/dates
+CONF_SCHEDULE_ALL_DAY = "all_day"                # legacy; migrated to time_mode (not persisted)
 CONF_SCHEDULE_ENABLED = "enabled"                # per-period enable; default True
-CONF_SCHEDULE_RECURRING = "recurring"            # weekly recurrence; False = one-off date range
-CONF_SCHEDULE_START_DATE = "start_date"          # ISO date (YYYY-MM-DD) for one-off periods
-CONF_SCHEDULE_END_DATE = "end_date"              # ISO date (YYYY-MM-DD) for one-off periods
+CONF_SCHEDULE_RECURRING = "recurring"            # legacy; migrated to schedule_type (not persisted)
+CONF_SCHEDULE_START_DATE = "start_date"          # ISO date (YYYY-MM-DD) for date_range_daily
+CONF_SCHEDULE_END_DATE = "end_date"              # ISO date (YYYY-MM-DD) for date_range_daily
+CONF_SCHEDULE_TYPE = "schedule_type"             # weekly_recurring | date_range_daily | continuous_span
+CONF_SCHEDULE_TIME_MODE = "time_mode"            # window | all_day (first two types only)
+CONF_SCHEDULE_START_AT = "start_at"              # local ISO datetime for continuous_span
+CONF_SCHEDULE_END_AT = "end_at"                  # local ISO datetime for continuous_span
+
+SCHEDULE_TYPE_WEEKLY_RECURRING = "weekly_recurring"
+SCHEDULE_TYPE_DATE_RANGE_DAILY = "date_range_daily"
+SCHEDULE_TYPE_CONTINUOUS_SPAN = "continuous_span"
+SCHEDULE_TIME_MODE_WINDOW = "window"
+SCHEDULE_TIME_MODE_ALL_DAY = "all_day"
+SCHEDULE_TYPES = (
+    SCHEDULE_TYPE_WEEKLY_RECURRING,
+    SCHEDULE_TYPE_DATE_RANGE_DAILY,
+    SCHEDULE_TYPE_CONTINUOUS_SPAN,
+)
+SCHEDULE_TIME_MODES = (SCHEDULE_TIME_MODE_WINDOW, SCHEDULE_TIME_MODE_ALL_DAY)
 
 # Connection configuration keys
 CONF_CONNECTED_ROOM = "room"

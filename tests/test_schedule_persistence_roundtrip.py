@@ -27,14 +27,14 @@ from tests.helpers.coordinator_stubs import make_minimal_coordinator
 PERIODS = [
     {
         "name": "Morning",
+        "schedule_type": "weekly_recurring",
+        "time_mode": "window",
         "mode": "comfort",
         "start": "06:00",
         "end": "09:00",
         "days": [0, 1, 2, 3, 4],
         "setpoint": 21.0,
         "enabled": True,
-        "recurring": True,
-        "all_day": False,
     }
 ]
 

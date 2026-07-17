@@ -236,6 +236,7 @@ from ..schedule import (
     control_params_at,
     resolve_effective_setpoint,
 )
+from ..schedule_migration import migrate_period_list
 from .. import weather as _weather
 from ..experiments import ExperimentManager
 
@@ -557,7 +558,10 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._effective_setpoint: Dict[str, EffectiveControlParams] = {}
         for rc in rooms_cfg:
             room_name = rc[CONF_ROOM_NAME]
-            self._room_schedule[room_name] = build_schedule(rc.get(CONF_SCHEDULE))
+            schedule_raw = rc.get(CONF_SCHEDULE)
+            if schedule_raw:
+                schedule_raw = migrate_period_list(list(schedule_raw))
+            self._room_schedule[room_name] = build_schedule(schedule_raw)
             self._base_setpoint[room_name] = float(
                 rc.get(CONF_SETPOINT, DEFAULT_SETPOINT)
             )

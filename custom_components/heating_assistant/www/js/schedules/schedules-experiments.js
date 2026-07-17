@@ -1,8 +1,8 @@
-import { signalLabel, experimentRowHtml } from '../experiment-utils.js?v=104';
-import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=104';
+import { signalLabel, experimentRowHtml } from '../experiment-utils.js?v=105';
+import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=105';
 import {
   EXCITATION_OPTIONS, fmtExpWindow, tsToLocalInput, expStatusInfo, expCardModifier,
-} from './schedules-shared.js?v=104';
+} from './schedules-shared.js?v=105';
 
 export function renderExperimentsSection(container, room, connection, hass) {
   const sectionWrap = document.createElement('div');

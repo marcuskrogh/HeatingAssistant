@@ -394,6 +394,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
         )
 
+    from .schedule_migration import migrate_schedule_types_in_persisted
+
+    if get_entry is not None:
+        entry = get_entry(entry.entry_id) or entry
+    if migrate_schedule_types_in_persisted(hass, entry):
+        if get_entry is not None:
+            entry = get_entry(entry.entry_id) or entry
+        entry_data[CONF_PERSISTED_SCHEDULES] = dict(
+            entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+        )
+
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)
 

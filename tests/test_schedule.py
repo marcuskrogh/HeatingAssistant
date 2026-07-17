@@ -14,6 +14,11 @@ from custom_components.heating_assistant.const import (
     DEFAULT_FROST_PROTECTION,
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
+    SCHEDULE_TIME_MODE_ALL_DAY,
+    SCHEDULE_TIME_MODE_WINDOW,
+    SCHEDULE_TYPE_CONTINUOUS_SPAN,
+    SCHEDULE_TYPE_DATE_RANGE_DAILY,
+    SCHEDULE_TYPE_WEEKLY_RECURRING,
 )
 from custom_components.heating_assistant.schedule import (
     RoomSchedule,
@@ -27,6 +32,17 @@ from custom_components.heating_assistant.schedule import (
 
 # A fixed Monday (weekday() == 0) used as a base for time arithmetic.
 MONDAY = datetime(2026, 1, 5)
+
+
+def _weekly_window(name: str, start: time, end: time, **kwargs) -> SchedulePeriod:
+    return SchedulePeriod(
+        name=name,
+        schedule_type=SCHEDULE_TYPE_WEEKLY_RECURRING,
+        time_mode=SCHEDULE_TIME_MODE_WINDOW,
+        start=start,
+        end=end,
+        **kwargs,
+    )
 
 
 def _at(hour: int, minute: int = 0, day_offset: int = 0) -> datetime:
@@ -69,38 +85,28 @@ class TestParseTime:
 
 class TestSchedulePeriodMatches:
     def test_matches_inside_normal_window(self):
-        period = SchedulePeriod(
-            name="evening", start=time(18, 0), end=time(22, 0),
-        )
+        period = _weekly_window("evening", time(18, 0), time(22, 0))
         assert period.matches(_at(18, 0)) is True
         assert period.matches(_at(20, 30)) is True
 
     def test_does_not_match_at_end(self):
-        period = SchedulePeriod(
-            name="evening", start=time(18, 0), end=time(22, 0),
-        )
+        period = _weekly_window("evening", time(18, 0), time(22, 0))
         assert period.matches(_at(22, 0)) is False
         assert period.matches(_at(22, 30)) is False
 
     def test_does_not_match_before_start(self):
-        period = SchedulePeriod(
-            name="evening", start=time(18, 0), end=time(22, 0),
-        )
+        period = _weekly_window("evening", time(18, 0), time(22, 0))
         assert period.matches(_at(17, 59)) is False
 
     def test_wraps_past_midnight_first_half(self):
-        period = SchedulePeriod(
-            name="night", start=time(22, 0), end=time(4, 0),
-        )
+        period = _weekly_window("night", time(22, 0), time(4, 0))
         # Monday 22:30 is in the night period (start-side).
         assert period.matches(_at(22, 30)) is True
         # Monday 23:59 still in.
         assert period.matches(_at(23, 59)) is True
 
     def test_wraps_past_midnight_second_half(self):
-        period = SchedulePeriod(
-            name="night", start=time(22, 0), end=time(4, 0),
-        )
+        period = _weekly_window("night", time(22, 0), time(4, 0))
         # Tuesday 02:00 (1 day after Monday) is still in the wrap.
         assert period.matches(_at(2, 0, day_offset=1)) is True
         # Tuesday 03:59 in.
@@ -109,16 +115,14 @@ class TestSchedulePeriodMatches:
         assert period.matches(_at(4, 0, day_offset=1)) is False
 
     def test_wraps_past_midnight_outside_window(self):
-        period = SchedulePeriod(
-            name="night", start=time(22, 0), end=time(4, 0),
-        )
+        period = _weekly_window("night", time(22, 0), time(4, 0))
         # Monday 12:00 is well outside.
         assert period.matches(_at(12, 0)) is False
 
     def test_day_filter_excludes_unlisted_weekdays(self):
-        period = SchedulePeriod(
-            name="workday", start=time(9, 0), end=time(17, 0),
-            days=frozenset({0, 1, 2, 3, 4}),  # Mon-Fri
+        period = _weekly_window(
+            "workday", time(9, 0), time(17, 0),
+            days=frozenset({0, 1, 2, 3, 4}),
         )
         # Monday → in.
         assert period.matches(_at(10, 0)) is True
@@ -127,9 +131,9 @@ class TestSchedulePeriodMatches:
 
     def test_wrap_around_uses_start_day_for_filter(self):
         """A night period starting Sunday should still match Monday early hours."""
-        period = SchedulePeriod(
-            name="weekend_night", start=time(23, 0), end=time(8, 0),
-            days=frozenset({6}),  # Sunday only (weekday=6)
+        period = _weekly_window(
+            "weekend_night", time(23, 0), time(8, 0),
+            days=frozenset({6}),
         )
         sunday_evening = _at(23, 30, day_offset=6)  # Monday + 6 = Sunday next week
         # Verify weekday assumption.
@@ -156,16 +160,16 @@ class TestRoomScheduleActive:
 
     def test_returns_none_when_no_period_matches(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("night", time(22, 0), time(4, 0)),
+            _weekly_window("night", time(22, 0), time(4, 0)),
         ])
         assert sched.active(_at(12, 0)) is None
 
     def test_returns_first_matching_period(self):
         # Two overlapping periods — declaration order wins.
         sched = RoomSchedule(periods=[
-            SchedulePeriod("workday_eco", time(9, 0), time(17, 0),
+            _weekly_window("workday_eco", time(9, 0), time(17, 0),
                            days=frozenset({0})),
-            SchedulePeriod("daytime", time(8, 0), time(18, 0)),
+            _weekly_window("daytime", time(8, 0), time(18, 0)),
         ])
         active = sched.active(_at(10, 0))
         assert active is not None
@@ -189,7 +193,7 @@ class TestResolveEffectiveSetpoint:
 
     def test_no_active_period_returns_base(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("night", time(22, 0), time(4, 0)),
+            _weekly_window("night", time(22, 0), time(4, 0)),
         ])
         result = resolve_effective_setpoint(sched, base_setpoint=21.0,
                                             measured_temp=20.0, now=_at(12, 0))
@@ -198,7 +202,7 @@ class TestResolveEffectiveSetpoint:
 
     def test_comfort_period_with_explicit_setpoint(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("workday_eco", time(9, 0), time(17, 0),
+            _weekly_window("workday_eco", time(9, 0), time(17, 0),
                            setpoint=18.0),
         ])
         result = resolve_effective_setpoint(sched, base_setpoint=21.0,
@@ -210,7 +214,7 @@ class TestResolveEffectiveSetpoint:
 
     def test_comfort_period_falls_back_to_base_setpoint(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("evening", time(18, 0), time(22, 0)),
+            _weekly_window("evening", time(18, 0), time(22, 0)),
         ])
         result = resolve_effective_setpoint(sched, base_setpoint=21.0,
                                             measured_temp=20.0, now=_at(20, 0))
@@ -219,7 +223,7 @@ class TestResolveEffectiveSetpoint:
 
     def test_off_period_disables_room(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("night", time(22, 0), time(4, 0),
+            _weekly_window("night", time(22, 0), time(4, 0),
                            mode=SCHEDULE_MODE_OFF, frost_protection=12.0),
         ])
         result = resolve_effective_setpoint(sched, base_setpoint=21.0,
@@ -232,7 +236,7 @@ class TestResolveEffectiveSetpoint:
     def test_off_period_frost_protection_trips(self):
         """Below the floor, the room is re-enabled to defend the floor."""
         sched = RoomSchedule(periods=[
-            SchedulePeriod("night", time(22, 0), time(4, 0),
+            _weekly_window("night", time(22, 0), time(4, 0),
                            mode=SCHEDULE_MODE_OFF, frost_protection=12.0),
         ])
         result = resolve_effective_setpoint(sched, base_setpoint=21.0,
@@ -243,7 +247,7 @@ class TestResolveEffectiveSetpoint:
 
     def test_off_period_with_missing_temperature_stays_off(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("night", time(22, 0), time(4, 0),
+            _weekly_window("night", time(22, 0), time(4, 0),
                            mode=SCHEDULE_MODE_OFF, frost_protection=12.0),
         ])
         result = resolve_effective_setpoint(sched, base_setpoint=21.0,
@@ -265,7 +269,12 @@ class TestBuildSchedule:
 
     def test_builds_minimal_period(self):
         sched = build_schedule([
-            {"start": "22:00", "end": "04:00"},
+            {
+                "schedule_type": SCHEDULE_TYPE_WEEKLY_RECURRING,
+                "time_mode": SCHEDULE_TIME_MODE_WINDOW,
+                "start": "22:00",
+                "end": "04:00",
+            },
         ])
         assert len(sched.periods) == 1
         period = sched.periods[0]
@@ -282,6 +291,8 @@ class TestBuildSchedule:
         sched = build_schedule([
             {
                 "name": "night",
+                "schedule_type": SCHEDULE_TYPE_WEEKLY_RECURRING,
+                "time_mode": SCHEDULE_TIME_MODE_WINDOW,
                 "start": "22:00",
                 "end": "04:00",
                 "mode": "off",
@@ -297,15 +308,29 @@ class TestBuildSchedule:
 
     def test_rejects_unknown_mode(self):
         with pytest.raises(ValueError):
-            build_schedule([{"start": "08:00", "end": "10:00", "mode": "boost"}])
+            build_schedule([
+                {
+                    "schedule_type": SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    "time_mode": SCHEDULE_TIME_MODE_WINDOW,
+                    "start": "08:00",
+                    "end": "10:00",
+                    "mode": "boost",
+                }
+            ])
 
     def test_rejects_unknown_day(self):
         with pytest.raises(ValueError):
             build_schedule([
-                {"start": "08:00", "end": "10:00", "days": ["monday", "funday"]},
+                {
+                    "schedule_type": SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    "time_mode": SCHEDULE_TIME_MODE_WINDOW,
+                    "start": "08:00",
+                    "end": "10:00",
+                    "days": ["monday", "funday"],
+                },
             ])
 
-    def test_rejects_missing_start(self):
+    def test_rejects_missing_schedule_type(self):
         with pytest.raises(ValueError):
             build_schedule([{"end": "10:00"}])
 
@@ -321,7 +346,7 @@ class TestNextTransition:
 
     def test_finds_upcoming_start(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("night", time(22, 0), time(4, 0)),
+            _weekly_window("night", time(22, 0), time(4, 0)),
         ])
         # At 21:00 the next transition is the start of "night" at 22:00.
         target = next_transition(sched, _at(21, 0))
@@ -331,7 +356,7 @@ class TestNextTransition:
 
     def test_finds_upcoming_end(self):
         sched = RoomSchedule(periods=[
-            SchedulePeriod("night", time(22, 0), time(4, 0)),
+            _weekly_window("night", time(22, 0), time(4, 0)),
         ])
         # Already inside the period at 23:00 → next transition is the 04:00
         # end on the next day.
@@ -350,10 +375,9 @@ class TestScheduleExtendedFeatures:
     def test_all_day_recurring_matches_entire_day(self):
         period = SchedulePeriod(
             name="weekend",
-            start=time(8, 0),
-            end=time(22, 0),
+            schedule_type=SCHEDULE_TYPE_WEEKLY_RECURRING,
+            time_mode=SCHEDULE_TIME_MODE_ALL_DAY,
             days=frozenset({5, 6}),
-            all_day=True,
         )
         saturday = datetime(2026, 1, 10, 3, 30)  # Saturday
         assert period.matches(saturday) is True
@@ -364,20 +388,17 @@ class TestScheduleExtendedFeatures:
     def test_disabled_period_never_matches(self):
         period = SchedulePeriod(
             name="vacation",
-            start=time(0, 0),
-            end=time(23, 59),
+            schedule_type=SCHEDULE_TYPE_WEEKLY_RECURRING,
+            time_mode=SCHEDULE_TIME_MODE_ALL_DAY,
             enabled=False,
-            all_day=True,
         )
         assert period.matches(_at(12, 0)) is False
 
     def test_one_off_date_range_all_day(self):
         period = SchedulePeriod(
             name="trip",
-            start=time(0, 0),
-            end=time(23, 59),
-            recurring=False,
-            all_day=True,
+            schedule_type=SCHEDULE_TYPE_DATE_RANGE_DAILY,
+            time_mode=SCHEDULE_TIME_MODE_ALL_DAY,
             start_date=datetime(2026, 7, 20).date(),
             end_date=datetime(2026, 7, 27).date(),
             mode=SCHEDULE_MODE_OFF,
@@ -390,9 +411,10 @@ class TestScheduleExtendedFeatures:
     def test_one_off_time_window(self):
         period = SchedulePeriod(
             name="event",
+            schedule_type=SCHEDULE_TYPE_DATE_RANGE_DAILY,
+            time_mode=SCHEDULE_TIME_MODE_WINDOW,
             start=time(9, 0),
             end=time(17, 0),
-            recurring=False,
             start_date=datetime(2026, 3, 1).date(),
             end_date=datetime(2026, 3, 1).date(),
         )
@@ -400,28 +422,43 @@ class TestScheduleExtendedFeatures:
         assert period.matches(datetime(2026, 3, 1, 17, 0)) is False
         assert period.matches(datetime(2026, 3, 2, 10, 0)) is False
 
+    def test_continuous_span_half_open(self):
+        period = SchedulePeriod(
+            name="vacation",
+            schedule_type=SCHEDULE_TYPE_CONTINUOUS_SPAN,
+            start_at=datetime(2026, 7, 20, 10, 0),
+            end_at=datetime(2026, 7, 20, 14, 0),
+        )
+        assert period.matches(datetime(2026, 7, 20, 10, 0)) is True
+        assert period.matches(datetime(2026, 7, 20, 13, 59)) is True
+        assert period.matches(datetime(2026, 7, 20, 14, 0)) is False
+
     def test_build_schedule_parses_extended_fields(self):
         sched = build_schedule([
             {
                 "name": "vacation",
-                "start": "00:00",
-                "end": "23:59",
+                "schedule_type": SCHEDULE_TYPE_DATE_RANGE_DAILY,
+                "time_mode": SCHEDULE_TIME_MODE_ALL_DAY,
                 "mode": "off",
-                "recurring": False,
-                "all_day": True,
                 "start_date": "2026-07-20",
                 "end_date": "2026-07-27",
                 "enabled": False,
             }
         ])
         period = sched.periods[0]
-        assert period.all_day is True
-        assert period.recurring is False
+        assert period.time_mode == SCHEDULE_TIME_MODE_ALL_DAY
+        assert period.schedule_type == SCHEDULE_TYPE_DATE_RANGE_DAILY
         assert period.enabled is False
         assert period.start_date == datetime(2026, 7, 20).date()
 
-    def test_build_schedule_requires_dates_for_one_off(self):
+    def test_build_schedule_requires_dates_for_date_range_daily(self):
         with pytest.raises(ValueError):
             build_schedule([
-                {"name": "trip", "start": "08:00", "end": "10:00", "recurring": False},
+                {
+                    "name": "trip",
+                    "schedule_type": SCHEDULE_TYPE_DATE_RANGE_DAILY,
+                    "time_mode": SCHEDULE_TIME_MODE_WINDOW,
+                    "start": "08:00",
+                    "end": "10:00",
+                },
             ])
