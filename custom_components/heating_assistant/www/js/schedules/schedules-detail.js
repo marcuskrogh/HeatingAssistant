@@ -1,8 +1,22 @@
-import { findActivePeriod, findNextPeriod, periodModeDisplay, formatPeriodTime, serializeSchedulePeriod, normalizePeriodForEditor } from '../schedule-utils.js?v=105';
-import { setPanelHash } from '../panel-hash.js?v=105';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=105';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=105';
-import { renderExperimentsSection } from './schedules-experiments.js?v=105';
+import {
+  activeOverrideFields,
+  findActivePeriod,
+  findNextPeriod,
+  formatPeriodTime,
+  hasOverride,
+  normalizePeriodForEditor,
+  OVERRIDE_META,
+  overrideBaseline,
+  periodModeDisplay,
+  SCHEDULE_TYPE_CONTINUOUS,
+  SCHEDULE_TYPE_DATE_RANGE,
+  SCHEDULE_TYPE_WEEKLY,
+  serializeSchedulePeriod,
+} from '../schedule-utils.js?v=106';
+import { setPanelHash } from '../panel-hash.js?v=106';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=106';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=106';
+import { renderExperimentsSection } from './schedules-experiments.js?v=106';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function renderScheduleDetail(container, roomSlug, rooms, state, connection, hass) {
@@ -107,9 +121,77 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     return {
       setpoint: config.room_setpoints?.[room.slug] ?? 21,
       comfort_offset: config.room_comfort_offsets?.[room.slug] ?? config.comfort_offset ?? 2.0,
-      tracking_weight: config.tracking_weight ?? 0.0,
-      energy_weight: config.energy_weight ?? 0.01,
+      tracking_weight: 1.0,
+      energy_weight: 1.0,
+      frost_protection: 12,
     };
+  }
+
+  function escapeAttr(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function ensureWhenState(period) {
+    const normalized = normalizePeriodForEditor(period);
+    period._whenByType = normalized._whenByType;
+    period.schedule_type = normalized.schedule_type;
+    return period._whenByType;
+  }
+
+  function typeLabel(type) {
+    if (type === SCHEDULE_TYPE_DATE_RANGE) return 'Date range';
+    if (type === SCHEDULE_TYPE_CONTINUOUS) return 'Continuous span';
+    return 'Weekly recurring';
+  }
+
+  function segmentedHtml(field, value, options, extraClass = '') {
+    return `<div class="schedule-form__segmented ${extraClass}" data-segmented-field="${field}">
+      ${options.map((opt) => `
+        <button type="button"
+          class="schedule-form__segment${value === opt.value ? ' schedule-form__segment--active' : ''}"
+          data-value="${opt.value}">${opt.label}</button>
+      `).join('')}
+    </div>`;
+  }
+
+  function overrideInputHtml(field, period, defaults) {
+    const meta = OVERRIDE_META[field];
+    const value = hasOverride(period, field) ? period[field] : overrideBaseline(field, defaults);
+    const unit = meta.unit ? `<span class="form-hint">${meta.unit}</span>` : '';
+    return `
+      <div class="schedule-form__override" data-override="${field}">
+        <div class="schedule-form__override-main">
+          <label class="form-label">${meta.label}</label>
+          <div class="schedule-form__override-control">
+            <input class="form-input form-input--time" type="number" step="${meta.step}" min="${meta.min}" max="${meta.max}"
+              value="${escapeAttr(value)}" data-field="${field}">
+            <button type="button" class="schedule-form__override-remove" data-remove-override="${field}" title="Return to inherit">Remove</button>
+          </div>
+          <span class="form-hint">${meta.hint}${unit ? ` - ${unit}` : ''}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function overridesHtml(period, defaults) {
+    const modeFields = activeOverrideFields(period.mode || 'comfort');
+    const shownFields = modeFields.filter((field) => hasOverride(period, field));
+    const addable = modeFields.filter((field) => !hasOverride(period, field));
+    const rows = shownFields.map((field) => overrideInputHtml(field, period, defaults)).join('');
+    const empty = rows ? '' : '<p class="schedule-form__section-empty">No overrides. This period inherits room/default values.</p>';
+    const picker = addable.length > 0 ? `
+      <div class="schedule-form__override-picker">
+        <select class="schedule-form__mode-select" data-action="override-picker" aria-label="Override to add">
+          ${addable.map((field) => `<option value="${field}">${OVERRIDE_META[field].label}</option>`).join('')}
+        </select>
+        <button type="button" class="btn btn--sm" data-action="add-override">Add override</button>
+      </div>
+    ` : '<p class="schedule-form__section-empty">All overrides for this mode are shown.</p>';
+    return `${empty}${rows}${picker}`;
   }
 
   function renderToggle(schedData) {
@@ -148,6 +230,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   }
 
   function renderPeriodForms() {
+    localPeriods = localPeriods.map((period) => normalizePeriodForEditor(period));
     const defaults = getDefaults(state);
     const activePeriod = findActivePeriod(localPeriods);
     const nextPeriod = findNextPeriod(localPeriods);
@@ -191,7 +274,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
         ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
         <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
-        <span class="schedule-form__period-name">${p.name || 'Period'}</span>
+        <span class="schedule-form__period-name">${escapeAttr(p.name || 'Period')}</span>
         <span class="schedule-form__period-time">${formatPeriodTime(p)}</span>
         <span class="sched-row__mode ${modeCls}">${modeText}</span>
         <button class="schedule-form__delete" title="Delete period">×</button>
@@ -204,103 +287,110 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       cardBody.className = 'schedule-form__period-body';
       if (!isExpanded) cardBody.hidden = true;
 
-      const modeOptions = `
-        <option value="comfort"${p.mode !== 'off' ? ' selected' : ''}>Comfort</option>
-        <option value="off"${p.mode === 'off' ? ' selected' : ''}>Off</option>
-      `;
-
+      const scheduleType = p.schedule_type || SCHEDULE_TYPE_WEEKLY;
+      const whenByType = ensureWhenState(p);
+      const weeklyWhen = whenByType[SCHEDULE_TYPE_WEEKLY];
+      const dateWhen = whenByType[SCHEDULE_TYPE_DATE_RANGE];
+      const continuousWhen = whenByType[SCHEDULE_TYPE_CONTINUOUS];
+      const activeWhen = whenByType[scheduleType];
+      const timeMode = activeWhen?.time_mode || 'window';
       let daysHtml = '';
       for (let d = 0; d < 7; d++) {
-        const on = (p.days || []).includes(d);
+        const on = (weeklyWhen.days || []).includes(d);
         daysHtml += `<span class="schedule-form__day${on ? ' schedule-form__day--active' : ''}" data-day="${d}">${DAY_NAMES[d]}</span>`;
       }
 
-      const isComfort = p.mode !== 'off';
-      const isRecurring = p.recurring !== false;
-      const isAllDay = !!p.all_day;
-      const today = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
-      const defaultDate = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-
-      const paramsHtml = isComfort ? `
-        <div class="schedule-form__period-row">
-          <div class="form-group">
-            <label class="form-label">Setpoint (°C)</label>
-            <input class="form-input form-input--time" type="number" step="0.5" min="5" max="35"
-              value="${p.setpoint ?? defaults.setpoint}" data-field="setpoint">
+      let whenHtml = '';
+      if (scheduleType === SCHEDULE_TYPE_WEEKLY) {
+        whenHtml = `
+          <div class="schedule-form__days" data-period="${i}">${daysHtml}</div>
+          ${segmentedHtml('time_mode', timeMode, [
+            { value: 'all_day', label: 'All day' },
+            { value: 'window', label: 'Time window' },
+          ], 'schedule-form__segmented--compact')}
+          <div class="schedule-form__period-row schedule-form__time-row"${timeMode === 'all_day' ? ' hidden' : ''}>
+            <div class="form-group">
+              <label class="form-label">Start time</label>
+              <input class="form-input form-input--time" type="time" value="${escapeAttr(weeklyWhen.start || '08:00')}" data-when-field="start">
+            </div>
+            <div class="form-group">
+              <label class="form-label">End time</label>
+              <input class="form-input form-input--time" type="time" value="${escapeAttr(weeklyWhen.end || '22:00')}" data-when-field="end">
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Comfort Offset (±°C)</label>
-            <input class="form-input form-input--time" type="number" step="0.1" min="0.1" max="5"
-              value="${p.comfort_offset ?? defaults.comfort_offset}" data-field="comfort_offset">
-            <span class="form-hint">Band half-width</span>
+        `;
+      } else if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+        whenHtml = `
+          <div class="schedule-form__date-row">
+            <div class="form-group">
+              <label class="form-label">Start date</label>
+              <input class="form-input" type="date" value="${escapeAttr(dateWhen.start_date)}" data-when-field="start_date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">End date</label>
+              <input class="form-input" type="date" value="${escapeAttr(dateWhen.end_date)}" data-when-field="end_date">
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Tracking Weight</label>
-            <input class="form-input form-input--time" type="number" step="0.1" min="0" max="10"
-              value="${p.tracking_weight ?? defaults.tracking_weight}" data-field="tracking_weight">
-            <span class="form-hint">Setpoint tracking strength</span>
+          ${segmentedHtml('time_mode', timeMode, [
+            { value: 'all_day', label: 'All day' },
+            { value: 'window', label: 'Time window' },
+          ], 'schedule-form__segmented--compact')}
+          <div class="schedule-form__period-row schedule-form__time-row"${timeMode === 'all_day' ? ' hidden' : ''}>
+            <div class="form-group">
+              <label class="form-label">Start time</label>
+              <input class="form-input form-input--time" type="time" value="${escapeAttr(dateWhen.start || '08:00')}" data-when-field="start">
+            </div>
+            <div class="form-group">
+              <label class="form-label">End time</label>
+              <input class="form-input form-input--time" type="time" value="${escapeAttr(dateWhen.end || '22:00')}" data-when-field="end">
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Energy Weight</label>
-            <input class="form-input form-input--time" type="number" step="0.01" min="0" max="10"
-              value="${p.energy_weight ?? defaults.energy_weight}" data-field="energy_weight">
-            <span class="form-hint">Energy-use penalty</span>
+        `;
+      } else {
+        whenHtml = `
+          <div class="schedule-form__date-row">
+            <div class="form-group">
+              <label class="form-label">Start datetime</label>
+              <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.start_at)}" data-when-field="start_at">
+            </div>
+            <div class="form-group">
+              <label class="form-label">End datetime</label>
+              <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.end_at)}" data-when-field="end_at">
+            </div>
           </div>
-        </div>
-      ` : `
-        <div class="schedule-form__period-row">
-          <div class="form-group">
-            <label class="form-label">Frost Protection (°C)</label>
-            <input class="form-input form-input--time" type="number" step="0.5" min="0" max="15"
-              value="${p.frost_protection ?? 12}" data-field="frost_protection">
-          </div>
-        </div>
-      `;
+        `;
+      }
 
       cardBody.innerHTML = `
-        <div class="schedule-form__period-row">
+        <div class="schedule-form__editor-section">
+          <div class="schedule-form__section-title">Type</div>
+          ${segmentedHtml('schedule_type', scheduleType, [
+            { value: SCHEDULE_TYPE_WEEKLY, label: 'Weekly recurring' },
+            { value: SCHEDULE_TYPE_DATE_RANGE, label: 'Date range' },
+            { value: SCHEDULE_TYPE_CONTINUOUS, label: 'Continuous span' },
+          ])}
+        </div>
+        <div class="schedule-form__editor-section">
+          <div class="schedule-form__section-title">Name</div>
           <div class="form-group">
-            <label class="form-label">Name</label>
-            <input class="form-input form-input--name" type="text" value="${p.name || ''}" data-field="name">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Mode</label>
-            <select class="schedule-form__mode-select" data-field="mode">${modeOptions}</select>
+            <input class="form-input form-input--name" type="text" value="${escapeAttr(p.name || '')}" data-field="name">
           </div>
         </div>
-        <div class="schedule-form__flags">
-          <label class="schedule-form__flag">
-            <input type="checkbox" data-field="all_day"${isAllDay ? ' checked' : ''}>
-            <span>All day</span>
-          </label>
-          <label class="schedule-form__flag">
-            <input type="checkbox" data-field="recurring"${isRecurring ? ' checked' : ''}>
-            <span>Recurring weekly</span>
-          </label>
+        <div class="schedule-form__editor-section">
+          <div class="schedule-form__section-title">When <span class="schedule-form__section-subtitle">${typeLabel(scheduleType)}</span></div>
+          ${whenHtml}
         </div>
-        <div class="schedule-form__period-row schedule-form__time-row"${isAllDay ? ' hidden' : ''}>
-          <div class="form-group">
-            <label class="form-label">Start</label>
-            <input class="form-input form-input--time" type="time" value="${p.start || '08:00'}" data-field="start">
-          </div>
-          <div class="form-group">
-            <label class="form-label">End</label>
-            <input class="form-input form-input--time" type="time" value="${p.end || '22:00'}" data-field="end">
-          </div>
+        <div class="schedule-form__editor-section">
+          <div class="schedule-form__section-title">Behaviour</div>
+          ${segmentedHtml('mode', p.mode === 'off' ? 'off' : 'comfort', [
+            { value: 'comfort', label: 'Comfort' },
+            { value: 'off', label: 'Off' },
+          ], 'schedule-form__segmented--compact')}
         </div>
-        <div class="schedule-form__date-row"${isRecurring ? ' hidden' : ''}>
-          <div class="form-group">
-            <label class="form-label">Start date</label>
-            <input class="form-input" type="date" value="${p.start_date || defaultDate}" data-field="start_date">
-          </div>
-          <div class="form-group">
-            <label class="form-label">End date</label>
-            <input class="form-input" type="date" value="${p.end_date || defaultDate}" data-field="end_date">
-          </div>
+        <div class="schedule-form__editor-section">
+          <div class="schedule-form__section-title">Overrides</div>
+          ${overridesHtml(p, defaults)}
         </div>
-        <div class="schedule-form__days" data-period="${i}"${isRecurring ? '' : ' hidden'}>${daysHtml}</div>
-        ${paramsHtml}
       `;
 
       card.appendChild(cardBody);
@@ -338,52 +428,17 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         renderPeriodForms();
       });
 
-      // Wire all [data-field] inputs/selects inside body
+      // Wire simple text/number inputs inside body
       cardBody.querySelectorAll('[data-field]').forEach((input) => {
         const field = input.dataset.field;
-        const eventName = input.type === 'checkbox' ? 'change' : 'change';
-        input.addEventListener(eventName, () => {
-          if (field === 'mode') {
-            localPeriods[i].mode = input.value;
-            if (input.value === 'off') {
-              delete localPeriods[i].setpoint;
-              delete localPeriods[i].comfort_offset;
-              delete localPeriods[i].tracking_weight;
-              delete localPeriods[i].energy_weight;
-              localPeriods[i].frost_protection = localPeriods[i].frost_protection ?? 12;
+        input.addEventListener('change', () => {
+          if (OVERRIDE_META[field]) {
+            const parsed = parseFloat(input.value);
+            if (Number.isFinite(parsed)) {
+              localPeriods[i][field] = parsed;
             } else {
-              delete localPeriods[i].frost_protection;
-              localPeriods[i].setpoint = localPeriods[i].setpoint ?? defaults.setpoint;
-              localPeriods[i].comfort_offset = localPeriods[i].comfort_offset ?? defaults.comfort_offset;
-              localPeriods[i].tracking_weight = localPeriods[i].tracking_weight ?? defaults.tracking_weight;
-              localPeriods[i].energy_weight = localPeriods[i].energy_weight ?? defaults.energy_weight;
+              delete localPeriods[i][field];
             }
-            dirty = true;
-            expandedSet.add(i);
-            renderPeriodForms();
-          } else if (field === 'all_day') {
-            localPeriods[i].all_day = input.checked;
-            if (input.checked) {
-              localPeriods[i].start = '00:00';
-              localPeriods[i].end = '23:59';
-            }
-            dirty = true;
-            expandedSet.add(i);
-            renderPeriodForms();
-          } else if (field === 'recurring') {
-            localPeriods[i].recurring = input.checked;
-            if (!input.checked) {
-              const d = new Date();
-              const padN = (n) => String(n).padStart(2, '0');
-              const iso = `${d.getFullYear()}-${padN(d.getMonth() + 1)}-${padN(d.getDate())}`;
-              localPeriods[i].start_date = localPeriods[i].start_date || iso;
-              localPeriods[i].end_date = localPeriods[i].end_date || iso;
-            }
-            dirty = true;
-            expandedSet.add(i);
-            renderPeriodForms();
-          } else if (['setpoint', 'frost_protection', 'comfort_offset', 'tracking_weight', 'energy_weight'].includes(field)) {
-            localPeriods[i][field] = parseFloat(input.value);
             dirty = true;
           } else {
             localPeriods[i][field] = input.value;
@@ -392,17 +447,72 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         });
       });
 
+      cardBody.querySelectorAll('[data-when-field]').forEach((input) => {
+        input.addEventListener('change', () => {
+          const period = localPeriods[i];
+          const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
+          when[input.dataset.whenField] = input.value;
+          dirty = true;
+        });
+      });
+
+      cardBody.querySelectorAll('[data-segmented-field]').forEach((group) => {
+        const field = group.dataset.segmentedField;
+        group.querySelectorAll('.schedule-form__segment').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const period = localPeriods[i];
+            const value = btn.dataset.value;
+            if (field === 'schedule_type') {
+              ensureWhenState(period);
+              period.schedule_type = value;
+            } else if (field === 'time_mode') {
+              const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
+              when.time_mode = value;
+            } else if (field === 'mode') {
+              period.mode = value;
+            }
+            dirty = true;
+            expandedSet.add(i);
+            renderPeriodForms();
+          });
+        });
+      });
+
+      const addOverrideBtn = cardBody.querySelector('[data-action="add-override"]');
+      if (addOverrideBtn) {
+        addOverrideBtn.addEventListener('click', () => {
+          const picker = cardBody.querySelector('[data-action="override-picker"]');
+          const field = picker?.value;
+          if (!field) return;
+          localPeriods[i][field] = overrideBaseline(field, defaults);
+          dirty = true;
+          expandedSet.add(i);
+          renderPeriodForms();
+        });
+      }
+
+      cardBody.querySelectorAll('[data-remove-override]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          delete localPeriods[i][btn.dataset.removeOverride];
+          dirty = true;
+          expandedSet.add(i);
+          renderPeriodForms();
+        });
+      });
+
       // Wire day toggles
       cardBody.querySelectorAll('.schedule-form__day').forEach((dayEl) => {
         dayEl.addEventListener('click', () => {
           const d = parseInt(dayEl.dataset.day, 10);
-          const idx = localPeriods[i].days.indexOf(d);
+          const weekly = ensureWhenState(localPeriods[i])[SCHEDULE_TYPE_WEEKLY];
+          const days = weekly.days || (weekly.days = []);
+          const idx = days.indexOf(d);
           if (idx >= 0) {
-            localPeriods[i].days.splice(idx, 1);
+            days.splice(idx, 1);
             dayEl.classList.remove('schedule-form__day--active');
           } else {
-            localPeriods[i].days.push(d);
-            localPeriods[i].days.sort();
+            days.push(d);
+            days.sort();
             dayEl.classList.add('schedule-form__day--active');
           }
           dirty = true;
@@ -433,16 +543,13 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
 
   // Add a blank period — auto-expand it
   btnAdd.addEventListener('click', () => {
-    const defaults = getDefaults(state);
     localPeriods.push({
       name: `Period ${localPeriods.length + 1}`,
+      schedule_type: SCHEDULE_TYPE_WEEKLY,
+      time_mode: 'window',
       start: '08:00',
       end: '22:00',
       mode: 'comfort',
-      setpoint: defaults.setpoint,
-      comfort_offset: defaults.comfort_offset,
-      tracking_weight: defaults.tracking_weight,
-      energy_weight: defaults.energy_weight,
       days: [0, 1, 2, 3, 4, 5, 6],
       enabled: true,
       recurring: true,
@@ -491,7 +598,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       // Re-sync localPeriods to the canonical saved data and re-render the
       // form right away so the user sees the saved state without waiting for
       // the server's state_changed event.
-      localPeriods = periods.map((p) => ({ ...p, days: [...(p.days || [])] }));
+      localPeriods = periods.map((p) => normalizePeriodForEditor({ ...p, days: [...(p.days || [])] }));
       renderPeriodForms();
 
       dirty = false;

@@ -63,7 +63,7 @@ async def test_registers_static_path_and_panel(monkeypatch):
     (static_configs,) = hass.http.async_register_static_paths.await_args.args
     (cfg,) = static_configs
     assert cfg.url_path == "/ha-industrial-panel"
-    assert cfg.path.endswith("/www")
+    assert cfg.path.replace("\\", "/").endswith("/www")
     assert cfg.cache_headers is False
 
     assert extra_url_calls == [["/ha-industrial-panel/heating-assistant-icons.js"]]
