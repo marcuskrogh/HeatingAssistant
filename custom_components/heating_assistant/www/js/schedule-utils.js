@@ -486,31 +486,43 @@ export function formatPeriodPreview(p) {
   };
 }
 
-/** HTML snippets for preview parts (escaped text content assumed safe from caller names). */
+/** Escape text for HTML element bodies / attributes. */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** HTML snippets for preview parts (user-controlled fields escaped). */
 export function formatPeriodPreviewHtml(p) {
   const parts = formatPeriodPreview(p);
   return {
-    typeHtml: `<span class="sched-row__type">${parts.type}</span>`,
-    nameHtml: `<span class="sched-row__name">${parts.name}</span>`,
-    timingHtml: `<span class="sched-row__time">${parts.timing}</span>`,
-    modeHtml: `<span class="sched-row__mode ${parts.modeCls}">${parts.mode}</span>`,
+    typeHtml: `<span class="sched-row__type">${escapeHtml(parts.type)}</span>`,
+    nameHtml: `<span class="sched-row__name">${escapeHtml(parts.name)}</span>`,
+    timingHtml: `<span class="sched-row__time">${escapeHtml(parts.timing)}</span>`,
+    modeHtml: `<span class="sched-row__mode ${escapeHtml(parts.modeCls)}">${escapeHtml(parts.mode)}</span>`,
     parts,
   };
 }
 
 /**
  * Inactive = disabled OR fully past.
- * Continuous: end_at <= now; date_range: end_date < today; weekly: never past by date.
+ * Continuous: end_at <= now (or missing end_at); date_range: end_date < today; weekly: never past by date.
  */
 export function isPeriodInactive(p, now = new Date()) {
   if (p.enabled === false) return true;
   const scheduleType = resolveScheduleType(p);
   if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) {
-    if (!p.end_at) return false;
-    return localDateTimeString(now) >= p.end_at;
+    if (!p.end_at) return true;
+    const end = parseLocalDateTime(p.end_at);
+    if (!end) return true;
+    return now.getTime() >= end.getTime();
   }
   if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
-    if (!p.end_date) return false;
+    if (!p.end_date) return true;
     return localDateString(now) > p.end_date;
   }
   return false;

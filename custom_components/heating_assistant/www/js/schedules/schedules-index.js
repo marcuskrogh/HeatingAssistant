@@ -162,11 +162,12 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
         if (inactiveEntries.length > 0) {
           const details = document.createElement('details');
           details.className = 'sched-inactive';
-          details.addEventListener('click', (e) => e.stopPropagation());
 
           const summary = document.createElement('summary');
           summary.className = 'sched-inactive__summary';
           summary.textContent = `Inactive (${inactiveEntries.length})`;
+          // Keep card navigation for rows; only block summary toggle from opening the room.
+          summary.addEventListener('click', (e) => e.stopPropagation());
           details.appendChild(summary);
 
           const inactiveList = document.createElement('div');
