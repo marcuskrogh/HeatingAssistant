@@ -2,13 +2,13 @@ import {
   activeOverrideFields,
   findActivePeriod,
   findNextPeriod,
-  formatPeriodTime,
+  formatPeriodPreview,
   hasOverride,
+  isPeriodInactive,
   movePeriodInList,
   normalizePeriodForEditor,
   OVERRIDE_META,
   overrideBaseline,
-  periodModeDisplay,
   remapExpandedIndices,
   SCHEDULE_TYPE_CONTINUOUS,
   SCHEDULE_TYPE_DATE_RANGE,
@@ -465,9 +465,11 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   }
 
   function enabledIndicesInOrder() {
+    // Contiguous active (non-inactive) prefix used by drop-target math.
+    // Inactive = disabled OR fully past (SWD-22); those are not draggable.
     const out = [];
     for (let i = 0; i < localPeriods.length; i++) {
-      if (localPeriods[i].enabled !== false) out.push(i);
+      if (!isPeriodInactive(localPeriods[i])) out.push(i);
     }
     return out;
   }
@@ -598,7 +600,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       await persistPeriods({ reason: 'drop' });
     } catch (err) {
       for (let i = 0; i < localPeriods.length; i++) {
-        if (localPeriods[i].enabled !== false) dirtyPeriodIndices.add(i);
+        if (!isPeriodInactive(localPeriods[i])) dirtyPeriodIndices.add(i);
       }
       dirty = true;
       updateDirtyUI();
@@ -776,13 +778,13 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
    * them by **object identity** rather than assuming any positional shift.
    */
   function normalizeEnabledFirst() {
-    const enabled = [];
-    const disabled = [];
+    const active = [];
+    const inactive = [];
     for (const p of localPeriods) {
-      if (p.enabled !== false) enabled.push(p);
-      else disabled.push(p);
+      if (isPeriodInactive(p)) inactive.push(p);
+      else active.push(p);
     }
-    const next = [...enabled, ...disabled];
+    const next = [...active, ...inactive];
     if (next.every((p, i) => p === localPeriods[i])) return;
     const remap = (set) => {
       const out = new Set();
@@ -803,8 +805,10 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     normalizeEnabledFirst();
     localPeriods = localPeriods.map((period) => normalizePeriodForEditor(period));
     const defaults = getDefaults(state);
-    const activePeriod = findActivePeriod(localPeriods);
-    const nextPeriod = findNextPeriod(localPeriods);
+    // NOW/NEXT only among non-inactive periods (SWD-22).
+    const activeList = localPeriods.filter((p) => !isPeriodInactive(p));
+    const activePeriod = findActivePeriod(activeList);
+    const nextPeriod = findNextPeriod(activeList);
 
     periodsTitleEl.textContent = localPeriods.length > 0
       ? `COMFORT PERIODS (${localPeriods.length})`
@@ -826,32 +830,32 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       return;
     }
 
-    let hasEnabled = false;
-    let hasDisabled = false;
+    let hasActive = false;
+    let hasInactive = false;
 
     for (let i = 0; i < localPeriods.length; i++) {
       const p = localPeriods[i];
-      const periodEnabled = p.enabled !== false;
-      if (periodEnabled) hasEnabled = true; else hasDisabled = true;
+      const inactive = isPeriodInactive(p);
+      if (inactive) hasInactive = true; else hasActive = true;
       const card = buildPeriodCard(i, p, {
         defaults,
-        isActive: p === activePeriod,
-        isNext: p === nextPeriod,
+        isActive: !inactive && p === activePeriod,
+        isNext: !inactive && p === nextPeriod,
       });
-      if (periodEnabled) {
-        periodsContainer.appendChild(card);
-      } else {
+      if (inactive) {
         inactiveContainer.appendChild(card);
+      } else {
+        periodsContainer.appendChild(card);
       }
     }
 
-    if (!hasEnabled) {
+    if (!hasActive) {
       const empty = document.createElement('div');
       empty.className = 'sched-detail__empty sched-detail__empty--muted';
       empty.innerHTML = `<p>No active periods. Enable one below or add a new period above.</p>`;
       periodsContainer.appendChild(empty);
     }
-    inactiveHeader.hidden = !hasDisabled;
+    inactiveHeader.hidden = !hasInactive;
 
     updateDirtyUI();
   }
@@ -859,7 +863,8 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   function buildPeriodCard(i, p, { defaults, isActive, isNext }) {
     const isExpanded = expandedSet.has(i);
     const periodEnabled = p.enabled !== false;
-    const { text: modeText, cls: modeCls } = periodModeDisplay(p);
+    const periodInactive = isPeriodInactive(p);
+    const preview = formatPeriodPreview(p);
 
     const card = document.createElement('div');
     card.className = 'card schedule-form__period' +
@@ -869,7 +874,8 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       (!periodEnabled ? ' schedule-form__period--disabled' : '');
     card.dataset.periodIndex = String(i);
 
-    if (periodEnabled) {
+    // Only active (non-inactive) cards participate in drag reorder (SWD-24 + SWD-22).
+    if (!periodInactive) {
       card.classList.add('schedule-form__period--draggable');
       // Draggable attribute is toggled by updateDirtyUI based on state.
       if (!dirty && !saveInFlight) card.setAttribute('draggable', 'true');
@@ -882,9 +888,10 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
       ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
       <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
-      <span class="schedule-form__period-name">${escapeAttr(p.name || 'Period')}</span>
-      <span class="schedule-form__period-time">${formatPeriodTime(p)}</span>
-      <span class="sched-row__mode ${modeCls}">${modeText}</span>
+      <span class="sched-row__type">${escapeAttr(preview.type)}</span>
+      <span class="schedule-form__period-name">${escapeAttr(preview.name)}</span>
+      <span class="schedule-form__period-time">${escapeAttr(preview.timing)}</span>
+      <span class="sched-row__mode ${preview.modeCls}">${escapeAttr(preview.mode)}</span>
       <span class="schedule-form__unsaved-dot" aria-hidden="true" title="Unsaved changes"></span>
       <button class="schedule-form__delete" title="Delete period" data-action="delete">×</button>
       <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
@@ -1043,11 +1050,11 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         expandedSet = shiftDown(expandedSet);
         dirtyPeriodIndices = shiftDown(dirtyPeriodIndices);
 
-        let lastEnabledIdx = -1;
+        let lastActiveIdx = -1;
         for (let k = 0; k < localPeriods.length; k++) {
-          if (localPeriods[k].enabled !== false) lastEnabledIdx = k;
+          if (!isPeriodInactive(localPeriods[k])) lastActiveIdx = k;
         }
-        const insertAt = lastEnabledIdx + 1;
+        const insertAt = lastActiveIdx + 1;
 
         const shiftUp = (set) => {
           const out = new Set();
@@ -1107,6 +1114,16 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
         when[input.dataset.whenField] = input.value;
         markPeriodDirty(i);
+      });
+      // Dates/times can move a period between active and inactive — re-bucket
+      // on change (not every keystroke) so focus is preserved while typing.
+      input.addEventListener('change', () => {
+        const period = localPeriods[i];
+        const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
+        when[input.dataset.whenField] = input.value;
+        markPeriodDirty(i);
+        expandedSet.add(i);
+        renderPeriodForms();
       });
     });
 
@@ -1172,8 +1189,8 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       });
     });
 
-    // Wire DnD (only for enabled cards)
-    if (periodEnabled) {
+    // Wire DnD (only for active / non-inactive cards)
+    if (!periodInactive) {
       attachMouseDrag(card, i);
       attachTouchDrag(card, i);
     }
@@ -1216,11 +1233,11 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       recurring: true,
       all_day: false,
     };
-    let lastEnabledIdx = -1;
+    let lastActiveIdx = -1;
     for (let k = 0; k < localPeriods.length; k++) {
-      if (localPeriods[k].enabled !== false) lastEnabledIdx = k;
+      if (!isPeriodInactive(localPeriods[k])) lastActiveIdx = k;
     }
-    const insertAt = lastEnabledIdx + 1;
+    const insertAt = lastActiveIdx + 1;
     const shiftUp = (set) => {
       const out = new Set();
       for (const idx of set) {
@@ -1234,8 +1251,10 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     expandedSet.add(insertAt);
     markPeriodDirty(insertAt);
     renderPeriodForms();
-    const cards = periodsContainer.querySelectorAll('.schedule-form__period');
-    if (cards.length > 0) cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const sel = '.schedule-form__period[data-period-index="' + insertAt + '"]';
+    const newCard = periodsContainer.querySelector(sel)
+      || inactiveContainer.querySelector(sel);
+    if (newCard) newCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 
   // Save all periods (manual)

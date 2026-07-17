@@ -140,13 +140,19 @@ def _as_naive_local(value: datetime) -> datetime:
     """Return a naive local wall-clock ``datetime`` for schedule comparisons.
 
     Persisted continuous-span bounds are naive local ISO strings. Coordinator
-    ``now`` is typically timezone-aware (``now_utc.astimezone()``). Comparing
-    naive to aware raises ``TypeError`` in Python 3, which the schedule apply
-    path swallows — continuous spans would never match.
+    ``now`` is typically timezone-aware (``now_utc.astimezone()`` already in
+    the HA local zone). Comparing naive to aware raises ``TypeError`` in
+    Python 3, which the schedule apply path swallows — continuous spans would
+    never match.
+
+    Keep the aware value's wall-clock fields (do not re-convert via
+    ``astimezone()`` to the process timezone — CI runners are often UTC, which
+    would shift Copenhagen wall times and break comparisons against naive
+    local bounds).
     """
     if value.tzinfo is None:
         return value
-    return value.astimezone().replace(tzinfo=None)
+    return value.replace(tzinfo=None)
 
 
 def _parse_datetime(value: str | datetime) -> datetime:

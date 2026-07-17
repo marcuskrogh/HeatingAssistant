@@ -1,8 +1,17 @@
-import { escapeHtml, findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=108';
-import { findNextScheduledExperiment } from '../experiment-utils.js?v=108';
+import {
+  escapeHtml,
+  findActivePeriod,
+  findNextPeriod,
+  isPeriodInactive,
+  partitionPeriods,
+  scheduleEnabledBadgeHtml,
+  scheduleSectionHeaderHtml,
+  serializeSchedulePeriod,
+} from '../schedule-utils.js?v=108';
+import { experimentRowHtml, findNextScheduledExperiment } from '../experiment-utils.js?v=108';
 import { setPanelHash } from '../panel-hash.js?v=108';
 import { updateRoomSchedule } from '../ha-services.js?v=108';
-import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=108';
+import { makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=108';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -28,6 +37,33 @@ async function togglePeriodEnabled(hass, state, room, periods, periodIndex) {
   await updateRoomSchedule(hass, room.slug, payload);
   patchStateSchedule(state, room.slug, payload);
   return payload;
+}
+
+function bindPeriodToggle(row, hass, state, room, periods, periodIndex, enabled, rebuild) {
+  const toggleBtn = row.querySelector('[data-period-enable]');
+  if (!toggleBtn) return;
+  toggleBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    toggleBtn.disabled = true;
+    try {
+      const updated = await togglePeriodEnabled(hass, state, room, periods, periodIndex);
+      periods.splice(0, periods.length, ...updated.map((period) => ({
+        ...period,
+        days: [...(period.days || [0, 1, 2, 3, 4, 5, 6])],
+      })));
+      rebuild({ enabled, periods: [...periods] });
+    } catch (err) {
+      toggleBtn.disabled = false;
+    }
+  });
+}
+
+function appendPeriodRows(list, entries, activePeriod, nextPeriod, hass, state, room, periods, enabled, rebuild) {
+  for (const { p, index } of entries) {
+    const row = makePeriodRow(p, p === activePeriod, p === nextPeriod, index);
+    bindPeriodToggle(row, hass, state, room, periods, index, enabled, rebuild);
+    list.appendChild(row);
+  }
 }
 
 export function renderScheduleIndex(container, rooms, state, connection, hass) {
@@ -62,8 +98,16 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
       const periods = schedData?.periods || [];
       const enabled = schedData?.enabled ?? true;
 
-      const activePeriod = findActivePeriod(periods);
-      const nextPeriod = findNextPeriod(periods);
+      const { active } = partitionPeriods(periods);
+      const activePeriod = findActivePeriod(active);
+      const nextPeriod = findNextPeriod(active);
+
+      const activeEntries = [];
+      const inactiveEntries = [];
+      periods.forEach((p, index) => {
+        if (isPeriodInactive(p)) inactiveEntries.push({ p, index });
+        else activeEntries.push({ p, index });
+      });
 
       const roomExps = expsByRoom[room.slug] || [];
       const upcomingExps = roomExps.filter((e) => e.status === 'scheduled' || e.status === 'running');
@@ -73,69 +117,72 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
       const card = document.createElement('div');
       card.className = 'card card--clickable sched-index-card';
 
-      // ── Header: room name ────────────────────────────────────────────────
       const cardHeader = document.createElement('div');
       cardHeader.className = 'sched-index-card__header';
       cardHeader.innerHTML = `<span class="sched-index-card__name">${escapeHtml(room.name)}</span>`;
       card.appendChild(cardHeader);
 
-      // ── Comfort periods section ─────────────────────────────────────────
       const comfortSection = document.createElement('div');
       comfortSection.className = 'sched-section';
       comfortSection.innerHTML = scheduleSectionHeaderHtml(
         'COMFORT PERIODS',
         scheduleEnabledBadgeHtml(enabled),
       );
+
+      const rebuildRoom = (updatedSched) => {
+        cachedSchedules = {
+          ...cachedSchedules,
+          [room.slug]: updatedSched,
+        };
+        buildCards(cachedSchedules, cachedExpsByRoom);
+      };
+
       if (periods.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'sched-index-card__empty';
-        empty.textContent = 'No periods configured — click to add';
+        empty.textContent = 'No periods configured \u2014 click to add';
         comfortSection.appendChild(empty);
       } else {
         const list = document.createElement('div');
         list.className = 'sched-index-card__list';
 
-        const preview = periods.slice(0, 4);
-        const overflow = periods.length - preview.length;
-
-        preview.forEach((p, idx) => {
-          const row = makePeriodRow(p, p === activePeriod, p === nextPeriod, idx);
-          const toggleBtn = row.querySelector('[data-period-enable]');
-          if (toggleBtn) {
-            toggleBtn.addEventListener('click', async (e) => {
-              e.stopPropagation();
-              toggleBtn.disabled = true;
-              try {
-                const updated = await togglePeriodEnabled(hass, state, room, periods, idx);
-                periods.splice(0, periods.length, ...updated.map((period) => ({
-                  ...period,
-                  days: [...(period.days || [0, 1, 2, 3, 4, 5, 6])],
-                })));
-                cachedSchedules = {
-                  ...cachedSchedules,
-                  [room.slug]: { enabled, periods: [...periods] },
-                };
-                buildCards(cachedSchedules, cachedExpsByRoom);
-              } catch (err) {
-                toggleBtn.disabled = false;
-              }
-            });
-          }
-          list.appendChild(row);
-        });
-
-        if (overflow > 0) {
-          const more = document.createElement('div');
-          more.className = 'sched-index-card__overflow';
-          more.textContent = `+${overflow} more…`;
-          list.appendChild(more);
+        if (activeEntries.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'sched-index-card__empty';
+          empty.textContent = 'No active periods';
+          list.appendChild(empty);
+        } else {
+          appendPeriodRows(
+            list, activeEntries, activePeriod, nextPeriod,
+            hass, state, room, periods, enabled, rebuildRoom,
+          );
         }
 
         comfortSection.appendChild(list);
+
+        if (inactiveEntries.length > 0) {
+          const details = document.createElement('details');
+          details.className = 'sched-inactive';
+
+          const summary = document.createElement('summary');
+          summary.className = 'sched-inactive__summary';
+          summary.textContent = `Inactive (${inactiveEntries.length})`;
+          // Keep card navigation for rows; only block summary toggle from opening the room.
+          summary.addEventListener('click', (e) => e.stopPropagation());
+          details.appendChild(summary);
+
+          const inactiveList = document.createElement('div');
+          inactiveList.className = 'sched-inactive__list';
+          appendPeriodRows(
+            inactiveList, inactiveEntries, null, null,
+            hass, state, room, periods, enabled, rebuildRoom,
+          );
+          details.appendChild(inactiveList);
+          comfortSection.appendChild(details);
+        }
       }
       card.appendChild(comfortSection);
 
-      // ── Experiments section ─────────────────────────────────────────────
       const expSection = document.createElement('div');
       expSection.className = 'sched-section';
       expSection.innerHTML = scheduleSectionHeaderHtml('EXPERIMENTS');
@@ -160,7 +207,7 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
         if (overflow > 0) {
           const more = document.createElement('div');
           more.className = 'sched-index-card__overflow';
-          more.textContent = `+${overflow} more…`;
+          more.textContent = `+${overflow} more\u2026`;
           list.appendChild(more);
         }
         expSection.appendChild(list);
@@ -174,7 +221,6 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
     }
   }
 
-  // Fetch schedules and experiments from the coordinator via WebSocket
   const initialGen = ++scheduleLoadGen;
   Promise.all([connection.getSchedules(), connection.listExperiments()]).then(([roomSchedules, experiments]) => {
     if (initialGen !== scheduleLoadGen) return;
