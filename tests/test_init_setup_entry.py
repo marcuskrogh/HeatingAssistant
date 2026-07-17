@@ -9,6 +9,7 @@ import custom_components.heating_assistant.__init__ as init_mod
 from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
+    CONF_INHERIT_OVERRIDES_MIGRATED,
     CONF_PERSISTED_SYSTEM_ENABLED,
     CONF_ROOMS,
     DEFAULT_HORIZON,
@@ -95,12 +96,19 @@ async def test_setup_entry_continues_on_first_refresh_failure(monkeypatch):
     assert await init_mod.async_setup_entry(hass, entry) is True
 
     hass.config_entries.async_forward_entry_setups.assert_awaited_once()
-    hass.config_entries.async_update_entry.assert_called_once()
-    update_call = hass.config_entries.async_update_entry.call_args
-    assert update_call.kwargs["data"][CONF_ROOMS] == yaml_cfg[CONF_ROOMS]
-    assert (
-        update_call.kwargs["data"][CONF_HEAT_SOURCES]
-        == yaml_cfg[CONF_HEAT_SOURCES]
+    assert hass.config_entries.async_update_entry.call_count == 2
+    update_payloads = [
+        call.kwargs["data"]
+        for call in hass.config_entries.async_update_entry.call_args_list
+    ]
+    assert any(
+        data[CONF_ROOMS] == yaml_cfg[CONF_ROOMS]
+        and data[CONF_HEAT_SOURCES] == yaml_cfg[CONF_HEAT_SOURCES]
+        for data in update_payloads
+    )
+    assert any(
+        data.get(CONF_INHERIT_OVERRIDES_MIGRATED) is True
+        for data in update_payloads
     )
 
 

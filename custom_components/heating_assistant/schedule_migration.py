@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 
 from .const import (
     CONF_COMFORT_OFFSET,
+    CONF_INHERIT_OVERRIDES_MIGRATED,
     CONF_PERSISTED_SCHEDULES,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_PERSISTED_SETPOINTS,
@@ -165,6 +166,8 @@ def _float_or_default(value: Any, default: float) -> float:
 
 
 def _room_override_baselines(data: Dict[str, Any], room_key: str) -> Dict[str, float]:
+    from .naming import slugify
+
     baselines: Dict[str, float] = {
         CONF_SCHEDULE_SETPOINT: DEFAULT_SETPOINT,
         CONF_SCHEDULE_COMFORT_OFFSET: DEFAULT_COMFORT_OFFSET,
@@ -173,10 +176,37 @@ def _room_override_baselines(data: Dict[str, Any], room_key: str) -> Dict[str, f
         CONF_SCHEDULE_FROST_PROTECTION: DEFAULT_FROST_PROTECTION,
     }
 
+    room_key_text = str(room_key)
+    room_slug = slugify(room_key_text)
+    canonical_room_name: str | None = None
     rooms = data.get(CONF_ROOMS) or []
     if isinstance(rooms, list):
+        rooms_by_slug: Dict[str, str] = {}
+        ambiguous_slugs: set[str] = set()
         for room in rooms:
-            if not isinstance(room, dict) or room.get(CONF_ROOM_NAME) != room_key:
+            if not isinstance(room, dict):
+                continue
+            name = room.get(CONF_ROOM_NAME)
+            if not name:
+                continue
+            name_text = str(name)
+            if name_text == room_key_text:
+                canonical_room_name = name_text
+                break
+            slug = slugify(name_text)
+            prior = rooms_by_slug.get(slug)
+            if prior is not None and prior != name_text:
+                ambiguous_slugs.add(slug)
+            else:
+                rooms_by_slug[slug] = name_text
+        if canonical_room_name is None and room_slug not in ambiguous_slugs:
+            canonical_room_name = rooms_by_slug.get(room_slug)
+
+        for room in rooms:
+            if (
+                not isinstance(room, dict)
+                or room.get(CONF_ROOM_NAME) != canonical_room_name
+            ):
                 continue
             baselines[CONF_SCHEDULE_SETPOINT] = _float_or_default(
                 room.get(CONF_SETPOINT), DEFAULT_SETPOINT
@@ -186,17 +216,34 @@ def _room_override_baselines(data: Dict[str, Any], room_key: str) -> Dict[str, f
             )
             break
 
+    lookup_keys = []
+    for key in (
+        room_key_text,
+        canonical_room_name,
+        slugify(canonical_room_name) if canonical_room_name else None,
+        room_slug,
+    ):
+        if key is not None and key not in lookup_keys:
+            lookup_keys.append(key)
+
     persisted_setpoints = data.get(CONF_PERSISTED_SETPOINTS) or {}
-    if isinstance(persisted_setpoints, dict) and room_key in persisted_setpoints:
-        baselines[CONF_SCHEDULE_SETPOINT] = _float_or_default(
-            persisted_setpoints.get(room_key), baselines[CONF_SCHEDULE_SETPOINT]
-        )
+    if isinstance(persisted_setpoints, dict):
+        for key in lookup_keys:
+            if key in persisted_setpoints:
+                baselines[CONF_SCHEDULE_SETPOINT] = _float_or_default(
+                    persisted_setpoints.get(key), baselines[CONF_SCHEDULE_SETPOINT]
+                )
+                break
 
     persisted_offsets = data.get(CONF_PERSISTED_COMFORT_OFFSETS) or {}
-    if isinstance(persisted_offsets, dict) and room_key in persisted_offsets:
-        baselines[CONF_SCHEDULE_COMFORT_OFFSET] = _float_or_default(
-            persisted_offsets.get(room_key), baselines[CONF_SCHEDULE_COMFORT_OFFSET]
-        )
+    if isinstance(persisted_offsets, dict):
+        for key in lookup_keys:
+            if key in persisted_offsets:
+                baselines[CONF_SCHEDULE_COMFORT_OFFSET] = _float_or_default(
+                    persisted_offsets.get(key),
+                    baselines[CONF_SCHEDULE_COMFORT_OFFSET],
+                )
+                break
 
     return baselines
 
@@ -261,15 +308,19 @@ def migrate_inherited_overrides_persisted_schedules_dict(
 def migrate_inherited_overrides_in_persisted(hass: Any, entry: Any) -> bool:
     """One-shot cleanup for old persisted schedule override snapshots."""
     data = dict(entry.data)
+    if data.get(CONF_INHERIT_OVERRIDES_MIGRATED) is True:
+        return False
+
     persisted: Dict[str, Any] = dict(data.get(CONF_PERSISTED_SCHEDULES) or {})
     migrated, changed = migrate_inherited_overrides_persisted_schedules_dict(
         persisted, data
     )
-    if not changed:
-        return False
 
+    next_data = {**data, CONF_INHERIT_OVERRIDES_MIGRATED: True}
+    if changed:
+        next_data[CONF_PERSISTED_SCHEDULES] = migrated
     hass.config_entries.async_update_entry(
         entry,
-        data={**data, CONF_PERSISTED_SCHEDULES: migrated},
+        data=next_data,
     )
     return True

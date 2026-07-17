@@ -485,6 +485,33 @@ class TestScheduleExtendedFeatures:
         assert period.enabled is False
         assert period.start_date == datetime(2026, 7, 20).date()
 
+    def test_build_schedule_round_trips_inactive_when_fields(self):
+        sched = build_schedule([
+            {
+                "name": "weekly with inactive when",
+                "schedule_type": SCHEDULE_TYPE_WEEKLY_RECURRING,
+                "time_mode": SCHEDULE_TIME_MODE_WINDOW,
+                "start": "08:00",
+                "end": "10:00",
+                "days": ["mon", "wed"],
+                "start_date": "2026-07-20",
+                "end_date": "2026-07-27",
+                "start_at": "2026-08-01T12:00",
+                "end_at": "2026-08-01T14:00",
+            }
+        ])
+
+        payload = period_to_dict(sched.periods[0])
+
+        assert payload["schedule_type"] == SCHEDULE_TYPE_WEEKLY_RECURRING
+        assert payload["start"] == "08:00"
+        assert payload["end"] == "10:00"
+        assert payload["days"] == [0, 2]
+        assert payload["start_date"] == "2026-07-20"
+        assert payload["end_date"] == "2026-07-27"
+        assert payload["start_at"] == "2026-08-01T12:00:00"
+        assert payload["end_at"] == "2026-08-01T14:00:00"
+
     def test_build_schedule_requires_dates_for_date_range_daily(self):
         with pytest.raises(ValueError):
             build_schedule([
