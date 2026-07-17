@@ -97,7 +97,6 @@ from .const import (
     DEFAULT_FACADE_COLOUR,
     DEFAULT_FACADE_SOLAR_SHARE,
     DEFAULT_FLOOR_TYPE,
-    DEFAULT_FROST_PROTECTION,
     DEFAULT_HEATING_EFFICIENCY,
     DEFAULT_HORIZON,
     DEFAULT_IDENTIFICATION_HISTORY_DAYS,
@@ -159,9 +158,7 @@ _SCHEDULE_PERIOD_SCHEMA = vol.Schema(
         vol.Optional(CONF_SCHEDULE_MODE, default=SCHEDULE_MODE_COMFORT): vol.In(
             [SCHEDULE_MODE_COMFORT, SCHEDULE_MODE_OFF]
         ),
-        vol.Optional(
-            CONF_SCHEDULE_FROST_PROTECTION, default=DEFAULT_FROST_PROTECTION
-        ): vol.Coerce(float),
+        vol.Optional(CONF_SCHEDULE_FROST_PROTECTION): vol.Any(None, vol.Coerce(float)),
         # Per-period overrides written by the schedule editor.  Optional so a
         # period round-tripped through update_rooms (which carries the room's
         # full schedule) validates instead of being rejected as an extra key.

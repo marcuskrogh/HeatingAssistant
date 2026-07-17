@@ -205,7 +205,7 @@ def register_control_services(hass: HomeAssistant) -> None:
                             vol.Optional("end_at"): cv.string,
                             vol.Optional("days"): [vol.Any(vol.Coerce(int), cv.string)],
                             vol.Optional("setpoint"): vol.Coerce(float),
-                            vol.Optional("frost_protection", default=12.0): vol.Coerce(float),
+                            vol.Optional("frost_protection"): vol.Coerce(float),
                             vol.Optional("comfort_offset"): vol.Coerce(float),
                             vol.Optional("tracking_weight"): vol.Coerce(float),
                             vol.Optional("energy_weight"): vol.Coerce(float),

@@ -5,9 +5,24 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from custom_components.heating_assistant.const import (
+    CONF_INHERIT_OVERRIDES_MIGRATED,
     CONF_PERSISTED_SCHEDULES,
+    CONF_PERSISTED_COMFORT_OFFSETS,
+    CONF_PERSISTED_SETPOINTS,
+    CONF_ROOMS,
+    CONF_ROOM_NAME,
+    CONF_COMFORT_OFFSET,
+    CONF_SETPOINT,
+    CONF_SCHEDULE_COMFORT_OFFSET,
+    CONF_SCHEDULE_ENERGY_WEIGHT,
+    CONF_SCHEDULE_FROST_PROTECTION,
+    CONF_SCHEDULE_MODE,
+    CONF_SCHEDULE_SETPOINT,
     CONF_SCHEDULE_TIME_MODE,
+    CONF_SCHEDULE_TRACKING_WEIGHT,
     CONF_SCHEDULE_TYPE,
+    SCHEDULE_MODE_COMFORT,
+    SCHEDULE_MODE_OFF,
     SCHEDULE_TIME_MODE_ALL_DAY,
     SCHEDULE_TIME_MODE_WINDOW,
     SCHEDULE_TYPE_DATE_RANGE_DAILY,
@@ -17,6 +32,7 @@ from custom_components.heating_assistant.schedule import build_schedule
 from custom_components.heating_assistant.schedule_migration import (
     migrate_period_dict,
     migrate_period_list,
+    migrate_inherited_overrides_in_persisted,
     migrate_persisted_schedules_dict,
     migrate_schedule_types_in_persisted,
 )
@@ -122,3 +138,211 @@ def test_migrate_period_list_strips_legacy_keys_from_new_shape():
     migrated = migrate_period_list([period])[0]
     assert "recurring" not in migrated
     assert "all_day" not in migrated
+
+
+def test_migrate_inherited_overrides_strips_defaults_and_mode_irrelevant_fields():
+    entry = MagicMock()
+    entry.data = {
+        CONF_ROOMS: [
+            {
+                CONF_ROOM_NAME: "Living Room",
+                CONF_SETPOINT: 21.0,
+                CONF_COMFORT_OFFSET: 1.5,
+            },
+            {CONF_ROOM_NAME: "Bedroom"},
+        ],
+        CONF_PERSISTED_SETPOINTS: {"Living Room": 20.0},
+        CONF_PERSISTED_COMFORT_OFFSETS: {"Living Room": 1.0},
+        CONF_PERSISTED_SCHEDULES: {
+            "Living Room": [
+                {
+                    "name": "Comfort",
+                    CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+                    CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+                    "start": "08:00",
+                    "end": "12:00",
+                    "enabled": False,
+                    CONF_SCHEDULE_SETPOINT: 20.0,
+                    CONF_SCHEDULE_COMFORT_OFFSET: 1.0,
+                    CONF_SCHEDULE_TRACKING_WEIGHT: 1.0,
+                    CONF_SCHEDULE_ENERGY_WEIGHT: 1.0,
+                    CONF_SCHEDULE_FROST_PROTECTION: 9.0,
+                },
+                {
+                    "name": "Off default",
+                    CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+                    CONF_SCHEDULE_MODE: SCHEDULE_MODE_OFF,
+                    "start": "22:00",
+                    "end": "06:00",
+                    CONF_SCHEDULE_SETPOINT: 18.0,
+                    CONF_SCHEDULE_COMFORT_OFFSET: 0.5,
+                    CONF_SCHEDULE_TRACKING_WEIGHT: 2.0,
+                    CONF_SCHEDULE_ENERGY_WEIGHT: 2.0,
+                    CONF_SCHEDULE_FROST_PROTECTION: 12.0,
+                },
+                {
+                    "name": "Off custom",
+                    CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+                    CONF_SCHEDULE_MODE: SCHEDULE_MODE_OFF,
+                    "start": "12:00",
+                    "end": "13:00",
+                    CONF_SCHEDULE_FROST_PROTECTION: 10.0,
+                },
+            ],
+            "Bedroom": [
+                {
+                    "name": "Default comfort",
+                    CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+                    CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+                    "start": "07:00",
+                    "end": "09:00",
+                    CONF_SCHEDULE_SETPOINT: 22.0,
+                    CONF_SCHEDULE_COMFORT_OFFSET: 2.0,
+                }
+            ],
+        },
+    }
+    hass = MagicMock()
+
+    changed = migrate_inherited_overrides_in_persisted(hass, entry)
+
+    assert changed is True
+    hass.config_entries.async_update_entry.assert_called_once()
+    update_kwargs = hass.config_entries.async_update_entry.call_args.kwargs
+    assert update_kwargs["data"][CONF_INHERIT_OVERRIDES_MIGRATED] is True
+    migrated = update_kwargs["data"][CONF_PERSISTED_SCHEDULES]
+    living_periods = migrated["Living Room"]
+    assert living_periods[0] == {
+        "name": "Comfort",
+        CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+        CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+        CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+        "start": "08:00",
+        "end": "12:00",
+        "enabled": False,
+    }
+    assert living_periods[1] == {
+        "name": "Off default",
+        CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+        CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+        CONF_SCHEDULE_MODE: SCHEDULE_MODE_OFF,
+        "start": "22:00",
+        "end": "06:00",
+    }
+    assert living_periods[2][CONF_SCHEDULE_FROST_PROTECTION] == 10.0
+    assert migrated["Bedroom"][0] == {
+        "name": "Default comfort",
+        CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+        CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+        CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+        "start": "07:00",
+        "end": "09:00",
+    }
+
+
+def test_migrate_inherited_overrides_marks_clean_entry_as_migrated():
+    entry = MagicMock()
+    entry.data = {
+        CONF_PERSISTED_SCHEDULES: {
+            "Living Room": [
+                {
+                    "name": "Off custom",
+                    CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+                    CONF_SCHEDULE_MODE: SCHEDULE_MODE_OFF,
+                    "start": "22:00",
+                    "end": "06:00",
+                    CONF_SCHEDULE_FROST_PROTECTION: 10.0,
+                }
+            ],
+        },
+    }
+    hass = MagicMock()
+
+    changed = migrate_inherited_overrides_in_persisted(hass, entry)
+
+    assert changed is True
+    update_kwargs = hass.config_entries.async_update_entry.call_args.kwargs
+    assert update_kwargs["data"][CONF_INHERIT_OVERRIDES_MIGRATED] is True
+    assert (
+        update_kwargs["data"][CONF_PERSISTED_SCHEDULES]
+        == entry.data[CONF_PERSISTED_SCHEDULES]
+    )
+
+
+def test_migrate_inherited_overrides_skips_after_marker_preserving_inactive_fields():
+    entry = MagicMock()
+    entry.data = {
+        CONF_INHERIT_OVERRIDES_MIGRATED: True,
+        CONF_PERSISTED_SCHEDULES: {
+            "Living Room": [
+                {
+                    "name": "Off reversible",
+                    CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+                    CONF_SCHEDULE_MODE: SCHEDULE_MODE_OFF,
+                    "start": "22:00",
+                    "end": "06:00",
+                    CONF_SCHEDULE_SETPOINT: 18.0,
+                    CONF_SCHEDULE_COMFORT_OFFSET: 0.5,
+                    CONF_SCHEDULE_TRACKING_WEIGHT: 2.0,
+                    CONF_SCHEDULE_ENERGY_WEIGHT: 2.0,
+                    CONF_SCHEDULE_FROST_PROTECTION: 10.0,
+                }
+            ],
+        },
+    }
+    hass = MagicMock()
+
+    changed = migrate_inherited_overrides_in_persisted(hass, entry)
+
+    assert changed is False
+    hass.config_entries.async_update_entry.assert_not_called()
+    period = entry.data[CONF_PERSISTED_SCHEDULES]["Living Room"][0]
+    assert period[CONF_SCHEDULE_SETPOINT] == 18.0
+    assert period[CONF_SCHEDULE_COMFORT_OFFSET] == 0.5
+    assert period[CONF_SCHEDULE_TRACKING_WEIGHT] == 2.0
+    assert period[CONF_SCHEDULE_ENERGY_WEIGHT] == 2.0
+
+
+def test_migrate_inherited_overrides_uses_slug_keyed_room_baselines():
+    entry = MagicMock()
+    entry.data = {
+        CONF_ROOMS: [
+            {
+                CONF_ROOM_NAME: "Living Room",
+                CONF_SETPOINT: 21.0,
+                CONF_COMFORT_OFFSET: 1.5,
+            },
+        ],
+        CONF_PERSISTED_SETPOINTS: {"living_room": 20.0},
+        CONF_PERSISTED_COMFORT_OFFSETS: {"living_room": 1.0},
+        CONF_PERSISTED_SCHEDULES: {
+            "living_room": [
+                {
+                    "name": "Comfort slug",
+                    CONF_SCHEDULE_TYPE: SCHEDULE_TYPE_WEEKLY_RECURRING,
+                    CONF_SCHEDULE_TIME_MODE: SCHEDULE_TIME_MODE_WINDOW,
+                    CONF_SCHEDULE_MODE: SCHEDULE_MODE_COMFORT,
+                    "start": "08:00",
+                    "end": "12:00",
+                    CONF_SCHEDULE_SETPOINT: 20.0,
+                    CONF_SCHEDULE_COMFORT_OFFSET: 1.0,
+                }
+            ],
+        },
+    }
+    hass = MagicMock()
+
+    changed = migrate_inherited_overrides_in_persisted(hass, entry)
+
+    assert changed is True
+    update_kwargs = hass.config_entries.async_update_entry.call_args.kwargs
+    migrated = update_kwargs["data"][CONF_PERSISTED_SCHEDULES]
+    period = migrated["living_room"][0]
+    assert CONF_SCHEDULE_SETPOINT not in period
+    assert CONF_SCHEDULE_COMFORT_OFFSET not in period

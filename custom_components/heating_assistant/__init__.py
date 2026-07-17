@@ -394,11 +394,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
         )
 
-    from .schedule_migration import migrate_schedule_types_in_persisted
+    from .schedule_migration import (
+        migrate_inherited_overrides_in_persisted,
+        migrate_schedule_types_in_persisted,
+    )
 
     if get_entry is not None:
         entry = get_entry(entry.entry_id) or entry
     if migrate_schedule_types_in_persisted(hass, entry):
+        if get_entry is not None:
+            entry = get_entry(entry.entry_id) or entry
+        entry_data[CONF_PERSISTED_SCHEDULES] = dict(
+            entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
+        )
+
+    if get_entry is not None:
+        entry = get_entry(entry.entry_id) or entry
+    if migrate_inherited_overrides_in_persisted(hass, entry):
         if get_entry is not None:
             entry = get_entry(entry.entry_id) or entry
         entry_data[CONF_PERSISTED_SCHEDULES] = dict(

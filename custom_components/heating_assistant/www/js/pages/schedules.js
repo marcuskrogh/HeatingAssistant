@@ -1,5 +1,5 @@
-import { renderScheduleIndex } from '../schedules/schedules-index.js?v=105';
-import { renderScheduleDetail } from '../schedules/schedules-detail.js?v=105';
+import { renderScheduleIndex } from '../schedules/schedules-index.js?v=106';
+import { renderScheduleDetail } from '../schedules/schedules-detail.js?v=106';
 
 export function renderSchedules(container, rooms, state, connection, hass, slug) {
   if (slug) {

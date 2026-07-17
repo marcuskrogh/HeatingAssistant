@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=105';
-import { findNextScheduledExperiment } from '../experiment-utils.js?v=105';
-import { setPanelHash } from '../panel-hash.js?v=105';
-import { updateRoomSchedule } from '../ha-services.js?v=105';
-import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=105';
+import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=106';
+import { findNextScheduledExperiment } from '../experiment-utils.js?v=106';
+import { setPanelHash } from '../panel-hash.js?v=106';
+import { updateRoomSchedule } from '../ha-services.js?v=106';
+import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=106';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -11,8 +11,9 @@ function getDefaults(st, room) {
   return {
     setpoint: config.room_setpoints?.[room.slug] ?? 21,
     comfort_offset: config.room_comfort_offsets?.[room.slug] ?? config.comfort_offset ?? 2.0,
-    tracking_weight: config.tracking_weight ?? 0.0,
-    energy_weight: config.energy_weight ?? 0.01,
+    tracking_weight: 1.0,
+    energy_weight: 1.0,
+    frost_protection: 12,
   };
 }
 

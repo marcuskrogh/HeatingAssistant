@@ -79,6 +79,21 @@ from .const import (
 )
 
 
+_ALL_DAYS = frozenset(range(7))
+_WHEN_FIELD_KEYS = frozenset(
+    {
+        CONF_SCHEDULE_DAYS,
+        CONF_SCHEDULE_START,
+        CONF_SCHEDULE_END,
+        CONF_SCHEDULE_START_DATE,
+        CONF_SCHEDULE_END_DATE,
+        CONF_SCHEDULE_START_AT,
+        CONF_SCHEDULE_END_AT,
+        CONF_SCHEDULE_TIME_MODE,
+    }
+)
+
+
 # Weekday short names accepted in the YAML ``days`` list (case-insensitive).
 # Index matches Python's ``datetime.weekday()`` (Monday = 0).
 WEEKDAY_NAMES: Tuple[str, ...] = (
@@ -167,8 +182,8 @@ class SchedulePeriod:
     schedule_type: str
     mode: str = SCHEDULE_MODE_COMFORT
     setpoint: Optional[float] = None
-    frost_protection: float = DEFAULT_FROST_PROTECTION
-    days: frozenset[int] = field(default_factory=lambda: frozenset(range(7)))
+    frost_protection: Optional[float] = None
+    days: frozenset[int] = field(default_factory=lambda: _ALL_DAYS)
     comfort_offset: Optional[float] = None
     tracking_weight: Optional[float] = None
     energy_weight: Optional[float] = None
@@ -180,6 +195,9 @@ class SchedulePeriod:
     end_date: Optional[date] = None
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
+    preserved_when_fields: frozenset[str] = field(
+        default_factory=frozenset, repr=False, compare=False
+    )
 
     @property
     def wraps_midnight(self) -> bool:
@@ -316,10 +334,11 @@ def period_to_dict(period: SchedulePeriod) -> Dict:
         CONF_SCHEDULE_TYPE: period.schedule_type,
         CONF_SCHEDULE_MODE: period.mode,
         CONF_SCHEDULE_ENABLED: period.enabled,
-        CONF_SCHEDULE_FROST_PROTECTION: period.frost_protection,
     }
     if period.setpoint is not None:
         payload[CONF_SCHEDULE_SETPOINT] = period.setpoint
+    if period.frost_protection is not None:
+        payload[CONF_SCHEDULE_FROST_PROTECTION] = period.frost_protection
     if period.comfort_offset is not None:
         payload[CONF_SCHEDULE_COMFORT_OFFSET] = period.comfort_offset
     if period.tracking_weight is not None:
@@ -331,35 +350,88 @@ def period_to_dict(period: SchedulePeriod) -> Dict:
         SCHEDULE_TYPE_WEEKLY_RECURRING,
         SCHEDULE_TYPE_DATE_RANGE_DAILY,
     ):
-        payload[CONF_SCHEDULE_TIME_MODE] = period.time_mode
         if period.time_mode == SCHEDULE_TIME_MODE_WINDOW:
             if period.start is None or period.end is None:
                 raise ValueError(
                     f"Schedule entry {period.name!r}: window mode requires "
                     f"{CONF_SCHEDULE_START!r} and {CONF_SCHEDULE_END!r}"
                 )
-            payload[CONF_SCHEDULE_START] = period.start.strftime("%H:%M")
-            payload[CONF_SCHEDULE_END] = period.end.strftime("%H:%M")
-        if period.schedule_type == SCHEDULE_TYPE_WEEKLY_RECURRING:
-            payload[CONF_SCHEDULE_DAYS] = sorted(period.days)
-        else:
+        if period.schedule_type == SCHEDULE_TYPE_DATE_RANGE_DAILY:
             if period.start_date is None or period.end_date is None:
                 raise ValueError(
                     f"Schedule entry {period.name!r}: date_range_daily requires "
                     f"{CONF_SCHEDULE_START_DATE!r} and {CONF_SCHEDULE_END_DATE!r}"
                 )
-            payload[CONF_SCHEDULE_START_DATE] = period.start_date.isoformat()
-            payload[CONF_SCHEDULE_END_DATE] = period.end_date.isoformat()
     elif period.schedule_type == SCHEDULE_TYPE_CONTINUOUS_SPAN:
         if period.start_at is None or period.end_at is None:
             raise ValueError(
                 f"Schedule entry {period.name!r}: continuous_span requires "
                 f"{CONF_SCHEDULE_START_AT!r} and {CONF_SCHEDULE_END_AT!r}"
             )
+    if (
+        period.schedule_type
+        in (SCHEDULE_TYPE_WEEKLY_RECURRING, SCHEDULE_TYPE_DATE_RANGE_DAILY)
+        or CONF_SCHEDULE_TIME_MODE in period.preserved_when_fields
+    ) and period.time_mode is not None:
+        payload[CONF_SCHEDULE_TIME_MODE] = period.time_mode
+    if period.start is not None:
+        payload[CONF_SCHEDULE_START] = period.start.strftime("%H:%M")
+    if period.end is not None:
+        payload[CONF_SCHEDULE_END] = period.end.strftime("%H:%M")
+    if (
+        period.schedule_type == SCHEDULE_TYPE_WEEKLY_RECURRING
+        or CONF_SCHEDULE_DAYS in period.preserved_when_fields
+    ):
+        payload[CONF_SCHEDULE_DAYS] = sorted(period.days)
+    if period.start_date is not None:
+        payload[CONF_SCHEDULE_START_DATE] = period.start_date.isoformat()
+    if period.end_date is not None:
+        payload[CONF_SCHEDULE_END_DATE] = period.end_date.isoformat()
+    if period.start_at is not None:
         payload[CONF_SCHEDULE_START_AT] = period.start_at.strftime("%Y-%m-%dT%H:%M:%S")
+    if period.end_at is not None:
         payload[CONF_SCHEDULE_END_AT] = period.end_at.strftime("%Y-%m-%dT%H:%M:%S")
 
     return payload
+
+
+def _parse_optional_time(entry: Dict, key: str) -> Optional[time]:
+    if key not in entry or entry.get(key) is None:
+        return None
+    return parse_time(entry[key])
+
+
+def _parse_optional_date(entry: Dict, key: str) -> Optional[date]:
+    if key not in entry or entry.get(key) is None:
+        return None
+    return _parse_date(entry[key])
+
+
+def _parse_optional_datetime(entry: Dict, key: str) -> Optional[datetime]:
+    if key not in entry or entry.get(key) is None:
+        return None
+    return _parse_datetime(entry[key])
+
+
+def _parse_time_mode(
+    entry: Dict,
+    name: str,
+    schedule_type: str,
+) -> Optional[str]:
+    if (
+        schedule_type
+        not in (SCHEDULE_TYPE_WEEKLY_RECURRING, SCHEDULE_TYPE_DATE_RANGE_DAILY)
+        and CONF_SCHEDULE_TIME_MODE not in entry
+    ):
+        return None
+
+    time_mode = entry.get(CONF_SCHEDULE_TIME_MODE, SCHEDULE_TIME_MODE_WINDOW)
+    if time_mode not in SCHEDULE_TIME_MODES:
+        raise ValueError(
+            f"Schedule entry {name!r}: {CONF_SCHEDULE_TIME_MODE!r} must be "
+            f"one of {SCHEDULE_TIME_MODES}; got {time_mode!r}"
+        )
+    return time_mode
 
 
 def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
@@ -395,7 +467,8 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
         if setpoint is not None:
             setpoint = float(setpoint)
 
-        frost = float(entry.get(CONF_SCHEDULE_FROST_PROTECTION, DEFAULT_FROST_PROTECTION))
+        frost_raw = entry.get(CONF_SCHEDULE_FROST_PROTECTION)
+        frost = float(frost_raw) if frost_raw is not None else None
         comfort_offset, tracking_weight, energy_weight = _parse_optional_weights(
             entry, name
         )
@@ -413,92 +486,88 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
             enabled=enabled,
         )
 
-        if schedule_type == SCHEDULE_TYPE_WEEKLY_RECURRING:
-            time_mode = entry.get(CONF_SCHEDULE_TIME_MODE, SCHEDULE_TIME_MODE_WINDOW)
-            if time_mode not in SCHEDULE_TIME_MODES:
+        preserved_when_fields = frozenset(
+            key for key in _WHEN_FIELD_KEYS if key in entry
+        )
+        time_mode = _parse_time_mode(entry, name, schedule_type)
+        days = (
+            _parse_days(entry.get(CONF_SCHEDULE_DAYS))
+            if schedule_type == SCHEDULE_TYPE_WEEKLY_RECURRING
+            or CONF_SCHEDULE_DAYS in entry
+            else _ALL_DAYS
+        )
+        start = _parse_optional_time(entry, CONF_SCHEDULE_START)
+        end = _parse_optional_time(entry, CONF_SCHEDULE_END)
+        start_date = _parse_optional_date(entry, CONF_SCHEDULE_START_DATE)
+        end_date = _parse_optional_date(entry, CONF_SCHEDULE_END_DATE)
+        start_at = _parse_optional_datetime(entry, CONF_SCHEDULE_START_AT)
+        end_at = _parse_optional_datetime(entry, CONF_SCHEDULE_END_AT)
+
+        if schedule_type in (
+            SCHEDULE_TYPE_WEEKLY_RECURRING,
+            SCHEDULE_TYPE_DATE_RANGE_DAILY,
+        ) and time_mode == SCHEDULE_TIME_MODE_WINDOW:
+            missing = [
+                key
+                for key, value in (
+                    (CONF_SCHEDULE_START, start),
+                    (CONF_SCHEDULE_END, end),
+                )
+                if value is None
+            ]
+            if missing:
                 raise ValueError(
-                    f"Schedule entry {name!r}: {CONF_SCHEDULE_TIME_MODE!r} must be "
-                    f"one of {SCHEDULE_TIME_MODES}; got {time_mode!r}"
+                    f"Schedule entry {name!r} is missing required key {missing[0]!r}"
                 )
-            start = end = None
-            if time_mode == SCHEDULE_TIME_MODE_WINDOW:
-                try:
-                    start = parse_time(entry[CONF_SCHEDULE_START])
-                    end = parse_time(entry[CONF_SCHEDULE_END])
-                except KeyError as exc:
-                    raise ValueError(
-                        f"Schedule entry {name!r} is missing required key "
-                        f"{exc.args[0]!r}"
-                    ) from exc
-            periods.append(
-                SchedulePeriod(
-                    **common,
-                    time_mode=time_mode,
-                    start=start,
-                    end=end,
-                    days=_parse_days(entry.get(CONF_SCHEDULE_DAYS)),
-                )
-            )
-            continue
 
         if schedule_type == SCHEDULE_TYPE_DATE_RANGE_DAILY:
-            time_mode = entry.get(CONF_SCHEDULE_TIME_MODE, SCHEDULE_TIME_MODE_WINDOW)
-            if time_mode not in SCHEDULE_TIME_MODES:
-                raise ValueError(
-                    f"Schedule entry {name!r}: {CONF_SCHEDULE_TIME_MODE!r} must be "
-                    f"one of {SCHEDULE_TIME_MODES}; got {time_mode!r}"
+            missing = [
+                key
+                for key, value in (
+                    (CONF_SCHEDULE_START_DATE, start_date),
+                    (CONF_SCHEDULE_END_DATE, end_date),
                 )
-            try:
-                start_date = _parse_date(entry[CONF_SCHEDULE_START_DATE])
-                end_date = _parse_date(entry[CONF_SCHEDULE_END_DATE])
-            except KeyError as exc:
+                if value is None
+            ]
+            if missing:
                 raise ValueError(
-                    f"Schedule entry {name!r} is missing required key "
-                    f"{exc.args[0]!r}"
-                ) from exc
+                    f"Schedule entry {name!r} is missing required key {missing[0]!r}"
+                )
             if end_date < start_date:
                 raise ValueError(
                     f"Schedule entry {name!r}: end_date must be on or after start_date"
                 )
-            start = end = None
-            if time_mode == SCHEDULE_TIME_MODE_WINDOW:
-                try:
-                    start = parse_time(entry[CONF_SCHEDULE_START])
-                    end = parse_time(entry[CONF_SCHEDULE_END])
-                except KeyError as exc:
-                    raise ValueError(
-                        f"Schedule entry {name!r} is missing required key "
-                        f"{exc.args[0]!r}"
-                    ) from exc
-            periods.append(
-                SchedulePeriod(
-                    **common,
-                    time_mode=time_mode,
-                    start=start,
-                    end=end,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-            )
-            continue
 
-        try:
-            start_at = _parse_datetime(entry[CONF_SCHEDULE_START_AT])
-            end_at = _parse_datetime(entry[CONF_SCHEDULE_END_AT])
-        except KeyError as exc:
-            raise ValueError(
-                f"Schedule entry {name!r} is missing required key {exc.args[0]!r}"
-            ) from exc
-        if end_at <= start_at:
-            raise ValueError(
-                f"Schedule entry {name!r}: end_at must be after start_at"
-            )
+        if schedule_type == SCHEDULE_TYPE_CONTINUOUS_SPAN:
+            missing = [
+                key
+                for key, value in (
+                    (CONF_SCHEDULE_START_AT, start_at),
+                    (CONF_SCHEDULE_END_AT, end_at),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(
+                    f"Schedule entry {name!r} is missing required key {missing[0]!r}"
+                )
+            if end_at <= start_at:
+                raise ValueError(
+                    f"Schedule entry {name!r}: end_at must be after start_at"
+                )
+
         periods.append(
             SchedulePeriod(
                 **common,
-                time_mode=None,
+                time_mode=time_mode,
+                days=days,
+                start=start,
+                end=end,
+                start_date=start_date,
+                end_date=end_date,
                 start_at=start_at,
                 end_at=end_at,
+                preserved_when_fields=preserved_when_fields,
             )
         )
 
@@ -602,12 +671,17 @@ def resolve_effective_control_params(
         )
 
     if period.is_off:
+        frost_floor = (
+            period.frost_protection
+            if period.frost_protection is not None
+            else DEFAULT_FROST_PROTECTION
+        )
         # Frost protection: keep the room enabled and target the floor when
         # the measurement drops below it.  This way an "off" period never
         # lets pipes freeze.
-        if measured_temp is not None and measured_temp <= period.frost_protection:
+        if measured_temp is not None and measured_temp <= frost_floor:
             return EffectiveControlParams(
-                setpoint=period.frost_protection,
+                setpoint=frost_floor,
                 comfort_offset=default_comfort_offset,
                 tracking_weight=default_tracking_weight,
                 energy_weight=default_energy_weight,
@@ -616,7 +690,7 @@ def resolve_effective_control_params(
                 mode=period.mode,
             )
         return EffectiveControlParams(
-            setpoint=period.frost_protection,
+            setpoint=frost_floor,
             comfort_offset=default_comfort_offset,
             tracking_weight=default_tracking_weight,
             energy_weight=default_energy_weight,

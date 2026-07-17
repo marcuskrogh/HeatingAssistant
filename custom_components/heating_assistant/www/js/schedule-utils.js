@@ -19,6 +19,263 @@ function localDateTimeString(now) {
   return `${localDateString(now)}T${localHhmm(now)}:00`;
 }
 
+export const SCHEDULE_TYPE_WEEKLY = 'weekly_recurring';
+export const SCHEDULE_TYPE_DATE_RANGE = 'date_range_daily';
+export const SCHEDULE_TYPE_CONTINUOUS = 'continuous_span';
+export const SCHEDULE_TYPES = [
+  SCHEDULE_TYPE_WEEKLY,
+  SCHEDULE_TYPE_DATE_RANGE,
+  SCHEDULE_TYPE_CONTINUOUS,
+];
+
+export const COMFORT_OVERRIDE_FIELDS = [
+  'setpoint',
+  'comfort_offset',
+  'tracking_weight',
+  'energy_weight',
+];
+export const OFF_OVERRIDE_FIELDS = ['frost_protection'];
+export const OVERRIDE_FIELDS = [...COMFORT_OVERRIDE_FIELDS, ...OFF_OVERRIDE_FIELDS];
+
+const DEFAULT_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+export const OVERRIDE_META = {
+  setpoint: {
+    label: 'Setpoint',
+    unit: 'degC',
+    step: '0.5',
+    min: '5',
+    max: '35',
+    hint: 'Room base setpoint override',
+  },
+  comfort_offset: {
+    label: 'Comfort Offset',
+    unit: '+/- degC',
+    step: '0.1',
+    min: '0.1',
+    max: '5',
+    hint: 'Comfort band half-width override',
+  },
+  tracking_weight: {
+    label: 'Tracking Weight',
+    unit: '',
+    step: '0.1',
+    min: '0',
+    max: '10',
+    hint: 'Inherited baseline is 1.0',
+  },
+  energy_weight: {
+    label: 'Energy Weight',
+    unit: '',
+    step: '0.01',
+    min: '0',
+    max: '10',
+    hint: 'Inherited baseline is 1.0',
+  },
+  frost_protection: {
+    label: 'Frost Protection',
+    unit: 'degC',
+    step: '0.5',
+    min: '0',
+    max: '15',
+    hint: 'Inherited frost floor is 12 degC',
+  },
+};
+
+export function overrideBaseline(field, defaults = {}) {
+  if (field === 'setpoint') return defaults.setpoint ?? 21;
+  if (field === 'comfort_offset') return defaults.comfort_offset ?? 2.0;
+  if (field === 'tracking_weight') return 1.0;
+  if (field === 'energy_weight') return 1.0;
+  if (field === 'frost_protection') return 12;
+  return undefined;
+}
+
+export function activeOverrideFields(mode) {
+  return mode === 'off' ? OFF_OVERRIDE_FIELDS : COMFORT_OVERRIDE_FIELDS;
+}
+
+export function hasOverride(period, field) {
+  return period && period[field] !== undefined && period[field] !== null;
+}
+
+function parseNumberOrNull(value) {
+  if (value === '' || value === undefined || value === null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeScheduleType(p) {
+  if (SCHEDULE_TYPES.includes(p.schedule_type)) return p.schedule_type;
+  return p.recurring === false ? SCHEDULE_TYPE_DATE_RANGE : SCHEDULE_TYPE_WEEKLY;
+}
+
+function normalizeTimeMode(p, fallback = 'window') {
+  if (p.time_mode === 'all_day' || p.time_mode === 'window') return p.time_mode;
+  if (p.all_day === true) return 'all_day';
+  return fallback;
+}
+
+function todayString() {
+  return localDateString(new Date());
+}
+
+function normalizeDateTimeInput(value, fallback) {
+  if (!value) return fallback;
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(text)) {
+    return text.slice(0, 16);
+  }
+  return text;
+}
+
+function serializeDateTimeInput(value) {
+  if (!value) return value;
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(text)) return `${text}:00`;
+  return text;
+}
+
+function defaultWhenByType(p = {}) {
+  const today = todayString();
+  return {
+    [SCHEDULE_TYPE_WEEKLY]: {
+      time_mode: 'window',
+      start: p.start || '08:00',
+      end: p.end || '22:00',
+      days: p.days ? [...p.days] : [...DEFAULT_DAYS],
+    },
+    [SCHEDULE_TYPE_DATE_RANGE]: {
+      time_mode: 'window',
+      start: p.start || '08:00',
+      end: p.end || '22:00',
+      start_date: p.start_date || today,
+      end_date: p.end_date || today,
+    },
+    [SCHEDULE_TYPE_CONTINUOUS]: {
+      start_at: normalizeDateTimeInput(p.start_at, `${today}T08:00`),
+      end_at: normalizeDateTimeInput(p.end_at, `${today}T22:00`),
+    },
+  };
+}
+
+function normalizeWhenByType(p) {
+  const when = defaultWhenByType(p);
+  const existing = p._whenByType || {};
+  const hasEditorWhen = Boolean(p._whenByType);
+
+  if (existing[SCHEDULE_TYPE_WEEKLY]) {
+    when[SCHEDULE_TYPE_WEEKLY] = {
+      ...when[SCHEDULE_TYPE_WEEKLY],
+      ...existing[SCHEDULE_TYPE_WEEKLY],
+      days: existing[SCHEDULE_TYPE_WEEKLY].days
+        ? [...existing[SCHEDULE_TYPE_WEEKLY].days]
+        : [...when[SCHEDULE_TYPE_WEEKLY].days],
+    };
+  }
+  if (existing[SCHEDULE_TYPE_DATE_RANGE]) {
+    when[SCHEDULE_TYPE_DATE_RANGE] = {
+      ...when[SCHEDULE_TYPE_DATE_RANGE],
+      ...existing[SCHEDULE_TYPE_DATE_RANGE],
+    };
+  }
+  if (existing[SCHEDULE_TYPE_CONTINUOUS]) {
+    when[SCHEDULE_TYPE_CONTINUOUS] = {
+      ...when[SCHEDULE_TYPE_CONTINUOUS],
+      ...existing[SCHEDULE_TYPE_CONTINUOUS],
+    };
+  }
+
+  const scheduleType = normalizeScheduleType(p);
+  if (scheduleType === SCHEDULE_TYPE_WEEKLY) {
+    when[SCHEDULE_TYPE_WEEKLY] = {
+      time_mode: hasEditorWhen
+        ? when[SCHEDULE_TYPE_WEEKLY].time_mode
+        : normalizeTimeMode(p, when[SCHEDULE_TYPE_WEEKLY].time_mode),
+      start: hasEditorWhen ? when[SCHEDULE_TYPE_WEEKLY].start : p.start || when[SCHEDULE_TYPE_WEEKLY].start,
+      end: hasEditorWhen ? when[SCHEDULE_TYPE_WEEKLY].end : p.end || when[SCHEDULE_TYPE_WEEKLY].end,
+      days: hasEditorWhen
+        ? [...when[SCHEDULE_TYPE_WEEKLY].days]
+        : p.days ? [...p.days] : [...when[SCHEDULE_TYPE_WEEKLY].days],
+    };
+  } else if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+    when[SCHEDULE_TYPE_DATE_RANGE] = {
+      time_mode: hasEditorWhen
+        ? when[SCHEDULE_TYPE_DATE_RANGE].time_mode
+        : normalizeTimeMode(p, when[SCHEDULE_TYPE_DATE_RANGE].time_mode),
+      start: hasEditorWhen ? when[SCHEDULE_TYPE_DATE_RANGE].start : p.start || when[SCHEDULE_TYPE_DATE_RANGE].start,
+      end: hasEditorWhen ? when[SCHEDULE_TYPE_DATE_RANGE].end : p.end || when[SCHEDULE_TYPE_DATE_RANGE].end,
+      start_date: hasEditorWhen ? when[SCHEDULE_TYPE_DATE_RANGE].start_date : p.start_date || when[SCHEDULE_TYPE_DATE_RANGE].start_date,
+      end_date: hasEditorWhen ? when[SCHEDULE_TYPE_DATE_RANGE].end_date : p.end_date || when[SCHEDULE_TYPE_DATE_RANGE].end_date,
+    };
+  } else {
+    when[SCHEDULE_TYPE_CONTINUOUS] = {
+      start_at: hasEditorWhen
+        ? normalizeDateTimeInput(when[SCHEDULE_TYPE_CONTINUOUS].start_at, when[SCHEDULE_TYPE_CONTINUOUS].start_at)
+        : normalizeDateTimeInput(p.start_at, when[SCHEDULE_TYPE_CONTINUOUS].start_at),
+      end_at: hasEditorWhen
+        ? normalizeDateTimeInput(when[SCHEDULE_TYPE_CONTINUOUS].end_at, when[SCHEDULE_TYPE_CONTINUOUS].end_at)
+        : normalizeDateTimeInput(p.end_at, when[SCHEDULE_TYPE_CONTINUOUS].end_at),
+    };
+  }
+
+  return when;
+}
+
+function applyActiveWhenFields(out, scheduleType, whenByType) {
+  const when = whenByType[scheduleType];
+  if (scheduleType === SCHEDULE_TYPE_WEEKLY) {
+    out.time_mode = when.time_mode || 'window';
+    if (out.time_mode === 'window') {
+      out.start = when.start || '08:00';
+      out.end = when.end || '22:00';
+    }
+    out.days = when.days ? [...when.days] : [...DEFAULT_DAYS];
+    return;
+  }
+
+  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+    out.time_mode = when.time_mode || 'window';
+    if (out.time_mode === 'window') {
+      out.start = when.start || '08:00';
+      out.end = when.end || '22:00';
+    }
+    out.start_date = when.start_date || todayString();
+    out.end_date = when.end_date || out.start_date;
+    return;
+  }
+
+  out.start_at = serializeDateTimeInput(when.start_at);
+  out.end_at = serializeDateTimeInput(when.end_at);
+}
+
+function preserveInactiveWhenFields(out, scheduleType, whenByType) {
+  if (scheduleType !== SCHEDULE_TYPE_WEEKLY) {
+    const weekly = whenByType[SCHEDULE_TYPE_WEEKLY];
+    out.days = weekly.days ? [...weekly.days] : [...DEFAULT_DAYS];
+  }
+  if (scheduleType !== SCHEDULE_TYPE_DATE_RANGE) {
+    const dateRange = whenByType[SCHEDULE_TYPE_DATE_RANGE];
+    out.start_date = dateRange.start_date;
+    out.end_date = dateRange.end_date;
+  }
+  if (scheduleType !== SCHEDULE_TYPE_CONTINUOUS) {
+    const continuous = whenByType[SCHEDULE_TYPE_CONTINUOUS];
+    out.start_at = serializeDateTimeInput(continuous.start_at);
+    out.end_at = serializeDateTimeInput(continuous.end_at);
+  }
+}
+
+function applyOverrideFields(out, period, defaults) {
+  for (const field of OVERRIDE_FIELDS) {
+    const value = parseNumberOrNull(period[field]);
+    if (value === null) continue;
+    if (value !== overrideBaseline(field, defaults)) {
+      out[field] = value;
+    }
+  }
+}
+
 /** Mirrors Python ``SchedulePeriod._matches_time_of_day``. */
 function periodMatchesTimeOfDay(p, now, applyWeekdayFilter) {
   const day = (now.getDay() + 6) % 7;
@@ -68,12 +325,12 @@ export function periodMatchesNow(p, now = new Date()) {
   if (p.enabled === false) return false;
 
   const scheduleType = p.schedule_type
-    || (p.recurring === false ? 'date_range_daily' : 'weekly_recurring');
+    || (p.recurring === false ? SCHEDULE_TYPE_DATE_RANGE : SCHEDULE_TYPE_WEEKLY);
 
-  if (scheduleType === 'continuous_span') {
+  if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) {
     return matchesContinuousSpan(p, now);
   }
-  if (scheduleType === 'date_range_daily') {
+  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
     const normalized = { ...p };
     if (!normalized.time_mode) {
       normalized.time_mode = p.all_day ? 'all_day' : 'window';
@@ -108,8 +365,8 @@ export function findNextPeriod(periods) {
   for (const p of periods) {
     if (p.enabled === false) continue;
     const scheduleType = p.schedule_type
-      || (p.recurring === false ? 'date_range_daily' : 'weekly_recurring');
-    if (scheduleType !== 'weekly_recurring') continue;
+      || (p.recurring === false ? SCHEDULE_TYPE_DATE_RANGE : SCHEDULE_TYPE_WEEKLY);
+    if (scheduleType !== SCHEDULE_TYPE_WEEKLY) continue;
     const timeMode = p.time_mode || (p.all_day ? 'all_day' : 'window');
     if (timeMode === 'all_day') continue;
     const days = p.days || [0, 1, 2, 3, 4, 5, 6];
@@ -124,53 +381,63 @@ export function findNextPeriod(periods) {
 /** Human-readable time window for a period row. */
 export function formatPeriodTime(p) {
   const scheduleType = p.schedule_type
-    || (p.recurring === false ? 'date_range_daily' : 'weekly_recurring');
+    || (p.recurring === false ? SCHEDULE_TYPE_DATE_RANGE : SCHEDULE_TYPE_WEEKLY);
   const timeMode = p.time_mode || (p.all_day ? 'all_day' : 'window');
 
-  if (scheduleType === 'continuous_span') {
+  if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) {
     if (p.start_at && p.end_at) return `${p.start_at} → ${p.end_at}`;
     return 'Continuous span';
   }
-  if (timeMode === 'all_day') return 'All day';
-  if (scheduleType === 'date_range_daily' && p.start_date && p.end_date) {
+  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE && p.start_date && p.end_date) {
+    if (timeMode === 'all_day') {
+      if (p.start_date === p.end_date) return `${p.start_date} All day`;
+      return `${p.start_date} → ${p.end_date} All day`;
+    }
     const timePart = `${p.start || '—'}–${p.end || '—'}`;
     if (p.start_date === p.end_date) return `${p.start_date} ${timePart}`;
     return `${p.start_date} → ${p.end_date} ${timePart}`;
   }
+  if (timeMode === 'all_day') return 'All day';
   return `${p.start || '—'}–${p.end || '—'}`;
 }
 
-/** Map persisted schedule_type payloads to legacy editor toggles until SWD-23. */
+/** Map persisted schedule_type payloads to the period editor state. */
 export function normalizePeriodForEditor(p) {
+  const scheduleType = normalizeScheduleType(p);
+  const whenByType = normalizeWhenByType({ ...p, schedule_type: scheduleType });
+  const activeWhen = whenByType[scheduleType];
   const out = {
     ...p,
+    schedule_type: scheduleType,
     mode: p.mode || 'comfort',
     enabled: p.enabled !== false,
-    days: p.days ? [...p.days] : [0, 1, 2, 3, 4, 5, 6],
-    start: p.start || '08:00',
-    end: p.end || '22:00',
+    _whenByType: whenByType,
   };
 
-  if (p.schedule_type === 'continuous_span') {
+  if (scheduleType === SCHEDULE_TYPE_WEEKLY) {
+    out.recurring = true;
+    out.all_day = activeWhen.time_mode === 'all_day';
+    out.time_mode = activeWhen.time_mode;
+    out.start = activeWhen.start;
+    out.end = activeWhen.end;
+    out.days = [...(activeWhen.days || DEFAULT_DAYS)];
+  } else if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+    out.recurring = false;
+    out.all_day = activeWhen.time_mode === 'all_day';
+    out.time_mode = activeWhen.time_mode;
+    out.start = activeWhen.start;
+    out.end = activeWhen.end;
+    out.start_date = activeWhen.start_date;
+    out.end_date = activeWhen.end_date;
+    out.days = [...(whenByType[SCHEDULE_TYPE_WEEKLY].days || DEFAULT_DAYS)];
+  } else {
     out.recurring = false;
     out.all_day = false;
-    return out;
+    out.start_at = activeWhen.start_at;
+    out.end_at = activeWhen.end_at;
+    out.days = [...(whenByType[SCHEDULE_TYPE_WEEKLY].days || DEFAULT_DAYS)];
   }
 
-  if (p.schedule_type === 'date_range_daily') {
-    out.recurring = false;
-    out.all_day = p.time_mode === 'all_day';
-    return out;
-  }
-
-  if (p.schedule_type === 'weekly_recurring') {
-    out.recurring = true;
-    out.all_day = p.time_mode === 'all_day';
-    return out;
-  }
-
-  out.recurring = p.recurring !== false;
-  out.all_day = !!p.all_day;
   return out;
 }
 
@@ -231,58 +498,17 @@ export function scheduleSectionHeaderHtml(title, badgeHtml = '') {
 
 /** Serialize a local period object for the update_room_schedule service. */
 export function serializeSchedulePeriod(p, defaults) {
-  if (p.schedule_type === 'continuous_span') {
-    const out = {
-      name: p.name,
-      schedule_type: 'continuous_span',
-      mode: p.mode,
-      enabled: p.enabled !== false,
-      start_at: p.start_at,
-      end_at: p.end_at,
-    };
-    if (p.mode === 'off') {
-      out.frost_protection = p.frost_protection ?? 12;
-    } else {
-      out.setpoint = p.setpoint ?? defaults.setpoint;
-      if (p.comfort_offset != null) out.comfort_offset = p.comfort_offset;
-      if (p.tracking_weight != null) out.tracking_weight = p.tracking_weight;
-      if (p.energy_weight != null) out.energy_weight = p.energy_weight;
-    }
-    return out;
-  }
-
-  const recurring = p.recurring !== false;
-  const allDay = !!p.all_day;
-  const scheduleType = recurring ? 'weekly_recurring' : 'date_range_daily';
-  const timeMode = allDay ? 'all_day' : 'window';
-
+  const normalized = normalizePeriodForEditor(p);
+  const scheduleType = normalized.schedule_type;
   const out = {
     name: p.name,
     schedule_type: scheduleType,
-    time_mode: timeMode,
-    mode: p.mode,
+    mode: p.mode || 'comfort',
     enabled: p.enabled !== false,
   };
 
-  if (timeMode === 'window') {
-    out.start = p.start;
-    out.end = p.end;
-  }
-
-  if (scheduleType === 'date_range_daily') {
-    out.start_date = p.start_date;
-    out.end_date = p.end_date;
-  } else if (p.days) {
-    out.days = p.days;
-  }
-
-  if (p.mode === 'off') {
-    out.frost_protection = p.frost_protection ?? 12;
-  } else {
-    out.setpoint = p.setpoint ?? defaults.setpoint;
-    if (p.comfort_offset != null) out.comfort_offset = p.comfort_offset;
-    if (p.tracking_weight != null) out.tracking_weight = p.tracking_weight;
-    if (p.energy_weight != null) out.energy_weight = p.energy_weight;
-  }
+  applyActiveWhenFields(out, scheduleType, normalized._whenByType);
+  preserveInactiveWhenFields(out, scheduleType, normalized._whenByType);
+  applyOverrideFields(out, normalized, defaults || {});
   return out;
 }

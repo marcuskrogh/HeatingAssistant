@@ -672,6 +672,9 @@ CONF_PERSISTED_SETPOINTS = "persisted_setpoints"
 #: reloads and restarts regardless of whether rooms come from YAML or options.
 CONF_PERSISTED_SCHEDULES = "persisted_schedules"
 
+#: entry.data marker set after the one-shot inherited override cleanup has run.
+CONF_INHERIT_OVERRIDES_MIGRATED = "inherit_overrides_migrated"
+
 #: entry.data key that stores user-modified per-room comfort offsets (the
 #: symmetric comfort-band half-width set from the dashboard climate cards) so
 #: they survive a full Home Assistant restart, mirroring CONF_PERSISTED_SETPOINTS.
