@@ -1096,13 +1096,7 @@
   flex-direction: column;
 }
 
-/* Reorder-locked styling: dim + strike affordance so it's obvious the drag
-   handle is inert. Doesn't hide anything — the user can still edit inputs. */
-.schedule-form__periods--reorder-locked .schedule-form__drag-grip {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
+/* Reorder-locked styling: whole-card drag is inert while dirty/saving. */
 .schedule-form__periods--reorder-locked .schedule-form__period--draggable {
   cursor: default;
 }
@@ -1116,24 +1110,6 @@
 
 .schedule-form__period--draggable:active {
   cursor: grabbing;
-}
-
-/* Grip icon lives at the far-left of the header on enabled cards */
-.schedule-form__drag-grip {
-  flex-shrink: 0;
-  display: inline-block;
-  width: 12px;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 14px;
-  line-height: 1;
-  letter-spacing: -2px;
-  cursor: grab;
-  user-select: none;
-}
-
-.schedule-form__drag-grip:hover {
-  color: var(--accent);
 }
 
 .schedule-form__period--dragging {

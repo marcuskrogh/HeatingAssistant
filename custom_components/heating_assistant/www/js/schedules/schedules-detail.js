@@ -632,6 +632,10 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     card.addEventListener('drop', (e) => {
       if (!dragState || dragState.mode !== 'mouse') return;
       e.preventDefault();
+      // Prevent the container-level drop from re-firing on the same event.
+      // Currently safe (dragState is nulled below) but explicit stopPropagation
+      // avoids any future ambiguity if that invariant changes.
+      e.stopPropagation();
       const finalIndex = computeTargetIndexFromPointer(e.clientY, dragState.fromIndex);
       const from = dragState.fromIndex;
       dragState = null;
@@ -677,8 +681,18 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         startY: t.clientY,
         cardEl: card,
         timer: setTimeout(() => {
+          // Seed pointerY from the initial press. Without this, a hold-then-
+          // release with no `touchmove` would leave pointerY undefined and
+          // the drop math would silently land at the top of the list.
+          const startY = touchPending?.startY;
           touchPending = null;
-          dragState = { fromIndex: periodIndex, mode: 'touch', overIndex: periodIndex };
+          dragState = {
+            fromIndex: periodIndex,
+            mode: 'touch',
+            overIndex: periodIndex,
+            pointerY: startY,
+            cardEl: card,
+          };
           card.classList.add('schedule-form__period--dragging');
           beforeDragStart();
         }, TOUCH_DRAG_HOLD_MS),
@@ -712,7 +726,14 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       }
       if (dragState && dragState.mode === 'touch' && dragState.fromIndex === periodIndex) {
         const from = dragState.fromIndex;
-        const pointerY = dragState.pointerY ?? 0;
+        // Fall back to the dragging card's current midpoint if pointerY was
+        // never populated (e.g. hold-then-release with zero touchmove).
+        let pointerY = dragState.pointerY;
+        if (pointerY == null) {
+          const target = dragState.cardEl ?? card;
+          const rect = target?.getBoundingClientRect?.();
+          pointerY = rect ? rect.top + rect.height / 2 : 0;
+        }
         const finalIndex = computeTargetIndexFromPointer(pointerY, from);
         dragState = null;
         clearDragVisuals();
@@ -738,7 +759,45 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
 
   // ── Render ─────────────────────────────────────────────────────────────
 
+  /**
+   * Reorder `localPeriods` so every enabled period comes before every
+   * disabled one, without perturbing the relative order inside each group.
+   *
+   * Guarantees drop-target math in `computeTargetIndexFromPointer` — which
+   * clamps to `[firstEnabled..lastEnabled]` — is only ever applied to a
+   * contiguous enabled prefix. Freshly loaded schedules (before the first
+   * persist rebuilds the wire order) or a stale interleaving from an older
+   * client can otherwise put a disabled period between two enabled ones.
+   *
+   * `expandedSet` and `dirtyPeriodIndices` are keyed by index, so we remap
+   * them by **object identity** rather than assuming any positional shift.
+   */
+  function normalizeEnabledFirst() {
+    const enabled = [];
+    const disabled = [];
+    for (const p of localPeriods) {
+      if (p.enabled !== false) enabled.push(p);
+      else disabled.push(p);
+    }
+    const next = [...enabled, ...disabled];
+    if (next.every((p, i) => p === localPeriods[i])) return;
+    const remap = (set) => {
+      const out = new Set();
+      for (const idx of set) {
+        const period = localPeriods[idx];
+        if (!period) continue;
+        const newIdx = next.indexOf(period);
+        if (newIdx >= 0) out.add(newIdx);
+      }
+      return out;
+    };
+    expandedSet = remap(expandedSet);
+    dirtyPeriodIndices = remap(dirtyPeriodIndices);
+    localPeriods = next;
+  }
+
   function renderPeriodForms() {
+    normalizeEnabledFirst();
     localPeriods = localPeriods.map((period) => normalizePeriodForEditor(period));
     const defaults = getDefaults(state);
     const activePeriod = findActivePeriod(localPeriods);
@@ -817,7 +876,6 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     const cardHeader = document.createElement('div');
     cardHeader.className = 'schedule-form__period-header';
     cardHeader.innerHTML = `
-      ${periodEnabled ? '<span class="schedule-form__drag-grip" aria-hidden="true" title="Drag to reorder">⋮⋮</span>' : ''}
       ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
       ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
       <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
@@ -945,7 +1003,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
 
     // Toggle expansion on header click (except action buttons / drag grip)
     cardHeader.addEventListener('click', (e) => {
-      if (e.target.closest('.schedule-form__delete, [data-action="toggle-enabled"], .schedule-form__drag-grip')) return;
+      if (e.target.closest('.schedule-form__delete, [data-action="toggle-enabled"]')) return;
       const willExpand = !expandedSet.has(i);
       if (willExpand) expandedSet.add(i); else expandedSet.delete(i);
       card.classList.toggle('schedule-form__period--expanded', willExpand);
@@ -1139,9 +1197,11 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     }
   });
 
-  // Add a blank period — auto-expand it
+  // Add a blank period — auto-expand it. New periods are enabled, so they
+  // must land at the end of the enabled group (not appended after any
+  // disabled entries) to keep priority = position in the enabled prefix.
   btnAdd.addEventListener('click', () => {
-    localPeriods.push({
+    const newPeriod = {
       name: `Period ${localPeriods.length + 1}`,
       schedule_type: SCHEDULE_TYPE_WEEKLY,
       time_mode: 'window',
@@ -1152,10 +1212,24 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       enabled: true,
       recurring: true,
       all_day: false,
-    });
-    const newIndex = localPeriods.length - 1;
-    expandedSet.add(newIndex);
-    markPeriodDirty(newIndex);
+    };
+    let lastEnabledIdx = -1;
+    for (let k = 0; k < localPeriods.length; k++) {
+      if (localPeriods[k].enabled !== false) lastEnabledIdx = k;
+    }
+    const insertAt = lastEnabledIdx + 1;
+    const shiftUp = (set) => {
+      const out = new Set();
+      for (const idx of set) {
+        if (idx >= insertAt) out.add(idx + 1); else out.add(idx);
+      }
+      return out;
+    };
+    expandedSet = shiftUp(expandedSet);
+    dirtyPeriodIndices = shiftUp(dirtyPeriodIndices);
+    localPeriods.splice(insertAt, 0, newPeriod);
+    expandedSet.add(insertAt);
+    markPeriodDirty(insertAt);
     renderPeriodForms();
     const cards = periodsContainer.querySelectorAll('.schedule-form__period');
     if (cards.length > 0) cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1184,6 +1258,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     },
     destroy() {
       cancelTouchPending();
+      dragState = null;
       expSection.destroy();
     },
   };
