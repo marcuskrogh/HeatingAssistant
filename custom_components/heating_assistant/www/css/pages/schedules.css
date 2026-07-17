@@ -653,6 +653,16 @@
   white-space: nowrap;
 }
 
+.sched-row__type {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 .sched-row__name {
   flex: 1;
   color: var(--text-secondary);
@@ -660,6 +670,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .sched-row__time {
@@ -667,6 +678,51 @@
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
+}
+
+/* Collapsed Inactive section (index + detail) */
+.sched-inactive {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.sched-inactive__summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  user-select: none;
+  padding: 4px 0;
+}
+
+.sched-inactive__summary::-webkit-details-marker {
+  display: none;
+}
+
+.sched-inactive__summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-dim);
+}
+
+.sched-inactive[open] > .sched-inactive__summary::before {
+  content: '▾';
+}
+
+.sched-inactive__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.sched-inactive .schedule-form__period {
+  margin-top: 8px;
 }
 
 .sched-row__mode {
