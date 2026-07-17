@@ -167,7 +167,7 @@ class SchedulePeriod:
     schedule_type: str
     mode: str = SCHEDULE_MODE_COMFORT
     setpoint: Optional[float] = None
-    frost_protection: float = DEFAULT_FROST_PROTECTION
+    frost_protection: Optional[float] = None
     days: frozenset[int] = field(default_factory=lambda: frozenset(range(7)))
     comfort_offset: Optional[float] = None
     tracking_weight: Optional[float] = None
@@ -316,10 +316,11 @@ def period_to_dict(period: SchedulePeriod) -> Dict:
         CONF_SCHEDULE_TYPE: period.schedule_type,
         CONF_SCHEDULE_MODE: period.mode,
         CONF_SCHEDULE_ENABLED: period.enabled,
-        CONF_SCHEDULE_FROST_PROTECTION: period.frost_protection,
     }
     if period.setpoint is not None:
         payload[CONF_SCHEDULE_SETPOINT] = period.setpoint
+    if period.frost_protection is not None:
+        payload[CONF_SCHEDULE_FROST_PROTECTION] = period.frost_protection
     if period.comfort_offset is not None:
         payload[CONF_SCHEDULE_COMFORT_OFFSET] = period.comfort_offset
     if period.tracking_weight is not None:
@@ -395,7 +396,8 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
         if setpoint is not None:
             setpoint = float(setpoint)
 
-        frost = float(entry.get(CONF_SCHEDULE_FROST_PROTECTION, DEFAULT_FROST_PROTECTION))
+        frost_raw = entry.get(CONF_SCHEDULE_FROST_PROTECTION)
+        frost = float(frost_raw) if frost_raw is not None else None
         comfort_offset, tracking_weight, energy_weight = _parse_optional_weights(
             entry, name
         )
@@ -602,12 +604,17 @@ def resolve_effective_control_params(
         )
 
     if period.is_off:
+        frost_floor = (
+            period.frost_protection
+            if period.frost_protection is not None
+            else DEFAULT_FROST_PROTECTION
+        )
         # Frost protection: keep the room enabled and target the floor when
         # the measurement drops below it.  This way an "off" period never
         # lets pipes freeze.
-        if measured_temp is not None and measured_temp <= period.frost_protection:
+        if measured_temp is not None and measured_temp <= frost_floor:
             return EffectiveControlParams(
-                setpoint=period.frost_protection,
+                setpoint=frost_floor,
                 comfort_offset=default_comfort_offset,
                 tracking_weight=default_tracking_weight,
                 energy_weight=default_energy_weight,
@@ -616,7 +623,7 @@ def resolve_effective_control_params(
                 mode=period.mode,
             )
         return EffectiveControlParams(
-            setpoint=period.frost_protection,
+            setpoint=frost_floor,
             comfort_offset=default_comfort_offset,
             tracking_weight=default_tracking_weight,
             energy_weight=default_energy_weight,

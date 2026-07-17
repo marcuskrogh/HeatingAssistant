@@ -26,6 +26,7 @@ from custom_components.heating_assistant.schedule import (
     build_schedule,
     next_transition,
     parse_time,
+    period_to_dict,
     resolve_effective_setpoint,
 )
 
@@ -254,6 +255,16 @@ class TestResolveEffectiveSetpoint:
                                             measured_temp=None, now=_at(23, 0))
         assert result.enabled is False
 
+    def test_off_period_without_frost_uses_default_floor(self):
+        sched = RoomSchedule(periods=[
+            _weekly_window("night", time(22, 0), time(4, 0),
+                           mode=SCHEDULE_MODE_OFF),
+        ])
+        result = resolve_effective_setpoint(sched, base_setpoint=21.0,
+                                            measured_temp=11.5, now=_at(23, 0))
+        assert result.enabled is True
+        assert result.setpoint == DEFAULT_FROST_PROTECTION
+
 
 # ---------------------------------------------------------------------------
 # build_schedule
@@ -281,11 +292,34 @@ class TestBuildSchedule:
         assert period.start == time(22, 0)
         assert period.end == time(4, 0)
         assert period.mode == SCHEDULE_MODE_COMFORT
-        assert period.frost_protection == DEFAULT_FROST_PROTECTION
+        assert period.frost_protection is None
         assert period.days == frozenset(range(7))
         assert period.setpoint is None
         # Auto-generated name when omitted.
         assert period.name == "period_1"
+
+    def test_builds_null_frost_as_inherit(self):
+        sched = build_schedule([
+            {
+                "schedule_type": SCHEDULE_TYPE_WEEKLY_RECURRING,
+                "time_mode": SCHEDULE_TIME_MODE_WINDOW,
+                "start": "22:00",
+                "end": "04:00",
+                "mode": "off",
+                "frost_protection": None,
+            },
+        ])
+        assert sched.periods[0].frost_protection is None
+
+    def test_period_to_dict_omits_none_frost(self):
+        period = _weekly_window(
+            "night",
+            time(22, 0),
+            time(4, 0),
+            mode=SCHEDULE_MODE_OFF,
+        )
+        payload = period_to_dict(period)
+        assert "frost_protection" not in payload
 
     def test_builds_full_off_period_with_days_filter(self):
         sched = build_schedule([
