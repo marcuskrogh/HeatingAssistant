@@ -735,6 +735,57 @@ export function scheduleSectionHeaderHtml(title, badgeHtml = '') {
   </div>`;
 }
 
+/**
+ * Move an entry in an array to a new index and return a new array.
+ *
+ * Used by the drag-to-reorder schedule priority UI on the room schedule detail
+ * page (SWD-24). Kept as a pure helper so the reorder mechanics can be covered
+ * by unit tests without spinning up the DOM harness.
+ *
+ * If either index is out of range or equals the other, the original array is
+ * returned unchanged (as a shallow copy).
+ */
+export function movePeriodInList(list, fromIndex, toIndex) {
+  if (!Array.isArray(list)) return list;
+  const n = list.length;
+  if (fromIndex < 0 || fromIndex >= n) return list.slice();
+  if (toIndex < 0) toIndex = 0;
+  if (toIndex > n - 1) toIndex = n - 1;
+  if (fromIndex === toIndex) return list.slice();
+  const next = list.slice();
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+}
+
+/**
+ * Remap a Set of indices after a single-item move within a list.
+ *
+ * Given the set of currently-expanded period indices, returns a new Set with
+ * each index shifted to reflect the same period's new position after moving
+ * the entry at `fromIndex` to `toIndex`. Companion to `movePeriodInList`.
+ */
+export function remapExpandedIndices(set, fromIndex, toIndex) {
+  const out = new Set();
+  if (!(set instanceof Set)) return out;
+  if (fromIndex === toIndex) {
+    for (const idx of set) out.add(idx);
+    return out;
+  }
+  for (const idx of set) {
+    let next = idx;
+    if (idx === fromIndex) {
+      next = toIndex;
+    } else if (fromIndex < toIndex) {
+      if (idx > fromIndex && idx <= toIndex) next = idx - 1;
+    } else {
+      if (idx >= toIndex && idx < fromIndex) next = idx + 1;
+    }
+    out.add(next);
+  }
+  return out;
+}
+
 /** Serialize a local period object for the update_room_schedule service. */
 export function serializeSchedulePeriod(p, defaults) {
   const normalized = normalizePeriodForEditor(p);
