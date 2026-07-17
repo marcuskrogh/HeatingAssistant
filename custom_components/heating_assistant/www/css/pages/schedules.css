@@ -1027,6 +1027,144 @@
   opacity: 0.7;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   DRAG-TO-REORDER  (SWD-24)
+   Enabled period cards on the schedule detail page can be reordered by
+   drag-and-drop while there are no unsaved edits. Unsaved changes lock the
+   list and are surfaced by a page-level banner + a per-card marker so it's
+   always clear why reorder is unavailable.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Page-level unsaved-changes banner */
+.sched-detail__dirty-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  background: rgba(245, 166, 35, 0.08);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--warning);
+}
+
+.sched-detail__dirty-banner[hidden] {
+  display: none;
+}
+
+.sched-detail__dirty-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.18);
+}
+
+.sched-detail__dirty-banner-text {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tuning-actions__status--dirty {
+  color: var(--warning);
+}
+
+/* Optional inactive-section header treatment — muted vs the enabled header */
+.sched-detail__section-header--inactive {
+  margin-top: 24px;
+}
+
+.sched-detail__section-header--inactive .sched-detail__section-title {
+  color: var(--text-dim);
+}
+
+/* Muted empty-state used inside the enabled list when everything is inactive */
+.sched-detail__empty--muted {
+  padding: 18px 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  border-style: solid;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+/* ── Enabled-list container ────────────────────────────────────────────── */
+.schedule-form__periods {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Reorder-locked styling: whole-card drag is inert while dirty/saving. */
+.schedule-form__periods--reorder-locked .schedule-form__period--draggable {
+  cursor: default;
+}
+
+/* ── Draggable period cards ────────────────────────────────────────────── */
+.schedule-form__period--draggable {
+  cursor: grab;
+  transition: box-shadow var(--transition), transform 120ms ease;
+  touch-action: pan-y; /* let vertical scroll happen until hold-drag begins */
+}
+
+.schedule-form__period--draggable:active {
+  cursor: grabbing;
+}
+
+.schedule-form__period--dragging {
+  opacity: 0.55;
+  transform: scale(0.99);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  border-color: var(--accent) !important;
+  z-index: 2;
+}
+
+/* Drop insertion indicators — a coloured edge on the target card */
+.schedule-form__period--drop-before {
+  box-shadow: 0 -3px 0 0 var(--accent) inset, 0 -3px 0 0 var(--accent);
+}
+
+.schedule-form__period--drop-after {
+  box-shadow: 0 3px 0 0 var(--accent) inset, 0 3px 0 0 var(--accent);
+}
+
+/* Per-card unsaved marker: dot in the collapsed header. Rendered invisible
+   by default so becoming unsaved does not reflow the row. */
+.schedule-form__unsaved-dot {
+  visibility: hidden;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.15);
+}
+
+.schedule-form__period--unsaved {
+  border-color: rgba(245, 166, 35, 0.55);
+  background: linear-gradient(160deg, var(--bg-card) 0%, rgba(245, 166, 35, 0.05) 100%);
+}
+
+.schedule-form__period--unsaved .schedule-form__unsaved-dot {
+  visibility: visible;
+}
+
+/* The delete '×' button sits after the unsaved-dot; keep spacing tight so
+   the header row doesn't jump when a card becomes unsaved. */
+.schedule-form__period-header .schedule-form__delete {
+  margin-left: 6px;
+}
+
+.schedule-form__period--unsaved .schedule-form__period-name {
+  color: var(--text-primary);
+}
+
+/* Inactive section: never draggable, no grip */
+.schedule-form__periods--inactive .schedule-form__period {
+  cursor: default;
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ROOM TILE — new setpoint control components (design system v2)
