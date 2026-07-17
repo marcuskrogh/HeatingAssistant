@@ -577,6 +577,20 @@ def test_panel_schedules_modules_load_without_shadowing() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+def test_panel_schedules_preview_and_inactive() -> None:
+    """Period preview, NOW/NEXT across types, and inactive bucketing (SWD-45)."""
+    harness = REPO_ROOT / "tests" / "panel_schedules_preview.harness.mjs"
+    result = subprocess.run(
+        ["node", str(harness)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_panel_schedule_resolver_falls_back_to_config_state() -> None:
     """Shared schedule resolver must use config-entity state when WS is empty."""
     harness = REPO_ROOT / "tests" / "panel_schedule_resolver.harness.mjs"

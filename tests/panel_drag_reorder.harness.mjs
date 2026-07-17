@@ -238,35 +238,43 @@ assert(
   'commitReorder must use movePeriodInList to reorder localPeriods',
 );
 
-// Enable → append to end of enabled group.
+// Enable → append to end of active (non-inactive) group.
 {
   const detach = /localPeriods\.splice\(from,\s*1\)/;
   assert(detach.test(detailSource), 'enable path must detach the period from its current slot');
   const insertAtEnd = /localPeriods\.splice\(insertAt,\s*0,\s*detached\)/;
   assert(insertAtEnd.test(detailSource), 'enable path must re-insert the period at end of enabled group');
-  const findsLastEnabled = /for\s*\(let\s+k[\s\S]*?localPeriods\[k\]\.enabled\s*!==\s*false[\s\S]*?lastEnabledIdx\s*=\s*k/;
+  const findsLastActive = /for\s*\(let\s+k[\s\S]*?!isPeriodInactive\(localPeriods\[k\]\)[\s\S]*?lastActiveIdx\s*=\s*k/;
   assert(
-    findsLastEnabled.test(detailSource),
-    'enable path must locate the last enabled index before re-inserting',
+    findsLastActive.test(detailSource),
+    'enable path must locate the last active (non-inactive) index before re-inserting',
   );
 }
 
-// Draggable + data-period-index wiring on enabled cards only.
+// Draggable + data-period-index wiring on active (non-inactive) cards only.
 assert(
   detailSource.includes('schedule-form__period--draggable'),
   'enabled cards must carry the --draggable class',
 );
 assert(
-  /if\s*\(periodEnabled\)\s*\{[\s\S]*?card\.classList\.add\(['"]schedule-form__period--draggable['"]\)/.test(detailSource),
-  '--draggable class is applied only for enabled cards',
+  /if\s*\(!periodInactive\)\s*\{[\s\S]*?card\.classList\.add\(['"]schedule-form__period--draggable['"]\)/.test(detailSource),
+  '--draggable class is applied only for active (non-inactive) cards',
 );
 assert(
   /card\.dataset\.periodIndex\s*=\s*String\(i\)/.test(detailSource),
   'each card records its localPeriods index in data-period-index',
 );
 assert(
-  /if\s*\(periodEnabled\)\s*\{\s*attachMouseDrag\(card,\s*i\);\s*attachTouchDrag\(card,\s*i\);/.test(detailSource),
-  'DnD handlers are wired only for enabled cards',
+  /if\s*\(!periodInactive\)\s*\{\s*attachMouseDrag\(card,\s*i\);\s*attachTouchDrag\(card,\s*i\);/.test(detailSource),
+  'DnD handlers are wired only for active (non-inactive) cards',
+);
+assert(
+  /isPeriodInactive/.test(detailSource),
+  'detail page must use isPeriodInactive for active/inactive bucketing',
+);
+assert(
+  /formatPeriodPreview/.test(detailSource),
+  'collapsed headers must use formatPeriodPreview (SWD-22 shared preview)',
 );
 
 // Persisted order sends enabled-first, disabled-last — same convention that

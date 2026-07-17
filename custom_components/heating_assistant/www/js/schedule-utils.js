@@ -345,60 +345,296 @@ export function periodMatchesNow(p, now = new Date()) {
   return matchesWeeklyRecurring(normalized, now);
 }
 
-/** Returns the period active right now, or null. */
-export function findActivePeriod(periods) {
-  if (!periods || !periods.length) return null;
-  const now = new Date();
+const DAY_NAMES_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function resolveScheduleType(p) {
+  return p.schedule_type
+    || (p.recurring === false ? SCHEDULE_TYPE_DATE_RANGE : SCHEDULE_TYPE_WEEKLY);
+}
+
+function resolveTimeMode(p) {
+  return p.time_mode || (p.all_day ? 'all_day' : 'window');
+}
+
+function startOfLocalDay(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function addLocalDays(d, n) {
+  const out = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  out.setDate(out.getDate() + n);
+  return out;
+}
+
+function atLocalDateAndTime(dateStr, hhmm) {
+  const [y, m, day] = String(dateStr).split('-').map(Number);
+  const [h, mi] = String(hhmm || '00:00').split(':').map(Number);
+  return new Date(y, m - 1, day, h || 0, mi || 0, 0);
+}
+
+function parseLocalDateTime(value) {
+  if (!value) return null;
+  const text = String(value);
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+}
+
+function formatShortDate(dateStr) {
+  if (!dateStr) return '—';
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  if (!y || !m || !d) return dateStr;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function formatShortDateTime(value) {
+  const dt = parseLocalDateTime(value);
+  if (!dt) return value || '—';
+  const datePart = dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const timePart = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+  return `${datePart} ${timePart}`;
+}
+
+function formatDateRangeLabel(startDate, endDate) {
+  if (!startDate || !endDate) return '—';
+  if (startDate === endDate) return formatShortDate(startDate);
+  return `${formatShortDate(startDate)} → ${formatShortDate(endDate)}`;
+}
+
+/** Compact weekday label list (Mon–Sun, Mon=0). */
+export function formatWeekdayLabels(days) {
+  const sorted = [...(days && days.length ? days : DEFAULT_DAYS)]
+    .map(Number)
+    .filter((d) => d >= 0 && d <= 6)
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) return '';
+  if (sorted.length === 7) return 'Mon–Sun';
+
+  const ranges = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === prev + 1) {
+      prev = sorted[i];
+      continue;
+    }
+    ranges.push(start === prev
+      ? DAY_NAMES_SHORT[start]
+      : `${DAY_NAMES_SHORT[start]}–${DAY_NAMES_SHORT[prev]}`);
+    start = sorted[i];
+    prev = sorted[i];
+  }
+  ranges.push(start === prev
+    ? DAY_NAMES_SHORT[start]
+    : `${DAY_NAMES_SHORT[start]}–${DAY_NAMES_SHORT[prev]}`);
+  return ranges.join(', ');
+}
+
+/** Short type label for previews: Weekly / Date range / Continuous. */
+export function scheduleTypeLabel(p) {
+  const scheduleType = resolveScheduleType(p);
+  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) return 'Date range';
+  if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) return 'Continuous';
+  return 'Weekly';
+}
+
+/**
+ * Timing-only preview string per schedule type.
+ * All-day weekly/date-range uses lowercase "all day" (no clock times).
+ */
+export function formatPeriodTiming(p) {
+  const scheduleType = resolveScheduleType(p);
+  const timeMode = resolveTimeMode(p);
+
+  if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) {
+    if (p.start_at && p.end_at) {
+      return `${formatShortDateTime(p.start_at)} → ${formatShortDateTime(p.end_at)}`;
+    }
+    return 'Continuous span';
+  }
+
+  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+    const dates = formatDateRangeLabel(p.start_date, p.end_date);
+    if (timeMode === 'all_day') return `${dates} · all day`;
+    const window = `${p.start || '—'}–${p.end || '—'}`;
+    return `${dates} · ${window}`;
+  }
+
+  // weekly_recurring
+  if (timeMode === 'all_day') {
+    const days = p.days || DEFAULT_DAYS;
+    if (!days || days.length === 7) return 'all day';
+    return `${formatWeekdayLabels(days)} · all day`;
+  }
+  const daysLabel = formatWeekdayLabels(p.days || DEFAULT_DAYS);
+  const window = `${p.start || '—'}–${p.end || '—'}`;
+  return daysLabel ? `${daysLabel} ${window}` : window;
+}
+
+/**
+ * Structured preview parts: type + name + timing + mode (no overrides).
+ * @returns {{ type: string, name: string, timing: string, mode: string, modeCls: string }}
+ */
+export function formatPeriodPreview(p) {
+  const mode = periodModeDisplay(p);
+  return {
+    type: scheduleTypeLabel(p),
+    name: p.name || 'Period',
+    timing: formatPeriodTiming(p),
+    mode: mode.text,
+    modeCls: mode.cls,
+  };
+}
+
+/** Escape text for HTML element bodies / attributes. */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** HTML snippets for preview parts (user-controlled fields escaped). */
+export function formatPeriodPreviewHtml(p) {
+  const parts = formatPeriodPreview(p);
+  return {
+    typeHtml: `<span class="sched-row__type">${escapeHtml(parts.type)}</span>`,
+    nameHtml: `<span class="sched-row__name">${escapeHtml(parts.name)}</span>`,
+    timingHtml: `<span class="sched-row__time">${escapeHtml(parts.timing)}</span>`,
+    modeHtml: `<span class="sched-row__mode ${escapeHtml(parts.modeCls)}">${escapeHtml(parts.mode)}</span>`,
+    parts,
+  };
+}
+
+/**
+ * Inactive = disabled OR fully past.
+ * Continuous: end_at <= now (or missing end_at); date_range: end_date < today; weekly: never past by date.
+ */
+export function isPeriodInactive(p, now = new Date()) {
+  if (p.enabled === false) return true;
+  const scheduleType = resolveScheduleType(p);
+  if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) {
+    if (!p.end_at) return true;
+    const end = parseLocalDateTime(p.end_at);
+    if (!end) return true;
+    return now.getTime() >= end.getTime();
+  }
+  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+    if (!p.end_date) return true;
+    return localDateString(now) > p.end_date;
+  }
+  return false;
+}
+
+/** Split periods into active vs inactive, preserving relative order in each bucket. */
+export function partitionPeriods(periods, now = new Date()) {
+  const active = [];
+  const inactive = [];
+  if (!periods) return { active, inactive };
   for (const p of periods) {
+    if (isPeriodInactive(p, now)) inactive.push(p);
+    else active.push(p);
+  }
+  return { active, inactive };
+}
+
+/** Next future start datetime for an active, non-matching period; or null. */
+function nextStartForPeriod(p, now) {
+  const scheduleType = resolveScheduleType(p);
+  const timeMode = resolveTimeMode(p);
+
+  if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) {
+    const start = parseLocalDateTime(p.start_at);
+    if (start && start.getTime() > now.getTime()) return start;
+    return null;
+  }
+
+  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+    if (!p.start_date || !p.end_date) return null;
+    const todayStr = localDateString(now);
+
+    if (timeMode === 'all_day') {
+      // Next calendar day in range at 00:00 when not currently matching.
+      let cursor = todayStr < p.start_date ? p.start_date : todayStr;
+      if (cursor === todayStr && todayStr >= p.start_date && todayStr <= p.end_date) {
+        // Today is in range but not matching — should not happen for all_day;
+        // advance to tomorrow.
+        cursor = localDateString(addLocalDays(now, 1));
+      }
+      if (cursor < p.start_date) cursor = p.start_date;
+      if (cursor > p.end_date) return null;
+      return atLocalDateAndTime(cursor, '00:00');
+    }
+
+    // Daily window within remaining date range.
+    let cursor = todayStr < p.start_date ? p.start_date : todayStr;
+    while (cursor <= p.end_date) {
+      const startDt = atLocalDateAndTime(cursor, p.start || '00:00');
+      if (startDt.getTime() > now.getTime()) return startDt;
+      cursor = localDateString(addLocalDays(atLocalDateAndTime(cursor, '00:00'), 1));
+    }
+    return null;
+  }
+
+  // weekly_recurring
+  const days = p.days || DEFAULT_DAYS;
+  if (timeMode === 'all_day') {
+    for (let offset = 0; offset < 7; offset++) {
+      const candidate = addLocalDays(startOfLocalDay(now), offset);
+      const day = (candidate.getDay() + 6) % 7;
+      if (!days.includes(day)) continue;
+      if (offset === 0) continue; // today would already be NOW if matching
+      return candidate;
+    }
+    return null;
+  }
+
+  for (let offset = 0; offset < 8; offset++) {
+    const candidateDay = addLocalDays(startOfLocalDay(now), offset);
+    const day = (candidateDay.getDay() + 6) % 7;
+    if (!days.includes(day)) continue;
+    const startDt = atLocalDateAndTime(localDateString(candidateDay), p.start || '00:00');
+    if (startDt.getTime() > now.getTime()) return startDt;
+  }
+  return null;
+}
+
+/** Returns the period active right now among non-inactive periods, or null. */
+export function findActivePeriod(periods, now = new Date()) {
+  if (!periods || !periods.length) return null;
+  for (const p of periods) {
+    if (isPeriodInactive(p, now)) continue;
     if (periodMatchesNow(p, now)) return p;
   }
   return null;
 }
 
-/** Returns the next upcoming period today, or null (weekly recurring window mode). */
-export function findNextPeriod(periods) {
+/**
+ * Soonest upcoming start among active (non-inactive) periods across all types.
+ * Skips periods that currently match (those are NOW, not NEXT).
+ */
+export function findNextPeriod(periods, now = new Date()) {
   if (!periods || !periods.length) return null;
-  const now = new Date();
-  const day = (now.getDay() + 6) % 7;
-  const hhmm = localHhmm(now);
   let best = null;
+  let bestTime = null;
   for (const p of periods) {
-    if (p.enabled === false) continue;
-    const scheduleType = p.schedule_type
-      || (p.recurring === false ? SCHEDULE_TYPE_DATE_RANGE : SCHEDULE_TYPE_WEEKLY);
-    if (scheduleType !== SCHEDULE_TYPE_WEEKLY) continue;
-    const timeMode = p.time_mode || (p.all_day ? 'all_day' : 'window');
-    if (timeMode === 'all_day') continue;
-    const days = p.days || [0, 1, 2, 3, 4, 5, 6];
-    if (!days.includes(day)) continue;
-    if (p.start > hhmm) {
-      if (!best || p.start < best.start) best = p;
+    if (isPeriodInactive(p, now)) continue;
+    if (periodMatchesNow(p, now)) continue;
+    const start = nextStartForPeriod(p, now);
+    if (!start) continue;
+    if (!bestTime || start.getTime() < bestTime.getTime()) {
+      bestTime = start;
+      best = p;
     }
   }
   return best;
 }
 
-/** Human-readable time window for a period row. */
+/** Human-readable timing for a period row (delegates to formatPeriodTiming). */
 export function formatPeriodTime(p) {
-  const scheduleType = p.schedule_type
-    || (p.recurring === false ? SCHEDULE_TYPE_DATE_RANGE : SCHEDULE_TYPE_WEEKLY);
-  const timeMode = p.time_mode || (p.all_day ? 'all_day' : 'window');
-
-  if (scheduleType === SCHEDULE_TYPE_CONTINUOUS) {
-    if (p.start_at && p.end_at) return `${p.start_at} → ${p.end_at}`;
-    return 'Continuous span';
-  }
-  if (scheduleType === SCHEDULE_TYPE_DATE_RANGE && p.start_date && p.end_date) {
-    if (timeMode === 'all_day') {
-      if (p.start_date === p.end_date) return `${p.start_date} All day`;
-      return `${p.start_date} → ${p.end_date} All day`;
-    }
-    const timePart = `${p.start || '—'}–${p.end || '—'}`;
-    if (p.start_date === p.end_date) return `${p.start_date} ${timePart}`;
-    return `${p.start_date} → ${p.end_date} ${timePart}`;
-  }
-  if (timeMode === 'all_day') return 'All day';
-  return `${p.start || '—'}–${p.end || '—'}`;
+  return formatPeriodTiming(p);
 }
 
 /** Map persisted schedule_type payloads to the period editor state. */
@@ -478,12 +714,15 @@ export function periodEnabledToggleHtml(enabled, periodIndex) {
 export function periodRowHtml(p, isActive, isNext, periodIndex = null) {
   const disabled = p.enabled === false;
   const toggle = periodIndex != null ? periodEnabledToggleHtml(p.enabled, periodIndex) : '';
+  const preview = formatPeriodPreviewHtml(p);
   return `<div class="sched-row${isActive ? ' sched-row--active' : ''}${isNext ? ' sched-row--next' : ''}${disabled ? ' sched-row--disabled' : ''}">
     ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
     ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
     ${toggle}
-    <span class="sched-row__name">${p.name || 'Period'}</span>
-    <span class="sched-row__time">${formatPeriodTime(p)}</span>
+    ${preview.typeHtml}
+    ${preview.nameHtml}
+    ${preview.timingHtml}
+    ${preview.modeHtml}
     ${disabled ? '<span class="sched-row__disabled-label">DISABLED</span>' : ''}
   </div>`;
 }
