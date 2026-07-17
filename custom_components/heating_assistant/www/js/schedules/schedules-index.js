@@ -1,4 +1,5 @@
 import {
+  escapeHtml,
   findActivePeriod,
   findNextPeriod,
   isPeriodInactive,
@@ -6,11 +7,11 @@ import {
   scheduleEnabledBadgeHtml,
   scheduleSectionHeaderHtml,
   serializeSchedulePeriod,
-} from '../schedule-utils.js?v=107';
-import { experimentRowHtml, findNextScheduledExperiment } from '../experiment-utils.js?v=107';
-import { setPanelHash } from '../panel-hash.js?v=107';
-import { updateRoomSchedule } from '../ha-services.js?v=107';
-import { makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=107';
+} from '../schedule-utils.js?v=108';
+import { experimentRowHtml, findNextScheduledExperiment } from '../experiment-utils.js?v=108';
+import { setPanelHash } from '../panel-hash.js?v=108';
+import { updateRoomSchedule } from '../ha-services.js?v=108';
+import { makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=108';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -118,7 +119,7 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
 
       const cardHeader = document.createElement('div');
       cardHeader.className = 'sched-index-card__header';
-      cardHeader.innerHTML = `<span class="sched-index-card__name">${room.name}</span>`;
+      cardHeader.innerHTML = `<span class="sched-index-card__name">${escapeHtml(room.name)}</span>`;
       card.appendChild(cardHeader);
 
       const comfortSection = document.createElement('div');
@@ -139,7 +140,7 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
       if (periods.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'sched-index-card__empty';
-        empty.textContent = 'No periods configured — click to add';
+        empty.textContent = 'No periods configured \u2014 click to add';
         comfortSection.appendChild(empty);
       } else {
         const list = document.createElement('div');
@@ -206,7 +207,7 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
         if (overflow > 0) {
           const more = document.createElement('div');
           more.className = 'sched-index-card__overflow';
-          more.textContent = `+${overflow} more…`;
+          more.textContent = `+${overflow} more\u2026`;
           list.appendChild(more);
         }
         expSection.appendChild(list);

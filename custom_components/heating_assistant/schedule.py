@@ -43,6 +43,7 @@ the comfort temperature on time.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -65,6 +66,7 @@ from .const import (
     CONF_SCHEDULE_TIME_MODE,
     CONF_SCHEDULE_TRACKING_WEIGHT,
     CONF_SCHEDULE_TYPE,
+    CONF_SCHEDULE_WHEN_BY_TYPE,
     DEFAULT_COMFORT_OFFSET,
     DEFAULT_FROST_PROTECTION,
     SCHEDULE_MODE_COMFORT,
@@ -134,17 +136,37 @@ def _parse_date(value: str | date) -> date:
         raise ValueError(f"Schedule date must be YYYY-MM-DD; got {value!r}") from exc
 
 
+def _as_naive_local(value: datetime) -> datetime:
+    """Return a naive local wall-clock ``datetime`` for schedule comparisons.
+
+    Persisted continuous-span bounds are naive local ISO strings. Coordinator
+    ``now`` is typically timezone-aware (``now_utc.astimezone()`` already in
+    the HA local zone). Comparing naive to aware raises ``TypeError`` in
+    Python 3, which the schedule apply path swallows — continuous spans would
+    never match.
+
+    Keep the aware value's wall-clock fields (do not re-convert via
+    ``astimezone()`` to the process timezone — CI runners are often UTC, which
+    would shift Copenhagen wall times and break comparisons against naive
+    local bounds).
+    """
+    if value.tzinfo is None:
+        return value
+    return value.replace(tzinfo=None)
+
+
 def _parse_datetime(value: str | datetime) -> datetime:
     """Parse a local ISO datetime string into a naive ``datetime``."""
     if isinstance(value, datetime):
-        return value
+        return _as_naive_local(value)
     text = str(value).strip()
     try:
-        return datetime.fromisoformat(text)
+        parsed = datetime.fromisoformat(text)
     except ValueError as exc:
         raise ValueError(
             f"Schedule datetime must be ISO-8601 local time; got {value!r}"
         ) from exc
+    return _as_naive_local(parsed)
 
 
 def _parse_days(value: Optional[Sequence[str]]) -> frozenset[int]:
@@ -195,6 +217,7 @@ class SchedulePeriod:
     end_date: Optional[date] = None
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
+    when_by_type: Optional[Dict] = field(default=None, repr=False, compare=False)
     preserved_when_fields: frozenset[str] = field(
         default_factory=frozenset, repr=False, compare=False
     )
@@ -251,7 +274,10 @@ class SchedulePeriod:
     def _matches_continuous_span(self, now: datetime) -> bool:
         if self.start_at is None or self.end_at is None:
             return False
-        return self.start_at <= now < self.end_at
+        local_now = _as_naive_local(now)
+        start_at = _as_naive_local(self.start_at)
+        end_at = _as_naive_local(self.end_at)
+        return start_at <= local_now < end_at
 
     def matches(self, now: datetime) -> bool:
         """Return True if ``now`` falls inside this period.
@@ -391,6 +417,8 @@ def period_to_dict(period: SchedulePeriod) -> Dict:
         payload[CONF_SCHEDULE_START_AT] = period.start_at.strftime("%Y-%m-%dT%H:%M:%S")
     if period.end_at is not None:
         payload[CONF_SCHEDULE_END_AT] = period.end_at.strftime("%Y-%m-%dT%H:%M:%S")
+    if period.when_by_type:
+        payload[CONF_SCHEDULE_WHEN_BY_TYPE] = deepcopy(period.when_by_type)
 
     return payload
 
@@ -567,6 +595,11 @@ def build_schedule(raw: Optional[Sequence[Dict]]) -> RoomSchedule:
                 end_date=end_date,
                 start_at=start_at,
                 end_at=end_at,
+                when_by_type=(
+                    deepcopy(entry[CONF_SCHEDULE_WHEN_BY_TYPE])
+                    if isinstance(entry.get(CONF_SCHEDULE_WHEN_BY_TYPE), dict)
+                    else None
+                ),
                 preserved_when_fields=preserved_when_fields,
             )
         )

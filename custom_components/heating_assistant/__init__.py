@@ -383,39 +383,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Consolidate legacy per-room schedules into persisted_schedules so
     # dashboard saves and YAML-era schedules share one restart-safe store.
     from .coordinator import schedule_control
-
-    get_entry = getattr(hass.config_entries, "async_get_entry", None)
-    if get_entry is not None:
-        entry = get_entry(entry.entry_id) or entry
-    if schedule_control.migrate_legacy_schedules_to_persisted(hass, entry):
-        if get_entry is not None:
-            entry = get_entry(entry.entry_id) or entry
-        entry_data[CONF_PERSISTED_SCHEDULES] = dict(
-            entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
-        )
-
     from .schedule_migration import (
         migrate_inherited_overrides_in_persisted,
         migrate_schedule_types_in_persisted,
     )
 
-    if get_entry is not None:
-        entry = get_entry(entry.entry_id) or entry
-    if migrate_schedule_types_in_persisted(hass, entry):
+    def _refresh_persisted_schedules_after_migrate() -> None:
+        nonlocal entry
+        get_entry = getattr(hass.config_entries, "async_get_entry", None)
         if get_entry is not None:
             entry = get_entry(entry.entry_id) or entry
         entry_data[CONF_PERSISTED_SCHEDULES] = dict(
             entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
         )
 
+    get_entry = getattr(hass.config_entries, "async_get_entry", None)
+    if get_entry is not None:
+        entry = get_entry(entry.entry_id) or entry
+    if schedule_control.migrate_legacy_schedules_to_persisted(hass, entry):
+        _refresh_persisted_schedules_after_migrate()
+
+    if get_entry is not None:
+        entry = get_entry(entry.entry_id) or entry
+    if migrate_schedule_types_in_persisted(hass, entry):
+        _refresh_persisted_schedules_after_migrate()
+
     if get_entry is not None:
         entry = get_entry(entry.entry_id) or entry
     if migrate_inherited_overrides_in_persisted(hass, entry):
-        if get_entry is not None:
-            entry = get_entry(entry.entry_id) or entry
-        entry_data[CONF_PERSISTED_SCHEDULES] = dict(
-            entry.data.get(CONF_PERSISTED_SCHEDULES) or {}
-        )
+        _refresh_persisted_schedules_after_migrate()
 
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)
