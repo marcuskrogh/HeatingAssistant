@@ -4,20 +4,30 @@ import {
   findNextPeriod,
   formatPeriodTime,
   hasOverride,
+  movePeriodInList,
   normalizePeriodForEditor,
   OVERRIDE_META,
   overrideBaseline,
   periodModeDisplay,
+  remapExpandedIndices,
   SCHEDULE_TYPE_CONTINUOUS,
   SCHEDULE_TYPE_DATE_RANGE,
   SCHEDULE_TYPE_WEEKLY,
   serializeSchedulePeriod,
-} from '../schedule-utils.js?v=106';
-import { setPanelHash } from '../panel-hash.js?v=106';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=106';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=106';
-import { renderExperimentsSection } from './schedules-experiments.js?v=106';
+} from '../schedule-utils.js?v=107';
+import { setPanelHash } from '../panel-hash.js?v=107';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=107';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=107';
+import { renderExperimentsSection } from './schedules-experiments.js?v=107';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// Touch hold duration before a card enters drag mode (SWD-24). Chosen so
+// vertical scrolling on a period card feels native but a deliberate press
+// grabs it. ~400ms sits between iOS long-press (~500ms) and a tap.
+const TOUCH_DRAG_HOLD_MS = 400;
+// Max finger travel during the hold window before we abandon the drag intent
+// and let the browser scroll instead.
+const TOUCH_DRAG_HOLD_SLOP_PX = 8;
 
 export function renderScheduleDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -63,13 +73,38 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   const comfortDesc = document.createElement('p');
   comfortDesc.className = 'tuning-section__desc';
   comfortDesc.style.margin = '0 0 14px';
-  comfortDesc.textContent = 'Daily comfort windows that set target temperature and operating mode for this room.';
+  comfortDesc.textContent = 'Daily comfort windows that set target temperature and operating mode for this room. Drag enabled periods to reorder — the first match wins.';
   container.appendChild(comfortDesc);
 
-  // Period form cards live here
+  // Unsaved-changes banner (shown while dirty; blocks reorder).
+  const dirtyBanner = document.createElement('div');
+  dirtyBanner.className = 'sched-detail__dirty-banner';
+  dirtyBanner.hidden = true;
+  dirtyBanner.innerHTML = `
+    <span class="sched-detail__dirty-banner-dot"></span>
+    <span class="sched-detail__dirty-banner-text">Unsaved changes — save to reorder periods.</span>
+  `;
+  container.appendChild(dirtyBanner);
+
+  // Period form cards live here — enabled (draggable) section.
   const periodsContainer = document.createElement('div');
   periodsContainer.id = 'periods-container';
+  periodsContainer.className = 'schedule-form__periods';
   container.appendChild(periodsContainer);
+
+  // Inactive (disabled) periods section header + container.
+  const inactiveHeader = document.createElement('div');
+  inactiveHeader.className = 'sched-detail__section-header sched-detail__section-header--inactive';
+  inactiveHeader.hidden = true;
+  inactiveHeader.innerHTML = `
+    <span class="sched-detail__section-title">INACTIVE PERIODS</span>
+  `;
+  container.appendChild(inactiveHeader);
+
+  const inactiveContainer = document.createElement('div');
+  inactiveContainer.id = 'inactive-periods-container';
+  inactiveContainer.className = 'schedule-form__periods schedule-form__periods--inactive';
+  container.appendChild(inactiveContainer);
 
   // Save row at the bottom
   const actionsRow = document.createElement('div');
@@ -90,11 +125,23 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
 
   let localPeriods = [];
   let dirty = false;
+  let dirtyPeriodIndices = new Set();
   let scheduleLoadGen = 0;
   /** Periods last persisted successfully; held until WS confirms the same payload. */
   let savedScheduleSnapshot = null;
   // Tracks which period indices are currently expanded in the UI
   let expandedSet = new Set();
+  // True while a persist call (Save button or drop auto-save) is in flight.
+  let saveInFlight = false;
+
+  // ── DnD state ──────────────────────────────────────────────────────────
+  // Active drag session (mouse HTML5 drag OR emulated touch drag). Both
+  // pathways share the same shape so downstream helpers stay simple.
+  //   { fromIndex, mode: 'mouse'|'touch', overIndex, pointerY }
+  let dragState = null;
+  // Touch pending state: press started but hold timer hasn't fired yet.
+  //   { periodIndex, timer, startX, startY, cardEl }
+  let touchPending = null;
 
   function getScheduleFromWS(roomSchedules) {
     return getScheduleDataForRoom(roomSchedules, room);
@@ -210,12 +257,13 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     }));
     expandedSet = new Set();
     dirty = false;
+    dirtyPeriodIndices = new Set();
   }
 
   function applySchedulePayload(roomSchedules) {
     const newData = resolveScheduleData(roomSchedules);
     renderToggle(newData);
-    if (!dirty) {
+    if (!dirty && !saveInFlight) {
       initLocalPeriods(newData);
       renderPeriodForms();
     }
@@ -229,6 +277,467 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     });
   }
 
+  // ── Dirty-state helpers ────────────────────────────────────────────────
+
+  function markPeriodDirty(i) {
+    dirtyPeriodIndices.add(i);
+    setDirty(true);
+  }
+
+  function setDirty(next) {
+    dirty = Boolean(next);
+    if (!dirty) dirtyPeriodIndices.clear();
+    updateDirtyUI();
+  }
+
+  function updateDirtyUI() {
+    dirtyBanner.hidden = !dirty;
+    container.classList.toggle('sched-detail--dirty', dirty);
+    container.classList.toggle('sched-detail--saving', saveInFlight);
+
+    if (dirty && !saveInFlight) {
+      if (!saveStatus.classList.contains('tuning-actions__status--error')) {
+        saveStatus.textContent = 'Unsaved changes';
+        saveStatus.className = 'tuning-actions__status tuning-actions__status--dirty';
+      }
+    } else if (!saveInFlight && !saveStatus.classList.contains('tuning-actions__status--success')
+                             && !saveStatus.classList.contains('tuning-actions__status--error')) {
+      saveStatus.textContent = '';
+      saveStatus.className = 'tuning-actions__status';
+    }
+
+    const allCards = [
+      ...periodsContainer.querySelectorAll('.schedule-form__period'),
+      ...inactiveContainer.querySelectorAll('.schedule-form__period'),
+    ];
+    for (const card of allCards) {
+      const idx = Number(card.dataset.periodIndex);
+      const isUnsaved = dirtyPeriodIndices.has(idx);
+      card.classList.toggle('schedule-form__period--unsaved', isUnsaved);
+    }
+
+    // Reorder is only allowed when there are no unsaved edits and no save in
+    // flight. Toggling `draggable` here (rather than re-rendering) keeps the
+    // UI feedback instantaneous as the user types / saves.
+    const reorderLocked = dirty || saveInFlight;
+    periodsContainer.classList.toggle('schedule-form__periods--reorder-locked', reorderLocked);
+    for (const card of periodsContainer.querySelectorAll('.schedule-form__period--draggable')) {
+      if (reorderLocked) card.removeAttribute('draggable');
+      else card.setAttribute('draggable', 'true');
+    }
+  }
+
+  /** Flush any in-progress values in visible editors back into localPeriods.
+   *
+   * Safety net for browsers that don't fire `input` for partial time/date
+   * entries. Called before starting a drag and before Save so what the user
+   * sees on screen is what gets persisted.
+   */
+  function flushOpenEditorsToLocal() {
+    const cards = [
+      ...periodsContainer.querySelectorAll('[data-period-index]'),
+      ...inactiveContainer.querySelectorAll('[data-period-index]'),
+    ];
+    for (const card of cards) {
+      const i = Number(card.dataset.periodIndex);
+      const period = localPeriods[i];
+      if (!period) continue;
+      const body = card.querySelector('.schedule-form__period-body');
+      if (!body || body.hidden) continue;
+      body.querySelectorAll('[data-field]').forEach((input) => {
+        const field = input.dataset.field;
+        if (OVERRIDE_META[field]) {
+          const parsed = parseFloat(input.value);
+          if (Number.isFinite(parsed)) period[field] = parsed;
+        } else if (input.value !== undefined) {
+          period[field] = input.value;
+        }
+      });
+      body.querySelectorAll('[data-when-field]').forEach((input) => {
+        const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
+        if (input.value !== undefined && input.value !== '') {
+          when[input.dataset.whenField] = input.value;
+        }
+      });
+    }
+  }
+
+  // ── Persist helper (used by Save button + drop auto-save) ──────────────
+
+  /**
+   * Persist the current localPeriods via update_room_schedule and confirm
+   * against the coordinator. Mirrors the historical Save behaviour so drop
+   * auto-saves get the same anti-race guarantees.
+   *
+   * On success: dirty=false, saved status message, resolves.
+   * On failure: dirty stays true, error status message, rejects.
+   */
+  async function persistPeriods({ reason }) {
+    if (saveInFlight) throw new Error('Save already in progress');
+    saveInFlight = true;
+    btnSave.disabled = true;
+
+    const savingLabel = reason === 'drop' ? 'Saving new order…' : 'Saving…';
+    saveStatus.textContent = savingLabel;
+    saveStatus.className = 'tuning-actions__status tuning-actions__status--running';
+    updateDirtyUI();
+
+    try {
+      const defaults = getDefaults(state);
+      // Rebuild persisted order as [enabled-in-priority-order, ...disabled]
+      // so priority is unambiguously the position in the enabled group.
+      const orderedLocal = [
+        ...localPeriods.filter((p) => p.enabled !== false),
+        ...localPeriods.filter((p) => p.enabled === false),
+      ];
+      const periods = orderedLocal.map((p) => serializeSchedulePeriod(p, defaults));
+      await updateRoomSchedule(hass, room.slug, periods);
+
+      // Hold the saved payload until WS confirms it — prevents stale/empty
+      // getSchedules() responses from wiping the form after save.
+      savedScheduleSnapshot = periods.map((p) => ({ ...p, days: [...(p.days || [])] }));
+
+      // Invalidate in-flight schedule reloads started before this save.
+      scheduleLoadGen++;
+
+      // Patch the shared state object immediately.
+      patchStateSchedule(state, room.slug, periods);
+
+      // Confirm the backend reflected the save before declaring success.
+      const wsSchedules = await connection.getSchedules();
+      const confirmed = resolveRoomScheduleData(room, wsSchedules, state, periods);
+      const confirmedPeriods = confirmed?.periods ?? [];
+      if (!periodsMatch(confirmedPeriods, periods)) {
+        const fromEntity = resolveRoomScheduleData(room, {}, state, periods)?.periods ?? [];
+        if (!periodsMatch(fromEntity, periods)) {
+          throw new Error('Backend did not confirm the saved schedule');
+        }
+      }
+
+      // Re-sync localPeriods to the canonical saved data and re-render.
+      localPeriods = periods.map((p) => normalizePeriodForEditor({ ...p, days: [...(p.days || [])] }));
+
+      dirty = false;
+      dirtyPeriodIndices.clear();
+      saveInFlight = false;
+      btnSave.disabled = false;
+
+      renderPeriodForms();
+
+      const savedLabel = reason === 'drop' ? 'Order saved.' : 'Saved.';
+      saveStatus.textContent = savedLabel;
+      saveStatus.className = 'tuning-actions__status tuning-actions__status--success';
+      return periods;
+    } catch (err) {
+      saveInFlight = false;
+      btnSave.disabled = false;
+      // Keep the unsaved order visible — user can Save to retry.
+      dirty = true;
+      updateDirtyUI();
+      saveStatus.textContent = 'Error: ' + (err?.message || err);
+      saveStatus.className = 'tuning-actions__status tuning-actions__status--error';
+      throw err;
+    }
+  }
+
+  // ── DnD helpers ────────────────────────────────────────────────────────
+
+  /** Selectors that should NOT initiate a drag when the pointer is on them. */
+  const INTERACTIVE_DRAG_EXCLUDE_SELECTOR = [
+    'input',
+    'button',
+    'select',
+    'textarea',
+    'label',
+    '.schedule-form__day',
+    '[data-action]',
+    '[data-remove-override]',
+    '[data-segmented-field]',
+    '.schedule-form__period-body',
+  ].join(', ');
+
+  function isDragExcludedTarget(target) {
+    if (!target || !(target instanceof Element)) return false;
+    return Boolean(target.closest(INTERACTIVE_DRAG_EXCLUDE_SELECTOR));
+  }
+
+  function enabledIndicesInOrder() {
+    const out = [];
+    for (let i = 0; i < localPeriods.length; i++) {
+      if (localPeriods[i].enabled !== false) out.push(i);
+    }
+    return out;
+  }
+
+  function beforeDragStart() {
+    // Flush any partially-typed values into localPeriods first so nothing is
+    // lost when we collapse the open editors below.
+    flushOpenEditorsToLocal();
+    // Collapse all open editors — keeps the drag list compact and avoids
+    // reflows from tall cards while the user is scrubbing.
+    if (expandedSet.size > 0) {
+      expandedSet = new Set();
+      // Instead of a full re-render (which would tear down the card we're
+      // about to drag), just fold each open body directly.
+      const cards = periodsContainer.querySelectorAll('.schedule-form__period--expanded');
+      for (const card of cards) {
+        card.classList.remove('schedule-form__period--expanded');
+        const body = card.querySelector('.schedule-form__period-body');
+        if (body) body.hidden = true;
+        const chev = card.querySelector('.schedule-form__expand-chevron');
+        if (chev) chev.textContent = '▼';
+      }
+    }
+  }
+
+  function clearDragVisuals() {
+    for (const card of periodsContainer.querySelectorAll('.schedule-form__period--dragging')) {
+      card.classList.remove('schedule-form__period--dragging');
+    }
+    for (const card of periodsContainer.querySelectorAll('.schedule-form__period--drop-before, .schedule-form__period--drop-after')) {
+      card.classList.remove('schedule-form__period--drop-before', 'schedule-form__period--drop-after');
+    }
+  }
+
+  function computeTargetIndexFromPointer(pointerY, sourceIndex) {
+    // Return the localPeriods index we would drop AT (before which the source
+    // gets inserted, or 'end' if past the last card). Only enabled cards are
+    // draggable, so we constrain the target to the enabled group.
+    const cards = Array.from(periodsContainer.querySelectorAll('.schedule-form__period--draggable'));
+    if (cards.length === 0) return sourceIndex;
+
+    let target = null;
+    let insertBefore = true;
+
+    for (const card of cards) {
+      const idx = Number(card.dataset.periodIndex);
+      if (!Number.isFinite(idx)) continue;
+      const rect = card.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      if (pointerY < mid) {
+        target = idx;
+        insertBefore = true;
+        break;
+      }
+    }
+
+    if (target === null) {
+      // After the last enabled card.
+      const enabled = enabledIndicesInOrder();
+      target = enabled[enabled.length - 1];
+      insertBefore = false;
+    }
+
+    // Translate (target, insertBefore) into the final index in localPeriods
+    // AFTER the source has been removed. movePeriodInList handles this by
+    // operating on the original array: we just need the desired final index.
+    let finalIndex = target;
+    if (!insertBefore) finalIndex = target + 1;
+    if (finalIndex > sourceIndex) finalIndex -= 1;
+
+    // Clamp within the enabled range so a drop can never land inside the
+    // inactive group. Enabled group occupies indices [0 .. lastEnabled].
+    const enabled = enabledIndicesInOrder();
+    if (enabled.length === 0) return sourceIndex;
+    const firstEnabled = enabled[0];
+    const lastEnabled = enabled[enabled.length - 1];
+    if (finalIndex < firstEnabled) finalIndex = firstEnabled;
+    if (finalIndex > lastEnabled) finalIndex = lastEnabled;
+    return finalIndex;
+  }
+
+  function showDropIndicator(fromIndex, pointerY) {
+    // Highlight the insertion slot for feedback.
+    clearDropOnlyVisuals();
+    const cards = Array.from(periodsContainer.querySelectorAll('.schedule-form__period--draggable'));
+    if (cards.length === 0) return;
+    let indicated = false;
+    for (const card of cards) {
+      const idx = Number(card.dataset.periodIndex);
+      if (idx === fromIndex) continue;
+      const rect = card.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      if (pointerY < mid) {
+        card.classList.add('schedule-form__period--drop-before');
+        indicated = true;
+        break;
+      }
+    }
+    if (!indicated) {
+      const enabled = enabledIndicesInOrder();
+      const last = cards.find((c) => Number(c.dataset.periodIndex) === enabled[enabled.length - 1]);
+      if (last && Number(last.dataset.periodIndex) !== fromIndex) {
+        last.classList.add('schedule-form__period--drop-after');
+      }
+    }
+  }
+
+  function clearDropOnlyVisuals() {
+    for (const card of periodsContainer.querySelectorAll('.schedule-form__period--drop-before, .schedule-form__period--drop-after')) {
+      card.classList.remove('schedule-form__period--drop-before', 'schedule-form__period--drop-after');
+    }
+  }
+
+  async function commitReorder(fromIndex, toIndex) {
+    if (fromIndex === toIndex) return;
+    const remapped = remapExpandedIndices(expandedSet, fromIndex, toIndex);
+    expandedSet = remapped;
+    const remappedDirty = remapExpandedIndices(dirtyPeriodIndices, fromIndex, toIndex);
+    dirtyPeriodIndices = remappedDirty;
+    localPeriods = movePeriodInList(localPeriods, fromIndex, toIndex);
+
+    // Re-render optimistically so the new order shows before the round-trip.
+    renderPeriodForms();
+
+    // Auto-save the new order. On failure, keep the unsaved order and mark
+    // every enabled period as unsaved (the reorder itself is the change).
+    try {
+      await persistPeriods({ reason: 'drop' });
+    } catch (err) {
+      for (let i = 0; i < localPeriods.length; i++) {
+        if (localPeriods[i].enabled !== false) dirtyPeriodIndices.add(i);
+      }
+      dirty = true;
+      updateDirtyUI();
+    }
+  }
+
+  // Mouse HTML5 drag handlers wired per-card in renderPeriodForms.
+  function attachMouseDrag(card, periodIndex) {
+    card.addEventListener('dragstart', (e) => {
+      if (dirty || saveInFlight) {
+        e.preventDefault();
+        return;
+      }
+      if (isDragExcludedTarget(e.target)) {
+        e.preventDefault();
+        return;
+      }
+      dragState = { fromIndex: periodIndex, mode: 'mouse', overIndex: periodIndex };
+      try {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(periodIndex));
+      } catch (_) { /* some browsers reject setData in shadow DOM — ignore */ }
+      card.classList.add('schedule-form__period--dragging');
+      beforeDragStart();
+    });
+
+    card.addEventListener('dragover', (e) => {
+      if (!dragState || dragState.mode !== 'mouse') return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch (_) { /* ignore */ }
+      showDropIndicator(dragState.fromIndex, e.clientY);
+    });
+
+    card.addEventListener('drop', (e) => {
+      if (!dragState || dragState.mode !== 'mouse') return;
+      e.preventDefault();
+      const finalIndex = computeTargetIndexFromPointer(e.clientY, dragState.fromIndex);
+      const from = dragState.fromIndex;
+      dragState = null;
+      clearDragVisuals();
+      commitReorder(from, finalIndex);
+    });
+
+    card.addEventListener('dragend', () => {
+      dragState = null;
+      clearDragVisuals();
+    });
+  }
+
+  // Container-level dragover so drops in the gap between cards are handled.
+  periodsContainer.addEventListener('dragover', (e) => {
+    if (!dragState || dragState.mode !== 'mouse') return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) { /* ignore */ }
+    showDropIndicator(dragState.fromIndex, e.clientY);
+  });
+  periodsContainer.addEventListener('drop', (e) => {
+    if (!dragState || dragState.mode !== 'mouse') return;
+    e.preventDefault();
+    const finalIndex = computeTargetIndexFromPointer(e.clientY, dragState.fromIndex);
+    const from = dragState.fromIndex;
+    dragState = null;
+    clearDragVisuals();
+    commitReorder(from, finalIndex);
+  });
+
+  // Touch drag: hold, then move. Uses touch events so we can preventDefault
+  // once the drag has started to stop the page from scrolling.
+  function attachTouchDrag(card, periodIndex) {
+    card.addEventListener('touchstart', (e) => {
+      if (dirty || saveInFlight) return;
+      if (e.touches.length !== 1) return;
+      if (isDragExcludedTarget(e.target)) return;
+      const t = e.touches[0];
+      cancelTouchPending();
+      touchPending = {
+        periodIndex,
+        startX: t.clientX,
+        startY: t.clientY,
+        cardEl: card,
+        timer: setTimeout(() => {
+          touchPending = null;
+          dragState = { fromIndex: periodIndex, mode: 'touch', overIndex: periodIndex };
+          card.classList.add('schedule-form__period--dragging');
+          beforeDragStart();
+        }, TOUCH_DRAG_HOLD_MS),
+      };
+    }, { passive: true });
+
+    card.addEventListener('touchmove', (e) => {
+      // Waiting for the hold: cancel if the finger slides too far.
+      if (touchPending && touchPending.periodIndex === periodIndex) {
+        const t = e.touches[0];
+        const dx = t.clientX - touchPending.startX;
+        const dy = t.clientY - touchPending.startY;
+        if (Math.abs(dx) > TOUCH_DRAG_HOLD_SLOP_PX || Math.abs(dy) > TOUCH_DRAG_HOLD_SLOP_PX) {
+          cancelTouchPending();
+        }
+        return;
+      }
+      // Actively dragging: prevent scroll and update indicator.
+      if (dragState && dragState.mode === 'touch' && dragState.fromIndex === periodIndex) {
+        e.preventDefault();
+        const t = e.touches[0];
+        dragState.pointerY = t.clientY;
+        showDropIndicator(dragState.fromIndex, t.clientY);
+      }
+    }, { passive: false });
+
+    card.addEventListener('touchend', () => {
+      if (touchPending && touchPending.periodIndex === periodIndex) {
+        cancelTouchPending();
+        return;
+      }
+      if (dragState && dragState.mode === 'touch' && dragState.fromIndex === periodIndex) {
+        const from = dragState.fromIndex;
+        const pointerY = dragState.pointerY ?? 0;
+        const finalIndex = computeTargetIndexFromPointer(pointerY, from);
+        dragState = null;
+        clearDragVisuals();
+        commitReorder(from, finalIndex);
+      }
+    });
+
+    card.addEventListener('touchcancel', () => {
+      if (touchPending && touchPending.periodIndex === periodIndex) {
+        cancelTouchPending();
+      }
+      if (dragState && dragState.mode === 'touch' && dragState.fromIndex === periodIndex) {
+        dragState = null;
+        clearDragVisuals();
+      }
+    });
+  }
+
+  function cancelTouchPending() {
+    if (touchPending?.timer) clearTimeout(touchPending.timer);
+    touchPending = null;
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────
+
   function renderPeriodForms() {
     localPeriods = localPeriods.map((period) => normalizePeriodForEditor(period));
     const defaults = getDefaults(state);
@@ -240,6 +749,7 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       : 'COMFORT PERIODS';
 
     periodsContainer.innerHTML = '';
+    inactiveContainer.innerHTML = '';
 
     if (localPeriods.length === 0) {
       const empty = document.createElement('div');
@@ -249,276 +759,365 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         <p>Click <strong>+ Add Period</strong> above to create a schedule.</p>
       `;
       periodsContainer.appendChild(empty);
+      inactiveHeader.hidden = true;
+      updateDirtyUI();
       return;
     }
 
+    let hasEnabled = false;
+    let hasDisabled = false;
+
     for (let i = 0; i < localPeriods.length; i++) {
       const p = localPeriods[i];
-      const isActive = (p === activePeriod);
-      const isNext = (p === nextPeriod);
-      const isExpanded = expandedSet.has(i);
       const periodEnabled = p.enabled !== false;
-      const { text: modeText, cls: modeCls } = periodModeDisplay(p);
-
-      const card = document.createElement('div');
-      card.className = 'card schedule-form__period' +
-        (isActive ? ' schedule-form__period--active' : '') +
-        (isNext ? ' schedule-form__period--next' : '') +
-        (isExpanded ? ' schedule-form__period--expanded' : '') +
-        (!periodEnabled ? ' schedule-form__period--disabled' : '');
-
-      // ── Collapsed header — always visible ──────────────────────────────────
-      const cardHeader = document.createElement('div');
-      cardHeader.className = 'schedule-form__period-header';
-      cardHeader.innerHTML = `
-        ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
-        ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
-        <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
-        <span class="schedule-form__period-name">${escapeAttr(p.name || 'Period')}</span>
-        <span class="schedule-form__period-time">${formatPeriodTime(p)}</span>
-        <span class="sched-row__mode ${modeCls}">${modeText}</span>
-        <button class="schedule-form__delete" title="Delete period">×</button>
-        <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
-      `;
-      card.appendChild(cardHeader);
-
-      // ── Expandable body — hidden when collapsed ────────────────────────────
-      const cardBody = document.createElement('div');
-      cardBody.className = 'schedule-form__period-body';
-      if (!isExpanded) cardBody.hidden = true;
-
-      const scheduleType = p.schedule_type || SCHEDULE_TYPE_WEEKLY;
-      const whenByType = ensureWhenState(p);
-      const weeklyWhen = whenByType[SCHEDULE_TYPE_WEEKLY];
-      const dateWhen = whenByType[SCHEDULE_TYPE_DATE_RANGE];
-      const continuousWhen = whenByType[SCHEDULE_TYPE_CONTINUOUS];
-      const activeWhen = whenByType[scheduleType];
-      const timeMode = activeWhen?.time_mode || 'window';
-      let daysHtml = '';
-      for (let d = 0; d < 7; d++) {
-        const on = (weeklyWhen.days || []).includes(d);
-        daysHtml += `<span class="schedule-form__day${on ? ' schedule-form__day--active' : ''}" data-day="${d}">${DAY_NAMES[d]}</span>`;
-      }
-
-      let whenHtml = '';
-      if (scheduleType === SCHEDULE_TYPE_WEEKLY) {
-        whenHtml = `
-          <div class="schedule-form__days" data-period="${i}">${daysHtml}</div>
-          ${segmentedHtml('time_mode', timeMode, [
-            { value: 'all_day', label: 'All day' },
-            { value: 'window', label: 'Time window' },
-          ], 'schedule-form__segmented--compact')}
-          <div class="schedule-form__period-row schedule-form__time-row"${timeMode === 'all_day' ? ' hidden' : ''}>
-            <div class="form-group">
-              <label class="form-label">Start time</label>
-              <input class="form-input form-input--time" type="time" value="${escapeAttr(weeklyWhen.start || '08:00')}" data-when-field="start">
-            </div>
-            <div class="form-group">
-              <label class="form-label">End time</label>
-              <input class="form-input form-input--time" type="time" value="${escapeAttr(weeklyWhen.end || '22:00')}" data-when-field="end">
-            </div>
-          </div>
-        `;
-      } else if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
-        whenHtml = `
-          <div class="schedule-form__date-row">
-            <div class="form-group">
-              <label class="form-label">Start date</label>
-              <input class="form-input" type="date" value="${escapeAttr(dateWhen.start_date)}" data-when-field="start_date">
-            </div>
-            <div class="form-group">
-              <label class="form-label">End date</label>
-              <input class="form-input" type="date" value="${escapeAttr(dateWhen.end_date)}" data-when-field="end_date">
-            </div>
-          </div>
-          ${segmentedHtml('time_mode', timeMode, [
-            { value: 'all_day', label: 'All day' },
-            { value: 'window', label: 'Time window' },
-          ], 'schedule-form__segmented--compact')}
-          <div class="schedule-form__period-row schedule-form__time-row"${timeMode === 'all_day' ? ' hidden' : ''}>
-            <div class="form-group">
-              <label class="form-label">Start time</label>
-              <input class="form-input form-input--time" type="time" value="${escapeAttr(dateWhen.start || '08:00')}" data-when-field="start">
-            </div>
-            <div class="form-group">
-              <label class="form-label">End time</label>
-              <input class="form-input form-input--time" type="time" value="${escapeAttr(dateWhen.end || '22:00')}" data-when-field="end">
-            </div>
-          </div>
-        `;
+      if (periodEnabled) hasEnabled = true; else hasDisabled = true;
+      const card = buildPeriodCard(i, p, {
+        defaults,
+        isActive: p === activePeriod,
+        isNext: p === nextPeriod,
+      });
+      if (periodEnabled) {
+        periodsContainer.appendChild(card);
       } else {
-        whenHtml = `
-          <div class="schedule-form__date-row">
-            <div class="form-group">
-              <label class="form-label">Start datetime</label>
-              <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.start_at)}" data-when-field="start_at">
-            </div>
-            <div class="form-group">
-              <label class="form-label">End datetime</label>
-              <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.end_at)}" data-when-field="end_at">
-            </div>
-          </div>
-        `;
+        inactiveContainer.appendChild(card);
       }
+    }
 
-      cardBody.innerHTML = `
-        <div class="schedule-form__editor-section">
-          <div class="schedule-form__section-title">Type</div>
-          ${segmentedHtml('schedule_type', scheduleType, [
-            { value: SCHEDULE_TYPE_WEEKLY, label: 'Weekly recurring' },
-            { value: SCHEDULE_TYPE_DATE_RANGE, label: 'Date range' },
-            { value: SCHEDULE_TYPE_CONTINUOUS, label: 'Continuous span' },
-          ])}
-        </div>
-        <div class="schedule-form__editor-section">
-          <div class="schedule-form__section-title">Name</div>
+    if (!hasEnabled) {
+      const empty = document.createElement('div');
+      empty.className = 'sched-detail__empty sched-detail__empty--muted';
+      empty.innerHTML = `<p>No active periods. Enable one below or add a new period above.</p>`;
+      periodsContainer.appendChild(empty);
+    }
+    inactiveHeader.hidden = !hasDisabled;
+
+    updateDirtyUI();
+  }
+
+  function buildPeriodCard(i, p, { defaults, isActive, isNext }) {
+    const isExpanded = expandedSet.has(i);
+    const periodEnabled = p.enabled !== false;
+    const { text: modeText, cls: modeCls } = periodModeDisplay(p);
+
+    const card = document.createElement('div');
+    card.className = 'card schedule-form__period' +
+      (isActive ? ' schedule-form__period--active' : '') +
+      (isNext ? ' schedule-form__period--next' : '') +
+      (isExpanded ? ' schedule-form__period--expanded' : '') +
+      (!periodEnabled ? ' schedule-form__period--disabled' : '');
+    card.dataset.periodIndex = String(i);
+
+    if (periodEnabled) {
+      card.classList.add('schedule-form__period--draggable');
+      // Draggable attribute is toggled by updateDirtyUI based on state.
+      if (!dirty && !saveInFlight) card.setAttribute('draggable', 'true');
+    }
+
+    // ── Collapsed header — always visible ──────────────────────────────────
+    const cardHeader = document.createElement('div');
+    cardHeader.className = 'schedule-form__period-header';
+    cardHeader.innerHTML = `
+      ${periodEnabled ? '<span class="schedule-form__drag-grip" aria-hidden="true" title="Drag to reorder">⋮⋮</span>' : ''}
+      ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
+      ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
+      <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
+      <span class="schedule-form__period-name">${escapeAttr(p.name || 'Period')}</span>
+      <span class="schedule-form__period-time">${formatPeriodTime(p)}</span>
+      <span class="sched-row__mode ${modeCls}">${modeText}</span>
+      <span class="schedule-form__unsaved-dot" aria-hidden="true" title="Unsaved changes"></span>
+      <button class="schedule-form__delete" title="Delete period" data-action="delete">×</button>
+      <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
+    `;
+    card.appendChild(cardHeader);
+
+    // ── Expandable body — hidden when collapsed ────────────────────────────
+    const cardBody = document.createElement('div');
+    cardBody.className = 'schedule-form__period-body';
+    if (!isExpanded) cardBody.hidden = true;
+
+    const scheduleType = p.schedule_type || SCHEDULE_TYPE_WEEKLY;
+    const whenByType = ensureWhenState(p);
+    const weeklyWhen = whenByType[SCHEDULE_TYPE_WEEKLY];
+    const dateWhen = whenByType[SCHEDULE_TYPE_DATE_RANGE];
+    const continuousWhen = whenByType[SCHEDULE_TYPE_CONTINUOUS];
+    const activeWhen = whenByType[scheduleType];
+    const timeMode = activeWhen?.time_mode || 'window';
+    let daysHtml = '';
+    for (let d = 0; d < 7; d++) {
+      const on = (weeklyWhen.days || []).includes(d);
+      daysHtml += `<span class="schedule-form__day${on ? ' schedule-form__day--active' : ''}" data-day="${d}">${DAY_NAMES[d]}</span>`;
+    }
+
+    let whenHtml = '';
+    if (scheduleType === SCHEDULE_TYPE_WEEKLY) {
+      whenHtml = `
+        <div class="schedule-form__days" data-period="${i}">${daysHtml}</div>
+        ${segmentedHtml('time_mode', timeMode, [
+          { value: 'all_day', label: 'All day' },
+          { value: 'window', label: 'Time window' },
+        ], 'schedule-form__segmented--compact')}
+        <div class="schedule-form__period-row schedule-form__time-row"${timeMode === 'all_day' ? ' hidden' : ''}>
           <div class="form-group">
-            <input class="form-input form-input--name" type="text" value="${escapeAttr(p.name || '')}" data-field="name">
+            <label class="form-label">Start time</label>
+            <input class="form-input form-input--time" type="time" value="${escapeAttr(weeklyWhen.start || '08:00')}" data-when-field="start">
           </div>
-        </div>
-        <div class="schedule-form__editor-section">
-          <div class="schedule-form__section-title">When <span class="schedule-form__section-subtitle">${typeLabel(scheduleType)}</span></div>
-          ${whenHtml}
-        </div>
-        <div class="schedule-form__editor-section">
-          <div class="schedule-form__section-title">Behaviour</div>
-          ${segmentedHtml('mode', p.mode === 'off' ? 'off' : 'comfort', [
-            { value: 'comfort', label: 'Comfort' },
-            { value: 'off', label: 'Off' },
-          ], 'schedule-form__segmented--compact')}
-        </div>
-        <div class="schedule-form__editor-section">
-          <div class="schedule-form__section-title">Overrides</div>
-          ${overridesHtml(p, defaults)}
+          <div class="form-group">
+            <label class="form-label">End time</label>
+            <input class="form-input form-input--time" type="time" value="${escapeAttr(weeklyWhen.end || '22:00')}" data-when-field="end">
+          </div>
         </div>
       `;
+    } else if (scheduleType === SCHEDULE_TYPE_DATE_RANGE) {
+      whenHtml = `
+        <div class="schedule-form__date-row">
+          <div class="form-group">
+            <label class="form-label">Start date</label>
+            <input class="form-input" type="date" value="${escapeAttr(dateWhen.start_date)}" data-when-field="start_date">
+          </div>
+          <div class="form-group">
+            <label class="form-label">End date</label>
+            <input class="form-input" type="date" value="${escapeAttr(dateWhen.end_date)}" data-when-field="end_date">
+          </div>
+        </div>
+        ${segmentedHtml('time_mode', timeMode, [
+          { value: 'all_day', label: 'All day' },
+          { value: 'window', label: 'Time window' },
+        ], 'schedule-form__segmented--compact')}
+        <div class="schedule-form__period-row schedule-form__time-row"${timeMode === 'all_day' ? ' hidden' : ''}>
+          <div class="form-group">
+            <label class="form-label">Start time</label>
+            <input class="form-input form-input--time" type="time" value="${escapeAttr(dateWhen.start || '08:00')}" data-when-field="start">
+          </div>
+          <div class="form-group">
+            <label class="form-label">End time</label>
+            <input class="form-input form-input--time" type="time" value="${escapeAttr(dateWhen.end || '22:00')}" data-when-field="end">
+          </div>
+        </div>
+      `;
+    } else {
+      whenHtml = `
+        <div class="schedule-form__date-row">
+          <div class="form-group">
+            <label class="form-label">Start datetime</label>
+            <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.start_at)}" data-when-field="start_at">
+          </div>
+          <div class="form-group">
+            <label class="form-label">End datetime</label>
+            <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.end_at)}" data-when-field="end_at">
+          </div>
+        </div>
+      `;
+    }
 
-      card.appendChild(cardBody);
-      periodsContainer.appendChild(card);
+    cardBody.innerHTML = `
+      <div class="schedule-form__editor-section">
+        <div class="schedule-form__section-title">Type</div>
+        ${segmentedHtml('schedule_type', scheduleType, [
+          { value: SCHEDULE_TYPE_WEEKLY, label: 'Weekly recurring' },
+          { value: SCHEDULE_TYPE_DATE_RANGE, label: 'Date range' },
+          { value: SCHEDULE_TYPE_CONTINUOUS, label: 'Continuous span' },
+        ])}
+      </div>
+      <div class="schedule-form__editor-section">
+        <div class="schedule-form__section-title">Name</div>
+        <div class="form-group">
+          <input class="form-input form-input--name" type="text" value="${escapeAttr(p.name || '')}" data-field="name">
+        </div>
+      </div>
+      <div class="schedule-form__editor-section">
+        <div class="schedule-form__section-title">When <span class="schedule-form__section-subtitle">${typeLabel(scheduleType)}</span></div>
+        ${whenHtml}
+      </div>
+      <div class="schedule-form__editor-section">
+        <div class="schedule-form__section-title">Behaviour</div>
+        ${segmentedHtml('mode', p.mode === 'off' ? 'off' : 'comfort', [
+          { value: 'comfort', label: 'Comfort' },
+          { value: 'off', label: 'Off' },
+        ], 'schedule-form__segmented--compact')}
+      </div>
+      <div class="schedule-form__editor-section">
+        <div class="schedule-form__section-title">Overrides</div>
+        ${overridesHtml(p, defaults)}
+      </div>
+    `;
 
-      // Toggle expansion on header click (except action buttons)
-      cardHeader.addEventListener('click', (e) => {
-        if (e.target.closest('.schedule-form__delete, [data-action="toggle-enabled"]')) return;
-        const willExpand = !expandedSet.has(i);
-        if (willExpand) expandedSet.add(i); else expandedSet.delete(i);
-        card.classList.toggle('schedule-form__period--expanded', willExpand);
-        cardBody.hidden = !willExpand;
-        cardHeader.querySelector('.schedule-form__expand-chevron').textContent = willExpand ? '▲' : '▼';
-      });
+    card.appendChild(cardBody);
 
-      // Per-period enable toggle
-      cardHeader.querySelector('[data-action="toggle-enabled"]').addEventListener('click', (e) => {
-        e.stopPropagation();
-        localPeriods[i].enabled = !(localPeriods[i].enabled !== false);
-        dirty = true;
+    // Toggle expansion on header click (except action buttons / drag grip)
+    cardHeader.addEventListener('click', (e) => {
+      if (e.target.closest('.schedule-form__delete, [data-action="toggle-enabled"], .schedule-form__drag-grip')) return;
+      const willExpand = !expandedSet.has(i);
+      if (willExpand) expandedSet.add(i); else expandedSet.delete(i);
+      card.classList.toggle('schedule-form__period--expanded', willExpand);
+      cardBody.hidden = !willExpand;
+      cardHeader.querySelector('.schedule-form__expand-chevron').textContent = willExpand ? '▲' : '▼';
+    });
+
+    // Per-period enable toggle — re-enabling appends to the end of enabled group.
+    cardHeader.querySelector('[data-action="toggle-enabled"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const period = localPeriods[i];
+      const wasEnabled = period.enabled !== false;
+      if (wasEnabled) {
+        period.enabled = false;
+        markPeriodDirty(i);
         renderPeriodForms();
-      });
+      } else {
+        // Move this period to the end of the enabled group so it lands with
+        // the lowest priority — matches SWD-24 plan ("enable → append").
+        // Robust regardless of any interleaving that mid-edit toggles may
+        // have introduced: detach first, then find the end of the enabled
+        // group in the remaining array and re-insert there.
+        period.enabled = true;
+        const from = i;
+        const detached = localPeriods.splice(from, 1)[0];
+        const shiftDown = (set) => {
+          const out = new Set();
+          for (const idx of set) {
+            if (idx < from) out.add(idx);
+            else if (idx > from) out.add(idx - 1);
+          }
+          return out;
+        };
+        expandedSet = shiftDown(expandedSet);
+        dirtyPeriodIndices = shiftDown(dirtyPeriodIndices);
 
-      // Delete — rebuild expandedSet with shifted indices
-      cardHeader.querySelector('.schedule-form__delete').addEventListener('click', (e) => {
-        e.stopPropagation();
-        const newSet = new Set();
-        for (const idx of expandedSet) {
-          if (idx < i) newSet.add(idx);
-          else if (idx > i) newSet.add(idx - 1);
+        let lastEnabledIdx = -1;
+        for (let k = 0; k < localPeriods.length; k++) {
+          if (localPeriods[k].enabled !== false) lastEnabledIdx = k;
         }
-        expandedSet = newSet;
-        localPeriods.splice(i, 1);
-        dirty = true;
+        const insertAt = lastEnabledIdx + 1;
+
+        const shiftUp = (set) => {
+          const out = new Set();
+          for (const idx of set) {
+            if (idx >= insertAt) out.add(idx + 1); else out.add(idx);
+          }
+          return out;
+        };
+        expandedSet = shiftUp(expandedSet);
+        dirtyPeriodIndices = shiftUp(dirtyPeriodIndices);
+        localPeriods.splice(insertAt, 0, detached);
+        markPeriodDirty(insertAt);
         renderPeriodForms();
-      });
-
-      // Wire simple text/number inputs inside body
-      cardBody.querySelectorAll('[data-field]').forEach((input) => {
-        const field = input.dataset.field;
-        input.addEventListener('change', () => {
-          if (OVERRIDE_META[field]) {
-            const parsed = parseFloat(input.value);
-            if (Number.isFinite(parsed)) {
-              localPeriods[i][field] = parsed;
-            } else {
-              delete localPeriods[i][field];
-            }
-            dirty = true;
-          } else {
-            localPeriods[i][field] = input.value;
-            dirty = true;
-          }
-        });
-      });
-
-      cardBody.querySelectorAll('[data-when-field]').forEach((input) => {
-        input.addEventListener('change', () => {
-          const period = localPeriods[i];
-          const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
-          when[input.dataset.whenField] = input.value;
-          dirty = true;
-        });
-      });
-
-      cardBody.querySelectorAll('[data-segmented-field]').forEach((group) => {
-        const field = group.dataset.segmentedField;
-        group.querySelectorAll('.schedule-form__segment').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            const period = localPeriods[i];
-            const value = btn.dataset.value;
-            if (field === 'schedule_type') {
-              ensureWhenState(period);
-              period.schedule_type = value;
-            } else if (field === 'time_mode') {
-              const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
-              when.time_mode = value;
-            } else if (field === 'mode') {
-              period.mode = value;
-            }
-            dirty = true;
-            expandedSet.add(i);
-            renderPeriodForms();
-          });
-        });
-      });
-
-      const addOverrideBtn = cardBody.querySelector('[data-action="add-override"]');
-      if (addOverrideBtn) {
-        addOverrideBtn.addEventListener('click', () => {
-          const picker = cardBody.querySelector('[data-action="override-picker"]');
-          const field = picker?.value;
-          if (!field) return;
-          localPeriods[i][field] = overrideBaseline(field, defaults);
-          dirty = true;
-          expandedSet.add(i);
-          renderPeriodForms();
-        });
       }
+    });
 
-      cardBody.querySelectorAll('[data-remove-override]').forEach((btn) => {
+    // Delete — rebuild expandedSet / dirtyPeriodIndices with shifted indices
+    cardHeader.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const shift = (set) => {
+        const out = new Set();
+        for (const idx of set) {
+          if (idx < i) out.add(idx);
+          else if (idx > i) out.add(idx - 1);
+        }
+        return out;
+      };
+      expandedSet = shift(expandedSet);
+      dirtyPeriodIndices = shift(dirtyPeriodIndices);
+      localPeriods.splice(i, 1);
+      setDirty(true);
+      renderPeriodForms();
+    });
+
+    // Wire text/number inputs — use `input` so we mark dirty on every
+    // keystroke and the dirty gate reacts instantly.
+    cardBody.querySelectorAll('[data-field]').forEach((input) => {
+      const field = input.dataset.field;
+      input.addEventListener('input', () => {
+        if (OVERRIDE_META[field]) {
+          const parsed = parseFloat(input.value);
+          if (Number.isFinite(parsed)) {
+            localPeriods[i][field] = parsed;
+          } else if (input.value === '') {
+            delete localPeriods[i][field];
+          }
+        } else {
+          localPeriods[i][field] = input.value;
+        }
+        markPeriodDirty(i);
+      });
+    });
+
+    cardBody.querySelectorAll('[data-when-field]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const period = localPeriods[i];
+        const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
+        when[input.dataset.whenField] = input.value;
+        markPeriodDirty(i);
+      });
+    });
+
+    cardBody.querySelectorAll('[data-segmented-field]').forEach((group) => {
+      const field = group.dataset.segmentedField;
+      group.querySelectorAll('.schedule-form__segment').forEach((btn) => {
         btn.addEventListener('click', () => {
-          delete localPeriods[i][btn.dataset.removeOverride];
-          dirty = true;
+          const period = localPeriods[i];
+          const value = btn.dataset.value;
+          if (field === 'schedule_type') {
+            ensureWhenState(period);
+            period.schedule_type = value;
+          } else if (field === 'time_mode') {
+            const when = ensureWhenState(period)[period.schedule_type || SCHEDULE_TYPE_WEEKLY];
+            when.time_mode = value;
+          } else if (field === 'mode') {
+            period.mode = value;
+          }
+          markPeriodDirty(i);
           expandedSet.add(i);
           renderPeriodForms();
         });
       });
+    });
 
-      // Wire day toggles
-      cardBody.querySelectorAll('.schedule-form__day').forEach((dayEl) => {
-        dayEl.addEventListener('click', () => {
-          const d = parseInt(dayEl.dataset.day, 10);
-          const weekly = ensureWhenState(localPeriods[i])[SCHEDULE_TYPE_WEEKLY];
-          const days = weekly.days || (weekly.days = []);
-          const idx = days.indexOf(d);
-          if (idx >= 0) {
-            days.splice(idx, 1);
-            dayEl.classList.remove('schedule-form__day--active');
-          } else {
-            days.push(d);
-            days.sort();
-            dayEl.classList.add('schedule-form__day--active');
-          }
-          dirty = true;
-        });
+    const addOverrideBtn = cardBody.querySelector('[data-action="add-override"]');
+    if (addOverrideBtn) {
+      addOverrideBtn.addEventListener('click', () => {
+        const picker = cardBody.querySelector('[data-action="override-picker"]');
+        const field = picker?.value;
+        if (!field) return;
+        localPeriods[i][field] = overrideBaseline(field, defaults);
+        markPeriodDirty(i);
+        expandedSet.add(i);
+        renderPeriodForms();
       });
     }
+
+    cardBody.querySelectorAll('[data-remove-override]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        delete localPeriods[i][btn.dataset.removeOverride];
+        markPeriodDirty(i);
+        expandedSet.add(i);
+        renderPeriodForms();
+      });
+    });
+
+    cardBody.querySelectorAll('.schedule-form__day').forEach((dayEl) => {
+      dayEl.addEventListener('click', () => {
+        const d = parseInt(dayEl.dataset.day, 10);
+        const weekly = ensureWhenState(localPeriods[i])[SCHEDULE_TYPE_WEEKLY];
+        const days = weekly.days || (weekly.days = []);
+        const idx = days.indexOf(d);
+        if (idx >= 0) {
+          days.splice(idx, 1);
+          dayEl.classList.remove('schedule-form__day--active');
+        } else {
+          days.push(d);
+          days.sort();
+          dayEl.classList.add('schedule-form__day--active');
+        }
+        markPeriodDirty(i);
+      });
+    });
+
+    // Wire DnD (only for enabled cards)
+    if (periodEnabled) {
+      attachMouseDrag(card, i);
+      attachTouchDrag(card, i);
+    }
+
+    return card;
   }
 
   // Toggle enable/disable
@@ -530,7 +1129,6 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     toggleStatus.className = 'tuning-actions__status tuning-actions__status--running';
     try {
       await setScheduleEnabled(hass, room.slug, !currentEnabled);
-      // Patch state optimistically for the enabled flag
       patchStateSchedule(state, room.slug, localPeriods, !currentEnabled);
       toggleStatus.textContent = '';
       toggleStatus.className = 'tuning-actions__status';
@@ -555,60 +1153,22 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       recurring: true,
       all_day: false,
     });
-    dirty = true;
-    expandedSet.add(localPeriods.length - 1); // expand the new card
+    const newIndex = localPeriods.length - 1;
+    expandedSet.add(newIndex);
+    markPeriodDirty(newIndex);
     renderPeriodForms();
     const cards = periodsContainer.querySelectorAll('.schedule-form__period');
     if (cards.length > 0) cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 
-  // Save all periods
+  // Save all periods (manual)
   btnSave.addEventListener('click', async () => {
-    saveStatus.textContent = 'Saving…';
-    saveStatus.className = 'tuning-actions__status tuning-actions__status--running';
-    btnSave.disabled = true;
+    flushOpenEditorsToLocal();
     try {
-      const defaults = getDefaults(state);
-      const periods = localPeriods.map((p) => serializeSchedulePeriod(p, defaults));
-      await updateRoomSchedule(hass, room.slug, periods);
-
-      // Hold the saved payload until WS confirms it — prevents stale/empty
-      // getSchedules() responses from wiping the form after save.
-      savedScheduleSnapshot = periods.map((p) => ({ ...p, days: [...(p.days || [])] }));
-
-      // Invalidate in-flight schedule reloads started before this save.
-      scheduleLoadGen++;
-
-      // Patch the shared state object immediately — prevents any intermediate
-      // state_changed events (from other entities) from wiping localPeriods
-      // before the config entity's own state_changed arrives from the server.
-      patchStateSchedule(state, room.slug, periods);
-
-      // Confirm the backend reflected the save before declaring success.
-      const wsSchedules = await connection.getSchedules();
-      const confirmed = resolveRoomScheduleData(room, wsSchedules, state, periods);
-      const confirmedPeriods = confirmed?.periods ?? [];
-      if (!periodsMatch(confirmedPeriods, periods)) {
-        const fromEntity = resolveRoomScheduleData(room, {}, state, periods)?.periods ?? [];
-        if (!periodsMatch(fromEntity, periods)) {
-          throw new Error('Backend did not confirm the saved schedule');
-        }
-      }
-
-      // Re-sync localPeriods to the canonical saved data and re-render the
-      // form right away so the user sees the saved state without waiting for
-      // the server's state_changed event.
-      localPeriods = periods.map((p) => normalizePeriodForEditor({ ...p, days: [...(p.days || [])] }));
-      renderPeriodForms();
-
-      dirty = false;
-      saveStatus.textContent = 'Saved.';
-      saveStatus.className = 'tuning-actions__status tuning-actions__status--success';
+      await persistPeriods({ reason: 'save' });
     } catch (err) {
-      saveStatus.textContent = 'Error: ' + (err.message || err);
-      saveStatus.className = 'tuning-actions__status tuning-actions__status--error';
+      // persistPeriods already surfaced the error into the status area.
     }
-    btnSave.disabled = false;
   });
 
   // Initial render — fetch from WebSocket to get persisted schedule data
@@ -622,6 +1182,9 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       state = newState;
       fetchSchedules();
     },
-    destroy() { expSection.destroy(); },
+    destroy() {
+      cancelTouchPending();
+      expSection.destroy();
+    },
   };
 }
