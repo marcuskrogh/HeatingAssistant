@@ -14,11 +14,11 @@ import {
   SCHEDULE_TYPE_DATE_RANGE,
   SCHEDULE_TYPE_WEEKLY,
   serializeSchedulePeriod,
-} from '../schedule-utils.js?v=107';
-import { setPanelHash } from '../panel-hash.js?v=107';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=107';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=107';
-import { renderExperimentsSection } from './schedules-experiments.js?v=107';
+} from '../schedule-utils.js?v=108';
+import { setPanelHash } from '../panel-hash.js?v=108';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=108';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=108';
+import { renderExperimentsSection } from './schedules-experiments.js?v=108';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // Touch hold duration before a card enters drag mode (SWD-24). Chosen so
@@ -48,7 +48,10 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
   // Room title
   const roomHeader = document.createElement('div');
   roomHeader.className = 'room-header';
-  roomHeader.innerHTML = `<h2 class="room-header__title">${room.name}</h2>`;
+  const roomTitle = document.createElement('h2');
+  roomTitle.className = 'room-header__title';
+  roomTitle.textContent = room.name;
+  roomHeader.appendChild(roomTitle);
   container.appendChild(roomHeader);
 
   // Enable/disable toggle

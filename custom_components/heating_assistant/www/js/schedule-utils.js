@@ -19,6 +19,32 @@ function localDateTimeString(now) {
   return `${localDateString(now)}T${localHhmm(now)}:00`;
 }
 
+/** Escape text interpolated into HTML attribute/text nodes. */
+export function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Parse a local ISO datetime (`YYYY-MM-DDTHH:MM[:SS[.fff]]`) into a Date. */
+export function parseLocalDateTime(value) {
+  if (!value) return null;
+  const text = String(value);
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = m[6] != null ? Number(m[6]) : 0;
+  const dt = new Date(year, month, day, hour, minute, second);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 export const SCHEDULE_TYPE_WEEKLY = 'weekly_recurring';
 export const SCHEDULE_TYPE_DATE_RANGE = 'date_range_daily';
 export const SCHEDULE_TYPE_CONTINUOUS = 'continuous_span';
@@ -138,23 +164,37 @@ function serializeDateTimeInput(value) {
 
 function defaultWhenByType(p = {}) {
   const today = todayString();
+  const persisted = (p.when_by_type && typeof p.when_by_type === 'object')
+    ? p.when_by_type
+    : {};
+  const weeklyPersisted = persisted[SCHEDULE_TYPE_WEEKLY] || {};
+  const datePersisted = persisted[SCHEDULE_TYPE_DATE_RANGE] || {};
+  const continuousPersisted = persisted[SCHEDULE_TYPE_CONTINUOUS] || {};
   return {
     [SCHEDULE_TYPE_WEEKLY]: {
-      time_mode: 'window',
-      start: p.start || '08:00',
-      end: p.end || '22:00',
-      days: p.days ? [...p.days] : [...DEFAULT_DAYS],
+      time_mode: weeklyPersisted.time_mode || 'window',
+      start: weeklyPersisted.start || p.start || '08:00',
+      end: weeklyPersisted.end || p.end || '22:00',
+      days: weeklyPersisted.days
+        ? [...weeklyPersisted.days]
+        : (p.days ? [...p.days] : [...DEFAULT_DAYS]),
     },
     [SCHEDULE_TYPE_DATE_RANGE]: {
-      time_mode: 'window',
-      start: p.start || '08:00',
-      end: p.end || '22:00',
-      start_date: p.start_date || today,
-      end_date: p.end_date || today,
+      time_mode: datePersisted.time_mode || 'window',
+      start: datePersisted.start || p.start || '08:00',
+      end: datePersisted.end || p.end || '22:00',
+      start_date: datePersisted.start_date || p.start_date || today,
+      end_date: datePersisted.end_date || p.end_date || today,
     },
     [SCHEDULE_TYPE_CONTINUOUS]: {
-      start_at: normalizeDateTimeInput(p.start_at, `${today}T08:00`),
-      end_at: normalizeDateTimeInput(p.end_at, `${today}T22:00`),
+      start_at: normalizeDateTimeInput(
+        continuousPersisted.start_at || p.start_at,
+        `${today}T08:00`,
+      ),
+      end_at: normalizeDateTimeInput(
+        continuousPersisted.end_at || p.end_at,
+        `${today}T22:00`,
+      ),
     },
   };
 }
@@ -264,6 +304,33 @@ function preserveInactiveWhenFields(out, scheduleType, whenByType) {
     out.start_at = serializeDateTimeInput(continuous.start_at);
     out.end_at = serializeDateTimeInput(continuous.end_at);
   }
+
+  // Persist a full per-type When snapshot so weekly vs date-range window /
+  // all-day configs survive type switch → save → reload → switch back
+  // (SWD-23). Flat start/end/time_mode alone cannot hold both types.
+  out.when_by_type = {
+    [SCHEDULE_TYPE_WEEKLY]: {
+      time_mode: whenByType[SCHEDULE_TYPE_WEEKLY].time_mode || 'window',
+      start: whenByType[SCHEDULE_TYPE_WEEKLY].start || '08:00',
+      end: whenByType[SCHEDULE_TYPE_WEEKLY].end || '22:00',
+      days: whenByType[SCHEDULE_TYPE_WEEKLY].days
+        ? [...whenByType[SCHEDULE_TYPE_WEEKLY].days]
+        : [...DEFAULT_DAYS],
+    },
+    [SCHEDULE_TYPE_DATE_RANGE]: {
+      time_mode: whenByType[SCHEDULE_TYPE_DATE_RANGE].time_mode || 'window',
+      start: whenByType[SCHEDULE_TYPE_DATE_RANGE].start || '08:00',
+      end: whenByType[SCHEDULE_TYPE_DATE_RANGE].end || '22:00',
+      start_date: whenByType[SCHEDULE_TYPE_DATE_RANGE].start_date || todayString(),
+      end_date: whenByType[SCHEDULE_TYPE_DATE_RANGE].end_date
+        || whenByType[SCHEDULE_TYPE_DATE_RANGE].start_date
+        || todayString(),
+    },
+    [SCHEDULE_TYPE_CONTINUOUS]: {
+      start_at: serializeDateTimeInput(whenByType[SCHEDULE_TYPE_CONTINUOUS].start_at),
+      end_at: serializeDateTimeInput(whenByType[SCHEDULE_TYPE_CONTINUOUS].end_at),
+    },
+  };
 }
 
 function applyOverrideFields(out, period, defaults) {
@@ -316,8 +383,11 @@ function matchesDateRangeDaily(p, now) {
 
 function matchesContinuousSpan(p, now) {
   if (!p.start_at || !p.end_at) return false;
-  const current = localDateTimeString(now);
-  return current >= p.start_at && current < p.end_at;
+  const start = parseLocalDateTime(p.start_at);
+  const end = parseLocalDateTime(p.end_at);
+  if (!start || !end) return false;
+  const t = now.getTime();
+  return t >= start.getTime() && t < end.getTime();
 }
 
 /** Mirrors Python ``SchedulePeriod.matches``. */
@@ -482,8 +552,8 @@ export function periodRowHtml(p, isActive, isNext, periodIndex = null) {
     ${isActive ? '<span class="sched-row__now-badge">NOW</span>' : ''}
     ${isNext ? '<span class="sched-index-card__next-label">NEXT</span>' : ''}
     ${toggle}
-    <span class="sched-row__name">${p.name || 'Period'}</span>
-    <span class="sched-row__time">${formatPeriodTime(p)}</span>
+    <span class="sched-row__name">${escapeHtml(p.name || 'Period')}</span>
+    <span class="sched-row__time">${escapeHtml(formatPeriodTime(p))}</span>
     ${disabled ? '<span class="sched-row__disabled-label">DISABLED</span>' : ''}
   </div>`;
 }

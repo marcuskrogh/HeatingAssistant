@@ -467,6 +467,63 @@ class TestScheduleExtendedFeatures:
         assert period.matches(datetime(2026, 7, 20, 13, 59)) is True
         assert period.matches(datetime(2026, 7, 20, 14, 0)) is False
 
+    def test_continuous_span_matches_aware_local_now(self):
+        """Coordinator passes timezone-aware local now; bounds are naive local."""
+        from datetime import timezone
+        from zoneinfo import ZoneInfo
+
+        period = SchedulePeriod(
+            name="vacation",
+            schedule_type=SCHEDULE_TYPE_CONTINUOUS_SPAN,
+            start_at=datetime(2026, 7, 20, 10, 0),
+            end_at=datetime(2026, 7, 20, 14, 0),
+        )
+        # Simulate coordinator: UTC instant converted to a local zone.
+        copenhagen = ZoneInfo("Europe/Copenhagen")
+        now_aware = datetime(2026, 7, 20, 12, 0, tzinfo=copenhagen)
+        assert period.matches(now_aware) is True
+        # Also accept an aware datetime whose wall clock is outside the span.
+        assert period.matches(datetime(2026, 7, 20, 15, 0, tzinfo=copenhagen)) is False
+        # UTC+0 wall clock that is still inside when interpreted as local after
+        # astimezone() would differ; ensure naive comparison uses local wall.
+        now_utc = datetime(2026, 7, 20, 10, 30, tzinfo=timezone.utc)
+        # Just ensure no TypeError and a boolean result.
+        assert isinstance(period.matches(now_utc), bool)
+
+    def test_build_schedule_round_trips_when_by_type(self):
+        when_by_type = {
+            SCHEDULE_TYPE_WEEKLY_RECURRING: {
+                "time_mode": "window",
+                "start": "08:00",
+                "end": "10:00",
+                "days": [0, 1, 2],
+            },
+            SCHEDULE_TYPE_DATE_RANGE_DAILY: {
+                "time_mode": "all_day",
+                "start": "09:00",
+                "end": "17:00",
+                "start_date": "2026-07-20",
+                "end_date": "2026-07-27",
+            },
+            SCHEDULE_TYPE_CONTINUOUS_SPAN: {
+                "start_at": "2026-08-01T12:00:00",
+                "end_at": "2026-08-01T14:00:00",
+            },
+        }
+        sched = build_schedule([
+            {
+                "name": "typed",
+                "schedule_type": SCHEDULE_TYPE_DATE_RANGE_DAILY,
+                "time_mode": "all_day",
+                "start_date": "2026-07-20",
+                "end_date": "2026-07-27",
+                "when_by_type": when_by_type,
+            }
+        ])
+        payload = period_to_dict(sched.periods[0])
+        assert payload["when_by_type"][SCHEDULE_TYPE_WEEKLY_RECURRING]["start"] == "08:00"
+        assert payload["when_by_type"][SCHEDULE_TYPE_DATE_RANGE_DAILY]["time_mode"] == "all_day"
+
     def test_build_schedule_parses_extended_fields(self):
         sched = build_schedule([
             {

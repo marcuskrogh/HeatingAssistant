@@ -1,8 +1,8 @@
-import { findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=107';
-import { findNextScheduledExperiment } from '../experiment-utils.js?v=107';
-import { setPanelHash } from '../panel-hash.js?v=107';
-import { updateRoomSchedule } from '../ha-services.js?v=107';
-import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=107';
+import { escapeHtml, findActivePeriod, findNextPeriod, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml, serializeSchedulePeriod } from '../schedule-utils.js?v=108';
+import { findNextScheduledExperiment } from '../experiment-utils.js?v=108';
+import { setPanelHash } from '../panel-hash.js?v=108';
+import { updateRoomSchedule } from '../ha-services.js?v=108';
+import { getScheduleDataForRoom, makePeriodRow, mergeRoomSchedulesWithState, patchStateSchedule, resolveRoomScheduleData } from './schedules-shared.js?v=108';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -76,7 +76,7 @@ export function renderScheduleIndex(container, rooms, state, connection, hass) {
       // ── Header: room name ────────────────────────────────────────────────
       const cardHeader = document.createElement('div');
       cardHeader.className = 'sched-index-card__header';
-      cardHeader.innerHTML = `<span class="sched-index-card__name">${room.name}</span>`;
+      cardHeader.innerHTML = `<span class="sched-index-card__name">${escapeHtml(room.name)}</span>`;
       card.appendChild(cardHeader);
 
       // ── Comfort periods section ─────────────────────────────────────────

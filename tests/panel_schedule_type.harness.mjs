@@ -5,8 +5,10 @@
  */
 import {
   activeOverrideFields,
+  escapeHtml,
   hasOverride,
   periodMatchesNow,
+  periodRowHtml,
   serializeSchedulePeriod,
   normalizePeriodForEditor,
   overrideBaseline,
@@ -123,6 +125,18 @@ periodWithAllTypes.schedule_type = 'weekly_recurring';
 const weeklyAgain = serializeSchedulePeriod(periodWithAllTypes, defaults);
 assert(weeklyAgain.start === '08:00', 'switching back should restore weekly start');
 assert(JSON.stringify(weeklyAgain.days) === JSON.stringify([0, 1, 2]), 'switching back should restore weekly days');
+assert(dateSerialized.when_by_type?.weekly_recurring?.start === '08:00', 'when_by_type retains inactive weekly start');
+assert(dateSerialized.when_by_type?.date_range_daily?.start === '10:00', 'when_by_type retains active date-range start');
+assert(dateSerialized.when_by_type?.continuous_span?.start_at === '2026-07-22T09:30:00', 'when_by_type retains continuous');
+
+// Reload from flat payload + when_by_type (simulates save → WS → editor).
+const reloaded = normalizePeriodForEditor(dateSerialized);
+assert(reloaded._whenByType.weekly_recurring.start === '08:00', 'reload restores weekly when from when_by_type');
+assert(reloaded._whenByType.date_range_daily.time_mode === 'window', 'reload restores date-range when');
+reloaded.schedule_type = 'weekly_recurring';
+const weeklyFromReload = serializeSchedulePeriod(reloaded, defaults);
+assert(weeklyFromReload.start === '08:00', 'save→reload→switch restores weekly window');
+assert(weeklyFromReload.time_mode === 'window', 'save→reload→switch restores weekly time_mode');
 
 const continuousSerialized = serializeSchedulePeriod({
   name: 'Maintenance',
@@ -156,5 +170,22 @@ assert(overrideSerialized.energy_weight === 0.8, 'inactive differing energy over
 assert(overrideBaseline('tracking_weight', { tracking_weight: 0 }) === 1.0, 'tracking baseline ignores global config');
 assert(activeOverrideFields('off').join(',') === 'frost_protection', 'off picker should only expose frost');
 assert(!hasOverride({}, 'setpoint'), 'missing override means inherit');
+
+// Continuous span: fractional seconds / Date-based match (not lexicographic ISO).
+assert(
+  periodMatchesNow({
+    schedule_type: 'continuous_span',
+    start_at: '2026-07-20T10:00:00.500',
+    end_at: '2026-07-20T14:00:00',
+    enabled: true,
+  }, new Date(2026, 6, 20, 10, 0, 1)),
+  'continuous span should match via parsed local datetime',
+);
+
+// XSS: period names must be escaped in shared row HTML.
+assert(escapeHtml('<b>x</b>') === '&lt;b&gt;x&lt;/b&gt;', 'escapeHtml escapes tags');
+const row = periodRowHtml({ name: '<img src=x onerror=alert(1)>', start: '08:00', end: '09:00', days: [0] }, false, false);
+assert(!row.includes('<img'), 'periodRowHtml must escape period name');
+assert(row.includes('&lt;img'), 'periodRowHtml encodes angle brackets');
 
 console.log('panel_schedule_type.harness.mjs: all assertions passed');

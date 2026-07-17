@@ -58,6 +58,7 @@ CONF_SCHEDULE_TYPE = "schedule_type"             # weekly_recurring | date_range
 CONF_SCHEDULE_TIME_MODE = "time_mode"            # window | all_day (first two types only)
 CONF_SCHEDULE_START_AT = "start_at"              # local ISO datetime for continuous_span
 CONF_SCHEDULE_END_AT = "end_at"                  # local ISO datetime for continuous_span
+CONF_SCHEDULE_WHEN_BY_TYPE = "when_by_type"      # opaque per-type When snapshot for editor restore
 
 SCHEDULE_TYPE_WEEKLY_RECURRING = "weekly_recurring"
 SCHEDULE_TYPE_DATE_RANGE_DAILY = "date_range_daily"

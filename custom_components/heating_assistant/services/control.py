@@ -212,6 +212,7 @@ def register_control_services(hass: HomeAssistant) -> None:
                             vol.Optional("enabled", default=True): cv.boolean,
                             vol.Optional("start_date"): cv.string,
                             vol.Optional("end_date"): cv.string,
+                            vol.Optional("when_by_type"): dict,
                         }
                     )
                 ],
