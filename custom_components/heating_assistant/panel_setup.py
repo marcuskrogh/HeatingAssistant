@@ -58,7 +58,7 @@ async def async_register_industrial_panel(hass: HomeAssistant, entry: ConfigEntr
                     # point and its submodules can never drift out of sync.  Bump
                     # this token (and nothing else) on every frontend change to
                     # force browsers/service-workers to fetch fresh assets.
-                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=111",
+                    "js_url": "/ha-industrial-panel/industrial-dashboard.js?v=112",
                     "embed_iframe": False,
                 }
             },

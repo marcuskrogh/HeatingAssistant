@@ -1240,8 +1240,3 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
-
-/* Experiment card headers reuse the SWD-51 two-cluster period-header layout
-   (schedule-form__period-header-main + schedule-form__period-header-actions).
-   Badges already set flex-shrink: 0 above; name/time flex priority comes from
-   the shared schedules.css contract. */

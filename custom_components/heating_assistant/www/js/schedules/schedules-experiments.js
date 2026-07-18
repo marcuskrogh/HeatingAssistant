@@ -1,9 +1,9 @@
-import { signalLabel, experimentRowHtml } from '../experiment-utils.js?v=111';
-import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=111';
-import { escapeHtml } from '../schedule-utils.js?v=111';
+import { signalLabel } from '../experiment-utils.js?v=112';
+import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=112';
+import { escapeHtml } from '../schedule-utils.js?v=112';
 import {
   EXCITATION_OPTIONS, fmtExpWindow, tsToLocalInput, expStatusInfo, expCardModifier,
-} from './schedules-shared.js?v=111';
+} from './schedules-shared.js?v=112';
 
 export function renderExperimentsSection(container, room, connection, hass) {
   const sectionWrap = document.createElement('div');
@@ -72,8 +72,8 @@ export function renderExperimentsSection(container, room, connection, hass) {
           <div class="form-group">
             <label class="form-label">Name</label>
             <input class="form-input form-input--name" type="text" id="ef-name"
-              placeholder="${room.name} overnight"
-              value="${prefill?.name || ''}">
+              placeholder="${escapeHtml(room.name)} overnight"
+              value="${escapeHtml(prefill?.name || '')}">
           </div>
           <div class="form-group">
             <label class="form-label">Signal Type</label>
@@ -250,7 +250,7 @@ export function renderExperimentsSection(container, room, connection, hass) {
       card.className = `card schedule-form__period${modifier}${isExpanded ? ' schedule-form__period--expanded' : ''}`;
 
       card.innerHTML = `
-        <div class="schedule-form__period-header exp-card__header">
+        <div class="schedule-form__period-header">
           <div class="schedule-form__period-header-main">
             <span class="schedule-form__period-name">${escapeHtml(exp.name || '(unnamed)')}</span>
             <span class="exp-signal-badge">${signalLabel(exp.signal_type)}</span>

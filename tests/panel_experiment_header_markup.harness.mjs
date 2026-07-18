@@ -44,6 +44,15 @@ assert(
   'experiment card header must contain a header-actions cluster',
 );
 
+// Card list header-main: name → signal → status → window (not the form header).
+const cardMainMatch = source.match(
+  /schedule-form__period-header-main[\s\S]*?schedule-form__period-name[\s\S]*?exp-signal-badge[\s\S]*?exp-status-badge[\s\S]*?schedule-form__period-time[\s\S]*?<\/div>/,
+);
+assert(
+  cardMainMatch,
+  'card header-main must contain name → signal → status → window in order',
+);
+
 // Actions cluster: cancel/delete before expand-chevron when present.
 const actionsMatch = source.match(
   /schedule-form__period-header-actions[\s\S]*?(?:data-cancel|data-delete)[\s\S]*?schedule-form__expand-chevron[\s\S]*?<\/div>/,
@@ -61,7 +70,21 @@ assert(
   'new/edit form header must pin discard (ef-discard) in header-actions',
 );
 
-// Obsolete two-row experiment header markup must be gone.
+// Form prefill name and room placeholder must be escaped.
+assert(
+  source.includes('escapeHtml(prefill?.name') || source.includes('escapeHtml(prefill?.name ||'),
+  'form name input value must use escapeHtml',
+);
+assert(
+  source.includes('escapeHtml(room.name)'),
+  'form placeholder must escape room.name',
+);
+
+// Dead marker class and obsolete two-row markup must be gone.
+assert(
+  !source.includes('exp-card__header'),
+  'dead exp-card__header class must be removed from schedules-experiments.js',
+);
 assert(
   !source.includes('exp-card__header-row'),
   'obsolete .exp-card__header-row must be removed from schedules-experiments.js',
@@ -69,6 +92,10 @@ assert(
 assert(
   !source.includes('exp-card__header-window'),
   'obsolete .exp-card__header-window must be removed from schedules-experiments.js',
+);
+assert(
+  !industrialCss.includes('.exp-card__header'),
+  'obsolete .exp-card__header rules must be removed from industrial.css',
 );
 assert(
   !industrialCss.includes('.exp-card__header-row'),
@@ -93,6 +120,25 @@ assert(
   headerBlock[0].includes('flex-wrap: nowrap'),
   'period-header must use flex-wrap: nowrap to keep actions pinned',
 );
+
+// SWD-58: name/time flex contract shared with schedule rows.
+assert(
+  /\/\* Shared name\/time flex contract[\s\S]*\.sched-row__name,\s*\r?\n\.schedule-form__period-name/.test(css)
+    || css.includes('.sched-row__name,\n.schedule-form__period-name')
+    || css.includes('.sched-row__name,\r\n.schedule-form__period-name'),
+  'name flex contract must be shared between sched-row and period-name',
+);
+const nameBlock = css.match(
+  /\.sched-row__name,\s*\r?\n\.schedule-form__period-name\s*\{[^}]*\}/,
+);
+assert(nameBlock, 'shared name rule block must exist');
+assert(nameBlock[0].includes('flex: 1 1 6em'), 'name must use flex: 1 1 6em');
+assert(nameBlock[0].includes('min-width: 4em'), 'name must use min-width: 4em');
+const timeBlock = css.match(
+  /\.sched-row__time,\s*\r?\n\.schedule-form__period-time\s*\{[^}]*\}/,
+);
+assert(timeBlock, 'shared time rule block must exist');
+assert(timeBlock[0].includes('flex: 0 1 auto'), 'timing must use flex: 0 1 auto');
 
 // Index/overview experimentRowHtml: status → name → time (SWD-51 sched-row contract).
 const rowFn = utils.match(/export function experimentRowHtml[\s\S]*?\n\}/);
