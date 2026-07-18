@@ -14,11 +14,11 @@ import {
   SCHEDULE_TYPE_DATE_RANGE,
   SCHEDULE_TYPE_WEEKLY,
   serializeSchedulePeriod,
-} from '../schedule-utils.js?v=108';
-import { setPanelHash } from '../panel-hash.js?v=108';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=108';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=108';
-import { renderExperimentsSection } from './schedules-experiments.js?v=108';
+} from '../schedule-utils.js?v=110';
+import { setPanelHash } from '../panel-hash.js?v=110';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=110';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=110';
+import { renderExperimentsSection } from './schedules-experiments.js?v=110';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // Touch hold duration before a card enters drag mode (SWD-24). Chosen so
@@ -885,16 +885,20 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     const cardHeader = document.createElement('div');
     cardHeader.className = 'schedule-form__period-header';
     cardHeader.innerHTML = `
-      ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
-      ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
-      <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
-      <span class="sched-row__type">${escapeAttr(preview.type)}</span>
-      <span class="schedule-form__period-name">${escapeAttr(preview.name)}</span>
-      <span class="schedule-form__period-time">${escapeAttr(preview.timing)}</span>
-      <span class="sched-row__mode ${preview.modeCls}">${escapeAttr(preview.mode)}</span>
-      <span class="schedule-form__unsaved-dot" aria-hidden="true" title="Unsaved changes"></span>
-      <button class="schedule-form__delete" title="Delete period" data-action="delete">×</button>
-      <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
+      <div class="schedule-form__period-header-main">
+        ${isActive ? '<span class="sched-detail__now-badge">NOW</span>' : ''}
+        ${isNext ? '<span class="sched-detail__next-badge">NEXT</span>' : ''}
+        <button type="button" class="sched-period-toggle ${periodEnabled ? 'sched-period-toggle--on' : 'sched-period-toggle--off'}" data-action="toggle-enabled" title="${periodEnabled ? 'Disable period' : 'Enable period'}">${periodEnabled ? 'ON' : 'OFF'}</button>
+        <span class="sched-row__type">${escapeAttr(preview.type)}</span>
+        <span class="schedule-form__period-name">${escapeAttr(preview.name)}</span>
+        <span class="schedule-form__period-time">${escapeAttr(preview.timing)}</span>
+        <span class="sched-row__mode ${preview.modeCls}">${escapeAttr(preview.mode)}</span>
+      </div>
+      <div class="schedule-form__period-header-actions">
+        <span class="schedule-form__unsaved-dot" aria-hidden="true" title="Unsaved changes"></span>
+        <button class="schedule-form__delete" title="Delete period" data-action="delete">×</button>
+        <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
+      </div>
     `;
     card.appendChild(cardHeader);
 

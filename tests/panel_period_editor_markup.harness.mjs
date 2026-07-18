@@ -61,4 +61,57 @@ assert(
   'container query must collapse date-row on narrow period cards',
 );
 
+// SWD-51: two-cluster header layout — main content + pinned actions.
+assert(
+  source.includes('schedule-form__period-header-main'),
+  'collapsed header must contain a header-main cluster',
+);
+assert(
+  source.includes('schedule-form__period-header-actions'),
+  'collapsed header must contain a header-actions cluster',
+);
+
+// Delete must appear before expand-chevron inside the actions cluster.
+const actionsMatch = source.match(
+  /schedule-form__period-header-actions[\s\S]*?data-action="delete"[\s\S]*?schedule-form__expand-chevron[\s\S]*?<\/div>/,
+);
+assert(actionsMatch, 'header-actions must contain delete then expand-chevron before closing');
+assert(
+  actionsMatch[0].indexOf('data-action="delete"') < actionsMatch[0].indexOf('schedule-form__expand-chevron'),
+  'delete button must appear before expand-chevron in actions',
+);
+
+// CSS must pin the actions cluster so it never wraps to a lower line.
+const actionsCssRule = css.match(/\.schedule-form__period-header-actions\s*\{[^}]*\}/);
+assert(actionsCssRule, 'CSS must define .schedule-form__period-header-actions');
+assert(
+  actionsCssRule[0].includes('flex-shrink: 0'),
+  'header-actions must have flex-shrink: 0 so it never wraps',
+);
+
+// CSS must wrap the outer header with nowrap so actions stay on the first line.
+const headerBlock = css.match(/\.schedule-form__period-header\s*\{[^}]*\}/);
+assert(headerBlock, 'CSS must define .schedule-form__period-header');
+assert(
+  headerBlock[0].includes('flex-wrap: nowrap'),
+  'period-header must use flex-wrap: nowrap to keep actions pinned',
+);
+
+// CSS narrow-screen rule for period-time must be scoped inside header-main
+// and mirrored on summary rows for AC4 consistency.
+assert(
+  css.includes('.schedule-form__period-header-main .schedule-form__period-time'),
+  '@media narrow rule for period-time must be scoped inside header-main',
+);
+assert(
+  css.includes('.sched-row .sched-row__time'),
+  '@media narrow rule must also wrap .sched-row timing for cross-surface consistency',
+);
+assert(
+  /\/\* Shared name\/time flex contract[\s\S]*\.sched-row__name,\s*\n\.schedule-form__period-name/.test(css)
+    || css.includes('.sched-row__name,\n.schedule-form__period-name')
+    || css.includes('.sched-row__name,\r\n.schedule-form__period-name'),
+  'name flex contract must be shared between sched-row and period-name',
+);
+
 console.log('panel_period_editor_markup.harness.mjs: ok');
