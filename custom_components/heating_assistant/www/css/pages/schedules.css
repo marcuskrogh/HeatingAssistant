@@ -669,7 +669,7 @@
 }
 
 .sched-row__type {
-  flex-shrink: 1;
+  flex-shrink: 0;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -679,13 +679,13 @@
 }
 
 .sched-row__name {
-  flex: 1;
+  flex: 1 1 6em;
   color: var(--text-secondary);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  min-width: 4em;
 }
 
 .sched-row__time {
@@ -693,6 +693,7 @@
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -841,8 +842,8 @@
 /* Collapsed header row — always visible, acts as the toggle */
 .schedule-form__period-header {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
+  flex-wrap: nowrap;
   gap: 8px;
   cursor: pointer;
   user-select: none;
@@ -851,33 +852,53 @@
   max-width: 100%;
 }
 
+/* Main content cluster: badges, toggle, type, name, timing, mode — may wrap */
+.schedule-form__period-header-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Actions cluster: unsaved-dot, delete, chevron — always on the same row */
+.schedule-form__period-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .schedule-form__period-header:hover .schedule-form__period-name {
   color: var(--accent);
 }
 
-/* Period name — takes all remaining space */
+/* Period name — takes remaining space but always stays visible */
 .schedule-form__period-name {
-  flex: 1;
+  flex: 1 1 6em;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  min-width: 0;
+  min-width: 4em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: color var(--transition);
 }
 
-/* Time range (HH:MM–HH:MM) */
+/* Time range (HH:MM–HH:MM) — shrinks before name, never pushes name off */
 .schedule-form__period-time {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
-  flex-shrink: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* Expand/collapse chevron */
@@ -1254,11 +1275,6 @@
   visibility: visible;
 }
 
-/* The delete '×' button sits after the unsaved-dot; keep spacing tight so
-   the header row doesn't jump when a card becomes unsaved. */
-.schedule-form__period-header .schedule-form__delete {
-  margin-left: 6px;
-}
 
 .schedule-form__period--unsaved .schedule-form__period-name {
   color: var(--text-primary);
@@ -1447,7 +1463,7 @@
     row-gap: 6px;
   }
 
-  .schedule-form__period-time {
+  .schedule-form__period-header-main .schedule-form__period-time {
     flex: 1 1 100%;
   }
 

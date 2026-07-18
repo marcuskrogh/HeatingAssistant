@@ -1,7 +1,7 @@
-import { setPanelHash } from '../panel-hash.js?v=108';
+import { setPanelHash } from '../panel-hash.js?v=109';
 import {
   el, configPageShell, configListHeader, loadingNode, prettify, fmt,
-} from './config-ui.js?v=108';
+} from './config-ui.js?v=109';
 
 // Heat sources — list
 // ---------------------------------------------------------------------------
