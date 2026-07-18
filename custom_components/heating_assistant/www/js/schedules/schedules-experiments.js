@@ -1,8 +1,9 @@
-import { signalLabel, experimentRowHtml } from '../experiment-utils.js?v=110';
-import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=110';
+import { signalLabel, experimentRowHtml } from '../experiment-utils.js?v=111';
+import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=111';
+import { escapeHtml } from '../schedule-utils.js?v=111';
 import {
   EXCITATION_OPTIONS, fmtExpWindow, tsToLocalInput, expStatusInfo, expCardModifier,
-} from './schedules-shared.js?v=110';
+} from './schedules-shared.js?v=111';
 
 export function renderExperimentsSection(container, room, connection, hass) {
   const sectionWrap = document.createElement('div');
@@ -59,8 +60,12 @@ export function renderExperimentsSection(container, room, connection, hass) {
     card.style.marginBottom = '8px';
     card.innerHTML = `
       <div class="schedule-form__period-header">
-        <span class="schedule-form__period-name">${isEdit ? 'Edit Experiment' : 'New Experiment'}</span>
-        <button class="schedule-form__delete" id="ef-discard" title="Discard">×</button>
+        <div class="schedule-form__period-header-main">
+          <span class="schedule-form__period-name">${isEdit ? 'Edit Experiment' : 'New Experiment'}</span>
+        </div>
+        <div class="schedule-form__period-header-actions">
+          <button class="schedule-form__delete" id="ef-discard" title="Discard">×</button>
+        </div>
       </div>
       <div class="schedule-form__period-body">
         <div class="schedule-form__period-row">
@@ -246,16 +251,16 @@ export function renderExperimentsSection(container, room, connection, hass) {
 
       card.innerHTML = `
         <div class="schedule-form__period-header exp-card__header">
-          <div class="exp-card__header-row">
-            <span class="schedule-form__period-name">${exp.name || '(unnamed)'}</span>
+          <div class="schedule-form__period-header-main">
+            <span class="schedule-form__period-name">${escapeHtml(exp.name || '(unnamed)')}</span>
             <span class="exp-signal-badge">${signalLabel(exp.signal_type)}</span>
             <span class="exp-status-badge ${statusCls}">${statusLabel}</span>
+            <span class="schedule-form__period-time">${fmtExpWindow(exp)}</span>
+          </div>
+          <div class="schedule-form__period-header-actions">
             ${isRunning ? `<button class="btn btn--ghost btn--sm" data-cancel="${exp.id}">Cancel</button>` : ''}
             ${(isScheduled || isTerminal) ? `<button class="schedule-form__delete" data-delete="${exp.id}" title="Delete">×</button>` : ''}
             <span class="schedule-form__expand-chevron">${isExpanded ? '▲' : '▼'}</span>
-          </div>
-          <div class="exp-card__header-window">
-            <span class="schedule-form__period-time">${fmtExpWindow(exp)}</span>
           </div>
         </div>
         <div class="schedule-form__period-body"${isExpanded ? '' : ' hidden'}>
