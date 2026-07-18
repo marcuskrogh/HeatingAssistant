@@ -347,6 +347,8 @@
 /* Content */
 .content {
   padding: 24px;
+  width: 100%;
+  min-width: 0;
   max-width: 1400px;
   margin: 0 auto;
 }
@@ -376,6 +378,7 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
   margin-bottom: 32px;
+  min-width: 0;
 }
 
 .grid-charts {
@@ -397,6 +400,8 @@
   border-radius: var(--radius);
   padding: 20px;
   transition: border-color var(--transition);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .card:hover {
@@ -728,7 +733,7 @@
   }
 
   .grid-rooms {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .tuning-actions {
@@ -738,6 +743,17 @@
 
   .tuning-actions__btn {
     width: 100%;
+  }
+
+  .tuning-actions > .btn {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .tuning-actions__status {
+    margin-left: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 }
 

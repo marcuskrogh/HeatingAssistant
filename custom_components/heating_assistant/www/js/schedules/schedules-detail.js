@@ -940,11 +940,15 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         <div class="schedule-form__date-row">
           <div class="form-group">
             <label class="form-label">Start date</label>
-            <input class="form-input" type="date" value="${escapeAttr(dateWhen.start_date)}" data-when-field="start_date">
+            <div class="form-input form-input--datetime-wrap">
+              <input class="form-input--datetime" type="date" value="${escapeAttr(dateWhen.start_date)}" data-when-field="start_date">
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">End date</label>
-            <input class="form-input" type="date" value="${escapeAttr(dateWhen.end_date)}" data-when-field="end_date">
+            <div class="form-input form-input--datetime-wrap">
+              <input class="form-input--datetime" type="date" value="${escapeAttr(dateWhen.end_date)}" data-when-field="end_date">
+            </div>
           </div>
         </div>
         ${segmentedHtml('time_mode', timeMode, [
@@ -967,11 +971,15 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
         <div class="schedule-form__date-row">
           <div class="form-group">
             <label class="form-label">Start datetime</label>
-            <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.start_at)}" data-when-field="start_at">
+            <div class="form-input form-input--datetime-wrap">
+              <input class="form-input--datetime" type="datetime-local" value="${escapeAttr(continuousWhen.start_at)}" data-when-field="start_at">
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">End datetime</label>
-            <input class="form-input" type="datetime-local" value="${escapeAttr(continuousWhen.end_at)}" data-when-field="end_at">
+            <div class="form-input form-input--datetime-wrap">
+              <input class="form-input--datetime" type="datetime-local" value="${escapeAttr(continuousWhen.end_at)}" data-when-field="end_at">
+            </div>
           </div>
         </div>
       `;
