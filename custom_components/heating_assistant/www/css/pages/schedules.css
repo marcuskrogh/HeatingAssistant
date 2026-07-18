@@ -193,6 +193,8 @@
   padding: 16px;
   margin-bottom: 12px;
   position: relative;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .schedule-form__period-row {
@@ -541,6 +543,8 @@
   flex-direction: column;
   gap: 0;
   padding: 16px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Header row: room name on the left, enabled/disabled badge on the right */
@@ -548,13 +552,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 12px;
+  min-width: 0;
 }
 
 .sched-index-card__name {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sched-index-card__badge {
@@ -594,6 +604,8 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sched-index-card__overflow {
@@ -610,11 +622,14 @@
 .sched-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   font-size: 12px;
   padding: 6px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sched-row--active {
@@ -654,7 +669,7 @@
 }
 
 .sched-row__type {
-  flex-shrink: 0;
+  flex-shrink: 1;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -678,6 +693,9 @@
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Collapsed Inactive section (index + detail) */
@@ -824,10 +842,13 @@
 .schedule-form__period-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   cursor: pointer;
   user-select: none;
   min-height: 28px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .schedule-form__period-header:hover .schedule-form__period-name {
@@ -840,6 +861,7 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -852,7 +874,10 @@
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Expand/collapse chevron */
@@ -869,11 +894,17 @@
   color: var(--text-secondary);
 }
 
-/* Expandable body — separator + top padding */
+/* Expandable body — separator + top padding.
+   container-type here (not on .schedule-form__date-row) so @container rules
+   can target the date row as a descendant — needed when the HA sidebar makes
+   the card narrow while the viewport is still >480px. */
 .schedule-form__period-body {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+  min-width: 0;
+  max-width: 100%;
+  container-type: inline-size;
 }
 
 .schedule-form__editor-section {
@@ -925,6 +956,8 @@
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   width: fit-content;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .schedule-form__segmented--compact {
@@ -1028,9 +1061,22 @@
 
 .schedule-form__date-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
   gap: 12px;
   margin-bottom: 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.schedule-form__date-row .form-group {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.schedule-form__period .form-input,
+.schedule-form__period .form-select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .schedule-form__date-row[hidden],
@@ -1150,6 +1196,8 @@
 .schedule-form__periods {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Reorder-locked styling: whole-card drag is inert while dirty/saving. */
@@ -1376,4 +1424,34 @@
   border: 1px solid var(--border);
   background: transparent;
   color: var(--alarm);
+}
+
+@container (max-width: 500px) {
+  .schedule-form__date-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .schedule-form__segmented {
+    width: 100%;
+  }
+
+  .schedule-form__segment {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .schedule-form__period-header {
+    row-gap: 6px;
+  }
+
+  .schedule-form__period-time {
+    flex: 1 1 100%;
+  }
+
+  .schedule-form__date-row {
+    grid-template-columns: 1fr;
+  }
 }
