@@ -894,13 +894,17 @@
   color: var(--text-secondary);
 }
 
-/* Expandable body — separator + top padding */
+/* Expandable body — separator + top padding.
+   container-type here (not on .schedule-form__date-row) so @container rules
+   can target the date row as a descendant — needed when the HA sidebar makes
+   the card narrow while the viewport is still >480px. */
 .schedule-form__period-body {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
   min-width: 0;
   max-width: 100%;
+  container-type: inline-size;
 }
 
 .schedule-form__editor-section {
@@ -1062,7 +1066,6 @@
   margin-bottom: 12px;
   min-width: 0;
   max-width: 100%;
-  container-type: inline-size;
 }
 
 .schedule-form__date-row .form-group {
