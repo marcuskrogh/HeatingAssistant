@@ -1,9 +1,15 @@
-import { signalLabel } from '../experiment-utils.js?v=112';
-import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=112';
-import { escapeHtml } from '../schedule-utils.js?v=112';
+import { signalLabel } from '../experiment-utils.js?v=113';
+import { cancelExperiment, deleteExperiment, scheduleExperiment } from '../ha-services.js?v=113';
+import { escapeHtml } from '../schedule-utils.js?v=113';
 import {
-  EXCITATION_OPTIONS, fmtExpWindow, tsToLocalInput, expStatusInfo, expCardModifier,
-} from './schedules-shared.js?v=112';
+  EXCITATION_OPTIONS,
+  fmtExpDate,
+  fmtExpTime,
+  fmtExpWindow,
+  tsToLocalInput,
+  expStatusInfo,
+  expCardModifier,
+} from './schedules-shared.js?v=113';
 
 export function renderExperimentsSection(container, room, connection, hass) {
   const sectionWrap = document.createElement('div');
