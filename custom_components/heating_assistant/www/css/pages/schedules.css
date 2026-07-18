@@ -678,17 +678,23 @@
   white-space: nowrap;
 }
 
-.sched-row__name {
+/* Shared name/time flex contract for index rows and detail headers (SWD-51). */
+.sched-row__name,
+.schedule-form__period-name {
   flex: 1 1 6em;
-  color: var(--text-secondary);
-  font-weight: 500;
+  min-width: 4em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 4em;
 }
 
-.sched-row__time {
+.sched-row__name {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.sched-row__time,
+.schedule-form__period-time {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-dim);
@@ -745,6 +751,7 @@
 }
 
 .sched-row__mode {
+  flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 700;
@@ -868,37 +875,18 @@
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 .schedule-form__period-header:hover .schedule-form__period-name {
   color: var(--accent);
 }
 
-/* Period name — takes remaining space but always stays visible */
+/* Period name — detail-header typography on top of shared flex contract */
 .schedule-form__period-name {
-  flex: 1 1 6em;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  min-width: 4em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   transition: color var(--transition);
-}
-
-/* Time range (HH:MM–HH:MM) — shrinks before name, never pushes name off */
-.schedule-form__period-time {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
 }
 
 /* Expand/collapse chevron */
@@ -1459,11 +1447,13 @@
     white-space: normal;
   }
 
-  .schedule-form__period-header {
+  .schedule-form__period-header-main {
     row-gap: 6px;
   }
 
-  .schedule-form__period-header-main .schedule-form__period-time {
+  /* Keep timing wrap consistent across detail headers and summary rows (AC4). */
+  .schedule-form__period-header-main .schedule-form__period-time,
+  .sched-row .sched-row__time {
     flex: 1 1 100%;
   }
 

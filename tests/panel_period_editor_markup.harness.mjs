@@ -71,22 +71,21 @@ assert(
   'collapsed header must contain a header-actions cluster',
 );
 
-// Delete must appear before expand-chevron inside the actions block.
-const actionsStart = source.indexOf('schedule-form__period-header-actions');
-assert(actionsStart >= 0, 'header-actions div must be present in source');
-const actionsEnd = source.indexOf('</div>', actionsStart);
-const actionsBlock = source.slice(actionsStart, actionsEnd);
-const deleteIdx = actionsBlock.indexOf('data-action="delete"');
-const chevronIdx = actionsBlock.indexOf('schedule-form__expand-chevron');
-assert(deleteIdx >= 0, 'delete button must be inside header-actions');
-assert(chevronIdx >= 0, 'expand-chevron must be inside header-actions');
-assert(deleteIdx < chevronIdx, 'delete button must appear before expand-chevron in actions');
+// Delete must appear before expand-chevron inside the actions cluster.
+const actionsMatch = source.match(
+  /schedule-form__period-header-actions[\s\S]*?data-action="delete"[\s\S]*?schedule-form__expand-chevron[\s\S]*?<\/div>/,
+);
+assert(actionsMatch, 'header-actions must contain delete then expand-chevron before closing');
+assert(
+  actionsMatch[0].indexOf('data-action="delete"') < actionsMatch[0].indexOf('schedule-form__expand-chevron'),
+  'delete button must appear before expand-chevron in actions',
+);
 
 // CSS must pin the actions cluster so it never wraps to a lower line.
-const actionsBlock2 = css.match(/\.schedule-form__period-header-actions\s*\{[^}]*\}/);
-assert(actionsBlock2, 'CSS must define .schedule-form__period-header-actions');
+const actionsCssRule = css.match(/\.schedule-form__period-header-actions\s*\{[^}]*\}/);
+assert(actionsCssRule, 'CSS must define .schedule-form__period-header-actions');
 assert(
-  actionsBlock2[0].includes('flex-shrink: 0'),
+  actionsCssRule[0].includes('flex-shrink: 0'),
   'header-actions must have flex-shrink: 0 so it never wraps',
 );
 
@@ -98,10 +97,21 @@ assert(
   'period-header must use flex-wrap: nowrap to keep actions pinned',
 );
 
-// CSS narrow-screen rule for period-time must be scoped inside header-main.
+// CSS narrow-screen rule for period-time must be scoped inside header-main
+// and mirrored on summary rows for AC4 consistency.
 assert(
   css.includes('.schedule-form__period-header-main .schedule-form__period-time'),
   '@media narrow rule for period-time must be scoped inside header-main',
+);
+assert(
+  css.includes('.sched-row .sched-row__time'),
+  '@media narrow rule must also wrap .sched-row timing for cross-surface consistency',
+);
+assert(
+  /\/\* Shared name\/time flex contract[\s\S]*\.sched-row__name,\s*\n\.schedule-form__period-name/.test(css)
+    || css.includes('.sched-row__name,\n.schedule-form__period-name')
+    || css.includes('.sched-row__name,\r\n.schedule-form__period-name'),
+  'name flex contract must be shared between sched-row and period-name',
 );
 
 console.log('panel_period_editor_markup.harness.mjs: ok');

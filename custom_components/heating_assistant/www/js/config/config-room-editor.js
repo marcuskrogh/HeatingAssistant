@@ -1,18 +1,18 @@
-import { setPanelHash } from '../panel-hash.js?v=109';
+import { setPanelHash } from '../panel-hash.js?v=110';
 import {
   updateHeatSources,
   updateRooms,
   updateSystemConfig,
   updateSystemParams,
   updateUiSettings,
-} from '../ha-services.js?v=109';
-import { ICONS } from './config-icons.js?v=109';
-import { LANDING_CARDS } from './config-landing.js?v=109';
+} from '../ha-services.js?v=110';
+import { ICONS } from './config-icons.js?v=110';
+import { LANDING_CARDS } from './config-landing.js?v=110';
 import {
   ROOM_SIZE_PRESETS,
   HOUSE_AGE_PRESETS,
   nearestPreset,
-} from './config-presets.js?v=109';
+} from './config-presets.js?v=110';
 import {
   el,
   schedulePanelNav,
@@ -32,7 +32,7 @@ import {
   fmt,
   entitySelectorField,
   listEditor,
-} from './config-ui.js?v=109';
+} from './config-ui.js?v=110';
 
 // Rooms — editor
 // ---------------------------------------------------------------------------
