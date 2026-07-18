@@ -1,6 +1,6 @@
 // Shared DOM builders for configuration sub-pages.
-import { createCollapsible } from '../components/collapsible.js?v=112';
-import { setPanelHash } from '../panel-hash.js?v=112';
+import { createCollapsible } from '../components/collapsible.js?v=113';
+import { setPanelHash } from '../panel-hash.js?v=113';
 
 function el(tag, className, html) {
   const node = document.createElement(tag);
