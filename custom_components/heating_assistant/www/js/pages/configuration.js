@@ -1,11 +1,11 @@
 // Configuration page router — sub-pages reached via hash routes.
-import { renderLanding } from '../config/config-landing.js?v=113';
-import { renderDisplay } from '../config/config-display.js?v=113';
-import { renderRoomList } from '../config/config-room-list.js?v=113';
-import { renderRoomEditor } from '../config/config-room-editor.js?v=113';
-import { renderSourceList } from '../config/config-source-list.js?v=113';
-import { renderSourceEditor } from '../config/config-source-editor.js?v=113';
-import { renderSystem, renderSystemParams } from '../config/config-system.js?v=113';
+import { renderLanding } from '../config/config-landing.js?v=114';
+import { renderDisplay } from '../config/config-display.js?v=114';
+import { renderRoomList } from '../config/config-room-list.js?v=114';
+import { renderRoomEditor } from '../config/config-room-editor.js?v=114';
+import { renderSourceList } from '../config/config-source-list.js?v=114';
+import { renderSourceEditor } from '../config/config-source-editor.js?v=114';
+import { renderSystem, renderSystemParams } from '../config/config-system.js?v=114';
 
 export function renderConfiguration(container, rooms, state, connection, hass, slug) {
   const parts = (slug || '').split('/').filter(Boolean);
