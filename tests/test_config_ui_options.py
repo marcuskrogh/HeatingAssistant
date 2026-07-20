@@ -682,6 +682,7 @@ def test_kpi_engine_exports_room_time_in_range() -> None:
 
 def test_sysid_index_cards_show_core_kpis_and_dismissible_warnings() -> None:
     """System identification index cards must show R²/RMSE/Estimated and dismissible warnings."""
+    token = _panel_cache_bust_token()
     source = (
         REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
         / "identification" / "sysid-index.js"
@@ -691,6 +692,11 @@ def test_sysid_index_cards_show_core_kpis_and_dismissible_warnings() -> None:
     assert "identificationStat('Estimated'" in source
     assert "card_warnings" in source
     assert "data-dismiss-warning" in source
+    # Missing these imports throws ReferenceError while building the first room
+    # card, which leaves the identification index empty.
+    assert f"from '../utils.js?v={token}'" in source
+    assert "formatNumber" in source
+    assert "modelFitLabel" in source
     shared = (
         REPO_ROOT / "custom_components" / "heating_assistant" / "www" / "js"
         / "identification" / "sysid-shared.js"
