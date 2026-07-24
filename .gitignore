@@ -29,9 +29,8 @@ env/
 *.db
 *.log
 
-# Development docs
-docs/
-# Agent pipeline workspace (skills) — allow commit
+# Development docs (keep docs/agents/ for pipeline workspace)
+docs/*
 !docs/agents/
 !docs/agents/**
 
