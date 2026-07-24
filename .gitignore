@@ -29,8 +29,13 @@ env/
 *.db
 *.log
 
-# Development docs
-docs/
+# Development docs (keep docs/agents/ for pipeline workspace)
+docs/*
+!docs/agents/
+!docs/agents/**
 
 # Claude Code internal
 .claude/
+
+# Synced agent skills at environment startup — do not commit
+.agents/skills/
