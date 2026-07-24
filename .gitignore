@@ -31,6 +31,12 @@ env/
 
 # Development docs
 docs/
+# Agent pipeline workspace (skills) — allow commit
+!docs/agents/
+!docs/agents/**
 
 # Claude Code internal
 .claude/
+
+# Synced agent skills at environment startup — do not commit
+.agents/skills/
