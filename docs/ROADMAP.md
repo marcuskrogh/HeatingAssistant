@@ -797,6 +797,8 @@ the plant model.
   over per-room presence sensors + calendar + device_tracker; output
   an expected internal-gain $\hat Q_\text{int}(t)$ trajectory with
   uncertainty.  Replaces the constant $Q_\text{int}$ assumption.
+  Product Home/Away *control* (setback / wider corridor when residents
+  are away) is tracked separately in [`ROADMAP-home-away.md`](ROADMAP-home-away.md).
 - [ ] **Wind-dependent infiltration forecast.**  Use forecast wind
   speed / direction to drive the Phase 1 infiltration model so the
   controller pre-heats ahead of forecast storms.

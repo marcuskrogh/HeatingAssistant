@@ -324,6 +324,7 @@ guide and a tuning cheat-sheet.
 | [Physics, Models & Control Theory](docs/THEORY.md) | The thermal model, solar pipeline, MPC and state estimator. |
 | [Architecture & Developer Guide](docs/DEVELOPMENT.md) | File layout, data flow, tests and extension points. |
 | [Roadmap](docs/ROADMAP.md) | Planned evolution of the control software. |
+| [Home/Away roadmap](docs/ROADMAP-home-away.md) | House occupancy mode that relaxes climate control when residents are away. |
 
 ## Contributing
 

@@ -27,7 +27,8 @@
 
 - Overview and room-detail schedule visualizations (boxed layout, NOW/NEXT badges, possible time-axis integration).
 - Drag-and-drop outside room schedule pages.
-- New scheduling capabilities beyond the three types (presence, hold-for-N-hours, global templates).
+- New scheduling capabilities beyond the three types (hold-for-N-hours, global templates).
+- House-level **Home/Away** occupancy control (presence-driven eco overlay) — tracked separately in [`ROADMAP-home-away.md`](ROADMAP-home-away.md).
 
 ## Suggested phases
 
