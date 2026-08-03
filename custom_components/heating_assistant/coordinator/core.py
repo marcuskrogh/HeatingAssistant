@@ -195,7 +195,6 @@ from ..const import (
     DEFAULT_DELTA_SAT,
     SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
     UPDATE_INTERVAL,
-    normalize_mpc_mode,
 )
 from ..heat_sources import (
     ElectricHeater,
@@ -211,6 +210,10 @@ from ..heat_sources import (
 from ..thermal_model import HouseModel, Room, RoomConnection, Window
 from ..controller import HeatingMPCController
 from ..controller.factory import ControllerBuildConfig, build_mpc_controller
+from ..mpc_mode_validation import (
+    MpcModeUnavailableError,
+    validate_mpc_mode_available,
+)
 from . import (
     actuation,
     disturbances,
@@ -335,15 +338,23 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._soft_constraint_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT))
         self._soft_constraint_linear_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT))
         self._terminal_weight: float = float(_opt(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT))
-        self._mpc_mode: str = normalize_mpc_mode(
-            _opt(CONF_MPC_MODE, None),
-            legacy_solver=_opt(CONF_MPC_SOLVER, DEFAULT_MPC_MODE),
-        )
         from ..controller.ipopt_probe import probe_ipopt_capability
 
         _ipopt_probe = probe_ipopt_capability()
         self._ipopt_available: bool = bool(_ipopt_probe.available)
         self._ipopt_unavailable_reason: Optional[str] = _ipopt_probe.reason
+        try:
+            self._mpc_mode: str = validate_mpc_mode_available(
+                _opt(CONF_MPC_MODE, None),
+                legacy_solver=_opt(CONF_MPC_SOLVER, DEFAULT_MPC_MODE),
+                ipopt_available=self._ipopt_available,
+                unavailable_reason=self._ipopt_unavailable_reason,
+            )
+        except MpcModeUnavailableError as err:
+            _LOGGER.warning(
+                "Heating Assistant: falling back to linear MPC because %s", err
+            )
+            self._mpc_mode = DEFAULT_MPC_MODE
         self._sigma_w: float = float(
             options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
         )

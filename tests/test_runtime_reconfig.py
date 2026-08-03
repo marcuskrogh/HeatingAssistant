@@ -26,6 +26,9 @@ from custom_components.heating_assistant.const import (
     MPC_MODE_NONLINEAR,
 )
 from custom_components.heating_assistant.coordinator import runtime_reconfig as rr
+from custom_components.heating_assistant.mpc_mode_validation import (
+    MpcModeUnavailableError,
+)
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
 # Builds real coordinator objects (tests/helpers stubs) — integration tier.
@@ -163,12 +166,40 @@ def test_apply_pending_runtime_reconfiguration_rebuilds_when_horizon_queued():
 
 def test_apply_pending_runtime_reconfiguration_rebuilds_when_mode_changes():
     coord = _reconfig_coord()
+    coord._ipopt_available = True
     coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
 
     rr.apply_pending_runtime_reconfiguration(coord)
 
     assert coord._mpc_mode == MPC_MODE_NONLINEAR
     coord._build_controller.assert_called_once()
+
+
+def test_apply_pending_runtime_reconfiguration_rejects_nonlinear_without_ipopt():
+    coord = _reconfig_coord()
+    coord._ipopt_available = False
+    coord._ipopt_unavailable_reason = "probe failed"
+    coord._mpc_mode = "linear"
+    coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
+
+    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+        rr.apply_pending_runtime_reconfiguration(coord)
+
+    assert coord._mpc_mode == "linear"
+    coord._build_controller.assert_not_called()
+
+
+def test_apply_runtime_reconfiguration_rejects_nonlinear_without_ipopt():
+    coord = _reconfig_coord()
+    coord._ipopt_available = False
+    coord._ipopt_unavailable_reason = "probe failed"
+    coord._last_runtime_config = {CONF_MPC_MODE: "linear"}
+
+    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+        rr.apply_runtime_reconfiguration(coord, {CONF_MPC_MODE: MPC_MODE_NONLINEAR})
+
+    assert coord._pending_runtime_reconfiguration == {}
+    assert coord._last_runtime_config == {CONF_MPC_MODE: "linear"}
 
 
 def test_apply_pending_runtime_reconfiguration_updates_history_retention():

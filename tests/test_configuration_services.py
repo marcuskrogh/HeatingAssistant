@@ -21,6 +21,7 @@ from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_MPC_MODE,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PLOT_FORECAST_HOURS,
     CONF_PLOT_HISTORY_HOURS,
@@ -28,6 +29,10 @@ from custom_components.heating_assistant.const import (
     CONF_ROOMS,
     CONF_ROOM_NAME,
     DOMAIN,
+    MPC_MODE_NONLINEAR,
+)
+from custom_components.heating_assistant.mpc_mode_validation import (
+    MpcModeUnavailableError,
 )
 
 
@@ -59,6 +64,8 @@ def _make_hass(entry, coordinator, update_calls, monkeypatch):
 def _make_coordinator():
     coordinator = MagicMock()
     coordinator._entry = SimpleNamespace(entry_id="entry-1")
+    coordinator._ipopt_available = True
+    coordinator._ipopt_unavailable_reason = None
     return coordinator
 
 
@@ -80,6 +87,27 @@ async def test_update_ui_settings_persists_both_stores(monkeypatch):
     assert call["options"][CONF_PLOT_HISTORY_HOURS] == 24.0
     assert call["data"][CONF_PLOT_FORECAST_HOURS] == 6.0
     coordinator.apply_tuning_updates.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_update_controller_tuning_rejects_nonlinear_when_ipopt_unavailable(
+    monkeypatch,
+):
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    coordinator = _make_coordinator()
+    coordinator._ipopt_available = False
+    coordinator._ipopt_unavailable_reason = "solver probe failed"
+    update_calls: list = []
+    hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
+
+    handlers = _capture_handlers(hass)
+    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+        await handlers["update_controller_tuning"](
+            SimpleNamespace(data={CONF_MPC_MODE: MPC_MODE_NONLINEAR})
+        )
+
+    assert update_calls == []
+    coordinator.apply_tuning_updates.assert_not_called()
 
 
 @pytest.mark.asyncio

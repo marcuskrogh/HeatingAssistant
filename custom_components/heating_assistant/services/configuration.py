@@ -47,6 +47,9 @@ from ..const import (
     MPC_MODES,
 )
 from ..persistence import persist_tuning_updates, write_entry_config
+from ..mpc_mode_validation import (
+    validate_mpc_mode_update,
+)
 from ..room_migration import (
     _apply_renames_to_connections,
     _migrate_room_entities,
@@ -93,6 +96,7 @@ async def handle_update_controller_tuning(hass: HomeAssistant, call: ServiceCall
     updates = {k: v for k, v in call.data.items() if k in _CONTROLLER_TUNING_KEYS}
     if not updates:
         return
+    validate_mpc_mode_update(coordinator, updates)
     persist_tuning_updates(hass, coordinator, updates)
     coordinator.apply_tuning_updates(updates)
     coordinator.async_update_listeners()

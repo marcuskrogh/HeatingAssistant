@@ -19,3 +19,4 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 - 2026-08-03 — research SWD-239 brief landed (`docs/agents/RESEARCH-swd-239-dual-mode-mpc.md`) on `cursor/swd-239-mpc-solver-research-d0ba`. Next: `/define SWD-240`.
 - 2026-08-03 — define SWD-240 PLAN approved; Sub-tasks SWD-241–245; branch `cursor/swd-240-dual-mode-mpc-d0ba`. Next: `/implement SWD-240`.
 - 2026-08-03 — implemented SWD-240 dual-mode MPC on PR #539; full pytest suite passed. Next: `/review-fix SWD-240`.
+- 2026-08-03 — fix-forward addressed PR #539 must-fix findings for preview `mpc_mode`, IPOPT probe gating, and nonlinear price profiles. Next: `/review-fix SWD-240`.

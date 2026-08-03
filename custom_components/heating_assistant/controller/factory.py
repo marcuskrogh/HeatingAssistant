@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_MPC_MODE
 from ..heat_sources import HeatSource
+from ..mpc_mode_validation import validate_mpc_mode_available
 from ..thermal_model import HouseModel
 from .facade import HeatingMPCController
 
@@ -32,6 +33,8 @@ class ControllerBuildConfig:
     sigma_b: float
     energy_price_weight: float
     mpc_mode: str = DEFAULT_MPC_MODE
+    ipopt_available: bool = True
+    ipopt_unavailable_reason: Optional[str] = None
     albedo: float = DEFAULT_GROUND_ALBEDO
     measurement_dt: Optional[float] = None
 
@@ -59,6 +62,20 @@ class ControllerBuildConfig:
 
         ov = dict(overrides or {})
         dt = float(ov.get(CONF_UPDATE_INTERVAL, coordinator._update_interval_s))
+        mpc_mode = validate_mpc_mode_available(
+            ov.get(
+                CONF_MPC_MODE,
+                getattr(
+                    coordinator,
+                    "_mpc_mode",
+                    getattr(coordinator, "_mpc_solver", DEFAULT_MPC_MODE),
+                ),
+            ),
+            ipopt_available=bool(getattr(coordinator, "_ipopt_available", True)),
+            unavailable_reason=getattr(
+                coordinator, "_ipopt_unavailable_reason", None
+            ),
+        )
         return cls(
             model=coordinator.model,
             heat_sources=coordinator.heat_sources,
@@ -98,21 +115,21 @@ class ControllerBuildConfig:
             energy_price_weight=float(
                 ov.get(CONF_ENERGY_PRICE_WEIGHT, coordinator._energy_price_weight)
             ),
-            mpc_mode=str(
-                ov.get(
-                    CONF_MPC_MODE,
-                    getattr(
-                        coordinator,
-                        "_mpc_mode",
-                        getattr(coordinator, "_mpc_solver", DEFAULT_MPC_MODE),
-                    ),
-                )
+            mpc_mode=mpc_mode,
+            ipopt_available=bool(getattr(coordinator, "_ipopt_available", True)),
+            ipopt_unavailable_reason=getattr(
+                coordinator, "_ipopt_unavailable_reason", None
             ),
         )
 
 
 def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
     """Construct an MPC controller from a :class:`ControllerBuildConfig`."""
+    mpc_mode = validate_mpc_mode_available(
+        config.mpc_mode,
+        ipopt_available=config.ipopt_available,
+        unavailable_reason=config.ipopt_unavailable_reason,
+    )
     measurement_dt = (
         config.measurement_dt if config.measurement_dt is not None else config.dt
     )
@@ -135,5 +152,5 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         sigma_v=config.sigma_v,
         sigma_b=config.sigma_b,
         energy_price_weight=config.energy_price_weight,
-        mpc_mode=config.mpc_mode,
+        mpc_mode=mpc_mode,
     )

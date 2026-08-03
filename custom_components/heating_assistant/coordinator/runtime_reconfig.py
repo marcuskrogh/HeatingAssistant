@@ -46,6 +46,7 @@ from ..const import (
     DEFAULT_MPC_MODE,
     normalize_mpc_mode,
 )
+from ..mpc_mode_validation import validate_mpc_mode_update
 
 if TYPE_CHECKING:
     from .core import HeatingAssistantCoordinator
@@ -121,6 +122,8 @@ def apply_runtime_reconfiguration(
         if coordinator._last_runtime_config.get(key) != new_config.get(key)
     }
     changed_keys -= PERSISTED_STATE_KEYS
+    if CONF_MPC_MODE in changed_keys:
+        validate_mpc_mode_update(coordinator, new_config)
     coordinator._last_runtime_config = new_config
 
     if old_persisted != new_persisted:
@@ -231,6 +234,7 @@ def apply_pending_runtime_reconfiguration(coordinator: HeatingAssistantCoordinat
         )
         rebuild_controller = True
     if CONF_MPC_MODE in pending:
+        validate_mpc_mode_update(coordinator, pending)
         coordinator._mpc_mode = normalize_mpc_mode(
             pending.get(CONF_MPC_MODE),
             legacy_solver=pending.get(
@@ -321,6 +325,7 @@ def apply_tuning_updates(
     coordinator: HeatingAssistantCoordinator, updates: Dict[str, Any]
 ) -> None:
     """Apply tuning parameter changes immediately (called from services)."""
+    validate_mpc_mode_update(coordinator, updates)
     for key, value in updates.items():
         coordinator._pending_runtime_reconfiguration[key] = value
     apply_pending_runtime_reconfiguration(coordinator)

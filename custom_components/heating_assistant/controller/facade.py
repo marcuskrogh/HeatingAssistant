@@ -1681,8 +1681,7 @@ class HeatingNonlinearMPC(StandardNonlinearContinuousMPC):
     ``StandardContinuousOCP`` currently supports the shared base cost terms
     (Q/R/P/S), static input bounds, static soft output corridors, and a direct
     linear input economy term. Horizon-varying Q/R scales, per-step input
-    clamps, and signed-magnitude price slacks are retained on the linear QP path
-    and deliberately approximated here until mbc exposes nonlinear equivalents.
+    clamps, and signed-magnitude price slacks are retained on the linear QP path.
     """
 
     def __init__(
@@ -1835,6 +1834,8 @@ class HeatingNonlinearMPC(StandardNonlinearContinuousMPC):
         dt_h: float,
     ) -> None:
         self._ocp._p_u_eco = None
+        self._ocp._lagrange = None
+        self._ocp._lagrange_jac = None
         if not (price_seq is not None and price_weight > 0.0 and elec_heat is not None):
             return
         model = self._model
@@ -1854,19 +1855,39 @@ class HeatingNonlinearMPC(StandardNonlinearContinuousMPC):
             else np.zeros(nu, dtype=bool)
         )
         _, u_max_abs = model.u_bounds
-        # Continuous OCP applies p_u_eco * u * dt_seconds. Convert the linear
-        # path's per-step kWh cost to a per-second coefficient.
-        mean_price = float(np.mean(price))
-        coeff = np.zeros(nu, dtype=float)
-        for i in range(nu):
-            if bid[i]:
-                continue
-            if float(u_max_abs[i]) > 0.0:
-                coeff[i] = price_weight * mean_price * elec_heat[i] * 1e-3 / 3600.0
-            else:
-                coeff[i] = -price_weight * mean_price * elec_cool[i] * 1e-3 / 3600.0
-        if np.any(coeff != 0.0):
-            self._ocp._p_u_eco = coeff
+        # The continuous OCP's static p_u_eco is horizon-invariant. Use an
+        # equivalent stage Lagrange term so each MPC step keeps its own price.
+        coeff_profile = np.zeros((self._N, nu), dtype=float)
+        for k in range(self._N):
+            for i in range(nu):
+                if bid[i]:
+                    continue
+                if float(u_max_abs[i]) > 0.0:
+                    coeff_profile[k, i] = (
+                        price_weight * price[k] * elec_heat[i] * 1e-3 / 3600.0
+                    )
+                else:
+                    coeff_profile[k, i] = (
+                        -price_weight * price[k] * elec_cool[i] * 1e-3 / 3600.0
+                    )
+        if not np.any(coeff_profile != 0.0):
+            return
+
+        def _price_step_index(t: float) -> int:
+            return min(max(int((float(t) - 1e-9) // self._dt), 0), self._N - 1)
+
+        def _price_lagrange(t, _x, _y, u, _theta) -> float:
+            return float(coeff_profile[_price_step_index(t)] @ u)
+
+        def _price_lagrange_jac(t, _x, _y, _u, _theta):
+            return (
+                np.zeros(model.nx, dtype=float),
+                np.zeros(getattr(model, "ny", 0), dtype=float),
+                coeff_profile[_price_step_index(t)].copy(),
+            )
+
+        self._ocp._lagrange = _price_lagrange
+        self._ocp._lagrange_jac = _price_lagrange_jac
 
     def estimate_only(
         self,
