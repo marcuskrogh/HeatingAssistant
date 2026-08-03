@@ -8,7 +8,6 @@
     "numpy>=1.21.0",
     "scipy>=1.9.0",
     "highspy",
-    "cyipopt-wheels",
     "mbc@https://github.com/marcuskrogh/mbc/archive/5b0a7098d403d35eac0d97092ef21437573ab94f.zip"
   ],
   "dependencies": [],

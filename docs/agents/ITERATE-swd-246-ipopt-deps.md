@@ -16,8 +16,8 @@
 ## Acceptance criteria
 - Mode option labels are **Linear** and **Non-linear** only.
 - Config help for the mode stays general (compute ↔ fidelity); no solver name beside the mode choice.
-- Integration declares and/or vendors a working Ipopt/`cyipopt` backend so the restart probe can pass on supported platforms (linux x86_64/aarch64 manylinux + musllinux; macOS arm64 where wheels exist).
-- Before the Ipopt probe, setup ensures `cyipopt` is importable (manifest requirement + vendored wheel fallback).
+- Integration vendors platform wheels and installs a matching `cyipopt`/Ipopt backend before the restart probe (not via `manifest.json`, because PyPI has no musllinux `cyipopt-wheels` and a failed HA requirement install can block the whole integration).
+- Supported platforms: linux x86_64/aarch64 manylinux + musllinux (HAOS); macOS arm64 where wheels exist.
 - Tests cover UI labels and the packaging/install contract.
 
 ## Out of scope

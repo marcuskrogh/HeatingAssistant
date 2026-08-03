@@ -20,7 +20,8 @@ VENDOR = (
 )
 
 
-def test_manifest_requires_cyipopt_wheels():
+def test_manifest_does_not_require_cyipopt_wheels():
+    """HAOS has no PyPI musllinux cyipopt-wheels; keep Ipopt out of manifest."""
     manifest = json.loads(
         (
             REPO_ROOT
@@ -29,8 +30,10 @@ def test_manifest_requires_cyipopt_wheels():
             / "manifest.json"
         ).read_text(encoding="utf-8")
     )
-    assert any(req.startswith("cyipopt-wheels") for req in manifest["requirements"])
-
+    assert not any(
+        "cyipopt" in req.lower() or "ipopt" in req.lower()
+        for req in manifest["requirements"]
+    )
 
 def test_requirements_txt_lists_cyipopt_wheels():
     text = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
