@@ -1,0 +1,56 @@
+name: Build cyipopt musllinux wheels
+
+# Produces HAOS-compatible musllinux cyipopt wheels and uploads them as
+# artifacts. Prefer committing finished wheels under
+# custom_components/heating_assistant/vendor/cyipopt_wheels/.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/build_cyipopt_musllinux.sh"
+      - ".github/workflows/build-cyipopt-musllinux.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  musllinux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build musllinux ${{ matrix.arch }} wheels
+        run: |
+          mkdir -p /tmp/wheels
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v "$PWD/scripts/build_cyipopt_musllinux.sh:/build.sh:ro" \
+            -v /tmp/wheels:/wheels \
+            -e OUT_DIR=/wheels \
+            -e PY_TAGS="cp312-cp312 cp313-cp313" \
+            quay.io/pypa/musllinux_1_2_${{ matrix.arch }} \
+            bash /build.sh v1.7.0
+          ls -lh /tmp/wheels
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyipopt-musllinux-${{ matrix.arch }}
+          path: /tmp/wheels/*.whl
+          if-no-files-found: error

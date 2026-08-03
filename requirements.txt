@@ -15,4 +15,7 @@
 numpy
 scipy
 highspy
+# Bundled-Ipopt wheels (import name remains ``cyipopt``). Official ``cyipopt``
+# has no usable binary wheels for Home Assistant hosts.
+cyipopt-wheels
 mbc@https://github.com/marcuskrogh/mbc/archive/5b0a7098d403d35eac0d97092ef21437573ab94f.zip

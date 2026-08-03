@@ -338,11 +338,27 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._soft_constraint_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT))
         self._soft_constraint_linear_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT))
         self._terminal_weight: float = float(_opt(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT))
+        from ..controller.ipopt_deps import ensure_cyipopt_installed
         from ..controller.ipopt_probe import probe_ipopt_capability
 
+        _cyipopt_install = ensure_cyipopt_installed()
+        if not _cyipopt_install.available:
+            _LOGGER.warning(
+                "Heating Assistant: cyipopt/Ipopt not available (%s: %s)",
+                _cyipopt_install.source,
+                _cyipopt_install.detail,
+            )
         _ipopt_probe = probe_ipopt_capability()
         self._ipopt_available: bool = bool(_ipopt_probe.available)
         self._ipopt_unavailable_reason: Optional[str] = _ipopt_probe.reason
+        if not self._ipopt_available and _cyipopt_install.detail:
+            # Prefer install detail when the probe failure is just a missing import.
+            reason = _ipopt_probe.reason or ""
+            if "cyipopt" in reason.lower() or "ipopt" in reason.lower() or not reason:
+                self._ipopt_unavailable_reason = (
+                    f"{reason}; install={_cyipopt_install.source}"
+                    + (f" ({_cyipopt_install.detail})" if _cyipopt_install.detail else "")
+                ).strip("; ")
         try:
             self._mpc_mode: str = validate_mpc_mode_available(
                 _opt(CONF_MPC_MODE, None),
