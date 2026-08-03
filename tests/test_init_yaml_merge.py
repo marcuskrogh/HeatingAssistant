@@ -4,6 +4,7 @@ from custom_components.heating_assistant.__init__ import _merge_yaml_into_entry_
 from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
     CONF_MPC_ANALYTIC_DERIVATIVES,
+    CONF_MPC_MODE,
     CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOM_NAME,
@@ -14,6 +15,7 @@ from custom_components.heating_assistant.const import (
     CONF_SIGMA_W,
     CONF_WEATHER_ENTITY,
     DEFAULT_MPC_ANALYTIC_DERIVATIVES,
+    DEFAULT_MPC_MODE,
     DEFAULT_MPC_SOLVER,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
@@ -95,6 +97,30 @@ def test_merge_populates_solver_defaults():
     assert merged[CONF_SIGMA_W] == DEFAULT_SIGMA_W
     assert merged[CONF_SIGMA_V] == DEFAULT_SIGMA_V
     assert merged[CONF_SIGMA_B] == DEFAULT_SIGMA_B
+    assert merged[CONF_MPC_MODE] == DEFAULT_MPC_MODE
+
+
+def test_merge_migrates_legacy_solver_to_mpc_mode():
+    entry_data = {CONF_ROOMS: [], CONF_HEAT_SOURCES: []}
+
+    assert (
+        _merge_yaml_into_entry_data(entry_data, {CONF_MPC_SOLVER: "ipopt"})[
+            CONF_MPC_MODE
+        ]
+        == "non-linear"
+    )
+    assert (
+        _merge_yaml_into_entry_data(entry_data, {CONF_MPC_SOLVER: "slsqp"})[
+            CONF_MPC_MODE
+        ]
+        == "non-linear"
+    )
+    assert (
+        _merge_yaml_into_entry_data(entry_data, {CONF_MPC_SOLVER: "qp"})[
+            CONF_MPC_MODE
+        ]
+        == "linear"
+    )
 
 
 def test_merge_yaml_rooms_preserve_stored_schedules():

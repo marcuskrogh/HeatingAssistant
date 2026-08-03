@@ -12,6 +12,8 @@ import numpy as np
 import pytest
 from mbc.control import IpoptNLPBackend, NLPProblem
 
+from custom_components.heating_assistant.controller import ipopt_probe
+
 
 def test_ipopt_backend_actually_engages() -> None:
     problem = NLPProblem(
@@ -33,3 +35,39 @@ def test_ipopt_backend_actually_engages() -> None:
         )
     assert res.success
     assert np.isclose(float(np.asarray(res.x)[0]), 1.0, atol=1e-4)
+
+
+def test_ipopt_capability_probe_reports_success(monkeypatch) -> None:
+    class FakeBackend:
+        def __init__(self, **_kwargs):
+            pass
+
+        def solve(self, _problem):
+            return type(
+                "Result",
+                (),
+                {"success": True, "x": np.array([1.0]), "message": "", "fun": 0.0},
+            )()
+
+    monkeypatch.setattr(ipopt_probe, "IpoptNLPBackend", FakeBackend)
+
+    result = ipopt_probe.probe_ipopt_capability()
+
+    assert result.available is True
+    assert result.reason is None
+
+
+def test_ipopt_capability_probe_reports_failure(monkeypatch) -> None:
+    class FakeBackend:
+        def __init__(self, **_kwargs):
+            pass
+
+        def solve(self, _problem):
+            raise RuntimeError("cyipopt missing")
+
+    monkeypatch.setattr(ipopt_probe, "IpoptNLPBackend", FakeBackend)
+
+    result = ipopt_probe.probe_ipopt_capability()
+
+    assert result.available is False
+    assert "cyipopt missing" in result.reason

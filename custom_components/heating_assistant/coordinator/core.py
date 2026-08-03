@@ -45,6 +45,8 @@ from ..const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_MPC_MODE,
+    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -126,6 +128,7 @@ from ..const import (
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
+    DEFAULT_MPC_MODE,
     DEFAULT_TRACKING_WEIGHT,
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
@@ -192,6 +195,7 @@ from ..const import (
     DEFAULT_DELTA_SAT,
     SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
     UPDATE_INTERVAL,
+    normalize_mpc_mode,
 )
 from ..heat_sources import (
     ElectricHeater,
@@ -331,6 +335,15 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._soft_constraint_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT))
         self._soft_constraint_linear_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT))
         self._terminal_weight: float = float(_opt(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT))
+        self._mpc_mode: str = normalize_mpc_mode(
+            _opt(CONF_MPC_MODE, None),
+            legacy_solver=_opt(CONF_MPC_SOLVER, DEFAULT_MPC_MODE),
+        )
+        from ..controller.ipopt_probe import probe_ipopt_capability
+
+        _ipopt_probe = probe_ipopt_capability()
+        self._ipopt_available: bool = bool(_ipopt_probe.available)
+        self._ipopt_unavailable_reason: Optional[str] = _ipopt_probe.reason
         self._sigma_w: float = float(
             options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
         )
@@ -1010,6 +1023,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self._soft_constraint_linear_weight
             ),
             "terminal_weight": float(self._terminal_weight),
+            "mpc_mode": self._mpc_mode,
+            "ipopt_available": bool(getattr(self, "_ipopt_available", False)),
+            "ipopt_unavailable_reason": getattr(
+                self, "_ipopt_unavailable_reason", None
+            ),
             "horizon": int(self._horizon),
             "update_interval": int(
                 ui.total_seconds() if hasattr(ui, "total_seconds") else ui

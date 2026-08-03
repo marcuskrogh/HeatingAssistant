@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..const import DEFAULT_GROUND_ALBEDO
+from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_MPC_MODE
 from ..heat_sources import HeatSource
 from ..thermal_model import HouseModel
 from .facade import HeatingMPCController
@@ -31,6 +31,7 @@ class ControllerBuildConfig:
     sigma_v: float
     sigma_b: float
     energy_price_weight: float
+    mpc_mode: str = DEFAULT_MPC_MODE
     albedo: float = DEFAULT_GROUND_ALBEDO
     measurement_dt: Optional[float] = None
 
@@ -47,6 +48,7 @@ class ControllerBuildConfig:
             CONF_ENERGY_PRICE_WEIGHT,
             CONF_ENERGY_WEIGHT,
             CONF_HORIZON,
+            CONF_MPC_MODE,
             CONF_SMOOTHING_WEIGHT,
             CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
             CONF_SOFT_CONSTRAINT_WEIGHT,
@@ -96,6 +98,16 @@ class ControllerBuildConfig:
             energy_price_weight=float(
                 ov.get(CONF_ENERGY_PRICE_WEIGHT, coordinator._energy_price_weight)
             ),
+            mpc_mode=str(
+                ov.get(
+                    CONF_MPC_MODE,
+                    getattr(
+                        coordinator,
+                        "_mpc_mode",
+                        getattr(coordinator, "_mpc_solver", DEFAULT_MPC_MODE),
+                    ),
+                )
+            ),
         )
 
 
@@ -123,4 +135,5 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         sigma_v=config.sigma_v,
         sigma_b=config.sigma_b,
         energy_price_weight=config.energy_price_weight,
+        mpc_mode=config.mpc_mode,
     )

@@ -69,6 +69,7 @@
         "title": "Control behaviour",
         "description": "Tune how the controller balances comfort, energy use and responsiveness. The top two are the everyday knobs; the rest are advanced and rarely need changing.",
         "data": {
+          "mpc_mode": "MPC mode",
           "tracking_weight": "Setpoint tracking strength",
           "energy_weight": "Energy-use penalty",
           "horizon": "Prediction horizon (steps)",
@@ -79,6 +80,7 @@
           "energy_price_weight": "Price sensitivity"
         },
         "data_description": {
+          "mpc_mode": "Linear uses the fast HiGHS solver and a linearised dynamics model. Non-linear uses Ipopt with the nonlinear dynamics model for potentially better fidelity/accuracy at higher compute cost.",
           "tracking_weight": "How strongly the controller chases the exact setpoint. 0 = stay inside the comfort band only. Higher values mean tighter tracking at the cost of more energy use.",
           "energy_weight": "How strongly the controller avoids running heaters. Higher values save energy but may drift toward the edges of the comfort band.",
           "horizon": "Advanced — number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",

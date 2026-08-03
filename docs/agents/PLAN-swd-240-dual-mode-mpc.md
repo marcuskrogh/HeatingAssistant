@@ -61,6 +61,11 @@
 - Exact probe problem size (small fixed NLP).
 - Whether any existing option is mode-gated in v1 (none required).
 
+## Implementation notes
+- Notification wording and the tiny Ipopt probe NLP were implemented in code and covered by tests.
+- Non-linear mode uses mbc `StandardContinuousOCP` + `StandardNonlinearContinuousMPC` with `IpoptNLPBackend` only. Shared base Q/R/P/S weights, static input bounds, soft output corridor, and direct price economy are wired.
+- Intentional v1 parity gaps: mbc's current nonlinear OCP does not expose the linear QP path's full horizon-varying Q/R profiles, time-varying soft-corridor/input-bound profiles, or signed-magnitude price slacks. The non-linear path approximates those from the first/current horizon step and omits bidirectional signed-magnitude price slacks until mbc exposes matching nonlinear profile support.
+
 ## Constraints
 - Stay on current OCP — no Phase 7 rewrite.
 - No silent solver or mode fallback.
@@ -76,6 +81,6 @@
 - SHA: *(update on push)*
 
 ## Next
-`/implement SWD-240` — Build per this plan on the same delivery branch/PR
+`/review-fix SWD-240` — Review and auto-fix until clean
 
 (Alternate: `/ship SWD-240` to finish remaining through Done.)

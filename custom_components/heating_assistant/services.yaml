@@ -608,6 +608,15 @@ update_controller_tuning:
         number:
           min: 0
           step: 0.1
+    mpc_mode:
+      name: MPC mode
+      description: Linear uses HiGHS and a linearised model. Non-linear uses Ipopt and nonlinear dynamics for higher fidelity at higher compute cost.
+      required: false
+      selector:
+        select:
+          options:
+            - "linear"
+            - "non-linear"
     energy_weight:
       name: Energy weight
       description: How strongly the controller avoids running heaters.

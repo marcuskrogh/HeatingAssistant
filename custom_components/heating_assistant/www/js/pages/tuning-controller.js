@@ -3,18 +3,30 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=114';
+} from '../components/time-series-chart.js?v=115';
 import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../charts/mpc-preview-charts.js?v=114';
+} from '../charts/mpc-preview-charts.js?v=115';
 import {
   updateControllerTuning,
   updateEstimationParams,
-} from '../ha-services.js?v=114';
+} from '../ha-services.js?v=115';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+
+const MODE_DEF = {
+  key: 'mpc_mode',
+  label: 'MPC Mode',
+  hint: 'Linear is faster and robust; non-linear can improve model fidelity/accuracy at higher compute cost.',
+  parse: String,
+};
+
+const MODE_OPTIONS = [
+  { value: 'linear', label: 'Linear (HiGHS)' },
+  { value: 'non-linear', label: 'Non-linear (Ipopt)' },
+];
 
 // Parameters that take effect on the live controller without rebuilding its structure.
 const LIVE_PARAM_DEFS = [
@@ -34,10 +46,12 @@ const RESTART_PARAM_DEFS = [
   { key: 'horizon', label: 'Prediction Horizon', unit: 'steps', hint: 'Control intervals planned ahead — changing this rebuilds the controller', step: 1, parse: parseInt },
 ];
 
-const PARAM_DEFS = [...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
+const PARAM_DEFS = [MODE_DEF, ...LIVE_PARAM_DEFS, ...RESTART_PARAM_DEFS];
+const RESTART_CHANGE_DEFS = [MODE_DEF, ...RESTART_PARAM_DEFS];
 
 // Must match backend DEFAULT_* constants in const.py
 const DEFAULTS = {
+  mpc_mode: 'linear',
   update_interval: 900,
   comfort_offset: 2.0,
   horizon: 100,
@@ -117,6 +131,23 @@ function renderTuningIndex(container, rooms, connection, hass) {
   formSection.appendChild(mpcTitle);
 
   const inputs = {};
+  let nonlinearOption = null;
+  let modeHint = null;
+
+  const modeGroup = document.createElement('div');
+  modeGroup.className = 'form-group';
+  modeGroup.innerHTML = `
+    <label class="form-label" for="ctrl-${MODE_DEF.key}">${MODE_DEF.label}</label>
+    <select class="form-input" id="ctrl-${MODE_DEF.key}">
+      ${MODE_OPTIONS.map((opt) => `<option value="${opt.value}">${opt.label}</option>`).join('')}
+    </select>
+    <span class="form-hint">${MODE_DEF.hint}</span>
+    <span class="form-hint" id="ctrl-mpc-mode-ipopt"></span>
+  `;
+  formSection.appendChild(modeGroup);
+  inputs[MODE_DEF.key] = modeGroup.querySelector('select');
+  nonlinearOption = inputs[MODE_DEF.key].querySelector('option[value="non-linear"]');
+  modeHint = modeGroup.querySelector('#ctrl-mpc-mode-ipopt');
 
   function appendParamSubsection(title, description, defs) {
     const subsection = document.createElement('div');
@@ -284,7 +315,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   function hasPendingRestartChanges() {
     if (!appliedConfig) return false;
     const configured = collectConfiguredConfig();
-    return RESTART_PARAM_DEFS.some((def) => !valuesEqual(
+    return RESTART_CHANGE_DEFS.some((def) => !valuesEqual(
       configured[def.key],
       appliedConfig[def.key] ?? ALL_DEFAULTS[def.key],
     ));
@@ -301,7 +332,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
     const needsRestart = hasPendingRestartChanges();
     pendingBanner.classList.toggle('tuning-pending-banner--restart', needsRestart);
     pendingBanner.textContent = needsRestart
-      ? 'Unsaved changes include sample interval or prediction horizon — applying will rebuild the MPC controller.'
+      ? 'Unsaved changes include MPC mode, sample interval, or prediction horizon — applying will rebuild the MPC controller.'
       : 'Unsaved changes — penalty weights and window settings apply to the live controller on the next cycle.';
   }
 
@@ -318,6 +349,7 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   function populate(config) {
+    updateModeAvailability(config);
     for (const def of PARAM_DEFS) {
       const val = config[def.key];
       if (val !== undefined && val !== null) inputs[def.key].value = val;
@@ -333,6 +365,16 @@ function renderTuningIndex(container, rooms, connection, hass) {
     for (const def of PARAM_DEFS) inputs[def.key].value = DEFAULTS[def.key];
     for (const def of WINDOW_DEFS) windowInputs[def.key].value = WINDOW_DEFAULTS[def.key];
     updatePendingIndicators();
+  }
+
+  function updateModeAvailability(config) {
+    const available = config?.ipopt_available === true;
+    if (nonlinearOption) nonlinearOption.disabled = !available;
+    if (modeHint) {
+      modeHint.textContent = available
+        ? 'Ipopt probe passed on the last restart; non-linear mode is selectable.'
+        : `Non-linear requires Ipopt. It will be selectable after a restart probe passes${config?.ipopt_unavailable_reason ? ` (${config.ipopt_unavailable_reason})` : ''}.`;
+    }
   }
 
   function liveHass() {

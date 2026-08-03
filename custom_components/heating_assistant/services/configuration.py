@@ -22,6 +22,7 @@ from ..const import (
     CONF_IDENTIFICATION_HORIZON_HOURS,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_MPC_MODE,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PLOT_FORECAST_HOURS,
     CONF_PLOT_HISTORY_HOURS,
@@ -43,6 +44,7 @@ from ..const import (
     CONF_WINDOW_OPEN_DEBOUNCE,
     CONF_WINDOW_OPEN_Q_INFLATION,
     DOMAIN,
+    MPC_MODES,
 )
 from ..persistence import persist_tuning_updates, write_entry_config
 from ..room_migration import (
@@ -69,6 +71,7 @@ _CONTROLLER_TUNING_KEYS = {
     CONF_HORIZON,
     CONF_UPDATE_INTERVAL,
     CONF_COMFORT_OFFSET,
+    CONF_MPC_MODE,
 }
 
 _ESTIMATION_PARAM_KEYS = {
@@ -304,6 +307,7 @@ def register_configuration_services(hass: HomeAssistant) -> None:
                 vol.Optional(CONF_HORIZON): vol.Coerce(int),
                 vol.Optional(CONF_UPDATE_INTERVAL): vol.Coerce(int),
                 vol.Optional(CONF_COMFORT_OFFSET): vol.Coerce(float),
+                vol.Optional(CONF_MPC_MODE): vol.In(list(MPC_MODES)),
             }
         ),
     )

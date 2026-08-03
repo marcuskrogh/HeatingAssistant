@@ -10,6 +10,14 @@ from custom_components.heating_assistant.controller.factory import (
     ControllerBuildConfig,
     build_mpc_controller,
 )
+from custom_components.heating_assistant.controller.facade import (
+    HeatingLinearisedMPC,
+    HeatingNonlinearMPC,
+)
+from custom_components.heating_assistant.const import (
+    CONF_MPC_MODE,
+    MPC_MODE_NONLINEAR,
+)
 from custom_components.heating_assistant.heat_sources import ElectricHeater
 from custom_components.heating_assistant.thermal_model import HouseModel, Room
 from tests.helpers.coordinator_stubs import make_minimal_coordinator, wire_room_enablement
@@ -35,12 +43,18 @@ def test_controller_build_config_from_coordinator_applies_overrides():
     coord.heat_sources = [ElectricHeater("hp", "living_room", 2000.0)]
 
     config = ControllerBuildConfig.from_coordinator(
-        coord, overrides={"tracking_weight": 5.0, "horizon": 12}
+        coord,
+        overrides={
+            "tracking_weight": 5.0,
+            "horizon": 12,
+            CONF_MPC_MODE: MPC_MODE_NONLINEAR,
+        },
     )
 
     assert config.tracking_weight == pytest.approx(5.0)
     assert config.horizon == 12
     assert config.dt == pytest.approx(900.0)
+    assert config.mpc_mode == MPC_MODE_NONLINEAR
 
 
 @pytest.mark.integration
@@ -70,3 +84,37 @@ def test_build_mpc_controller_constructs_controller():
 
     assert controller.horizon == 4
     assert controller._dt == pytest.approx(900.0)
+    assert controller.mpc_mode == "linear"
+    assert controller.solver_active == "highs"
+    assert isinstance(controller._mpc, HeatingLinearisedMPC)
+
+
+@pytest.mark.integration
+def test_build_mpc_controller_constructs_nonlinear_ipopt_controller():
+    model = _make_house_model()
+    sources = [ElectricHeater("hp", "living_room", 2000.0)]
+    config = ControllerBuildConfig(
+        model=model,
+        heat_sources=sources,
+        horizon=2,
+        dt=900.0,
+        latitude=55.0,
+        longitude=12.0,
+        tracking_weight=1.0,
+        energy_weight=0.1,
+        smoothing_weight=0.05,
+        soft_constraint_weight=10.0,
+        soft_constraint_linear_weight=0.0,
+        terminal_weight=1.0,
+        sigma_w=0.1,
+        sigma_v=0.5,
+        sigma_b=0.002,
+        energy_price_weight=0.0,
+        mpc_mode=MPC_MODE_NONLINEAR,
+    )
+
+    controller = build_mpc_controller(config)
+
+    assert controller.mpc_mode == MPC_MODE_NONLINEAR
+    assert controller.solver_active == "ipopt"
+    assert isinstance(controller._mpc, HeatingNonlinearMPC)
