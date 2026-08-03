@@ -1,6 +1,7 @@
 # Implementation plan: Dual-mode MPC (linear / non-linear)
 
 ## Summary
+- **Shipped** on PR https://github.com/marcuskrogh/HeatingAssistant/pull/539
 - Config **MPC mode** at the top of the options UI: **linear** (default) | **non-linear**.
 - Same OCP weights/costs/constraints; difference is linearized QP vs nonlinear dynamics in the OCP.
 - Internal solvers: **HiGHS** (linear), **Ipopt** (non-linear). No alternate-solver fallback.
