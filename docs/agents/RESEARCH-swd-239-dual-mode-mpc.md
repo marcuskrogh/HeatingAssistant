@@ -105,7 +105,8 @@ Supportive context for `/define SWD-240` (and optional `/model` only if define p
 - Parent map: [SWD-238](https://marcusknielsen.atlassian.net/browse/SWD-238)
 - Artifact: `docs/agents/RESEARCH-swd-239-dual-mode-mpc.md`
 - Branch: `cursor/swd-239-mpc-solver-research-d0ba`
-- PR: *(set on open)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/538
+- SHA: `07ce6c175791c01628691bda4e08f6dfac8a7ce9`
 
 ## Next
 `/define SWD-240` — Align dual-mode product particulars with the user; this brief is supportive context only (Ipopt for non-linear; HPIPM Riccati not a drop-in for condensed linear QP; guidance factors above remain open for UX decisions)
