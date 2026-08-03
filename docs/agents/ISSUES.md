@@ -7,7 +7,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-238 | Story (Epic) | Dual-mode MPC (linear / non-linear) | To Do | — | docs/agents/ROADMAP-dual-mode-mpc.md | Optional: close research **SWD-239**; iterate **SWD-246** In Progress |
 | SWD-239 | Task | Research: solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM for linear) | To Do | SWD-238 | docs/agents/RESEARCH-swd-239-dual-mode-mpc.md | Optional closeout (brief landed) |
 | SWD-240 | Task | Define: dual-mode MPC config (linear / non-linear) + guidance + internal solvers | Done | SWD-238 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
-| SWD-246 | Task | [Iterate] SWD-240: ship Ipopt deps + remove solver names from mode labels | In Progress | SWD-238 | docs/agents/ITERATE-swd-246-ipopt-deps.md | `/review-fix SWD-246` |
+| SWD-246 | Task | [Iterate] SWD-240: ship Ipopt deps + remove solver names from mode labels | In Review | SWD-238 | docs/agents/ITERATE-swd-246-ipopt-deps.md | `/review-fix SWD-246` |
 | SWD-241 | Sub-task | Config/UI: MPC mode selector, help text, grey-out | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-242 | Sub-task | Controller: linear=HiGHS, non-linear=Ipopt, shared weights | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-243 | Sub-task | Ipopt capability probe on restart | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
