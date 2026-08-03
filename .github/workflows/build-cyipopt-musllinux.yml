@@ -15,42 +15,49 @@ permissions:
   contents: read
 
 jobs:
-  musllinux:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            platform: linux/amd64
-          - arch: aarch64
-            platform: linux/arm64
+  musllinux-x86_64:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build musllinux ${{ matrix.arch }} wheels
+      - name: Build musllinux x86_64 wheels
         run: |
           mkdir -p /tmp/wheels
-          docker run --rm --platform ${{ matrix.platform }} \
+          docker run --rm \
             -v "$PWD/scripts/build_cyipopt_musllinux.sh:/build.sh:ro" \
             -v /tmp/wheels:/wheels \
             -e OUT_DIR=/wheels \
             -e PY_TAGS="cp312-cp312 cp313-cp313" \
-            quay.io/pypa/musllinux_1_2_${{ matrix.arch }} \
+            quay.io/pypa/musllinux_1_2_x86_64 \
             bash /build.sh v1.7.0
           ls -lh /tmp/wheels
-
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cyipopt-musllinux-${{ matrix.arch }}
+          name: cyipopt-musllinux-x86_64
+          path: /tmp/wheels/*.whl
+          if-no-files-found: error
+
+  musllinux-aarch64:
+    # Native arm64 avoids multi-hour qemu Ipopt builds.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build musllinux aarch64 wheels
+        run: |
+          mkdir -p /tmp/wheels
+          docker run --rm \
+            -v "$PWD/scripts/build_cyipopt_musllinux.sh:/build.sh:ro" \
+            -v /tmp/wheels:/wheels \
+            -e OUT_DIR=/wheels \
+            -e PY_TAGS="cp312-cp312 cp313-cp313" \
+            quay.io/pypa/musllinux_1_2_aarch64 \
+            bash /build.sh v1.7.0
+          ls -lh /tmp/wheels
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyipopt-musllinux-aarch64
           path: /tmp/wheels/*.whl
           if-no-files-found: error
