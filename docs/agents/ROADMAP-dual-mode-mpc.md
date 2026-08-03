@@ -15,18 +15,18 @@ Users can run the **current** OCP in either **linear** or **non-linear** mode: n
 ## Route
 | Order | Task | Type | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
-| 1 | Solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM vs HiGHS/OSQP for linear / Riccati fit; when to recommend each mode) | research | — | To Do | [SWD-239](https://marcusknielsen.atlassian.net/browse/SWD-239) |
+| 1 | Solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM vs HiGHS/OSQP for linear / Riccati fit; when to recommend each mode) | research | — | To Do (brief landed) | [SWD-239](https://marcusknielsen.atlassian.net/browse/SWD-239) |
 | 2 | Dual-mode MPC: config (linear / non-linear), guidance copy, internal solver binding, acceptance | define | SWD-239 | To Do | [SWD-240](https://marcusknielsen.atlassian.net/browse/SWD-240) |
 
 ## Cleared so far
-<!-- one line per completed route Task: gist + link — do not restate the full answer -->
+- [Research: solver backends & mode-guidance](https://marcusknielsen.atlassian.net/browse/SWD-239) — Ipopt fits NMPC; HPIPM Riccati needs OCP structure HA does not use today (condensed QP); keep HiGHS/OSQP as linear evidence-default; guidance = fidelity vs convexity/deps. Brief: `docs/agents/RESEARCH-swd-239-dual-mode-mpc.md`
 
 ## Not yet specified
-- Default mode for beta (`linear` vs `non-linear`)
-- Linear-mode fallback if research finds HPIPM a poor fit (keep HiGHS/OSQP? reformulate?)
-- Whether a **model** Task is needed if HPIPM requires a Riccati-shaped OCP reformulation
-- Exact guidance factors (rooms, horizon, cycle budget, prediction error, …) — research should feed these
-- Failure / missing-dependency behaviour (e.g. cyipopt unavailable)
+- Default mode for beta (`linear` vs `non-linear`) — define
+- Whether to attempt HPIPM **dense** QP anyway (packaging cost) vs stay on HiGHS/OSQP — define
+- Whether a **model** Task is needed (only if define chooses Riccati / stage-wise OCP reformulation)
+- Exact guidance copy / UI placement — define (research listed decision factors)
+- Failure / missing-dependency behaviour (e.g. cyipopt unavailable) — define
 
 ## Out of scope
 - Phase 7 CasADi / acados / full numerics rewrite
@@ -40,4 +40,4 @@ Users can run the **current** OCP in either **linear** or **non-linear** mode: n
 - Tasks: [SWD-239](https://marcusknielsen.atlassian.net/browse/SWD-239), [SWD-240](https://marcusknielsen.atlassian.net/browse/SWD-240)
 
 ## Next
-`/research SWD-239` — Ipopt for NMPC; HPIPM fitness for linear; evidence for mode guidance
+`/define SWD-240` — Dual-mode config + guidance + internal solvers; research brief is supportive only
