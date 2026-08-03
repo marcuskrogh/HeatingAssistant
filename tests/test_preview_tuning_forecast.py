@@ -11,7 +11,15 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
-from custom_components.heating_assistant.const import CONF_HORIZON, CONF_TRACKING_WEIGHT
+from custom_components.heating_assistant.const import (
+    CONF_HORIZON,
+    CONF_MPC_MODE,
+    CONF_TRACKING_WEIGHT,
+    MPC_MODE_NONLINEAR,
+)
+from custom_components.heating_assistant.mpc_mode_validation import (
+    MpcModeUnavailableError,
+)
 
 
 def _make_preview_coordinator():
@@ -124,3 +132,17 @@ def test_preview_runs_mpc_and_builds_payload(mock_controller_cls):
     assert preview_ctrl.compute.call_args.kwargs["run_optimization"] is True
     assert "rooms" in payload
     assert "living_room" in payload["rooms"]
+
+
+def test_preview_rejects_nonlinear_when_ipopt_probe_failed():
+    coord = _make_preview_coordinator()
+    coord._ipopt_available = False
+    coord._ipopt_unavailable_reason = "ipopt library missing"
+
+    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+        HeatingAssistantCoordinator.preview_tuning_forecast(
+            coord,
+            {CONF_MPC_MODE: MPC_MODE_NONLINEAR},
+            None,
+            {},
+        )

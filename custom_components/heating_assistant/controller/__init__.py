@@ -3,6 +3,7 @@
 from .facade import (
     HeatingLinearisedMPC,
     HeatingMPCController,
+    HeatingNonlinearMPC,
     HouseThermalSDE,
     _InnovationEKF,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "ControllerBuildConfig",
     "HeatingLinearisedMPC",
     "HeatingMPCController",
+    "HeatingNonlinearMPC",
     "HouseThermalSDE",
     "MPC_STATS_BUFFER_SIZE",
     "_InnovationEKF",

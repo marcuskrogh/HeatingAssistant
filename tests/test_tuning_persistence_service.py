@@ -17,11 +17,13 @@ import custom_components.heating_assistant.__init__ as init_mod
 import custom_components.heating_assistant.services.configuration as svc_mod
 from custom_components.heating_assistant.const import (
     CONF_COMFORT_OFFSET,
+    CONF_MPC_MODE,
     CONF_ROOMS,
     CONF_ROOM_NAME,
     CONF_TRACKING_WEIGHT,
     CONF_SIGMA_W,
     DOMAIN,
+    MPC_MODE_NONLINEAR,
 )
 
 
@@ -81,6 +83,26 @@ async def test_controller_tuning_written_to_both_data_and_options(monkeypatch):
     assert call["options"][CONF_TRACKING_WEIGHT] == 5.0
     assert call["data"][CONF_TRACKING_WEIGHT] == 5.0
     coordinator.apply_tuning_updates.assert_called_once_with({CONF_TRACKING_WEIGHT: 5.0})
+
+
+@pytest.mark.asyncio
+async def test_mpc_mode_written_to_both_data_and_options(monkeypatch):
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    coordinator = _make_coordinator()
+    update_calls: list = []
+    hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
+
+    handlers = _capture_handlers(hass)
+    await handlers["update_controller_tuning"](
+        SimpleNamespace(data={CONF_MPC_MODE: MPC_MODE_NONLINEAR})
+    )
+
+    call = update_calls[0]
+    assert call["options"][CONF_MPC_MODE] == MPC_MODE_NONLINEAR
+    assert call["data"][CONF_MPC_MODE] == MPC_MODE_NONLINEAR
+    coordinator.apply_tuning_updates.assert_called_once_with(
+        {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
+    )
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ import pytest
 
 from custom_components.heating_assistant import websocket_api
 from custom_components.heating_assistant.const import (
+    CONF_MPC_MODE,
     CONF_PLOT_FORECAST_HOURS,
     CONF_PLOT_HISTORY_HOURS,
     CONF_ROOMS,
@@ -16,6 +17,7 @@ from custom_components.heating_assistant.const import (
     DEFAULT_PLOT_FORECAST_HOURS,
     DEFAULT_PLOT_HISTORY_HOURS,
     DOMAIN,
+    MPC_MODE_NONLINEAR,
 )
 
 
@@ -264,6 +266,7 @@ async def test_preview_tuning_forecast_payload_shape(
         {
             "id": 5,
             CONF_TRACKING_WEIGHT: 2.5,
+            CONF_MPC_MODE: MPC_MODE_NONLINEAR,
             "plot_forecast_hours": 1.5,
         },
     )
@@ -271,7 +274,10 @@ async def test_preview_tuning_forecast_payload_shape(
     connection.send_result.assert_called_once()
     msg_id, payload = connection.send_result.call_args.args
     assert msg_id == 5
-    assert payload["tuning"] == {CONF_TRACKING_WEIGHT: 2.5}
+    assert payload["tuning"] == {
+        CONF_TRACKING_WEIGHT: 2.5,
+        CONF_MPC_MODE: MPC_MODE_NONLINEAR,
+    }
     assert payload["plot_steps"] == 6
     assert "cloud_forecast" in payload["weather_keys"]
     hass.async_add_executor_job.assert_awaited_once()

@@ -13,6 +13,7 @@ from custom_components.heating_assistant.controller.factory import (
     ControllerBuildConfig,
     build_mpc_controller,
 )
+from custom_components.heating_assistant.const import MPC_MODE_NONLINEAR
 from custom_components.heating_assistant.coordinator import mpc_cycle
 from custom_components.heating_assistant.heat_sources import ElectricHeater
 from custom_components.heating_assistant.thermal_model import HouseModel, Room
@@ -221,6 +222,46 @@ def test_run_controller_compute_mirrors_controller_outputs():
     assert coord.predictions == controller.predictions
     assert coord.filtered_temperatures == dict(controller.filtered_temperatures)
     assert innovation is controller.last_innovation
+
+
+@pytest.mark.integration
+def test_run_controller_compute_notifies_on_nonlinear_failure():
+    coord = make_minimal_coordinator(room_names=["studio"], horizon=3)
+    coord._mpc_mode = MPC_MODE_NONLINEAR
+    source = ElectricHeater("heater", "studio", 2500.0)
+    coord.heat_sources = [source]
+    coord.controller = MagicMock()
+    coord.controller.compute.side_effect = RuntimeError("ipopt failed")
+    coord.hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    coord._build_experiment_clamps = MagicMock(return_value={})
+    coord._relax_experiment_comfort = MagicMock()
+    coord.is_window_override_active = MagicMock(return_value=False)
+    coord.solar_gains = {"studio": 50.0}
+    ctx = mpc_cycle.DisturbanceContext(
+        outdoor_forecast=[2.0, 1.5],
+        cloud_cover_now=0.2,
+        cloud_forecast=[0.3],
+        ghi_now=100.0,
+        ghi_forecast=[90.0],
+        wind_forecast=[4.0],
+        now=coord.now_utc,
+    )
+
+    innovation = mpc_cycle.run_controller_compute(
+        coord,
+        outdoor_temp=2.0,
+        control_traj=None,
+        rooms_not_ready=set(),
+        ctx=ctx,
+    )
+
+    assert innovation is None
+    assert coord.predictions == []
+    coord.hass.services.async_call.assert_called_once()
+    args, kwargs = coord.hass.services.async_call.call_args
+    assert args[:2] == ("persistent_notification", "create")
+    assert "switch MPC mode to linear" in args[2]["message"]
+    assert kwargs["blocking"] is False
 
 
 @pytest.mark.integration

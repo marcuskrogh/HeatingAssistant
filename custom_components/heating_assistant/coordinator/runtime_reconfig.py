@@ -16,6 +16,8 @@ from ..const import (
     CONF_IDENTIFICATION_HORIZON_HOURS,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_MPC_MODE,
+    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_PERSISTED_ROOM_ENABLED,
@@ -41,7 +43,10 @@ from ..const import (
     CONF_WINDOW_OPEN_DEBOUNCE,
     CONF_WINDOW_OPEN_Q_INFLATION,
     CONF_SOLAR_RADIATION_ENTITY,
+    DEFAULT_MPC_MODE,
+    normalize_mpc_mode,
 )
+from ..mpc_mode_validation import validate_mpc_mode_update
 
 if TYPE_CHECKING:
     from .core import HeatingAssistantCoordinator
@@ -75,6 +80,7 @@ RUNTIME_RECONFIG_KEYS: Set[str] = {
     CONF_SOFT_CONSTRAINT_WEIGHT,
     CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
     CONF_TERMINAL_WEIGHT,
+    CONF_MPC_MODE,
     CONF_SIGMA_W,
     CONF_SIGMA_V,
     CONF_SIGMA_B,
@@ -116,6 +122,8 @@ def apply_runtime_reconfiguration(
         if coordinator._last_runtime_config.get(key) != new_config.get(key)
     }
     changed_keys -= PERSISTED_STATE_KEYS
+    if CONF_MPC_MODE in changed_keys:
+        validate_mpc_mode_update(coordinator, new_config)
     coordinator._last_runtime_config = new_config
 
     if old_persisted != new_persisted:
@@ -225,6 +233,16 @@ def apply_pending_runtime_reconfiguration(coordinator: HeatingAssistantCoordinat
             pending.get(CONF_TERMINAL_WEIGHT, coordinator._terminal_weight)
         )
         rebuild_controller = True
+    if CONF_MPC_MODE in pending:
+        validate_mpc_mode_update(coordinator, pending)
+        coordinator._mpc_mode = normalize_mpc_mode(
+            pending.get(CONF_MPC_MODE),
+            legacy_solver=pending.get(
+                CONF_MPC_SOLVER,
+                getattr(coordinator, "_mpc_mode", DEFAULT_MPC_MODE),
+            ),
+        )
+        rebuild_controller = True
     if CONF_SIGMA_W in pending:
         coordinator._sigma_w = float(
             pending.get(CONF_SIGMA_W, coordinator._sigma_w)
@@ -307,6 +325,7 @@ def apply_tuning_updates(
     coordinator: HeatingAssistantCoordinator, updates: Dict[str, Any]
 ) -> None:
     """Apply tuning parameter changes immediately (called from services)."""
+    validate_mpc_mode_update(coordinator, updates)
     for key, value in updates.items():
         coordinator._pending_runtime_reconfiguration[key] = value
     apply_pending_runtime_reconfiguration(coordinator)
