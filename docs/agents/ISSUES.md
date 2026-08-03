@@ -4,9 +4,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-238 | Story (Epic) | Dual-mode MPC (linear / non-linear) | To Do | — | docs/ROADMAP-dual-mode-mpc.md | `/research SWD-239` |
-| SWD-239 | Task | Research: solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM for linear) | To Do | SWD-238 | docs/ROADMAP-dual-mode-mpc.md | `/research SWD-239` |
-| SWD-240 | Task | Define: dual-mode MPC config (linear / non-linear) + guidance + internal solvers | To Do | SWD-238 | docs/ROADMAP-dual-mode-mpc.md | blocked by SWD-239 → `/define SWD-240` |
+| SWD-238 | Story (Epic) | Dual-mode MPC (linear / non-linear) | To Do | — | docs/agents/ROADMAP-dual-mode-mpc.md | `/research SWD-239` |
+| SWD-239 | Task | Research: solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM for linear) | To Do | SWD-238 | docs/agents/ROADMAP-dual-mode-mpc.md | `/research SWD-239` |
+| SWD-240 | Task | Define: dual-mode MPC config (linear / non-linear) + guidance + internal solvers | To Do | SWD-238 | docs/agents/ROADMAP-dual-mode-mpc.md | blocked by SWD-239 → `/define SWD-240` |
 
 ## Log
 
