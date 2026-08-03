@@ -72,7 +72,8 @@
 - Task: [SWD-240](https://marcusknielsen.atlassian.net/browse/SWD-240)
 - Sub-tasks: SWD-241, SWD-243, SWD-242, SWD-244, SWD-245
 - Branch: `cursor/swd-240-dual-mode-mpc-d0ba`
-- PR: *(set on open)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/539
+- SHA: *(update on push)*
 
 ## Next
 `/implement SWD-240` — Build per this plan on the same delivery branch/PR
