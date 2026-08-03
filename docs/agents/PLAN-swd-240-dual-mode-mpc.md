@@ -82,6 +82,4 @@
 - SHA: *(update on push)*
 
 ## Next
-`/review-fix SWD-240` — Review and auto-fix until clean
-
-(Alternate: `/ship SWD-240` to finish remaining through Done.)
+Done.

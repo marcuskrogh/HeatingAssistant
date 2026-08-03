@@ -16,7 +16,7 @@ Users can run the **current** OCP in either **linear** or **non-linear** mode: n
 | Order | Task | Type | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
 | 1 | Solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM vs HiGHS/OSQP for linear / Riccati fit; when to recommend each mode) | research | — | To Do (brief landed) | [SWD-239](https://marcusknielsen.atlassian.net/browse/SWD-239) |
-| 2 | Dual-mode MPC: config (linear / non-linear), guidance copy, internal solver binding, acceptance | define | SWD-239 | To Do (PLAN ready) | [SWD-240](https://marcusknielsen.atlassian.net/browse/SWD-240) |
+| 2 | Dual-mode MPC: config (linear / non-linear), guidance copy, internal solver binding, acceptance | define → ship | SWD-239 | Done (PR #539) | [SWD-240](https://marcusknielsen.atlassian.net/browse/SWD-240) |
 
 ## Cleared so far
 - [Research: solver backends & mode-guidance](https://marcusknielsen.atlassian.net/browse/SWD-239) — Ipopt fits NMPC; HPIPM Riccati needs OCP structure HA does not use today (condensed QP); keep HiGHS/OSQP as linear evidence-default; guidance = fidelity vs convexity/deps. Brief: `docs/agents/RESEARCH-swd-239-dual-mode-mpc.md`
@@ -40,4 +40,4 @@ Users can run the **current** OCP in either **linear** or **non-linear** mode: n
 - Sub-tasks (SWD-240): SWD-241, SWD-243, SWD-242, SWD-244, SWD-245
 
 ## Next
-`/implement SWD-240` — Build dual-mode MPC per PLAN.md on `cursor/swd-240-dual-mode-mpc-d0ba`
+Delivery **SWD-240** shipped (PR #539). Story **SWD-238** remains open while research Task **SWD-239** is still To Do (optional closeout).
