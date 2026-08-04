@@ -134,15 +134,32 @@ def test_preview_runs_mpc_and_builds_payload(mock_controller_cls):
     assert "living_room" in payload["rooms"]
 
 
-def test_preview_rejects_nonlinear_when_ipopt_probe_failed():
+def test_preview_rejects_nonlinear_when_no_nlp_backend():
     coord = _make_preview_coordinator()
     coord._ipopt_available = False
+    coord._nonlinear_available = False
     coord._ipopt_unavailable_reason = "ipopt library missing"
 
-    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+    with pytest.raises(MpcModeUnavailableError, match="NLP solver backend"):
         HeatingAssistantCoordinator.preview_tuning_forecast(
             coord,
             {CONF_MPC_MODE: MPC_MODE_NONLINEAR},
             None,
             {},
         )
+
+
+def test_factory_allows_nonlinear_with_scipy_backend():
+    coord = _make_preview_coordinator()
+    coord._ipopt_available = False
+    coord._nonlinear_available = True
+    coord._nonlinear_backend = "scipy"
+    from custom_components.heating_assistant.controller.factory import (
+        ControllerBuildConfig,
+    )
+
+    config = ControllerBuildConfig.from_coordinator(
+        coord, overrides={CONF_MPC_MODE: MPC_MODE_NONLINEAR}
+    )
+    assert config.mpc_mode == MPC_MODE_NONLINEAR
+    assert config.nonlinear_backend == "scipy"

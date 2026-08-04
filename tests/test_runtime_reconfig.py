@@ -167,6 +167,8 @@ def test_apply_pending_runtime_reconfiguration_rebuilds_when_horizon_queued():
 def test_apply_pending_runtime_reconfiguration_rebuilds_when_mode_changes():
     coord = _reconfig_coord()
     coord._ipopt_available = True
+    coord._nonlinear_available = True
+    coord._nonlinear_backend = "ipopt"
     coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
 
     rr.apply_pending_runtime_reconfiguration(coord)
@@ -175,27 +177,42 @@ def test_apply_pending_runtime_reconfiguration_rebuilds_when_mode_changes():
     coord._build_controller.assert_called_once()
 
 
-def test_apply_pending_runtime_reconfiguration_rejects_nonlinear_without_ipopt():
+def test_apply_pending_runtime_reconfiguration_allows_nonlinear_with_scipy_fallback():
     coord = _reconfig_coord()
     coord._ipopt_available = False
+    coord._nonlinear_available = True
+    coord._nonlinear_backend = "scipy"
+    coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
+
+    rr.apply_pending_runtime_reconfiguration(coord)
+
+    assert coord._mpc_mode == MPC_MODE_NONLINEAR
+    coord._build_controller.assert_called_once()
+
+
+def test_apply_pending_runtime_reconfiguration_rejects_nonlinear_without_nlp_backend():
+    coord = _reconfig_coord()
+    coord._ipopt_available = False
+    coord._nonlinear_available = False
     coord._ipopt_unavailable_reason = "probe failed"
     coord._mpc_mode = "linear"
     coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
 
-    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+    with pytest.raises(MpcModeUnavailableError, match="NLP solver backend"):
         rr.apply_pending_runtime_reconfiguration(coord)
 
     assert coord._mpc_mode == "linear"
     coord._build_controller.assert_not_called()
 
 
-def test_apply_runtime_reconfiguration_rejects_nonlinear_without_ipopt():
+def test_apply_runtime_reconfiguration_rejects_nonlinear_without_nlp_backend():
     coord = _reconfig_coord()
     coord._ipopt_available = False
+    coord._nonlinear_available = False
     coord._ipopt_unavailable_reason = "probe failed"
     coord._last_runtime_config = {CONF_MPC_MODE: "linear"}
 
-    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+    with pytest.raises(MpcModeUnavailableError, match="NLP solver backend"):
         rr.apply_runtime_reconfiguration(coord, {CONF_MPC_MODE: MPC_MODE_NONLINEAR})
 
     assert coord._pending_runtime_reconfiguration == {}

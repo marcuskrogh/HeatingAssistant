@@ -40,4 +40,4 @@ Users can run the **current** OCP in either **linear** or **non-linear** mode: n
 - Sub-tasks (SWD-240): SWD-241, SWD-243, SWD-242, SWD-244, SWD-245
 
 ## Next
-Iterate **SWD-246** shipped (PR #540 — Ipopt vendored wheels + mode label cleanup). Story **SWD-238** remains open while research Task **SWD-239** is still To Do (optional closeout).
+Iterate **SWD-247** shipped (PR #541 — Ipopt install pass + SciPy NLP fallback; clean mode help). Story **SWD-238** remains open while research Task **SWD-239** is still To Do (optional closeout).

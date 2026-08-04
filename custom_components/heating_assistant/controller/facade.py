@@ -97,6 +97,7 @@ from mbc.estimation import (
 )
 from mbc.control import (
     IpoptNLPBackend,
+    ScipyNLPBackend,
     StandardContinuousOCP,
     StandardLinearisedContinuousMPC,
     StandardNonlinearContinuousMPC,
@@ -1984,6 +1985,7 @@ class HeatingMPCController:
         use_analytic_derivatives: bool = True,
         energy_price_weight: float = 0.0,
         mpc_mode: str = MPC_MODE_LINEAR,
+        nonlinear_backend: str = "ipopt",
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
@@ -1993,9 +1995,13 @@ class HeatingMPCController:
         self._albedo = float(albedo)
 
         self._mpc_mode = normalize_mpc_mode(mpc_mode, legacy_solver=solver)
-        self._solver_requested = (
-            "ipopt" if self._mpc_mode == MPC_MODE_NONLINEAR else "highs"
+        self._nonlinear_backend = (
+            "scipy" if str(nonlinear_backend).lower() == "scipy" else "ipopt"
         )
+        if self._mpc_mode == MPC_MODE_NONLINEAR:
+            self._solver_requested = self._nonlinear_backend
+        else:
+            self._solver_requested = "highs"
         self._solver_active = self._solver_requested
         self._use_analytic_derivatives = True
 
@@ -2094,11 +2100,21 @@ class HeatingMPCController:
         x_ref = np.zeros(n_x_ctrl)
         x_ref[:n_rooms] = [model.rooms[name].setpoint for name in room_list]
 
-        # ── MPC controller (linear HiGHS QP or nonlinear Ipopt NLP) ───────
+        # ── MPC controller (linear HiGHS QP or nonlinear NLP) ─────────────
         if self._mpc_mode == MPC_MODE_NONLINEAR:
-            nlp_backend = IpoptNLPBackend(
-                options={"print_level": 0, "max_iter": 500, "tol": 1e-6}
-            )
+            if self._nonlinear_backend == "scipy":
+                nlp_backend = ScipyNLPBackend(
+                    method="SLSQP",
+                    options={"maxiter": 500, "ftol": 1e-9, "disp": False},
+                )
+                self._solver_requested = "scipy"
+                self._solver_active = "scipy"
+            else:
+                nlp_backend = IpoptNLPBackend(
+                    options={"print_level": 0, "max_iter": 500, "tol": 1e-6}
+                )
+                self._solver_requested = "ipopt"
+                self._solver_active = "ipopt"
             ocp = StandardContinuousOCP(
                 model=self._control_system,
                 N=horizon,
