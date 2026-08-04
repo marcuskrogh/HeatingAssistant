@@ -11,9 +11,33 @@ class MpcModeUnavailableError(ValueError):
     """Raised when non-linear MPC is requested without a usable NLP backend."""
 
 
+def coordinator_nonlinear_available(coordinator: Any) -> bool:
+    """Return whether a coordinator has a usable non-linear NLP backend."""
+    return bool(
+        getattr(
+            coordinator,
+            "_nonlinear_available",
+            getattr(coordinator, "_ipopt_available", False),
+        )
+    )
+
+
+def coordinator_nonlinear_backend(coordinator: Any) -> str | None:
+    """Return the probed NLP backend name, or None when unavailable."""
+    if not coordinator_nonlinear_available(coordinator):
+        return None
+    backend = getattr(coordinator, "_nonlinear_backend", None)
+    if backend in ("ipopt", "scipy"):
+        return str(backend)
+    return "ipopt" if bool(getattr(coordinator, "_ipopt_available", False)) else "scipy"
+
+
 def mpc_mode_unavailable_message(reason: str | None = None) -> str:
-    """Return a short user-facing explanation for unavailable non-linear MPC."""
-    # Keep this short — never dump install paths / wheel names into UI copy.
+    """Return a short user-facing explanation for unavailable non-linear MPC.
+
+    ``reason`` is accepted for call-site compatibility but intentionally ignored —
+    never dump install paths / wheel names into UI copy.
+    """
     _ = reason
     return (
         "Non-linear MPC is temporarily unavailable because no NLP solver backend "
@@ -57,12 +81,6 @@ def validate_mpc_mode_update(
         return
     updates[CONF_MPC_MODE] = validate_mpc_mode_available(
         updates.get(CONF_MPC_MODE),
-        nonlinear_available=bool(
-            getattr(
-                coordinator,
-                "_nonlinear_available",
-                getattr(coordinator, "_ipopt_available", False),
-            )
-        ),
+        nonlinear_available=coordinator_nonlinear_available(coordinator),
         unavailable_reason=getattr(coordinator, "_ipopt_unavailable_reason", None),
     )

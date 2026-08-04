@@ -149,14 +149,11 @@ def test_preview_rejects_nonlinear_when_no_nlp_backend():
         )
 
 
-def test_preview_allows_nonlinear_when_scipy_fallback_ready():
+def test_factory_allows_nonlinear_with_scipy_backend():
     coord = _make_preview_coordinator()
     coord._ipopt_available = False
     coord._nonlinear_available = True
     coord._nonlinear_backend = "scipy"
-    # Should not raise — SciPy is an accepted nonlinear backend.
-    # Stub deeper preview work by expecting an error deeper than mode validation
-    # is fine if the call path is heavy; assert validation path via factory config.
     from custom_components.heating_assistant.controller.factory import (
         ControllerBuildConfig,
     )

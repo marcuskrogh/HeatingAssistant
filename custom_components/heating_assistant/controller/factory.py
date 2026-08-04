@@ -5,11 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_MPC_MODE
+from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_MPC_MODE, MPC_MODE_NONLINEAR
 from ..heat_sources import HeatSource
-from ..mpc_mode_validation import validate_mpc_mode_available
+from ..mpc_mode_validation import (
+    coordinator_nonlinear_available,
+    coordinator_nonlinear_backend,
+    validate_mpc_mode_available,
+)
 from ..thermal_model import HouseModel
 from .facade import HeatingMPCController
+from .ipopt_probe import BACKEND_IPOPT, BACKEND_SCIPY
 
 
 @dataclass
@@ -33,9 +38,10 @@ class ControllerBuildConfig:
     sigma_b: float
     energy_price_weight: float
     mpc_mode: str = DEFAULT_MPC_MODE
-    ipopt_available: bool = True
-    nonlinear_available: bool = True
-    nonlinear_backend: str = "ipopt"
+    # Capability flags must come from the startup probe; default unavailable.
+    ipopt_available: bool = False
+    nonlinear_available: bool = False
+    nonlinear_backend: str = BACKEND_IPOPT
     ipopt_unavailable_reason: Optional[str] = None
     albedo: float = DEFAULT_GROUND_ALBEDO
     measurement_dt: Optional[float] = None
@@ -64,13 +70,13 @@ class ControllerBuildConfig:
 
         ov = dict(overrides or {})
         dt = float(ov.get(CONF_UPDATE_INTERVAL, coordinator._update_interval_s))
-        nonlinear_available = bool(
-            getattr(
-                coordinator,
-                "_nonlinear_available",
-                getattr(coordinator, "_ipopt_available", True),
-            )
-        )
+        nonlinear_available = coordinator_nonlinear_available(coordinator)
+        ipopt_available = bool(getattr(coordinator, "_ipopt_available", False))
+        backend = coordinator_nonlinear_backend(coordinator)
+        if nonlinear_available and not ipopt_available:
+            backend = BACKEND_SCIPY
+        elif backend is None:
+            backend = BACKEND_IPOPT
         mpc_mode = validate_mpc_mode_available(
             ov.get(
                 CONF_MPC_MODE,
@@ -125,11 +131,9 @@ class ControllerBuildConfig:
                 ov.get(CONF_ENERGY_PRICE_WEIGHT, coordinator._energy_price_weight)
             ),
             mpc_mode=mpc_mode,
-            ipopt_available=bool(getattr(coordinator, "_ipopt_available", True)),
+            ipopt_available=ipopt_available,
             nonlinear_available=nonlinear_available,
-            nonlinear_backend=str(
-                getattr(coordinator, "_nonlinear_backend", "ipopt") or "ipopt"
-            ),
+            nonlinear_backend=backend,
             ipopt_unavailable_reason=getattr(
                 coordinator, "_ipopt_unavailable_reason", None
             ),
@@ -144,6 +148,12 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         ipopt_available=config.ipopt_available,
         unavailable_reason=config.ipopt_unavailable_reason,
     )
+    backend = str(config.nonlinear_backend or BACKEND_IPOPT).lower()
+    if backend not in (BACKEND_IPOPT, BACKEND_SCIPY):
+        backend = BACKEND_IPOPT
+    # Never build Ipopt NLP when the Ipopt probe failed.
+    if mpc_mode == MPC_MODE_NONLINEAR and not config.ipopt_available:
+        backend = BACKEND_SCIPY
     measurement_dt = (
         config.measurement_dt if config.measurement_dt is not None else config.dt
     )
@@ -167,5 +177,5 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         sigma_b=config.sigma_b,
         energy_price_weight=config.energy_price_weight,
         mpc_mode=mpc_mode,
-        nonlinear_backend=config.nonlinear_backend,
+        nonlinear_backend=backend,
     )

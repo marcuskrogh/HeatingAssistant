@@ -416,17 +416,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)
 
-    # Install/probe Ipopt off the event loop before constructing the coordinator.
+    # Install/probe NLP backends off the event loop before constructing the coordinator.
     from .controller.ipopt_deps import ensure_cyipopt_installed
     from .controller.ipopt_probe import probe_nonlinear_backend
 
-    def _prepare_ipopt_backend():
+    def _prepare_nonlinear_backend():
         install = ensure_cyipopt_installed()
         probe = probe_nonlinear_backend()
         return install, probe
 
     cyipopt_install, ipopt_probe = await hass.async_add_executor_job(
-        _prepare_ipopt_backend
+        _prepare_nonlinear_backend
     )
 
     coordinator = HeatingAssistantCoordinator(  # type: ignore[arg-type]

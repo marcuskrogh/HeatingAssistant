@@ -132,7 +132,30 @@ def test_build_mpc_controller_constructs_nonlinear_ipopt_controller():
 
 
 @pytest.mark.integration
-def test_build_mpc_controller_constructs_nonlinear_scipy_fallback():
+def test_controller_build_config_from_coordinator_scipy_fallback():
+    coord = make_minimal_coordinator()
+    coord._ipopt_available = False
+    coord._nonlinear_available = True
+    coord._nonlinear_backend = "scipy"
+    coord.model = _make_house_model()
+    coord.heat_sources = [ElectricHeater("hp", "living_room", 2000.0)]
+
+    config = ControllerBuildConfig.from_coordinator(
+        coord,
+        overrides={CONF_MPC_MODE: MPC_MODE_NONLINEAR},
+    )
+    controller = build_mpc_controller(config)
+
+    assert config.nonlinear_available is True
+    assert config.nonlinear_backend == "scipy"
+    assert config.ipopt_available is False
+    assert controller.mpc_mode == MPC_MODE_NONLINEAR
+    assert controller.solver_active == "scipy"
+    assert isinstance(controller._mpc, HeatingNonlinearMPC)
+
+
+@pytest.mark.integration
+def test_build_mpc_controller_coerces_ipopt_backend_when_ipopt_unavailable():
     model = _make_house_model()
     sources = [ElectricHeater("hp", "living_room", 2000.0)]
     config = ControllerBuildConfig(
@@ -154,13 +177,12 @@ def test_build_mpc_controller_constructs_nonlinear_scipy_fallback():
         energy_price_weight=0.0,
         mpc_mode=MPC_MODE_NONLINEAR,
         nonlinear_available=True,
-        nonlinear_backend="scipy",
+        nonlinear_backend="ipopt",
         ipopt_available=False,
     )
 
     controller = build_mpc_controller(config)
 
-    assert controller.mpc_mode == MPC_MODE_NONLINEAR
     assert controller.solver_active == "scipy"
     assert isinstance(controller._mpc, HeatingNonlinearMPC)
 

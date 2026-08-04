@@ -37,7 +37,7 @@ class ControllerConfigSnapshot(TypedDict):
     terminal_weight: float
     mpc_mode: str
     nonlinear_available: bool
-    nonlinear_backend: str
+    nonlinear_backend: Optional[str]
     ipopt_available: bool
     ipopt_unavailable_reason: Optional[str]
     horizon: int

@@ -41,7 +41,7 @@ def _probe_backend(backend, *, name: str) -> tuple[bool, str | None]:
     problem = _tiny_problem()
     try:
         result = backend.solve(problem)
-    except (ImportError, ModuleNotFoundError, RuntimeError, ValueError, TypeError) as exc:
+    except Exception as exc:  # noqa: BLE001 — any probe failure means unavailable
         return False, str(exc)
     if not result.success:
         return False, result.message or f"{name} probe did not converge"

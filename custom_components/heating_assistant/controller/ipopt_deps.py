@@ -240,6 +240,11 @@ def _try_pypi_install() -> CyipoptInstallResult | None:
         _pip_install(CYIPOPT_WHEELS_REQUIREMENT)
         if cyipopt_importable():
             return CyipoptInstallResult(True, "pip-cyipopt-wheels")
+        return CyipoptInstallResult(
+            False,
+            "pip-import-failed",
+            "cyipopt-wheels installed but import cyipopt still failed",
+        )
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning(
             "Heating Assistant: pip install %s failed: %s",
@@ -247,7 +252,6 @@ def _try_pypi_install() -> CyipoptInstallResult | None:
             exc,
         )
         return CyipoptInstallResult(False, "pip-failed", str(exc)[:400])
-    return None
 
 
 def ensure_cyipopt_installed(*, vendor_dir: Path | None = None) -> CyipoptInstallResult:

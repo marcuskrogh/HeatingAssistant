@@ -247,4 +247,4 @@ def test_async_setup_entry_prepares_ipopt_off_event_loop():
     assert "async_add_executor_job" in init_source
     assert "ensure_cyipopt_installed" in init_source
     assert "probe_nonlinear_backend" in init_source
-    assert "_prepare_ipopt_backend" in init_source
+    assert "_prepare_nonlinear_backend" in init_source

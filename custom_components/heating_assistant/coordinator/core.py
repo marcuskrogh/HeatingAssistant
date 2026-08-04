@@ -367,23 +367,34 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         )
         self._nonlinear_available: bool = bool(getattr(_ipopt_probe, "available", False))
         backend = getattr(_ipopt_probe, "backend", None)
-        if backend in (BACKEND_IPOPT, BACKEND_SCIPY):
-            self._nonlinear_backend: str = str(backend)
+        if self._nonlinear_available and backend in (BACKEND_IPOPT, BACKEND_SCIPY):
+            self._nonlinear_backend: Optional[str] = str(backend)
         else:
-            self._nonlinear_backend = (
-                BACKEND_IPOPT if self._ipopt_available else BACKEND_SCIPY
-            )
-        # Diagnostic detail for logs only — never dump into UI-facing copy.
+            # Only set a backend name when the probe succeeded.
+            self._nonlinear_backend = None
+        # Full install/probe detail stays in logs; attribute reason stays short.
         install_detail = getattr(_cyipopt_install, "detail", None)
         probe_reason = getattr(_ipopt_probe, "reason", None)
+        self._ipopt_install_detail: Optional[str] = None
         if not self._ipopt_available and install_detail:
-            self._ipopt_unavailable_reason: Optional[str] = (
+            self._ipopt_install_detail = (
                 f"{probe_reason or 'Ipopt unavailable'}; "
                 f"install={getattr(_cyipopt_install, 'source', 'unknown')} "
                 f"({install_detail})"
             )
+            _LOGGER.debug(
+                "Heating Assistant: Ipopt install detail: %s",
+                self._ipopt_install_detail,
+            )
+        # Short reason for diagnostics attributes — never include wheel/install dumps.
+        if self._nonlinear_available:
+            self._ipopt_unavailable_reason = (
+                None if self._ipopt_available else "Ipopt unavailable; using SciPy NLP"
+            )
         else:
-            self._ipopt_unavailable_reason = probe_reason
+            self._ipopt_unavailable_reason = (
+                "No NLP solver backend passed the startup probe"
+            )
         if self._nonlinear_available:
             _LOGGER.info(
                 "Heating Assistant: non-linear MPC backend ready (%s; ipopt=%s)",
@@ -393,7 +404,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         else:
             _LOGGER.warning(
                 "Heating Assistant: no non-linear NLP backend passed probe (%s)",
-                self._ipopt_unavailable_reason,
+                self._ipopt_install_detail or self._ipopt_unavailable_reason,
             )
         try:
             self._mpc_mode: str = validate_mpc_mode_available(
@@ -1094,9 +1105,7 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                     getattr(self, "_ipopt_available", False),
                 )
             ),
-            "nonlinear_backend": str(
-                getattr(self, "_nonlinear_backend", "ipopt") or "ipopt"
-            ),
+            "nonlinear_backend": getattr(self, "_nonlinear_backend", None),
             # Kept for diagnostics / older clients; UI must not dump this into hints.
             "ipopt_available": bool(getattr(self, "_ipopt_available", False)),
             "ipopt_unavailable_reason": getattr(
