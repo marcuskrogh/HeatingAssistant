@@ -43,10 +43,60 @@ def test_requirements_txt_lists_cyipopt_wheels():
 def test_vendor_directory_ships_platform_wheels():
     wheels = sorted(p.name for p in VENDOR.glob("*.whl"))
     assert wheels, "expected vendored cyipopt wheels for HA platforms"
-    # At least one linux x86_64 and one aarch64 (or musllinux) wheel.
     joined = " ".join(wheels).lower()
-    assert "x86_64" in joined or "amd64" in joined
-    assert "aarch64" in joined or "arm64" in joined
+    for tag in (
+        "manylinux_2_27_x86_64",
+        "manylinux_2_27_aarch64",
+        "musllinux_1_2_x86_64",
+        "musllinux_1_2_aarch64",
+    ):
+        assert tag in joined, f"missing vendored wheel for {tag}"
+    for py in ("cp312", "cp313"):
+        assert py in joined
+
+
+@pytest.mark.parametrize(
+    ("python_tag", "platform_tag", "needle"),
+    [
+        ("cp312", "manylinux_2_27_x86_64", "manylinux"),
+        ("cp312", "manylinux_2_27_aarch64", "aarch64"),
+        ("cp313", "musllinux_1_2_x86_64", "musllinux"),
+        ("cp313", "musllinux_1_2_aarch64", "musllinux"),
+    ],
+)
+def test_select_vendor_wheel_covers_linux_matrix(python_tag, platform_tag, needle):
+    wheels = ipopt_deps.list_vendor_wheels()
+    assert wheels
+    chosen = ipopt_deps.select_vendor_wheel(
+        wheels,
+        python_tag=python_tag,
+        platform_tags=(platform_tag,),
+    )
+    assert chosen is not None
+    assert python_tag in chosen.name.lower()
+    assert needle in chosen.name.lower()
+    arch = platform_tag.split("_")[-1]
+    assert arch in chosen.name.lower()
+
+
+def test_pip_install_command_is_binary_only_and_no_deps():
+    cmd = ipopt_deps._pip_install_command("cyipopt-wheels")
+    assert cmd[:4] == [cmd[0], "-m", "pip", "install"]
+    assert "--no-deps" in cmd
+    assert "--only-binary=:all:" in cmd
+    assert "--upgrade" not in cmd
+    assert cmd[-1] == "cyipopt-wheels"
+
+
+def test_pip_install_surfaces_stderr_on_failure(monkeypatch):
+    class _Completed:
+        returncode = 1
+        stdout = ""
+        stderr = "ERROR: No matching distribution found for cyipopt-wheels"
+
+    monkeypatch.setattr(ipopt_deps.subprocess, "run", lambda *_a, **_k: _Completed())
+    with pytest.raises(RuntimeError, match="No matching distribution"):
+        ipopt_deps._pip_install("cyipopt-wheels")
 
 
 def test_select_vendor_wheel_prefers_matching_python_and_platform(tmp_path):
@@ -138,6 +188,7 @@ def test_mpc_mode_help_omits_solver_names_beside_modes():
     for rel in (
         "strings.json",
         "translations/en.json",
+        "services.yaml",
     ):
         text = (
             REPO_ROOT / "custom_components" / "heating_assistant" / rel
@@ -146,3 +197,15 @@ def test_mpc_mode_help_omits_solver_names_beside_modes():
         assert "HiGHS" not in text
         assert "Ipopt" not in text
         assert "fidelity" in text.lower() or "accuracy" in text.lower()
+
+
+def test_async_setup_entry_prepares_ipopt_off_event_loop():
+    init_source = (
+        REPO_ROOT
+        / "custom_components"
+        / "heating_assistant"
+        / "__init__.py"
+    ).read_text(encoding="utf-8")
+    assert "async_add_executor_job" in init_source
+    assert "ensure_cyipopt_installed" in init_source
+    assert "_prepare_ipopt_backend" in init_source

@@ -1,10 +1,13 @@
 """Ensure a working ``cyipopt`` (Ipopt) install for non-linear MPC.
 
 Home Assistant installs ``manifest.json`` requirements via pip. Official
-``cyipopt`` publishes no usable binary wheels, so we depend on
-``cyipopt-wheels`` (bundled Ipopt) and also ship matching wheels under
-``vendor/cyipopt_wheels/`` for platforms HA's index does not cover
-(especially musllinux / HAOS).
+``cyipopt`` publishes no usable binary wheels, so we prefer
+``cyipopt-wheels`` (bundled Ipopt) when a binary wheel exists, and also ship
+matching wheels under ``vendor/cyipopt_wheels/`` for platforms HA's index
+does not cover (especially musllinux / HAOS).
+
+Do **not** declare ``cyipopt-wheels`` in ``manifest.json``: PyPI has no
+musllinux wheels, and a failed HA requirement install can block setup.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import subprocess
 import sys
 import sysconfig
 from dataclasses import dataclass
@@ -148,16 +152,15 @@ def select_vendor_wheel(
     return matches[0]
 
 
-def _pip_install(requirement_or_path: str) -> None:
-    """Install a requirement or local wheel with pip (same interpreter)."""
-    import subprocess
-
+def _pip_install_command(requirement_or_path: str) -> list[str]:
+    """Build a fail-fast, binary-only pip install command for cyipopt wheels."""
     cmd = [
         sys.executable,
         "-m",
         "pip",
         "install",
-        "--upgrade",
+        "--no-deps",
+        "--only-binary=:all:",
         "--no-cache-dir",
         requirement_or_path,
     ]
@@ -165,8 +168,23 @@ def _pip_install(requirement_or_path: str) -> None:
     in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
     if not in_venv and os.environ.get("VIRTUAL_ENV") is None:
         cmd.insert(-1, "--user")
+    return cmd
+
+
+def _pip_install(requirement_or_path: str) -> None:
+    """Install a requirement or local wheel with pip (same interpreter)."""
+    cmd = _pip_install_command(requirement_or_path)
     _LOGGER.info("Heating Assistant: installing Ipopt backend via %s", " ".join(cmd))
-    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    completed = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        stderr = (completed.stderr or completed.stdout or "").strip()
+        tail = stderr[-800:] if stderr else f"exit {completed.returncode}"
+        raise RuntimeError(tail)
 
 
 def ensure_cyipopt_installed(*, vendor_dir: Path | None = None) -> CyipoptInstallResult:
