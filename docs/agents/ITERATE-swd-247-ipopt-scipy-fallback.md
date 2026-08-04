@@ -38,4 +38,4 @@
 - Relates: SWD-246
 
 ## Next
-`/review-fix SWD-247` — Review and auto-fix until clean
+`/ship SWD-247` — Merge PR and close the Task
