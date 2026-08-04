@@ -33,6 +33,9 @@
 ## Tracker
 - Task: SWD-246
 - Relates: SWD-240
+- Status: Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/540
+- Branch: `cursor/swd-246-ipopt-deps-d0ba`
 
 ## Next
-`/review-fix SWD-246` — Review and auto-fix until clean
+Done.
