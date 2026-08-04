@@ -416,7 +416,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Build a temporary entry-like object with merged data for the coordinator
     merged_entry = _MergedEntry(entry, entry_data)
 
-    coordinator = HeatingAssistantCoordinator(hass, merged_entry)  # type: ignore[arg-type]
+    # Install/probe Ipopt off the event loop before constructing the coordinator.
+    from .controller.ipopt_deps import ensure_cyipopt_installed
+    from .controller.ipopt_probe import probe_ipopt_capability
+
+    def _prepare_ipopt_backend():
+        install = ensure_cyipopt_installed()
+        probe = probe_ipopt_capability()
+        return install, probe
+
+    cyipopt_install, ipopt_probe = await hass.async_add_executor_job(
+        _prepare_ipopt_backend
+    )
+
+    coordinator = HeatingAssistantCoordinator(  # type: ignore[arg-type]
+        hass,
+        merged_entry,
+        ipopt_probe=ipopt_probe,
+        cyipopt_install=cyipopt_install,
+    )
 
     # Set up the integration-managed identification history store so it is
     # available before the first update cycle and before history is restored.

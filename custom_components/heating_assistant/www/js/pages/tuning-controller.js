@@ -3,16 +3,16 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=115';
+} from '../components/time-series-chart.js?v=116';
 import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../charts/mpc-preview-charts.js?v=115';
+} from '../charts/mpc-preview-charts.js?v=116';
 import {
   updateControllerTuning,
   updateEstimationParams,
-} from '../ha-services.js?v=115';
+} from '../ha-services.js?v=116';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -24,8 +24,8 @@ const MODE_DEF = {
 };
 
 const MODE_OPTIONS = [
-  { value: 'linear', label: 'Linear (HiGHS)' },
-  { value: 'non-linear', label: 'Non-linear (Ipopt)' },
+  { value: 'linear', label: 'Linear' },
+  { value: 'non-linear', label: 'Non-linear' },
 ];
 
 // Parameters that take effect on the live controller without rebuilding its structure.
@@ -372,8 +372,8 @@ function renderTuningIndex(container, rooms, connection, hass) {
     if (nonlinearOption) nonlinearOption.disabled = !available;
     if (modeHint) {
       modeHint.textContent = available
-        ? 'Ipopt probe passed on the last restart; non-linear mode is selectable.'
-        : `Non-linear requires Ipopt. It will be selectable after a restart probe passes${config?.ipopt_unavailable_reason ? ` (${config.ipopt_unavailable_reason})` : ''}.`;
+        ? 'Non-linear mode is available (capability probe passed on the last restart).'
+        : `Non-linear mode needs its solver backend. It will be selectable after a restart probe passes${config?.ipopt_unavailable_reason ? ` (${config.ipopt_unavailable_reason})` : ''}.`;
     }
   }
 

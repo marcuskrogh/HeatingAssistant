@@ -610,7 +610,7 @@ update_controller_tuning:
           step: 0.1
     mpc_mode:
       name: MPC mode
-      description: Linear uses HiGHS and a linearised model. Non-linear uses Ipopt and nonlinear dynamics for higher fidelity at higher compute cost.
+      description: Linear is faster and more robust with a linearised model. Non-linear can improve fidelity/accuracy at higher compute cost.
       required: false
       selector:
         select:

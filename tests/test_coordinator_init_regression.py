@@ -49,6 +49,14 @@ def fake_controller(monkeypatch):
         "custom_components.heating_assistant.coordinator.core.HeatingMPCController",
         _FakeController,
     )
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.controller.ipopt_deps.ensure_cyipopt_installed",
+        lambda **_kwargs: SimpleNamespace(available=True, source="test", detail=None),
+    )
+    monkeypatch.setattr(
+        "custom_components.heating_assistant.controller.ipopt_probe.probe_ipopt_capability",
+        lambda: SimpleNamespace(available=False, reason="test stub"),
+    )
 
 
 def test_coordinator_init_initialises_room_state(fake_controller):

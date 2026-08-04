@@ -1,0 +1,63 @@
+name: Build cyipopt musllinux wheels
+
+# Produces HAOS-compatible musllinux cyipopt wheels and uploads them as
+# artifacts. Prefer committing finished wheels under
+# custom_components/heating_assistant/vendor/cyipopt_wheels/.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/build_cyipopt_musllinux.sh"
+      - ".github/workflows/build-cyipopt-musllinux.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  musllinux-x86_64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build musllinux x86_64 wheels
+        run: |
+          mkdir -p /tmp/wheels
+          docker run --rm \
+            -v "$PWD/scripts/build_cyipopt_musllinux.sh:/build.sh:ro" \
+            -v /tmp/wheels:/wheels \
+            -e OUT_DIR=/wheels \
+            -e PY_TAGS="cp312-cp312 cp313-cp313" \
+            quay.io/pypa/musllinux_1_2_x86_64 \
+            bash /build.sh v1.7.0
+          ls -lh /tmp/wheels
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyipopt-musllinux-x86_64
+          path: /tmp/wheels/*.whl
+          if-no-files-found: error
+
+  musllinux-aarch64:
+    # Native arm64 avoids multi-hour qemu Ipopt builds.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build musllinux aarch64 wheels
+        run: |
+          mkdir -p /tmp/wheels
+          docker run --rm \
+            -v "$PWD/scripts/build_cyipopt_musllinux.sh:/build.sh:ro" \
+            -v /tmp/wheels:/wheels \
+            -e OUT_DIR=/wheels \
+            -e PY_TAGS="cp312-cp312 cp313-cp313" \
+            quay.io/pypa/musllinux_1_2_aarch64 \
+            bash /build.sh v1.7.0
+          ls -lh /tmp/wheels
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyipopt-musllinux-aarch64
+          path: /tmp/wheels/*.whl
+          if-no-files-found: error

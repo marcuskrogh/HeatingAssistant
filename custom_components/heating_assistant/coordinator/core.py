@@ -279,6 +279,9 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
+        *,
+        ipopt_probe: Any = None,
+        cyipopt_install: Any = None,
     ) -> None:
         self._entry = entry
         data = entry.data
@@ -338,11 +341,36 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._soft_constraint_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT))
         self._soft_constraint_linear_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT))
         self._terminal_weight: float = float(_opt(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT))
+        from ..controller.ipopt_deps import ensure_cyipopt_installed
         from ..controller.ipopt_probe import probe_ipopt_capability
 
-        _ipopt_probe = probe_ipopt_capability()
+        # Prefer results prepared off the event loop by async_setup_entry.
+        _cyipopt_install = cyipopt_install
+        _ipopt_probe = ipopt_probe
+        if _cyipopt_install is None:
+            _cyipopt_install = ensure_cyipopt_installed()
+        if not getattr(_cyipopt_install, "available", False):
+            _LOGGER.warning(
+                "Heating Assistant: cyipopt/Ipopt not available (%s: %s)",
+                getattr(_cyipopt_install, "source", "unknown"),
+                getattr(_cyipopt_install, "detail", None),
+            )
+        if _ipopt_probe is None:
+            _ipopt_probe = probe_ipopt_capability()
         self._ipopt_available: bool = bool(_ipopt_probe.available)
         self._ipopt_unavailable_reason: Optional[str] = _ipopt_probe.reason
+        if not self._ipopt_available and getattr(_cyipopt_install, "detail", None):
+            # Prefer install detail when the probe failure is just a missing import.
+            reason = _ipopt_probe.reason or ""
+            if "cyipopt" in reason.lower() or "ipopt" in reason.lower() or not reason:
+                self._ipopt_unavailable_reason = (
+                    f"{reason}; install={getattr(_cyipopt_install, 'source', 'unknown')}"
+                    + (
+                        f" ({_cyipopt_install.detail})"
+                        if getattr(_cyipopt_install, "detail", None)
+                        else ""
+                    )
+                ).strip("; ")
         try:
             self._mpc_mode: str = validate_mpc_mode_available(
                 _opt(CONF_MPC_MODE, None),

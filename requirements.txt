@@ -15,4 +15,8 @@
 numpy
 scipy
 highspy
+# Prefer installing via ensure_cyipopt_installed() + vendored wheels.
+# Do NOT put cyipopt-wheels in manifest.json: PyPI has no musllinux wheels,
+# so HAOS requirement install would fail and can block the whole integration.
+cyipopt-wheels
 mbc@https://github.com/marcuskrogh/mbc/archive/5b0a7098d403d35eac0d97092ef21437573ab94f.zip
