@@ -499,6 +499,16 @@ DEFAULT_SETPOINT_PULL_WEIGHT = 0.0     # kept for internal back-compat; use DEFA
 DEFAULT_TRACKING_WEIGHT = 0.0          # weight on ‖z − z_ref‖² (Q diagonal); 0 = zone control (comfort-corridor only)
 DEFAULT_HORIZON = 100                  # 100 steps ahead (~25 h at 15-min steps)
 DEFAULT_UPDATE_INTERVAL = 900          # OCP step / ZOH duration = coordinator / EKF update period (seconds)
+# SciPy SLSQP simultaneous-transcription NMPC does not scale to DEFAULT_HORIZON.
+# Cap SciPy-backed non-linear builds so HA does not appear to hang.
+SCIPY_NMPC_MAX_HORIZON = 16
+# Wall-clock budget for one coordinator MPC compute (off the event loop).
+MPC_COMPUTE_TIMEOUT_LINEAR_S = 30.0
+MPC_COMPUTE_TIMEOUT_NONLINEAR_S = 45.0
+# NLP iteration / CPU caps for non-linear backends (production solves).
+SCIPY_NMPC_MAXITER = 80
+IPOPT_NMPC_MAX_ITER = 200
+IPOPT_NMPC_MAX_CPU_TIME_S = 30.0
 DEFAULT_EFFICIENCY = 1.0
 DEFAULT_COP_RATED = 3.5
 DEFAULT_COP_TEMP_REF = 7.0             # °C

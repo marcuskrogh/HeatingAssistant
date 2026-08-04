@@ -257,6 +257,56 @@ def publish_cycle_solar_gains(
     coordinator._save_runtime_state()
 
 
+def _clear_forecasts_after_compute_failure(
+    coordinator: HeatingAssistantCoordinator,
+    outdoor_temp: float,
+    ctx: DisturbanceContext,
+) -> None:
+    """Clear prediction products after an MPC compute failure/timeout."""
+    if not coordinator.actions:
+        coordinator.actions = {
+            src.name: 0.0 for src in coordinator.heat_sources
+        }
+    if ctx.outdoor_forecast:
+        coordinator.outdoor_forecast = list(
+            ctx.outdoor_forecast[: coordinator._horizon]
+        )
+        if len(coordinator.outdoor_forecast) < coordinator._horizon:
+            coordinator.outdoor_forecast.extend(
+                [outdoor_temp]
+                * (coordinator._horizon - len(coordinator.outdoor_forecast))
+            )
+    else:
+        coordinator.outdoor_forecast = [outdoor_temp] * coordinator._horizon
+    coordinator.predictions = []
+    coordinator.linearised_predictions = []
+    coordinator.heating_schedule = []
+    coordinator.solar_forecast = []
+    coordinator.filtered_temperatures = {}
+    coordinator.estimated_internal_gains = {}
+
+
+def handle_controller_compute_timeout(
+    coordinator: HeatingAssistantCoordinator,
+    outdoor_temp: float,
+    ctx: DisturbanceContext,
+    *,
+    timeout_s: float,
+) -> None:
+    """Surface an NMPC/MPC wall-clock timeout without blocking the event loop forever."""
+    error = TimeoutError(
+        f"MPC compute exceeded {timeout_s:.0f}s wall-clock budget "
+        f"(mode={getattr(coordinator, '_mpc_mode', 'unknown')}, "
+        f"backend={getattr(coordinator, '_nonlinear_backend', None)})"
+    )
+    _LOGGER.warning(
+        "Heating Assistant: %s; keeping last controls and clearing forecasts",
+        error,
+    )
+    _notify_nmpc_failure(coordinator, error)
+    _clear_forecasts_after_compute_failure(coordinator, outdoor_temp, ctx)
+
+
 def run_controller_compute(
     coordinator: HeatingAssistantCoordinator,
     outdoor_temp: float,
@@ -332,27 +382,7 @@ def run_controller_compute(
             exc_info=True,
         )
         _notify_nmpc_failure(coordinator, exc)
-        if not coordinator.actions:
-            coordinator.actions = {
-                src.name: 0.0 for src in coordinator.heat_sources
-            }
-        if ctx.outdoor_forecast:
-            coordinator.outdoor_forecast = list(
-                ctx.outdoor_forecast[: coordinator._horizon]
-            )
-            if len(coordinator.outdoor_forecast) < coordinator._horizon:
-                coordinator.outdoor_forecast.extend(
-                    [outdoor_temp]
-                    * (coordinator._horizon - len(coordinator.outdoor_forecast))
-                )
-        else:
-            coordinator.outdoor_forecast = [outdoor_temp] * coordinator._horizon
-        coordinator.predictions = []
-        coordinator.linearised_predictions = []
-        coordinator.heating_schedule = []
-        coordinator.solar_forecast = []
-        coordinator.filtered_temperatures = {}
-        coordinator.estimated_internal_gains = {}
+        _clear_forecasts_after_compute_failure(coordinator, outdoor_temp, ctx)
         kalman_innovation = None
     return kalman_innovation
 

@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_MPC_MODE, MPC_MODE_NONLINEAR
+from ..const import (
+    DEFAULT_GROUND_ALBEDO,
+    DEFAULT_MPC_MODE,
+    MPC_MODE_NONLINEAR,
+    SCIPY_NMPC_MAX_HORIZON,
+)
 from ..heat_sources import HeatSource
 from ..mpc_mode_validation import (
     coordinator_nonlinear_available,
@@ -15,6 +21,8 @@ from ..mpc_mode_validation import (
 from ..thermal_model import HouseModel
 from .facade import HeatingMPCController
 from .ipopt_probe import BACKEND_IPOPT, BACKEND_SCIPY
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -154,13 +162,22 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
     # Never build Ipopt NLP when the Ipopt probe failed.
     if mpc_mode == MPC_MODE_NONLINEAR and not config.ipopt_available:
         backend = BACKEND_SCIPY
+    horizon = int(config.horizon)
+    if mpc_mode == MPC_MODE_NONLINEAR and backend == BACKEND_SCIPY:
+        if horizon > SCIPY_NMPC_MAX_HORIZON:
+            _LOGGER.warning(
+                "Heating Assistant: capping SciPy NMPC horizon from %s to %s",
+                horizon,
+                SCIPY_NMPC_MAX_HORIZON,
+            )
+            horizon = SCIPY_NMPC_MAX_HORIZON
     measurement_dt = (
         config.measurement_dt if config.measurement_dt is not None else config.dt
     )
     return HeatingMPCController(
         model=config.model,
         heat_sources=config.heat_sources,
-        horizon=config.horizon,
+        horizon=horizon,
         dt=config.dt,
         measurement_dt=measurement_dt,
         latitude=config.latitude,

@@ -106,8 +106,12 @@ from mbc.control import (
 from ..const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+    IPOPT_NMPC_MAX_CPU_TIME_S,
+    IPOPT_NMPC_MAX_ITER,
     MPC_MODE_LINEAR,
     MPC_MODE_NONLINEAR,
+    SCIPY_NMPC_MAX_HORIZON,
+    SCIPY_NMPC_MAXITER,
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
@@ -118,6 +122,24 @@ from ..integrator import implicit_euler_substeps
 from ..thermal_model import _SG_FACTOR_TYPICAL
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class _GuardedNLPBackend:
+    """Raise on NLP failure so mid-cycle NMPC notification can fire.
+
+    mbc's continuous OCP ignores ``result.success`` and returns whatever ``x``
+    the backend produced; that silently swallows soft failures.
+    """
+
+    def __init__(self, backend: Any) -> None:
+        self._backend = backend
+
+    def solve(self, problem: Any) -> Any:
+        result = self._backend.solve(problem)
+        if not bool(getattr(result, "success", False)):
+            message = getattr(result, "message", None) or "NLP solve failed"
+            raise RuntimeError(message)
+        return result
 
 
 # ============================================================
@@ -2102,22 +2124,44 @@ class HeatingMPCController:
 
         # ── MPC controller (linear HiGHS QP or nonlinear NLP) ─────────────
         if self._mpc_mode == MPC_MODE_NONLINEAR:
+            nmpc_horizon = int(horizon)
             if self._nonlinear_backend == "scipy":
-                nlp_backend = ScipyNLPBackend(
-                    method="SLSQP",
-                    options={"maxiter": 500, "ftol": 1e-9, "disp": False},
+                if nmpc_horizon > SCIPY_NMPC_MAX_HORIZON:
+                    _LOGGER.warning(
+                        "Heating Assistant: SciPy NMPC horizon %s exceeds cap %s; "
+                        "capping to keep HA responsive",
+                        nmpc_horizon,
+                        SCIPY_NMPC_MAX_HORIZON,
+                    )
+                    nmpc_horizon = SCIPY_NMPC_MAX_HORIZON
+                nlp_backend = _GuardedNLPBackend(
+                    ScipyNLPBackend(
+                        method="SLSQP",
+                        options={
+                            "maxiter": SCIPY_NMPC_MAXITER,
+                            "ftol": 1e-8,
+                            "disp": False,
+                        },
+                    )
                 )
                 self._solver_requested = "scipy"
                 self._solver_active = "scipy"
             else:
-                nlp_backend = IpoptNLPBackend(
-                    options={"print_level": 0, "max_iter": 500, "tol": 1e-6}
+                nlp_backend = _GuardedNLPBackend(
+                    IpoptNLPBackend(
+                        options={
+                            "print_level": 0,
+                            "max_iter": IPOPT_NMPC_MAX_ITER,
+                            "tol": 1e-6,
+                            "max_cpu_time": IPOPT_NMPC_MAX_CPU_TIME_S,
+                        }
+                    )
                 )
                 self._solver_requested = "ipopt"
                 self._solver_active = "ipopt"
             ocp = StandardContinuousOCP(
                 model=self._control_system,
-                N=horizon,
+                N=nmpc_horizon,
                 Q_z=Q_cv,
                 z_ref=x_ref[:n_z],
                 R_stage=R_cv,
@@ -2136,7 +2180,7 @@ class HeatingMPCController:
             self._mpc = HeatingNonlinearMPC(
                 model=self._control_system,
                 estimator=self._ekf,
-                N=horizon,
+                N=nmpc_horizon,
                 dt=dt,
                 x_ref=x_ref,
                 ocp=ocp,
@@ -2146,6 +2190,8 @@ class HeatingMPCController:
                 S_diag=S_diag,
                 z_offset=y_offset,
             )
+            # Keep the public horizon consistent with the OCP that was built.
+            self._horizon = nmpc_horizon
         else:
             self._mpc = HeatingLinearisedMPC(
                 model=self._control_system,

@@ -12,6 +12,7 @@ The coordinator
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import deque
@@ -130,6 +131,9 @@ from ..const import (
     DEFAULT_HORIZON,
     DEFAULT_MPC_MODE,
     DEFAULT_TRACKING_WEIGHT,
+    MPC_COMPUTE_TIMEOUT_LINEAR_S,
+    MPC_COMPUTE_TIMEOUT_NONLINEAR_S,
+    MPC_MODE_NONLINEAR,
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_SMOOTHING_WEIGHT,
@@ -1257,9 +1261,31 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             ctx = await mpc_cycle.gather_disturbances(self)
             mpc_cycle.publish_cycle_solar_gains(self, ctx)
 
-            kalman_innovation = mpc_cycle.run_controller_compute(
-                self, outdoor_temp, control_traj, rooms_not_ready, ctx
+            timeout_s = (
+                MPC_COMPUTE_TIMEOUT_NONLINEAR_S
+                if getattr(self, "_mpc_mode", None) == MPC_MODE_NONLINEAR
+                else MPC_COMPUTE_TIMEOUT_LINEAR_S
             )
+            try:
+                kalman_innovation = await asyncio.wait_for(
+                    self.hass.async_add_executor_job(
+                        mpc_cycle.run_controller_compute,
+                        self,
+                        outdoor_temp,
+                        control_traj,
+                        rooms_not_ready,
+                        ctx,
+                    ),
+                    timeout=timeout_s,
+                )
+            except asyncio.TimeoutError:
+                mpc_cycle.handle_controller_compute_timeout(
+                    self,
+                    outdoor_temp,
+                    ctx,
+                    timeout_s=timeout_s,
+                )
+                kalman_innovation = None
             mpc_cycle.finalize_actions(self, outdoor_temp)
 
             await mpc_cycle.record_observation_history(
