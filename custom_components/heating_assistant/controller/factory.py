@@ -34,6 +34,8 @@ class ControllerBuildConfig:
     energy_price_weight: float
     mpc_mode: str = DEFAULT_MPC_MODE
     ipopt_available: bool = True
+    nonlinear_available: bool = True
+    nonlinear_backend: str = "ipopt"
     ipopt_unavailable_reason: Optional[str] = None
     albedo: float = DEFAULT_GROUND_ALBEDO
     measurement_dt: Optional[float] = None
@@ -62,6 +64,13 @@ class ControllerBuildConfig:
 
         ov = dict(overrides or {})
         dt = float(ov.get(CONF_UPDATE_INTERVAL, coordinator._update_interval_s))
+        nonlinear_available = bool(
+            getattr(
+                coordinator,
+                "_nonlinear_available",
+                getattr(coordinator, "_ipopt_available", True),
+            )
+        )
         mpc_mode = validate_mpc_mode_available(
             ov.get(
                 CONF_MPC_MODE,
@@ -71,7 +80,7 @@ class ControllerBuildConfig:
                     getattr(coordinator, "_mpc_solver", DEFAULT_MPC_MODE),
                 ),
             ),
-            ipopt_available=bool(getattr(coordinator, "_ipopt_available", True)),
+            nonlinear_available=nonlinear_available,
             unavailable_reason=getattr(
                 coordinator, "_ipopt_unavailable_reason", None
             ),
@@ -117,6 +126,10 @@ class ControllerBuildConfig:
             ),
             mpc_mode=mpc_mode,
             ipopt_available=bool(getattr(coordinator, "_ipopt_available", True)),
+            nonlinear_available=nonlinear_available,
+            nonlinear_backend=str(
+                getattr(coordinator, "_nonlinear_backend", "ipopt") or "ipopt"
+            ),
             ipopt_unavailable_reason=getattr(
                 coordinator, "_ipopt_unavailable_reason", None
             ),
@@ -127,6 +140,7 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
     """Construct an MPC controller from a :class:`ControllerBuildConfig`."""
     mpc_mode = validate_mpc_mode_available(
         config.mpc_mode,
+        nonlinear_available=config.nonlinear_available,
         ipopt_available=config.ipopt_available,
         unavailable_reason=config.ipopt_unavailable_reason,
     )
@@ -153,4 +167,5 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         sigma_b=config.sigma_b,
         energy_price_weight=config.energy_price_weight,
         mpc_mode=mpc_mode,
+        nonlinear_backend=config.nonlinear_backend,
     )

@@ -54,8 +54,22 @@ def fake_controller(monkeypatch):
         lambda **_kwargs: SimpleNamespace(available=True, source="test", detail=None),
     )
     monkeypatch.setattr(
+        "custom_components.heating_assistant.controller.ipopt_probe.probe_nonlinear_backend",
+        lambda: SimpleNamespace(
+            available=True,
+            backend="scipy",
+            ipopt_available=False,
+            reason="test stub uses scipy",
+        ),
+    )
+    monkeypatch.setattr(
         "custom_components.heating_assistant.controller.ipopt_probe.probe_ipopt_capability",
-        lambda: SimpleNamespace(available=False, reason="test stub"),
+        lambda: SimpleNamespace(
+            available=True,
+            backend="scipy",
+            ipopt_available=False,
+            reason="test stub uses scipy",
+        ),
     )
 
 

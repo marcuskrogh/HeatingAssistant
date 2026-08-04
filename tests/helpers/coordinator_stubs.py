@@ -104,6 +104,8 @@ def make_minimal_coordinator(
     coord._energy_price_weight = 0.0
     coord._mpc_mode = "linear"
     coord._ipopt_available = False
+    coord._nonlinear_available = False
+    coord._nonlinear_backend = "ipopt"
     coord._ipopt_unavailable_reason = "not probed"
     coord._sigma_w = 0.1
     coord._sigma_v = 0.5

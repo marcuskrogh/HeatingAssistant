@@ -401,8 +401,9 @@ def test_tuning_page_splits_live_and_restart_parameters() -> None:
     assert "RESTART_PARAM_DEFS" in source
     assert "MODE_OPTIONS" in source
     assert "mpc_mode" in source
-    assert "ipopt_available" in source
+    assert "nonlinear_available" in source
     assert "nonlinearOption.disabled = !available" in source
+    assert "ipopt_unavailable_reason" not in source
     assert "higher compute cost" in source
     assert "Live tuning" in source
     assert "Restart required" in source

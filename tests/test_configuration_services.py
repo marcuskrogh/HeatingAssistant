@@ -65,6 +65,8 @@ def _make_coordinator():
     coordinator = MagicMock()
     coordinator._entry = SimpleNamespace(entry_id="entry-1")
     coordinator._ipopt_available = True
+    coordinator._nonlinear_available = True
+    coordinator._nonlinear_backend = "ipopt"
     coordinator._ipopt_unavailable_reason = None
     return coordinator
 
@@ -90,24 +92,46 @@ async def test_update_ui_settings_persists_both_stores(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_update_controller_tuning_rejects_nonlinear_when_ipopt_unavailable(
+async def test_update_controller_tuning_rejects_nonlinear_when_nlp_unavailable(
     monkeypatch,
 ):
     entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
     coordinator = _make_coordinator()
     coordinator._ipopt_available = False
+    coordinator._nonlinear_available = False
     coordinator._ipopt_unavailable_reason = "solver probe failed"
     update_calls: list = []
     hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
 
     handlers = _capture_handlers(hass)
-    with pytest.raises(MpcModeUnavailableError, match="IPOPT solver"):
+    with pytest.raises(MpcModeUnavailableError, match="NLP solver backend"):
         await handlers["update_controller_tuning"](
             SimpleNamespace(data={CONF_MPC_MODE: MPC_MODE_NONLINEAR})
         )
 
     assert update_calls == []
     coordinator.apply_tuning_updates.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_controller_tuning_allows_nonlinear_with_scipy_fallback(
+    monkeypatch,
+):
+    entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
+    coordinator = _make_coordinator()
+    coordinator._ipopt_available = False
+    coordinator._nonlinear_available = True
+    coordinator._nonlinear_backend = "scipy"
+    update_calls: list = []
+    hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
+
+    handlers = _capture_handlers(hass)
+    await handlers["update_controller_tuning"](
+        SimpleNamespace(data={CONF_MPC_MODE: MPC_MODE_NONLINEAR})
+    )
+
+    assert len(update_calls) == 1
+    coordinator.apply_tuning_updates.assert_called_once()
 
 
 @pytest.mark.asyncio

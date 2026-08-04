@@ -3,16 +3,16 @@ import {
   forecastToDataPoints,
   forecastToEnabledPoints,
   loadChartJs,
-} from '../components/time-series-chart.js?v=116';
+} from '../components/time-series-chart.js?v=117';
 import {
   buildTemperatureChart,
   buildPowerChart,
   buildDisturbanceChart,
-} from '../charts/mpc-preview-charts.js?v=116';
+} from '../charts/mpc-preview-charts.js?v=117';
 import {
   updateControllerTuning,
   updateEstimationParams,
-} from '../ha-services.js?v=116';
+} from '../ha-services.js?v=117';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 
@@ -368,12 +368,16 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   function updateModeAvailability(config) {
-    const available = config?.ipopt_available === true;
+    // Prefer nonlinear_available (Ipopt or SciPy). Fall back to legacy ipopt_available.
+    const available =
+      config?.nonlinear_available === true ||
+      (config?.nonlinear_available === undefined && config?.ipopt_available === true);
     if (nonlinearOption) nonlinearOption.disabled = !available;
     if (modeHint) {
+      // Keep hints short — never dump install or wheel detail into mode help.
       modeHint.textContent = available
         ? 'Non-linear mode is available (capability probe passed on the last restart).'
-        : `Non-linear mode needs its solver backend. It will be selectable after a restart probe passes${config?.ipopt_unavailable_reason ? ` (${config.ipopt_unavailable_reason})` : ''}.`;
+        : 'Non-linear mode needs an NLP solver backend. It will be selectable after a restart probe passes.';
     }
   }
 

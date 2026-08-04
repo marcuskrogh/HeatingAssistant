@@ -1,20 +1,23 @@
 """Ensure a working ``cyipopt`` (Ipopt) install for non-linear MPC.
 
-Home Assistant installs ``manifest.json`` requirements via pip. Official
-``cyipopt`` publishes no usable binary wheels, so we prefer
-``cyipopt-wheels`` (bundled Ipopt) when a binary wheel exists, and also ship
-matching wheels under ``vendor/cyipopt_wheels/`` for platforms HA's index
-does not cover (especially musllinux / HAOS).
+Official ``cyipopt`` has no usable binary wheels for Home Assistant. We try a
+**light** install path only:
 
-Do **not** declare ``cyipopt-wheels`` in ``manifest.json``: PyPI has no
-musllinux wheels, and a failed HA requirement install can block setup.
+1. Prefer a matching wheel under ``vendor/cyipopt_wheels/`` (especially on
+   musllinux / HAOS, where PyPI has no musllinux ``cyipopt-wheels``).
+2. Optionally try PyPI ``cyipopt-wheels`` with ``--only-binary=:all:`` (glibc).
+
+Do **not** declare ``cyipopt-wheels`` in ``manifest.json`` — a failed HA
+requirement install can block the whole integration on HAOS.
 """
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import platform
+import site
 import subprocess
 import sys
 import sysconfig
@@ -47,19 +50,58 @@ def cyipopt_importable() -> bool:
     return True
 
 
+def _refresh_import_path() -> None:
+    """Make a just-installed wheel visible to this interpreter."""
+    try:
+        user_site = site.getusersitepackages()
+        if user_site and user_site not in sys.path:
+            site.addsitedir(user_site)
+    except Exception:  # noqa: BLE001
+        pass
+    importlib.invalidate_caches()
+    # Drop a failed/partial import so the next import_module reloads.
+    sys.modules.pop("cyipopt", None)
+    for key in list(sys.modules):
+        if key.startswith("cyipopt."):
+            sys.modules.pop(key, None)
+
+
 def _python_tag() -> str:
     return f"cp{sys.version_info.major}{sys.version_info.minor}"
 
 
+def _normalize_machine(machine: str | None = None) -> str:
+    m = (machine or platform.machine()).lower()
+    if m in {"amd64", "x86_64"}:
+        return "x86_64"
+    if m in {"aarch64", "arm64"}:
+        return "aarch64"
+    if m.startswith("armv7"):
+        return "armv7l"
+    return m
+
+
+def _looks_like_musl() -> bool:
+    host = sysconfig.get_config_var("HOST_GNU_TYPE") or ""
+    if "musl" in str(host):
+        return True
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None)
+        return bool(getattr(libc, "gnu_get_libc_version", None) is None)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _platform_tags() -> tuple[str, ...]:
     """Return ordered platform tag fragments to match against wheel filenames."""
-    machine = platform.machine().lower()
+    machine = _normalize_machine()
     system = platform.system().lower()
     tags: list[str] = []
+    musl = _looks_like_musl()
 
     if system == "linux":
-        # musl (HAOS) vs glibc (Container / many supervised installs).
-        is_musl = "musl" in (sysconfig.get_config_var("HOST_GNU_TYPE") or "")
         try:
             from packaging.tags import sys_tags  # type: ignore
 
@@ -71,7 +113,7 @@ def _platform_tags() -> tuple[str, ...]:
                         break
         except Exception:  # noqa: BLE001
             pass
-        if is_musl or _looks_like_musl():
+        if musl:
             tags.extend(
                 [
                     f"musllinux_1_2_{machine}",
@@ -90,14 +132,13 @@ def _platform_tags() -> tuple[str, ...]:
     elif system == "darwin":
         tags.extend(
             [
-                "macosx_11_0_arm64" if machine in {"arm64", "aarch64"} else "macosx_11_0_x86_64",
+                "macosx_11_0_arm64" if machine == "aarch64" else "macosx_11_0_x86_64",
                 "macosx_10_9_x86_64",
             ]
         )
     elif system == "windows":
-        tags.append("win_amd64" if machine in {"amd64", "x86_64"} else f"win_{machine}")
+        tags.append("win_amd64" if machine == "x86_64" else f"win_{machine}")
 
-    # Preserve order, drop duplicates.
     seen: set[str] = set()
     ordered: list[str] = []
     for tag in tags:
@@ -105,16 +146,6 @@ def _platform_tags() -> tuple[str, ...]:
             seen.add(tag)
             ordered.append(tag)
     return tuple(ordered)
-
-
-def _looks_like_musl() -> bool:
-    try:
-        import ctypes
-
-        libc = ctypes.CDLL(None)
-        return bool(getattr(libc, "gnu_get_libc_version", None) is None)
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def list_vendor_wheels(vendor_dir: Path | None = None) -> list[Path]:
@@ -144,7 +175,6 @@ def select_vendor_wheel(
             matches.append(wheel)
     if not matches:
         return None
-    # Prefer musllinux when present on this host, else first match.
     if _looks_like_musl():
         for wheel in matches:
             if "musllinux" in wheel.name.lower():
@@ -164,7 +194,6 @@ def _pip_install_command(requirement_or_path: str) -> list[str]:
         "--no-cache-dir",
         requirement_or_path,
     ]
-    # Prefer user site when not in a venv (HA Core often uses a system env).
     in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
     if not in_venv and os.environ.get("VIRTUAL_ENV") is None:
         cmd.insert(-1, "--user")
@@ -185,14 +214,28 @@ def _pip_install(requirement_or_path: str) -> None:
         stderr = (completed.stderr or completed.stdout or "").strip()
         tail = stderr[-800:] if stderr else f"exit {completed.returncode}"
         raise RuntimeError(tail)
+    _refresh_import_path()
 
 
-def ensure_cyipopt_installed(*, vendor_dir: Path | None = None) -> CyipoptInstallResult:
-    """Make ``cyipopt`` importable using PyPI wheels and/or vendored wheels."""
-    if cyipopt_importable():
-        return CyipoptInstallResult(True, "already-present")
+def _try_vendor_install(vendor_dir: Path | None) -> CyipoptInstallResult | None:
+    wheel = select_vendor_wheel(list_vendor_wheels(vendor_dir))
+    if wheel is None:
+        return None
+    try:
+        _pip_install(str(wheel))
+        if cyipopt_importable():
+            return CyipoptInstallResult(True, "vendor-wheel", wheel.name)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning(
+            "Heating Assistant: installing vendored wheel %s failed: %s",
+            wheel.name,
+            exc,
+        )
+        return CyipoptInstallResult(False, "vendor-wheel-failed", str(exc)[:400])
+    return CyipoptInstallResult(False, "vendor-wheel-failed", wheel.name)
 
-    # 1) Try the PyPI project that ships bundled Ipopt binaries.
+
+def _try_pypi_install() -> CyipoptInstallResult | None:
     try:
         _pip_install(CYIPOPT_WHEELS_REQUIREMENT)
         if cyipopt_importable():
@@ -203,28 +246,47 @@ def ensure_cyipopt_installed(*, vendor_dir: Path | None = None) -> CyipoptInstal
             CYIPOPT_WHEELS_REQUIREMENT,
             exc,
         )
+        return CyipoptInstallResult(False, "pip-failed", str(exc)[:400])
+    return None
 
-    # 2) Fall back to a matching wheel shipped with the integration.
-    wheel = select_vendor_wheel(list_vendor_wheels(vendor_dir))
-    if wheel is not None:
-        try:
-            _pip_install(str(wheel))
-            if cyipopt_importable():
-                return CyipoptInstallResult(True, "vendor-wheel", wheel.name)
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning(
-                "Heating Assistant: installing vendored wheel %s failed: %s",
-                wheel.name,
-                exc,
-            )
-            return CyipoptInstallResult(False, "vendor-wheel-failed", str(exc))
+
+def ensure_cyipopt_installed(*, vendor_dir: Path | None = None) -> CyipoptInstallResult:
+    """Make ``cyipopt`` importable using vendored wheels and/or PyPI."""
+    _refresh_import_path()
+    if cyipopt_importable():
+        return CyipoptInstallResult(True, "already-present")
+
+    musl = _looks_like_musl()
+    # HAOS / musl: PyPI has no musllinux cyipopt-wheels — try vendor first.
+    # Evaluate attempts lazily so a successful vendor install skips PyPI.
+    attempt_fns = (
+        (
+            lambda: _try_vendor_install(vendor_dir),
+            _try_pypi_install,
+        )
+        if musl
+        else (
+            _try_pypi_install,
+            lambda: _try_vendor_install(vendor_dir),
+        )
+    )
+
+    failed: list[CyipoptInstallResult] = []
+    for attempt in attempt_fns:
+        result = attempt()
+        if result is None:
+            continue
+        if result.available:
+            return result
+        failed.append(result)
 
     if cyipopt_importable():
         return CyipoptInstallResult(True, "already-present")
 
-    available = list_vendor_wheels(vendor_dir)
     detail = (
-        f"no matching wheel for {_python_tag()} / {platform.machine()}; "
-        f"vendored={', '.join(p.name for p in available) or 'none'}"
+        f"no matching wheel for {_python_tag()} / {_normalize_machine()}; "
+        f"musl={musl}"
     )
+    if failed:
+        detail = f"{detail}; last={failed[-1].source}"
     return CyipoptInstallResult(False, "unavailable", detail)

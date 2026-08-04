@@ -155,6 +155,7 @@ def test_ensure_cyipopt_installs_vendor_wheel_when_pip_fails(monkeypatch, tmp_pa
     monkeypatch.setattr(ipopt_deps, "cyipopt_importable", fake_importable)
     monkeypatch.setattr(ipopt_deps, "_pip_install", fake_pip)
     monkeypatch.setattr(ipopt_deps, "_python_tag", lambda: "cp312")
+    monkeypatch.setattr(ipopt_deps, "_looks_like_musl", lambda: False)
     monkeypatch.setattr(
         ipopt_deps,
         "_platform_tags",
@@ -166,6 +167,37 @@ def test_ensure_cyipopt_installs_vendor_wheel_when_pip_fails(monkeypatch, tmp_pa
     assert result.source == "vendor-wheel"
     assert calls[0] == ipopt_deps.CYIPOPT_WHEELS_REQUIREMENT
     assert calls[1] == str(wheel)
+
+
+def test_ensure_cyipopt_prefers_vendor_first_on_musl(monkeypatch, tmp_path):
+    wheel = tmp_path / "cyipopt_wheels-1.7.0.dev0-cp312-cp312-musllinux_1_2_x86_64.whl"
+    wheel.write_bytes(b"0")
+    calls: list[str] = []
+    state = {"ok": False}
+
+    def fake_importable() -> bool:
+        return state["ok"]
+
+    def fake_pip(req: str) -> None:
+        calls.append(req)
+        if req == str(wheel):
+            state["ok"] = True
+
+    monkeypatch.setattr(ipopt_deps, "cyipopt_importable", fake_importable)
+    monkeypatch.setattr(ipopt_deps, "_pip_install", fake_pip)
+    monkeypatch.setattr(ipopt_deps, "_python_tag", lambda: "cp312")
+    monkeypatch.setattr(ipopt_deps, "_looks_like_musl", lambda: True)
+    monkeypatch.setattr(
+        ipopt_deps,
+        "_platform_tags",
+        lambda: ("musllinux_1_2_x86_64",),
+    )
+
+    result = ipopt_deps.ensure_cyipopt_installed(vendor_dir=tmp_path)
+    assert result.available is True
+    assert result.source == "vendor-wheel"
+    assert calls[0] == str(wheel)
+    assert ipopt_deps.CYIPOPT_WHEELS_REQUIREMENT not in calls
 
 
 def test_mode_selector_labels_omit_solver_names():
@@ -182,6 +214,10 @@ def test_mode_selector_labels_omit_solver_names():
     assert "{ value: 'non-linear', label: 'Non-linear' }" in source
     assert "Linear (HiGHS)" not in source
     assert "Non-linear (Ipopt)" not in source
+    assert "nonlinear_available" in source
+    assert "ipopt_unavailable_reason" not in source
+    assert ".whl" not in source
+    assert "cyipopt" not in source.lower()
 
 
 def test_mpc_mode_help_omits_solver_names_beside_modes():
@@ -196,6 +232,8 @@ def test_mpc_mode_help_omits_solver_names_beside_modes():
         # Mode help should describe the trade-off without naming solvers.
         assert "HiGHS" not in text
         assert "Ipopt" not in text
+        assert "wheel" not in text.lower()
+        assert "cyipopt" not in text.lower()
         assert "fidelity" in text.lower() or "accuracy" in text.lower()
 
 
@@ -208,4 +246,5 @@ def test_async_setup_entry_prepares_ipopt_off_event_loop():
     ).read_text(encoding="utf-8")
     assert "async_add_executor_job" in init_source
     assert "ensure_cyipopt_installed" in init_source
+    assert "probe_nonlinear_backend" in init_source
     assert "_prepare_ipopt_backend" in init_source

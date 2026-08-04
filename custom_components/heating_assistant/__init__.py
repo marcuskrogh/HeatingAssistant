@@ -418,11 +418,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Install/probe Ipopt off the event loop before constructing the coordinator.
     from .controller.ipopt_deps import ensure_cyipopt_installed
-    from .controller.ipopt_probe import probe_ipopt_capability
+    from .controller.ipopt_probe import probe_nonlinear_backend
 
     def _prepare_ipopt_backend():
         install = ensure_cyipopt_installed()
-        probe = probe_ipopt_capability()
+        probe = probe_nonlinear_backend()
         return install, probe
 
     cyipopt_install, ipopt_probe = await hass.async_add_executor_job(

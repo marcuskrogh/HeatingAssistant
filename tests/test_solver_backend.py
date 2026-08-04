@@ -54,7 +54,39 @@ def test_ipopt_capability_probe_reports_success(monkeypatch) -> None:
     result = ipopt_probe.probe_ipopt_capability()
 
     assert result.available is True
+    assert result.backend == ipopt_probe.BACKEND_IPOPT
+    assert result.ipopt_available is True
     assert result.reason is None
+
+
+def test_ipopt_capability_probe_falls_back_to_scipy(monkeypatch) -> None:
+    class FakeIpopt:
+        def __init__(self, **_kwargs):
+            pass
+
+        def solve(self, _problem):
+            raise RuntimeError("cyipopt missing")
+
+    class FakeScipy:
+        def __init__(self, **_kwargs):
+            pass
+
+        def solve(self, _problem):
+            return type(
+                "Result",
+                (),
+                {"success": True, "x": np.array([1.0]), "message": "", "fun": 0.0},
+            )()
+
+    monkeypatch.setattr(ipopt_probe, "IpoptNLPBackend", FakeIpopt)
+    monkeypatch.setattr(ipopt_probe, "ScipyNLPBackend", FakeScipy)
+
+    result = ipopt_probe.probe_nonlinear_backend()
+
+    assert result.available is True
+    assert result.backend == ipopt_probe.BACKEND_SCIPY
+    assert result.ipopt_available is False
+    assert "cyipopt missing" in (result.reason or "")
 
 
 def test_ipopt_capability_probe_reports_failure(monkeypatch) -> None:
@@ -66,8 +98,10 @@ def test_ipopt_capability_probe_reports_failure(monkeypatch) -> None:
             raise RuntimeError("cyipopt missing")
 
     monkeypatch.setattr(ipopt_probe, "IpoptNLPBackend", FakeBackend)
+    monkeypatch.setattr(ipopt_probe, "ScipyNLPBackend", FakeBackend)
 
     result = ipopt_probe.probe_ipopt_capability()
 
     assert result.available is False
+    assert result.backend is None
     assert "cyipopt missing" in result.reason

@@ -342,7 +342,11 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._soft_constraint_linear_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT))
         self._terminal_weight: float = float(_opt(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT))
         from ..controller.ipopt_deps import ensure_cyipopt_installed
-        from ..controller.ipopt_probe import probe_ipopt_capability
+        from ..controller.ipopt_probe import (
+            BACKEND_IPOPT,
+            BACKEND_SCIPY,
+            probe_nonlinear_backend,
+        )
 
         # Prefer results prepared off the event loop by async_setup_entry.
         _cyipopt_install = cyipopt_install
@@ -356,26 +360,46 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 getattr(_cyipopt_install, "detail", None),
             )
         if _ipopt_probe is None:
-            _ipopt_probe = probe_ipopt_capability()
-        self._ipopt_available: bool = bool(_ipopt_probe.available)
-        self._ipopt_unavailable_reason: Optional[str] = _ipopt_probe.reason
-        if not self._ipopt_available and getattr(_cyipopt_install, "detail", None):
-            # Prefer install detail when the probe failure is just a missing import.
-            reason = _ipopt_probe.reason or ""
-            if "cyipopt" in reason.lower() or "ipopt" in reason.lower() or not reason:
-                self._ipopt_unavailable_reason = (
-                    f"{reason}; install={getattr(_cyipopt_install, 'source', 'unknown')}"
-                    + (
-                        f" ({_cyipopt_install.detail})"
-                        if getattr(_cyipopt_install, "detail", None)
-                        else ""
-                    )
-                ).strip("; ")
+            _ipopt_probe = probe_nonlinear_backend()
+        # Ipopt-specific flag (diagnostics). Nonlinear mode can still use SciPy.
+        self._ipopt_available: bool = bool(
+            getattr(_ipopt_probe, "ipopt_available", False)
+        )
+        self._nonlinear_available: bool = bool(getattr(_ipopt_probe, "available", False))
+        backend = getattr(_ipopt_probe, "backend", None)
+        if backend in (BACKEND_IPOPT, BACKEND_SCIPY):
+            self._nonlinear_backend: str = str(backend)
+        else:
+            self._nonlinear_backend = (
+                BACKEND_IPOPT if self._ipopt_available else BACKEND_SCIPY
+            )
+        # Diagnostic detail for logs only — never dump into UI-facing copy.
+        install_detail = getattr(_cyipopt_install, "detail", None)
+        probe_reason = getattr(_ipopt_probe, "reason", None)
+        if not self._ipopt_available and install_detail:
+            self._ipopt_unavailable_reason: Optional[str] = (
+                f"{probe_reason or 'Ipopt unavailable'}; "
+                f"install={getattr(_cyipopt_install, 'source', 'unknown')} "
+                f"({install_detail})"
+            )
+        else:
+            self._ipopt_unavailable_reason = probe_reason
+        if self._nonlinear_available:
+            _LOGGER.info(
+                "Heating Assistant: non-linear MPC backend ready (%s; ipopt=%s)",
+                self._nonlinear_backend,
+                self._ipopt_available,
+            )
+        else:
+            _LOGGER.warning(
+                "Heating Assistant: no non-linear NLP backend passed probe (%s)",
+                self._ipopt_unavailable_reason,
+            )
         try:
             self._mpc_mode: str = validate_mpc_mode_available(
                 _opt(CONF_MPC_MODE, None),
                 legacy_solver=_opt(CONF_MPC_SOLVER, DEFAULT_MPC_MODE),
-                ipopt_available=self._ipopt_available,
+                nonlinear_available=self._nonlinear_available,
                 unavailable_reason=self._ipopt_unavailable_reason,
             )
         except MpcModeUnavailableError as err:
@@ -1063,6 +1087,17 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
             ),
             "terminal_weight": float(self._terminal_weight),
             "mpc_mode": self._mpc_mode,
+            "nonlinear_available": bool(
+                getattr(
+                    self,
+                    "_nonlinear_available",
+                    getattr(self, "_ipopt_available", False),
+                )
+            ),
+            "nonlinear_backend": str(
+                getattr(self, "_nonlinear_backend", "ipopt") or "ipopt"
+            ),
+            # Kept for diagnostics / older clients; UI must not dump this into hints.
             "ipopt_available": bool(getattr(self, "_ipopt_available", False)),
             "ipopt_unavailable_reason": getattr(
                 self, "_ipopt_unavailable_reason", None
