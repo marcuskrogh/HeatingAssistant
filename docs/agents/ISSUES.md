@@ -8,7 +8,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-239 | Task | Research: solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM for linear) | To Do | SWD-238 | docs/agents/RESEARCH-swd-239-dual-mode-mpc.md | Optional closeout (brief landed) |
 | SWD-240 | Task | Define: dual-mode MPC config (linear / non-linear) + guidance + internal solvers | Done | SWD-238 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-246 | Task | [Iterate] SWD-240: ship Ipopt deps + remove solver names from mode labels | Done | SWD-238 | docs/agents/ITERATE-swd-246-ipopt-deps.md | Done |
-| SWD-247 | Task | [Iterate] SWD-246: Ipopt install pass + SciPy NLP fallback; clean mode help | In Review | SWD-238 | docs/agents/ITERATE-swd-247-ipopt-scipy-fallback.md | `/ship SWD-247` |
+| SWD-247 | Task | [Iterate] SWD-246: Ipopt install pass + SciPy NLP fallback; clean mode help | Done | SWD-238 | docs/agents/ITERATE-swd-247-ipopt-scipy-fallback.md | Done |
 | SWD-241 | Sub-task | Config/UI: MPC mode selector, help text, grey-out | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-242 | Sub-task | Controller: linear=HiGHS, non-linear=Ipopt, shared weights | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-243 | Sub-task | Ipopt capability probe on restart | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
@@ -27,3 +27,4 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 - 2026-08-04 — review-fix CLEAN; shipped SWD-246 via PR #540 (Ipopt vendored wheels + mode label cleanup). Story SWD-238 remains open (SWD-239 still To Do).
 - 2026-08-04 — iterate SWD-247: light Ipopt install pass + SciPy NLP fallback when Ipopt unavailable; remove wheel/install dumps from mode UI hints. Next: `/review-fix SWD-247`.
 - 2026-08-04 — review-fix SWD-247 CLEAN on PR #541 (1 review + fix-forward + re-review). Next: `/ship SWD-247`.
+- 2026-08-04 — shipped SWD-247 via PR #541 (SciPy NLP fallback + clean mode help). Story SWD-238 remains open (SWD-239 still To Do).

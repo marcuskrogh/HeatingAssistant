@@ -36,6 +36,13 @@
 ## Tracker
 - Task: SWD-247
 - Relates: SWD-246
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/541
+
+## Shipped
+- Light Ipopt install (vendor-first on musl; binary-only; import refresh).
+- SciPy NLP fallback when Ipopt unavailable; mode gated on `nonlinear_available`.
+- Mode UI hints stay short — no wheel/install dumps.
+- Review-fix CLEAN; fake-coordinator CI stubs fixed for linear rebuild path.
 
 ## Next
-`/ship SWD-247` — Merge PR and close the Task
+Done
