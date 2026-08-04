@@ -9,7 +9,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-240 | Task | Define: dual-mode MPC config (linear / non-linear) + guidance + internal solvers | Done | SWD-238 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-246 | Task | [Iterate] SWD-240: ship Ipopt deps + remove solver names from mode labels | Done | SWD-238 | docs/agents/ITERATE-swd-246-ipopt-deps.md | Done |
 | SWD-247 | Task | [Iterate] SWD-246: Ipopt install pass + SciPy NLP fallback; clean mode help | Done | SWD-238 | docs/agents/ITERATE-swd-247-ipopt-scipy-fallback.md | Done |
-| SWD-248 | Task | [Iterate] SWD-247: stop NMPC hang — executor, timeout, SciPy horizon gate | In Progress | SWD-238 | docs/agents/ITERATE-swd-248-nmpc-hang-stability.md | `/review-fix SWD-248` |
+| SWD-248 | Task | [Iterate] SWD-247: stop NMPC hang — executor, timeout, SciPy horizon gate | In Review | SWD-238 | docs/agents/ITERATE-swd-248-nmpc-hang-stability.md | `/review-fix SWD-248` |
 | SWD-241 | Sub-task | Config/UI: MPC mode selector, help text, grey-out | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-242 | Sub-task | Controller: linear=HiGHS, non-linear=Ipopt, shared weights | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
 | SWD-243 | Sub-task | Ipopt capability probe on restart | Done | SWD-240 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |
