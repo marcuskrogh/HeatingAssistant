@@ -47,7 +47,7 @@
 - Task: SWD-253
 - Relates: SWD-247
 - Branch: `cursor/swd-253-cyipopt-startup-hang-af84`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/543
 
 ## Next
-`/implement SWD-253` — Remove IPOPT; SciPy-only NLP per BUG.md
+`/review-fix SWD-253` — Review delivery PR #543

@@ -18,7 +18,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
-- 2026-08-06 — bug SWD-253: HA Core freeze from cyipopt install on HAOS. Fix: remove Ipopt/cyipopt entirely; SciPy-only NLP. Branch `cursor/swd-253-cyipopt-startup-hang-af84`. Next: `/review-fix SWD-253`.
+- 2026-08-06 — implemented SWD-253 SciPy-only NLP on PR #543 (1762 pytest passed). Next: `/review-fix SWD-253`.
+- 2026-08-06 — bug SWD-253: HA Core freeze from cyipopt install on HAOS. Fix: remove Ipopt/cyipopt entirely; SciPy-only NLP. Branch `cursor/swd-253-cyipopt-startup-hang-af84`.
 - 2026-08-03 — explore charted dual-mode MPC map: Epic SWD-238, research SWD-239, define SWD-240 (SWD-239 blocks SWD-240). Next: `/research SWD-239`.
 - 2026-08-03 — research SWD-239 brief landed (`docs/agents/RESEARCH-swd-239-dual-mode-mpc.md`) on `cursor/swd-239-mpc-solver-research-d0ba`. Next: `/define SWD-240`.
 - 2026-08-03 — define SWD-240 PLAN approved; Sub-tasks SWD-241–245; branch `cursor/swd-240-dual-mode-mpc-d0ba`. Next: `/implement SWD-240`.
