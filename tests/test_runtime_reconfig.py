@@ -13,7 +13,6 @@ from custom_components.heating_assistant.const import (
     CONF_IDENTIFICATION_HISTORY_DAYS,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_MPC_MODE,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PERSISTED_SETPOINTS,
     CONF_PLOT_FORECAST_HOURS,
@@ -23,12 +22,8 @@ from custom_components.heating_assistant.const import (
     CONF_TRACKING_WEIGHT,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
-    MPC_MODE_NONLINEAR,
 )
 from custom_components.heating_assistant.coordinator import runtime_reconfig as rr
-from custom_components.heating_assistant.mpc_mode_validation import (
-    MpcModeUnavailableError,
-)
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
 # Builds real coordinator objects (tests/helpers stubs) — integration tier.
@@ -55,7 +50,6 @@ def test_config_key_sets_partition_runtime_vs_reload_vs_persisted():
     assert rr.PERSISTED_STATE_KEYS.isdisjoint(rr.RUNTIME_RECONFIG_KEYS)
     assert rr.PERSISTED_STATE_KEYS.isdisjoint(rr.RELOAD_REQUIRED_CONFIG_KEYS)
     assert CONF_TRACKING_WEIGHT in rr.RUNTIME_RECONFIG_KEYS
-    assert CONF_MPC_MODE in rr.RUNTIME_RECONFIG_KEYS
     assert CONF_ROOMS in rr.RELOAD_REQUIRED_CONFIG_KEYS
     assert CONF_PERSISTED_SETPOINTS in rr.PERSISTED_STATE_KEYS
 
@@ -162,57 +156,6 @@ def test_apply_pending_runtime_reconfiguration_rebuilds_when_horizon_queued():
 
     assert coord._horizon == 8
     coord._build_controller.assert_called_once()
-
-
-def test_apply_pending_runtime_reconfiguration_rebuilds_when_mode_changes():
-    coord = _reconfig_coord()
-    coord._nonlinear_available = True
-    coord._nonlinear_backend = "scipy"
-    coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
-
-    rr.apply_pending_runtime_reconfiguration(coord)
-
-    assert coord._mpc_mode == MPC_MODE_NONLINEAR
-    coord._build_controller.assert_called_once()
-
-
-def test_apply_pending_runtime_reconfiguration_allows_nonlinear_with_scipy():
-    coord = _reconfig_coord()
-    coord._nonlinear_available = True
-    coord._nonlinear_backend = "scipy"
-    coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
-
-    rr.apply_pending_runtime_reconfiguration(coord)
-
-    assert coord._mpc_mode == MPC_MODE_NONLINEAR
-    coord._build_controller.assert_called_once()
-
-
-def test_apply_pending_runtime_reconfiguration_rejects_nonlinear_without_nlp_backend():
-    coord = _reconfig_coord()
-    coord._nonlinear_available = False
-    coord._nonlinear_unavailable_reason = "probe failed"
-    coord._mpc_mode = "linear"
-    coord._pending_runtime_reconfiguration = {CONF_MPC_MODE: MPC_MODE_NONLINEAR}
-
-    with pytest.raises(MpcModeUnavailableError, match="SciPy NLP"):
-        rr.apply_pending_runtime_reconfiguration(coord)
-
-    assert coord._mpc_mode == "linear"
-    coord._build_controller.assert_not_called()
-
-
-def test_apply_runtime_reconfiguration_rejects_nonlinear_without_nlp_backend():
-    coord = _reconfig_coord()
-    coord._nonlinear_available = False
-    coord._nonlinear_unavailable_reason = "probe failed"
-    coord._last_runtime_config = {CONF_MPC_MODE: "linear"}
-
-    with pytest.raises(MpcModeUnavailableError, match="SciPy NLP"):
-        rr.apply_runtime_reconfiguration(coord, {CONF_MPC_MODE: MPC_MODE_NONLINEAR})
-
-    assert coord._pending_runtime_reconfiguration == {}
-    assert coord._last_runtime_config == {CONF_MPC_MODE: "linear"}
 
 
 def test_apply_pending_runtime_reconfiguration_updates_history_retention():

@@ -461,8 +461,7 @@ CONF_SMOOTHING_WEIGHT = "smoothing_weight"        # scalar weight on ‖Δu‖²
 CONF_SOFT_CONSTRAINT_WEIGHT = "soft_constraint_weight"          # quadratic penalty ρ on soft output bound violations (ρ·ε²)
 CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT = "soft_constraint_linear_weight"  # linear penalty ρ_lin on soft output bound violations (ρ_lin·ε)
 CONF_TERMINAL_WEIGHT = "terminal_weight"          # scalar multiplier on Q for terminal cost P = terminal_weight × Q
-CONF_MPC_MODE = "mpc_mode"                        # MPC dynamics mode: linear or non-linear
-CONF_MPC_SOLVER = "mpc_solver"                    # legacy; migrated to mpc_mode when present
+CONF_MPC_SOLVER = "mpc_solver"                    # kept for backwards compat; QP backend always used
 CONF_MPC_ANALYTIC_DERIVATIVES = "mpc_analytic_derivatives"  # kept for backwards compat; always True
 CONF_SIGMA_W = "sigma_w"                          # EKF/process model process-noise std dev [K/√s]
 CONF_SIGMA_V = "sigma_v"                          # EKF measurement-noise std dev [K]
@@ -519,29 +518,8 @@ DEFAULT_SMOOTHING_WEIGHT = 0.1         # weight on ‖Δu‖² (input rate-of-mo
 DEFAULT_SOFT_CONSTRAINT_WEIGHT = 1000.0       # quadratic soft output-bound violation penalty ρ (ρ·ε²)
 DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT = 0.0   # linear soft output-bound violation penalty ρ_lin (ρ_lin·ε); 0 = disabled
 DEFAULT_TERMINAL_WEIGHT = 100.0        # terminal cost multiplier P = terminal_weight × Q
-MPC_MODE_LINEAR = "linear"
-MPC_MODE_NONLINEAR = "non-linear"
-MPC_MODES = (MPC_MODE_LINEAR, MPC_MODE_NONLINEAR)
-DEFAULT_MPC_MODE = MPC_MODE_LINEAR
 DEFAULT_MPC_SOLVER = "qp"              # QP backend; legacy "ipopt"/"slsqp" values accepted but ignored
 DEFAULT_MPC_ANALYTIC_DERIVATIVES = True  # always True; kept for backwards compat
-
-
-def normalize_mpc_mode(
-    value: object = None,
-    *,
-    legacy_solver: object = None,
-) -> str:
-    """Return a supported MPC mode, migrating legacy solver selections."""
-    raw = value if value not in (None, "") else legacy_solver
-    text = str(raw or DEFAULT_MPC_MODE).strip().lower().replace("_", "-")
-    if text in {MPC_MODE_LINEAR, "qp", "highs", "osqp"}:
-        return MPC_MODE_LINEAR
-    if text in {MPC_MODE_NONLINEAR, "nonlinear", "nmpc", "ipopt", "slsqp"}:
-        return MPC_MODE_NONLINEAR
-    return DEFAULT_MPC_MODE
-
-
 DEFAULT_SIGMA_W = 0.1
 DEFAULT_SIGMA_V = 0.5
 DEFAULT_SIGMA_B = 0.002
