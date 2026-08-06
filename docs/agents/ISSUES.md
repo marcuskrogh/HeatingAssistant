@@ -6,7 +6,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 |-----|------|-------|--------|--------|----------|------|
 | SWD-254 | Bug | [Bug] Remove dual-mode nonlinear MPC (revert to pre-SWD-240) — HA hang | Done | — | docs/agents/BUG-swd-254-remove-nonlinear-mpc.md | Done |
 | SWD-238 | Story | Dual-mode MPC (linear / non-linear) | To Do | — | — | Dual-mode removed from main by SWD-254; optional Story closeout |
-| SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | To Do | — | — | Superseded by SWD-254; close draft PR #542 |
+| SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
 
