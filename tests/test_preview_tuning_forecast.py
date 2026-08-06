@@ -136,11 +136,10 @@ def test_preview_runs_mpc_and_builds_payload(mock_controller_cls):
 
 def test_preview_rejects_nonlinear_when_no_nlp_backend():
     coord = _make_preview_coordinator()
-    coord._ipopt_available = False
     coord._nonlinear_available = False
-    coord._ipopt_unavailable_reason = "ipopt library missing"
+    coord._nonlinear_unavailable_reason = "SciPy probe failed"
 
-    with pytest.raises(MpcModeUnavailableError, match="NLP solver backend"):
+    with pytest.raises(MpcModeUnavailableError, match="SciPy NLP"):
         HeatingAssistantCoordinator.preview_tuning_forecast(
             coord,
             {CONF_MPC_MODE: MPC_MODE_NONLINEAR},
@@ -151,7 +150,6 @@ def test_preview_rejects_nonlinear_when_no_nlp_backend():
 
 def test_factory_allows_nonlinear_with_scipy_backend():
     coord = _make_preview_coordinator()
-    coord._ipopt_available = False
     coord._nonlinear_available = True
     coord._nonlinear_backend = "scipy"
     from custom_components.heating_assistant.controller.factory import (

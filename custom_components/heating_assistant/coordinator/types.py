@@ -38,8 +38,6 @@ class ControllerConfigSnapshot(TypedDict):
     mpc_mode: str
     nonlinear_available: bool
     nonlinear_backend: Optional[str]
-    ipopt_available: bool
-    ipopt_unavailable_reason: Optional[str]
     horizon: int
     update_interval: int
     window_open_debounce: int

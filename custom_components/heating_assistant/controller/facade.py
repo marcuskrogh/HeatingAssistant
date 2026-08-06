@@ -96,7 +96,6 @@ from mbc.estimation import (
     IntegrationScheme,
 )
 from mbc.control import (
-    IpoptNLPBackend,
     ScipyNLPBackend,
     StandardContinuousOCP,
     StandardLinearisedContinuousMPC,
@@ -1985,7 +1984,7 @@ class HeatingMPCController:
         use_analytic_derivatives: bool = True,
         energy_price_weight: float = 0.0,
         mpc_mode: str = MPC_MODE_LINEAR,
-        nonlinear_backend: str = "ipopt",
+        nonlinear_backend: str = "scipy",
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
@@ -1995,9 +1994,9 @@ class HeatingMPCController:
         self._albedo = float(albedo)
 
         self._mpc_mode = normalize_mpc_mode(mpc_mode, legacy_solver=solver)
-        self._nonlinear_backend = (
-            "scipy" if str(nonlinear_backend).lower() == "scipy" else "ipopt"
-        )
+        # Non-linear MPC always uses SciPy; Ipopt/cyipopt is not supported.
+        self._nonlinear_backend = "scipy"
+        _ = nonlinear_backend  # accepted for call-site compatibility
         if self._mpc_mode == MPC_MODE_NONLINEAR:
             self._solver_requested = self._nonlinear_backend
         else:
@@ -2100,21 +2099,14 @@ class HeatingMPCController:
         x_ref = np.zeros(n_x_ctrl)
         x_ref[:n_rooms] = [model.rooms[name].setpoint for name in room_list]
 
-        # ── MPC controller (linear HiGHS QP or nonlinear NLP) ─────────────
+        # ── MPC controller (linear HiGHS QP or nonlinear SciPy NLP) ───────
         if self._mpc_mode == MPC_MODE_NONLINEAR:
-            if self._nonlinear_backend == "scipy":
-                nlp_backend = ScipyNLPBackend(
-                    method="SLSQP",
-                    options={"maxiter": 500, "ftol": 1e-9, "disp": False},
-                )
-                self._solver_requested = "scipy"
-                self._solver_active = "scipy"
-            else:
-                nlp_backend = IpoptNLPBackend(
-                    options={"print_level": 0, "max_iter": 500, "tol": 1e-6}
-                )
-                self._solver_requested = "ipopt"
-                self._solver_active = "ipopt"
+            nlp_backend = ScipyNLPBackend(
+                method="SLSQP",
+                options={"maxiter": 500, "ftol": 1e-9, "disp": False},
+            )
+            self._solver_requested = "scipy"
+            self._solver_active = "scipy"
             ocp = StandardContinuousOCP(
                 model=self._control_system,
                 N=horizon,

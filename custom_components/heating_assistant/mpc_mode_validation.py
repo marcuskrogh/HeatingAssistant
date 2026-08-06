@@ -12,36 +12,20 @@ class MpcModeUnavailableError(ValueError):
 
 
 def coordinator_nonlinear_available(coordinator: Any) -> bool:
-    """Return whether a coordinator has a usable non-linear NLP backend."""
-    return bool(
-        getattr(
-            coordinator,
-            "_nonlinear_available",
-            getattr(coordinator, "_ipopt_available", False),
-        )
-    )
-
-
-def coordinator_nonlinear_backend(coordinator: Any) -> str | None:
-    """Return the probed NLP backend name, or None when unavailable."""
-    if not coordinator_nonlinear_available(coordinator):
-        return None
-    backend = getattr(coordinator, "_nonlinear_backend", None)
-    if backend in ("ipopt", "scipy"):
-        return str(backend)
-    return "ipopt" if bool(getattr(coordinator, "_ipopt_available", False)) else "scipy"
+    """Return whether a coordinator has a usable SciPy NLP backend."""
+    return bool(getattr(coordinator, "_nonlinear_available", False))
 
 
 def mpc_mode_unavailable_message(reason: str | None = None) -> str:
     """Return a short user-facing explanation for unavailable non-linear MPC.
 
     ``reason`` is accepted for call-site compatibility but intentionally ignored —
-    never dump install paths / wheel names into UI copy.
+    never dump probe internals into UI copy.
     """
     _ = reason
     return (
-        "Non-linear MPC is temporarily unavailable because no NLP solver backend "
-        "passed the startup probe. Try restarting Home Assistant."
+        "Non-linear MPC is temporarily unavailable because the SciPy NLP solver "
+        "did not pass the startup probe. Try restarting Home Assistant."
     )
 
 
@@ -49,23 +33,12 @@ def validate_mpc_mode_available(
     value: Any,
     *,
     nonlinear_available: bool | None = None,
-    ipopt_available: bool | None = None,
     unavailable_reason: str | None = None,
     legacy_solver: Any = None,
 ) -> str:
-    """Normalize an MPC mode and reject non-linear when no NLP backend is ready.
-
-    ``nonlinear_available`` is preferred. ``ipopt_available`` remains as a
-    backward-compatible alias (treated as nonlinear availability when the new
-    flag is omitted).
-    """
+    """Normalize an MPC mode and reject non-linear when SciPy NLP is not ready."""
     mode = normalize_mpc_mode(value, legacy_solver=legacy_solver)
-    ready = (
-        bool(nonlinear_available)
-        if nonlinear_available is not None
-        else bool(ipopt_available)
-    )
-    if mode == MPC_MODE_NONLINEAR and not ready:
+    if mode == MPC_MODE_NONLINEAR and not bool(nonlinear_available):
         raise MpcModeUnavailableError(
             mpc_mode_unavailable_message(unavailable_reason)
         )
@@ -82,5 +55,7 @@ def validate_mpc_mode_update(
     updates[CONF_MPC_MODE] = validate_mpc_mode_available(
         updates.get(CONF_MPC_MODE),
         nonlinear_available=coordinator_nonlinear_available(coordinator),
-        unavailable_reason=getattr(coordinator, "_ipopt_unavailable_reason", None),
+        unavailable_reason=getattr(
+            coordinator, "_nonlinear_unavailable_reason", None
+        ),
     )
