@@ -24,7 +24,7 @@
 
 ## Acceptance criteria
 - [x] Codebase tree matches `30814c4` for product code (dual-mode / NMPC / Ipopt / SciPy NLP mode UI removed).
-- [x] `main` updated via PR that lands this restore.
+- [x] `main` updated via PR that lands this restore (PR #544, merge `5fa0ac6`).
 - [x] Tests for the restored linear/QP path pass (1750 passed, 6 skipped).
 
 ## Out of scope
@@ -34,8 +34,9 @@
 ## Tracker
 - Task: SWD-254
 - Relates: SWD-238 (dual-mode story), SWD-248 (hang mitigations superseded)
-- Branch: `cursor/swd-254-remove-nonlinear-mpc-2550`
+- Branch: `cursor/swd-254-remove-nonlinear-mpc-2550` (deleted after merge)
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/544
+- Merge: `5fa0ac6`
 
 ## Next
-`/ship SWD-254` — merge PR #544 to restore pre-SWD-240 tree on main
+Done
