@@ -21,7 +21,6 @@ from .const import (
     CONF_INFILTRATION_FRACTION,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_MPC_MODE,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_PLOT_FORECAST_HOURS,
     CONF_PLOT_HISTORY_HOURS,
@@ -102,7 +101,6 @@ from .const import (
     DEFAULT_HORIZON,
     DEFAULT_IDENTIFICATION_HISTORY_DAYS,
     DEFAULT_INFILTRATION_FRACTION,
-    DEFAULT_MPC_MODE,
     DEFAULT_MAX_TEMP_OFFSET,
     DEFAULT_MIN_POWER,
     DEFAULT_PLOT_FORECAST_HOURS,
@@ -130,7 +128,6 @@ from .const import (
     DOMAIN,
     FACADE_COLOUR_TO_ABSORPTANCE,
     FLOOR_TYPE_DEFAULTS,
-    MPC_MODES,
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
     SOLAR_EXPOSURE_TO_APERTURE,
@@ -291,9 +288,6 @@ CONFIG_SCHEMA = vol.Schema(
                 ),
                 vol.Optional(CONF_HORIZON, default=DEFAULT_HORIZON): vol.All(
                     vol.Coerce(int), vol.Range(min=1)
-                ),
-                vol.Optional(CONF_MPC_MODE, default=DEFAULT_MPC_MODE): vol.In(
-                    list(MPC_MODES)
                 ),
                 vol.Optional(
                     CONF_TRACKING_WEIGHT, default=DEFAULT_TRACKING_WEIGHT

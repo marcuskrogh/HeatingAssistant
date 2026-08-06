@@ -19,8 +19,6 @@ from .const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_MPC_MODE,
-    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_ROOM_NAME,
     CONF_ROOMS,
@@ -38,7 +36,6 @@ from .const import (
     CONF_WINDOW_OPEN_Q_INFLATION,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
-    DEFAULT_MPC_MODE,
     DEFAULT_SIGMA_B,
     DEFAULT_SIGMA_V,
     DEFAULT_SIGMA_W,
@@ -49,7 +46,6 @@ from .const import (
     DEFAULT_WINDOW_OPEN_CLOSE_SETTLE,
     DEFAULT_WINDOW_OPEN_DEBOUNCE,
     DEFAULT_WINDOW_OPEN_Q_INFLATION,
-    normalize_mpc_mode,
 )
 
 
@@ -106,19 +102,6 @@ def merge_yaml_into_entry_data(
     # ── Scalars with defaults: YAML fills in only when the key is absent.
     _fill_default(merged, yaml_cfg, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
     _fill_default(merged, yaml_cfg, CONF_HORIZON, DEFAULT_HORIZON)
-    if CONF_MPC_MODE not in merged:
-        merged[CONF_MPC_MODE] = normalize_mpc_mode(
-            yaml_cfg.get(CONF_MPC_MODE),
-            legacy_solver=yaml_cfg.get(
-                CONF_MPC_SOLVER,
-                merged.get(CONF_MPC_SOLVER, DEFAULT_MPC_MODE),
-            ),
-        )
-    else:
-        merged[CONF_MPC_MODE] = normalize_mpc_mode(
-            merged.get(CONF_MPC_MODE),
-            legacy_solver=merged.get(CONF_MPC_SOLVER),
-        )
     _fill_default(merged, yaml_cfg, CONF_ENERGY_WEIGHT, DEFAULT_ENERGY_WEIGHT)
     _fill_default(merged, yaml_cfg, CONF_SMOOTHING_WEIGHT, DEFAULT_SMOOTHING_WEIGHT)
     _fill_default(merged, yaml_cfg, CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT)

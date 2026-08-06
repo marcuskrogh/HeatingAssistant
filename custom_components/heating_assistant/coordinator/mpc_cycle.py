@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from ..const import DOMAIN, MPC_MODE_NONLINEAR
 from ..ground_temp import ground_temperature
 from ..solar_model import horizontal_irradiance
 from . import runtime_state
@@ -25,36 +23,6 @@ _LOGGER = logging.getLogger(__name__)
 # before an UpdateFailed is raised (only applies when no prior reading was ever
 # obtained — i.e., the entity was never reachable since startup).
 _OUTDOOR_TEMP_MAX_STARTUP_FAILURES = 3
-
-
-def _notify_nmpc_failure(coordinator: HeatingAssistantCoordinator, error: BaseException) -> None:
-    """Raise a visible HA notification when non-linear MPC fails mid-cycle."""
-    if getattr(coordinator, "_mpc_mode", None) != MPC_MODE_NONLINEAR:
-        return
-    message = (
-        "Heating Assistant's non-linear MPC failed to compute this cycle. "
-        "No automatic switch to linear mode was made. Open Heating Assistant "
-        "controller tuning and switch MPC mode to linear, then check the logs "
-        f"for details. Last error: {error}"
-    )
-    try:
-        result = coordinator.hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": "Heating Assistant non-linear MPC failed",
-                "message": message,
-                "notification_id": f"{DOMAIN}_nmpc_failure",
-            },
-            blocking=False,
-        )
-        if asyncio.iscoroutine(result):
-            coordinator.hass.async_create_task(result)
-    except Exception:  # pragma: no cover - notification must never mask cycle state
-        _LOGGER.debug(
-            "Heating Assistant: failed to create non-linear MPC failure notification",
-            exc_info=True,
-        )
 
 
 @dataclass
@@ -325,13 +293,12 @@ def run_controller_compute(
         kalman_innovation = coordinator.controller.last_innovation
         if coordinator._system_enabled:
             coordinator._last_mpc_run_ts = now.timestamp()
-    except Exception as exc:
+    except Exception:
         _LOGGER.warning(
             "Failed to compute MPC actions; clearing forecast data so "
             "dashboards show a visible gap at the failure point",
             exc_info=True,
         )
-        _notify_nmpc_failure(coordinator, exc)
         if not coordinator.actions:
             coordinator.actions = {
                 src.name: 0.0 for src in coordinator.heat_sources

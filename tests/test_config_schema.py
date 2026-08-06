@@ -20,7 +20,6 @@ from custom_components.heating_assistant.config_schema import CONFIG_SCHEMA  # n
 from custom_components.heating_assistant.const import (
     CONF_HEAT_SOURCES,
     CONF_INFILTRATION_FRACTION,
-    CONF_MPC_MODE,
     CONF_ROOM_NAME,
     CONF_ROOMS,
     CONF_SOURCE_MAX_POWER,
@@ -68,14 +67,6 @@ def test_minimal_room_and_source_valid():
     assert result[DOMAIN][CONF_HEAT_SOURCES][0][CONF_SOURCE_MAX_POWER] == 2000.0
 
 
-def test_mpc_mode_accepts_linear_and_non_linear():
-    assert CONFIG_SCHEMA(_minimal_config(**{CONF_MPC_MODE: "linear"}))[DOMAIN][CONF_MPC_MODE] == "linear"
-    assert (
-        CONFIG_SCHEMA(_minimal_config(**{CONF_MPC_MODE: "non-linear"}))[DOMAIN][CONF_MPC_MODE]
-        == "non-linear"
-    )
-
-
 def test_room_with_nested_window_and_connection():
     """Nested room schemas (windows, connections, schedule) validate."""
     config = _minimal_config(
@@ -116,10 +107,6 @@ def test_room_with_nested_window_and_connection():
         (
             _minimal_config(terminal_weight=0.5),
             "terminal_weight",
-        ),
-        (
-            _minimal_config(**{CONF_MPC_MODE: "ipopt"}),
-            "mpc_mode",
         ),
         (
             _minimal_config(identification_history_days=3),

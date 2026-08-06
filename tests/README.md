@@ -73,8 +73,12 @@ up by CI automatically. Keep each under ~2 s.
 
 ## Solver backend visibility
 
-`tests/test_solver_backend.py` asserts the SciPy NLP backend engages for
-non-linear MPC and parameter estimation. Ipopt/`cyipopt` is not used.
+`tests/test_solver_backend.py` asserts the IPOPT backend actually engages when
+`cyipopt` is installed, and **skips loudly** when it isn't — in that case every
+estimation test (including the slow-tier "IPOPT" regressions) runs on the
+scipy L-BFGS-B fallback. Watch for that skip in CI output before trusting
+IPOPT-specific conclusions. `cyipopt` ships no wheels, so CI currently runs
+the fallback path.
 
 ## Shared helpers
 

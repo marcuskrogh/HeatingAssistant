@@ -11,15 +11,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
-from custom_components.heating_assistant.const import (
-    CONF_HORIZON,
-    CONF_MPC_MODE,
-    CONF_TRACKING_WEIGHT,
-    MPC_MODE_NONLINEAR,
-)
-from custom_components.heating_assistant.mpc_mode_validation import (
-    MpcModeUnavailableError,
-)
+from custom_components.heating_assistant.const import CONF_HORIZON, CONF_TRACKING_WEIGHT
 
 
 def _make_preview_coordinator():
@@ -132,32 +124,3 @@ def test_preview_runs_mpc_and_builds_payload(mock_controller_cls):
     assert preview_ctrl.compute.call_args.kwargs["run_optimization"] is True
     assert "rooms" in payload
     assert "living_room" in payload["rooms"]
-
-
-def test_preview_rejects_nonlinear_when_no_nlp_backend():
-    coord = _make_preview_coordinator()
-    coord._nonlinear_available = False
-    coord._nonlinear_unavailable_reason = "SciPy probe failed"
-
-    with pytest.raises(MpcModeUnavailableError, match="SciPy NLP"):
-        HeatingAssistantCoordinator.preview_tuning_forecast(
-            coord,
-            {CONF_MPC_MODE: MPC_MODE_NONLINEAR},
-            None,
-            {},
-        )
-
-
-def test_factory_allows_nonlinear_with_scipy_backend():
-    coord = _make_preview_coordinator()
-    coord._nonlinear_available = True
-    coord._nonlinear_backend = "scipy"
-    from custom_components.heating_assistant.controller.factory import (
-        ControllerBuildConfig,
-    )
-
-    config = ControllerBuildConfig.from_coordinator(
-        coord, overrides={CONF_MPC_MODE: MPC_MODE_NONLINEAR}
-    )
-    assert config.mpc_mode == MPC_MODE_NONLINEAR
-    assert config.nonlinear_backend == "scipy"

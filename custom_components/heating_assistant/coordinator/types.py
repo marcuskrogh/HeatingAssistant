@@ -35,9 +35,6 @@ class ControllerConfigSnapshot(TypedDict):
     soft_constraint_weight: float
     soft_constraint_linear_weight: float
     terminal_weight: float
-    mpc_mode: str
-    nonlinear_available: bool
-    nonlinear_backend: Optional[str]
     horizon: int
     update_interval: int
     window_open_debounce: int

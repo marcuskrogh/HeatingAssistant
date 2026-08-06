@@ -49,14 +49,6 @@ def fake_controller(monkeypatch):
         "custom_components.heating_assistant.coordinator.core.HeatingMPCController",
         _FakeController,
     )
-    monkeypatch.setattr(
-        "custom_components.heating_assistant.controller.nlp_probe.probe_nonlinear_backend",
-        lambda: SimpleNamespace(
-            available=True,
-            backend="scipy",
-            reason=None,
-        ),
-    )
 
 
 def test_coordinator_init_initialises_room_state(fake_controller):

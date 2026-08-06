@@ -45,8 +45,6 @@ from ..const import (
     CONF_HORIZON,
     CONF_LATITUDE,
     CONF_LONGITUDE,
-    CONF_MPC_MODE,
-    CONF_MPC_SOLVER,
     CONF_OUTDOOR_TEMP_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_WEATHER_ENTITY,
@@ -128,7 +126,6 @@ from ..const import (
     DEFAULT_EFFICIENCY,
     DEFAULT_ENERGY_WEIGHT,
     DEFAULT_HORIZON,
-    DEFAULT_MPC_MODE,
     DEFAULT_TRACKING_WEIGHT,
     DEFAULT_MIN_POWER,
     DEFAULT_MAX_TEMP_OFFSET,
@@ -210,10 +207,6 @@ from ..heat_sources import (
 from ..thermal_model import HouseModel, Room, RoomConnection, Window
 from ..controller import HeatingMPCController
 from ..controller.factory import ControllerBuildConfig, build_mpc_controller
-from ..mpc_mode_validation import (
-    MpcModeUnavailableError,
-    validate_mpc_mode_available,
-)
 from . import (
     actuation,
     disturbances,
@@ -279,8 +272,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
-        *,
-        nlp_probe: Any = None,
     ) -> None:
         self._entry = entry
         data = entry.data
@@ -340,45 +331,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
         self._soft_constraint_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_WEIGHT, DEFAULT_SOFT_CONSTRAINT_WEIGHT))
         self._soft_constraint_linear_weight: float = float(_opt(CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT, DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT))
         self._terminal_weight: float = float(_opt(CONF_TERMINAL_WEIGHT, DEFAULT_TERMINAL_WEIGHT))
-        from ..controller.nlp_probe import BACKEND_SCIPY, probe_nonlinear_backend
-
-        # Prefer results prepared off the event loop by async_setup_entry.
-        _nlp_probe = nlp_probe
-        if _nlp_probe is None:
-            _nlp_probe = probe_nonlinear_backend()
-        self._nonlinear_available: bool = bool(getattr(_nlp_probe, "available", False))
-        if self._nonlinear_available:
-            self._nonlinear_backend: Optional[str] = BACKEND_SCIPY
-        else:
-            self._nonlinear_backend = None
-        probe_reason = getattr(_nlp_probe, "reason", None)
-        self._nonlinear_unavailable_reason: Optional[str] = (
-            None
-            if self._nonlinear_available
-            else (probe_reason or "SciPy NLP unavailable")
-        )
-        if self._nonlinear_available:
-            _LOGGER.info(
-                "Heating Assistant: non-linear MPC backend ready (%s)",
-                self._nonlinear_backend,
-            )
-        else:
-            _LOGGER.warning(
-                "Heating Assistant: no non-linear NLP backend passed probe (%s)",
-                self._nonlinear_unavailable_reason,
-            )
-        try:
-            self._mpc_mode: str = validate_mpc_mode_available(
-                _opt(CONF_MPC_MODE, None),
-                legacy_solver=_opt(CONF_MPC_SOLVER, DEFAULT_MPC_MODE),
-                nonlinear_available=self._nonlinear_available,
-                unavailable_reason=self._nonlinear_unavailable_reason,
-            )
-        except MpcModeUnavailableError as err:
-            _LOGGER.warning(
-                "Heating Assistant: falling back to linear MPC because %s", err
-            )
-            self._mpc_mode = DEFAULT_MPC_MODE
         self._sigma_w: float = float(
             options.get(CONF_SIGMA_W, data.get(CONF_SIGMA_W, DEFAULT_SIGMA_W))
         )
@@ -1058,9 +1010,6 @@ class HeatingAssistantCoordinator(DataUpdateCoordinator):
                 self._soft_constraint_linear_weight
             ),
             "terminal_weight": float(self._terminal_weight),
-            "mpc_mode": self._mpc_mode,
-            "nonlinear_available": bool(getattr(self, "_nonlinear_available", False)),
-            "nonlinear_backend": getattr(self, "_nonlinear_backend", None),
             "horizon": int(self._horizon),
             "update_interval": int(
                 ui.total_seconds() if hasattr(ui, "total_seconds") else ui

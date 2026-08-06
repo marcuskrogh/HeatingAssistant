@@ -11,7 +11,7 @@ import numpy as np
 from ..controller import HouseThermalSDE as HouseThermalSystem
 from ..heat_sources import HeatSource
 from ..thermal_model import Room
-from mbc.control import NLPProblem, ScipyNLPBackend
+from mbc.control import IpoptNLPBackend, NLPProblem, ScipyNLPBackend
 from mbc.identification import cd_ped_neg_log_likelihood as _cd_ped_neg_ll
 from .constants import (
     MIN_HISTORY_STEPS,
@@ -662,6 +662,9 @@ class KalmanMLEstimator:
             _eval(theta)
             return np.asarray(_cache[2], dtype=float)  # type: ignore[arg-type]
 
+        ipopt_backend = IpoptNLPBackend(
+            options={"print_level": 0, "max_iter": 300, "tol": 1e-6}
+        )
         scipy_backend = ScipyNLPBackend(
             # L-BFGS-B builds a quasi-Newton Hessian approximation that
             # handles the large scale differences between parameters (e.g.
@@ -670,6 +673,7 @@ class KalmanMLEstimator:
             method="L-BFGS-B",
             options={"maxiter": 500, "ftol": 1e-12, "gtol": 1e-6},
         )
+        _active_backend = ipopt_backend
 
         best_theta = theta_prior.copy()
         best_f = float("inf")
@@ -694,7 +698,8 @@ class KalmanMLEstimator:
         starts.append(theta_prior.copy())
 
         def _solve_from(theta_start: np.ndarray) -> Optional[Tuple[float, np.ndarray, bool]]:
-            """Run SciPy L-BFGS-B from one start; return (f, theta, ok)."""
+            """Run the active backend from one start; return (f, theta, ok)."""
+            nonlocal _active_backend
             _cache[0] = None
             problem = NLPProblem(
                 objective=_fun,
@@ -705,9 +710,21 @@ class KalmanMLEstimator:
                 constraints=(),
             )
             try:
-                res = scipy_backend.solve(problem)
+                res = _active_backend.solve(problem)
+            except (ImportError, ModuleNotFoundError, RuntimeError) as exc:
+                _LOGGER.warning(
+                    "IPOPT backend unavailable for parameter estimation (%s); "
+                    "falling back to L-BFGS-B.", exc,
+                )
+                _active_backend = scipy_backend
+                _cache[0] = None
+                try:
+                    res = _active_backend.solve(problem)
+                except Exception as exc2:
+                    _LOGGER.debug("Optimiser fallback failed: %s", exc2)
+                    return None
             except Exception as exc:
-                _LOGGER.debug("SciPy optimiser failed: %s", exc)
+                _LOGGER.debug("Optimiser failed: %s", exc)
                 return None
             if not np.isfinite(res.fun):
                 return None

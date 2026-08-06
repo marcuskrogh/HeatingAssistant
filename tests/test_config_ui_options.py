@@ -135,7 +135,6 @@ def test_strings_and_english_translation_are_in_sync_for_new_ui_labels() -> None
     for key in (
         "tracking_weight",
         "energy_weight",
-        "mpc_mode",
         "horizon",
         "smoothing_weight",
         "soft_constraint_weight",
@@ -399,12 +398,6 @@ def test_tuning_page_splits_live_and_restart_parameters() -> None:
     ).read_text(encoding="utf-8")
     assert "LIVE_PARAM_DEFS" in source
     assert "RESTART_PARAM_DEFS" in source
-    assert "MODE_OPTIONS" in source
-    assert "mpc_mode" in source
-    assert "nonlinear_available" in source
-    assert "nonlinearOption.disabled = !available" in source
-    assert "ipopt_unavailable_reason" not in source
-    assert "higher compute cost" in source
     assert "Live tuning" in source
     assert "Restart required" in source
     assert "hasPendingRestartChanges" in source

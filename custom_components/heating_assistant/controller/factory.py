@@ -5,15 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from ..const import DEFAULT_GROUND_ALBEDO, DEFAULT_MPC_MODE
+from ..const import DEFAULT_GROUND_ALBEDO
 from ..heat_sources import HeatSource
-from ..mpc_mode_validation import (
-    coordinator_nonlinear_available,
-    validate_mpc_mode_available,
-)
 from ..thermal_model import HouseModel
 from .facade import HeatingMPCController
-from .nlp_probe import BACKEND_SCIPY
 
 
 @dataclass
@@ -36,11 +31,6 @@ class ControllerBuildConfig:
     sigma_v: float
     sigma_b: float
     energy_price_weight: float
-    mpc_mode: str = DEFAULT_MPC_MODE
-    # Capability flag must come from the startup SciPy NLP probe.
-    nonlinear_available: bool = False
-    nonlinear_backend: Optional[str] = BACKEND_SCIPY
-    nonlinear_unavailable_reason: Optional[str] = None
     albedo: float = DEFAULT_GROUND_ALBEDO
     measurement_dt: Optional[float] = None
 
@@ -53,10 +43,10 @@ class ControllerBuildConfig:
     ) -> "ControllerBuildConfig":
         """Build config from a coordinator, optionally applying tuning overrides."""
         from ..const import (  # noqa: PLC0415
+            CONF_COMFORT_OFFSET,
             CONF_ENERGY_PRICE_WEIGHT,
             CONF_ENERGY_WEIGHT,
             CONF_HORIZON,
-            CONF_MPC_MODE,
             CONF_SMOOTHING_WEIGHT,
             CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
             CONF_SOFT_CONSTRAINT_WEIGHT,
@@ -67,21 +57,6 @@ class ControllerBuildConfig:
 
         ov = dict(overrides or {})
         dt = float(ov.get(CONF_UPDATE_INTERVAL, coordinator._update_interval_s))
-        nonlinear_available = coordinator_nonlinear_available(coordinator)
-        mpc_mode = validate_mpc_mode_available(
-            ov.get(
-                CONF_MPC_MODE,
-                getattr(
-                    coordinator,
-                    "_mpc_mode",
-                    getattr(coordinator, "_mpc_solver", DEFAULT_MPC_MODE),
-                ),
-            ),
-            nonlinear_available=nonlinear_available,
-            unavailable_reason=getattr(
-                coordinator, "_nonlinear_unavailable_reason", None
-            ),
-        )
         return cls(
             model=coordinator.model,
             heat_sources=coordinator.heat_sources,
@@ -121,22 +96,11 @@ class ControllerBuildConfig:
             energy_price_weight=float(
                 ov.get(CONF_ENERGY_PRICE_WEIGHT, coordinator._energy_price_weight)
             ),
-            mpc_mode=mpc_mode,
-            nonlinear_available=nonlinear_available,
-            nonlinear_backend=BACKEND_SCIPY if nonlinear_available else None,
-            nonlinear_unavailable_reason=getattr(
-                coordinator, "_nonlinear_unavailable_reason", None
-            ),
         )
 
 
 def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
     """Construct an MPC controller from a :class:`ControllerBuildConfig`."""
-    mpc_mode = validate_mpc_mode_available(
-        config.mpc_mode,
-        nonlinear_available=config.nonlinear_available,
-        unavailable_reason=config.nonlinear_unavailable_reason,
-    )
     measurement_dt = (
         config.measurement_dt if config.measurement_dt is not None else config.dt
     )
@@ -159,6 +123,4 @@ def build_mpc_controller(config: ControllerBuildConfig) -> HeatingMPCController:
         sigma_v=config.sigma_v,
         sigma_b=config.sigma_b,
         energy_price_weight=config.energy_price_weight,
-        mpc_mode=mpc_mode,
-        nonlinear_backend=BACKEND_SCIPY,
     )

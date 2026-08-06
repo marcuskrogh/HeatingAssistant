@@ -95,23 +95,15 @@ from mbc.estimation import (
     ContinuousDiscreteEKFParams,
     IntegrationScheme,
 )
-from mbc.control import (
-    ScipyNLPBackend,
-    StandardContinuousOCP,
-    StandardLinearisedContinuousMPC,
-    StandardNonlinearContinuousMPC,
-)
+from mbc.control import StandardLinearisedContinuousMPC
 
 from ..const import (
     DEFAULT_SETPOINT_PULL_WEIGHT,
     DEFAULT_SOFT_CONSTRAINT_WEIGHT,
-    MPC_MODE_LINEAR,
-    MPC_MODE_NONLINEAR,
     AIR_RHO_CP,
     SHERMAN_GRIMSRUD_STACK_COEF,
     SHERMAN_GRIMSRUD_WIND_COEF,
     SOLAR_WALL_FRACTION,
-    normalize_mpc_mode,
 )
 from ..integrator import implicit_euler_substeps
 from ..thermal_model import _SG_FACTOR_TYPICAL
@@ -1661,249 +1653,6 @@ class HeatingLinearisedMPC(StandardLinearisedContinuousMPC):
         return np.asarray(x_hat, dtype=float)
 
 
-def _repeat_step_profile_for_substeps(
-    step_profile: np.ndarray,
-    *,
-    n_steps: int,
-) -> np.ndarray:
-    """Expand a per-control-step profile to the nonlinear OCP sub-step grid."""
-    step_profile = np.asarray(step_profile, dtype=float)
-    N = step_profile.shape[0]
-    out = np.zeros((N * n_steps + 1, step_profile.shape[1]), dtype=float)
-    for n in range(N * n_steps + 1):
-        out[n] = step_profile[min(n // n_steps, N - 1)]
-    return out
-
-
-class HeatingNonlinearMPC(StandardNonlinearContinuousMPC):
-    """House-heating wrapper around mbc's nonlinear continuous NMPC.
-
-    ``StandardContinuousOCP`` currently supports the shared base cost terms
-    (Q/R/P/S), static input bounds, static soft output corridors, and a direct
-    linear input economy term. Horizon-varying Q/R scales, per-step input
-    clamps, and signed-magnitude price slacks are retained on the linear QP path.
-    """
-
-    def __init__(
-        self,
-        *,
-        model: HouseThermalSDE,
-        estimator: _InnovationEKF,
-        N: int,
-        dt: float,
-        x_ref: np.ndarray,
-        ocp: StandardContinuousOCP,
-        Q_diag: np.ndarray,
-        R_diag: np.ndarray,
-        terminal_weight: float,
-        S_diag: Optional[np.ndarray],
-        z_offset: float,
-    ) -> None:
-        super().__init__(estimator, ocp)
-        self._model = model
-        self._N = int(N)
-        self._dt = float(dt)
-        self._x_ref_abs = np.asarray(x_ref, dtype=float).reshape(model.nx)
-        self._Q_diag = np.asarray(Q_diag, dtype=float).reshape(model.nz)
-        self._R_diag = np.asarray(R_diag, dtype=float).reshape(model.nu)
-        self._terminal_weight = float(terminal_weight)
-        self._S_diag = (
-            None if S_diag is None else np.asarray(S_diag, dtype=float).reshape(model.nu)
-        )
-        self._z_offset = float(z_offset)
-
-    @property
-    def x_ref(self) -> np.ndarray:
-        return self._x_ref_abs.copy()
-
-    @x_ref.setter
-    def x_ref(self, val: np.ndarray) -> None:
-        self._x_ref_abs = np.asarray(val, dtype=float).reshape(self._model.nx)
-
-    def step(
-        self,
-        y: np.ndarray,
-        d: np.ndarray,
-        p: Optional[np.ndarray] = None,
-        t: float = 0.0,
-        D_forecast: Optional[np.ndarray] = None,
-        x_ref_abs_seq: Optional[np.ndarray] = None,
-        offset_seq: Optional[np.ndarray] = None,
-        q_scale_seq: Optional[np.ndarray] = None,
-        r_scale_seq: Optional[np.ndarray] = None,
-        u_min_seq: Optional[np.ndarray] = None,
-        u_max_seq: Optional[np.ndarray] = None,
-        price_seq: Optional[np.ndarray] = None,
-        elec_heat: Optional[np.ndarray] = None,
-        elec_cool: Optional[np.ndarray] = None,
-        bid_mask: Optional[np.ndarray] = None,
-        price_weight: float = 0.0,
-        dt_h: float = 0.25,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        model = self._model
-        nz = model.nz
-        nu = model.nu
-        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
-        d_now = np.asarray(d, dtype=float).reshape(model.nd)
-        D = (
-            np.asarray(D_forecast, dtype=float).reshape(self._N, model.nd)
-            if D_forecast is not None
-            else np.tile(d_now.reshape(1, -1), (self._N, 1))
-        )
-
-        self.clear_horizon_profile()
-        self.set_disturbance_profile(D)
-
-        z_ref_steps = (
-            np.asarray(x_ref_abs_seq, dtype=float).reshape(self._N, nz)
-            if x_ref_abs_seq is not None
-            else np.tile(self._x_ref_abs[:nz].reshape(1, -1), (self._N, 1))
-        )
-        self._ocp._z_ref = _repeat_step_profile_for_substeps(
-            z_ref_steps,
-            n_steps=self._ocp._n_steps,
-        )
-
-        if offset_seq is not None:
-            offsets = np.asarray(offset_seq, dtype=float).reshape(self._N, nz)[0]
-        else:
-            offsets = np.array(
-                [
-                    float(
-                        getattr(self._model._model.rooms[name], "comfort_offset", 2.0)
-                        or 2.0
-                    )
-                    for name in self._model._room_list
-                ],
-                dtype=float,
-            )
-        self._ocp._z_min = z_ref_steps[0] - offsets
-        self._ocp._z_max = z_ref_steps[0] + offsets
-
-        q_diag = self._Q_diag.copy()
-        if q_scale_seq is not None:
-            q_diag *= np.asarray(q_scale_seq, dtype=float).reshape(self._N, nz)[0]
-        r_diag = self._R_diag.copy()
-        if r_scale_seq is not None:
-            r_diag *= np.asarray(r_scale_seq, dtype=float).reshape(self._N, nu)[0]
-        self._ocp._Q_z = np.diag(q_diag)
-        self._ocp._R_stage = np.diag(r_diag)
-        self._ocp._P_terminal = np.diag(self._terminal_weight * q_diag)
-        self._ocp._Q_du = None if self._S_diag is None else np.diag(self._S_diag)
-
-        if u_min_seq is not None and u_max_seq is not None:
-            # Nonlinear OCP has static input bounds; first-step clamps are still
-            # honoured, while genuinely time-varying clamp profiles remain a
-            # known parity gap versus the linear QP path.
-            self._ocp._u_min = np.asarray(u_min_seq, dtype=float).reshape(self._N, nu)[0]
-            self._ocp._u_max = np.asarray(u_max_seq, dtype=float).reshape(self._N, nu)[0]
-        else:
-            self._ocp._u_min, self._ocp._u_max = model.u_bounds
-
-        self._configure_price(
-            price_seq, elec_heat, elec_cool, bid_mask, price_weight, dt_h
-        )
-
-        u_abs = self.compute(y, D, p_, t)
-        U_abs = (
-            self._u_seq_prev.copy()
-            if self._u_seq_prev is not None
-            else np.tile(np.asarray(u_abs, dtype=float).reshape(1, -1), (self._N, 1))
-        )
-        X_traj = self._x_traj_prev
-        if X_traj is None:
-            X_abs = np.tile(self._estimator.x_hat.reshape(1, -1), (self._N, 1))
-        else:
-            X_abs = np.asarray(X_traj, dtype=float)[
-                self._ocp._n_steps :: self._ocp._n_steps
-            ][: self._N]
-
-        u_min_abs, u_max_abs = model.u_bounds
-        U_abs = np.clip(U_abs, u_min_abs.reshape(1, -1), u_max_abs.reshape(1, -1))
-        u_abs = U_abs[0].copy()
-        self._u_prev = u_abs.copy()
-        return u_abs, U_abs, X_abs
-
-    def _configure_price(
-        self,
-        price_seq: Optional[np.ndarray],
-        elec_heat: Optional[np.ndarray],
-        elec_cool: Optional[np.ndarray],
-        bid_mask: Optional[np.ndarray],
-        price_weight: float,
-        dt_h: float,
-    ) -> None:
-        self._ocp._p_u_eco = None
-        self._ocp._lagrange = None
-        self._ocp._lagrange_jac = None
-        if not (price_seq is not None and price_weight > 0.0 and elec_heat is not None):
-            return
-        model = self._model
-        nu = model.nu
-        price = np.maximum(np.asarray(price_seq, dtype=float).reshape(-1), 0.0)
-        if price.size == 0:
-            return
-        elec_heat = np.asarray(elec_heat, dtype=float).reshape(nu)
-        elec_cool = (
-            np.asarray(elec_cool, dtype=float).reshape(nu)
-            if elec_cool is not None
-            else elec_heat
-        )
-        bid = (
-            np.asarray(bid_mask, dtype=bool).reshape(nu)
-            if bid_mask is not None
-            else np.zeros(nu, dtype=bool)
-        )
-        _, u_max_abs = model.u_bounds
-        # The continuous OCP's static p_u_eco is horizon-invariant. Use an
-        # equivalent stage Lagrange term so each MPC step keeps its own price.
-        coeff_profile = np.zeros((self._N, nu), dtype=float)
-        for k in range(self._N):
-            for i in range(nu):
-                if bid[i]:
-                    continue
-                if float(u_max_abs[i]) > 0.0:
-                    coeff_profile[k, i] = (
-                        price_weight * price[k] * elec_heat[i] * 1e-3 / 3600.0
-                    )
-                else:
-                    coeff_profile[k, i] = (
-                        -price_weight * price[k] * elec_cool[i] * 1e-3 / 3600.0
-                    )
-        if not np.any(coeff_profile != 0.0):
-            return
-
-        def _price_step_index(t: float) -> int:
-            return min(max(int((float(t) - 1e-9) // self._dt), 0), self._N - 1)
-
-        def _price_lagrange(t, _x, _y, u, _theta) -> float:
-            return float(coeff_profile[_price_step_index(t)] @ u)
-
-        def _price_lagrange_jac(t, _x, _y, _u, _theta):
-            return (
-                np.zeros(model.nx, dtype=float),
-                np.zeros(getattr(model, "ny", 0), dtype=float),
-                coeff_profile[_price_step_index(t)].copy(),
-            )
-
-        self._ocp._lagrange = _price_lagrange
-        self._ocp._lagrange_jac = _price_lagrange_jac
-
-    def estimate_only(
-        self,
-        y: np.ndarray,
-        d: np.ndarray,
-        p: Optional[np.ndarray] = None,
-        t: float = 0.0,
-    ) -> np.ndarray:
-        d_now = np.asarray(d, dtype=float).reshape(self._model.nd)
-        p_ = np.array([], dtype=float) if p is None else np.asarray(p, dtype=float)
-        y_arr = np.asarray(y, dtype=float).reshape(self._model.nym)
-        x_hat, _ = self._estimator.step(y_arr, self._u_prev, self._d_prev, p_, t)
-        self._d_prev = d_now.copy()
-        return np.asarray(x_hat, dtype=float)
-
-
 # ============================================================
 # House-heating linearised MPC facade
 # ============================================================
@@ -1983,8 +1732,6 @@ class HeatingMPCController:
         solver_options: Optional[Dict[str, Any]] = None,
         use_analytic_derivatives: bool = True,
         energy_price_weight: float = 0.0,
-        mpc_mode: str = MPC_MODE_LINEAR,
-        nonlinear_backend: str = "scipy",
     ) -> None:
         self._sources = heat_sources
         self._horizon = horizon
@@ -1993,15 +1740,9 @@ class HeatingMPCController:
         self._longitude = longitude
         self._albedo = float(albedo)
 
-        self._mpc_mode = normalize_mpc_mode(mpc_mode, legacy_solver=solver)
-        # Non-linear MPC always uses SciPy; Ipopt/cyipopt is not supported.
-        self._nonlinear_backend = "scipy"
-        _ = nonlinear_backend  # accepted for call-site compatibility
-        if self._mpc_mode == MPC_MODE_NONLINEAR:
-            self._solver_requested = self._nonlinear_backend
-        else:
-            self._solver_requested = "highs"
-        self._solver_active = self._solver_requested
+        # solver/derivative args accepted for API compat; QP backend always used
+        self._solver_requested = "qp"
+        self._solver_active = "qp"
         self._use_analytic_derivatives = True
 
         if tracking_weight < 0.0:
@@ -2064,17 +1805,10 @@ class HeatingMPCController:
         )
 
         # ── OCP cost matrices ────────────────────────────────────────────
-        Q_diag = np.full(n_z, float(tracking_weight), dtype=float)
-        R_diag = np.full(n_u, float(energy_weight), dtype=float)
-        S_diag = (
-            np.full(n_u, float(smoothing_weight), dtype=float)
-            if smoothing_weight > 0.0
-            else None
-        )
-        Q_cv = np.diag(Q_diag)
-        R_cv = np.diag(R_diag)
-        P_cv = np.diag(float(terminal_weight) * Q_diag)
-        S_cv = None if S_diag is None else np.diag(S_diag)
+        Q_cv = _diag_np(n_z, float(tracking_weight))
+        R_cv = _diag_np(n_u, float(energy_weight))
+        P_cv = _diag_np(n_z, float(terminal_weight) * float(tracking_weight))
+        S_cv = _diag_np(n_u, float(smoothing_weight)) if smoothing_weight > 0.0 else None
 
         # Soft-constraint penalties on comfort-corridor violations
         rho = float(soft_constraint_weight)
@@ -2099,63 +1833,23 @@ class HeatingMPCController:
         x_ref = np.zeros(n_x_ctrl)
         x_ref[:n_rooms] = [model.rooms[name].setpoint for name in room_list]
 
-        # ── MPC controller (linear HiGHS QP or nonlinear SciPy NLP) ───────
-        if self._mpc_mode == MPC_MODE_NONLINEAR:
-            nlp_backend = ScipyNLPBackend(
-                method="SLSQP",
-                options={"maxiter": 500, "ftol": 1e-9, "disp": False},
-            )
-            self._solver_requested = "scipy"
-            self._solver_active = "scipy"
-            ocp = StandardContinuousOCP(
-                model=self._control_system,
-                N=horizon,
-                Q_z=Q_cv,
-                z_ref=x_ref[:n_z],
-                R_stage=R_cv,
-                P_terminal=P_cv,
-                Q_du=S_cv,
-                u_min=u_min,
-                u_max=u_max,
-                z_min=x_ref[:n_z] - y_offset,
-                z_max=x_ref[:n_z] + y_offset,
-                rho_z_1=rho_lin,
-                rho_z_2=rho,
-                n_steps=n_int_steps,
-                solver=nlp_backend,
-                dt=dt,
-            )
-            self._mpc = HeatingNonlinearMPC(
-                model=self._control_system,
-                estimator=self._ekf,
-                N=horizon,
-                dt=dt,
-                x_ref=x_ref,
-                ocp=ocp,
-                Q_diag=Q_diag,
-                R_diag=R_diag,
-                terminal_weight=terminal_weight,
-                S_diag=S_diag,
-                z_offset=y_offset,
-            )
-        else:
-            self._mpc = HeatingLinearisedMPC(
-                model=self._control_system,
-                estimator=self._ekf,
-                N=horizon,
-                Q=Q_cv,
-                R=R_cv,
-                dt=dt,
-                u_min=u_min,
-                u_max=u_max,
-                x_ref=x_ref,
-                P=P_cv,
-                S=S_cv,
-                rho=rho,
-                rho_lin=rho_lin,
-                z_offset=y_offset,
-                solver="highs",
-            )
+        # ── MPC controller (native mbc successive-linearisation MPC) ─────
+        self._mpc = HeatingLinearisedMPC(
+            model=self._control_system,
+            estimator=self._ekf,
+            N=horizon,
+            Q=Q_cv,
+            R=R_cv,
+            dt=dt,
+            u_min=u_min,
+            u_max=u_max,
+            x_ref=x_ref,
+            P=P_cv,
+            S=S_cv,
+            rho=rho,
+            rho_lin=rho_lin,
+            z_offset=y_offset,
+        )
 
         # Store global cost weights so the trajectory builder can use them
         # to convert per-period multipliers to absolute values if needed,
@@ -2224,18 +1918,13 @@ class HeatingMPCController:
 
     @property
     def solver_requested(self) -> str:
-        """Configured solver backend name for the active MPC mode."""
+        """Configured solver backend name (always 'qp')."""
         return self._solver_requested
 
     @property
     def solver_active(self) -> str:
-        """Currently active solver backend."""
+        """Currently active solver backend (always 'qp')."""
         return self._solver_active
-
-    @property
-    def mpc_mode(self) -> str:
-        """Configured MPC dynamics mode."""
-        return self._mpc_mode
 
     @property
     def use_analytic_derivatives(self) -> bool:
@@ -2906,10 +2595,8 @@ class HeatingMPCController:
             U_abs, outdoor_seq, solar_seq, room_list, n_rooms,
             wind_seq=wind_seq,
         )
-        self._linearised_predictions = (
-            []
-            if self._mpc_mode == MPC_MODE_NONLINEAR
-            else self._extract_linearised_predictions(X_abs, room_list, n_rooms)
+        self._linearised_predictions = self._extract_linearised_predictions(
+            X_abs, room_list, n_rooms
         )
 
         # ── Heating schedule ─────────────────────────────────────────────
