@@ -368,16 +368,12 @@ function renderTuningIndex(container, rooms, connection, hass) {
   }
 
   function updateModeAvailability(config) {
-    // Prefer nonlinear_available (Ipopt or SciPy). Fall back to legacy ipopt_available.
-    const available =
-      config?.nonlinear_available === true ||
-      (config?.nonlinear_available === undefined && config?.ipopt_available === true);
+    const available = config?.nonlinear_available === true;
     if (nonlinearOption) nonlinearOption.disabled = !available;
     if (modeHint) {
-      // Keep hints short — never dump install or wheel detail into mode help.
       modeHint.textContent = available
-        ? 'Non-linear mode is available (capability probe passed on the last restart).'
-        : 'Non-linear mode needs an NLP solver backend. It will be selectable after a restart probe passes.';
+        ? 'Non-linear mode is available (SciPy NLP probe passed on the last restart).'
+        : 'Non-linear mode needs the SciPy NLP probe to pass. It will be selectable after a successful restart probe.';
     }
   }
 

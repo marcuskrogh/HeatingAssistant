@@ -108,10 +108,9 @@ class _FakeCoordinator:
         self._energy_price_weight = 1.0
         self._mpc_mode = "linear"
         self._mpc_solver = "qp"
-        self._ipopt_available = False
         self._nonlinear_available = False
         self._nonlinear_backend = None
-        self._ipopt_unavailable_reason = None
+        self._nonlinear_unavailable_reason = None
         self._mpc_analytic_derivatives = True
         self._latitude = 0.0
         self._longitude = 0.0

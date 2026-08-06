@@ -107,15 +107,6 @@ def _read_previous_baseline(path: str) -> Dict[Tuple[str, str, str], float]:
 _PREVIOUS_BASELINE = _read_previous_baseline(_BENCHMARKS_FILE)
 
 
-def _ipopt_available() -> bool:
-    """Return True when cyipopt is importable in the current environment."""
-    try:
-        import cyipopt  # noqa: F401
-    except Exception:
-        return False
-    return True
-
-
 def _format_comparison_rows(results: List[dict]) -> List[str]:
     """Build markdown rows comparing current medians with previous benchmarks."""
     rows: List[str] = []
@@ -501,12 +492,11 @@ class TestParameterEstimationPerformance:
             estimator.estimate(history)
 
         mean_ms, median_ms, p95_ms = _time_it(run, _ESTIM_REPS)
-        ipopt_available = _ipopt_available()
-        solver_active = "IPOPT" if ipopt_available else "SLSQP"
+        solver_active = "SLSQP"
         _record(
             "two-bedroom-2room",
             "KalmanMLEstimator.estimate",
-            "IPOPT",
+            "SLSQP",
             solver_active,
             _ESTIM_REPS,
             mean_ms,
@@ -514,7 +504,7 @@ class TestParameterEstimationPerformance:
             p95_ms,
         )
 
-        threshold_ms = 120_000 if ipopt_available else 180_000
+        threshold_ms = 180_000
         assert median_ms < threshold_ms, (
             f"KalmanMLEstimator.estimate median {median_ms:.0f}ms exceeds "
             f"{threshold_ms:,}ms for two-bedroom-2room ({solver_active})"

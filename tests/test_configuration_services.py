@@ -64,10 +64,9 @@ def _make_hass(entry, coordinator, update_calls, monkeypatch):
 def _make_coordinator():
     coordinator = MagicMock()
     coordinator._entry = SimpleNamespace(entry_id="entry-1")
-    coordinator._ipopt_available = True
     coordinator._nonlinear_available = True
-    coordinator._nonlinear_backend = "ipopt"
-    coordinator._ipopt_unavailable_reason = None
+    coordinator._nonlinear_backend = "scipy"
+    coordinator._nonlinear_unavailable_reason = None
     return coordinator
 
 
@@ -97,14 +96,13 @@ async def test_update_controller_tuning_rejects_nonlinear_when_nlp_unavailable(
 ):
     entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
     coordinator = _make_coordinator()
-    coordinator._ipopt_available = False
     coordinator._nonlinear_available = False
-    coordinator._ipopt_unavailable_reason = "solver probe failed"
+    coordinator._nonlinear_unavailable_reason = "solver probe failed"
     update_calls: list = []
     hass = _make_hass(entry, coordinator, update_calls, monkeypatch)
 
     handlers = _capture_handlers(hass)
-    with pytest.raises(MpcModeUnavailableError, match="NLP solver backend"):
+    with pytest.raises(MpcModeUnavailableError, match="SciPy NLP"):
         await handlers["update_controller_tuning"](
             SimpleNamespace(data={CONF_MPC_MODE: MPC_MODE_NONLINEAR})
         )
@@ -114,12 +112,11 @@ async def test_update_controller_tuning_rejects_nonlinear_when_nlp_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_update_controller_tuning_allows_nonlinear_with_scipy_fallback(
+async def test_update_controller_tuning_allows_nonlinear_with_scipy(
     monkeypatch,
 ):
     entry = SimpleNamespace(data={}, options={}, entry_id="entry-1")
     coordinator = _make_coordinator()
-    coordinator._ipopt_available = False
     coordinator._nonlinear_available = True
     coordinator._nonlinear_backend = "scipy"
     update_calls: list = []

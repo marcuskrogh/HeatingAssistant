@@ -1,10 +1,8 @@
 """
-Controller-level benchmark: HeatingMPCController.compute() with SLSQP
-and analytical derivatives.
+Controller-level benchmark: HeatingMPCController.compute() with SciPy
+SLSQP and analytical derivatives.
 
-Mirrors the scenario configurations in tests/test_performance.py but
-uses only SLSQP (mbc's deterministic fallback, always available) so the
-benchmark runs without cyipopt.
+Mirrors the scenario configurations in tests/test_performance.py.
 
 Usage:
     python benchmarks/bench_controller.py
