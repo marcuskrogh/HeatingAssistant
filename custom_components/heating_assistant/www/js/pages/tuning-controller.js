@@ -142,12 +142,12 @@ function renderTuningIndex(container, rooms, connection, hass) {
       ${MODE_OPTIONS.map((opt) => `<option value="${opt.value}">${opt.label}</option>`).join('')}
     </select>
     <span class="form-hint">${MODE_DEF.hint}</span>
-    <span class="form-hint" id="ctrl-mpc-mode-ipopt"></span>
+    <span class="form-hint" id="ctrl-mpc-mode-hint"></span>
   `;
   formSection.appendChild(modeGroup);
   inputs[MODE_DEF.key] = modeGroup.querySelector('select');
   nonlinearOption = inputs[MODE_DEF.key].querySelector('option[value="non-linear"]');
-  modeHint = modeGroup.querySelector('#ctrl-mpc-mode-ipopt');
+  modeHint = modeGroup.querySelector('#ctrl-mpc-mode-hint');
 
   function appendParamSubsection(title, description, defs) {
     const subsection = document.createElement('div');

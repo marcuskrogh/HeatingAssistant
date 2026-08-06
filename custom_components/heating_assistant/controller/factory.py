@@ -39,7 +39,7 @@ class ControllerBuildConfig:
     mpc_mode: str = DEFAULT_MPC_MODE
     # Capability flag must come from the startup SciPy NLP probe.
     nonlinear_available: bool = False
-    nonlinear_backend: str = BACKEND_SCIPY
+    nonlinear_backend: Optional[str] = BACKEND_SCIPY
     nonlinear_unavailable_reason: Optional[str] = None
     albedo: float = DEFAULT_GROUND_ALBEDO
     measurement_dt: Optional[float] = None
@@ -123,7 +123,7 @@ class ControllerBuildConfig:
             ),
             mpc_mode=mpc_mode,
             nonlinear_available=nonlinear_available,
-            nonlinear_backend=BACKEND_SCIPY,
+            nonlinear_backend=BACKEND_SCIPY if nonlinear_available else None,
             nonlinear_unavailable_reason=getattr(
                 coordinator, "_nonlinear_unavailable_reason", None
             ),

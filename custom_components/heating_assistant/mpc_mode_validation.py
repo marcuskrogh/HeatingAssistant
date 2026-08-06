@@ -16,13 +16,6 @@ def coordinator_nonlinear_available(coordinator: Any) -> bool:
     return bool(getattr(coordinator, "_nonlinear_available", False))
 
 
-def coordinator_nonlinear_backend(coordinator: Any) -> str | None:
-    """Return the probed NLP backend name, or None when unavailable."""
-    if not coordinator_nonlinear_available(coordinator):
-        return None
-    return "scipy"
-
-
 def mpc_mode_unavailable_message(reason: str | None = None) -> str:
     """Return a short user-facing explanation for unavailable non-linear MPC.
 
