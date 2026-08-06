@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-253 | Bug | [Bug] HA Core UI freezes on startup when cyipopt wheel install hangs | In Review | — | docs/agents/BUG-swd-253-cyipopt-startup-hang.md | `/review-fix SWD-253` |
+| SWD-253 | Bug | [Bug] HA Core UI freezes on startup when cyipopt wheel install hangs | Done | — | docs/agents/BUG-swd-253-cyipopt-startup-hang.md | Done |
 | SWD-238 | Story (Epic) | Dual-mode MPC (linear / non-linear) | To Do | — | docs/agents/ROADMAP-dual-mode-mpc.md | Optional: close research **SWD-239** |
 | SWD-239 | Task | Research: solver backends & mode-guidance evidence (Ipopt NMPC; HPIPM for linear) | To Do | SWD-238 | docs/agents/RESEARCH-swd-239-dual-mode-mpc.md | Optional closeout (brief landed) |
 | SWD-240 | Task | Define: dual-mode MPC config (linear / non-linear) + guidance + internal solvers | Done | SWD-238 | docs/agents/PLAN-swd-240-dual-mode-mpc.md | Done |

@@ -49,5 +49,10 @@
 - Branch: `cursor/swd-253-cyipopt-startup-hang-af84`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/543
 
+## Shipped
+- Removed Ipopt/cyipopt entirely; SciPy-only NLP for non-linear MPC and estimation
+- Deleted vendored wheels + runtime pip install path that hung HAOS Core
+- review-fix CLEAN; merged via PR #543
+
 ## Next
-`/review-fix SWD-253` — Review delivery PR #543
+Done
