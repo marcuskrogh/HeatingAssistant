@@ -1,0 +1,36 @@
+name: "HeatingAssistant"
+version: "2.0.0"
+slug: heatingassistant
+description: "Heating control App for Home Assistant OS (SWD-255)"
+url: "https://github.com/marcuskrogh/HeatingAssistant"
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: application
+boot: auto
+timeout: 120
+watchdog: "http://[HOST]:[PORT:8099]/"
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:radiator
+panel_title: HeatingAssistant
+ports:
+  8099/tcp: 8099
+map:
+  - type: data
+    read_only: false
+  - type: homeassistant_config
+    read_only: false
+options:
+  instance_id: default
+  mqtt_broker: core-mosquitto
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+schema:
+  instance_id: str
+  mqtt_broker: str
+  mqtt_port: port
+  mqtt_username: str
+  mqtt_password: password

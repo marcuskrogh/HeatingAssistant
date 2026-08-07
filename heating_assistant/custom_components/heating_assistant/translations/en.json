@@ -1,0 +1,665 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Welcome to Heating Assistant",
+        "description": "Heating Assistant uses model-predictive control to keep your home comfortable while minimising energy use.\n\nConfirm your home's location below (pre-filled from Home Assistant). After setup, open the **Heating Assistant** sidebar panel to add rooms, heat sources and sensors.",
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude"
+        },
+        "data_description": {
+          "latitude": "Decimal degrees, positive north of the equator. Used for solar gain prediction. Pre-filled from your Home Assistant location.",
+          "longitude": "Decimal degrees, positive east of the prime meridian. Used for solar gain prediction. Pre-filled from your Home Assistant location."
+        }
+      },
+      "reconfigure": {
+        "title": "Site location",
+        "description": "Update your home's location. Sensors, timing, rooms, heat sources and schedules are managed from **Configure** and the Heating Assistant panel.",
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude"
+        },
+        "data_description": {
+          "latitude": "Decimal degrees, positive north of the equator. Used for solar gain prediction.",
+          "longitude": "Decimal degrees, positive east of the prime meridian. Used for solar gain prediction."
+        }
+      }
+    },
+    "abort": {
+      "reconfigure_successful": "Site location updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Heating Assistant",
+        "description": "Configure how Heating Assistant controls your home. Changes are saved when you pick **Save & close**.",
+        "menu_options": {
+          "global_settings": "General & sensor settings",
+          "manage_rooms": "Rooms",
+          "manage_room_windows": "Windows",
+          "manage_room_heaters": "Heat sources",
+          "save": "Save & close"
+        }
+      },
+      "global_settings": {
+        "title": "General & sensor settings",
+        "description": "Outdoor sources and how often the controller re-plans.",
+        "data": {
+          "outdoor_temp_entity": "Outdoor temperature sensor",
+          "weather_entity": "Weather forecast",
+          "solar_radiation_entity": "Solar radiation (irradiance) sensor",
+          "price_entity": "Electricity price sensor",
+          "price_net_tariff": "Net tariff (per kWh)",
+          "price_spot_surcharge": "Spot price surcharge (per kWh)",
+          "update_interval": "Control interval (seconds)"
+        },
+        "data_description": {
+          "outdoor_temp_entity": "A local sensor measuring current outdoor temperature. Optional when a weather forecast entity is set.",
+          "weather_entity": "Provides forecasts so the controller can plan ahead. Optional; if not set, an outdoor temperature sensor is required.",
+          "solar_radiation_entity": "Optional. A sensor reporting the sun's solar irradiance (Global Horizontal Irradiance) in W/m² — e.g. Open-Meteo's shortwave_radiation, or a pyranometer — ideally with an hourly forecast in its attributes. When set, the forecast replaces the modelled clear-sky radiation in the solar-gain model (decomposed and transposed onto your windows by geometry); the clear-sky model stays as the automatic fallback. This is the sun's radiation, not solar-panel production.",
+          "price_entity": "Optional. A sensor exposing hourly spot prices (Nord Pool, Tibber, Energi Data Service, etc.). When set, the controller accounts for electricity prices when planning heating.",
+          "price_net_tariff": "Fixed grid / network tariff to add to the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.20 DKK/kWh). Ensures the effective price seen by the controller is never below your actual cost of electricity.",
+          "price_spot_surcharge": "Fixed spot price surcharge or electricity tax to add on top of the raw spot price, in the same currency per kWh as your price sensor (e.g. 0.90 DKK/kWh for Danish elafgift). Together with the net tariff this floors the effective price at a realistic consumer value.",
+          "update_interval": "Re-planning cadence in seconds (60–3600). 900 s (15 min) suits most homes."
+        }
+      },
+      "mpc_tuning": {
+        "title": "Control behaviour",
+        "description": "Tune how the controller balances comfort, energy use and responsiveness. The top two are the everyday knobs; the rest are advanced and rarely need changing.",
+        "data": {
+          "tracking_weight": "Setpoint tracking strength",
+          "energy_weight": "Energy-use penalty",
+          "horizon": "Prediction horizon (steps)",
+          "smoothing_weight": "Output smoothing",
+          "soft_constraint_weight": "Comfort band quadratic penalty",
+          "soft_constraint_linear_weight": "Comfort band linear penalty",
+          "terminal_weight": "End-of-horizon weight",
+          "energy_price_weight": "Price sensitivity"
+        },
+        "data_description": {
+          "tracking_weight": "How strongly the controller chases the exact setpoint. 0 = stay inside the comfort band only. Higher values mean tighter tracking at the cost of more energy use.",
+          "energy_weight": "How strongly the controller avoids running heaters. Higher values save energy but may drift toward the edges of the comfort band.",
+          "horizon": "Advanced — number of control intervals planned ahead. 100 steps ≈ 25 hours at a 15-minute interval.",
+          "smoothing_weight": "Advanced — penalises rapid changes in heater output. Higher = smoother but less responsive.",
+          "soft_constraint_weight": "Advanced — quadratic penalty ρ on comfort-band violations (ρ·ε²). Higher = stronger restoring force proportional to how far outside the band the temperature is.",
+          "soft_constraint_linear_weight": "Advanced — linear penalty ρ_lin on comfort-band violations (ρ_lin·ε). Applies a constant restoring force as soon as the temperature leaves the band, regardless of the magnitude of the violation. Combine with the quadratic penalty or use alone. 0 = disabled.",
+          "terminal_weight": "Advanced — weight applied at the prediction horizon. Higher values discourage end-of-horizon drift.",
+          "energy_price_weight": "Scales how strongly the electricity price enters the MPC cost. Comfort is always respected first — the price term shifts heating timing within the comfort zone toward cheaper hours. Start at 1 (default). Raise to 5–20 for a stronger response; lower if comfort is being sacrificed. 0 disables price awareness. Only active when an electricity price sensor is configured."
+        }
+      },
+      "manage_rooms": {
+        "title": "Manage rooms",
+        "description": "Add, edit, or remove rooms. Configure heaters and windows from the main menu.",
+        "menu_options": {
+          "add_room": "Add a room",
+          "edit_room": "Edit a room",
+          "remove_room": "Remove a room",
+          "finish_rooms": "Back"
+        }
+      },
+      "add_room": {
+        "title": "Add a room",
+        "description": "Tell Heating Assistant about a new room. Optional envelope refinements are in the collapsible **Advanced settings** section.",
+        "data": {
+          "name": "Room name",
+          "temp_sensors": "Indoor temperature sensors",
+          "window_sensors": "Window / door sensors",
+          "room_size": "Room size",
+          "building_age": "Building age (insulation level)",
+          "envelope_tightness": "Envelope tightness",
+          "comfort_offset": "Comfort band (± °C)",
+          "floor_type": "Floor type",
+          "facade_colour": "Facade colour",
+          "facade_solar_share": "Facade solar share",
+          "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
+          "sky_radiative_ua": "Sky radiative coupling (W/K)",
+          "solar_exposure": "Solar exposure",
+          "solar_facing": "Sun-facing direction"
+        },
+        "data_description": {
+          "name": "A unique identifier for this room (e.g. 'Living Room'). Used as the climate entity name.",
+          "temp_sensors": "Sensors measuring this room's indoor temperature. Pick one or more — multiple sensors are averaged.",
+          "window_sensors": "Binary sensors that go ON when a window or door is open. The controller pauses heating when any of these are open.",
+          "room_size": "Rough room volume. Determines the room's thermal mass; can be refined later from measured data.",
+          "building_age": "Older buildings lose more heat. Determines the room's insulation level; refined automatically over time.",
+          "envelope_tightness": "How draught-proof the envelope is. Affects how much heat is lost through wind-driven air infiltration.",
+          "comfort_offset": "Symmetric band around the setpoint that's still considered comfortable. ±2 °C is typical.",
+          "floor_type": "Advanced — underfloor heating and concrete slabs add a large slow thermal mass that the model can track separately.",
+          "facade_colour": "Advanced — affects how much solar gain the opaque walls absorb. Darker = more absorption.",
+          "facade_solar_share": "Advanced — fraction of window-derived solar gain attributed to the opaque facade (0 = ignored). Typical 0.2–0.6 when enabled.",
+          "thermal_bridge_psi_l": "Advanced — extra heat loss from window frames, balcony slabs, etc. Leave at 0 if unknown — the model can infer it from data.",
+          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky (clear-night cooling). Leave at 0 if unknown.",
+          "solar_exposure": "Quick alternative to listing individual windows: how much direct sun this room gets. Used only when no windows are added below; adding windows overrides it.",
+          "solar_facing": "The direction the room's main glazing faces. Only used with the solar-exposure preset above."
+        }
+      },
+      "edit_room": {
+        "title": "Edit a room",
+        "description": "Pick a room to edit.",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "room_detail": {
+        "title": "Edit room: {name}",
+        "description": "Update sensors, sizing, and the comfort band for this room.",
+        "data": {
+          "name": "Room name",
+          "temp_sensors": "Indoor temperature sensors",
+          "window_sensors": "Window / door sensors",
+          "room_size": "Room size",
+          "building_age": "Building age (insulation level)",
+          "envelope_tightness": "Envelope tightness",
+          "comfort_offset": "Comfort band (± °C)",
+          "floor_type": "Floor type",
+          "facade_colour": "Facade colour",
+          "facade_solar_share": "Facade solar share",
+          "thermal_bridge_psi_l": "Linear thermal bridges (W/K)",
+          "sky_radiative_ua": "Sky radiative coupling (W/K)",
+          "solar_exposure": "Solar exposure",
+          "solar_facing": "Sun-facing direction"
+        },
+        "data_description": {
+          "name": "A unique identifier for this room.",
+          "temp_sensors": "Sensors measuring this room's indoor temperature. Multiple sensors are averaged.",
+          "window_sensors": "Binary sensors that go ON when a window or door is open.",
+          "room_size": "Rough room volume. Determines the room's thermal mass.",
+          "building_age": "Older buildings lose more heat. Determines insulation level.",
+          "envelope_tightness": "How draught-proof the envelope is.",
+          "comfort_offset": "Symmetric band around the setpoint that's still considered comfortable.",
+          "floor_type": "Advanced — underfloor heating and concrete slabs add a large slow thermal mass.",
+          "facade_colour": "Advanced — affects opaque-wall solar absorption.",
+          "facade_solar_share": "Advanced — fraction of window-derived solar gain attributed to the opaque facade.",
+          "thermal_bridge_psi_l": "Advanced — extra heat loss from window frames, balcony slabs, etc.",
+          "sky_radiative_ua": "Advanced — long-wave radiation to the night sky.",
+          "solar_exposure": "Quick alternative to listing windows: how much direct sun this room gets. Used only when no windows are added; adding windows overrides it.",
+          "solar_facing": "The direction the room's main glazing faces. Only used with the solar-exposure preset."
+        }
+      },
+      "manage_room_windows": {
+        "title": "Windows: pick a room",
+        "description": "Choose which room's windows to configure.",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "remove_room": {
+        "title": "Remove a room",
+        "description": "This will delete the room and all of its heaters, windows and schedule periods. Cannot be undone.",
+        "data": {
+          "room_name": "Room to remove"
+        }
+      },
+      "manage_windows": {
+        "title": "Windows in {name}",
+        "description": "Solar gain is computed for each configured window. Window-open detection uses the room's binary sensors instead.",
+        "menu_options": {
+          "add_window": "Add a window",
+          "edit_window": "Edit a window",
+          "remove_window": "Remove a window",
+          "finish_windows": "Done"
+        }
+      },
+      "add_window": {
+        "title": "Add a window to {name}",
+        "description": "Tell Heating Assistant about a window so it can compute its solar gain.",
+        "data": {
+          "area": "Glazed area (m²)",
+          "orientation": "Orientation",
+          "tilt": "Tilt from horizontal (°)"
+        },
+        "data_description": {
+          "area": "The glazed surface area in m². Frames are not counted.",
+          "orientation": "Compass direction the window faces (where the sun strikes it most directly).",
+          "tilt": "Tilt of the window pane. 90° is a normal vertical window in a wall; 0° is a horizontal skylight."
+        }
+      },
+      "edit_window": {
+        "title": "Edit a window in {name}",
+        "description": "Pick which window to edit.",
+        "data": {
+          "window_idx": "Window"
+        }
+      },
+      "window_detail": {
+        "title": "Edit window: {name}",
+        "description": "Update this window's area, orientation, and tilt.",
+        "data": {
+          "area": "Glazed area (m²)",
+          "orientation": "Orientation",
+          "tilt": "Tilt from horizontal (°)"
+        },
+        "data_description": {
+          "area": "The glazed surface area in m². Frames are not counted.",
+          "orientation": "Compass direction the window faces (where the sun strikes it most directly).",
+          "tilt": "Tilt of the window pane. 90° is a normal vertical window in a wall; 0° is a horizontal skylight."
+        }
+      },
+      "remove_window": {
+        "title": "Remove a window from {name}",
+        "description": "Pick the window you want to delete.",
+        "data": {
+          "window_idx": "Window"
+        }
+      },
+      "manage_room_heaters": {
+        "title": "Heat sources: pick a room",
+        "description": "Choose which room's heat sources to configure.",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "manage_heaters": {
+        "title": "Heat sources in {name}",
+        "description": "Heaters are the actuators the controller drives. Each one is a Home Assistant switch entity.",
+        "menu_options": {
+          "add_heater": "Add a heat source",
+          "edit_heater": "Edit a heat source",
+          "remove_heater": "Remove a heat source",
+          "finish_heaters": "Done"
+        }
+      },
+      "add_heater": {
+        "title": "Add a heat source to {name}",
+        "description": "Configure a heater or heat pump. Performance details are in the collapsible **Performance details** section.",
+        "data": {
+          "name": "Display name",
+          "type": "Type",
+          "max_power": "Maximum thermal power (W)",
+          "heater_entity": "Control switch",
+          "efficiency": "Efficiency (electric heater)",
+          "cop_rated": "Rated COP (heat pump)",
+          "cop_temp_ref": "COP reference outdoor temp (°C)",
+          "min_power": "Minimum power (W)",
+          "max_temp_offset": "Max supply temp offset (°C)",
+          "hvac_mode": "Operating mode",
+          "heating_efficiency": "Heating efficiency (heat pump)",
+          "cooling_cop": "Cooling COP / EER (heat pump)",
+          "cooling_efficiency": "Cooling efficiency (heat pump)",
+          "emitter_time_constant": "Emitter response time (s)",
+          "min_power_fraction": "Minimum output fraction (pellet stove)",
+          "charge_power": "Charge power (W)",
+          "storage_capacity_kwh": "Storage capacity (kWh)",
+          "passive_discharge_rate": "Passive discharge rate (fraction/s)"
+        },
+        "data_description": {
+          "name": "Friendly name shown in the dashboard.",
+          "type": "Select the heat source type. Each type has a dedicated physics model. Use 'Generic thermostat' for any device not listed.",
+          "max_power": "Rated thermal output in watts when fully on. For heat pumps this is the heat delivered, not the electrical input.",
+          "heater_entity": "The Home Assistant switch that turns this heater on and off.",
+          "efficiency": "Fraction of electrical input delivered as heat (0–1). Normally 1.0 for electric heaters.",
+          "cop_rated": "Coefficient of performance at the reference outdoor temperature. Typical air-source heat pumps: 2.5–4.5.",
+          "cop_temp_ref": "Outdoor temperature at which the rated COP applies. Manufacturer datasheets typically use 7 °C.",
+          "min_power": "Lowest stable thermal output. 0 = no minimum. Helps the controller avoid short-cycling.",
+          "max_temp_offset": "Largest temperature lift this heat pump will attempt at full power (°C above outdoor).",
+          "hvac_mode": "Whether this unit can heat, cool, or do both.",
+          "heating_efficiency": "Fraction of rated thermal heating capacity actually delivered (0–1).",
+          "cooling_cop": "Cooling coefficient of performance (EER). Cooling capacity = rated electrical input × this value, so it sets the (asymmetric) maximum cooling power independently of heating. Set 0 to disable cooling.",
+          "cooling_efficiency": "Fraction of the rated cooling capacity used (0–1). Lower for gentle dry/dehumidify modes.",
+          "emitter_time_constant": "Lag between the controller's command and heat actually reaching the room. Radiators ≈ 600 s; fan coils ≈ 60 s; resistive heaters ≈ 0 s.",
+          "min_power_fraction": "Pellet stoves cannot modulate below ~30 % of rated output — below this the burner shuts off. Typical value: 0.30.",
+          "charge_power": "Electrical power drawn during the overnight charging window (W). Typical: 1000–3000 W.",
+          "storage_capacity_kwh": "Thermal energy stored in the brick core at full charge (kWh). Typical: 4–18 kWh.",
+          "passive_discharge_rate": "Fraction of stored energy released per second as passive heat. Default (1/(8×3600) ≈ 3.5×10⁻⁵) drains fully over 8 h."
+        }
+      },
+      "edit_heater": {
+        "title": "Edit a heat source",
+        "description": "Pick which heat source to edit.",
+        "data": {
+          "heater_idx": "Heat source"
+        }
+      },
+      "heater_detail": {
+        "title": "Edit heat source: {name}",
+        "description": "Update this heater's wiring and performance parameters.",
+        "data": {
+          "name": "Display name",
+          "type": "Type",
+          "max_power": "Maximum thermal power (W)",
+          "heater_entity": "Control switch",
+          "efficiency": "Efficiency (electric heater)",
+          "cop_rated": "Rated COP (heat pump)",
+          "cop_temp_ref": "COP reference outdoor temp (°C)",
+          "min_power": "Minimum power (W)",
+          "max_temp_offset": "Max supply temp offset (°C)",
+          "hvac_mode": "Operating mode",
+          "heating_efficiency": "Heating efficiency (heat pump)",
+          "cooling_cop": "Cooling COP / EER (heat pump)",
+          "cooling_efficiency": "Cooling efficiency (heat pump)",
+          "emitter_time_constant": "Emitter response time (s)",
+          "min_power_fraction": "Minimum output fraction (pellet stove)",
+          "charge_power": "Charge power (W)",
+          "storage_capacity_kwh": "Storage capacity (kWh)",
+          "passive_discharge_rate": "Passive discharge rate (fraction/s)"
+        },
+        "data_description": {
+          "name": "Friendly name shown in the dashboard.",
+          "type": "Select the heat source type. Each type has a dedicated physics model. Use 'Generic thermostat' for any device not listed.",
+          "max_power": "Rated thermal output in watts when fully on.",
+          "heater_entity": "The Home Assistant switch that turns this heater on and off.",
+          "efficiency": "Fraction of electrical input delivered as heat (0–1).",
+          "cop_rated": "Coefficient of performance at the reference outdoor temperature.",
+          "cop_temp_ref": "Outdoor temperature at which the rated COP applies.",
+          "min_power": "Lowest stable thermal output. 0 = no minimum.",
+          "max_temp_offset": "Largest temperature lift this heat pump will attempt.",
+          "hvac_mode": "Whether this unit can heat, cool, or do both.",
+          "heating_efficiency": "Fraction of rated thermal heating capacity actually delivered (0–1).",
+          "cooling_cop": "Cooling COP (EER). Sets the maximum cooling power (rated electrical input × this value), independent of heating. Set 0 to disable cooling.",
+          "cooling_efficiency": "Fraction of rated cooling capacity used (0–1).",
+          "emitter_time_constant": "Lag between command and delivered heat.",
+          "min_power_fraction": "Pellet stoves cannot modulate below ~30 % of rated output — below this the burner shuts off. Typical value: 0.30.",
+          "charge_power": "Electrical power drawn during the overnight charging window (W). Typical: 1000–3000 W.",
+          "storage_capacity_kwh": "Thermal energy stored in the brick core at full charge (kWh). Typical: 4–18 kWh.",
+          "passive_discharge_rate": "Fraction of stored energy released per second as passive heat. Default (1/(8×3600) ≈ 3.5×10⁻⁵) drains fully over 8 h."
+        }
+      },
+      "remove_heater": {
+        "title": "Remove a heat source",
+        "description": "Pick the heat source you want to delete.",
+        "data": {
+          "heater_idx": "Heat source"
+        }
+      },
+      "manage_room_schedule": {
+        "title": "Schedule: pick a room",
+        "description": "Choose which room's schedule to manage.",
+        "data": {
+          "room_name": "Room"
+        }
+      },
+      "manage_schedule": {
+        "title": "Schedule for {name}",
+        "description": "Periods define time-of-day comfort and setback. Outside any active period the room uses its default setpoint.",
+        "menu_options": {
+          "add_period": "Add a period",
+          "select_edit_period": "Edit a period",
+          "remove_period": "Remove a period",
+          "finish_schedule": "Done"
+        }
+      },
+      "add_period": {
+        "title": "Add a schedule period to {name}",
+        "description": "Create a time-of-day setpoint override (e.g. warm in the evening, cool overnight). The bottom three fields are optional per-period tweaks.",
+        "data": {
+          "name": "Label",
+          "mode": "Mode",
+          "start": "Start time",
+          "end": "End time",
+          "days": "Days of the week",
+          "setpoint": "Setpoint override (°C)",
+          "comfort_offset": "Comfort band override (± °C)",
+          "tracking_weight": "Tracking strength multiplier",
+          "energy_weight": "Energy-use penalty multiplier",
+          "frost_protection": "Frost protection (°C)"
+        },
+        "data_description": {
+          "name": "A short label for this period (e.g. 'morning', 'night').",
+          "mode": "Comfort = follow the setpoint. Off = disable heating (with frost protection).",
+          "start": "Local time when this period begins.",
+          "end": "Local time when this period ends. May cross midnight.",
+          "days": "Leave empty to apply every day.",
+          "setpoint": "Target temperature during this period. Leave at the room default if you don't want an override.",
+          "comfort_offset": "Comfort band width during this period. Leave at the room default if you don't want an override.",
+          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period. 1.0 = no change.",
+          "energy_weight": "Advanced — multiplier on the global energy penalty during this period. 1.0 = no change.",
+          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
+        }
+      },
+      "select_edit_period": {
+        "title": "Edit a schedule period",
+        "description": "Pick which period to edit.",
+        "data": {
+          "period_idx": "Period"
+        }
+      },
+      "edit_period": {
+        "title": "Edit period: {name}",
+        "description": "Update this period's timing and overrides.",
+        "data": {
+          "name": "Label",
+          "mode": "Mode",
+          "start": "Start time",
+          "end": "End time",
+          "days": "Days of the week",
+          "setpoint": "Setpoint override (°C)",
+          "comfort_offset": "Comfort band override (± °C)",
+          "tracking_weight": "Tracking strength multiplier",
+          "energy_weight": "Energy-use penalty multiplier",
+          "frost_protection": "Frost protection (°C)"
+        },
+        "data_description": {
+          "name": "A short label for this period.",
+          "mode": "Comfort = follow the setpoint. Off = disable heating (with frost protection).",
+          "start": "Local time when this period begins.",
+          "end": "Local time when this period ends. May cross midnight.",
+          "days": "Leave empty to apply every day.",
+          "setpoint": "Target temperature during this period.",
+          "comfort_offset": "Comfort band width during this period.",
+          "tracking_weight": "Advanced — multiplier on the global tracking strength during this period.",
+          "energy_weight": "Advanced — multiplier on the global energy penalty during this period.",
+          "frost_protection": "Minimum allowed temperature when this period is in 'off' mode."
+        }
+      },
+      "remove_period": {
+        "title": "Remove a schedule period",
+        "description": "Pick which period to delete.",
+        "data": {
+          "period_idx": "Period"
+        }
+      }
+    },
+    "error": {
+      "duplicate_room": "A room with that name already exists. Please pick a different name.",
+      "invalid_time": "Invalid time. Please pick a time using the picker, or enter HH:MM (e.g. 22:00).",
+      "outdoor_or_weather_required": "Please pick at least one outdoor temperature sensor or weather forecast entity."
+    }
+  },
+  "selector": {
+    "room_size": {
+      "options": {
+        "small": "Small (≈ bedroom, study)",
+        "medium": "Medium (≈ living room)",
+        "large": "Large (≈ open-plan)"
+      }
+    },
+    "building_age": {
+      "options": {
+        "pre_1940": "Pre-1940 — poorly insulated",
+        "1940_1979": "1940 – 1979 — minimal insulation",
+        "1980_1999": "1980 – 1999 — moderately insulated",
+        "2000_plus": "2000 and newer — well insulated"
+      }
+    },
+    "envelope_tightness": {
+      "options": {
+        "leaky": "Leaky (older, unsealed)",
+        "typical": "Typical (1980s – 2000s)",
+        "tight": "Tight (modern construction)",
+        "passive_house": "Passive house"
+      }
+    },
+    "orientation": {
+      "options": {
+        "N": "North",
+        "NE": "Northeast",
+        "E": "East",
+        "SE": "Southeast",
+        "S": "South",
+        "SW": "Southwest",
+        "W": "West",
+        "NW": "Northwest"
+      }
+    },
+    "solar_exposure": {
+      "options": {
+        "none": "None (no direct sun / use windows below)",
+        "low": "Low (small or shaded glazing)",
+        "medium": "Medium (typical room)",
+        "high": "High (large sun-facing glazing)"
+      }
+    },
+    "source_type": {
+      "options": {
+        "electric_heater": "Electric heater",
+        "heat_pump": "Air-source heat pump",
+        "ground_source_heat_pump": "Ground-source heat pump",
+        "gas_heater": "Gas heater / boiler",
+        "oil_boiler": "Oil boiler",
+        "hydronic_radiator": "Hydronic radiator (district heat / hot water)",
+        "hydronic_floor_heating": "Hydronic underfloor heating",
+        "electric_floor_heating": "Electric underfloor heating",
+        "oil_radiator": "Oil-filled electric radiator",
+        "pellet_stove": "Pellet stove",
+        "electric_storage_heater": "Electric storage heater (night storage)",
+        "generic_thermostat": "Generic thermostat (catch-all)"
+      }
+    },
+    "hvac_mode": {
+      "options": {
+        "heat": "Heat only",
+        "cool": "Cool only",
+        "heat_cool": "Heat & cool"
+      }
+    },
+    "schedule_mode": {
+      "options": {
+        "comfort": "Comfort (apply setpoint)",
+        "off": "Off (frost protection only)"
+      }
+    },
+    "floor_type": {
+      "options": {
+        "none": "No significant floor mass (suspended timber)",
+        "concrete": "Concrete over conditioned space",
+        "slab_on_grade": "Slab on ground",
+        "ufh": "Underfloor heating"
+      }
+    },
+    "facade_colour": {
+      "options": {
+        "light": "Light (whitewash, pale cladding)",
+        "medium": "Medium (mid-tone brick, painted timber)",
+        "dark": "Dark (dark brick, dark metal)",
+        "custom": "Custom"
+      }
+    },
+    "weekday": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    }
+  },
+  "services": {
+    "simulate_thermal_response": {
+      "name": "Simulate thermal response",
+      "description": "Run a standalone thermal simulation showing how a room responds to constant heating power.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Name of the room to simulate."
+        },
+        "initial_temp": {
+          "name": "Initial temperature",
+          "description": "Starting temperature of the room (°C)."
+        },
+        "outdoor_temp": {
+          "name": "Outdoor temperature",
+          "description": "Outdoor temperature during the simulation (°C)."
+        },
+        "heating_power": {
+          "name": "Heating power",
+          "description": "Constant thermal power applied to the room (W)."
+        },
+        "duration_hours": {
+          "name": "Duration",
+          "description": "Length of the simulation (hours)."
+        }
+      }
+    },
+    "set_schedule_enabled": {
+      "name": "Suspend or resume comfort schedule",
+      "description": "Suspend or resume the comfort schedule for a room (or all rooms when none is specified). Useful for one-off exceptions to a sleep / setback schedule.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Optional room name. Leave blank to apply to all rooms."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "True to resume the schedule, false to suspend it."
+        }
+      }
+    },
+    "estimate_parameters": {
+      "name": "Estimate thermal parameters",
+      "description": "Back-calculate thermal_mass and r_external from an observed heating experiment.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Name of the room."
+        },
+        "heating_power": {
+          "name": "Heating power",
+          "description": "Constant thermal power applied during the experiment (W)."
+        },
+        "outdoor_temp": {
+          "name": "Outdoor temperature",
+          "description": "Outdoor temperature during the experiment (°C)."
+        },
+        "initial_temp": {
+          "name": "Initial temperature",
+          "description": "Room temperature at the start of the experiment (°C)."
+        },
+        "final_temp": {
+          "name": "Final temperature",
+          "description": "Room temperature at the end of the experiment (°C)."
+        },
+        "duration_seconds": {
+          "name": "Duration",
+          "description": "Duration of the experiment (seconds)."
+        }
+      }
+    },
+    "regenerate_dashboard": {
+      "name": "Regenerate Lovelace dashboard",
+      "description": "Build a complete per-room Lovelace dashboard from the current Heating Assistant configuration. Returns the YAML in the response and optionally writes it to <config>/dashboards/.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Return YAML only, do not write a file or create a notification."
+        },
+        "filename": {
+          "name": "Output filename",
+          "description": "Plain filename (no path) inside <config>/dashboards. Defaults to heating_assistant.yaml."
+        }
+      }
+    },
+    "compute_loglik_slice": {
+      "name": "Compute log-likelihood slice",
+      "description": "Evaluate the CD-EKF PED log-likelihood on a (log C, log R_ext) grid centred on the room's current MLE. Drives the Diagnostics dashboard's likelihood-landscape card.",
+      "fields": {
+        "room_name": {
+          "name": "Room name",
+          "description": "Room whose parameters should be sliced."
+        },
+        "n_grid": {
+          "name": "Grid points",
+          "description": "Number of grid points per axis (odd preferred)."
+        },
+        "span_log": {
+          "name": "Half-width (log)",
+          "description": "Half-width of the slice in log-units. 1.0 ≈ factor 2.7."
+        }
+      }
+    }
+  }
+}
