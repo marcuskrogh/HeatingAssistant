@@ -28,7 +28,7 @@ Agreed agent workspace setup for this repository.
 | Workspace | docs/agents/WORKSPACE.md |
 | Continuity mirror | docs/agents/ISSUES.md |
 | Roadmap | docs/ROADMAP.md |
-| Plan | docs/PLAN-<slug>.md |
+| Plan | docs/agents/PLAN-<slug>.md |
 | Bug | docs/BUG.md |
 | Iterate | docs/ITERATE.md |
 | Model | docs/MODEL.md |

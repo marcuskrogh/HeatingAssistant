@@ -63,7 +63,7 @@
 - Task: [SWD-255](https://marcusknielsen.atlassian.net/browse/SWD-255)
 - Sub-tasks: [SWD-258](https://marcusknielsen.atlassian.net/browse/SWD-258), [SWD-259](https://marcusknielsen.atlassian.net/browse/SWD-259), [SWD-260](https://marcusknielsen.atlassian.net/browse/SWD-260), [SWD-261](https://marcusknielsen.atlassian.net/browse/SWD-261), [SWD-257](https://marcusknielsen.atlassian.net/browse/SWD-257), [SWD-256](https://marcusknielsen.atlassian.net/browse/SWD-256)
 - Branch: `cursor/swd-255-haos-app-mqtt-01f0` (delivery; maps to `swd-255-haos-app-mqtt`)
-- PR: *(draft — filled after open)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/545
 
 ## Next
 `/implement SWD-255` — Build per this plan (same branch/PR)
