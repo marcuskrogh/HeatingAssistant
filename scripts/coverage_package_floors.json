@@ -1,9 +1,9 @@
 {
   "tolerance_percent": 2.0,
   "packages": {
-    "custom_components/heating_assistant/services/": 83.0,
-    "custom_components/heating_assistant/history/": 82.0,
-    "custom_components/heating_assistant/coordinator/": 85.0,
-    "custom_components/heating_assistant/sensor/": 93.0
+    "heatingassistant/engine/": 74.6,
+    "heatingassistant/app/": 66.0,
+    "heatingassistant/mqtt/": 78.6,
+    "heatingassistant/fusion/": 92.5
   }
 }

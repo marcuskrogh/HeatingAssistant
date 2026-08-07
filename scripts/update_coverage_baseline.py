@@ -4,9 +4,9 @@
 Maintainers run this after a full local fast+slow run with combined coverage:
 
     python3 -m pytest tests/ -m "not slow" \\
-        --cov=custom_components/heating_assistant --cov-report= \\
+        --cov=heatingassistant --cov-report= \\
     COVERAGE_FILE=.coverage.slow python3 -m pytest tests/ -m slow \\
-        --cov=custom_components/heating_assistant --cov-append --cov-report= \\
+        --cov=heatingassistant --cov-append --cov-report= \\
     coverage combine .coverage .coverage.slow
     coverage report -m | tee coverage_report.txt
     python3 scripts/update_coverage_baseline.py coverage_report.txt
