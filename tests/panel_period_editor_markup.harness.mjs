@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DETAIL = join(ROOT, 'custom_components/heating_assistant/www/js/schedules/schedules-detail.js');
+const DETAIL = join(ROOT, 'heatingassistant/app/static/js/schedules/schedules-detail.js');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -43,7 +43,7 @@ assert(!source.includes('Recurring weekly'), 'legacy Recurring weekly label must
 // SWD-50: container queries must target .schedule-form__date-row as a descendant
 // of a container ancestor (period body), not the date row itself.
 const css = readFileSync(
-  join(ROOT, 'custom_components/heating_assistant/www/css/pages/schedules.css'),
+  join(ROOT, 'heatingassistant/app/static/css/pages/schedules.css'),
   'utf8',
 );
 const bodyBlock = css.match(/\.schedule-form__period-body\s*\{[^}]*\}/);

@@ -1,12 +1,6 @@
-"""SWD-262: fat HA integration removed.
+"""Unit tests for recorder resample helpers."""
 
-This test module exercised the removed in-process Home Assistant integration layer.
-"""
-import pytest
-
-pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
-
-from custom_components.heating_assistant.recorder_resample import (
+from heatingassistant.engine.recorder_resample import (
     build_uniform_grid, zoh_resample,
 )
 

@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DASHBOARD = join(ROOT, 'custom_components/heating_assistant/www/industrial-dashboard.js');
+const DASHBOARD = join(ROOT, 'heatingassistant/app/static/industrial-dashboard.js');
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);

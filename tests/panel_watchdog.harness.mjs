@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const WWW = join(ROOT, 'custom_components/heating_assistant/www');
+const WWW = join(ROOT, 'heatingassistant/app/static');
 
 // ---- minimal DOM shim -------------------------------------------------------
 const hashListeners = [];

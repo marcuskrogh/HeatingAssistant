@@ -13,10 +13,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DASHBOARD = join(ROOT, 'custom_components/heating_assistant/www/industrial-dashboard.js');
-const INDUSTRIAL_CSS = join(ROOT, 'custom_components/heating_assistant/www/css/industrial.css');
-const CLIMATE_CSS = join(ROOT, 'custom_components/heating_assistant/www/css/pages/climate-card.css');
-const PANEL_SETUP = join(ROOT, 'custom_components/heating_assistant/panel_setup.py');
+const DASHBOARD = join(ROOT, 'heatingassistant/app/static/industrial-dashboard.js');
+const INDUSTRIAL_CSS = join(ROOT, 'heatingassistant/app/static/css/industrial.css');
+const CLIMATE_CSS = join(ROOT, 'heatingassistant/app/static/css/pages/climate-card.css');
+const INDEX_HTML = join(ROOT, 'heatingassistant/app/static/index.html');
 
 const REQUIRED_STYLESHEETS = [
   'css/industrial.css',
@@ -42,10 +42,10 @@ function assert(condition, message) {
 const dashboard = readFileSync(DASHBOARD, 'utf8');
 const industrialCss = readFileSync(INDUSTRIAL_CSS, 'utf8');
 const climateCss = readFileSync(CLIMATE_CSS, 'utf8');
-const panelSetup = readFileSync(PANEL_SETUP, 'utf8');
+const indexHtml = readFileSync(INDEX_HTML, 'utf8');
 
-const versionMatch = panelSetup.match(/industrial-dashboard\.js\?v=(\d+)/);
-assert(versionMatch, 'panel_setup.py must declare js_url cache-bust token');
+const versionMatch = indexHtml.match(/industrial-dashboard\.js\?v=(\d+)/);
+assert(versionMatch, 'index.html must declare industrial-dashboard.js cache-bust token');
 const version = versionMatch[1];
 
 assert(

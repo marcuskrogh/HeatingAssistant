@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const WWW = join(ROOT, 'custom_components/heating_assistant/www/js');
+const WWW = join(ROOT, 'heatingassistant/app/static/js');
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
@@ -214,17 +214,19 @@ assert(
   'room-climate-tile must not use a timed optimistic power revert',
 );
 
-const controlSrc = readFileSync(
-  join(ROOT, 'custom_components/heating_assistant/services/control.py'),
+// App owns room enablement via /api service → runtime._set_room_enabled
+// (no HA coordinator listeners in the thin MQTT bridge).
+const runtimeSrc = readFileSync(
+  join(ROOT, 'heatingassistant/app/runtime.py'),
   'utf8',
 );
-const handlerBlock = controlSrc.slice(
-  controlSrc.indexOf('async def handle_set_room_enabled'),
-  controlSrc.indexOf('def register_control_services'),
+assert(
+  /async def _set_room_enabled\(/.test(runtimeSrc),
+  'App runtime must implement _set_room_enabled for climate power toggles',
 );
 assert(
-  handlerBlock.includes('coordinator.async_update_listeners()'),
-  'handle_set_room_enabled must call async_update_listeners before refresh',
+  /room\["enabled"\]\s*=\s*enabled/.test(runtimeSrc),
+  '_set_room_enabled must persist the enabled flag on the room config',
 );
 
 console.log('panel climate power harness: ok');

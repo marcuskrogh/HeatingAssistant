@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PANEL_PATH = join(ROOT, 'custom_components/heating_assistant/www/industrial-dashboard.js');
+const PANEL_PATH = join(ROOT, 'heatingassistant/app/static/industrial-dashboard.js');
 
 // Minimal stand-in for another integration's classic entry script (old pattern).
 const OTHER_PANEL_ENTRY = `

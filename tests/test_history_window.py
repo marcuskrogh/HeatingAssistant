@@ -1,12 +1,7 @@
-"""SWD-262: fat HA integration removed.
-
-This test module exercised the removed in-process Home Assistant integration layer.
-"""
-import pytest
-
-pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
+"""Unit tests for history window selection helpers."""
 
 import numpy as np
+import pytest
 
 from heatingassistant.engine.history_window import (
     DEFAULT_MAX_GAP_FACTOR,
@@ -328,25 +323,11 @@ def test_ekf_reconstruction_stays_in_recent_24h():
 
 
 def test_open_loop_stays_in_recent_24h_and_keeps_latest():
-    from custom_components.heating_assistant.model_diagnostics import (
-        compute_open_loop_predictions,
+    pytest.skip(
+        "SWD-262: model_diagnostics lives in the removed fat HA integration; "
+        "open-loop window behaviour is covered by select_recent_window unit tests "
+        "and EKF reconstruction above"
     )
-
-    dt = 900.0
-    _, _, system = _make_system(dt)
-    history, recent_t0 = _scenario_history(dt)
-
-    window = select_recent_window(history, 24 * 3600.0)
-    res = compute_open_loop_predictions(history=window, system=system,
-                                        room_names=["studio"], n_rooms=1, dt=dt,
-                                        segment_length=30)
-    sim = res["per_room"]["studio"]["simulation"]
-    assert sim
-    assert all(s["time"] >= recent_t0 for s in sim)
-    span = (sim[-1]["time"] - sim[0]["time"]) / 3600.0
-    assert span <= 24.0, f"open-loop spans {span:.1f} h"
-    # The latest sample must be represented (within one sample of the window end).
-    assert window[-1]["timestamp"] - sim[-1]["time"] <= dt + 1.0
 
 
 # ---------------------------------------------------------------------------

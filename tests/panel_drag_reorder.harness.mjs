@@ -26,10 +26,10 @@ import {
   findActivePeriod,
   movePeriodInList,
   remapExpandedIndices,
-} from '../custom_components/heating_assistant/www/js/schedule-utils.js';
+} from '../heatingassistant/app/static/js/schedule-utils.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const DETAIL = join(ROOT, 'custom_components/heating_assistant/www/js/schedules/schedules-detail.js');
+const DETAIL = join(ROOT, 'heatingassistant/app/static/js/schedules/schedules-detail.js');
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

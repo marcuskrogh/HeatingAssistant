@@ -12,7 +12,7 @@ import {
   serializeSchedulePeriod,
   normalizePeriodForEditor,
   overrideBaseline,
-} from '../custom_components/heating_assistant/www/js/schedule-utils.js';
+} from '../heatingassistant/app/static/js/schedule-utils.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

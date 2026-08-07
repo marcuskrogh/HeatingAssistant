@@ -14,11 +14,11 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = join(
   ROOT,
-  'custom_components/heating_assistant/www/js/identification/sysid-index.js',
+  'heatingassistant/app/static/js/identification/sysid-index.js',
 );
 const UTILS = join(
   ROOT,
-  'custom_components/heating_assistant/www/js/utils.js',
+  'heatingassistant/app/static/js/utils.js',
 );
 
 function assert(condition, message) {

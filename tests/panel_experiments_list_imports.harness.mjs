@@ -13,11 +13,11 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const EXPERIMENTS = join(
   ROOT,
-  'custom_components/heating_assistant/www/js/schedules/schedules-experiments.js',
+  'heatingassistant/app/static/js/schedules/schedules-experiments.js',
 );
 const SHARED = join(
   ROOT,
-  'custom_components/heating_assistant/www/js/schedules/schedules-shared.js',
+  'heatingassistant/app/static/js/schedules/schedules-shared.js',
 );
 
 function assert(condition, message) {
