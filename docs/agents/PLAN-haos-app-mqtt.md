@@ -54,7 +54,7 @@
 
 ## Open items
 - Exact MQTT topic/payload schema details (settled during work package 3; follow PLCAssistant patterns where they fit).
-- Final App folder/slug naming (`heating_assistant` vs `heatingassistant`) — pick one and keep version lock consistent.
+- Naming locked: Python package/import slug is `heatingassistant`; HAOS App folder is `heating_assistant`; Supervisor slug remains `heatingassistant`; bundled HA integration domain remains `heating_assistant`.
 - Whether a retained “bindings” topic vs a small shared file under mapped config is used for integration subscription list (MQTT-first preference).
 
 ## Tracker

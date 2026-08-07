@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Heating Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/css/industrial.css">
+  <!--
+    The original industrial-dashboard.js is copied into /static, but it is a
+    Home Assistant custom-panel entry point and expects HA websocket/hass
+    objects. This App Ingress shell reuses the same CSS/assets and mirrors the
+    overview/config structure against local /api/* endpoints until those HA-WS
+    dependencies are removed from the full panel code.
+  -->
+  <style>
+    body {
+      margin: 0;
+      background: #1a1d23;
+      color: #e8eaed;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    .app-shell {
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .app-header,
+    .card-grid,
+    .bindings-grid {
+      display: grid;
+      gap: 16px;
+    }
+    .app-header {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .card-grid {
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .app-card {
+      background: #22262e;
+      border: 1px solid #363b44;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .muted {
+      color: #9aa0a8;
+    }
+    .status-pill {
+      border: 1px solid #00d4aa;
+      border-radius: 999px;
+      color: #00d4aa;
+      padding: 6px 12px;
+    }
+    input,
+    select,
+    textarea,
+    button {
+      border-radius: 6px;
+      border: 1px solid #363b44;
+      padding: 8px;
+    }
+    input,
+    select,
+    textarea {
+      background: #2a2f38;
+      color: #e8eaed;
+      width: 100%;
+    }
+    button {
+      background: #00d4aa;
+      color: #10231f;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .binding-row {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 1fr 1fr 100px;
+    }
+    pre {
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <h1>Heating Assistant</h1>
+        <p class="muted">HAOS App dashboard via Ingress</p>
+      </div>
+      <span id="health-pill" class="status-pill">Loading...</span>
+    </header>
+
+    <section class="card-grid">
+      <article class="app-card">
+        <h2>Rooms</h2>
+        <div id="rooms">Loading rooms...</div>
+      </article>
+      <article class="app-card">
+        <h2>Runtime</h2>
+        <pre id="state">Loading state...</pre>
+      </article>
+    </section>
+
+    <section class="app-card" style="margin-top: 16px;">
+      <h2>Bindings</h2>
+      <p class="muted">Map HA entities to App MQTT tags. Direction is from the App perspective.</p>
+      <div id="bindings" class="bindings-grid"></div>
+      <button id="add-binding" type="button">Add binding</button>
+      <button id="save-bindings" type="button">Save bindings</button>
+    </section>
+
+    <section class="app-card" style="margin-top: 16px;">
+      <h2>Raw config</h2>
+      <textarea id="config" rows="14"></textarea>
+      <button id="save-config" type="button">Save config</button>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let config = {};
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options,
+      });
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}: ${await response.text()}`);
+      }
+      return response.json();
+    }
+
+    function renderRooms(status) {
+      const rooms = status.rooms || [];
+      $("rooms").innerHTML = rooms.length
+        ? rooms.map((room) => `
+            <div class="app-card" style="margin-top: 8px;">
+              <strong>${room.name}</strong>
+              <div class="muted">Temp tags: ${(room.temp_tags || []).join(", ") || "none"}</div>
+              <div>${room.temperature ?? "unknown"} degC</div>
+            </div>
+          `).join("")
+        : "<p class='muted'>No rooms configured.</p>";
+    }
+
+    function bindingRow(binding = {}) {
+      const row = document.createElement("div");
+      row.className = "binding-row";
+      row.innerHTML = `
+        <input placeholder="tag" value="${binding.tag || ""}">
+        <input placeholder="entity_id" value="${binding.entity_id || ""}">
+        <select>
+          <option value="in" ${binding.direction === "in" ? "selected" : ""}>in</option>
+          <option value="out" ${binding.direction === "out" ? "selected" : ""}>out</option>
+        </select>
+      `;
+      return row;
+    }
+
+    function renderBindings(bindings) {
+      const container = $("bindings");
+      container.innerHTML = "";
+      (bindings || []).forEach((binding) => container.appendChild(bindingRow(binding)));
+    }
+
+    function readBindings() {
+      return [...$("bindings").children].map((row) => {
+        const [tag, entityId, direction] = row.querySelectorAll("input, select");
+        return { tag: tag.value, entity_id: entityId.value, direction: direction.value };
+      }).filter((binding) => binding.tag && binding.entity_id);
+    }
+
+    async function refresh() {
+      const [health, stateData, configData] = await Promise.all([
+        api("/api/health"),
+        api("/api/state"),
+        api("/api/config"),
+      ]);
+      config = configData;
+      $("health-pill").textContent = `${health.status} - ${health.control?.mode || "unknown"}`;
+      $("state").textContent = JSON.stringify(stateData, null, 2);
+      $("config").value = JSON.stringify(configData, null, 2);
+      renderRooms(health);
+      renderBindings(configData.bindings || []);
+    }
+
+    $("add-binding").addEventListener("click", () => $("bindings").appendChild(bindingRow()));
+    $("save-bindings").addEventListener("click", async () => {
+      await api("/api/bindings", { method: "PUT", body: JSON.stringify({ bindings: readBindings() }) });
+      await refresh();
+    });
+    $("save-config").addEventListener("click", async () => {
+      await api("/api/config", { method: "POST", body: $("config").value });
+      await refresh();
+    });
+
+    refresh().catch((err) => {
+      $("health-pill").textContent = "error";
+      $("state").textContent = String(err);
+    });
+  </script>
+</body>
+</html>

@@ -6,9 +6,18 @@ APP_DIR="${ROOT}/heating_assistant"
 CONFIG="${APP_DIR}/config.yaml"
 DOCKERFILE="${APP_DIR}/Dockerfile"
 SRC_PACKAGE="${ROOT}/heatingassistant"
-SRC_INTEGRATION="${ROOT}/custom_components/heating_assistant"
+SRC_INTEGRATION="${ROOT}/custom_components/heating_assistant_mqtt_thin"
 DST_PACKAGE="${APP_DIR}/heatingassistant"
 DST_INTEGRATION="${APP_DIR}/custom_components/heating_assistant"
+THIN_FILES=(
+  manifest.json
+  __init__.py
+  const.py
+  mqtt_topics.py
+  config_flow.py
+  version_sync.py
+  update.py
+)
 
 for required in "${CONFIG}" "${DOCKERFILE}" "${ROOT}/pyproject.toml" "${SRC_PACKAGE}" "${SRC_INTEGRATION}" "${ROOT}/README.md"; do
   if [ ! -e "${required}" ]; then
@@ -16,11 +25,19 @@ for required in "${CONFIG}" "${DOCKERFILE}" "${ROOT}/pyproject.toml" "${SRC_PACK
     exit 1
   fi
 done
+for file in "${THIN_FILES[@]}"; do
+  if [ ! -f "${SRC_INTEGRATION}/${file}" ]; then
+    echo "Missing required thin integration file: ${SRC_INTEGRATION}/${file}" >&2
+    exit 1
+  fi
+done
 
 rm -rf "${DST_PACKAGE}" "${DST_INTEGRATION}"
-mkdir -p "${APP_DIR}/custom_components"
+mkdir -p "${APP_DIR}/custom_components" "${DST_INTEGRATION}"
 cp -a "${SRC_PACKAGE}" "${DST_PACKAGE}"
-cp -a "${SRC_INTEGRATION}" "${DST_INTEGRATION}"
+for file in "${THIN_FILES[@]}"; do
+  cp -a "${SRC_INTEGRATION}/${file}" "${DST_INTEGRATION}/${file}"
+done
 cp -a "${ROOT}/pyproject.toml" "${APP_DIR}/pyproject.toml"
 cp -a "${ROOT}/README.md" "${APP_DIR}/README.md"
 
@@ -39,6 +56,7 @@ config_path = app_dir / "config.yaml"
 dockerfile_path = app_dir / "Dockerfile"
 pyproject_path = root / "pyproject.toml"
 manifest_path = app_dir / "custom_components" / "heating_assistant" / "manifest.json"
+const_path = app_dir / "custom_components" / "heating_assistant" / "const.py"
 
 config_paths = sorted(
     path.relative_to(root)
@@ -79,11 +97,23 @@ if project_name != "heatingassistant":
     raise SystemExit("pyproject.toml project.name must be heatingassistant")
 
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+manifest["domain"] = "heating_assistant"
+manifest["name"] = "Heating Assistant"
 manifest["version"] = config_version
 manifest_path.write_text(
     json.dumps(manifest, indent=2, ensure_ascii=True) + "\n",
     encoding="utf-8",
 )
+
+const_text = const_path.read_text(encoding="utf-8")
+const_text = re.sub(r'^DOMAIN = ".*"$', 'DOMAIN = "heating_assistant"', const_text, flags=re.MULTILINE)
+const_text = re.sub(r'^NAME = ".*"$', 'NAME = "Heating Assistant"', const_text, flags=re.MULTILINE)
+const_text = re.sub(r'^VERSION = ".*"$', f'VERSION = "{config_version}"', const_text, flags=re.MULTILINE)
+const_path.write_text(const_text, encoding="utf-8")
+
+for forbidden in ("controller", "coordinator", "estimation", "sensor", "services"):
+    if (manifest_path.parent / forbidden).exists():
+        raise SystemExit(f"App-bundled thin integration contains forbidden fat directory: {forbidden}")
 
 versions = {
     "heating_assistant/config.yaml": config_version,
