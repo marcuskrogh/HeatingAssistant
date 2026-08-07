@@ -1,6 +1,3 @@
-"""HeatingAssistant App package."""
-
-__version__ = "2.0.0"
 """Heating Assistant application package."""
 
 __all__ = ["__version__"]

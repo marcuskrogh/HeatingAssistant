@@ -1,4 +1,4 @@
-"""Thin Home Assistant bridge for the Heating Assistant App."""
+"""Staged thin Home Assistant bridge for the Heating Assistant App."""
 
 from __future__ import annotations
 
@@ -23,26 +23,20 @@ from .const import CONF_INSTANCE_ID, DATA_MANAGERS, DEFAULT_INSTANCE_ID, DOMAIN,
 from .mqtt_topics import MqttTagPayload, bindings as bindings_topic, tag_in, tag_out
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ("update",)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up the thin MQTT bridge."""
-
     manager = _BridgeManager(hass, entry)
     await manager.async_start()
     hass.data.setdefault(DOMAIN, {}).setdefault(DATA_MANAGERS, {})[entry.entry_id] = manager
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload the bridge and remove MQTT/state subscriptions."""
-
     manager = hass.data.get(DOMAIN, {}).get(DATA_MANAGERS, {}).pop(entry.entry_id, None)
     if manager is not None:
         await manager.async_stop()
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    return True
 
 
 class _BridgeManager:
@@ -95,14 +89,12 @@ class _BridgeManager:
 
     def _bind_entity_input(self, tag: str, entity_id: str) -> None:
         async def _state_changed(event: Event) -> None:
-            new_state = event.data.get("new_state")
-            await self._publish_entity_state(tag, new_state)
+            await self._publish_entity_state(tag, event.data.get("new_state"))
 
         self._binding_subs.append(
             async_track_state_change_event(self.hass, [entity_id], _state_changed)
         )
-        state = self.hass.states.get(entity_id)
-        self.hass.async_create_task(self._publish_entity_state(tag, state))
+        self.hass.async_create_task(self._publish_entity_state(tag, self.hass.states.get(entity_id)))
 
     async def _bind_entity_output(self, tag: str, entity_id: str) -> None:
         async def _message_received(message: Any) -> None:
@@ -114,30 +106,15 @@ class _BridgeManager:
             await self._write_entity(entity_id, payload.value)
 
         unsubscribe = await _maybe_await(
-            mqtt.async_subscribe(
-                self.hass,
-                tag_out(self.instance_id, tag),
-                _message_received,
-                qos=QOS,
-            )
+            mqtt.async_subscribe(self.hass, tag_out(self.instance_id, tag), _message_received, qos=QOS)
         )
         self._binding_subs.append(unsubscribe)
 
     async def _publish_entity_state(self, tag: str, state: State | None) -> None:
         if state is None or state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
-            payload = MqttTagPayload(
-                value=None,
-                status="BAD",
-                reason="entity_unavailable",
-                ts=time.time(),
-            )
+            payload = MqttTagPayload(None, status="BAD", reason="entity_unavailable", ts=time.time())
         else:
-            payload = MqttTagPayload(
-                value=_coerce_state_value(state.state),
-                status="GOOD",
-                reason=None,
-                ts=time.time(),
-            )
+            payload = MqttTagPayload(_coerce_state_value(state.state), status="GOOD", ts=time.time())
         await _maybe_await(
             mqtt.async_publish(
                 self.hass,
@@ -151,10 +128,9 @@ class _BridgeManager:
     async def _write_entity(self, entity_id: str, value: Any) -> None:
         domain = entity_id.split(".", 1)[0]
         if domain == "switch":
-            service = SERVICE_TURN_ON if _truthy(value) else SERVICE_TURN_OFF
             await self.hass.services.async_call(
                 "switch",
-                service,
+                SERVICE_TURN_ON if _truthy(value) else SERVICE_TURN_OFF,
                 {"entity_id": entity_id},
                 blocking=False,
             )
@@ -165,29 +141,10 @@ class _BridgeManager:
                 {"entity_id": entity_id, "value": float(value)},
                 blocking=False,
             )
-        elif domain == "climate":
-            service_data = {"entity_id": entity_id}
-            if isinstance(value, str):
-                await self.hass.services.async_call(
-                    "climate",
-                    "set_hvac_mode",
-                    {**service_data, "hvac_mode": value},
-                    blocking=False,
-                )
-            else:
-                await self.hass.services.async_call(
-                    "climate",
-                    "set_temperature",
-                    {**service_data, "temperature": float(value)},
-                    blocking=False,
-                )
-        else:
-            _LOGGER.debug("No write mapping for Heating Assistant entity %s", entity_id)
 
     def _clear_binding_subscriptions(self) -> None:
         while self._binding_subs:
-            unsubscribe = self._binding_subs.pop()
-            unsubscribe()
+            self._binding_subs.pop()()
 
 
 async def _maybe_await(value: Any) -> Any:

@@ -1,4 +1,4 @@
-"""Config flow for the thin Heating Assistant MQTT bridge."""
+"""Config flow for the staged thin Heating Assistant MQTT bridge."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from homeassistant import config_entries
 from .const import CONF_INSTANCE_ID, DEFAULT_INSTANCE_ID, DOMAIN, NAME
 
 
-class HeatingAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class HeatingAssistantMqttThinConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Collect only the MQTT App instance id."""
 
     VERSION = 1
