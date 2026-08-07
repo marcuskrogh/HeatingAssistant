@@ -1,6 +1,12 @@
-"""Unit tests for Heating Assistant SysID datetime entities."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -43,7 +49,7 @@ if "homeassistant.helpers.restore_state" not in sys.modules:
     _rs_mod.RestoreEntity = _RestoreEntityBase
     sys.modules["homeassistant.helpers.restore_state"] = _rs_mod
 
-from custom_components.heating_assistant.const import DOMAIN
+from heatingassistant.engine.const import DOMAIN
 from custom_components.heating_assistant.datetime import (
     SysIdWindowEndEntity,
     SysIdWindowStartEntity,

@@ -1,12 +1,10 @@
-"""Tests for the ``set_room_setpoint`` service, plus the shared
-slug-resolution behaviour of the per-room control services.
+"""SWD-262: fat HA integration removed.
 
-``set_room_setpoint``, ``set_room_enabled`` and ``set_room_comfort_offset``
-all resolve the frontend slug to the canonical configured room name via the
-same ``_resolve_room_name`` helper, so slug resolution and the unknown-room
-error are tested once here, parametrized over the three handlers.  Each
-service's specific behaviour stays in its own test file.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock

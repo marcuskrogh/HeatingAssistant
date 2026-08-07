@@ -27,7 +27,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     ENVELOPE_TIGHTNESS_LEAKY,
     ENVELOPE_TIGHTNESS_PASSIVE,
     ENVELOPE_TIGHTNESS_TIGHT,
@@ -36,7 +36,7 @@ from custom_components.heating_assistant.const import (
     SHERMAN_GRIMSRUD_DT_TYPICAL,
     SHERMAN_GRIMSRUD_V_TYPICAL,
 )
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel,
     Room,
 )
@@ -267,17 +267,17 @@ class _FakeHass:
 
 
 def test_read_wind_speed_returns_none_without_entity() -> None:
-    from custom_components.heating_assistant.weather import read_wind_speed_now
+    from heatingassistant.engine.weather import read_wind_speed_now
     assert read_wind_speed_now(_FakeHass({}), None) is None
 
 
 def test_read_wind_speed_returns_none_on_missing_state() -> None:
-    from custom_components.heating_assistant.weather import read_wind_speed_now
+    from heatingassistant.engine.weather import read_wind_speed_now
     assert read_wind_speed_now(_FakeHass({}), "weather.home") is None
 
 
 def test_read_wind_speed_returns_value_in_mps() -> None:
-    from custom_components.heating_assistant.weather import read_wind_speed_now
+    from heatingassistant.engine.weather import read_wind_speed_now
     states = {
         "weather.home": _FakeWeatherState(
             state="partlycloudy",
@@ -289,7 +289,7 @@ def test_read_wind_speed_returns_value_in_mps() -> None:
 
 
 def test_read_wind_speed_converts_kmh_to_mps() -> None:
-    from custom_components.heating_assistant.weather import read_wind_speed_now
+    from heatingassistant.engine.weather import read_wind_speed_now
     states = {
         "weather.home": _FakeWeatherState(
             state="cloudy",
@@ -302,7 +302,7 @@ def test_read_wind_speed_converts_kmh_to_mps() -> None:
 
 
 def test_read_wind_speed_converts_mph_to_mps() -> None:
-    from custom_components.heating_assistant.weather import read_wind_speed_now
+    from heatingassistant.engine.weather import read_wind_speed_now
     states = {
         "weather.home": _FakeWeatherState(
             state="windy",
@@ -315,7 +315,7 @@ def test_read_wind_speed_converts_mph_to_mps() -> None:
 
 
 def test_read_wind_speed_unknown_unit_falls_back_to_mps() -> None:
-    from custom_components.heating_assistant.weather import read_wind_speed_now
+    from heatingassistant.engine.weather import read_wind_speed_now
     states = {
         "weather.home": _FakeWeatherState(
             state="cloudy",
@@ -328,7 +328,7 @@ def test_read_wind_speed_unknown_unit_falls_back_to_mps() -> None:
 
 
 def test_read_wind_speed_clips_to_nonnegative() -> None:
-    from custom_components.heating_assistant.weather import read_wind_speed_now
+    from heatingassistant.engine.weather import read_wind_speed_now
     states = {
         "weather.home": _FakeWeatherState(
             state="cloudy",
@@ -349,8 +349,8 @@ def test_controller_set_wind_speed_updates_jacobian() -> None:
     EKF stays consistent with the dynamics in ``f``.  Setting a wind
     speed must therefore change the Jacobian diagonal compared with
     the typical-conditions baseline."""
-    from custom_components.heating_assistant.controller import HouseThermalSDE
-    from custom_components.heating_assistant.heat_sources import ElectricHeater
+    from heatingassistant.engine.controller import HouseThermalSDE
+    from heatingassistant.engine.heat_sources import ElectricHeater
 
     room = Room(
         name="a", thermal_mass=5e6, r_external=0.05, infiltration_fraction=0.50,
@@ -384,8 +384,8 @@ def test_controller_set_wind_speed_updates_jacobian() -> None:
 def test_controller_f_responds_to_wind() -> None:
     """For a leaky room with ΔT > 0, increasing wind makes ``f`` more
     negative (faster cooling)."""
-    from custom_components.heating_assistant.controller import HouseThermalSDE
-    from custom_components.heating_assistant.heat_sources import ElectricHeater
+    from heatingassistant.engine.controller import HouseThermalSDE
+    from heatingassistant.engine.heat_sources import ElectricHeater
 
     room = Room(
         name="a", thermal_mass=5e6, r_external=0.05, infiltration_fraction=0.50,

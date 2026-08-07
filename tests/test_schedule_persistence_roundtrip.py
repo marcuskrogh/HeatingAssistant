@@ -1,10 +1,12 @@
-"""Round-trip tests for dashboard schedule persistence (SWD-2).
+"""SWD-262: fat HA integration removed.
 
-Guards the regression where schedules appeared saved on the detail page but
-vanished on navigation and after HA restart.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -12,7 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import custom_components.heating_assistant.services.control as svc_mod
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_PERSISTED_SCHEDULES,
     CONF_ROOM_NAME,
     CONF_ROOMS,
@@ -21,7 +23,7 @@ from custom_components.heating_assistant.const import (
 from custom_components.heating_assistant.coordinator import schedule_control
 from custom_components.heating_assistant.coordinator.core import HeatingAssistantCoordinator
 from custom_components.heating_assistant.coordinator import runtime_reconfig
-from custom_components.heating_assistant.schedule import build_schedule
+from heatingassistant.engine.schedule import build_schedule
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
 PERIODS = [
@@ -212,7 +214,7 @@ def test_runtime_reconfig_applies_persisted_schedules_in_place():
 async def test_update_listener_applies_persisted_schedules_without_reload(monkeypatch):
     """Config-entry listener must refresh schedules when only persisted_schedules changes."""
     import custom_components.heating_assistant.__init__ as init_mod
-    from custom_components.heating_assistant.const import DOMAIN
+    from heatingassistant.engine.const import DOMAIN
 
     entry_data = {
         CONF_ROOMS: [{CONF_ROOM_NAME: "Living Room", "setpoint": 21.0}],

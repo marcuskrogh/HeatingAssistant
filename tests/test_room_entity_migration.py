@@ -1,11 +1,12 @@
-"""Tests for room_migration._migrate_room_entities (the entity-registry half).
+"""SWD-262: fat HA integration removed.
 
-The pure data-migration helpers are covered in test_room_rename_migration.py;
-this covers the registry rewrite, whose prefix-collision rules decide whether a
-renamed room keeps its recorder history or orphans its entities.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import sys
 import types
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.heating_assistant.const import DOMAIN
+from heatingassistant.engine.const import DOMAIN
 from custom_components.heating_assistant.room_migration import _migrate_room_entities
 
 pytestmark = pytest.mark.integration

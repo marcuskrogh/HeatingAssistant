@@ -1,10 +1,10 @@
-"""Tests for the plot-only forecast horizon in build_forecast_payload.
+"""SWD-262: fat HA integration removed.
 
-The dashboard can request a display horizon that differs from the controller
-horizon.  When it is longer, the final actuation is held flat and the
-temperature is simulated forward; when shorter, the forecast is truncated.
-Neither changes the controller.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys

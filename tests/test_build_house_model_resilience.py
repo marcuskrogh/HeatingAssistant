@@ -1,12 +1,10 @@
-"""Regression tests for ``build_house_model`` resilience.
+"""SWD-262: fat HA integration removed.
 
-A room's inter-room connections reference the adjacent room by name.  Deleting
-or renaming a room can leave other rooms with a connection pointing at a name
-that no longer exists.  Such a dangling connection (or a window/connection with
-invalid numeric values) must be dropped with a warning rather than raise — a
-stale sub-record left behind by a room edit must never crash integration setup
-(which would take the whole integration, and therefore every room, offline).
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -15,7 +13,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import custom_components.heating_assistant.coordinator as coord_mod
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_CONNECTED_ROOM,
     CONF_CONNECTIONS,
     CONF_ROOM_NAME,

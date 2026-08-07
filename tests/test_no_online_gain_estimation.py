@@ -18,13 +18,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel,
     Room,
     RoomConnection,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.controller import (
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.controller import (
     HouseThermalSDE,
     HeatingMPCController,
 )

@@ -1,11 +1,10 @@
-"""Regression tests for the ``update_room_schedule`` service persistence.
+"""SWD-262: fat HA integration removed.
 
-These guard the bug where a saved room schedule disappeared on reload because
-the service wrote the periods only to ``entry.data[CONF_ROOMS]`` while rooms
-configured via the UI options flow live in ``entry.options[CONF_ROOMS]`` — which
-overrides and is copied back over ``entry.data`` on every setup, silently
-discarding the schedule.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -14,7 +13,7 @@ import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
 import custom_components.heating_assistant.services.control as svc_mod
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_PERSISTED_SCHEDULES,
     CONF_ROOMS,
     CONF_SCHEDULE,

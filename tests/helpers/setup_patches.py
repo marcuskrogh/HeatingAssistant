@@ -27,7 +27,7 @@ def patch_setup_stores(monkeypatch: pytest.MonkeyPatch) -> None:
             return None
 
     monkeypatch.setattr(
-        "custom_components.heating_assistant.history.store.IdentificationHistoryStore",
+        "heatingassistant.engine.history.store.IdentificationHistoryStore",
         lambda *_a, **_kw: _FakeIdHistoryStore(),
     )
     monkeypatch.setattr(

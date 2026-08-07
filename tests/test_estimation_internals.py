@@ -11,26 +11,26 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.estimation.model_build import (
+from heatingassistant.engine.estimation.model_build import (
     _build_parametric_system,
     _build_rooms_from_theta,
     _build_system,
     _theta_model_quantities,
 )
-from custom_components.heating_assistant.estimation.sensitivity import (
+from heatingassistant.engine.estimation.sensitivity import (
     _cd_ped_neg_ll_and_grad,
     _dFdtheta_const,
     _dfdtheta_step,
     _simulation_mse_and_grad,
 )
-from custom_components.heating_assistant.estimation.theta_layout import _ThetaLayout
-from custom_components.heating_assistant.estimation.warmstart import (
+from heatingassistant.engine.estimation.theta_layout import _ThetaLayout
+from heatingassistant.engine.estimation.warmstart import (
     _initial_state_and_covariance,
     _physics_informed_theta,
     _pin_locked_params,
     _update_wall_init_prior_from_history,
 )
-from custom_components.heating_assistant.thermal_model import Room, RoomConnection
+from heatingassistant.engine.thermal_model import Room, RoomConnection
 from tests.helpers.estimation_fixtures import (
     generate_history,
     make_electric_heaters,

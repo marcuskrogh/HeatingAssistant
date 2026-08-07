@@ -1,7 +1,7 @@
 /**
  * Syntax/load gate over ALL non-vendor panel JS files.
  *
- * Every file under custom_components/heating_assistant/www (excluding the
+ * Every file under heatingassistant/app/static (excluding the
  * vendored third-party bundles in www/vendor) is parsed with `node --check`.
  * Node 22 auto-detects ES-module syntax for .js files; if a direct check
  * still misfires the file is re-checked as an explicit ES module via stdin.
@@ -16,7 +16,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const WWW = join(ROOT, 'custom_components/heating_assistant/www');
+const WWW = join(ROOT, 'heatingassistant/app/static');
 const EXCLUDE_DIRS = new Set(['vendor']);
 
 function collectJsFiles(dir) {

@@ -1,4 +1,8 @@
-"""Integration tests for controller.factory."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised controller construction through the removed
+in-process Home Assistant coordinator layer.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +10,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.heating_assistant.controller.factory import (
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
+
+from heatingassistant.engine.controller.factory import (
     ControllerBuildConfig,
     build_mpc_controller,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.thermal_model import HouseModel, Room
 from tests.helpers.coordinator_stubs import make_minimal_coordinator, wire_room_enablement
 
 

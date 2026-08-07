@@ -10,19 +10,19 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const EXPERIMENTS = join(
   ROOT,
-  'custom_components/heating_assistant/www/js/schedules/schedules-experiments.js',
+  'heatingassistant/app/static/js/schedules/schedules-experiments.js',
 );
 const EXPERIMENT_UTILS = join(
   ROOT,
-  'custom_components/heating_assistant/www/js/experiment-utils.js',
+  'heatingassistant/app/static/js/experiment-utils.js',
 );
 const SCHEDULES_CSS = join(
   ROOT,
-  'custom_components/heating_assistant/www/css/pages/schedules.css',
+  'heatingassistant/app/static/css/pages/schedules.css',
 );
 const INDUSTRIAL_CSS = join(
   ROOT,
-  'custom_components/heating_assistant/www/css/industrial.css',
+  'heatingassistant/app/static/css/industrial.css',
 );
 
 function assert(condition, message) {

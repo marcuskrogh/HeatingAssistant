@@ -1,11 +1,12 @@
-"""Unit tests for the pure-Python options-flow helpers (U4).
+"""SWD-262: fat HA integration removed.
 
-``RoomFlowHelper`` and ``WindowFlowHelper`` carry the room and window CRUD
-logic that ``HeatingAssistantOptionsFlow`` used to inline.  Pulling the logic
-out is what made these tests possible — they don't need HA's flow framework.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import pytest
 
@@ -25,7 +26,7 @@ from custom_components.heating_assistant._options_flow import (
     parse_entity_ids,
     window_display,
 )
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_COMFORT_OFFSET,
     CONF_FACADE_COLOUR,
     CONF_FACADE_SOLAR_SHARE,

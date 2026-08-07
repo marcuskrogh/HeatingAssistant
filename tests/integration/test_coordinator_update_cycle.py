@@ -1,6 +1,12 @@
-"""Integration tests for HeatingAssistantCoordinator._async_update_data orchestration."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from collections import deque
 from unittest.mock import AsyncMock, MagicMock
@@ -8,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.heating_assistant.coordinator import mpc_cycle
-from custom_components.heating_assistant.heat_sources import ElectricHeater
+from heatingassistant.engine.heat_sources import ElectricHeater
 from tests.helpers.coordinator_stubs import make_hass_stub
 from tests.integration.test_mpc_cycle import _build_mpc_stack, _wire_disturbance_mocks
 

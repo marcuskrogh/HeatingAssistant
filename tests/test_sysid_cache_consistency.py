@@ -1,12 +1,10 @@
-"""
-Regression tests for sysid_results cache consistency across ML estimation and
-EKF simulation.
+"""SWD-262: fat HA integration removed.
 
-``handle_estimate_ml`` stores identified parameters (t_wall_initial,
-internal_gain, heater_scales, …) per room.  ``handle_run_sysid_simulation``
-must merge simulation diagnostics into those entries instead of replacing the
-whole per-room dict (which erased the identified fields).
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import asyncio
 import math
@@ -21,14 +19,14 @@ from custom_components.heating_assistant import (
     _merge_per_room_into_sysid_results,
     _open_loop_t_wall_initial_dict,
 )
-from custom_components.heating_assistant.controller import HouseThermalSDE
-from custom_components.heating_assistant.heat_sources import ElectricHeater
+from heatingassistant.engine.controller import HouseThermalSDE
+from heatingassistant.engine.heat_sources import ElectricHeater
 from custom_components.heating_assistant.model_diagnostics import (
     compute_open_loop_predictions,
 )
-from custom_components.heating_assistant.parameter_estimator import KalmanMLEstimator
-from custom_components.heating_assistant.sysid import _build_sim_model
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
+from heatingassistant.engine.parameter_estimator import KalmanMLEstimator
+from heatingassistant.engine.sysid import _build_sim_model
+from heatingassistant.engine.thermal_model import HouseModel, Room
 
 
 def _ml_identified_cache():
@@ -196,7 +194,7 @@ def _sde_synthetic_history(
     """
     import numpy as np
 
-    from custom_components.heating_assistant.integrator import implicit_euler_substeps
+    from heatingassistant.engine.integrator import implicit_euler_substeps
 
     room = Room("a", thermal_mass=true_mass, r_external=true_r, temperature=t_air0)
     if t_wall0 != t_air0:

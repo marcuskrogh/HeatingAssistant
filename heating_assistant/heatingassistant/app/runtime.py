@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
 
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
+from heatingassistant.engine import const
 from heatingassistant.mqtt.bridge import InMemoryMqttBus, MqttBus, Unsubscribe
 from heatingassistant.mqtt.topics import (
     DEFAULT_QOS,
@@ -189,6 +191,98 @@ class HeatingRuntime:
         await self.run_control_cycle()
         return dict(self.options)
 
+    async def update_schedule(
+        self,
+        room_name: str,
+        *,
+        periods: list[Mapping[str, Any]] | None = None,
+        enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """Persist one room schedule in App config for dashboard edits."""
+
+        slug = self._room_slug(room_name)
+        if not slug:
+            raise ValueError("room_name must be a non-empty string")
+
+        schedules = self.schedules()
+        current = dict(schedules.get(slug) or {"enabled": True, "periods": []})
+        if periods is not None:
+            if not isinstance(periods, list):
+                raise ValueError("periods must be a list")
+            current["periods"] = [dict(period) for period in periods if isinstance(period, Mapping)]
+        if enabled is not None:
+            current["enabled"] = bool(enabled)
+
+        schedules[slug] = current
+        self.options["schedules"] = schedules
+        save_config(self.data_dir, self.options)
+        self.control_engine.update_config(self.options)
+        self._save_runtime_state()
+        await self.run_control_cycle()
+        return self.schedules()
+
+    async def apply_service(self, domain: str, service: str, data: Mapping[str, Any]) -> dict[str, Any]:
+        """Apply dashboard service calls through the App configuration API."""
+
+        payload = dict(data)
+        if domain == "heating_assistant":
+            if service == "update_room_schedule":
+                return {
+                    "room_schedules": await self.update_schedule(
+                        str(payload.get("room_name") or ""),
+                        periods=payload.get("periods") if isinstance(payload.get("periods"), list) else [],
+                    )
+                }
+            if service == "set_schedule_enabled":
+                return {
+                    "room_schedules": await self.update_schedule(
+                        str(payload.get("room_name") or ""),
+                        enabled=bool(payload.get("enabled")),
+                    )
+                }
+            if service == "update_ui_settings":
+                return {"ui_settings": await self.update_ui_settings(payload)}
+            if service == "update_rooms":
+                rooms = payload.get("rooms")
+                if not isinstance(rooms, list):
+                    raise ValueError("rooms must be a list")
+                return {"config": await self.update_config({"rooms": rooms})}
+            if service == "update_heat_sources":
+                sources = payload.get("heat_sources")
+                if not isinstance(sources, list):
+                    raise ValueError("heat_sources must be a list")
+                return {"config": await self.update_config({"heat_sources": sources})}
+            if service in {"update_system_config", "update_system_params", "update_controller_tuning"}:
+                return {"config": await self.update_config(payload)}
+            if service == "set_system_enabled":
+                return {"config": await self.update_config({"system_enabled": bool(payload.get("enabled"))})}
+            if service == "set_room_setpoint":
+                return {"config": await self._update_room_value(payload, "setpoint")}
+            if service == "set_room_comfort_offset":
+                return {"config": await self._update_room_value(payload, "comfort_offset")}
+            if service == "set_room_enabled":
+                return {"config": await self._set_room_enabled(payload)}
+            # Mutating sysid/experiment services are accepted as no-ops until the
+            # App runtime owns those stores.
+            return {"accepted": True, "domain": domain, "service": service}
+
+        if domain == "climate" and service in {"set_temperature", "turn_on", "turn_off"}:
+            return {"accepted": True, "domain": domain, "service": service}
+
+        raise ValueError(f"unsupported service {domain}.{service}")
+
+    async def update_ui_settings(self, updates: Mapping[str, Any]) -> dict[str, float]:
+        """Persist dashboard display-window settings."""
+
+        allowed = {const.CONF_PLOT_HISTORY_HOURS, const.CONF_PLOT_FORECAST_HOURS}
+        next_updates: dict[str, float] = {}
+        for key in allowed:
+            if key in updates:
+                next_updates[key] = float(updates[key])
+        if next_updates:
+            await self.update_config(next_updates)
+        return self.ui_settings()
+
     async def update_bindings(self, bindings: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
         """Persist bridge bindings and publish the retained binding map."""
 
@@ -213,6 +307,168 @@ class HeatingRuntime:
 
         return dict(self.options)
 
+    def schedules(self) -> dict[str, dict[str, Any]]:
+        """Return schedule payloads keyed by room slug, matching panel WS shape."""
+
+        source = self.options.get("schedules", self.options.get("room_schedules", {}))
+        schedules: dict[str, dict[str, Any]] = {}
+        if isinstance(source, Mapping):
+            for key, value in source.items():
+                slug = self._room_slug(str(key))
+                if slug:
+                    schedules[slug] = self._normalise_schedule(value)
+
+        for room in self._rooms():
+            name = room.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            slug = self._room_slug(name)
+            room_schedule = room.get("schedule")
+            if slug not in schedules and room_schedule is not None:
+                schedules[slug] = self._normalise_schedule(room_schedule)
+            schedules.setdefault(slug, {"enabled": self._room_enabled(room), "periods": []})
+        return schedules
+
+    def controller_config(self) -> dict[str, Any]:
+        """Return the industrial panel's controller-configuration snapshot."""
+
+        config = {
+            "comfort_offset": float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET)),
+            "tracking_weight": float(self.options.get("tracking_weight", 1.0)),
+            "energy_weight": float(self.options.get("energy_weight", 1.0)),
+            "energy_price_weight": float(
+                self.options.get("energy_price_weight", const.DEFAULT_ENERGY_PRICE_WEIGHT)
+            ),
+            "smoothing_weight": float(self.options.get("smoothing_weight", 0.05)),
+            "soft_constraint_weight": float(self.options.get("soft_constraint_weight", 10.0)),
+            "soft_constraint_linear_weight": float(
+                self.options.get("soft_constraint_linear_weight", 0.0)
+            ),
+            "terminal_weight": float(self.options.get("terminal_weight", 1.0)),
+            "horizon": int(self.options.get("horizon", const.DEFAULT_HORIZON)),
+            "update_interval": int(
+                self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+            ),
+            "window_open_debounce": int(
+                self.options.get("window_open_debounce", const.DEFAULT_WINDOW_OPEN_DEBOUNCE)
+            ),
+            "window_open_close_settle": int(
+                self.options.get(
+                    "window_open_close_settle", const.DEFAULT_WINDOW_OPEN_CLOSE_SETTLE
+                )
+            ),
+            "window_open_q_inflation": float(
+                self.options.get(
+                    "window_open_q_inflation", const.DEFAULT_WINDOW_OPEN_Q_INFLATION
+                )
+            ),
+            "room_schedules": self.schedules(),
+            "room_comfort_offsets": self._room_comfort_offsets(),
+            "room_enabled": self._room_enabled_map(),
+            "room_active": self._room_enabled_map(),
+            "system_enabled": bool(self.options.get("system_enabled", False)),
+        }
+        return config
+
+    def ui_settings(self) -> dict[str, float]:
+        """Return dashboard plotting window settings."""
+
+        return {
+            const.CONF_PLOT_HISTORY_HOURS: float(
+                self.options.get(
+                    const.CONF_PLOT_HISTORY_HOURS, const.DEFAULT_PLOT_HISTORY_HOURS
+                )
+            ),
+            const.CONF_PLOT_FORECAST_HOURS: float(
+                self.options.get(
+                    const.CONF_PLOT_FORECAST_HOURS, const.DEFAULT_PLOT_FORECAST_HOURS
+                )
+            ),
+        }
+
+    def model_config(self) -> dict[str, Any]:
+        """Return editable model/system configuration for the panel config pages."""
+
+        system = {
+            const.CONF_OUTDOOR_TEMP_ENTITY: self.options.get(
+                const.CONF_OUTDOOR_TEMP_ENTITY, ""
+            ),
+            const.CONF_WEATHER_ENTITY: self.options.get(const.CONF_WEATHER_ENTITY, ""),
+            const.CONF_SOLAR_RADIATION_ENTITY: self.options.get(
+                const.CONF_SOLAR_RADIATION_ENTITY, ""
+            ),
+            const.CONF_PRICE_ENTITY: self.options.get(const.CONF_PRICE_ENTITY, ""),
+            const.CONF_LATITUDE: self.options.get(const.CONF_LATITUDE, 0.0),
+            const.CONF_LONGITUDE: self.options.get(const.CONF_LONGITUDE, 0.0),
+        }
+        return {
+            "rooms": [dict(room) for room in self._rooms()],
+            "heat_sources": [dict(source) for source in self._heat_sources()],
+            "system": system,
+            "ui_settings": self.ui_settings(),
+            "system_params": {
+                const.CONF_IDENTIFICATION_HISTORY_DAYS: int(
+                    self.options.get(
+                        const.CONF_IDENTIFICATION_HISTORY_DAYS,
+                        const.DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+                    )
+                )
+            },
+            "enums": {
+                "floor_types": list(const.FLOOR_TYPE_DEFAULTS.keys()),
+                "facade_colours": list(const.FACADE_COLOUR_TO_ABSORPTANCE.keys()),
+                "solar_exposures": list(const.SOLAR_EXPOSURE_TO_APERTURE.keys()),
+                "envelope_tightness": list(
+                    const.ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION.keys()
+                ),
+                "envelope_tightness_map": dict(
+                    const.ENVELOPE_TIGHTNESS_TO_INFILTRATION_FRACTION
+                ),
+                "source_types": list(const.ALL_SOURCE_TYPES),
+                "hvac_modes": [
+                    const.SOURCE_HVAC_MODE_HEAT,
+                    const.SOURCE_HVAC_MODE_COOL,
+                    const.SOURCE_HVAC_MODE_HEAT_COOL,
+                ],
+            },
+        }
+
+    def forecasts(self, plot_forecast_hours: float | None = None) -> dict[str, Any]:
+        """Return an empty but structured forecast payload for chart callers."""
+
+        return {
+            "rooms": {},
+            "price_forecast": [],
+            "plot_forecast_hours": plot_forecast_hours,
+        }
+
+    def datasets(self, room_slug: str | None = None) -> list[dict[str, Any]]:
+        """Return persisted dataset metadata when configured, otherwise an empty list."""
+
+        source = self.options.get("datasets", [])
+        if not isinstance(source, list):
+            return []
+        datasets = [dict(item) for item in source if isinstance(item, Mapping)]
+        if room_slug:
+            datasets = [item for item in datasets if item.get("room_slug") == room_slug]
+        return datasets
+
+    def dataset(self, dataset_id: str) -> dict[str, Any] | None:
+        """Return one persisted dataset when present."""
+
+        for item in self.datasets():
+            if item.get("id") == dataset_id:
+                return item
+        return None
+
+    def experiments(self) -> list[dict[str, Any]]:
+        """Return persisted experiments when configured, otherwise an empty list."""
+
+        source = self.options.get("experiments", [])
+        if not isinstance(source, list):
+            return []
+        return [dict(item) for item in source if isinstance(item, Mapping)]
+
     def state_snapshot(self) -> dict[str, Any]:
         """Return persisted runtime state plus current derived fields."""
 
@@ -223,7 +479,115 @@ class HeatingRuntime:
             "room_temperatures": dict(self.room_temperatures),
             "actuator_outputs": dict(self.actuator_outputs),
             "control": self._control_status(),
+            "hass_states": self.hass_states(),
         }
+
+    def hass_states(self) -> dict[str, dict[str, Any]]:
+        """Build minimal Home Assistant-like states for the custom panel."""
+
+        now = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+        states: dict[str, dict[str, Any]] = {}
+
+        states["sensor.heating_assistant_controller_config"] = self._ha_state(
+            "sensor.heating_assistant_controller_config",
+            "ok",
+            self.controller_config(),
+            now,
+        )
+        states["sensor.heating_assistant_system_summary"] = self._ha_state(
+            "sensor.heating_assistant_system_summary",
+            str(sum(self.actuator_outputs.values()) if self.actuator_outputs else 0.0),
+            {
+                "system_enabled": bool(self.options.get("system_enabled", False)),
+                "control_mode": self.control_engine.mode,
+                "fallback_reason": self.control_engine.fallback_reason,
+                "comfort_index_pct": None,
+                "has_heat_pump": any(
+                    str(source.get("type", "")).lower() == "heat_pump"
+                    for source in self._heat_sources()
+                ),
+            },
+            now,
+        )
+
+        outdoor = self._outdoor_temperature()
+        states["sensor.heating_assistant_outdoor_temperature_measured"] = self._ha_state(
+            "sensor.heating_assistant_outdoor_temperature_measured",
+            "unknown" if outdoor is None else outdoor,
+            {"unit_of_measurement": "°C"},
+            now,
+        )
+
+        setpoints = self._setpoints()
+        schedules = self.schedules()
+        for room in self._rooms():
+            name = room.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            slug = self._room_slug(name)
+            temperature = self.room_temperatures.get(name)
+            setpoint = setpoints.get(name, self._coerce_number(room.get("setpoint")) or 21.0)
+            offset = self._coerce_number(room.get("comfort_offset"))
+            if offset is None:
+                offset = float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET))
+            enabled = self._room_enabled(room)
+            schedule = schedules.get(slug, {"enabled": enabled, "periods": []})
+
+            states[f"sensor.heating_assistant_{slug}_temperature_measured"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_temperature_measured",
+                "unknown" if temperature is None else temperature,
+                {"room": name, "unit_of_measurement": "°C"},
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_temperature_filtered"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_temperature_filtered",
+                "unknown" if temperature is None else temperature,
+                {
+                    "room": name,
+                    "unit_of_measurement": "°C",
+                    "comfort_deviation": None,
+                    "time_in_range_pct_24h": None,
+                },
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_setpoint"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_setpoint",
+                setpoint,
+                {"room": name, "unit_of_measurement": "°C"},
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_constraint_lower"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_constraint_lower",
+                setpoint - offset,
+                {"room": name, "unit_of_measurement": "°C"},
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_constraint_upper"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_constraint_upper",
+                setpoint + offset,
+                {"room": name, "unit_of_measurement": "°C"},
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_heating_power_measured"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_heating_power_measured",
+                self._room_power(name),
+                {"room": name, "unit_of_measurement": "W"},
+                now,
+            )
+            states[f"climate.heating_assistant_{slug}"] = self._ha_state(
+                f"climate.heating_assistant_{slug}",
+                "heat" if enabled else "off",
+                {
+                    "friendly_name": name,
+                    "current_temperature": temperature,
+                    "temperature": setpoint,
+                    "hvac_modes": ["off", "heat"],
+                    "supported_features": 1,
+                    "schedule": schedule,
+                },
+                now,
+            )
+        return states
 
     def status(self) -> dict[str, Any]:
         """Expose a compact health/status snapshot for HTTP and MQTT."""
@@ -268,6 +632,12 @@ class HeatingRuntime:
             return []
         return [room for room in rooms if isinstance(room, Mapping)]
 
+    def _heat_sources(self) -> list[Mapping[str, Any]]:
+        sources = self.options.get("heat_sources", [])
+        if not isinstance(sources, list):
+            return []
+        return [source for source in sources if isinstance(source, Mapping)]
+
     def _room_temp_tags(self, room: Mapping[str, Any]) -> list[str]:
         temp_tags = room.get("temp_tags")
         if isinstance(temp_tags, list):
@@ -300,6 +670,108 @@ class HeatingRuntime:
             if value is not None:
                 setpoints[name] = value
         return setpoints
+
+    async def _update_room_value(
+        self, payload: Mapping[str, Any], field: str
+    ) -> dict[str, Any]:
+        room_name = str(payload.get("room_name") or "")
+        if field not in payload:
+            raise ValueError(f"{field} is required")
+        value = float(payload[field])
+        rooms = [dict(room) for room in self._rooms()]
+        updated = False
+        for room in rooms:
+            if self._room_slug(str(room.get("name") or "")) == self._room_slug(room_name):
+                room[field] = value
+                updated = True
+                break
+        if not updated:
+            raise ValueError(f"unknown room {room_name!r}")
+        return await self.update_config({"rooms": rooms})
+
+    async def _set_room_enabled(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        room_name = str(payload.get("room_name") or "")
+        enabled = bool(payload.get("enabled"))
+        rooms = [dict(room) for room in self._rooms()]
+        updated = False
+        for room in rooms:
+            if self._room_slug(str(room.get("name") or "")) == self._room_slug(room_name):
+                room["enabled"] = enabled
+                updated = True
+                break
+        if not updated:
+            raise ValueError(f"unknown room {room_name!r}")
+        return await self.update_config({"rooms": rooms})
+
+    def _room_power(self, room_name: str) -> float:
+        total = 0.0
+        for source in self._heat_sources():
+            if source.get("room") != room_name:
+                continue
+            tag = source.get("output_tag")
+            if isinstance(tag, str):
+                value = self._coerce_number(self.actuator_outputs.get(tag))
+                if value is not None:
+                    total += value
+        return total
+
+    def _room_comfort_offsets(self) -> dict[str, float]:
+        offsets: dict[str, float] = {}
+        default = float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET))
+        for room in self._rooms():
+            name = room.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            value = self._coerce_number(room.get("comfort_offset"))
+            offsets[self._room_slug(name)] = value if value is not None else default
+        return offsets
+
+    def _room_enabled_map(self) -> dict[str, bool]:
+        enabled: dict[str, bool] = {}
+        for room in self._rooms():
+            name = room.get("name")
+            if isinstance(name, str) and name:
+                enabled[self._room_slug(name)] = self._room_enabled(room)
+        return enabled
+
+    @staticmethod
+    def _room_enabled(room: Mapping[str, Any]) -> bool:
+        return bool(room.get("enabled", True))
+
+    @staticmethod
+    def _room_slug(name: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+        return re.sub(r"_+", "_", slug)
+
+    @staticmethod
+    def _normalise_schedule(value: Any) -> dict[str, Any]:
+        if isinstance(value, list):
+            return {"enabled": True, "periods": [dict(p) for p in value if isinstance(p, Mapping)]}
+        if isinstance(value, Mapping):
+            periods = value.get("periods", [])
+            if not isinstance(periods, list):
+                periods = []
+            return {
+                "enabled": bool(value.get("enabled", True)),
+                "periods": [dict(p) for p in periods if isinstance(p, Mapping)],
+            }
+        return {"enabled": True, "periods": []}
+
+    @staticmethod
+    def _ha_state(
+        entity_id: str,
+        state: Any,
+        attributes: Mapping[str, Any],
+        now: str,
+    ) -> dict[str, Any]:
+        return {
+            "entity_id": entity_id,
+            "state": str(state),
+            "attributes": dict(attributes),
+            "last_changed": now,
+            "last_updated": now,
+            "context": {"id": "app-runtime", "parent_id": None, "user_id": None},
+        }
 
     def _recompute_room_temperatures(self) -> None:
         for room in self._rooms():

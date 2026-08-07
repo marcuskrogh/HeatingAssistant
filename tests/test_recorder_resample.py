@@ -1,4 +1,6 @@
-from custom_components.heating_assistant.recorder_resample import (
+"""Unit tests for recorder resample helpers."""
+
+from heatingassistant.engine.recorder_resample import (
     build_uniform_grid, zoh_resample,
 )
 

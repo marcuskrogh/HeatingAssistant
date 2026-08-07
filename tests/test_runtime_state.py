@@ -1,6 +1,12 @@
-"""Unit tests for coordinator runtime-state persistence and cloud-cover smoothing."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import math
 import time
@@ -11,7 +17,7 @@ import numpy as np
 import pytest
 
 from custom_components.heating_assistant.coordinator import runtime_state as rs
-from custom_components.heating_assistant.const import CLOUD_SMOOTHING_TAU_S
+from heatingassistant.engine.const import CLOUD_SMOOTHING_TAU_S
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
 # Builds real coordinator objects (tests/helpers stubs) — integration tier.

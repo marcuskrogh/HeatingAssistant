@@ -1,4 +1,4 @@
-"""Config flow for the staged thin Heating Assistant MQTT bridge."""
+"""Config flow for the thin Heating Assistant MQTT bridge."""
 
 from __future__ import annotations
 

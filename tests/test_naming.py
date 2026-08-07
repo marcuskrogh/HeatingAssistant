@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.heating_assistant.naming import slugify
+from heatingassistant.engine.naming import slugify
 
 
 @pytest.mark.parametrize(

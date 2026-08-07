@@ -1,12 +1,18 @@
-"""Unit tests for uncovered lovelace_dashboard helpers and coordinator builders."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 
 import pytest
 
-from custom_components.heating_assistant.const import DOMAIN
+from heatingassistant.engine.const import DOMAIN
 from custom_components.heating_assistant.lovelace_dashboard import (
     DashboardSpec,
     HeatSourceSpec,

@@ -1,18 +1,16 @@
 {
   "domain": "heating_assistant",
   "name": "Heating Assistant",
-  "version": "1.0.3",
+  "version": "2.0.1",
   "documentation": "https://github.com/marcuskrogh/HeatingAssistant",
   "issue_tracker": "https://github.com/marcuskrogh/HeatingAssistant/issues",
-  "requirements": [
-    "numpy>=1.21.0",
-    "scipy>=1.9.0",
-    "highspy",
-    "mbc@https://github.com/marcuskrogh/mbc/archive/5b0a7098d403d35eac0d97092ef21437573ab94f.zip"
+  "requirements": [],
+  "dependencies": [
+    "mqtt"
   ],
-  "dependencies": [],
-  "after_dependencies": ["recorder"],
-  "codeowners": ["@marcuskrogh"],
+  "codeowners": [
+    "@marcuskrogh"
+  ],
   "iot_class": "local_push",
   "config_flow": true
 }

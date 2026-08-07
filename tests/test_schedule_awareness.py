@@ -1,6 +1,12 @@
-"""Focused regression tests for schedule-aware MPC horizon behavior."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -8,19 +14,19 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from custom_components.heating_assistant.controller import HeatingMPCController
+from heatingassistant.engine.controller import HeatingMPCController
 from custom_components.heating_assistant.coordinator import (
     ControlTrajectory,
     HeatingAssistantCoordinator,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.schedule import EffectiveControlParams, build_schedule
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.schedule import EffectiveControlParams, build_schedule
 from custom_components.heating_assistant.sensor import (
     ConstraintLowerSensor,
     ConstraintUpperSensor,
     SetpointSensor,
 )
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
+from heatingassistant.engine.thermal_model import HouseModel, Room
 
 # Builds real coordinator objects (tests/helpers stubs) — integration tier.
 pytestmark = pytest.mark.integration

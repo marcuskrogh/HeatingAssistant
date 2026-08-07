@@ -16,10 +16,10 @@ the unobserved envelope), emitter lags warm-started.
 
 import numpy as np
 
-from custom_components.heating_assistant.controller import HouseThermalSDE
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.sysid import (
+from heatingassistant.engine.controller import HouseThermalSDE
+from heatingassistant.engine.thermal_model import HouseModel, Room
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.sysid import (
     run_sysid_ekf,
     _init_state_from_measurement,
 )

@@ -1,7 +1,13 @@
-"""Tests for YAML/config-entry merge behaviour in integration setup."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from custom_components.heating_assistant.__init__ import _merge_yaml_into_entry_data
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_HEAT_SOURCES,
     CONF_MPC_ANALYTIC_DERIVATIVES,
     CONF_MPC_SOLVER,

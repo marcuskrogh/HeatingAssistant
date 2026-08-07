@@ -1,11 +1,17 @@
-"""Unit tests for coordinator setup-assist thermal simulation helpers."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
 
 import pytest
 
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
+
+import pytest
+
 from custom_components.heating_assistant.coordinator import setup_simulation as sim
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
+from heatingassistant.engine.thermal_model import HouseModel, Room
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 
 # Builds real coordinator objects (tests/helpers stubs) — integration tier.

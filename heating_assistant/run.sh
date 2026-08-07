@@ -6,7 +6,7 @@ set -eu
 DATA_DIR="${HEATINGASSISTANT_DATA:-/data}"
 OPTIONS_PATH="${DATA_DIR}/options.json"
 HOST="${HEATINGASSISTANT_HOST:-0.0.0.0}"
-PORT="${HEATINGASSISTANT_PORT:-8099}"
+PORT="${HEATINGASSISTANT_PORT:-8100}"
 HA_CONFIG="${HEATINGASSISTANT_HA_CONFIG:-/homeassistant}"
 INTEGRATION_SRC="${HEATINGASSISTANT_INTEGRATION_SRC:-/usr/share/heatingassistant/custom_components/heating_assistant}"
 INTEGRATION_DST="${HA_CONFIG}/custom_components/heating_assistant"

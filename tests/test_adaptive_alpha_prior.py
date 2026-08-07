@@ -5,14 +5,14 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.parameter_estimator import (
+from heatingassistant.engine.parameter_estimator import (
     _adaptive_alpha_prior_weight,
     _ALPHA_PRIOR_WEIGHT,
     _ALPHA_PRIOR_WEIGHT_EXCITED,
     KalmanMLEstimator,
 )
-from custom_components.heating_assistant.thermal_model import Room
-from custom_components.heating_assistant.heat_sources import ElectricHeater
+from heatingassistant.engine.thermal_model import Room
+from heatingassistant.engine.heat_sources import ElectricHeater
 
 
 def test_adaptive_alpha_weaker_when_excited():

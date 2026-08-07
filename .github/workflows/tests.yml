@@ -40,7 +40,7 @@ jobs:
           COVERAGE_FILE: .coverage.fast
         run: |
           python3 -m pytest tests/ -m "not slow" \
-            --cov=custom_components/heating_assistant \
+            --cov=heatingassistant \
             --cov-report= \
             --durations=20 \
             -q
@@ -85,7 +85,7 @@ jobs:
           COVERAGE_FILE: .coverage.slow-${{ matrix.shard }}
         run: |
           python3 -m pytest ${{ matrix.pytest_args }} \
-            --cov=custom_components/heating_assistant \
+            --cov=heatingassistant \
             --cov-report= \
             --durations=10 \
             -q

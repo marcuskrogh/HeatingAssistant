@@ -1,11 +1,17 @@
-"""Tests for persisting the global START/STOP toggle across restarts."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_PERSISTED_SYSTEM_ENABLED,
     CONF_ROOM_NAME,
     CONF_ROOMS,

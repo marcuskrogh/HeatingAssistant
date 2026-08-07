@@ -1,6 +1,12 @@
-"""Unit tests for stored identification datasets (metadata + snapshots)."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from custom_components.heating_assistant import datasets as D
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     DATASET_SOURCE_MANUAL,
     MAX_DATASET_RECORDS,
     MAX_STORED_DATASETS,

@@ -1,6 +1,12 @@
-"""WebSocket API payload shape tests."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -8,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.heating_assistant import websocket_api
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_PLOT_FORECAST_HOURS,
     CONF_PLOT_HISTORY_HOURS,
     CONF_ROOMS,

@@ -1,13 +1,12 @@
-"""Tests for the weather-forecast health tracking (U3) and the
-WeatherForecastStatusSensor that surfaces it.
+"""SWD-262: fat HA integration removed.
 
-These tests exercise the ``_record_weather_success`` / ``_record_weather_failure``
-helpers via the lower-level ``_async_get_forecast_entries`` path, plus the
-sensor that reads the resulting state — without standing up the whole
-coordinator (the real ``__init__`` requires the full config pipeline).
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import logging
 from datetime import datetime, timezone

@@ -1,4 +1,10 @@
-"""Tests for the tuning-preview MPC solve (preview_tuning_forecast)."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -11,7 +17,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
-from custom_components.heating_assistant.const import CONF_HORIZON, CONF_TRACKING_WEIGHT
+from heatingassistant.engine.const import CONF_HORIZON, CONF_TRACKING_WEIGHT
 
 
 def _make_preview_coordinator():
@@ -97,7 +103,7 @@ def test_preview_returns_error_when_outdoor_unavailable():
     assert result == {"error": "outdoor_temperature_unavailable"}
 
 
-@patch("custom_components.heating_assistant.controller.factory.HeatingMPCController")
+@patch("heatingassistant.engine.controller.factory.HeatingMPCController")
 def test_preview_runs_mpc_and_builds_payload(mock_controller_cls):
     coord = _make_preview_coordinator()
     preview_ctrl = MagicMock()

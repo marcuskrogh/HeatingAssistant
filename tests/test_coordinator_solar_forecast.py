@@ -1,13 +1,12 @@
-"""Coordinator-level tests for the solar-radiation (irradiance) integration.
+"""SWD-262: fat HA integration removed.
 
-Builds a bare coordinator via ``object.__new__`` (same pattern as
-``test_coordinator_apply_actions.py``) and exercises ``_read_ghi`` and
-``_room_solar_gain`` directly, covering the graceful-fallback paths that keep
-the analytical model in charge when the radiation entity is missing / stale /
-carries no usable irradiance.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -16,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
-from custom_components.heating_assistant.thermal_model import HouseModel, Room, Window
+from heatingassistant.engine.thermal_model import HouseModel, Room, Window
 
 # Builds real coordinator objects (tests/helpers stubs) — integration tier.
 pytestmark = pytest.mark.integration
@@ -147,7 +146,7 @@ class TestRoomSolarGain:
     def test_missing_entity_gain_matches_cloud_baseline(self):
         # With no GHI, the gain equals the plain cloud-cover path.
         coord = _make_coordinator(None, {})
-        from custom_components.heating_assistant.solar_model import room_solar_gains
+        from heatingassistant.engine.solar_model import room_solar_gains
         baseline = room_solar_gains(
             coord.model.rooms["lr"].windows, NOW, LAT, LON, cloud_cover=0.5,
         )

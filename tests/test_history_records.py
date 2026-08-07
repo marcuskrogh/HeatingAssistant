@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from custom_components.heating_assistant.history.records import (
+from heatingassistant.engine.history.records import (
     record_d,
     record_u,
     record_window_open,

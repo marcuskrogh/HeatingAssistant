@@ -1,10 +1,10 @@
-"""Regression tests for Heating Assistant service registration.
+"""SWD-262: fat HA integration removed.
 
-Home Assistant classifies service handlers by callable type. Wrapping async
-handlers in ``lambda call: handle(hass, call)`` is classified as
-``HassJobType.Executor``, so the coroutine body is never awaited and panel
-saves appear to succeed without persisting anything.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import inspect
 from types import SimpleNamespace
@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
-from custom_components.heating_assistant.const import DOMAIN
+from heatingassistant.engine.const import DOMAIN
 
 
 def _capture_handlers(hass):

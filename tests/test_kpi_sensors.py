@@ -1,4 +1,10 @@
-"""Tests for KPI attributes published on system and room sensors (WP-3)."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -8,7 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.heat_sources import HeatPump, ElectricHeater
+from heatingassistant.engine.heat_sources import HeatPump, ElectricHeater
 from custom_components.heating_assistant.sensor import (
     MPCPerformanceSensor,
     SystemEfficiencySensor,

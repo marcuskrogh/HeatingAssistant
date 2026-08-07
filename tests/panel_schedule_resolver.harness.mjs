@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SHARED = join(
   ROOT,
-  'custom_components/heating_assistant/www/js/schedules/schedules-shared.js',
+  'heatingassistant/app/static/js/schedules/schedules-shared.js',
 );
 
 function assert(condition, message) {
@@ -41,7 +41,7 @@ assert(
 );
 
 const indexSource = readFileSync(
-  join(ROOT, 'custom_components/heating_assistant/www/js/schedules/schedules-index.js'),
+  join(ROOT, 'heatingassistant/app/static/js/schedules/schedules-index.js'),
   'utf8',
 );
 assert(

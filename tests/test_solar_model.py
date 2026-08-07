@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.solar_model import (
+from heatingassistant.engine.solar_model import (
     solar_angles,
     clear_sky_dni,
     clear_sky_dhi,
@@ -23,7 +23,7 @@ from custom_components.heating_assistant.solar_model import (
     extraterrestrial_normal_irradiance,
     ghi_to_dni_dhi,
 )
-from custom_components.heating_assistant.thermal_model import Window
+from heatingassistant.engine.thermal_model import Window
 
 
 LATITUDE = 55.0    # Copenhagen-ish
@@ -175,7 +175,7 @@ class TestCloudAttenuation:
         # does not scale with the GHI factor — assert the real invariants:
         # attenuation and a collapsed beam.
         assert 0.0 < overcast < clear
-        from custom_components.heating_assistant.solar_model import (
+        from heatingassistant.engine.solar_model import (
             _day_of_year, _intensity_dni_dhi, solar_angles,
         )
         alt, _az = solar_angles(dt, LATITUDE, LONGITUDE)

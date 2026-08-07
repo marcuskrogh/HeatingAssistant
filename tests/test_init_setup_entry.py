@@ -1,4 +1,10 @@
-"""Tests for integration setup-entry resilience and persistence."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -6,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_HEAT_SOURCES,
     CONF_HORIZON,
     CONF_INHERIT_OVERRIDES_MIGRATED,

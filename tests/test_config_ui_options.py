@@ -1,6 +1,12 @@
-"""Tests for configuration UI text and options-flow wiring."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import json
 import re
@@ -19,7 +25,7 @@ from custom_components.heating_assistant._options_flow import (
     ROOM_SIZE_TO_THERMAL_MASS,
     RoomFlowHelper,
 )
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_FACADE_COLOUR,
     CONF_FACADE_SOLAR_SHARE,
     CONF_FLOOR_TYPE,

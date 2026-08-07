@@ -1,4 +1,10 @@
-"""Unit tests for model diagnostics and fit validation tools."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import sys
 import os
@@ -608,9 +614,9 @@ def test_open_loop_simulation_includes_internal_gain():
     a system wrapping the same model — the prediction must reproduce the data
     with negligible bias.
     """
-    from custom_components.heating_assistant.controller import HouseThermalSDE
-    from custom_components.heating_assistant.thermal_model import HouseModel, Room
-    from custom_components.heating_assistant.heat_sources import ElectricHeater
+    from heatingassistant.engine.controller import HouseThermalSDE
+    from heatingassistant.engine.thermal_model import HouseModel, Room
+    from heatingassistant.engine.heat_sources import ElectricHeater
     from custom_components.heating_assistant.model_diagnostics import (
         compute_open_loop_predictions,
     )
@@ -677,9 +683,9 @@ def test_open_loop_warm_starts_emitter_state():
     the emitter-lag block is warm-started to the commanded fraction instead
     of cold-starting at zero.
     """
-    from custom_components.heating_assistant.controller import HouseThermalSDE
-    from custom_components.heating_assistant.thermal_model import HouseModel, Room
-    from custom_components.heating_assistant.heat_sources import ElectricHeater
+    from heatingassistant.engine.controller import HouseThermalSDE
+    from heatingassistant.engine.thermal_model import HouseModel, Room
+    from heatingassistant.engine.heat_sources import ElectricHeater
 
     room = Room("studio", 4e6, 0.05, temperature=20.0, setpoint=21.0)
     model = HouseModel([room])
@@ -714,9 +720,9 @@ def test_compute_open_loop_predictions_uses_correct_attribute_names():
     are ``system.nd`` and ``system.nu``).  The bug caused OpenLoopRMSESensor to
     always fail with an AttributeError.
     """
-    from custom_components.heating_assistant.controller import HouseThermalSDE
-    from custom_components.heating_assistant.thermal_model import HouseModel, Room
-    from custom_components.heating_assistant.heat_sources import ElectricHeater
+    from heatingassistant.engine.controller import HouseThermalSDE
+    from heatingassistant.engine.thermal_model import HouseModel, Room
+    from heatingassistant.engine.heat_sources import ElectricHeater
     from custom_components.heating_assistant.model_diagnostics import (
         compute_open_loop_predictions,
     )

@@ -1,6 +1,12 @@
-"""Tests for the dataset history-resolution helpers used by identification."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from custom_components.heating_assistant import (
     _records_for_dataset,

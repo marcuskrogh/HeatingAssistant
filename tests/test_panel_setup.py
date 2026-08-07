@@ -1,10 +1,12 @@
-"""Tests for panel_setup.async_register_industrial_panel.
+"""SWD-262: fat HA integration removed.
 
-Frontend/sidebar registration broke silently before (the function swallows all
-exceptions by design), so these tests pin the registration calls themselves.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import sys
 import types

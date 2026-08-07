@@ -37,16 +37,16 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     DEFAULT_DELTA_T_SKY,
     FACADE_COLOUR_DARK,
     FACADE_COLOUR_LIGHT,
     FACADE_COLOUR_MEDIUM,
     FACADE_COLOUR_TO_ABSORPTANCE,
 )
-from custom_components.heating_assistant.controller import HouseThermalSDE
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
+from heatingassistant.engine.controller import HouseThermalSDE
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.thermal_model import HouseModel, Room
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ def test_controller_no_facade_solar_when_share_zero() -> None:
     """Default ``facade_solar_share = 0`` keeps the solar channel at the
     plain air/wall split (scaled by solar_scale = 1): the air row couples
     (1 − SOLAR_WALL_FRACTION)/C_a, the wall row SOLAR_WALL_FRACTION/C_w."""
-    from custom_components.heating_assistant.const import SOLAR_WALL_FRACTION
+    from heatingassistant.engine.const import SOLAR_WALL_FRACTION
 
     room = Room(name="a", thermal_mass=5e6, r_external=0.05, temperature=20.0)
     src = ElectricHeater("h", "a", max_power=1000.0)

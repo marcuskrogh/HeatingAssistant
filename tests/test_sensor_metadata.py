@@ -1,4 +1,10 @@
-"""Tests for sensor entity metadata."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from datetime import timedelta
 from types import SimpleNamespace

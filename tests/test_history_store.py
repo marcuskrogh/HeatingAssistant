@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.heating_assistant.history.store import IdentificationHistoryStore
+from heatingassistant.engine.history.store import IdentificationHistoryStore
 from tests.helpers.setup_patches import ensure_hass_config
 
 

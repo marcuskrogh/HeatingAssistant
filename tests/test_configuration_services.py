@@ -1,14 +1,10 @@
-"""Unit tests for Configuration-page service handlers.
+"""SWD-262: fat HA integration removed.
 
-These back the industrial-UI Configuration menu: display settings, room and
-heat-source replacement, and environment/site updates.  They assert the handlers
-persist to both ``entry.data`` and ``entry.options`` (so the coordinator's
-options-first reads survive a restart) and route runtime updates to the
-coordinator.
-
-Controller-tuning handler integration coverage lives in
-``tests/integration/test_configuration_services.py``.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -17,7 +13,7 @@ import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
 import custom_components.heating_assistant.services.configuration as svc_mod
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_HEAT_SOURCES,
     CONF_LATITUDE,
     CONF_LONGITUDE,

@@ -1,6 +1,12 @@
-"""Unit tests for config_flow validation helpers and flow steps."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -15,7 +21,7 @@ from custom_components.heating_assistant.config_flow import (
     _location_schema,
     _number_box,
 )
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_SCHEDULE_DAYS,

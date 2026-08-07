@@ -1,8 +1,9 @@
 [run]
-source = custom_components/heating_assistant
+source = heatingassistant
 omit =
     */tests/*
     */benchmarks/*
+    heating_assistant/*
 branch = True
 
 [report]

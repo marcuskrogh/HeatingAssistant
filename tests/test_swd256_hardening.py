@@ -34,7 +34,7 @@ def test_thin_integration_has_no_heavy_requirements():
             / "manifest.json"
         ).read_text(encoding="utf-8")
     )
-    assert manifest["version"] == "2.0.0"
+    assert manifest["version"] == "2.0.1"
     assert "mqtt" in manifest.get("dependencies", [])
     reqs = manifest.get("requirements") or []
     joined = " ".join(reqs).lower()
@@ -48,8 +48,8 @@ def test_version_sync_pending_restart_helper():
     import sys
     import types
 
-    root = ROOT / "custom_components" / "heating_assistant_mqtt_thin"
-    pkg_name = "heating_assistant_mqtt_thin"
+    root = ROOT / "custom_components" / "heating_assistant"
+    pkg_name = "heating_assistant"
     pkg = types.ModuleType(pkg_name)
     pkg.__path__ = [str(root.resolve())]
     sys.modules[pkg_name] = pkg

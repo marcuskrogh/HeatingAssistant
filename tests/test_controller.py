@@ -10,20 +10,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel,
     Room,
     RoomConnection,
     Window,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
+from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from mbc.models import ContinuousDiscreteSDE
 from mbc.estimation import (
     ContinuousDiscreteEKF,
     ContinuousDiscreteEKFParams,
     IntegrationScheme,
 )
-from custom_components.heating_assistant.controller import (
+from heatingassistant.engine.controller import (
     HouseThermalSDE,
     HeatingMPCController,
     HeatingLinearisedMPC,
@@ -1262,7 +1262,7 @@ class TestTotalComputes:
 
     def test_exceeds_rolling_window(self, two_room):
         """total_computes must exceed MPC_STATS_BUFFER_SIZE (rolling deque cap)."""
-        from custom_components.heating_assistant.controller import MPC_STATS_BUFFER_SIZE
+        from heatingassistant.engine.controller import MPC_STATS_BUFFER_SIZE
 
         model, sources = two_room
         ctrl = HeatingMPCController(model, sources, horizon=2, dt=900)
@@ -1285,10 +1285,10 @@ class TestSolarForecastIndexing:
 
     def test_solar_seq_zero_uses_current_time(self):
         """solar_seq[0] must equal the solar gain computed at *now* (not now+dt)."""
-        from custom_components.heating_assistant.controller import (
+        from heatingassistant.engine.controller import (
             HeatingMPCController, HouseThermalSDE,
         )
-        from custom_components.heating_assistant.solar_model import room_solar_gains
+        from heatingassistant.engine.solar_model import room_solar_gains
         from datetime import timedelta
 
         room = Room(
@@ -1338,7 +1338,7 @@ class TestSolarForecastIndexing:
 
     def test_d_traj_zero_uses_current_disturbance(self):
         """After fix, d_traj[0] must use current solar (not future solar)."""
-        from custom_components.heating_assistant.solar_model import room_solar_gains
+        from heatingassistant.engine.solar_model import room_solar_gains
 
         room = Room(
             "living_room", 5_000_000.0, 0.05,

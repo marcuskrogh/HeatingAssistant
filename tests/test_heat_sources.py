@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.heat_sources import (
+from heatingassistant.engine.heat_sources import (
     ElectricHeater,
     GasHeater,
     GenericThermostat,
@@ -21,33 +21,13 @@ from custom_components.heating_assistant.heat_sources import (
     PelletStove,
     ElectricStorageHeater,
 )
-from custom_components.heating_assistant.const import (
-    SOURCE_TYPE_OIL_BOILER,
-    SOURCE_TYPE_GROUND_SOURCE_HP,
-    SOURCE_TYPE_PELLET_STOVE,
-    SOURCE_TYPE_ELECTRIC_STORAGE,
+from heatingassistant.engine.const import (
     SOURCE_TYPE_HYDRONIC_FLOOR,
-    DEFAULT_OIL_BOILER_EFFICIENCY,
-    DEFAULT_GROUND_SOURCE_COP,
-    DEFAULT_PELLET_EFFICIENCY,
-    DEFAULT_PELLET_MIN_POWER_FRACTION,
     DEFAULT_STORAGE_CHARGE_POWER,
     DEFAULT_STORAGE_CAPACITY_KWH,
     DEFAULT_STORAGE_DISCHARGE_RATE,
-    CONF_SOURCE_MIN_POWER_FRACTION,
-    CONF_SOURCE_CHARGE_POWER,
-    CONF_SOURCE_STORAGE_CAPACITY_KWH,
-    CONF_SOURCE_PASSIVE_DISCHARGE_RATE,
     SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU,
-    CONF_SOURCE_NAME,
-    CONF_SOURCE_ROOM,
-    CONF_SOURCE_MAX_POWER,
-    CONF_SOURCE_EFFICIENCY,
-    CONF_SOURCE_TYPE,
-    CONF_SOURCE_COP_RATED,
-    CONF_SOURCE_HVAC_MODE,
 )
-from custom_components.heating_assistant.coordinator import build_heat_sources
 
 
 class TestElectricHeater:
@@ -1063,135 +1043,7 @@ class TestElectricStorageHeater:
         assert esh.thermal_power(1.0) == pytest.approx(500.0 * 0.5)
 
 
-class TestOilBoilerAlias:
-    def _make_cfg(self, extra=None):
-        cfg = {
-            CONF_SOURCE_TYPE: SOURCE_TYPE_OIL_BOILER,
-            CONF_SOURCE_NAME: "ob",
-            CONF_SOURCE_ROOM: "r",
-            CONF_SOURCE_MAX_POWER: 20000.0,
-        }
-        if extra:
-            cfg.update(extra)
-        return [cfg]
-
-    def test_factory_returns_gas_heater(self):
-        sources = build_heat_sources(self._make_cfg())
-        assert isinstance(sources[0], GasHeater)
-
-    def test_default_efficiency(self):
-        sources = build_heat_sources(self._make_cfg())
-        assert sources[0].efficiency == pytest.approx(DEFAULT_OIL_BOILER_EFFICIENCY)
-
-    def test_thermal_power(self):
-        sources = build_heat_sources(self._make_cfg())
-        assert sources[0].thermal_power(1.0) == pytest.approx(20000.0 * DEFAULT_OIL_BOILER_EFFICIENCY)
-
-    def test_elec_per_unit_heat_zero(self):
-        """Oil combustion draws no electricity."""
-        sources = build_heat_sources(self._make_cfg())
-        assert sources[0].elec_per_unit_heat == pytest.approx(0.0)
-
-    def test_custom_efficiency_override(self):
-        sources = build_heat_sources(self._make_cfg(extra={CONF_SOURCE_EFFICIENCY: 0.93}))
-        assert sources[0].efficiency == pytest.approx(0.93)
-
-
-class TestCoordinatorFactoryNewTypes:
-    def _cfg(self, src_type, extra=None):
-        cfg = {
-            CONF_SOURCE_TYPE: src_type,
-            CONF_SOURCE_NAME: "s",
-            CONF_SOURCE_ROOM: "r",
-            CONF_SOURCE_MAX_POWER: 5000.0,
-        }
-        if extra:
-            cfg.update(extra)
-        return [cfg]
-
-    def test_ground_source_hp_factory(self):
-        sources = build_heat_sources(self._cfg(SOURCE_TYPE_GROUND_SOURCE_HP))
-        assert isinstance(sources[0], GroundSourceHeatPump)
-
-    def test_ground_source_hp_tau(self):
-        sources = build_heat_sources(self._cfg(SOURCE_TYPE_GROUND_SOURCE_HP))
-        assert sources[0].emitter_time_constant == pytest.approx(
-            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_GROUND_SOURCE_HP]
-        )
-
-    def test_pellet_stove_factory(self):
-        sources = build_heat_sources(self._cfg(SOURCE_TYPE_PELLET_STOVE))
-        assert isinstance(sources[0], PelletStove)
-
-    def test_pellet_stove_tau(self):
-        sources = build_heat_sources(self._cfg(SOURCE_TYPE_PELLET_STOVE))
-        assert sources[0].emitter_time_constant == pytest.approx(
-            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_PELLET_STOVE]
-        )
-
-    def test_electric_storage_factory(self):
-        sources = build_heat_sources(self._cfg(SOURCE_TYPE_ELECTRIC_STORAGE))
-        assert isinstance(sources[0], ElectricStorageHeater)
-
-    def test_electric_storage_tau(self):
-        sources = build_heat_sources(self._cfg(SOURCE_TYPE_ELECTRIC_STORAGE))
-        assert sources[0].emitter_time_constant == pytest.approx(
-            SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_ELECTRIC_STORAGE]
-        )
-
-    def test_hydronic_floor_tau_fixed(self):
-        """Regression: WP2 fixes hydronic_floor_heating τ_em from 3600 → 7200 s."""
-        sources = build_heat_sources(self._cfg(SOURCE_TYPE_HYDRONIC_FLOOR))
-        assert sources[0].emitter_time_constant == pytest.approx(7200.0)
-
-    def test_ground_source_hp_custom_cop(self):
-        sources = build_heat_sources(
-            self._cfg(SOURCE_TYPE_GROUND_SOURCE_HP, extra={CONF_SOURCE_COP_RATED: 5.0})
-        )
-        assert sources[0].cop_rated == pytest.approx(5.0)
-
-    def test_pellet_stove_custom_min_fraction(self):
-        sources = build_heat_sources(
-            self._cfg(SOURCE_TYPE_PELLET_STOVE, extra={CONF_SOURCE_MIN_POWER_FRACTION: 0.25})
-        )
-        assert sources[0].min_power_fraction == pytest.approx(0.25)
-
-    def test_electric_storage_custom_charge_power(self):
-        sources = build_heat_sources(
-            self._cfg(SOURCE_TYPE_ELECTRIC_STORAGE, extra={CONF_SOURCE_CHARGE_POWER: 2000.0})
-        )
-        assert sources[0].charge_power == pytest.approx(2000.0)
-
-
 class TestHydronicFloorHeatingTauRegression:
     def test_tau_default_is_7200(self):
         """Regression guard: WP2 fixed τ_em from 3600 s to 7200 s."""
         assert SOURCE_TYPE_TO_DEFAULT_EMITTER_TAU[SOURCE_TYPE_HYDRONIC_FLOOR] == pytest.approx(7200.0)
-
-    def test_factory_applies_7200_default(self):
-        """Factory with no explicit emitter_time_constant yields 7200 s."""
-        cfg = [
-            {
-                CONF_SOURCE_TYPE: SOURCE_TYPE_HYDRONIC_FLOOR,
-                CONF_SOURCE_NAME: "ufh",
-                CONF_SOURCE_ROOM: "r",
-                CONF_SOURCE_MAX_POWER: 3000.0,
-            }
-        ]
-        sources = build_heat_sources(cfg)
-        assert sources[0].emitter_time_constant == pytest.approx(7200.0)
-
-    def test_factory_respects_override(self):
-        """An explicit emitter_time_constant overrides the typology default."""
-        from custom_components.heating_assistant.const import CONF_SOURCE_EMITTER_TIME_CONSTANT
-        cfg = [
-            {
-                CONF_SOURCE_TYPE: SOURCE_TYPE_HYDRONIC_FLOOR,
-                CONF_SOURCE_NAME: "ufh",
-                CONF_SOURCE_ROOM: "r",
-                CONF_SOURCE_MAX_POWER: 3000.0,
-                CONF_SOURCE_EMITTER_TIME_CONSTANT: 10800.0,
-            }
-        ]
-        sources = build_heat_sources(cfg)
-        assert sources[0].emitter_time_constant == pytest.approx(10800.0)

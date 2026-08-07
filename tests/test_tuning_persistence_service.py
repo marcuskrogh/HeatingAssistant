@@ -1,12 +1,10 @@
-"""Regression tests for dashboard tuning-parameter persistence.
+"""SWD-262: fat HA integration removed.
 
-Guards the bug where tuning / estimation parameters set from the dashboard
-reverted to the previously-configured set on restart.  The coordinator reads
-these parameters with **options-first** precedence, but the dashboard service
-handlers wrote only to ``entry.data``.  Once the options flow had snapshotted
-the config into ``entry.options``, that stale options value re-won on every
-restart and the dashboard change was silently discarded.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -15,7 +13,7 @@ import pytest
 
 import custom_components.heating_assistant.__init__ as init_mod
 import custom_components.heating_assistant.services.configuration as svc_mod
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_COMFORT_OFFSET,
     CONF_ROOMS,
     CONF_ROOM_NAME,

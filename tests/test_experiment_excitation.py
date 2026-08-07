@@ -1,15 +1,12 @@
-"""Tests for the coordinator's experiment → MPC input-clamp wiring.
+"""SWD-262: fat HA integration removed.
 
-An active experiment is applied by clamping each source's heater input over the
-MPC horizon (``_build_experiment_clamps``) rather than overriding the chosen
-action afterwards.  These build a partially-initialised coordinator (the same
-pattern used by ``test_window_override``) and exercise the clamp builder so the
-right sources are clamped, the multi-phase step (including the cool phase for
-reversible units) is emitted, safety is applied at the applied step, and open
-windows are respected.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -169,7 +166,7 @@ def test_build_clamps_records_per_room_horizon_mask():
 
 
 def test_relax_experiment_comfort_zeros_tracking_and_widens_corridor():
-    from custom_components.heating_assistant.const import (
+    from heatingassistant.engine.const import (
         EXPERIMENT_RELAXED_COMFORT_OFFSET,
     )
 

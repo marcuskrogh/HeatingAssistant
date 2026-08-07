@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     DEFAULT_FROST_PROTECTION,
     SCHEDULE_MODE_COMFORT,
     SCHEDULE_MODE_OFF,
@@ -20,7 +20,7 @@ from custom_components.heating_assistant.const import (
     SCHEDULE_TYPE_DATE_RANGE_DAILY,
     SCHEDULE_TYPE_WEEKLY_RECURRING,
 )
-from custom_components.heating_assistant.schedule import (
+from heatingassistant.engine.schedule import (
     RoomSchedule,
     SchedulePeriod,
     build_schedule,

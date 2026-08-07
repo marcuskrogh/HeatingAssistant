@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const JS_ROOT = join(ROOT, 'custom_components/heating_assistant/www/js');
+const JS_ROOT = join(ROOT, 'heatingassistant/app/static/js');
 const SCHEDULES_PAGE = join(JS_ROOT, 'pages/schedules.js');
 const SCHEDULES_DETAIL = join(JS_ROOT, 'schedules/schedules-detail.js');
 const SCHEDULES_SHARED = join(JS_ROOT, 'schedules/schedules-shared.js');

@@ -1,13 +1,19 @@
-"""Round-trip tests for per-room schedule suspend persistence."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.heating_assistant.const import CONF_PERSISTED_SCHEDULE_ENABLED
+from heatingassistant.engine.const import CONF_PERSISTED_SCHEDULE_ENABLED
 from custom_components.heating_assistant.coordinator import schedule_control
 from custom_components.heating_assistant.coordinator.core import HeatingAssistantCoordinator
 
@@ -73,7 +79,7 @@ def test_init_room_state_reads_schedule_enabled_from_real_entry():
     coord._window_state = {}
     coord._window_state_since = {}
 
-    from custom_components.heating_assistant.const import CONF_ROOM_NAME
+    from heatingassistant.engine.const import CONF_ROOM_NAME
 
     coord._init_room_state(
         [{CONF_ROOM_NAME: "Living Room", "setpoint": 21.0, "comfort_offset": 2.0}]

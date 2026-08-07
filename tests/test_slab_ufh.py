@@ -15,11 +15,11 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     DEFAULT_GROUND_TEMP_AMPLITUDE,
     DEFAULT_GROUND_TEMP_MEAN,
 )
-from custom_components.heating_assistant.ground_temp import ground_temperature
+from heatingassistant.engine.ground_temp import ground_temperature
 
 
 # ---------------------------------------------------------------------------

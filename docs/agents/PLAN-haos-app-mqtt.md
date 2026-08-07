@@ -56,7 +56,7 @@
 - Exact MQTT topic/payload schema details — initial map in `docs/agents/MQTT-TOPICS.md`; extend during install soak.
 - Naming locked: Python package/import slug is `heatingassistant`; HAOS App folder is `heating_assistant`; Supervisor slug remains `heatingassistant`; bundled HA integration domain remains `heating_assistant`.
 - Full industrial panel HA-websocket parity in Ingress — shell reuses static assets; remaining WS-dependent panels documented in App `index.html`.
-- Root `custom_components/heating_assistant` fat tree still present for legacy unit imports; App installs sync thin from `heating_assistant_mqtt_thin` / App bundle only.
+- Root `custom_components/heating_assistant` is now the thin MQTT bridge source of truth; App installs sync from that root thin integration.
 
 ## Tracker
 - Provider: jira
