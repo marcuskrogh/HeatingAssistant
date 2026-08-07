@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+from http.server import ThreadingHTTPServer
+import json
+from threading import Thread
+from typing import Iterator
+from urllib.request import Request, urlopen
+
+from heatingassistant.app.__main__ import _Handler
+from heatingassistant.app.runtime import HeatingRuntime
+from heatingassistant.persistence import load_config
+
+
+@contextmanager
+def app_server(runtime: HeatingRuntime) -> Iterator[str]:
+    handler = type("TestHeatingAssistantIngressHandler", (_Handler,), {"runtime": runtime})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def get_json(base_url: str, path: str) -> dict:
+    with urlopen(f"{base_url}{path}", timeout=5) as response:
+        assert response.status == 200
+        return json.loads(response.read().decode("utf-8"))
+
+
+def post_json(base_url: str, path: str, payload: dict) -> dict:
+    request = Request(
+        f"{base_url}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=5) as response:
+        assert response.status == 200
+        return json.loads(response.read().decode("utf-8"))
+
+
+def test_ingress_serves_industrial_panel_assets_and_bootstrap(tmp_path) -> None:
+    runtime = HeatingRuntime(tmp_path, options={"instance_id": "haos"})
+
+    with app_server(runtime) as base_url:
+        with urlopen(
+            f"{base_url}/ha-industrial-panel/industrial-dashboard.js", timeout=5
+        ) as response:
+            assert response.status == 200
+            assert "javascript" in response.headers["Content-Type"]
+            assert b"customElements.define('ha-industrial-panel'" in response.read()
+
+        with urlopen(f"{base_url}/", timeout=5) as response:
+            body = response.read().decode("utf-8")
+
+    assert "/static/js/app-hass-shim.js" in body
+    assert "/ha-industrial-panel/industrial-dashboard.js" in body
+    assert "ha-industrial-panel" in body
+    assert "Home Assistant custom-panel entry point" not in body
+
+
+def test_ingress_panel_json_endpoints_and_schedule_persistence(tmp_path) -> None:
+    runtime = HeatingRuntime(
+        tmp_path,
+        options={
+            "instance_id": "haos",
+            "rooms": [
+                {
+                    "name": "Living Room",
+                    "temp_tags": ["living_temp"],
+                    "setpoint": 21.0,
+                    "comfort_offset": 1.5,
+                }
+            ],
+            "schedules": {
+                "living_room": {
+                    "enabled": True,
+                    "periods": [{"start": "08:00", "end": "22:00", "setpoint": 21.0}],
+                }
+            },
+        },
+    )
+
+    with app_server(runtime) as base_url:
+        schedules = get_json(base_url, "/api/schedules")
+        controller = get_json(base_url, "/api/controller_config")
+        ui_settings = get_json(base_url, "/api/ui_settings")
+        model_config = get_json(base_url, "/api/model_config")
+        forecasts = get_json(base_url, "/api/forecasts")
+        datasets = get_json(base_url, "/api/datasets")
+        experiments = get_json(base_url, "/api/experiments")
+        state = get_json(base_url, "/api/state")
+
+        updated = post_json(
+            base_url,
+            "/api/schedules",
+            {
+                "room_name": "Living Room",
+                "enabled": False,
+                "periods": [{"start": "07:00", "end": "09:00", "setpoint": 20.0}],
+            },
+        )
+
+    assert schedules["room_schedules"]["living_room"]["periods"][0]["start"] == "08:00"
+    assert controller["config"]["room_schedules"]["living_room"]["enabled"] is True
+    assert controller["config"]["room_comfort_offsets"]["living_room"] == 1.5
+    assert set(ui_settings) == {"ui_settings"}
+    assert model_config["rooms"][0]["name"] == "Living Room"
+    assert forecasts == {"plot_forecast_hours": None, "price_forecast": [], "rooms": {}}
+    assert datasets == {"datasets": []}
+    assert experiments == {"experiments": []}
+    assert "sensor.heating_assistant_controller_config" in state["hass_states"]
+
+    saved = updated["room_schedules"]["living_room"]
+    assert saved["enabled"] is False
+    assert saved["periods"][0]["start"] == "07:00"
+    assert load_config(tmp_path)["schedules"]["living_room"] == saved

@@ -11,7 +11,7 @@ import mimetypes
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from heatingassistant.app.runtime import HeatingRuntime
 
@@ -24,7 +24,8 @@ class _Handler(BaseHTTPRequestHandler):
     server_version = "HeatingAssistantApp/2.0.1"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-        path = urlsplit(self.path).path
+        parsed = urlsplit(self.path)
+        path = parsed.path
         if path == "/api/health":
             self._send_json(self.runtime.status())
             return
@@ -34,17 +35,65 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             self._send_json(self.runtime.state_snapshot())
             return
-        if path in {"/", "/index.html"}:
+        if path == "/api/schedules":
+            self._send_json({"room_schedules": self.runtime.schedules()})
+            return
+        if path == "/api/controller_config":
+            self._send_json({"config": self.runtime.controller_config()})
+            return
+        if path == "/api/ui_settings":
+            self._send_json({"ui_settings": self.runtime.ui_settings()})
+            return
+        if path == "/api/model_config":
+            self._send_json(self.runtime.model_config())
+            return
+        if path == "/api/forecasts":
+            query = parse_qs(parsed.query)
+            self._send_json(
+                self.runtime.forecasts(
+                    self._optional_float(query.get("plot_forecast_hours", [None])[0])
+                )
+            )
+            return
+        if path == "/api/datasets":
+            query = parse_qs(parsed.query)
+            room_slug = query.get("room_slug", [None])[0]
+            self._send_json({"datasets": self.runtime.datasets(room_slug)})
+            return
+        if path.startswith("/api/datasets/"):
+            dataset_id = unquote(path.removeprefix("/api/datasets/"))
+            self._send_json({"dataset": self.runtime.dataset(dataset_id)})
+            return
+        if path == "/api/experiments":
+            self._send_json({"experiments": self.runtime.experiments()})
+            return
+        if path == "/api/history":
+            self._send_json({})
+            return
+        if path in {"/", "/index.html", "/ha-industrial"} or path.startswith("/ha-industrial/"):
             self._send_file(_STATIC_DIR / "index.html", "text/html; charset=utf-8")
             return
         if path.startswith("/static/"):
             self._send_static(path)
             return
+        if path == "/ha-industrial-panel":
+            self._send_file(_STATIC_DIR / "index.html", "text/html; charset=utf-8")
+            return
+        if path.startswith("/ha-industrial-panel/"):
+            self._send_static(path, prefix="/ha-industrial-panel/")
+            return
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         path = urlsplit(self.path).path
-        if path != "/api/config":
+        if path not in {
+            "/api/config",
+            "/api/schedules",
+            "/api/controller_config",
+            "/api/ui_settings",
+            "/api/services",
+            "/api/forecasts/preview",
+        }:
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
         try:
@@ -53,14 +102,56 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
         if not isinstance(payload, dict):
-            self.send_error(HTTPStatus.BAD_REQUEST, "config payload must be a JSON object")
+            self.send_error(HTTPStatus.BAD_REQUEST, "payload must be a JSON object")
             return
         try:
-            config = asyncio.run(self.runtime.update_config(payload))
+            if path == "/api/config":
+                result = asyncio.run(self.runtime.update_config(payload))
+            elif path == "/api/schedules":
+                room_name = payload.get("room_name")
+                if not isinstance(room_name, str) or not room_name:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "room_name is required")
+                    return
+                result = {
+                    "room_schedules": asyncio.run(
+                        self.runtime.update_schedule(
+                            room_name,
+                            periods=payload.get("periods")
+                            if isinstance(payload.get("periods"), list)
+                            else None,
+                            enabled=bool(payload["enabled"])
+                            if "enabled" in payload
+                            else None,
+                        )
+                    )
+                }
+            elif path == "/api/controller_config":
+                result = {
+                    "config": asyncio.run(self.runtime.update_config(payload)),
+                }
+            elif path == "/api/ui_settings":
+                result = {
+                    "ui_settings": asyncio.run(self.runtime.update_ui_settings(payload)),
+                }
+            elif path == "/api/services":
+                domain = payload.get("domain")
+                service = payload.get("service")
+                data = payload.get("data", {})
+                if not isinstance(domain, str) or not isinstance(service, str):
+                    self.send_error(HTTPStatus.BAD_REQUEST, "domain and service are required")
+                    return
+                if not isinstance(data, dict):
+                    self.send_error(HTTPStatus.BAD_REQUEST, "service data must be a JSON object")
+                    return
+                result = asyncio.run(self.runtime.apply_service(domain, service, data))
+            else:
+                result = self.runtime.forecasts(
+                    self._optional_float(payload.get("plot_forecast_hours"))
+                )
         except ValueError as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
-        self._send_json(config)
+        self._send_json(result)
 
     def do_PUT(self) -> None:  # noqa: N802 - stdlib handler API
         path = urlsplit(self.path).path
@@ -86,7 +177,7 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         """Keep the stub quiet unless the real runtime adds structured logging."""
 
-    def _send_json(self, payload: dict[str, Any]) -> None:
+    def _send_json(self, payload: Any) -> None:
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json")
@@ -94,8 +185,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_static(self, path: str) -> None:
-        relative = Path(unquote(path.removeprefix("/static/")))
+    def _send_static(self, path: str, *, prefix: str = "/static/") -> None:
+        relative = Path(unquote(path.removeprefix(prefix)))
         if relative.is_absolute() or ".." in relative.parts:
             self.send_error(HTTPStatus.BAD_REQUEST, "invalid static path")
             return
@@ -126,6 +217,15 @@ class _Handler(BaseHTTPRequestHandler):
             return json.loads(body.decode("utf-8") if body else "{}")
         except json.JSONDecodeError as exc:
             raise ValueError("request body must be valid JSON") from exc
+
+    @staticmethod
+    def _optional_float(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
 
 def _parser() -> argparse.ArgumentParser:
