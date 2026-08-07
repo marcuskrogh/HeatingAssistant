@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-255 | Task | HAOS App + thin MQTT integration (compute isolation) | In Review | — | docs/agents/PLAN-haos-app-mqtt.md | Done — merging PR #545 |
+| SWD-255 | Task | HAOS App + thin MQTT integration (compute isolation) | Done | — | docs/agents/PLAN-haos-app-mqtt.md | Done |
 | SWD-258 | Sub-task | App packaging skeleton (sync + version lock) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
 | SWD-259 | Sub-task | Thin MQTT integration (entity↔tag bridge) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
 | SWD-260 | Sub-task | MQTT contract (topics, bindings, status) | Done | SWD-255 | docs/agents/PLAN-haos-app-mqtt.md | — |
