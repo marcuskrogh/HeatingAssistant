@@ -33,7 +33,7 @@
 - Task: SWD-262
 - Relates: SWD-255
 - Branch: `cursor/swd-262-finish-haos-app-01f0`
-- PR: *(filled after open)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/546
 
 ## Next
 `/review-fix SWD-262` — Review and auto-fix (single pass)
