@@ -106,4 +106,4 @@ def test_app_http_rejects_bad_static_path(tmp_path) -> None:
     with app_server(runtime) as base_url:
         with pytest.raises(HTTPError) as exc_info:
             urlopen(f"{base_url}/static/../pyproject.toml", timeout=5)
-        assert exc_info.value.code == 404
+        assert exc_info.value.code == 400
