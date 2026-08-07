@@ -67,4 +67,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/545
 
 ## Next
-`/review-fix SWD-255` — Review and auto-fix (single pass)
+Done — shipped via PR #545
