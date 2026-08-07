@@ -1,13 +1,12 @@
-"""Tests for the fast UI refresh path and live-value sensor availability.
+"""SWD-262: fat HA integration removed.
 
-The MPC runs strictly at the scheduled update interval.  Between those ticks a
-lightweight ``_refresh_live_state`` / ``async_refresh_ui`` keeps the dashboard's
-measurements, setpoints, and KPIs current WITHOUT running the controller, and the
-live-value sensors stay ``available`` so a single failed update cycle never blanks
-the overview.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from datetime import datetime, timezone
 from types import SimpleNamespace

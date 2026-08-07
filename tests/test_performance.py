@@ -38,14 +38,14 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel,
     Room,
     RoomConnection,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
-from custom_components.heating_assistant.controller import HeatingMPCController
-from custom_components.heating_assistant.parameter_estimator import (
+from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
+from heatingassistant.engine.controller import HeatingMPCController
+from heatingassistant.engine.parameter_estimator import (
     KalmanMLEstimator,
     MIN_HISTORY_STEPS,
 )

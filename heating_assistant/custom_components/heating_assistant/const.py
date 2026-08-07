@@ -1,4 +1,4 @@
-"""Constants for the staged thin Heating Assistant MQTT bridge."""
+"""Constants for the thin Heating Assistant MQTT bridge."""
 
 DOMAIN = "heating_assistant"
 NAME = "Heating Assistant"

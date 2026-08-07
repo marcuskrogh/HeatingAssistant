@@ -8,14 +8,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import custom_components.heating_assistant.persistence as persistence
-from custom_components.heating_assistant.const import (
+import heatingassistant.engine.persistence as persistence
+from heatingassistant.engine.const import (
     CONF_COMFORT_OFFSET,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_ROOM_NAME,
     CONF_ROOMS,
 )
-from custom_components.heating_assistant.persistence import (
+from heatingassistant.engine.persistence import (
     persist_tuning_updates,
     write_entry_config,
 )

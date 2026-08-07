@@ -1,13 +1,19 @@
-"""Unit tests for services/simulation.py pure helpers."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.heating_assistant.heat_sources import ElectricHeater
+from heatingassistant.engine.heat_sources import ElectricHeater
 from custom_components.heating_assistant.services import simulation as sim
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 

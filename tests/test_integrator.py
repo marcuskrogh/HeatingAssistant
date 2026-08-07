@@ -33,7 +33,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.integrator import (  # noqa: E402
+from heatingassistant.engine.integrator import (  # noqa: E402
     ImplicitEulerConvergenceError,
     implicit_euler_step,
     implicit_euler_substeps,

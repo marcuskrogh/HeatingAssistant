@@ -1,18 +1,19 @@
-"""Integration tests for services.configuration handlers.
+"""SWD-262: fat HA integration removed.
 
-Unit-tier persistence and service-registration paths live in
-``tests/test_configuration_services.py``.  This module covers handler logic
-that is not exercised there (e.g. controller tuning with ``persist_tuning_updates``).
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.heating_assistant.const import CONF_TRACKING_WEIGHT, DOMAIN
+from heatingassistant.engine.const import CONF_TRACKING_WEIGHT, DOMAIN
 from custom_components.heating_assistant.services import configuration as config_svc
 
 

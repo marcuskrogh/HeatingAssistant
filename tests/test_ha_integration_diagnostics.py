@@ -1,6 +1,12 @@
-"""Unit tests for the HA config-entry diagnostics panel (diagnostics.py)."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from collections import deque
 from types import SimpleNamespace
@@ -8,12 +14,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.heating_assistant.const import DOMAIN
+from heatingassistant.engine.const import DOMAIN
 from custom_components.heating_assistant.diagnostics import (
     _get_model_fit_diagnostics,
     async_get_config_entry_diagnostics,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
+from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 
 
 def _make_room(name="living_room", *, setpoint=21.0):

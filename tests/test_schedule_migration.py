@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_INHERIT_OVERRIDES_MIGRATED,
     CONF_PERSISTED_SCHEDULES,
     CONF_PERSISTED_COMFORT_OFFSETS,
@@ -28,8 +28,8 @@ from custom_components.heating_assistant.const import (
     SCHEDULE_TYPE_DATE_RANGE_DAILY,
     SCHEDULE_TYPE_WEEKLY_RECURRING,
 )
-from custom_components.heating_assistant.schedule import build_schedule
-from custom_components.heating_assistant.schedule_migration import (
+from heatingassistant.engine.schedule import build_schedule
+from heatingassistant.engine.schedule_migration import (
     migrate_period_dict,
     migrate_period_list,
     migrate_inherited_overrides_in_persisted,

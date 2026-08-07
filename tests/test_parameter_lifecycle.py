@@ -1,6 +1,12 @@
-"""Unit tests for coordinator.parameter_lifecycle."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from typing import Any, Dict, Optional
@@ -8,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 from custom_components.heating_assistant.coordinator import parameter_lifecycle
 
 
@@ -118,7 +124,7 @@ class _FakeCoordinator:
         self._sources_by_room = index
 
     def _build_controller(self) -> None:
-        from custom_components.heating_assistant.controller import factory as factory_mod
+        from heatingassistant.engine.controller import factory as factory_mod
 
         config = factory_mod.ControllerBuildConfig.from_coordinator(self)
         self.controller = factory_mod.build_mpc_controller(config)
@@ -198,7 +204,7 @@ def test_apply_heater_scales_updates_source_and_persists_snapshot():
     coordinator = _FakeCoordinator([room], [src])
 
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=MagicMock(),
     ):
         parameter_lifecycle.apply_heater_scales(coordinator, {"hp": 1.35, "missing": 2.0})
@@ -215,7 +221,7 @@ def test_apply_estimated_parameters_persists_snapshot_and_metadata():
     coordinator = _FakeCoordinator([room], [src])
 
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=MagicMock(),
     ):
         parameter_lifecycle.apply_estimated_parameters(
@@ -250,7 +256,7 @@ def test_store_identified_parameters_writes_active_history_snapshot():
     coordinator = _FakeCoordinator([room], [src])
 
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=MagicMock(),
     ):
         parameter_lifecycle.store_identified_parameters(

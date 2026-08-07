@@ -1,6 +1,12 @@
-"""Unit tests for forecast and electricity-price sensors in sensor/forecasts.py."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -180,7 +186,7 @@ def test_electricity_price_forecast_sensor_handles_invalid_forecast_value():
 
 
 def test_build_entities_includes_heat_pump_cop_and_price_sensors():
-    from custom_components.heating_assistant.heat_sources import HeatPump
+    from heatingassistant.engine.heat_sources import HeatPump
     from custom_components.heating_assistant.sensor import (
         ElectricityPriceForecastSensor,
         ElectricityPriceSensor,

@@ -1,4 +1,4 @@
-"""Staged thin Home Assistant bridge for the Heating Assistant App."""
+"""Thin Home Assistant MQTT bridge for the Heating Assistant App."""
 
 from __future__ import annotations
 

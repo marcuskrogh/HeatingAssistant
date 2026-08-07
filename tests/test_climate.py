@@ -1,13 +1,10 @@
-"""Unit tests for the RoomClimateEntity HVAC action / mode reporting.
+"""SWD-262: fat HA integration removed.
 
-The integration's climate entity must surface ``COOLING`` (not ``IDLE``)
-whenever a heat pump in the room is actively removing heat — either
-because it is in dry/fan-only mode (current_power < 0) or because the
-coordinator's ``_cooling_active`` flag is set for any source in the
-room.  Heat-pump-equipped rooms are also expected to advertise
-``HEAT_COOL`` as a supported HVAC mode so the HA frontend renders the
-cooling state correctly.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import sys
 import os
@@ -18,8 +15,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.heating_assistant.climate import RoomClimateEntity
-from custom_components.heating_assistant.const import DOMAIN
-from custom_components.heating_assistant.heat_sources import (
+from heatingassistant.engine.const import DOMAIN
+from heatingassistant.engine.heat_sources import (
     ElectricHeater,
     HeatPump,
 )

@@ -1,4 +1,10 @@
-"""Unit tests for YAML configuration schema validation."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import importlib
 import sys
@@ -17,7 +23,7 @@ import custom_components.heating_assistant.config_schema as _config_schema_mod  
 
 importlib.reload(_config_schema_mod)
 from custom_components.heating_assistant.config_schema import CONFIG_SCHEMA  # noqa: E402
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_HEAT_SOURCES,
     CONF_INFILTRATION_FRACTION,
     CONF_ROOM_NAME,

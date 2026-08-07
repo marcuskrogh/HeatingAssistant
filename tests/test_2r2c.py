@@ -24,7 +24,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel,
     Room,
     RoomConnection,

@@ -21,9 +21,9 @@ from typing import Any, Dict, List, Sequence
 import numpy as np
 import pytest
 
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.parameter_estimator import KalmanMLEstimator
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.parameter_estimator import KalmanMLEstimator
+from heatingassistant.engine.thermal_model import HouseModel, Room
 
 # Defaults aligned with tests/test_parameter_estimator.py helpers.
 _DEFAULT_DT = 60.0

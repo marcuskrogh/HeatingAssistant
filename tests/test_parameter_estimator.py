@@ -9,24 +9,24 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel,
     Room,
     RoomConnection,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.parameter_estimator import (
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.parameter_estimator import (
     KalmanMLEstimator,
     MIN_HISTORY_STEPS,
     _nelder_mead,
 )
-from custom_components.heating_assistant.estimation.constants import (
+from heatingassistant.engine.estimation.constants import (
     _LOG_MASS_HI,
     _LOG_MASS_LO,
     _LOG_R_HI,
     _LOG_R_LO,
 )
-from custom_components.heating_assistant.estimation.theta_layout import _ThetaLayout
+from heatingassistant.engine.estimation.theta_layout import _ThetaLayout
 from tests.helpers.estimation_fixtures import (
     generate_history as _generate_history,
     make_electric_heaters as _make_sources,

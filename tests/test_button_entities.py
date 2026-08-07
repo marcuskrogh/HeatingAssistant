@@ -1,6 +1,12 @@
-"""Unit tests for Heating Assistant button entities."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -17,8 +23,8 @@ from custom_components.heating_assistant.button import (
     RunSysIdWithWindowButton,
     async_setup_entry,
 )
-from custom_components.heating_assistant.const import DOMAIN
-from custom_components.heating_assistant.parameter_estimator import MIN_HISTORY_STEPS
+from heatingassistant.engine.const import DOMAIN
+from heatingassistant.engine.parameter_estimator import MIN_HISTORY_STEPS
 from tests.helpers.coordinator_stubs import make_hass_stub
 
 

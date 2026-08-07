@@ -1,11 +1,10 @@
-"""
-Tests for the always-available forecast sensors.
+"""SWD-262: fat HA integration removed.
 
-These sensors override ``available`` so dashboards keep rendering predictions
-across transient coordinator update failures, and declare no
-``device_class`` / ``state_class`` so HA's strict sensor validator accepts
-forward-looking values.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys

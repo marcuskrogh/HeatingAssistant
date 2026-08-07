@@ -1,4 +1,10 @@
-"""Unit tests for advanced visualisation features."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import sys
 import os
@@ -10,14 +16,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel,
     Room,
     RoomConnection,
     Window,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
-from custom_components.heating_assistant.controller import HeatingMPCController as MPCController
+from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
+from heatingassistant.engine.controller import HeatingMPCController as MPCController
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
 from tests.helpers.coordinator_stubs import wire_room_enablement
 from custom_components.heating_assistant.sensor import (
@@ -1165,23 +1171,23 @@ class TestCoerceCloudCoverPercent:
     """Test the module-level cloud-cover percent → fraction coercion."""
 
     def test_none_returns_none(self):
-        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        from heatingassistant.engine.weather import coerce_cloud_cover_percent
         assert coerce_cloud_cover_percent(None) is None
 
     def test_unparsable_returns_none(self):
-        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        from heatingassistant.engine.weather import coerce_cloud_cover_percent
         assert coerce_cloud_cover_percent("partly") is None
 
     def test_typical_values(self):
-        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        from heatingassistant.engine.weather import coerce_cloud_cover_percent
         assert coerce_cloud_cover_percent(0) == pytest.approx(0.0)
         assert coerce_cloud_cover_percent(50) == pytest.approx(0.5)
         assert coerce_cloud_cover_percent(100) == pytest.approx(1.0)
 
     def test_clamps_negative(self):
-        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        from heatingassistant.engine.weather import coerce_cloud_cover_percent
         assert coerce_cloud_cover_percent(-10) == pytest.approx(0.0)
 
     def test_clamps_above_hundred(self):
-        from custom_components.heating_assistant.weather import coerce_cloud_cover_percent
+        from heatingassistant.engine.weather import coerce_cloud_cover_percent
         assert coerce_cloud_cover_percent(150) == pytest.approx(1.0)

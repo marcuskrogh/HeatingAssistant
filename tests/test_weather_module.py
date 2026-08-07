@@ -1,6 +1,6 @@
 """Tests for the extracted weather helpers (S3).
 
-The functions in ``custom_components.heating_assistant.weather`` used to live
+The functions in ``heatingassistant.engine.weather`` used to live
 inline in ``coordinator.py``.  The behavior is unchanged — these tests pin
 down the contract so future tweaks don't regress it.
 """
@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.heating_assistant import weather as w
+from heatingassistant.engine import weather as w
 
 
 # ── Coercion helpers ──────────────────────────────────────────────────────

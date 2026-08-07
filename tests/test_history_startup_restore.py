@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.heating_assistant.const import DOMAIN
-from custom_components.heating_assistant.history.startup_restore import (
+from heatingassistant.engine.const import DOMAIN
+from heatingassistant.engine.history.startup_restore import (
     async_restore_history_buffer,
     async_stash_reload_state,
 )
-from custom_components.heating_assistant.history.store import IdentificationHistoryStore
+from heatingassistant.engine.history.store import IdentificationHistoryStore
 from tests.helpers.coordinator_stubs import make_minimal_coordinator
 from tests.helpers.setup_patches import ensure_hass_config
 
@@ -79,7 +79,7 @@ async def test_async_restore_jsonl_before_recorder(tmp_path):
     hass.data = {DOMAIN: {}}
 
     with patch(
-        "custom_components.heating_assistant.history.seed.async_rebuild_history_from_recorder",
+        "heatingassistant.engine.history.seed.async_rebuild_history_from_recorder",
         new_callable=AsyncMock,
     ) as mock_recorder:
         await async_restore_history_buffer(hass, entry, coord)
@@ -111,7 +111,7 @@ async def test_async_stash_reload_state(tmp_path):
             saved_data["history"] = data
 
     with patch(
-        "custom_components.heating_assistant.history.startup_restore.Store",
+        "heatingassistant.engine.history.startup_restore.Store",
         _CapturingStore,
     ):
         hass.data = {DOMAIN: {}}

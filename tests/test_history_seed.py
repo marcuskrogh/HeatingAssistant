@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.heating_assistant.history.seed import (
+from heatingassistant.engine.history.seed import (
     _earliest_usable_ts,
     _entity_ids,
     _samples_from_states,

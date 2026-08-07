@@ -1,10 +1,10 @@
-"""Tests for the ``set_room_comfort_offset`` service.
+"""SWD-262: fat HA integration removed.
 
-The dashboard climate cards call this service so users can widen or narrow a
-room's comfort band without editing a schedule.  These tests guard that the
-service resolves the room slug to the canonical configured name and forwards
-the change to the coordinator.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock

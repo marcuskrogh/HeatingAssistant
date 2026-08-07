@@ -1,6 +1,12 @@
-"""Unit tests for thin coordinator core helpers not covered by mpc_cycle tests."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from collections import deque
 from datetime import datetime, timezone
@@ -10,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_ESTIMATED_PARAMS,
     CONF_PERSISTED_COMFORT_OFFSETS,
     CONF_PERSISTED_ROOM_ENABLED,
@@ -521,7 +527,7 @@ class TestAsyncLoglikSlice:
             "loglik": -10.0,
         }
         with patch(
-            "custom_components.heating_assistant.parameter_estimator.KalmanMLEstimator"
+            "heatingassistant.engine.parameter_estimator.KalmanMLEstimator"
         ) as estimator_cls:
             estimator_cls.return_value.compute_loglik_slice = MagicMock(
                 return_value=estimator_result

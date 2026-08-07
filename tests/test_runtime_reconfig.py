@@ -1,13 +1,19 @@
-"""Unit tests for coordinator runtime (non-structural) reconfiguration."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_ENERGY_WEIGHT,
     CONF_HORIZON,
     CONF_IDENTIFICATION_HISTORY_DAYS,

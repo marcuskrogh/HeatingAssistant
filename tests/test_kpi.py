@@ -1,4 +1,10 @@
-"""Unit tests for KPI calculation functions (WP-2)."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys

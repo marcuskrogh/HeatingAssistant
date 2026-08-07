@@ -1,10 +1,10 @@
-"""Tests for room-rename data migration helpers.
+"""SWD-262: fat HA integration removed.
 
-A rename must move every store keyed by the old room name to the new name —
-persisted state, the estimated-parameters snapshot, heat-source room links and
-inter-room connections — so the renamed room keeps its data instead of starting
-blank with the old data orphaned under the previous name.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import custom_components.heating_assistant.__init__ as init_mod
-from custom_components.heating_assistant.const import (
+from heatingassistant.engine.const import (
     CONF_CONNECTIONS,
     CONF_CONNECTED_ROOM,
     CONF_ESTIMATED_PARAMS,

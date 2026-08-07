@@ -1,11 +1,9 @@
 """
-pytest configuration and stubs for running tests without a full HA install.
+pytest configuration and Home Assistant stubs.
 
-The custom_components/__init__.py imports several Home Assistant packages
-(voluptuous, homeassistant.*, etc.) that are not available in the CI
-test environment.  This conftest installs lightweight stubs before any
-test module is collected, so that imports of the HA-independent submodules
-(thermal_model, model_diagnostics, parameter_estimator, etc.) succeed.
+SWD-262 moved compute tests to ``heatingassistant.engine``.  The remaining
+stubs let bridge-level modules and explicitly skipped legacy HA tests import in
+CI without installing a full Home Assistant runtime.
 """
 
 from __future__ import annotations

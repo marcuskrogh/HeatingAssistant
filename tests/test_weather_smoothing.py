@@ -1,5 +1,5 @@
 import math
-from custom_components.heating_assistant.weather import smooth_cloud_cover_step as step
+from heatingassistant.engine.weather import smooth_cloud_cover_step as step
 
 def test_seeds_on_first_observation():
     assert step(None, 0.5, 900.0, 1800.0) == 0.5

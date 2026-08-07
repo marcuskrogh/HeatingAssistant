@@ -1,6 +1,12 @@
-"""Unit tests for the Lovelace dashboard generator."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -9,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.const import DOMAIN
+from heatingassistant.engine.const import DOMAIN
 from custom_components.heating_assistant.lovelace_dashboard import (
     DASHBOARD_VARIANT_INDUSTRIAL,
     DashboardSpec,
@@ -21,7 +27,7 @@ from custom_components.heating_assistant.lovelace_dashboard import (
     build_dashboard_from_coordinator,
     dashboard_to_yaml,
 )
-from custom_components.heating_assistant.naming import slugify
+from heatingassistant.engine.naming import slugify
 
 
 # ---------------------------------------------------------------------------
@@ -817,7 +823,7 @@ def test_industrial_overview_uses_gauge_kpis(two_room_spec):
     assert "MPC Compute Time" in names
     # Non-MPC metrics live in a compact entities card with icon_color, not separate gauges.
     refs = set(_iter_entity_refs(overview))
-    from custom_components.heating_assistant.const import DOMAIN
+    from heatingassistant.engine.const import DOMAIN
     assert f"sensor.{DOMAIN}_system_summary" in refs
     assert f"sensor.{DOMAIN}_outdoor_temperature_measured" in refs
 

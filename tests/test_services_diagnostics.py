@@ -1,4 +1,10 @@
-"""Unit tests for diagnostic service handlers and get_coordinator helper."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from collections import deque
 from types import SimpleNamespace
@@ -7,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
-from custom_components.heating_assistant.const import DOMAIN
+from heatingassistant.engine.const import DOMAIN
 from custom_components.heating_assistant.services import diagnostics as diag_mod
 from custom_components.heating_assistant.services.context import get_coordinator
 from custom_components.heating_assistant.services.diagnostics import (

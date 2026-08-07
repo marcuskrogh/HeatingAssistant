@@ -221,14 +221,14 @@ _cv.make_entity_service_schema = lambda s: s                           # type: i
 import homeassistant.helpers.update_coordinator as _coord  # noqa: E402
 _coord.UpdateFailed = Exception                            # type: ignore
 
-from custom_components.heating_assistant.thermal_model import (
+from heatingassistant.engine.thermal_model import (
     HouseModel, Room, RoomConnection,
 )
-from custom_components.heating_assistant.heat_sources import ElectricHeater
+from heatingassistant.engine.heat_sources import ElectricHeater
 from custom_components.heating_assistant.model_diagnostics import (
     compute_autocorrelation_function,
 )
-from custom_components.heating_assistant.history_window import (
+from heatingassistant.engine.history_window import (
     select_recent_window,
     select_window_by_timestamps,
     history_time_range,

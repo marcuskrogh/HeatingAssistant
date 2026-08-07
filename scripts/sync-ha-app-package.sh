@@ -6,7 +6,7 @@ APP_DIR="${ROOT}/heating_assistant"
 CONFIG="${APP_DIR}/config.yaml"
 DOCKERFILE="${APP_DIR}/Dockerfile"
 SRC_PACKAGE="${ROOT}/heatingassistant"
-SRC_INTEGRATION="${ROOT}/custom_components/heating_assistant_mqtt_thin"
+SRC_INTEGRATION="${ROOT}/custom_components/heating_assistant"
 DST_PACKAGE="${APP_DIR}/heatingassistant"
 DST_INTEGRATION="${APP_DIR}/custom_components/heating_assistant"
 THIN_FILES=(
@@ -17,6 +17,7 @@ THIN_FILES=(
   config_flow.py
   version_sync.py
   update.py
+  strings.json
 )
 
 for required in "${CONFIG}" "${DOCKERFILE}" "${ROOT}/pyproject.toml" "${SRC_PACKAGE}" "${SRC_INTEGRATION}" "${ROOT}/README.md"; do

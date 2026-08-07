@@ -1,16 +1,12 @@
-"""Tests for persisting and restoring estimated parameters.
+"""SWD-262: fat HA integration removed.
 
-Covers:
-- CONF_ESTIMATED_PARAMS is written to entry.data after a successful ML estimation.
-- Persisted values are restored to the live model on coordinator __init__.
-- reset_estimated_parameters() reverts the model and removes the snapshot.
-- internal_gain and power_scale are applied from the ML result.
-- ParameterConfidenceSensor.extra_state_attributes gains is_estimated/estimated_at.
-- EstimatedParametersStatusSensor.native_value and attributes.
-- HeaterScaleSensor.native_value reflects power_scale.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import sys
 import os
@@ -73,7 +69,7 @@ class _FakeCoordinator:
     """
 
     def __init__(self, rooms=None, sources=None, entry_data=None):
-        from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS as _KEY
+        from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS as _KEY
         self._CONF_ESTIMATED_PARAMS = _KEY
 
         if rooms is None:
@@ -147,7 +143,7 @@ class _FakeCoordinator:
         self._sources_by_room = index
 
     def _build_controller(self) -> None:
-        from custom_components.heating_assistant.controller import factory as factory_mod
+        from heatingassistant.engine.controller import factory as factory_mod
 
         config = factory_mod.ControllerBuildConfig.from_coordinator(self)
         self.controller = factory_mod.build_mpc_controller(config)
@@ -172,7 +168,7 @@ def test_apply_estimated_parameters_sets_internal_gain_and_power_scale():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ) as m_controller:
         coord_mod.HeatingAssistantCoordinator._apply_estimated_parameters(
@@ -201,7 +197,7 @@ def test_apply_estimated_parameters_sets_internal_gain_and_power_scale():
 def test_apply_estimated_parameters_persists_snapshot():
     """A CONF_ESTIMATED_PARAMS snapshot must be written to entry.data."""
     import custom_components.heating_assistant.coordinator as coord_mod
-    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+    from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 
     room = _make_room("lr", 5e6, 0.05)
     src = _make_source("hp", 1.0)
@@ -209,7 +205,7 @@ def test_apply_estimated_parameters_persists_snapshot():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator._apply_estimated_parameters(
@@ -238,7 +234,7 @@ def test_apply_estimated_parameters_updates_instance_vars():
     coordinator = _FakeCoordinator()
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator._apply_estimated_parameters(
@@ -335,7 +331,7 @@ def test_store_identified_parameters_snapshot_survives_restart():
     read the flat {"rooms": ...} layout, so nothing was restored.
     """
     import custom_components.heating_assistant.coordinator as coord_mod
-    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+    from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 
     room = _make_room("lr", 5e6, 0.05)
     src = _make_source("hp", 1.0)
@@ -343,7 +339,7 @@ def test_store_identified_parameters_snapshot_survives_restart():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator.store_identified_parameters(
@@ -373,7 +369,7 @@ def test_store_identified_parameters_applies_full_parameter_set():
     """The room page applies every identified parameter — not just C / R_ext —
     including the heater power scale, and they survive a restart."""
     import custom_components.heating_assistant.coordinator as coord_mod
-    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+    from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 
     room = _make_room("lr", 5e6, 0.05)
     src = _make_source("hp", power_scale=1.0, room="lr")
@@ -381,7 +377,7 @@ def test_store_identified_parameters_applies_full_parameter_set():
 
     mock_controller = MagicMock()
     with patch(
-        "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+        "heatingassistant.engine.controller.factory.HeatingMPCController",
         return_value=mock_controller,
     ):
         coord_mod.HeatingAssistantCoordinator.store_identified_parameters(
@@ -466,7 +462,7 @@ def test_reset_estimated_parameters_removes_snapshot_and_rebuilds():
     """reset_estimated_parameters must remove CONF_ESTIMATED_PARAMS from
     entry.data and rebuild the model/controller."""
     import custom_components.heating_assistant.coordinator as coord_mod
-    from custom_components.heating_assistant.const import (
+    from heatingassistant.engine.const import (
         CONF_ESTIMATED_PARAMS,
         CONF_ROOMS,
         CONF_HEAT_SOURCES,
@@ -494,7 +490,7 @@ def test_reset_estimated_parameters_removes_snapshot_and_rebuilds():
             return_value=[_make_source()],
         ),
         patch(
-            "custom_components.heating_assistant.controller.factory.HeatingMPCController",
+            "heatingassistant.engine.controller.factory.HeatingMPCController",
             return_value=mock_controller,
         ) as m_controller,
     ):
@@ -519,7 +515,7 @@ def test_estimated_params_snapshot_returns_none_when_absent():
 
 
 def test_estimated_params_snapshot_returns_snapshot_when_present():
-    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+    from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 
     snap = {"rooms": {}, "sources": {}, "estimated_at": "T"}
     coordinator = _FakeCoordinator()
@@ -534,7 +530,7 @@ def test_estimated_params_snapshot_returns_snapshot_when_present():
 def test_parameter_confidence_sensor_has_is_estimated_attribute():
     """extra_state_attributes must include is_estimated and estimated_at."""
     from custom_components.heating_assistant.sensor import ParameterConfidenceSensor
-    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+    from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 
     room = _make_room("lr", 5_000_000, 0.05)
     coordinator = _FakeCoordinator([room])
@@ -608,7 +604,7 @@ def test_heater_scale_sensor_native_value_estimated():
 
 def test_heater_scale_sensor_attributes_is_estimated():
     from custom_components.heating_assistant.sensor import HeaterScaleSensor
-    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+    from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 
     coordinator = _FakeCoordinator(sources=[_make_source("hp", 1.1)])
     snap = {
@@ -650,7 +646,7 @@ def test_estimated_parameters_status_sensor_default():
 
 def test_estimated_parameters_status_sensor_estimated():
     from custom_components.heating_assistant.sensor import EstimatedParametersStatusSensor
-    from custom_components.heating_assistant.const import CONF_ESTIMATED_PARAMS
+    from heatingassistant.engine.const import CONF_ESTIMATED_PARAMS
 
     coordinator = _FakeCoordinator(
         rooms=[_make_room("lr")], sources=[_make_source("hp")]
@@ -725,7 +721,7 @@ async def test_async_estimate_ml_passes_internal_gains_and_heater_scales():
     )
 
     with patch(
-        "custom_components.heating_assistant.parameter_estimator.KalmanMLEstimator",
+        "heatingassistant.engine.parameter_estimator.KalmanMLEstimator",
         _FakeEstimator,
     ), patch(
         "custom_components.heating_assistant.coordinator.parameter_lifecycle.apply_estimated_parameters",

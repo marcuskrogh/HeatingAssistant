@@ -1,6 +1,12 @@
-"""Unit tests for services/history_access.py."""
+"""SWD-262: fat HA integration removed.
 
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 from collections import deque
 from types import SimpleNamespace
@@ -83,7 +89,7 @@ async def test_get_history_for_window_recorder_fallback(monkeypatch):
     recorder_records = _records(1_000.0, 5)
     mock_fetch = AsyncMock(return_value=recorder_records)
     monkeypatch.setattr(
-        "custom_components.heating_assistant.history.seed.async_fetch_history_range",
+        "heatingassistant.engine.history.seed.async_fetch_history_range",
         mock_fetch,
     )
     hass = make_hass_stub()
@@ -103,7 +109,7 @@ async def test_get_history_for_window_last_resort_buffer(monkeypatch):
     coord.id_history_store.async_query_range = AsyncMock(side_effect=RuntimeError("disk"))
     mock_fetch = AsyncMock(side_effect=RuntimeError("recorder"))
     monkeypatch.setattr(
-        "custom_components.heating_assistant.history.seed.async_fetch_history_range",
+        "heatingassistant.engine.history.seed.async_fetch_history_range",
         mock_fetch,
     )
     hass = make_hass_stub()

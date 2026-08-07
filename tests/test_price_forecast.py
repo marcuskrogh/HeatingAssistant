@@ -1,16 +1,12 @@
-"""Tests for coordinator._async_read_price_forecast and electricity_price module.
+"""SWD-262: fat HA integration removed.
 
-Covers:
-  - Path A: timestamped dicts (Nord Pool HACS v2 ``raw_today``/``raw_tomorrow``)
-  - Path B: plain hourly/quarterly lists (Nord Pool v1 / EDS / generic)
-  - EDS: ``hour``+``price`` raw format, quarterly resolution, Carnot ``forecast``
-  - Fallback: sensor state only (constant persistence)
-
-The sub-hourly alignment fix is verified explicitly: at 14:45 with dt=15 min
-the price for hour 15 must start at step k=1, not step k=4.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import asyncio
 from datetime import datetime, timedelta, timezone

@@ -28,9 +28,9 @@ import warnings
 import numpy as np
 import pytest
 
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.parameter_estimator import (
+from heatingassistant.engine.thermal_model import HouseModel, Room
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.parameter_estimator import (
     KalmanMLEstimator,
     _ThetaLayout,
     _LOG_ALPHA_LO,

@@ -1,11 +1,12 @@
-"""Regression test: async_estimate_parameters_ml must pass dt as float.
+"""SWD-262: fat HA integration removed.
 
-Prior to the fix, coordinator.py passed dt=self._update_interval (int) to
-KalmanMLEstimator, which expects dt: float.  This test ensures the float
-conversion is in place and that pressing the button does not raise a TypeError.
+This test module exercised the removed in-process Home Assistant integration layer.
 """
-
 from __future__ import annotations
+
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import sys
 import os
@@ -52,7 +53,7 @@ async def test_estimate_parameters_ml_passes_float_dt():
     # The method does `from .parameter_estimator import KalmanMLEstimator`, so
     # we patch at the source module level.
     with patch(
-        "custom_components.heating_assistant.parameter_estimator.KalmanMLEstimator",
+        "heatingassistant.engine.parameter_estimator.KalmanMLEstimator",
         _FakeEstimator,
     ):
         await bound(coordinator, apply_params=False)
@@ -94,7 +95,7 @@ async def test_estimate_parameters_ml_accepts_timedelta_update_interval():
     bound = coord_mod.HeatingAssistantCoordinator.async_estimate_parameters_ml
 
     with patch(
-        "custom_components.heating_assistant.parameter_estimator.KalmanMLEstimator",
+        "heatingassistant.engine.parameter_estimator.KalmanMLEstimator",
         _FakeEstimator,
     ):
         await bound(coordinator, apply_params=False)

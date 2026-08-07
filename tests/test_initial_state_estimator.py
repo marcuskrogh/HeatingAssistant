@@ -8,16 +8,16 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.thermal_model import HouseModel, Room
-from custom_components.heating_assistant.heat_sources import ElectricHeater
-from custom_components.heating_assistant.controller import HouseThermalSDE
-from custom_components.heating_assistant.history_window import select_leading_window
-from custom_components.heating_assistant.initial_state_estimator import (
+from heatingassistant.engine.thermal_model import HouseModel, Room
+from heatingassistant.engine.heat_sources import ElectricHeater
+from heatingassistant.engine.controller import HouseThermalSDE
+from heatingassistant.engine.history_window import select_leading_window
+from heatingassistant.engine.initial_state_estimator import (
     estimate_simulation_initial_state,
     ekf_state_at_end_of_history,
     _prefix_calibration_slice,
 )
-from custom_components.heating_assistant.parameter_estimator import KalmanMLEstimator
+from heatingassistant.engine.parameter_estimator import KalmanMLEstimator
 
 
 def _simulate_history(

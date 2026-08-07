@@ -1,4 +1,10 @@
-"""Tests for live measurement and control sensors in sensor/room_live.py."""
+"""SWD-262: fat HA integration removed.
+
+This test module exercised the removed in-process Home Assistant integration layer.
+"""
+import pytest
+
+pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
 
 import os
 import sys
@@ -9,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from custom_components.heating_assistant.heat_sources import ElectricHeater, HeatPump
+from heatingassistant.engine.heat_sources import ElectricHeater, HeatPump
 from custom_components.heating_assistant.sensor import (
     ControlActionSensor,
     EnergyBalanceSensor,

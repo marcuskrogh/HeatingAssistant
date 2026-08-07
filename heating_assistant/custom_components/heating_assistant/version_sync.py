@@ -1,4 +1,4 @@
-"""Version-sync helpers for the staged thin bridge."""
+"""Version-sync helpers for the thin bridge."""
 
 from __future__ import annotations
 
