@@ -35,5 +35,9 @@
 - Branch: `cursor/swd-262-finish-haos-app-01f0`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/546
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/546
+- Version: 2.0.1 — App port **8100**; Ingress industrial panel via App hass shim; thin-only `custom_components/heating_assistant`; engine helpers restored for CI (`history`, `schedule_migration`, `recorder_resample`).
+
 ## Next
-`/review-fix SWD-262` — Review and auto-fix (single pass)
+Done
