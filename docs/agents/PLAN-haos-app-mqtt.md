@@ -53,9 +53,10 @@
 6. **End-to-end hardening** ([SWD-256](https://marcusknielsen.atlassian.net/browse/SWD-256)) — HAOS MiniPC acceptance; load isolation check; regression tests for packaging, MQTT, and core control behaviours.
 
 ## Open items
-- Exact MQTT topic/payload schema details (settled during work package 3; follow PLCAssistant patterns where they fit).
+- Exact MQTT topic/payload schema details — initial map in `docs/agents/MQTT-TOPICS.md`; extend during install soak.
 - Naming locked: Python package/import slug is `heatingassistant`; HAOS App folder is `heating_assistant`; Supervisor slug remains `heatingassistant`; bundled HA integration domain remains `heating_assistant`.
-- Whether a retained “bindings” topic vs a small shared file under mapped config is used for integration subscription list (MQTT-first preference).
+- Full industrial panel HA-websocket parity in Ingress — shell reuses static assets; remaining WS-dependent panels documented in App `index.html`.
+- Root `custom_components/heating_assistant` fat tree still present for legacy unit imports; App installs sync thin from `heating_assistant_mqtt_thin` / App bundle only.
 
 ## Tracker
 - Provider: jira
@@ -66,6 +67,4 @@
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/545
 
 ## Next
-`/implement SWD-255` — Build per this plan (same branch/PR)
-
-(`/ship SWD-255` is an alternate Next to finish remaining: implement → review-fix → closeout.)
+`/review-fix SWD-255` — Review and auto-fix (single pass)
