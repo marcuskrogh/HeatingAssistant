@@ -47,18 +47,18 @@ def test_heatingassistant_app_config_shape():
 
     assert config["name"] == "HeatingAssistant"
     assert config["slug"] == "heatingassistant"
-    assert config["version"] == "2.0.0"
+    assert config["version"] == "2.0.1"
     assert config["arch"] == ["amd64", "aarch64"]
     assert config["init"] is False
     assert config["startup"] == "application"
     assert config["boot"] == "auto"
     assert config["timeout"] == 120
-    assert config["watchdog"] == "http://[HOST]:[PORT:8099]/"
+    assert config["watchdog"] == "http://[HOST]:[PORT:8100]/"
     assert config["ingress"] is True
-    assert config["ingress_port"] == 8099
+    assert config["ingress_port"] == 8100
     assert config["panel_icon"] == "mdi:radiator"
     assert config["panel_title"] == "HeatingAssistant"
-    assert config["ports"] == {"8099/tcp": 8099}
+    assert config["ports"] == {"8100/tcp": 8100}
     assert config["map"] == [
         {"type": "data", "read_only": False},
         {"type": "homeassistant_config", "read_only": False},
@@ -108,7 +108,7 @@ def test_app_version_lock_across_app_context_and_package_metadata():
         app_manifest["version"],
         root_project["version"],
         app_project["version"],
-    } == {"2.0.0"}
+    } == {"2.0.1"}
 
 
 def test_app_dockerfile_uses_synced_package_and_bundled_integration():

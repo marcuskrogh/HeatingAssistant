@@ -1,5 +1,5 @@
 name: "HeatingAssistant"
-version: "2.0.0"
+version: "2.0.1"
 slug: heatingassistant
 description: "Heating control App for Home Assistant OS (SWD-255)"
 url: "https://github.com/marcuskrogh/HeatingAssistant"
@@ -10,13 +10,13 @@ init: false
 startup: application
 boot: auto
 timeout: 120
-watchdog: "http://[HOST]:[PORT:8099]/"
+watchdog: "http://[HOST]:[PORT:8100]/"
 ingress: true
-ingress_port: 8099
+ingress_port: 8100
 panel_icon: mdi:radiator
 panel_title: HeatingAssistant
 ports:
-  8099/tcp: 8099
+  8100/tcp: 8100
 map:
   - type: data
     read_only: false

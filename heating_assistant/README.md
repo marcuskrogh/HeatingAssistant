@@ -113,7 +113,8 @@ https://github.com/marcuskrogh/HeatingAssistant
 ```
 
 Install **HeatingAssistant** from the Apps store entry. The App exposes Ingress
-and optional host port **8099**. On start it syncs its bundled
+and optional host port **8100**. PLCAssistant uses **8099**, so both Apps can
+coexist without a port clash. On start HeatingAssistant syncs its bundled
 `custom_components/heating_assistant` integration into Home Assistant's config
 share; restart Home Assistant Core after the sync notification so Core loads the
 integration copy.

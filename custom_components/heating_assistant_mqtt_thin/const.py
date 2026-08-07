@@ -2,7 +2,7 @@
 
 DOMAIN = "heating_assistant_mqtt_thin"
 NAME = "Heating Assistant MQTT Thin Bridge"
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 CONF_INSTANCE_ID = "instance_id"
 DEFAULT_INSTANCE_ID = "default"

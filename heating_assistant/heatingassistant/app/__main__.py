@@ -21,7 +21,7 @@ _STATIC_DIR = Path(__file__).with_name("static")
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.0"
+    server_version = "HeatingAssistantApp/2.0.1"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         path = urlsplit(self.path).path
@@ -134,7 +134,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("HEATING_ASSISTANT_PORT", "8099")),
+        default=int(
+            os.environ.get(
+                "HEATINGASSISTANT_PORT",
+                os.environ.get("HEATING_ASSISTANT_PORT", "8100"),
+            )
+        ),
     )
     parser.add_argument(
         "--data-dir",
