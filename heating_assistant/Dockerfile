@@ -24,7 +24,8 @@ LABEL io.hass.version="${BUILD_VERSION}" \
 WORKDIR /usr/src/heatingassistant
 COPY pyproject.toml README.md ./
 COPY heatingassistant ./heatingassistant
-RUN pip3 install --no-cache-dir . "paho-mqtt>=1.6"
+# Runtime deps come from pyproject (numpy/scipy/highspy/mbc + paho-mqtt).
+RUN pip3 install --no-cache-dir .
 
 # Thin integration is auto-copied into HA /config on App start.
 COPY custom_components /usr/share/heatingassistant/custom_components

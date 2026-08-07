@@ -116,7 +116,8 @@ def test_app_dockerfile_uses_synced_package_and_bundled_integration():
 
     assert "ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.20" in dockerfile
     assert "COPY heatingassistant ./heatingassistant" in dockerfile
-    assert 'RUN pip3 install --no-cache-dir . "paho-mqtt>=1.6"' in dockerfile
+    assert "RUN pip3 install --no-cache-dir ." in dockerfile
+    assert "paho-mqtt" in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert (
         "COPY custom_components /usr/share/heatingassistant/custom_components"
         in dockerfile
