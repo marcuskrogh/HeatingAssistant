@@ -1,63 +1,49 @@
-# Iterate: MQTT still disconnected after mqtt:need — retry discovery + SSL
+# Iterate: MQTT rc=5 — SUPERVISOR_TOKEN missing without hassio_api
 
 ## Prior work
-- Task: SWD-270
-- Also: SWD-269 (soft MQTT / local KPIs), SWD-271 (config UX, shipped between)
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/558 (v2.0.10)
-- Spec context: docs/agents/ITERATE.md, docs/agents/MQTT-TOPICS.md
+- Task: SWD-273
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/560 (v2.0.12)
+- Spec context: docs/agents/ITERATE.md
 
 ## Problem
-After updating to v2.0.10/2.0.11, Ingress still shows:
+After v2.0.12, App logs show:
 
-`API connected - N entities · MQTT disconnected`
+```
+HeatingAssistant: SUPERVISOR_TOKEN missing; MQTT discovery unavailable.
+MQTT connect to core-mosquitto:1883 failed with rc=5 (not authorised)
+```
 
-MPC LOAD and NEXT CONTROL populate (local App control cycle from SWD-269), but
-room CURRENT / MODEL FIT stay `—`, heating power and daily energy stay at 0, and
-plots stay empty because MQTT tags never arrive.
+Discovery/retry from SWD-270/273 never runs because the App container has no
+`SUPERVISOR_TOKEN`. Without credentials, Mosquitto rejects anonymous clients
+(CONNACK rc=5).
 
-Remaining gaps after SWD-270:
-
-1. Supervisor MQTT discovery runs **once** at process start. When
-   `/services/mqtt` returns "Service not enabled" (common until `mqtt:need` is
-   fully provisioned), the App creates an anonymous Paho client and never
-   re-discovers credentials.
-2. Stock options keep non-blank `mqtt_broker` / `mqtt_port`, so discovery only
-   fills username/password and **ignores** Supervisor host/port/`ssl`.
-3. `mqtt_ssl` is parsed but never applied to `PahoMqttBus`.
-4. Health/status lack a clear last discovery/connect error for operators.
+Root cause: App `config.yaml` declares `services: [mqtt:need]` but **not**
+`hassio_api: true`. Supervisor only injects `SUPERVISOR_TOKEN` when
+`hassio_api` / `homeassistant_api` is enabled (same pattern zigbee2mqtt used
+for mqtt:need + Services API).
 
 ## Acceptance criteria
-1. When MQTT is disconnected and credentials were blank / sourced from
-   Supervisor, App retries Supervisor `/services/mqtt` discovery with backoff
-   and applies credentials without requiring an App rebuild.
-2. When credentials are discovered from Supervisor (blank option creds), also
-   apply Supervisor host/port/ssl for the provisioned MQTT endpoint.
-3. `PahoMqttBus` applies TLS when `mqtt_ssl` is true; reconnects after
-   credential/endpoint updates.
-4. `/api/health` (and state) expose mqtt connect/discovery diagnostics
-   (connected, source, last error, username present — password redacted).
-5. Regression tests cover retry/reconfigure, supervisor endpoint+ssl merge, and
-   diagnostics.
-6. Version bump to **2.0.12**.
+1. App `config.yaml` sets `hassio_api: true` and `hassio_role: default` so
+   Supervisor injects `SUPERVISOR_TOKEN`.
+2. Set `homeassistant_api: true` so existing `run.sh` Core-restart /
+   notification paths can authenticate.
+3. Correct the outdated comment that claimed `/services/mqtt` needs no token.
+4. Regression test asserts these flags are present in App packaging.
+5. Version bump to **2.0.13**.
 
 ## Out of scope
-- Changing Mosquitto addon config itself.
-- Full offline message queue persistence.
+- Manual Mosquitto user creation UX.
+- Changing Mosquitto addon config.
 
 ## Work packages
-1. Discovery merge: when filling blank creds from Supervisor, also take
-   host/port/ssl; improve error logging for "Service not enabled".
-2. PahoMqttBus: TLS support + `reconfigure()` for auth/endpoint updates.
-3. Runtime/main: background discovery retry while disconnected; persist
-   discovered settings; expose diagnostics.
-4. Tests + version 2.0.12 + sync App package.
+1. Update `heating_assistant/config.yaml` flags + comment.
+2. Version 2.0.13 across App/package/integration mirrors.
+3. Packaging regression assertions + tracker.
 
 ## Tracker
-- Task: SWD-273
-- Relates: SWD-270
-- Branch: `cursor/swd-273-mqtt-discovery-retry-f56e`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/560
-- Status: review-fix CLEAN (ssl CI, retry stop-on-creds, no explicit-cred overwrite, HTTP diagnostics, result=error path)
+- Task: SWD-274
+- Relates: SWD-273
+- Branch: `cursor/swd-274-hassio-api-token-f56e`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/560
+`/review-fix SWD-274` — Review and auto-fix (single pass)

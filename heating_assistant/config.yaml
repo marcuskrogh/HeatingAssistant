@@ -1,5 +1,5 @@
 name: "HeatingAssistant"
-version: "2.0.12"
+version: "2.0.13"
 slug: heatingassistant
 description: "Heating control App for Home Assistant OS (SWD-255)"
 url: "https://github.com/marcuskrogh/HeatingAssistant"
@@ -15,8 +15,14 @@ ingress: true
 ingress_port: 8100
 panel_icon: mdi:radiator
 panel_title: HeatingAssistant
-# Supervisor Services API (/services/mqtt) is available without hassio_api, but
-# mqtt:need is required so Mosquitto credentials are provisioned for this App.
+# hassio_api injects SUPERVISOR_TOKEN so the App can call /services/mqtt.
+# mqtt:need provisions Mosquitto credentials for this App. Without both,
+# discovery is skipped and Mosquitto returns CONNACK rc=5 (not authorised).
+hassio_api: true
+hassio_role: default
+# homeassistant_api lets run.sh request Core restart / persistent notifications
+# after syncing the thin integration into /homeassistant.
+homeassistant_api: true
 services:
   - mqtt:need
 ports:
