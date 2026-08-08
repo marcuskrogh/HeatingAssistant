@@ -27,6 +27,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-08 — shipped SWD-271 via PR #559 (`1306eab`): searchable HA entity catalog + Environment UX; v2.0.11; review-fix CLEAN (catalog flag + weather outdoor °C fallback).
 - 2026-08-08 — `/iterate` SWD-271 from SWD-270: streamline config UX — MQTT HA entity catalog for searchable pickers; Environment recommends price+weather, collapses outdoor temp, removes solar irradiance; v2.0.11; branch `cursor/swd-271-config-ux-entity-picker-7676`.
 - 2026-08-08 — shipped SWD-270 via PR #558 (`b8201de`): mqtt:need + Supervisor MQTT credential discovery; v2.0.10; review-fix CLEAN.
 - 2026-08-08 — SWD-270 review-fix CLEAN: credential pair rule, durable secret fallback, honest `mqtt_source`, redact `mqtt_password` from HTTP JSON; Next Done / ship via PR #558.
