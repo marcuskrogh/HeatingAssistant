@@ -35,6 +35,7 @@ Declaring `hassio_api` alone does not put the token in a bare `sh` process.
 - Task: SWD-275
 - Relates: SWD-274
 - Branch: `cursor/swd-275-with-contenv-token-f56e`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/564
 
 ## Next
 `/review-fix SWD-275` — Review and auto-fix (single pass)
