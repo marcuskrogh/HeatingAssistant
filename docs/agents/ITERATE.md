@@ -38,5 +38,9 @@ names and fail module resolution.
 - Branch: `cursor/swd-266-ingress-module-url-f9b0`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/550
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/550
+- Version: **2.0.5** — BASE_PATH from classic script URL so dynamic `import()` resolves under Ingress.
+
 ## Next
-`/review-fix SWD-266` — Review and auto-fix (single pass)
+Done
