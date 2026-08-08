@@ -1,5 +1,5 @@
 name: "HeatingAssistant"
-version: "2.0.1"
+version: "2.0.2"
 slug: heatingassistant
 description: "Heating control App for Home Assistant OS (SWD-255)"
 url: "https://github.com/marcuskrogh/HeatingAssistant"

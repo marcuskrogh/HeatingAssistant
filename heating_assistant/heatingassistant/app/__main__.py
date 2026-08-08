@@ -14,14 +14,51 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from heatingassistant.app.runtime import HeatingRuntime
+from heatingassistant.persistence import load_config
 
 _STATIC_DIR = Path(__file__).with_name("static")
+
+# Supervisor App options (config.yaml schema) overlaid onto durable config.json.
+_SUPERVISOR_OPTION_KEYS = (
+    "instance_id",
+    "mqtt_broker",
+    "mqtt_port",
+    "mqtt_username",
+    "mqtt_password",
+)
+
+
+def merge_supervisor_options(
+    data_dir: str | Path,
+    options_path: str | Path | None,
+) -> dict[str, Any]:
+    """Load durable App config and overlay Supervisor options when present.
+
+    Supervisor writes ``/data/options.json``. The App keeps rooms/schedules/bindings
+    in ``config.json``. Overlay only the known Supervisor keys so MQTT settings
+    apply without wiping durable fields.
+    """
+
+    config = load_config(data_dir)
+    if options_path is None:
+        return config
+    path = Path(options_path)
+    if not path.is_file():
+        return config
+    with path.open("r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    for key in _SUPERVISOR_OPTION_KEYS:
+        if key in raw:
+            config[key] = raw[key]
+    return config
 
 
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.1"
+    server_version = "HeatingAssistantApp/2.0.2"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
@@ -245,6 +282,14 @@ def _parser() -> argparse.ArgumentParser:
         "--data-dir",
         default=os.environ.get("HEATING_ASSISTANT_DATA_DIR", "/data"),
     )
+    parser.add_argument(
+        "--options-path",
+        default=os.environ.get(
+            "HEATING_ASSISTANT_OPTIONS_PATH",
+            os.environ.get("HEATINGASSISTANT_OPTIONS_PATH", "/data/options.json"),
+        ),
+        help="Supervisor options.json path (MQTT / instance_id overlay)",
+    )
     parser.add_argument("--ha-runtime", action="store_true")
     return parser
 
@@ -255,9 +300,11 @@ async def _start_runtime(runtime: HeatingRuntime) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    Path(args.data_dir).mkdir(parents=True, exist_ok=True)
+    data_dir = Path(args.data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
 
-    runtime = HeatingRuntime(Path(args.data_dir))
+    options = merge_supervisor_options(data_dir, args.options_path)
+    runtime = HeatingRuntime(data_dir, options=options)
     asyncio.run(_start_runtime(runtime))
 
     handler = type("HeatingAssistantHandler", (_Handler,), {"runtime": runtime})
