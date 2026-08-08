@@ -5,7 +5,22 @@
 (() => {
   if (customElements.get('ha-industrial-panel')) return;
 
-  const BASE_PATH = 'ha-industrial-panel';
+  // Dynamic import() requires a valid URL or a relative specifier starting with
+  // ./, ../, or /.  A bare path like "ha-industrial-panel/..." is treated as a
+  // package name and throws: "Module name ... does not resolve to a valid URL."
+  // Prefer the directory of this classic script (works under Ingress + direct
+  // App port); fall back to an explicit relative path for <base href> resolution.
+  const BASE_PATH = (() => {
+    try {
+      const src = document.currentScript?.src;
+      if (src) {
+        return new URL('.', src).href.replace(/\/$/, '');
+      }
+    } catch (e) {
+      /* unexpected — fall through */
+    }
+    return './ha-industrial-panel';
+  })();
 
 // Cache-bust token for all dynamically-imported submodules (js/pages/*, css).
 //
@@ -30,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '114';
+  return '115';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on

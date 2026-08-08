@@ -59,9 +59,29 @@ def test_ingress_serves_industrial_panel_assets_and_bootstrap(tmp_path) -> None:
             body = response.read().decode("utf-8")
 
     assert "static/js/app-hass-shim.js" in body
-    assert "ha-industrial-panel/industrial-dashboard.js" in body
+    assert "ha-industrial-panel/industrial-dashboard.js?v=115" in body
     assert "ha-industrial-panel" in body
     assert "Home Assistant custom-panel entry point" not in body
+
+
+def test_industrial_dashboard_base_path_is_importable_module_url() -> None:
+    """SWD-266: bare 'ha-industrial-panel/...' fails dynamic import(); must be a URL."""
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "heatingassistant"
+        / "app"
+        / "static"
+        / "industrial-dashboard.js"
+    ).read_text(encoding="utf-8")
+
+    # Must not assign a bare package-style path (no ./, ../, /, or http).
+    assert "const BASE_PATH = 'ha-industrial-panel'" not in source
+    assert 'const BASE_PATH = "ha-industrial-panel"' not in source
+    # Prefer resolving from the classic script URL, with ./ fallback.
+    assert "new URL('.', src)" in source
+    assert "return './ha-industrial-panel'" in source
 
 
 def test_ingress_index_injects_base_href_for_ha_proxy(tmp_path) -> None:
