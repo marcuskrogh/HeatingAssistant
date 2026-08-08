@@ -1,39 +1,41 @@
-# Iterate: Ingress UI stuck on "Loading App API..."
+# Iterate: Ingress panel LOAD ERROR — bare module path
 
 ## Prior work
-- Task: SWD-264
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/548
-- Spec context: docs/agents/PLAN-haos-app-mqtt.md
+- Task: SWD-265
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/549
+- Spec context: docs/agents/ITERATE.md (SWD-265 Ingress base href)
 
 ## Problem
-After SWD-264 shipped static assets, Ingress still showed a blank panel with **"Loading App API..."**
-in the status pill. HA Ingress serves the app under `/api/hassio_ingress/<key>/`, but the UI used
-absolute paths (`/api/...`, `/static/...`, `/ha-industrial-panel/...`) that resolve against the HA
-host root instead of the Ingress subpath.
+After SWD-265, Ingress loads past "Loading App API..." and the App shim connects
+(API connected — N entities), but the industrial panel shows:
+
+`LOAD ERROR — Module name, 'ha-industrial-panel/js/ha-connection.js?v=114' does not resolve to a valid URL.`
+
+SWD-265 changed `BASE_PATH` from `/ha-industrial-panel` to the bare relative
+`ha-industrial-panel`. Dynamic `import()` requires a valid URL or a relative
+specifier starting with `./`, `../`, or `/`. Bare paths are treated as package
+names and fail module resolution.
 
 ## Acceptance criteria
-1. `index.html` served through Ingress injects `<base href>` from `X-Ingress-Path`.
-2. Static assets, API calls, and dynamic panel imports load under the Ingress prefix.
-3. Hash routing works in Ingress mode (no broken `/ha-industrial` replaceState).
+1. Dynamic panel module imports use a relative URL (`./ha-industrial-panel/...`)
+   that resolves under Ingress `<base href>` (and direct App port access).
+2. Panel boots past LOAD ERROR when App API is connected.
+3. Regression test asserts `industrial-dashboard.js` does not use a bare
+   `BASE_PATH` for `import()`.
 4. Version bump so Supervisor offers Update.
 
 ## Out of scope
-- Full HA custom-panel websocket parity (Ingress App shim only).
+- Full HA custom-panel websocket parity beyond the Ingress App shim.
 
 ## Work packages
-1. Ingress base injection + relative URL fixes
-2. Version bump 2.0.4 + sync App package
-3. PR / ship
+1. Fix BASE_PATH + cache-bust / version bump 2.0.5
+2. Regression test + sync App package
+3. PR / ship handoff
 
 ## Tracker
-- Task: SWD-265
-- Relates: SWD-264
-- Branch: `cursor/fix-ingress-loading-stuck-7bb9`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/549
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/549
-- Version: **2.0.4** — Ingress base href + relative asset/API paths.
+- Task: SWD-266
+- Relates: SWD-265
+- Branch: `cursor/swd-266-ingress-module-url-f9b0`
 
 ## Next
-Done
+`/review-fix SWD-266` — Review and auto-fix (single pass)
