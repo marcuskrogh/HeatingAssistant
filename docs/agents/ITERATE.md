@@ -56,6 +56,7 @@ Remaining gaps after SWD-270:
 - Task: SWD-273
 - Relates: SWD-270
 - Branch: `cursor/swd-273-mqtt-discovery-retry-f56e`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/560
 
 ## Next
 `/review-fix SWD-273` — Review and auto-fix (single pass)
