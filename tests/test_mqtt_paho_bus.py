@@ -69,6 +69,7 @@ def fake_mqtt_client(monkeypatch: pytest.MonkeyPatch):
         def __init__(self, **kwargs: object) -> None:
             self.kwargs = kwargs
             self.on_connect = None
+            self.on_disconnect = None
             self.on_message = None
             self.subscriptions: list[tuple[str, int]] = []
             self.published: list[tuple[str, str | bytes, int, bool]] = []
@@ -77,6 +78,9 @@ def fake_mqtt_client(monkeypatch: pytest.MonkeyPatch):
         def username_pw_set(self, username: str, password: str) -> None:
             self.username = username
             self.password = password
+
+        def reconnect_delay_set(self, min_delay: int = 1, max_delay: int = 120) -> None:
+            self.reconnect_delay = (min_delay, max_delay)
 
         def connect_async(self, host: str, port: int, keepalive: int = 60) -> None:
             self.host = host
@@ -167,19 +171,31 @@ async def test_paho_bus_dispatches_async_handlers(fake_mqtt_client) -> None:
     bus.close()
 
 
-def test_paho_bus_connect_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_paho_bus_connect_does_not_block_or_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SWD-268: unreachable broker must not crash App construction / Ingress."""
+
     class HangingClient:
         def __init__(self, **kwargs: object) -> None:
             self.on_connect = None
+            self.on_disconnect = None
             self.on_message = None
 
         def username_pw_set(self, *args: object) -> None:
+            return None
+
+        def reconnect_delay_set(self, *args: object, **kwargs: object) -> None:
             return None
 
         def connect_async(self, *args: object, **kwargs: object) -> None:
             return None
 
         def loop_start(self) -> None:
+            return None
+
+        def loop_stop(self) -> None:
+            return None
+
+        def disconnect(self) -> None:
             return None
 
     monkeypatch.setattr("heatingassistant.mqtt.paho_bus.mqtt.Client", HangingClient)
@@ -189,15 +205,78 @@ def test_paho_bus_connect_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("heatingassistant.mqtt.paho_bus.mqtt.MQTTv311", "MQTTv311")
 
-    with pytest.raises(TimeoutError, match="did not connect"):
-        PahoMqttBus(host="core-mosquitto", connect_timeout_s=0.05)
+    bus = PahoMqttBus(host="core-mosquitto", connect_timeout_s=0.05)
+    assert bus.connected is False
+    bus.close()
 
 
 def test_paho_bus_publish_requires_connection(fake_mqtt_client) -> None:
-    bus = PahoMqttBus(host="core-mosquitto")
+    bus = PahoMqttBus(host="core-mosquitto", publish_timeout_s=0.05)
     bus._connected.clear()
 
     with pytest.raises(RuntimeError, match="not connected"):
         asyncio.run(bus.publish("topic", "payload"))
 
+    bus.close()
+
+
+def test_paho_bus_connect_handler_runs_on_connect(fake_mqtt_client) -> None:
+    import time
+
+    seen: list[str] = []
+
+    bus = PahoMqttBus(host="core-mosquitto")
+    # Connected during FakeClient.loop_start; late handler should still fire.
+    bus.add_connect_handler(lambda: seen.append("late"))
+    deadline = time.time() + 2
+    while "late" not in seen and time.time() < deadline:
+        time.sleep(0.01)
+    assert seen == ["late"]
+
+    bus._connected.clear()
+    seen.clear()
+    bus.add_connect_handler(lambda: seen.append("queued"))
+    fake_mqtt_client[0].on_connect(fake_mqtt_client[0], None, {}, 0)
+    deadline = time.time() + 2
+    while "queued" not in seen and time.time() < deadline:
+        time.sleep(0.01)
+    assert "queued" in seen
+    bus.close()
+
+
+def test_create_mqtt_bus_survives_unreachable_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    class HangingClient:
+        def __init__(self, **kwargs: object) -> None:
+            self.on_connect = None
+            self.on_disconnect = None
+            self.on_message = None
+
+        def username_pw_set(self, *args: object) -> None:
+            return None
+
+        def reconnect_delay_set(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def connect_async(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def loop_start(self) -> None:
+            return None
+
+        def loop_stop(self) -> None:
+            return None
+
+        def disconnect(self) -> None:
+            return None
+
+    monkeypatch.setattr("heatingassistant.mqtt.paho_bus.mqtt.Client", HangingClient)
+    monkeypatch.setattr(
+        "heatingassistant.mqtt.paho_bus.mqtt.CallbackAPIVersion",
+        SimpleNamespace(VERSION1="v1"),
+    )
+    monkeypatch.setattr("heatingassistant.mqtt.paho_bus.mqtt.MQTTv311", "MQTTv311")
+
+    bus = create_mqtt_bus({"mqtt_broker": "core-mosquitto", "mqtt_port": 1883})
+    assert isinstance(bus, PahoMqttBus)
+    assert bus.connected is False
     bus.close()

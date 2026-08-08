@@ -60,7 +60,7 @@ def merge_supervisor_options(
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.7"
+    server_version = "HeatingAssistantApp/2.0.8"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
@@ -350,9 +350,14 @@ def main(argv: list[str] | None = None) -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
 
     options = merge_supervisor_options(data_dir, args.options_path)
+    # MQTT must never block Ingress: create_mqtt_bus starts Paho async and does
+    # not raise when Mosquitto is slow. Runtime start is best-effort for publish.
     bus = create_mqtt_bus(options) if args.ha_runtime else None
     runtime = HeatingRuntime(data_dir, bus=bus, options=options)
-    asyncio.run(_start_runtime(runtime))
+    try:
+        asyncio.run(_start_runtime(runtime))
+    except Exception as exc:  # noqa: BLE001 - keep Ingress up on unexpected start errors
+        print(f"HeatingAssistant runtime start warning: {exc}", flush=True)
 
     handler = type("HeatingAssistantHandler", (_Handler,), {"runtime": runtime})
     server = ThreadingHTTPServer((args.host, args.port), handler)
