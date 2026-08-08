@@ -819,19 +819,24 @@ class HeatingRuntime:
 
         # Merge the thin-bridge HA entity catalog so Ingress pickers can search
         # all configured HA entities (SWD-271). Do not overwrite App synthetics
-        # or already-bound live values.
+        # or already-bound live values. Mark catalog-backed states so the UI can
+        # tell a full HA catalog apart from binding stubs alone.
         for item in self._ha_entity_catalog:
             entity_id = item["entity_id"]
             if entity_id in states:
                 # Prefer live friendly names / units from the catalog when the
                 # binding stub only has the raw entity_id as its name.
                 attrs = states[entity_id].setdefault("attributes", {})
+                attrs["heating_assistant_catalog"] = True
                 if attrs.get("friendly_name") in (None, "", entity_id):
                     attrs["friendly_name"] = item["name"]
                 if item.get("unit") and not attrs.get("unit_of_measurement"):
                     attrs["unit_of_measurement"] = item["unit"]
                 continue
-            attrs = {"friendly_name": item["name"]}
+            attrs = {
+                "friendly_name": item["name"],
+                "heating_assistant_catalog": True,
+            }
             if item.get("unit"):
                 attrs["unit_of_measurement"] = item["unit"]
             states[entity_id] = self._ha_state(
@@ -1137,6 +1142,12 @@ class HeatingRuntime:
         return re.sub(r"[^a-z0-9]+", "_", entity_id.strip().lower()).strip("_")
 
     def _outdoor_temperature(self) -> float | None:
+        """Return outdoor °C from the dedicated sensor, else weather fallback.
+
+        Mirrors classic ``read_outdoor_temp``: prefer ``outdoor_temp_*``, then
+        the weather entity's published temperature on ``weather_tag``.
+        """
+
         tag = self.options.get("outdoor_temp_tag") or self.options.get("outdoor_tag")
         if not isinstance(tag, str) or not tag:
             outdoor_entity = self.options.get(const.CONF_OUTDOOR_TEMP_ENTITY)
@@ -1145,9 +1156,20 @@ class HeatingRuntime:
                     if binding.direction == "in" and binding.entity_id == outdoor_entity:
                         tag = binding.tag
                         break
-        if not isinstance(tag, str) or not tag:
-            return None
-        return self._coerce_number(self.tag_values.get(tag))
+        if isinstance(tag, str) and tag:
+            outdoor = self._coerce_number(self.tag_values.get(tag))
+            if outdoor is not None:
+                return outdoor
+
+        weather_tag = self.options.get("weather_tag")
+        if isinstance(weather_tag, str) and weather_tag:
+            return self._coerce_number(self.tag_values.get(weather_tag))
+        weather_entity = self.options.get(const.CONF_WEATHER_ENTITY)
+        if isinstance(weather_entity, str) and weather_entity:
+            for binding in self.bindings:
+                if binding.direction == "in" and binding.entity_id == weather_entity:
+                    return self._coerce_number(self.tag_values.get(binding.tag))
+        return None
 
     def _setpoints(self) -> dict[str, float]:
         setpoints: dict[str, float] = {}

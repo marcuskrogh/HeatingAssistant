@@ -124,12 +124,19 @@ class _BridgeManager:
             if domain not in PICKER_DOMAINS:
                 continue
             name = state.name or entity_id
+            display_state = str(state.state)
+            if domain == "weather":
+                temp = state.attributes.get("temperature")
+                if temp is not None:
+                    display_state = str(temp)
             entry: dict[str, str] = {
                 "entity_id": entity_id,
                 "name": name,
-                "state": str(state.state),
+                "state": display_state,
             }
             unit = state.attributes.get("unit_of_measurement")
+            if domain == "weather" and not isinstance(unit, str):
+                unit = "°C" if state.attributes.get("temperature") is not None else None
             if isinstance(unit, str) and unit:
                 entry["unit"] = unit
             catalog.append(entry)
@@ -206,7 +213,19 @@ class _BridgeManager:
         if state is None or state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
             payload = MqttTagPayload(None, status="BAD", reason="entity_unavailable", ts=time.time())
         else:
-            payload = MqttTagPayload(_coerce_state_value(state.state), status="GOOD", ts=time.time())
+            # Weather entities report condition in ``state``; outdoor °C lives in
+            # ``attributes.temperature`` (mirrors classic read_outdoor_temp).
+            value: Any = _coerce_state_value(state.state)
+            reason: str | None = None
+            if state.domain == "weather":
+                temp = state.attributes.get("temperature")
+                if temp is not None:
+                    try:
+                        value = float(temp)
+                        reason = str(state.state)
+                    except (TypeError, ValueError):
+                        pass
+            payload = MqttTagPayload(value, status="GOOD", reason=reason, ts=time.time())
         # Retain last-known tag values so the App receives them on (re)subscribe
         # after a late MQTT connect (SWD-269). Without retain, the bind-time
         # snapshot is lost until the next HA state change.

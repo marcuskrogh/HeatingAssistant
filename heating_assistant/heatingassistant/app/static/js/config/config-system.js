@@ -91,22 +91,22 @@ function renderSystem(container, connection, hass) {
 
     const envCard = sectionCard(
       'Recommended sensors',
-      'Start with a weather entity (forecast + outdoor temperature for your location) '
-      + 'and an electricity price sensor for price-aware control. '
-      + 'A dedicated outdoor temperature sensor is optional if you want a clearer local reading.',
+      'Start with electricity price and a weather entity for your location '
+      + '(forecast + outdoor temperature from the weather entity). '
+      + 'Add a dedicated outdoor temperature sensor only if you want a clearer local reading.',
     );
     envCard.appendChild(paramGrid(
       entitySelectorField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], {
         hint: 'Recommended. Hourly / spot market price sensor (e.g. Nord Pool).',
       }),
       entitySelectorField(container, hass, working, 'weather_entity', 'Weather forecast', ['weather'], {
-        hint: 'Recommended. Provides outdoor temperature and forecast for your location — the lowest-friction outdoor signal.',
+        hint: 'Recommended. Outdoor temperature comes from the weather entity temperature attribute; forecast feeds outdoor planning.',
       }),
     ));
     const outdoorOpt = advancedSubsection(envCard, 'Optional: outdoor temperature sensor');
     outdoorOpt.appendChild(paramGrid(
       entitySelectorField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], {
-        hint: 'Optional. Use when you have a local outdoor sensor and want a clearer reading than the weather entity alone.',
+        hint: 'Optional. Prefer this over the weather temperature when you have a local outdoor sensor.',
       }),
     ));
     body.appendChild(envCard);

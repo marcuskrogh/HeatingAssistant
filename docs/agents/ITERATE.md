@@ -43,7 +43,7 @@ The configuration pipeline is cumbersome for first-time setup:
 - Relates: SWD-270
 - Branch: `cursor/swd-271-config-ux-entity-picker-7676`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/559
-- Status: In Review
+- Status: review-fix CLEAN (catalog flag + weather outdoor °C fallback)
 
 ## Next
-`/review-fix SWD-271` — Review and auto-fix (single pass)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/559

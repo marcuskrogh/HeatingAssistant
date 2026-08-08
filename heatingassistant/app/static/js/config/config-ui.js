@@ -248,14 +248,13 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  // Ingress App shim only exposes Heating Assistant's own synthetic states —
-  // not the full HA registry — unless the thin bridge has published a catalog
-  // (SWD-271). Free-text entity IDs remain available as a fallback.
-  const limitedCatalog = entities.length === 0
-    || (entities.length > 0
-      && entities.every((e) => e.id.startsWith('sensor.heating_assistant_')
-        || e.id.startsWith('climate.heating_assistant_')
-        || e.id.startsWith('binary_sensor.heating_assistant_')));
+  // Ingress only has a searchable HA list after the thin bridge publishes the
+  // MQTT entity catalog (SWD-271). Binding stubs alone must not look like a
+  // full catalog — detect the catalog flag App sets on merged states.
+  const catalogReady = Object.values(hass?.states || {}).some(
+    (s) => s?.attributes?.heating_assistant_catalog === true,
+  );
+  const limitedCatalog = !catalogReady;
 
   function close() { overlay.remove(); }
 
