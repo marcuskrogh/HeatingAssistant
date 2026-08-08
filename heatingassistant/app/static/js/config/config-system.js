@@ -1,10 +1,10 @@
 import {
   updateSystemConfig, updateSystemParams,
-} from '../ha-services.js?v=116';
+} from '../ha-services.js?v=118';
 import {
   configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid,
-  loadingNode, entitySelectorField,
-} from './config-ui.js?v=116';
+  loadingNode, entitySelectorField, advancedSubsection,
+} from './config-ui.js?v=118';
 
 // System Parameters
 // ---------------------------------------------------------------------------
@@ -75,34 +75,38 @@ function renderSystem(container, connection, hass) {
     backLabel: 'CONFIGURATION',
     backHash: '#config',
     title: 'ENVIRONMENT',
-    description: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors.',
+    description: 'Recommended outdoor signals and electricity price for forecasts and optimisation.',
   });
   body.appendChild(loadingNode());
 
   connection.getModelConfig().then((cfg) => {
     const sys = (cfg && cfg.system) || {};
     const working = { ...sys };
+    // Solar GHI option removed from the Environment UI (SWD-271).
+    delete working.solar_radiation_entity;
 
     body.innerHTML = '';
     const actions = actionsBar('Apply Changes');
     body.appendChild(actions);
 
-    const envCard = sectionCard('Weather & energy sensors',
-      'External signals the controller reads. Outdoor temperature is required for good control; '
-      + 'weather and solar irradiance improve the forecast; the price sensor enables price-aware '
-      + 'optimisation. Use Clear to disable any of them.');
+    const envCard = sectionCard(
+      'Recommended sensors',
+      'Start with electricity price and a weather entity for your location '
+      + '(forecast + outdoor temperature from the weather entity). '
+      + 'Add a dedicated outdoor temperature sensor only if you want a clearer local reading.',
+    );
     envCard.appendChild(paramGrid(
-      entitySelectorField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], {
-        hint: 'Measured outdoor air temperature. Under Ingress, type the full HA entity ID.',
+      entitySelectorField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], {
+        hint: 'Recommended. Hourly / spot market price sensor (e.g. Nord Pool).',
       }),
       entitySelectorField(container, hass, working, 'weather_entity', 'Weather forecast', ['weather'], {
-        hint: 'Weather entity for the outdoor forecast. Type weather.* when the list is incomplete.',
+        hint: 'Recommended. Outdoor temperature comes from the weather entity temperature attribute; forecast feeds outdoor planning.',
       }),
-      entitySelectorField(container, hass, working, 'solar_radiation_entity', 'Solar irradiance', ['sensor'], {
-        hint: 'GHI in W/m² (optional). Type sensor.* when the list is incomplete.',
-      }),
-      entitySelectorField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], {
-        hint: 'Hourly market price (optional). Type sensor.* when the list is incomplete.',
+    ));
+    const outdoorOpt = advancedSubsection(envCard, 'Optional: outdoor temperature sensor');
+    outdoorOpt.appendChild(paramGrid(
+      entitySelectorField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], {
+        hint: 'Optional. Prefer this over the weather temperature when you have a local outdoor sensor.',
       }),
     ));
     body.appendChild(envCard);
@@ -116,7 +120,8 @@ function renderSystem(container, connection, hass) {
         const data = {
           outdoor_temp_entity: working.outdoor_temp_entity || '',
           weather_entity: working.weather_entity || '',
-          solar_radiation_entity: working.solar_radiation_entity || '',
+          // Always clear — option removed from the UI (SWD-271).
+          solar_radiation_entity: '',
           price_entity: working.price_entity || '',
         };
         await updateSystemConfig(hass, data);

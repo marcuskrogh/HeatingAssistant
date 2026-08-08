@@ -7,6 +7,7 @@ from heatingassistant.mqtt.topics import (
     TOPIC_ROOT,
     bindings,
     cmd,
+    entities,
     parse_tag_topic,
     status,
     tag_in,
@@ -24,6 +25,7 @@ def test_topic_builders_follow_contract() -> None:
     assert cmd("haos", "reload") == "heatingassistant/haos/cmd/reload"
     assert status("haos") == "heatingassistant/haos/status"
     assert bindings("haos") == "heatingassistant/haos/bindings"
+    assert entities("haos") == "heatingassistant/haos/entities"
 
 
 def test_parse_tag_topic_returns_structured_parts() -> None:

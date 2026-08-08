@@ -40,6 +40,25 @@ def bindings(instance_id: str) -> str:
     return f"{TOPIC_ROOT}/{instance_id}/bindings"
 
 
+def entities(instance_id: str) -> str:
+    _validate_part(instance_id, "instance_id")
+    return f"{TOPIC_ROOT}/{instance_id}/entities"
+
+
+# Domains the Ingress entity pickers can select from.
+PICKER_DOMAINS = frozenset(
+    {
+        "sensor",
+        "weather",
+        "binary_sensor",
+        "switch",
+        "climate",
+        "number",
+        "input_boolean",
+    }
+)
+
+
 @dataclass(frozen=True)
 class MqttTagPayload:
     value: Any

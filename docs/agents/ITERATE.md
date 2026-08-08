@@ -1,48 +1,49 @@
-# Iterate: Ingress shows MQTT disconnected — App missing Supervisor Mosquitto credentials
+# Iterate: Streamline config UX — searchable HA entity picker + Environment recommendations
 
 ## Prior work
-- Task: SWD-269
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/557 (v2.0.9 — MQTT status + soft writes)
-- Spec context: docs/agents/ITERATE.md, heating_assistant/config.yaml, heatingassistant/mqtt/
+- Task: SWD-270
+- Also: SWD-267 (Ingress entity picker free-text + MQTT bindings)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/558 (v2.0.10)
+- Spec context: docs/agents/ITERATE.md, docs/agents/MQTT-TOPICS.md
 
 ## Problem
-After updating to v2.0.9, Ingress correctly shows:
+The configuration pipeline is cumbersome for first-time setup:
 
-`API connected - 19 entities · MQTT disconnected`
-
-Room CURRENT stays `—` and KPIs stay at 0 because the App never has a live MQTT session.
-
-Root cause:
-
-1. Official Mosquitto **rejects anonymous** connections.
-2. App defaults / options use empty `mqtt_username` / `mqtt_password`.
-3. App `config.yaml` does not declare `services: [mqtt:need]`, so Supervisor never grants/discovers Mosquitto credentials.
-4. No code path reads `http://supervisor/services/mqtt` for host/user/password.
+1. Under Ingress, entity selectors only see App-synthetic / already-bound entities.
+   Users must remember and type full HA entity IDs (SWD-267 workaround).
+2. Environment config expands every sensor option. Solar irradiance is not a
+   practical integration path. Weather alone is the low-friction outdoor signal
+   (forecast + outdoor temp for the location); a dedicated outdoor temp sensor
+   is optional. Electricity price should be recommended alongside weather.
 
 ## Acceptance criteria
-1. App declares MQTT service dependency (`mqtt:need`) so Supervisor exposes Mosquitto to the App.
-2. On HAOS start, when options lack MQTT credentials, App discovers host/port/username/password from Supervisor Services API and uses them for `PahoMqttBus`.
-3. Explicit user-supplied MQTT options still override discovery.
-4. `/api/health` / state expose enough detail to diagnose MQTT (connected flag; optional discovery source / broker host).
-5. Regression tests cover discovery merge + credential precedence + broker URL normalization.
-6. Version bump to **2.0.10**.
+1. All entity selectors can search HA entities (friendly name + entity ID)
+   without requiring users to memorize IDs. Manual ID entry remains as fallback.
+2. Environment page: electricity price and weather forecast are recommended and
+   expanded (price on top with weather).
+3. Outdoor temperature sensor is collapsed/expandable as an optional extension
+   below the weather forecast entity.
+4. Solar irradiance option is removed from the Environment UI (cleared on save).
+5. Regression tests cover entity catalog MQTT path + Environment field
+   ordering/collapse behavior.
+6. Version bump to **2.0.11**.
 
 ## Out of scope
-- Changing Mosquitto itself or requiring users to create custom Mosquitto logins by hand when Supervisor discovery works.
-- Full offline message queue persistence.
+- Removing backend solar-radiation engine support (UI-only removal for now).
+- Full HA websocket custom-panel parity outside Ingress.
 
 ## Work packages
-1. Declare `mqtt:need` (+ hassio_api if needed) in App config.yaml
-2. Supervisor MQTT discovery + options merge in Python (and run.sh hint)
-3. Broker host normalization (`mqtt://` strip)
-4. Tests + version 2.0.10 + sync App package
+1. Thin HA bridge publishes a retained MQTT entity catalog for picker domains.
+2. App consumes catalog and merges into Ingress `hass_states` for all pickers.
+3. Environment UX reorder / collapse / remove solar.
+4. Tests + version 2.0.11 + sync App package.
 
 ## Tracker
-- Task: SWD-270
-- Relates: SWD-269
-- Branch: `cursor/swd-270-mqtt-supervisor-creds-65c0`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/558
-- Status: review-fix CLEAN (credential pair, durable fallback, honest mqtt_source, password redaction)
+- Task: SWD-271
+- Relates: SWD-270
+- Branch: `cursor/swd-271-config-ux-entity-picker-7676`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/559
+- Status: review-fix CLEAN (catalog flag + weather outdoor °C fallback)
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/558
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/559
