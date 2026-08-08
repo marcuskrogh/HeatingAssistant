@@ -101,6 +101,35 @@ def test_fetch_supervisor_records_service_not_enabled(
     assert "Service not enabled" in (get_last_discovery_error() or "")
 
 
+def test_fetch_supervisor_records_result_error_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Supervisor often returns HTTP 200 with result=error for mqtt:need gaps."""
+
+    set_last_discovery_error(None)
+    import io
+
+    class _CM:
+        def __init__(self, raw: bytes) -> None:
+            self._buf = io.BytesIO(raw)
+
+        def __enter__(self) -> io.BytesIO:
+            return self._buf
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "token")
+    monkeypatch.setattr(
+        "heatingassistant.mqtt.supervisor.urlopen",
+        lambda *a, **k: _CM(
+            json.dumps({"result": "error", "message": "Service not enabled"}).encode()
+        ),
+    )
+    assert fetch_supervisor_mqtt_service() is None
+    assert get_last_discovery_error() == "Service not enabled"
+
+
 def test_create_mqtt_bus_passes_ssl(monkeypatch: pytest.MonkeyPatch) -> None:
     created: list[dict[str, object]] = []
 
@@ -270,4 +299,55 @@ async def test_runtime_discovery_retry_reconfigures_bus(
     assert runtime.options["mqtt_username"] == "addons"
     assert runtime.options["mqtt_source"] == "supervisor"
     assert runtime.status()["mqtt_connected"] is True
+    # After credentials are filled, further discovery retries must no-op.
+    assert runtime._should_retry_mqtt_discovery(runtime.options) is False
+    assert runtime._try_apply_supervisor_mqtt_discovery() is False
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_blank_explicit_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FakeBus:
+        connected = False
+        last_error = None
+
+        def subscribe(self, topic_filter: str, handler: Any) -> Any:
+            return lambda: None
+
+        def add_connect_handler(self, handler: Any) -> None:
+            return None
+
+        async def publish(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def reconfigure(self, **kwargs: object) -> None:
+            raise AssertionError("reconfigure must not run for explicit credentials")
+
+    monkeypatch.setattr(
+        "heatingassistant.app.runtime.apply_supervisor_mqtt_discovery",
+        lambda options, fallback=None: {
+            **dict(options),
+            "mqtt_broker": "hijacked",
+            "mqtt_username": "addons",
+            "mqtt_password": "from-supervisor",
+            "mqtt_source": "supervisor",
+        },
+    )
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=FakeBus(),  # type: ignore[arg-type]
+        options={
+            "instance_id": "default",
+            "mqtt_broker": "my-broker",
+            "mqtt_username": "custom",
+            "mqtt_password": "custom-pass",
+            "mqtt_source": "options",
+        },
+    )
+    await runtime.start()
+    assert runtime._try_apply_supervisor_mqtt_discovery() is False
+    assert runtime.options["mqtt_broker"] == "my-broker"
+    assert runtime.options["mqtt_username"] == "custom"
     await runtime.stop()

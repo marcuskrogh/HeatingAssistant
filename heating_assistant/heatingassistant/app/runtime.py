@@ -173,10 +173,8 @@ class HeatingRuntime:
 
     @classmethod
     def _should_retry_mqtt_discovery(cls, options: Mapping[str, Any]) -> bool:
-        """Retry when Supervisor may still provision mqtt:need credentials."""
+        """Retry only while the credential pair is still blank."""
 
-        if options.get("mqtt_source") == "supervisor":
-            return True
         return cls._blank_mqtt_value(options.get("mqtt_username")) and cls._blank_mqtt_value(
             options.get("mqtt_password")
         )
@@ -201,8 +199,17 @@ class HeatingRuntime:
 
     def _mqtt_discovery_retry_loop(self) -> None:
         delay = _MQTT_DISCOVERY_RETRY_INITIAL_S
-        while not self._mqtt_discovery_stop.wait(timeout=delay):
+        while not self._mqtt_discovery_stop.is_set():
             if self._mqtt_connected():
+                # Spec: retry only while disconnected — wait longer when healthy.
+                if self._mqtt_discovery_stop.wait(timeout=_MQTT_DISCOVERY_RETRY_MAX_S):
+                    return
+                continue
+            if not self._should_retry_mqtt_discovery(self.options):
+                return
+            if self._mqtt_discovery_stop.wait(timeout=delay):
+                return
+            if self._mqtt_connected() or not self._should_retry_mqtt_discovery(self.options):
                 delay = _MQTT_DISCOVERY_RETRY_INITIAL_S
                 continue
             if not self._try_apply_supervisor_mqtt_discovery():
@@ -220,8 +227,15 @@ class HeatingRuntime:
             "mqtt_password": self.options.get("mqtt_password"),
             "mqtt_ssl": self.options.get("mqtt_ssl", False),
         }
-        # Force a fresh discovery pass: blank the credential pair so merge takes
-        # the full Supervisor endpoint (host/port/ssl/user/pass).
+        both_blank = self._blank_mqtt_value(prior.get("mqtt_username")) and self._blank_mqtt_value(
+            prior.get("mqtt_password")
+        )
+        if not both_blank:
+            # Non-blank pair already present — never blank-and-rediscover over it.
+            return False
+
+        # Force a fresh discovery pass so merge takes the full Supervisor
+        # endpoint (host/port/ssl/user/pass).
         probe = dict(self.options)
         probe["mqtt_username"] = ""
         probe["mqtt_password"] = ""
@@ -239,10 +253,10 @@ class HeatingRuntime:
                 "mqtt_ssl",
             )
         )
-        # Even without a dict diff, anonymous starts need an explicit reconfigure
-        # once Supervisor finally returns credentials.
         has_creds = not self._blank_mqtt_value(merged.get("mqtt_username"))
-        if not changed and has_creds and not self._blank_mqtt_value(prior.get("mqtt_username")):
+        if not has_creds:
+            return False
+        if not changed and not self._blank_mqtt_value(prior.get("mqtt_username")):
             return False
 
         self.options["mqtt_broker"] = merged.get("mqtt_broker")
