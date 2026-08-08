@@ -193,8 +193,8 @@
 
     async refresh() {
       const [stateSnapshot, config] = await Promise.all([
-        requestJson('/api/state'),
-        requestJson('/api/config'),
+        requestJson('api/state'),
+        requestJson('api/config'),
       ]);
       const previous = this.states;
       this.config = config;
@@ -207,28 +207,28 @@
     async callWS(msg) {
       switch (msg?.type) {
         case 'heating_assistant/get_schedules':
-          return requestJson('/api/schedules');
+          return requestJson('api/schedules');
         case 'heating_assistant/get_controller_config':
-          return requestJson('/api/controller_config');
+          return requestJson('api/controller_config');
         case 'heating_assistant/get_ui_settings':
-          return requestJson('/api/ui_settings');
+          return requestJson('api/ui_settings');
         case 'heating_assistant/get_model_config':
-          return requestJson('/api/model_config');
+          return requestJson('api/model_config');
         case 'heating_assistant/get_forecasts':
-          return requestJson(`/api/forecasts${queryFromMessage(msg)}`);
+          return requestJson(`api/forecasts${queryFromMessage(msg)}`);
         case 'heating_assistant/preview_tuning_forecast':
-          return requestJson('/api/forecasts/preview', {
+          return requestJson('api/forecasts/preview', {
             method: 'POST',
             body: JSON.stringify(msg),
           });
         case 'heating_assistant/list_datasets':
-          return requestJson(`/api/datasets${queryFromMessage(msg)}`);
+          return requestJson(`api/datasets${queryFromMessage(msg)}`);
         case 'heating_assistant/get_dataset':
-          return requestJson(`/api/datasets/${encodeURIComponent(msg.dataset_id || '')}`);
+          return requestJson(`api/datasets/${encodeURIComponent(msg.dataset_id || '')}`);
         case 'heating_assistant/list_experiments':
-          return requestJson('/api/experiments');
+          return requestJson('api/experiments');
         case 'history/history_during_period':
-          return requestJson('/api/history');
+          return requestJson('api/history');
         default:
           console.warn('[HeatingAssistantAppHassShim] Unsupported callWS message:', msg);
           return {};
@@ -236,7 +236,7 @@
     }
 
     async callService(domain, service, data = {}) {
-      const result = await requestJson('/api/services', {
+      const result = await requestJson('api/services', {
         method: 'POST',
         body: JSON.stringify({ domain, service, data }),
       });

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Heating Assistant Industrial Panel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/static/css/industrial.css">
+  <link rel="stylesheet" href="static/css/industrial.css">
   <style>
     body {
       margin: 0;
@@ -41,13 +41,17 @@
   <div id="panel-root"></div>
   <div id="ingress-status">Loading App API...</div>
 
-  <script src="/static/js/app-hass-shim.js"></script>
-  <script src="/ha-industrial-panel/industrial-dashboard.js?v=114"></script>
+  <script src="static/js/app-hass-shim.js"></script>
+  <script src="ha-industrial-panel/industrial-dashboard.js?v=114"></script>
   <script>
     (async () => {
       const status = document.getElementById('ingress-status');
       try {
-        if (!window.location.pathname.startsWith('/ha-industrial')) {
+        const ingressBase = window.__HA_INGRESS_BASE;
+        if (
+          !ingressBase
+          && !window.location.pathname.startsWith('/ha-industrial')
+        ) {
           window.history.replaceState(
             window.history.state,
             '',

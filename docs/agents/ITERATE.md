@@ -1,47 +1,39 @@
-# Iterate: Ingress UI 404 — static assets missing from pip install
+# Iterate: Ingress UI stuck on "Loading App API..."
 
 ## Prior work
-- Task: SWD-263
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/547 (merge `5c2bdd4`)
-- Spec context: docs/agents/PLAN-haos-app-mqtt.md / prior ITERATE.md
+- Task: SWD-264
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/548
+- Spec context: docs/agents/PLAN-haos-app-mqtt.md
 
 ## Problem
-Opening HeatingAssistant from the HA side panel shows:
-
-```
-Error response
-Error code: 404
-Message: file not found.
-```
-
-App process is up (SWD-263 fixed argparse), but Ingress `/` calls `_send_file(index.html)` and the
-file is absent in the installed package. Wheel build contains **0** static files because
-`pyproject.toml` has no setuptools `package-data` for `heatingassistant/app/static/`.
+After SWD-264 shipped static assets, Ingress still showed a blank panel with **"Loading App API..."**
+in the status pill. HA Ingress serves the app under `/api/hassio_ingress/<key>/`, but the UI used
+absolute paths (`/api/...`, `/static/...`, `/ha-industrial-panel/...`) that resolve against the HA
+host root instead of the Ingress subpath.
 
 ## Acceptance criteria
-1. `python -m build` wheel includes `heatingassistant/app/static/index.html` and panel assets.
-2. After `pip install` of that wheel, `Path(heatingassistant.app.__file__).with_name("static")/index.html` exists.
-3. HTTP `/` and `/ha-industrial-panel/industrial-dashboard.js` return 200 from the installed package layout.
+1. `index.html` served through Ingress injects `<base href>` from `X-Ingress-Path`.
+2. Static assets, API calls, and dynamic panel imports load under the Ingress prefix.
+3. Hash routing works in Ingress mode (no broken `/ha-industrial` replaceState).
 4. Version bump so Supervisor offers Update.
 
 ## Out of scope
-- Absolute URL / `X-Ingress-Path` base-href rewriting (follow-up if assets 404 after HTML loads).
-- Changing panel UX beyond making static assets installable.
+- Full HA custom-panel websocket parity (Ingress App shim only).
 
 ## Work packages
-1. Add setuptools package-data for static assets + packaging regression test
-2. Version bump 2.0.3 + sync App package
-3. PR / handoff
+1. Ingress base injection + relative URL fixes
+2. Version bump 2.0.4 + sync App package
+3. PR / ship
 
 ## Tracker
-- Task: SWD-264
-- Relates: SWD-263
-- Branch: `cursor/swd-264-ingress-static-01f0`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/548
+- Task: SWD-265
+- Relates: SWD-264
+- Branch: `cursor/fix-ingress-loading-stuck-7bb9`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/549
 
 ## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/548
-- Version: **2.0.3** — Ingress static assets included in pip wheel (`package-data`).
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/549
+- Version: **2.0.4** — Ingress base href + relative asset/API paths.
 
 ## Next
 Done

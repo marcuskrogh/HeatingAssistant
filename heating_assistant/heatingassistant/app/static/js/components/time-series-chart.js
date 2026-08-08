@@ -95,10 +95,10 @@ export async function loadChartJs() {
     }
 
     const script = document.createElement('script');
-    script.src = '/ha-industrial-panel/vendor/chart.min.js';
+    script.src = 'ha-industrial-panel/vendor/chart.min.js';
     script.onload = () => {
       const adapter = document.createElement('script');
-      adapter.src = '/ha-industrial-panel/vendor/chartjs-adapter-date-fns.min.js';
+      adapter.src = 'ha-industrial-panel/vendor/chartjs-adapter-date-fns.min.js';
       adapter.onload = () => {
         chartJsLoaded = true;
         resolve();

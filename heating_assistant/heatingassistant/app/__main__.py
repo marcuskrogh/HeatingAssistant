@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -58,7 +59,7 @@ def merge_supervisor_options(
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.3"
+    server_version = "HeatingAssistantApp/2.0.4"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
@@ -108,13 +109,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({})
             return
         if path in {"/", "/index.html", "/ha-industrial"} or path.startswith("/ha-industrial/"):
-            self._send_file(_STATIC_DIR / "index.html", "text/html; charset=utf-8")
+            self._send_index_html()
             return
         if path.startswith("/static/"):
             self._send_static(path)
             return
         if path == "/ha-industrial-panel":
-            self._send_file(_STATIC_DIR / "index.html", "text/html; charset=utf-8")
+            self._send_index_html()
             return
         if path.startswith("/ha-industrial-panel/"):
             self._send_static(path, prefix="/ha-industrial-panel/")
@@ -234,6 +235,50 @@ class _Handler(BaseHTTPRequestHandler):
             return
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self._send_file(target, content_type)
+
+    def _ingress_base_path(self) -> str | None:
+        """Ingress proxy base path from Supervisor (e.g. /api/hassio_ingress/<key>)."""
+
+        raw = self.headers.get("X-Ingress-Path")
+        if not raw:
+            return None
+        path = raw.strip()
+        if not path:
+            return None
+        if not path.startswith("/"):
+            path = f"/{path}"
+        trimmed = path.rstrip("/")
+        return trimmed or None
+
+    def _send_index_html(self) -> None:
+        """Serve index.html with Ingress base href when proxied through HA."""
+
+        index_path = _STATIC_DIR / "index.html"
+        try:
+            body = index_path.read_text(encoding="utf-8")
+        except OSError:
+            self.send_error(HTTPStatus.NOT_FOUND, "file not found")
+            return
+
+        ingress = self._ingress_base_path()
+        if ingress:
+            base_tag = f'<base href="{ingress}/">\n'
+            ingress_script = f'<script>window.__HA_INGRESS_BASE="{ingress}";</script>\n'
+            if re.search(r"<base\b", body, flags=re.IGNORECASE):
+                body = re.sub(r"<base\b[^>]*>", base_tag.strip(), body, count=1)
+            else:
+                body = body.replace(
+                    "<head>",
+                    f"<head>\n  {base_tag}  {ingress_script}",
+                    1,
+                )
+
+        encoded = body.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
 
     def _send_file(self, path: Path, content_type: str) -> None:
         try:

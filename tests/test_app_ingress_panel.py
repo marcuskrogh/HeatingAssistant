@@ -58,10 +58,26 @@ def test_ingress_serves_industrial_panel_assets_and_bootstrap(tmp_path) -> None:
         with urlopen(f"{base_url}/", timeout=5) as response:
             body = response.read().decode("utf-8")
 
-    assert "/static/js/app-hass-shim.js" in body
-    assert "/ha-industrial-panel/industrial-dashboard.js" in body
+    assert "static/js/app-hass-shim.js" in body
+    assert "ha-industrial-panel/industrial-dashboard.js" in body
     assert "ha-industrial-panel" in body
     assert "Home Assistant custom-panel entry point" not in body
+
+
+def test_ingress_index_injects_base_href_for_ha_proxy(tmp_path) -> None:
+    runtime = HeatingRuntime(tmp_path, options={"instance_id": "haos"})
+
+    with app_server(runtime) as base_url:
+        request = Request(
+            f"{base_url}/",
+            headers={"X-Ingress-Path": "/api/hassio_ingress/test-key"},
+        )
+        with urlopen(request, timeout=5) as response:
+            body = response.read().decode("utf-8")
+
+    assert '<base href="/api/hassio_ingress/test-key/">' in body
+    assert 'window.__HA_INGRESS_BASE="/api/hassio_ingress/test-key"' in body
+    assert "static/js/app-hass-shim.js" in body
 
 
 def test_ingress_panel_json_endpoints_and_schedule_persistence(tmp_path) -> None:
