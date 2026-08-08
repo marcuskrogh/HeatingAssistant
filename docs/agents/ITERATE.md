@@ -57,6 +57,7 @@ Remaining gaps after SWD-270:
 - Relates: SWD-270
 - Branch: `cursor/swd-273-mqtt-discovery-retry-f56e`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/560
+- Status: review-fix CLEAN (ssl CI, retry stop-on-creds, no explicit-cred overwrite, HTTP diagnostics, result=error path)
 
 ## Next
-`/review-fix SWD-273` — Review and auto-fix (single pass)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/560
