@@ -184,15 +184,22 @@ class PahoMqttBus:
         *,
         qos: int = 1,
         retain: bool = False,
+        wait_connected: bool = False,
     ) -> None:
-        """Publish a message to the broker, waiting briefly for connect if needed."""
+        """Publish a message to the broker.
+
+        By default this fails fast when disconnected so Ingress HTTP handlers
+        (config / tuning Apply) never block on a 10s MQTT wait. Callers that
+        want a brief connect race window can pass ``wait_connected=True``.
+        """
 
         if not self._connected.is_set():
-            await asyncio.to_thread(self._connected.wait, self._publish_timeout_s)
-        if not self._connected.is_set():
-            raise RuntimeError(
-                f"MQTT client is not connected to {self._host}:{self._port}"
-            )
+            if wait_connected and self._publish_timeout_s > 0:
+                await asyncio.to_thread(self._connected.wait, self._publish_timeout_s)
+            if not self._connected.is_set():
+                raise RuntimeError(
+                    f"MQTT client is not connected to {self._host}:{self._port}"
+                )
         info = self._client.publish(topic, payload, qos=qos, retain=retain)
         info.wait_for_publish(timeout=10)
 

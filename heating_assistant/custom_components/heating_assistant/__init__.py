@@ -115,13 +115,16 @@ class _BridgeManager:
             payload = MqttTagPayload(None, status="BAD", reason="entity_unavailable", ts=time.time())
         else:
             payload = MqttTagPayload(_coerce_state_value(state.state), status="GOOD", ts=time.time())
+        # Retain last-known tag values so the App receives them on (re)subscribe
+        # after a late MQTT connect (SWD-269). Without retain, the bind-time
+        # snapshot is lost until the next HA state change.
         await _maybe_await(
             mqtt.async_publish(
                 self.hass,
                 tag_in(self.instance_id, tag),
                 payload.encode(),
                 qos=QOS,
-                retain=False,
+                retain=True,
             )
         )
 
