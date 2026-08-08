@@ -26,6 +26,7 @@ let _nativePushState = null;
 let _nativeReplaceState = null;
 
 export function isOnPanelPath() {
+  if (typeof window !== 'undefined' && window.__HA_INGRESS_BASE) return true;
   return window.location.pathname.startsWith(PANEL_PATH);
 }
 

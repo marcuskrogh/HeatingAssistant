@@ -5,7 +5,7 @@
 (() => {
   if (customElements.get('ha-industrial-panel')) return;
 
-  const BASE_PATH = '/ha-industrial-panel';
+  const BASE_PATH = 'ha-industrial-panel';
 
 // Cache-bust token for all dynamically-imported submodules (js/pages/*, css).
 //
@@ -64,6 +64,7 @@ const PANEL_HASH_GUARD_FLAG = '__haIndustrialPanelHashGuard';
 let _nativeReplaceState = null;
 
 function _isOnPanelPath() {
+  if (typeof window !== 'undefined' && window.__HA_INGRESS_BASE) return true;
   return window.location.pathname.startsWith(PANEL_PATH);
 }
 
