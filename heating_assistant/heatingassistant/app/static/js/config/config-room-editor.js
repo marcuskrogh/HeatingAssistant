@@ -1,18 +1,18 @@
-import { setPanelHash } from '../panel-hash.js?v=114';
+import { setPanelHash } from '../panel-hash.js?v=116';
 import {
   updateHeatSources,
   updateRooms,
   updateSystemConfig,
   updateSystemParams,
   updateUiSettings,
-} from '../ha-services.js?v=114';
-import { ICONS } from './config-icons.js?v=114';
-import { LANDING_CARDS } from './config-landing.js?v=114';
+} from '../ha-services.js?v=116';
+import { ICONS } from './config-icons.js?v=116';
+import { LANDING_CARDS } from './config-landing.js?v=116';
 import {
   ROOM_SIZE_PRESETS,
   HOUSE_AGE_PRESETS,
   nearestPreset,
-} from './config-presets.js?v=114';
+} from './config-presets.js?v=116';
 import {
   el,
   schedulePanelNav,
@@ -32,7 +32,7 @@ import {
   fmt,
   entitySelectorField,
   listEditor,
-} from './config-ui.js?v=114';
+} from './config-ui.js?v=116';
 
 // Rooms — editor
 // ---------------------------------------------------------------------------
@@ -99,11 +99,21 @@ function renderRoomEditor(container, connection, hass, idxParam) {
       + 'averaged in the backend.');
     sensorCard.appendChild(entitySelectorField(container, hass, room, 'temp_sensors',
       'Temperature sensors', ['sensor'],
-      { multiple: true, hint: 'Averaged when more than one is selected.', emptyText: 'No temperature sensors — add at least one.' }));
+      {
+        multiple: true,
+        hint: 'Averaged when more than one is selected. Under Ingress, type the full HA entity ID '
+          + '(e.g. sensor.living_room_temperature) — the App bridges it over MQTT.',
+        emptyText: 'No temperature sensors — add at least one.',
+      }));
     const sensorAdv = advancedSubsection(sensorCard, 'Window / contact sensors');
     sensorAdv.appendChild(entitySelectorField(container, hass, room, 'window_sensors',
       'Window sensors', ['binary_sensor'],
-      { multiple: true, hint: 'Heating pauses for this room while any of these report open.', emptyText: 'No window sensors.' }));
+      {
+        multiple: true,
+        hint: 'Heating pauses for this room while any of these report open. Type a full '
+          + 'binary_sensor.* entity ID when the list is incomplete.',
+        emptyText: 'No window sensors.',
+      }));
     body.appendChild(sensorCard);
 
     // --- Thermal model (categorical) ---------------------------------------

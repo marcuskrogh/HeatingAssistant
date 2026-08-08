@@ -67,12 +67,15 @@ class HeatingRuntime:
     ) -> None:
         self.data_dir = Path(data_dir)
         self.options = dict(options) if options is not None else load_config(self.data_dir)
-        save_config(self.data_dir, self.options)
         self.state = load_state(self.data_dir)
         self.instance_id = str(self.options.get("instance_id") or "default")
         self.mqtt_broker = self.options.get("mqtt_broker")
         self.bus = bus or InMemoryMqttBus()
+        # Derive MQTT tags/bindings from configured HA entity IDs (Ingress UI
+        # stores entity_ids; the thin HA bridge consumes the bindings map).
+        self._apply_entity_wiring()
         self.bindings = self._load_bindings()
+        save_config(self.data_dir, self.options)
         self.tag_values: dict[str, Any] = dict(self.state.get("tag_values") or {})
         self.tag_statuses: dict[str, str] = dict(self.state.get("tag_statuses") or {})
         self.room_temperatures: dict[str, float | None] = dict(
@@ -182,6 +185,7 @@ class HeatingRuntime:
         self.options = {**self.options, **dict(updates)}
         self.instance_id = str(self.options.get("instance_id") or "default")
         self.mqtt_broker = self.options.get("mqtt_broker")
+        self._apply_entity_wiring()
         self.bindings = self._load_bindings()
         save_config(self.data_dir, self.options)
         self.control_engine.update_config(self.options)
@@ -587,6 +591,25 @@ class HeatingRuntime:
                 },
                 now,
             )
+
+        # Expose configured HA entities (from bindings) so the Ingress entity
+        # picker can at least re-select already-wired IDs after a refresh.
+        for binding in self.bindings:
+            if binding.entity_id in states:
+                continue
+            value = self.tag_values.get(binding.tag)
+            if value is None and binding.direction == "out":
+                value = self.actuator_outputs.get(binding.tag)
+            states[binding.entity_id] = self._ha_state(
+                binding.entity_id,
+                "unknown" if value is None else value,
+                {
+                    "friendly_name": binding.entity_id,
+                    "heating_assistant_tag": binding.tag,
+                    "heating_assistant_direction": binding.direction,
+                },
+                now,
+            )
         return states
 
     def status(self) -> dict[str, Any]:
@@ -626,6 +649,168 @@ class HeatingRuntime:
             raise ValueError("bindings must be a list or {'bindings': list}")
         return [Binding.from_mapping(item) for item in source if isinstance(item, Mapping)]
 
+    def _apply_entity_wiring(self) -> None:
+        """Derive MQTT tags + bindings from HA entity IDs in the model config.
+
+        The Ingress Configuration UI stores Home Assistant entity IDs
+        (``temp_sensors``, ``heater_entity``, ``outdoor_temp_entity``, …). The
+        thin HA integration bridges entities via the retained MQTT bindings
+        map, and the App averages room temperatures via ``temp_tags``. This
+        keeps those three views in sync whenever config is loaded or saved.
+        """
+
+        previous: dict[tuple[str, str], str] = {}
+        raw_bindings = self.options.get("bindings", [])
+        if isinstance(raw_bindings, Mapping):
+            raw_bindings = raw_bindings.get("bindings", [])
+        if isinstance(raw_bindings, list):
+            for item in raw_bindings:
+                if not isinstance(item, Mapping):
+                    continue
+                entity_id = item.get("entity_id")
+                direction = item.get("direction")
+                tag = item.get("tag")
+                if (
+                    isinstance(entity_id, str)
+                    and entity_id
+                    and isinstance(tag, str)
+                    and tag
+                    and direction in {"in", "out"}
+                ):
+                    previous[(entity_id, direction)] = tag
+
+        bindings: list[dict[str, str]] = []
+        used_tags: set[str] = set()
+
+        def bind(entity_id: Any, direction: str, preferred_tag: str) -> str | None:
+            if not isinstance(entity_id, str):
+                return None
+            eid = entity_id.strip()
+            if not eid or "." not in eid:
+                return None
+            preferred = preferred_tag.strip() or self._entity_tag(eid)
+            tag = previous.get((eid, direction), preferred)
+            if not tag:
+                tag = preferred
+            base = tag
+            suffix = 2
+            while tag in used_tags:
+                tag = f"{base}_{suffix}"
+                suffix += 1
+            used_tags.add(tag)
+            bindings.append({"tag": tag, "entity_id": eid, "direction": direction})
+            return tag
+
+        rooms_out: list[dict[str, Any]] = []
+        for room in self._rooms():
+            room_cfg = dict(room)
+            slug = self._room_slug(str(room_cfg.get("name") or "")) or "room"
+            sensors = self._room_temp_sensor_entities(room_cfg)
+            if sensors:
+                temp_tags: list[str] = []
+                for index, entity_id in enumerate(sensors, start=1):
+                    tag = bind(entity_id, "in", f"{slug}_temp_{index}")
+                    if tag:
+                        temp_tags.append(tag)
+                if temp_tags:
+                    room_cfg["temp_tags"] = temp_tags
+                else:
+                    room_cfg.pop("temp_tags", None)
+                    room_cfg.pop("temp_tag", None)
+            else:
+                # Tag-only configs (no HA entity IDs) keep their temp_tags and
+                # any matching inbound bindings already present.
+                for tag in self._explicit_temp_tags(room_cfg):
+                    entity_id = next(
+                        (
+                            eid
+                            for (eid, direction), existing in previous.items()
+                            if direction == "in" and existing == tag
+                        ),
+                        None,
+                    )
+                    if entity_id:
+                        bind(entity_id, "in", tag)
+                    else:
+                        # Preserve the tag name even without an entity binding.
+                        if tag not in used_tags:
+                            used_tags.add(tag)
+
+            window_entities = self._string_list(room_cfg.get("window_sensors"))
+            if window_entities:
+                window_tags: list[str] = []
+                for index, entity_id in enumerate(window_entities, start=1):
+                    tag = bind(entity_id, "in", f"{slug}_window_{index}")
+                    if tag:
+                        window_tags.append(tag)
+                if window_tags:
+                    room_cfg["window_tags"] = window_tags
+                else:
+                    room_cfg.pop("window_tags", None)
+            rooms_out.append(room_cfg)
+        self.options["rooms"] = rooms_out
+
+        sources_out: list[dict[str, Any]] = []
+        for source in self._heat_sources():
+            source_cfg = dict(source)
+            name = source_cfg.get("name")
+            source_slug = (
+                self._room_slug(str(name)) if isinstance(name, str) and name else "heater"
+            )
+            preferred = source_cfg.get("output_tag")
+            if not isinstance(preferred, str) or not preferred.strip():
+                preferred = f"{source_slug}_heat"
+            heater_entity = source_cfg.get("heater_entity")
+            if isinstance(heater_entity, str) and heater_entity.strip():
+                tag = bind(heater_entity, "out", preferred)
+                if tag:
+                    source_cfg["output_tag"] = tag
+            else:
+                source_cfg.setdefault("output_tag", preferred)
+                tag_name = source_cfg.get("output_tag")
+                if isinstance(tag_name, str) and tag_name and tag_name not in used_tags:
+                    used_tags.add(tag_name)
+            sources_out.append(source_cfg)
+        self.options["heat_sources"] = sources_out
+
+        outdoor_entity = self.options.get(const.CONF_OUTDOOR_TEMP_ENTITY)
+        if isinstance(outdoor_entity, str) and outdoor_entity.strip():
+            outdoor_tag = bind(outdoor_entity, "in", "outdoor_temp")
+            if outdoor_tag:
+                self.options["outdoor_temp_tag"] = outdoor_tag
+
+        weather_entity = self.options.get(const.CONF_WEATHER_ENTITY)
+        if isinstance(weather_entity, str) and weather_entity.strip():
+            weather_tag = bind(weather_entity, "in", "weather_forecast")
+            if weather_tag:
+                self.options["weather_tag"] = weather_tag
+
+        solar_entity = self.options.get(const.CONF_SOLAR_RADIATION_ENTITY)
+        if isinstance(solar_entity, str) and solar_entity.strip():
+            solar_tag = bind(solar_entity, "in", "solar_radiation")
+            if solar_tag:
+                self.options["solar_radiation_tag"] = solar_tag
+
+        price_entity = self.options.get(const.CONF_PRICE_ENTITY)
+        if isinstance(price_entity, str) and price_entity.strip():
+            price_tag = bind(price_entity, "in", "energy_price")
+            if price_tag:
+                self.options["price_tag"] = price_tag
+
+        # Keep any leftover explicit bindings (e.g. set via /api/bindings) that
+        # were not regenerated from entity fields.
+        for (entity_id, direction), tag in previous.items():
+            if any(item["entity_id"] == entity_id and item["direction"] == direction for item in bindings):
+                continue
+            if tag in used_tags and not any(item["tag"] == tag for item in bindings):
+                # Tag already reserved by a regenerated binding under another entity.
+                continue
+            if tag not in used_tags:
+                used_tags.add(tag)
+            bindings.append({"tag": tag, "entity_id": entity_id, "direction": direction})
+
+        self.options["bindings"] = bindings
+
     def _rooms(self) -> list[Mapping[str, Any]]:
         rooms = self.options.get("rooms", [])
         if not isinstance(rooms, list):
@@ -639,16 +824,62 @@ class HeatingRuntime:
         return [source for source in sources if isinstance(source, Mapping)]
 
     def _room_temp_tags(self, room: Mapping[str, Any]) -> list[str]:
+        tags = self._explicit_temp_tags(room)
+        if tags:
+            return tags
+        # Resolve from configured HA entity IDs via the bindings map.
+        entity_to_tag = {
+            binding.entity_id: binding.tag
+            for binding in self.bindings
+            if binding.direction == "in"
+        }
+        return [
+            entity_to_tag[entity_id]
+            for entity_id in self._room_temp_sensor_entities(room)
+            if entity_id in entity_to_tag
+        ]
+
+    @staticmethod
+    def _explicit_temp_tags(room: Mapping[str, Any]) -> list[str]:
         temp_tags = room.get("temp_tags")
         if isinstance(temp_tags, list):
-            return [tag for tag in temp_tags if isinstance(tag, str) and tag]
+            tags = [tag for tag in temp_tags if isinstance(tag, str) and tag]
+            if tags:
+                return tags
         temp_tag = room.get("temp_tag")
         if isinstance(temp_tag, str) and temp_tag:
             return [temp_tag]
         return []
 
+    @staticmethod
+    def _room_temp_sensor_entities(room: Mapping[str, Any]) -> list[str]:
+        sensors = HeatingRuntime._string_list(room.get("temp_sensors"))
+        single = room.get("temp_sensor")
+        if isinstance(single, str) and single.strip() and single.strip() not in sensors:
+            sensors.insert(0, single.strip())
+        return sensors
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        if not isinstance(value, list):
+            return []
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+    @staticmethod
+    def _entity_tag(entity_id: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", entity_id.strip().lower()).strip("_")
+
     def _outdoor_temperature(self) -> float | None:
         tag = self.options.get("outdoor_temp_tag") or self.options.get("outdoor_tag")
+        if not isinstance(tag, str) or not tag:
+            outdoor_entity = self.options.get(const.CONF_OUTDOOR_TEMP_ENTITY)
+            if isinstance(outdoor_entity, str) and outdoor_entity:
+                for binding in self.bindings:
+                    if binding.direction == "in" and binding.entity_id == outdoor_entity:
+                        tag = binding.tag
+                        break
         if not isinstance(tag, str) or not tag:
             return None
         return self._coerce_number(self.tag_values.get(tag))

@@ -1,6 +1,6 @@
 // Shared DOM builders for configuration sub-pages.
-import { createCollapsible } from '../components/collapsible.js?v=114';
-import { setPanelHash } from '../panel-hash.js?v=114';
+import { createCollapsible } from '../components/collapsible.js?v=116';
+import { setPanelHash } from '../panel-hash.js?v=116';
 
 function el(tag, className, html) {
   const node = document.createElement(tag);
@@ -204,22 +204,39 @@ function entityFriendlyName(hass, id) {
   return hass?.states?.[id]?.attributes?.friendly_name || id;
 }
 
+/** True when ``id`` looks like a Home Assistant entity_id for one of ``domains``. */
+function isValidEntityId(id, domains = []) {
+  const value = String(id || '').trim().toLowerCase();
+  if (!/^[a-z0-9_]+\.[a-z0-9_]+$/.test(value)) return false;
+  if (!domains.length) return true;
+  return domains.some((d) => value.startsWith(`${d}.`));
+}
+
 function openEntityPicker(root, hass, { title, domains, onSelect }) {
   const overlay = el('div', 'ha-modal-overlay');
   const modal = el('div', 'ha-modal');
+  const domainHint = domains.length ? domains.join(' / ') : 'any domain';
   modal.innerHTML = `
     <div class="ha-modal__head">
       <span class="ha-modal__title">${title}</span>
       <button class="ha-modal__close" aria-label="Close" type="button">×</button>
     </div>
-    <input class="form-input ha-modal__search" type="text" placeholder="Search entities…">
+    <input class="form-input ha-modal__search" type="text"
+      placeholder="Search or type entity ID (e.g. sensor.living_room_temp)…">
+    <p class="ha-modal__hint" data-role="hint"></p>
     <div class="ha-modal__list"></div>
+    <div class="ha-modal__manual" data-role="manual" hidden>
+      <button class="btn btn--primary btn--sm" type="button" data-role="use-id"></button>
+    </div>
   `;
   overlay.appendChild(modal);
   root.appendChild(overlay);
 
   const searchEl = modal.querySelector('.ha-modal__search');
   const listEl = modal.querySelector('.ha-modal__list');
+  const hintEl = modal.querySelector('[data-role="hint"]');
+  const manualWrap = modal.querySelector('[data-role="manual"]');
+  const useIdBtn = modal.querySelector('[data-role="use-id"]');
 
   const entities = Object.entries(hass?.states || {})
     .filter(([id]) => domains.some((d) => id.startsWith(d + '.')))
@@ -231,17 +248,53 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Ingress App shim only exposes Heating Assistant's own synthetic states —
+  // not the full HA registry — so free-text entity IDs are the normal path.
+  const limitedCatalog = entities.length > 0
+    && entities.every((e) => e.id.startsWith('sensor.heating_assistant_')
+      || e.id.startsWith('climate.heating_assistant_')
+      || e.id.startsWith('binary_sensor.heating_assistant_'));
+
   function close() { overlay.remove(); }
 
+  function select(id) {
+    close();
+    onSelect(id);
+  }
+
   function draw(filterText) {
-    const f = (filterText || '').trim().toLowerCase();
+    const raw = (filterText || '').trim();
+    const f = raw.toLowerCase();
     listEl.innerHTML = '';
     const matches = entities.filter(
       (e) => !f || e.name.toLowerCase().includes(f) || e.id.toLowerCase().includes(f),
     );
+
+    if (limitedCatalog || entities.length === 0) {
+      hintEl.textContent = `Home Assistant entity list is not available here. `
+        + `Type a full entity ID (${domainHint}), then tap Use entity ID.`;
+    } else {
+      hintEl.textContent = `Search the list, or type a full entity ID (${domainHint}).`;
+    }
+
+    const typedId = isValidEntityId(raw, domains) ? raw.toLowerCase() : '';
+    const typedInList = typedId && matches.some((e) => e.id === typedId);
+    if (typedId && !typedInList) {
+      manualWrap.hidden = false;
+      useIdBtn.textContent = `Use entity ID: ${typedId}`;
+      useIdBtn.onclick = () => select(typedId);
+    } else {
+      manualWrap.hidden = true;
+      useIdBtn.onclick = null;
+    }
+
     if (matches.length === 0) {
       listEl.appendChild(el('div', 'ha-modal__empty',
-        domains.length ? `No ${domains.join(' / ')} entities found.` : 'No entities found.'));
+        typedId
+          ? 'Entity not in the local list — use the button below to add it.'
+          : (domains.length
+            ? `No ${domains.join(' / ')} entities found. Type a full entity ID above.`
+            : 'No entities found. Type a full entity ID above.')));
       return;
     }
     matches.slice(0, 400).forEach((e) => {
@@ -252,7 +305,7 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
         <span class="ha-modal__row-id">${e.id}</span>
         <span class="ha-modal__row-state">${e.state}${e.unit ? ' ' + e.unit : ''}</span>
       `;
-      row.addEventListener('click', () => { close(); onSelect(e.id); });
+      row.addEventListener('click', () => select(e.id));
       listEl.appendChild(row);
     });
   }
@@ -260,6 +313,16 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
   modal.querySelector('.ha-modal__close').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   searchEl.addEventListener('input', () => draw(searchEl.value));
+  searchEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const typedId = isValidEntityId(searchEl.value, domains)
+      ? searchEl.value.trim().toLowerCase()
+      : '';
+    if (typedId) {
+      e.preventDefault();
+      select(typedId);
+    }
+  });
   draw('');
   setTimeout(() => searchEl.focus(), 30);
 }
@@ -384,6 +447,7 @@ export {
   loadingNode,
   fmt,
   entityFriendlyName,
+  isValidEntityId,
   openEntityPicker,
   entitySelectorField,
   listEditor,

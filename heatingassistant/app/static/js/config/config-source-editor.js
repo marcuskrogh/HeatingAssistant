@@ -1,18 +1,18 @@
-import { setPanelHash } from '../panel-hash.js?v=114';
+import { setPanelHash } from '../panel-hash.js?v=116';
 import {
   updateHeatSources,
   updateRooms,
   updateSystemConfig,
   updateSystemParams,
   updateUiSettings,
-} from '../ha-services.js?v=114';
-import { ICONS } from './config-icons.js?v=114';
-import { LANDING_CARDS } from './config-landing.js?v=114';
+} from '../ha-services.js?v=116';
+import { ICONS } from './config-icons.js?v=116';
+import { LANDING_CARDS } from './config-landing.js?v=116';
 import {
   ROOM_SIZE_PRESETS,
   HOUSE_AGE_PRESETS,
   nearestPreset,
-} from './config-presets.js?v=114';
+} from './config-presets.js?v=116';
 import {
   el,
   schedulePanelNav,
@@ -32,7 +32,7 @@ import {
   fmt,
   entitySelectorField,
   listEditor,
-} from './config-ui.js?v=114';
+} from './config-ui.js?v=116';
 
 // Heat sources — editor (sections driven by HVAC mode)
 // ---------------------------------------------------------------------------
@@ -104,7 +104,10 @@ function renderSourceEditor(container, connection, hass, idxParam) {
         selectField(src, 'room', 'Room', roomNames.length ? roomNames : [''], { hint: 'Room this source heats.' }),
         entitySelectorField(container, hass, src, 'heater_entity', 'Driven entity',
           HP_TYPES.includes(src.type) ? ['climate'] : ['switch', 'input_boolean', 'climate', 'number'],
-          { hint: 'Entity the controller commands.' }),
+          {
+            hint: 'Entity the controller commands. Under Ingress, type the full HA entity ID '
+              + '(switch.*, number.*, or climate.*).',
+          }),
       ];
       if (HP_TYPES.includes(src.type)) {
         sharedFields.push(selectField(src, 'hvac_mode', 'HVAC mode',

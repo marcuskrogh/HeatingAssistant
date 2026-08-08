@@ -1,46 +1,60 @@
-# Iterate: Ingress panel LOAD ERROR — bare module path
+# Iterate: Ingress entity picker cannot wire HA room sensors
 
 ## Prior work
-- Task: SWD-265
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/549
-- Spec context: docs/agents/ITERATE.md (SWD-265 Ingress base href)
+- Task: SWD-266
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/550
+- Spec context: docs/agents/PLAN-haos-app-mqtt.md (bindings via App UI)
 
 ## Problem
-After SWD-265, Ingress loads past "Loading App API..." and the App shim connects
-(API connected — N entities), but the industrial panel shows:
+After Ingress UI boots (`API connected — 3 entities`), Configuration → Rooms →
+Add temperature sensors only lists HeatingAssistant's own synthetic sensors
+(`sensor.heating_assistant_*`). Real Home Assistant temperature entities are
+missing, so rooms cannot be wired to the App.
 
-`LOAD ERROR — Module name, 'ha-industrial-panel/js/ha-connection.js?v=114' does not resolve to a valid URL.`
-
-SWD-265 changed `BASE_PATH` from `/ha-industrial-panel` to the bare relative
-`ha-industrial-panel`. Dynamic `import()` requires a valid URL or a relative
-specifier starting with `./`, `../`, or `/`. Bare paths are treated as package
-names and fail module resolution.
+Root cause:
+1. Ingress uses `HeatingAssistantAppHassShim`, which only exposes App-synthesized
+   states — not the full HA entity registry (data plane is MQTT-only by design).
+2. Saving `temp_sensors` / `heater_entity` / outdoor entities did not auto-derive
+   MQTT `bindings` + room `temp_tags` for the thin HA bridge.
 
 ## Acceptance criteria
-1. Dynamic panel module imports use a relative URL (`./ha-industrial-panel/...`)
-   that resolves under Ingress `<base href>` (and direct App port access).
-2. Panel boots past LOAD ERROR when App API is connected.
-3. Regression test asserts `industrial-dashboard.js` does not use a bare
-   `BASE_PATH` for `import()`.
-4. Version bump so Supervisor offers Update.
+1. Entity picker allows typing a HA entity ID (e.g. `sensor.living_room_temperature`)
+   when the full HA state list is unavailable (Ingress/shim).
+2. Saving room / heat-source / environment config derives MQTT bindings
+   (`in` for sensors, `out` for actuators) and room `temp_tags` from configured
+   entity IDs.
+3. App publishes the bindings map so the thin HA integration bridges those entities.
+4. Regression tests cover binding derivation from `temp_sensors` and free-text
+   entity entry path.
+5. Version bump so Supervisor offers Update.
 
 ## Out of scope
-- Full HA custom-panel websocket parity beyond the Ingress App shim.
+- Fetching the full HA entity registry into the App over the Supervisor API.
+- Expanding thin-bridge climate write support beyond current switch/number.
 
 ## Work packages
-1. Fix BASE_PATH + cache-bust / version bump 2.0.5
-2. Regression test + sync App package
-3. PR / ship handoff
+1. Entity picker free-text entry + Ingress hint copy
+2. Runtime `_apply_entity_wiring` (bindings + temp_tags from entity IDs)
+3. Tests + version bump 2.0.6 + sync App package
+4. PR / ship handoff
 
 ## Tracker
-- Task: SWD-266
-- Relates: SWD-265
-- Branch: `cursor/swd-266-ingress-module-url-f9b0`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/550
+- Task: SWD-267
+- Relates: SWD-266 / SWD-255
+- Branch: `cursor/swd-267-ha-entity-wiring-5d31`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/551
 
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/550
-- Version: **2.0.5** — BASE_PATH from classic script URL so dynamic `import()` resolves under Ingress.
+## Setup guide (operator)
+1. Update the HeatingAssistant App to **2.0.6** and restart if Supervisor asks.
+2. Ensure Mosquitto is running and the thin `heating_assistant` integration is
+   loaded (Core restart after App sync if needed).
+3. Open HeatingAssistant → Configuration → Rooms → edit a room.
+4. Under **Temperature sensors**, click **+ Add**, type your HA entity ID
+   (e.g. `sensor.living_room_temperature`), then **Use entity ID** (or press Enter).
+5. Save the room. Repeat for outdoor temperature under Environment, and for
+   heaters under Heat Sources.
+6. The App publishes MQTT bindings; the thin integration bridges those entities
+   into App tags. Multi-sensor rooms are averaged in the App.
 
 ## Next
-Done
+Review-fix / ship after HAOS soak
