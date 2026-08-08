@@ -1,10 +1,10 @@
 import {
   updateSystemConfig, updateSystemParams,
-} from '../ha-services.js?v=114';
+} from '../ha-services.js?v=116';
 import {
   configPageShell, sectionCard, actionsBar, setStatus, numberField, paramGrid,
   loadingNode, entitySelectorField,
-} from './config-ui.js?v=114';
+} from './config-ui.js?v=116';
 
 // System Parameters
 // ---------------------------------------------------------------------------
@@ -92,10 +92,18 @@ function renderSystem(container, connection, hass) {
       + 'weather and solar irradiance improve the forecast; the price sensor enables price-aware '
       + 'optimisation. Use Clear to disable any of them.');
     envCard.appendChild(paramGrid(
-      entitySelectorField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], { hint: 'Measured outdoor air temperature.' }),
-      entitySelectorField(container, hass, working, 'weather_entity', 'Weather forecast', ['weather'], { hint: 'Weather entity for the outdoor forecast.' }),
-      entitySelectorField(container, hass, working, 'solar_radiation_entity', 'Solar irradiance', ['sensor'], { hint: 'GHI in W/m² (optional).' }),
-      entitySelectorField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], { hint: 'Hourly market price (optional).' }),
+      entitySelectorField(container, hass, working, 'outdoor_temp_entity', 'Outdoor temperature', ['sensor'], {
+        hint: 'Measured outdoor air temperature. Under Ingress, type the full HA entity ID.',
+      }),
+      entitySelectorField(container, hass, working, 'weather_entity', 'Weather forecast', ['weather'], {
+        hint: 'Weather entity for the outdoor forecast. Type weather.* when the list is incomplete.',
+      }),
+      entitySelectorField(container, hass, working, 'solar_radiation_entity', 'Solar irradiance', ['sensor'], {
+        hint: 'GHI in W/m² (optional). Type sensor.* when the list is incomplete.',
+      }),
+      entitySelectorField(container, hass, working, 'price_entity', 'Electricity price', ['sensor'], {
+        hint: 'Hourly market price (optional). Type sensor.* when the list is incomplete.',
+      }),
     ));
     body.appendChild(envCard);
 

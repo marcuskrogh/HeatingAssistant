@@ -34,3 +34,11 @@ Direction `in` means HA publishes entity state to the App. Direction `out` means
 the thin bridge subscribes to App tag output and writes to the HA entity. The
 initial thin bridge supports sensor reads, `switch.turn_on`/`switch.turn_off`,
 `number.set_value`, and basic climate setpoint/HVAC mode writes.
+
+When you configure rooms / heat sources / environment sensors in the Ingress UI
+with Home Assistant entity IDs (`temp_sensors`, `heater_entity`,
+`outdoor_temp_entity`, …), the App auto-derives the bindings map and matching
+`temp_tags` / `output_tag` / `outdoor_temp_tag` values, then publishes the
+retained bindings topic so the thin integration starts bridging those entities.
+Under Ingress the entity picker cannot list the full HA registry — type the
+full entity ID (e.g. `sensor.living_room_temperature`) and choose **Use entity ID**.
