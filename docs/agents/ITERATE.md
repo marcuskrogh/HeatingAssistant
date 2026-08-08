@@ -42,7 +42,7 @@ Root cause:
 - Task: SWD-267
 - Relates: SWD-266 / SWD-255
 - Branch: `cursor/swd-267-ha-entity-wiring-5d31`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/551
 
 ## Setup guide (operator)
 1. Update the HeatingAssistant App to **2.0.6** and restart if Supervisor asks.
@@ -57,4 +57,4 @@ Root cause:
    into App tags. Multi-sensor rooms are averaged in the App.
 
 ## Next
-Implement / review-fix
+Review-fix / ship after HAOS soak
