@@ -155,6 +155,23 @@
     return text ? `?${text}` : '';
   }
 
+  function historyQueryFromMessage(msg) {
+    const params = new URLSearchParams();
+    const entityIds = Array.isArray(msg?.entity_ids) ? msg.entity_ids : [];
+    for (const entityId of entityIds) {
+      if (entityId) params.append('entity_ids', String(entityId));
+    }
+    if (msg?.start_time) params.set('start', String(msg.start_time));
+    if (msg?.end_time) params.set('end', String(msg.end_time));
+    const text = params.toString();
+    return text ? `?${text}` : '';
+  }
+
+  function mqttStatusLabel(mqttConnected, entityCount) {
+    const mqttPart = mqttConnected ? 'MQTT ok' : 'MQTT disconnected';
+    return `API connected - ${entityCount} entities · ${mqttPart}`;
+  }
+
   class HeatingAssistantAppHassShim {
     constructor({ pollIntervalMs = 5000, statusElement = null } = {}) {
       this.states = {};
@@ -199,8 +216,18 @@
       const previous = this.states;
       this.config = config;
       this.states = stateSnapshot.hass_states || buildFallbackStates(stateSnapshot, config);
+      this.mqttConnected = stateSnapshot.mqtt_connected !== false;
+      if (
+        this.states['sensor.heating_assistant_system_summary']?.attributes?.mqtt_connected === false
+      ) {
+        this.mqttConnected = false;
+      }
       this._emitStateChanges(previous, this.states);
-      this._setStatus(`API connected - ${Object.keys(this.states).length} entities`, false);
+      const entityCount = Object.keys(this.states).length;
+      this._setStatus(
+        mqttStatusLabel(this.mqttConnected, entityCount),
+        !this.mqttConnected,
+      );
       return this.states;
     }
 
@@ -228,7 +255,7 @@
         case 'heating_assistant/list_experiments':
           return requestJson('api/experiments');
         case 'history/history_during_period':
-          return requestJson('api/history');
+          return requestJson(`api/history${historyQueryFromMessage(msg)}`);
         default:
           console.warn('[HeatingAssistantAppHassShim] Unsupported callWS message:', msg);
           return {};

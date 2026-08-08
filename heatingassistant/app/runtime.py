@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import json
@@ -28,6 +29,10 @@ from heatingassistant.mqtt.topics import (
     tag_out,
 )
 from heatingassistant.persistence import load_config, load_state, save_config, save_state
+
+# Keep ~48h of 15s samples in memory for Ingress plots (SWD-269).
+_HISTORY_MAX_SAMPLES = 12_000
+_HISTORY_MIN_INTERVAL_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -89,8 +94,20 @@ class HeatingRuntime:
         self.control_engine = ControlEngine(self.options)
         self._subscriptions: list[Unsubscribe] = []
         self._started = False
+        self._history: dict[str, deque[dict[str, Any]]] = {}
+        self._history_last_ts: float = 0.0
+        self._last_control_ts: float | None = self._coerce_number(self.state.get("last_control_ts"))
+        self._last_control_duration_s: float = float(
+            self._coerce_number(self.state.get("last_control_duration_s")) or 0.0
+        )
+        self._energy_total_wh: dict[str, float] = {
+            str(key): float(value)
+            for key, value in dict(self.state.get("energy_total_wh") or {}).items()
+            if self._coerce_number(value) is not None
+        }
+        self._energy_last_ts: float | None = self._coerce_number(self.state.get("energy_last_ts"))
         self._recompute_room_temperatures()
-
+        self._record_history_samples(force=True)
     async def start(self) -> None:
         """Subscribe to inbound tags and publish retained App metadata.
 
@@ -176,6 +193,14 @@ class HeatingRuntime:
                 retain=True,
             )
 
+    async def _best_effort_mqtt(self, coro: Any, what: str) -> None:
+        """Run an MQTT side-effect without failing the HTTP/config path."""
+
+        try:
+            await coro
+        except Exception:
+            _logger.exception("Best-effort MQTT %s failed; will retry on connect", what)
+
     async def _handle_tag_message(
         self,
         topic: str,
@@ -196,11 +221,13 @@ class HeatingRuntime:
         self.tag_values[tag] = payload.value
         self.tag_statuses[tag] = payload.status
         self._recompute_room_temperatures()
+        self._record_history_samples()
         self._save_runtime_state()
 
     async def run_control_cycle(self) -> dict[str, float]:
         """Compute and publish actuator outputs for the current runtime state."""
 
+        started = time.time()
         self._recompute_room_temperatures()
         outputs = self.control_engine.compute_actions(
             self.room_temperatures,
@@ -208,9 +235,14 @@ class HeatingRuntime:
             self._setpoints(),
         )
         self.actuator_outputs = dict(outputs)
+        now = time.time()
+        self._accumulate_energy(now)
+        self._last_control_ts = now
+        self._last_control_duration_s = max(0.0, now - started)
+        self._record_history_samples(force=True)
         self._save_runtime_state()
-        await self.publish_actuator_outputs()
-        await self.publish_status()
+        await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
+        await self._best_effort_mqtt(self.publish_status(), "status")
         return self.actuator_outputs
 
     async def update_config(self, updates: Mapping[str, Any]) -> dict[str, Any]:
@@ -224,8 +256,11 @@ class HeatingRuntime:
         save_config(self.data_dir, self.options)
         self.control_engine.update_config(self.options)
         self._recompute_room_temperatures()
+        self._record_history_samples(force=True)
         self._save_runtime_state()
-        await self.publish_bindings()
+        # Persist locally even when Mosquitto is down (SWD-269) — Ingress must
+        # not 502 on Controller Tuning Apply / config writes.
+        await self._best_effort_mqtt(self.publish_bindings(), "bindings")
         await self.run_control_cycle()
         return dict(self.options)
 
@@ -328,10 +363,9 @@ class HeatingRuntime:
         self.bindings = self._load_bindings()
         save_config(self.data_dir, self.options)
         self._save_runtime_state()
-        await self.publish_bindings()
-        await self.publish_status()
+        await self._best_effort_mqtt(self.publish_bindings(), "bindings")
+        await self._best_effort_mqtt(self.publish_status(), "status")
         return self.binding_dicts()
-
     def room_temperature(self, room_name: str) -> float | None:
         """Return the current fused temperature for a room."""
 
@@ -517,13 +551,43 @@ class HeatingRuntime:
             "room_temperatures": dict(self.room_temperatures),
             "actuator_outputs": dict(self.actuator_outputs),
             "control": self._control_status(),
+            "mqtt_connected": self._mqtt_connected(),
             "hass_states": self.hass_states(),
         }
+
+    def history(
+        self,
+        *,
+        entity_ids: Iterable[str] | None = None,
+        start_ts: float | None = None,
+        end_ts: float | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return in-memory entity history in HA ``history_during_period`` shape."""
+
+        wanted = {eid for eid in (entity_ids or []) if isinstance(eid, str) and eid}
+        start = float(start_ts) if start_ts is not None else None
+        end = float(end_ts) if end_ts is not None else None
+        result: dict[str, list[dict[str, Any]]] = {}
+        for entity_id, samples in self._history.items():
+            if wanted and entity_id not in wanted:
+                continue
+            filtered: list[dict[str, Any]] = []
+            for sample in samples:
+                lu = float(sample["lu"])
+                if start is not None and lu < start:
+                    continue
+                if end is not None and lu > end:
+                    continue
+                filtered.append({"s": sample["s"], "lu": lu})
+            if filtered:
+                result[entity_id] = filtered
+        return result
 
     def hass_states(self) -> dict[str, dict[str, Any]]:
         """Build minimal Home Assistant-like states for the custom panel."""
 
-        now = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+        now_ts = time.time()
+        now = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(now_ts))
         states: dict[str, dict[str, Any]] = {}
 
         states["sensor.heating_assistant_controller_config"] = self._ha_state(
@@ -532,18 +596,37 @@ class HeatingRuntime:
             self.controller_config(),
             now,
         )
+        total_power = sum(self.actuator_outputs.values()) if self.actuator_outputs else 0.0
         states["sensor.heating_assistant_system_summary"] = self._ha_state(
             "sensor.heating_assistant_system_summary",
-            str(sum(self.actuator_outputs.values()) if self.actuator_outputs else 0.0),
+            str(total_power),
             {
                 "system_enabled": bool(self.options.get("system_enabled", False)),
                 "control_mode": self.control_engine.mode,
                 "fallback_reason": self.control_engine.fallback_reason,
                 "comfort_index_pct": None,
+                "total_heating_power": total_power,
+                "mqtt_connected": self._mqtt_connected(),
                 "has_heat_pump": any(
                     str(source.get("type", "")).lower() == "heat_pump"
                     for source in self._heat_sources()
                 ),
+            },
+            now,
+        )
+
+        update_interval = float(
+            self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+        )
+        mean_error = self._mean_tracking_error()
+        states["sensor.heating_assistant_mpc_performance"] = self._ha_state(
+            "sensor.heating_assistant_mpc_performance",
+            self._last_control_duration_s,
+            {
+                "last_run_ts": self._last_control_ts,
+                "dt_s": update_interval,
+                "mean_tracking_error": mean_error,
+                "unit_of_measurement": "s",
             },
             now,
         )
@@ -570,6 +653,8 @@ class HeatingRuntime:
                 offset = float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET))
             enabled = self._room_enabled(room)
             schedule = schedules.get(slug, {"enabled": enabled, "periods": []})
+            power = self._room_power(name)
+            energy_wh = float(self._energy_total_wh.get(slug, 0.0))
 
             states[f"sensor.heating_assistant_{slug}_temperature_measured"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_temperature_measured",
@@ -583,7 +668,9 @@ class HeatingRuntime:
                 {
                     "room": name,
                     "unit_of_measurement": "°C",
-                    "comfort_deviation": None,
+                    "comfort_deviation": None
+                    if temperature is None
+                    else abs(float(temperature) - float(setpoint)),
                     "time_in_range_pct_24h": None,
                 },
                 now,
@@ -608,8 +695,30 @@ class HeatingRuntime:
             )
             states[f"sensor.heating_assistant_{slug}_heating_power_measured"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_heating_power_measured",
-                self._room_power(name),
+                power,
                 {"room": name, "unit_of_measurement": "W"},
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_solar_gain_measured"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_solar_gain_measured",
+                0.0,
+                {"room": name, "unit_of_measurement": "W"},
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_heat_loss"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_heat_loss",
+                0.0,
+                {"room": name, "unit_of_measurement": "W"},
+                now,
+            )
+            states[f"sensor.heating_assistant_{slug}_energy_total"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_energy_total",
+                energy_wh / 1000.0,
+                {
+                    "room": name,
+                    "unit_of_measurement": "kWh",
+                    "state_class": "total_increasing",
+                },
                 now,
             )
             states[f"climate.heating_assistant_{slug}"] = self._ha_state(
@@ -649,16 +758,10 @@ class HeatingRuntime:
     def status(self) -> dict[str, Any]:
         """Expose a compact health/status snapshot for HTTP and MQTT."""
 
-        mqtt_connected = getattr(self.bus, "connected", None)
-        if callable(mqtt_connected):
-            mqtt_connected = mqtt_connected()
-        elif mqtt_connected is None:
-            # In-memory bus is always "connected" for local/dev.
-            mqtt_connected = True
         return {
             "instance_id": self.instance_id,
             "mqtt_broker": self.mqtt_broker,
-            "mqtt_connected": bool(mqtt_connected),
+            "mqtt_connected": self._mqtt_connected(),
             "bindings_count": len(self.bindings),
             "control": self._control_status(),
             "actuator_outputs": dict(self.actuator_outputs),
@@ -676,12 +779,22 @@ class HeatingRuntime:
             "ts": time.time(),
         }
 
+    def _mqtt_connected(self) -> bool:
+        mqtt_connected = getattr(self.bus, "connected", None)
+        if callable(mqtt_connected):
+            mqtt_connected = mqtt_connected()
+        elif mqtt_connected is None:
+            # In-memory bus is always "connected" for local/dev.
+            mqtt_connected = True
+        return bool(mqtt_connected)
+
     def _control_status(self) -> dict[str, Any]:
         return {
             "mode": self.control_engine.mode,
             "fallback_reason": self.control_engine.fallback_reason,
+            "last_run_ts": self._last_control_ts,
+            "last_duration_s": self._last_control_duration_s,
         }
-
     def _load_bindings(self) -> list[Binding]:
         source = self.options.get("bindings", self.state.get("bindings", []))
         if isinstance(source, Mapping):
@@ -1069,9 +1182,73 @@ class HeatingRuntime:
         self.state["tag_statuses"] = dict(self.tag_statuses)
         self.state["room_temperatures"] = dict(self.room_temperatures)
         self.state["actuator_outputs"] = dict(self.actuator_outputs)
+        self.state["last_control_ts"] = self._last_control_ts
+        self.state["last_control_duration_s"] = self._last_control_duration_s
+        self.state["energy_total_wh"] = dict(self._energy_total_wh)
+        self.state["energy_last_ts"] = self._energy_last_ts
         self.state["config"] = dict(self.options)
         save_state(self.data_dir, self.state)
 
+    def _record_history_samples(self, *, force: bool = False) -> None:
+        """Append current synthetic entity values into the in-memory history ring."""
+
+        now = time.time()
+        if not force and (now - self._history_last_ts) < _HISTORY_MIN_INTERVAL_S:
+            return
+        self._history_last_ts = now
+        states = self.hass_states()
+        for entity_id, state in states.items():
+            if not entity_id.startswith("sensor.heating_assistant_"):
+                continue
+            if entity_id.endswith("_model_fit_quality"):
+                continue
+            raw = state.get("state")
+            if raw in {None, "unknown", "unavailable"}:
+                continue
+            try:
+                float(raw)
+            except (TypeError, ValueError):
+                continue
+            bucket = self._history.setdefault(
+                entity_id, deque(maxlen=_HISTORY_MAX_SAMPLES)
+            )
+            bucket.append({"s": str(raw), "lu": now})
+
+    def _accumulate_energy(self, now: float) -> None:
+        """Integrate room heating power into cumulative energy totals."""
+
+        previous = self._energy_last_ts
+        self._energy_last_ts = now
+        if previous is None or now <= previous:
+            return
+        dt_h = (now - previous) / 3600.0
+        for room in self._rooms():
+            name = room.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            slug = self._room_slug(name)
+            power_w = self._room_power(name)
+            self._energy_total_wh[slug] = float(self._energy_total_wh.get(slug, 0.0)) + (
+                power_w * dt_h
+            )
+
+    def _mean_tracking_error(self) -> float | None:
+        errors: list[float] = []
+        setpoints = self._setpoints()
+        for room in self._rooms():
+            name = room.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            temperature = self.room_temperatures.get(name)
+            if temperature is None:
+                continue
+            setpoint = setpoints.get(name)
+            if setpoint is None:
+                continue
+            errors.append(abs(float(temperature) - float(setpoint)))
+        if not errors:
+            return None
+        return sum(errors) / len(errors)
 
 async def publish_tag_in(
     runtime: HeatingRuntime,

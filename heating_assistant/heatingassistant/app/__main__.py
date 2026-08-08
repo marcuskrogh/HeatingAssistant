@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -60,7 +61,7 @@ def merge_supervisor_options(
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.8"
+    server_version = "HeatingAssistantApp/2.0.9"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
@@ -107,7 +108,21 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"experiments": self.runtime.experiments()})
             return
         if path == "/api/history":
-            self._send_json({})
+            query = parse_qs(parsed.query)
+            entity_ids = query.get("entity_ids", [])
+            # Support repeated entity_ids= or a single comma-separated value.
+            expanded: list[str] = []
+            for raw in entity_ids:
+                expanded.extend(part for part in str(raw).split(",") if part)
+            start_raw = query.get("start", [None])[0]
+            end_raw = query.get("end", [None])[0]
+            self._send_json(
+                self.runtime.history(
+                    entity_ids=expanded or None,
+                    start_ts=self._optional_timestamp(start_raw),
+                    end_ts=self._optional_timestamp(end_raw),
+                )
+            )
             return
         if path in {"/", "/index.html", "/ha-industrial"} or path.startswith("/ha-industrial/"):
             self._send_index_html()
@@ -190,6 +205,9 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
+        except Exception as exc:  # noqa: BLE001 — keep Ingress from 502 on MQTT/runtime faults
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            return
         self._send_json(result)
 
     def do_PUT(self) -> None:  # noqa: N802 - stdlib handler API
@@ -210,6 +228,9 @@ class _Handler(BaseHTTPRequestHandler):
             bindings = asyncio.run(self.runtime.update_bindings(source))
         except ValueError as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 — keep Ingress from 502 on MQTT faults
+            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             return
         self._send_json({"bindings": bindings})
 
@@ -309,6 +330,28 @@ class _Handler(BaseHTTPRequestHandler):
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    @classmethod
+    def _optional_timestamp(cls, value: Any) -> float | None:
+        """Parse a unix timestamp or ISO-8601 datetime into epoch seconds."""
+
+        if value in (None, ""):
+            return None
+        numeric = cls._optional_float(value)
+        if numeric is not None:
+            return numeric
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
 
 
 def _parser() -> argparse.ArgumentParser:
