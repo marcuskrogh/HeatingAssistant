@@ -129,7 +129,7 @@ const stub = (name) => (contentEl) => { contentEl.innerHTML = `PAGE:${name}`; re
 globalThis.__imp = async (spec) => {
   if (spec.includes('/router.js')) return { Router };
   if (spec.includes('/panel-hash.js')) return panelHashMod;
-  if (spec.includes('/ha-connection.js')) return { HaConnection: class { updateHass() {} async getState() { return {}; } } };
+  if (spec.includes('/ha-connection.js')) return { HaConnection: class { updateHass() {} async getState() { return {}; } async subscribe() { return () => {}; } } };
   if (spec.includes('/discovery.js')) return { discoverRooms: () => [] };
   if (spec.includes('/pages/overview.js')) return { renderOverview: stub('overview') };
   if (spec.includes('/pages/room-detail.js')) return { renderRoomDetail: stub('room') };
