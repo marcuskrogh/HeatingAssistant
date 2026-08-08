@@ -41,11 +41,9 @@ Root causes (post SWD-268):
 4. Synthesize `mpc_performance` / energy / solar stubs + MQTT status in panel
 5. Tests + version bump 2.0.9 + sync App package
 
-## Tracker
-- Task: SWD-269
-- Relates: SWD-268
-- Branch: `cursor/swd-269-empty-kpi-tuning-502-65c0`
+## Shipped
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/557
+- Version: **2.0.9** — soft MQTT writes, retain tag/in, in-memory history, KPI sensors, MQTT status in panel.
 
 ## Next
-`/review-fix SWD-269` — Review and auto-fix (single pass)
+Done

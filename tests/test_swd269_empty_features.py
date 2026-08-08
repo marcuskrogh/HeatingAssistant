@@ -115,6 +115,61 @@ async def test_history_and_kpi_sensors_populate_after_tag_update(tmp_path) -> No
 
 
 @pytest.mark.asyncio
+async def test_energy_accumulation_does_not_integrate_across_restart_gap(tmp_path) -> None:
+    bus = InMemoryMqttBus()
+    # Simulate persisted totals from a previous App process with a stale clock.
+    from heatingassistant.persistence import save_state
+
+    save_state(
+        tmp_path,
+        {
+            "energy_total_wh": {"living_room": 100.0},
+            "energy_last_ts": 1_700_000_000.0,  # hours in the past vs now
+            "actuator_outputs": {"living_heater": 2000.0},
+        },
+    )
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=bus,
+        options={
+            "instance_id": "haos",
+            "update_interval": 900,
+            "rooms": [
+                {
+                    "name": "Living Room",
+                    "setpoint": 22.0,
+                    "temp_tags": ["living_temp"],
+                    "enabled": True,
+                }
+            ],
+            "heat_sources": [
+                {
+                    "room": "Living Room",
+                    "type": "electric",
+                    "output_tag": "living_heater",
+                }
+            ],
+            "system_enabled": True,
+        },
+    )
+    runtime.actuator_outputs["living_heater"] = 2000.0
+    before = float(runtime._energy_total_wh.get("living_room", 0.0))
+    assert runtime._energy_last_ts is None
+
+    # First tick only arms the clock (no integration across the restored gap).
+    runtime._accumulate_energy(1_700_000_000.0 + 7200.0)
+    mid = float(runtime._energy_total_wh.get("living_room", 0.0))
+    assert mid == pytest.approx(before)
+    assert runtime._energy_last_ts is not None
+
+    # Second tick with a large gap is capped at 2 × update_interval (1800s).
+    runtime.actuator_outputs["living_heater"] = 2000.0
+    runtime._accumulate_energy(runtime._energy_last_ts + 7200.0)
+    after = float(runtime._energy_total_wh.get("living_room", 0.0))
+    assert after - mid == pytest.approx(2000.0 * (1800.0 / 3600.0))
+
+
+@pytest.mark.asyncio
 async def test_thin_bridge_publishes_tag_in_with_retain() -> None:
     ha_mqtt = MagicMock()
     published: list[dict[str, Any]] = []

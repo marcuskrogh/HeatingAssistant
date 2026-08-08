@@ -205,9 +205,6 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
-        except Exception as exc:  # noqa: BLE001 — keep Ingress from 502 on MQTT/runtime faults
-            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
-            return
         self._send_json(result)
 
     def do_PUT(self) -> None:  # noqa: N802 - stdlib handler API
@@ -228,9 +225,6 @@ class _Handler(BaseHTTPRequestHandler):
             bindings = asyncio.run(self.runtime.update_bindings(source))
         except ValueError as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
-            return
-        except Exception as exc:  # noqa: BLE001 — keep Ingress from 502 on MQTT faults
-            self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             return
         self._send_json({"bindings": bindings})
 

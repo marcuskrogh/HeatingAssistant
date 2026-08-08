@@ -105,9 +105,12 @@ class HeatingRuntime:
             for key, value in dict(self.state.get("energy_total_wh") or {}).items()
             if self._coerce_number(value) is not None
         }
-        self._energy_last_ts: float | None = self._coerce_number(self.state.get("energy_last_ts"))
+        # Do not restore the energy clock from disk — integrating across App
+        # downtime would spike Daily Energy on the first control cycle (SWD-269).
+        self._energy_last_ts: float | None = None
         self._recompute_room_temperatures()
         self._record_history_samples(force=True)
+
     async def start(self) -> None:
         """Subscribe to inbound tags and publish retained App metadata.
 
@@ -1221,7 +1224,13 @@ class HeatingRuntime:
         self._energy_last_ts = now
         if previous is None or now <= previous:
             return
-        dt_h = (now - previous) / 3600.0
+        # Cap gaps so a stalled loop / clock jump cannot invent kWh.
+        max_dt_s = max(
+            2.0 * float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
+            60.0,
+        )
+        dt_s = min(now - previous, max_dt_s)
+        dt_h = dt_s / 3600.0
         for room in self._rooms():
             name = room.get("name")
             if not isinstance(name, str) or not name:
