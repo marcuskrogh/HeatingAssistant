@@ -1,44 +1,42 @@
-# Iterate: App rejects --options-path (startup crash-loop)
+# Iterate: Ingress UI 404 — static assets missing from pip install
 
 ## Prior work
-- Task: SWD-262
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/546 (merge `8713980`)
+- Task: SWD-263
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/547 (merge `5c2bdd4`)
 - Spec context: docs/agents/PLAN-haos-app-mqtt.md / prior ITERATE.md
 
 ## Problem
-HAOS App crash-loops after thin-integration sync:
+Opening HeatingAssistant from the HA side panel shows:
 
 ```
-__main__.py: error: unrecognized arguments: --options-path /data/options.json
+Error response
+Error code: 404
+Message: file not found.
 ```
 
-`heating_assistant/run.sh` passes `--options-path`, `--data-dir`, and `--ha-runtime`, but
-`heatingassistant.app` argparse only knows `--host` / `--port` / `--data-dir` / `--ha-runtime`.
+App process is up (SWD-263 fixed argparse), but Ingress `/` calls `_send_file(index.html)` and the
+file is absent in the installed package. Wheel build contains **0** static files because
+`pyproject.toml` has no setuptools `package-data` for `heatingassistant/app/static/`.
 
 ## Acceptance criteria
-1. `python3 -m heatingassistant.app` accepts `--options-path` (default `/data/options.json`).
-2. Supervisor options (`instance_id`, MQTT broker/port/credentials) load from that file and merge into App config without wiping durable `config.json` fields (rooms, schedules, bindings, …).
-3. The `run.sh` argv shape starts without argparse failure (CLI parse smoke test).
+1. `python -m build` wheel includes `heatingassistant/app/static/index.html` and panel assets.
+2. After `pip install` of that wheel, `Path(heatingassistant.app.__file__).with_name("static")/index.html` exists.
+3. HTTP `/` and `/ha-industrial-panel/industrial-dashboard.js` return 200 from the installed package layout.
 4. Version bump so Supervisor offers Update.
 
 ## Out of scope
-- Changing Supervisor options schema beyond existing MQTT/instance fields.
-- Broader MQTT broker client wiring beyond loading options into runtime config.
+- Absolute URL / `X-Ingress-Path` base-href rewriting (follow-up if assets 404 after HTML loads).
+- Changing panel UX beyond making static assets installable.
 
 ## Work packages
-1. Accept `--options-path` + merge Supervisor options into config
-2. Version bump 2.0.2 + regression test
-3. Sync App package / handoff
+1. Add setuptools package-data for static assets + packaging regression test
+2. Version bump 2.0.3 + sync App package
+3. PR / handoff
 
 ## Tracker
-- Task: SWD-263
-- Relates: SWD-262
-- Branch: `cursor/swd-263-options-path-01f0`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/547
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/547
-- Version: **2.0.2** — accepts `--options-path`; merges Supervisor MQTT/instance options into durable config.
+- Task: SWD-264
+- Relates: SWD-263
+- Branch: `cursor/swd-264-ingress-static-01f0`
 
 ## Next
-Done
+`/review-fix SWD-264` — Review and auto-fix (single pass)
