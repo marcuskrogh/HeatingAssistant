@@ -45,6 +45,7 @@ Root causes (post SWD-268):
 - Task: SWD-269
 - Relates: SWD-268
 - Branch: `cursor/swd-269-empty-kpi-tuning-502-65c0`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/557
 
 ## Next
 `/review-fix SWD-269` — Review and auto-fix (single pass)
