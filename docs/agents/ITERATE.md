@@ -37,5 +37,12 @@ Declaring `hassio_api` alone does not put the token in a bare `sh` process.
 - Branch: `cursor/swd-275-with-contenv-token-f56e`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/564
 
+## Review-fix
+CLEAN — with-contenv shebang matches HA tutorial; hassio_api retained from SWD-274; packaging asserts entrypoint + v2.0.14.
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/564
+- Version: **2.0.14**
+
 ## Next
-`/review-fix SWD-275` — Review and auto-fix (single pass)
+Done — rebuild/update App on HAOS to v2.0.14; expect “Supervisor token present” then MQTT without rc=5. `/iterate` if still broken after install.
