@@ -123,16 +123,20 @@ class PahoMqttBus:
         qos: int,
         retain: bool,
     ) -> None:
+        # Fire-and-forget onto the bus loop. Waiting here on the MQTT network
+        # thread deadlocks when handlers publish (PUBACK needs this thread).
         async def _run() -> None:
-            result = handler(topic, payload, qos, retain)
-            if asyncio.iscoroutine(result):
-                await result
+            try:
+                result = handler(topic, payload, qos, retain)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                _logger.exception("MQTT handler failed for topic %s", topic)
 
         try:
-            future = asyncio.run_coroutine_threadsafe(_run(), self._loop)
-            future.result(timeout=30)
+            asyncio.run_coroutine_threadsafe(_run(), self._loop)
         except Exception:
-            _logger.exception("MQTT handler failed for topic %s", topic)
+            _logger.exception("Failed to schedule MQTT handler for topic %s", topic)
 
     def wait_connected(self, timeout_s: float) -> bool:
         """Block until connected or timeout; return True when connected."""

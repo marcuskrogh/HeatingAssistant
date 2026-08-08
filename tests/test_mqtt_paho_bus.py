@@ -115,6 +115,8 @@ def fake_mqtt_client(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_paho_bus_publish_and_subscribe(fake_mqtt_client) -> None:
+    import time
+
     seen: list[tuple[str, str | bytes]] = []
 
     def handler(topic: str, payload: str | bytes, qos: int, retain: bool) -> None:
@@ -140,6 +142,9 @@ async def test_paho_bus_publish_and_subscribe(fake_mqtt_client) -> None:
             retain=False,
         ),
     )
+    deadline = time.time() + 2
+    while seen != [("heatingassistant/haos/tag/living_temp/in", b"22.5")] and time.time() < deadline:
+        time.sleep(0.01)
     assert seen == [("heatingassistant/haos/tag/living_temp/in", b"22.5")]
 
     unsub()
@@ -148,6 +153,8 @@ async def test_paho_bus_publish_and_subscribe(fake_mqtt_client) -> None:
 
 @pytest.mark.asyncio
 async def test_paho_bus_dispatches_async_handlers(fake_mqtt_client) -> None:
+    import time
+
     seen: list[float] = []
 
     async def handler(topic: str, payload: str | bytes, qos: int, retain: bool) -> None:
@@ -167,6 +174,9 @@ async def test_paho_bus_dispatches_async_handlers(fake_mqtt_client) -> None:
             retain=True,
         ),
     )
+    deadline = time.time() + 2
+    while seen != [21.0] and time.time() < deadline:
+        time.sleep(0.01)
     assert seen == [21.0]
     bus.close()
 
