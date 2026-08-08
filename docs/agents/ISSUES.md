@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-274 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without hassio_api | In Review | — | docs/agents/ITERATE.md | review-fix CLEAN — https://github.com/marcuskrogh/HeatingAssistant/pull/563 · Next `/ship SWD-274` |
+| SWD-274 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without hassio_api | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/563 |
 | SWD-273 | Task | [Iterate] MQTT still disconnected after mqtt:need — one-shot discovery + ignored SSL/endpoint | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/560 |
 | SWD-271 | Task | [Iterate] Streamline config UX — searchable HA entity picker + Environment recommendations | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/559 |
 | SWD-270 | Task | [Iterate] Ingress shows MQTT disconnected — App missing Supervisor Mosquitto credentials | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/558 |
@@ -28,6 +28,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-08 — shipped SWD-274 via PR #563: hassio_api + homeassistant_api for SUPERVISOR_TOKEN; v2.0.13; review-fix CLEAN (`supervisor_token_present`). Rebuild App on HAOS to pick up token injection.
 - 2026-08-08 — SWD-274 review-fix CLEAN on PR #563: hassio_api confirmed necessary (user still on v2.0.12); health exposes `supervisor_token_present`; packaging flags OK. Next `/ship SWD-274`.
 - 2026-08-08 — SWD-274 In Review + PR #563: hassio_api + homeassistant_api for SUPERVISOR_TOKEN; v2.0.13; Next `/review-fix SWD-274`.
 - 2026-08-08 — `/iterate` SWD-274 from SWD-273: MQTT rc=5 not authorised — SUPERVISOR_TOKEN missing without `hassio_api`; v2.0.13; branch `cursor/swd-274-hassio-api-token-f56e`.
