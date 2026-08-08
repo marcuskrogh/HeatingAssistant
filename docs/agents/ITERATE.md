@@ -37,6 +37,7 @@ file is absent in the installed package. Wheel build contains **0** static files
 - Task: SWD-264
 - Relates: SWD-263
 - Branch: `cursor/swd-264-ingress-static-01f0`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/548
 
 ## Next
 `/review-fix SWD-264` — Review and auto-fix (single pass)
