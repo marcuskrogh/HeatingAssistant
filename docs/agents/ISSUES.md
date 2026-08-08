@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-268 | Task | [Iterate] Ingress 502 Bad Gateway after MQTT update — App not ready | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-268` |
+| SWD-268 | Task | [Iterate] Ingress 502 Bad Gateway after MQTT update — App not ready | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-268` — https://github.com/marcuskrogh/HeatingAssistant/pull/554 |
 | SWD-267 | Task | [Iterate] Ingress entity picker only shows App sensors — cannot wire HA room temperatures | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/551 |
 | SWD-266 | Task | [Iterate] Ingress panel LOAD ERROR — bare module path fails dynamic import | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/550 |
 | SWD-265 | Task | [Iterate] Ingress UI stuck on Loading App API | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/549 |

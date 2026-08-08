@@ -39,6 +39,7 @@ Supervisor Ingress returned 502.
 - Task: SWD-268
 - Relates: SWD-267 / PR #553
 - Branch: `cursor/swd-268-mqtt-ingress-502-72da`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/554
 
 ## Next
 `/review-fix SWD-268` — Review and auto-fix (single pass)
