@@ -52,6 +52,7 @@ def test_create_mqtt_bus_with_broker_returns_paho_bus(monkeypatch: pytest.Monkey
             "port": 1883,
             "username": "user",
             "password": "secret",
+            "ssl": False,
         }
     ]
 

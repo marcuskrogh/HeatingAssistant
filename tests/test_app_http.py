@@ -107,3 +107,53 @@ def test_app_http_rejects_bad_static_path(tmp_path) -> None:
         with pytest.raises(HTTPError) as exc_info:
             urlopen(f"{base_url}/static/../pyproject.toml", timeout=5)
         assert exc_info.value.code == 400
+
+
+def test_app_http_exposes_mqtt_diagnostics(tmp_path) -> None:
+    class FakeBus:
+        connected = False
+        last_error = "not authorised (rc=5)"
+
+        def subscribe(self, *args, **kwargs):
+            return lambda: None
+
+        def add_connect_handler(self, handler) -> None:
+            return None
+
+        async def publish(self, *args, **kwargs) -> None:
+            raise RuntimeError("MQTT client is not connected")
+
+        def reconfigure(self, **kwargs) -> None:
+            return None
+
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=FakeBus(),  # type: ignore[arg-type]
+        options={
+            "instance_id": "haos",
+            "mqtt_broker": "core-mosquitto",
+            "mqtt_port": 1883,
+            "mqtt_username": "addons",
+            "mqtt_password": "should-be-redacted",
+            "mqtt_source": "options",
+            "mqtt_ssl": False,
+        },
+    )
+
+    with app_server(runtime) as base_url:
+        health = get_json(base_url, "/api/health")
+        assert health["mqtt_connected"] is False
+        assert health["mqtt_source"] == "options"
+        assert health["mqtt_last_error"] == "not authorised (rc=5)"
+        assert "mqtt_discovery_error" in health
+        assert health["mqtt_username"] == "addons"
+        assert "mqtt_password" not in health or health["mqtt_password"] in {"", "***"}
+
+        state = get_json(base_url, "/api/state")
+        assert state["mqtt_connected"] is False
+        assert state["mqtt_last_error"] == "not authorised (rc=5)"
+        assert state["mqtt_username"] == "addons"
+        assert "mqtt_password" not in state or state["mqtt_password"] in {"", "***"}
+
+        config = get_json(base_url, "/api/config")
+        assert config["mqtt_password"] == "***"

@@ -122,6 +122,7 @@ def create_mqtt_bus(options: Mapping[str, Any] | None = None) -> MqttBus:
         port=port,
         username=username if isinstance(username, str) else None,
         password=password if isinstance(password, str) else None,
+        ssl=bool(config.get("mqtt_ssl", False)),
     )
 
 
