@@ -17,6 +17,10 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from heatingassistant.app.runtime import HeatingRuntime
 from heatingassistant.mqtt.bridge import create_mqtt_bus
+from heatingassistant.mqtt.supervisor import (
+    apply_supervisor_mqtt_discovery,
+    redact_mqtt_secrets,
+)
 from heatingassistant.persistence import load_config
 
 _STATIC_DIR = Path(__file__).with_name("static")
@@ -39,29 +43,30 @@ def merge_supervisor_options(
 
     Supervisor writes ``/data/options.json``. The App keeps rooms/schedules/bindings
     in ``config.json``. Overlay only the known Supervisor keys so MQTT settings
-    apply without wiping durable fields.
+    apply without wiping durable fields. When MQTT username/password are blank,
+    fill them from Supervisor's MQTT service discovery (Mosquitto rejects
+    anonymous clients). If discovery fails, keep previously persisted credentials.
     """
 
     config = load_config(data_dir)
-    if options_path is None:
-        return config
-    path = Path(options_path)
-    if not path.is_file():
-        return config
-    with path.open("r", encoding="utf-8") as handle:
-        raw = json.load(handle)
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    for key in _SUPERVISOR_OPTION_KEYS:
-        if key in raw:
-            config[key] = raw[key]
-    return config
+    durable = dict(config)
+    if options_path is not None:
+        path = Path(options_path)
+        if path.is_file():
+            with path.open("r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+            if not isinstance(raw, dict):
+                raise ValueError(f"{path} must contain a JSON object")
+            for key in _SUPERVISOR_OPTION_KEYS:
+                if key in raw:
+                    config[key] = raw[key]
+    return apply_supervisor_mqtt_discovery(config, fallback=durable)
 
 
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.9"
+    server_version = "HeatingAssistantApp/2.0.10"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
@@ -232,7 +237,7 @@ class _Handler(BaseHTTPRequestHandler):
         """Keep the stub quiet unless the real runtime adds structured logging."""
 
     def _send_json(self, payload: Any) -> None:
-        body = json.dumps(payload, sort_keys=True).encode("utf-8")
+        body = json.dumps(redact_mqtt_secrets(payload), sort_keys=True).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))

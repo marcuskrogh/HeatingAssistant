@@ -555,6 +555,8 @@ class HeatingRuntime:
             "actuator_outputs": dict(self.actuator_outputs),
             "control": self._control_status(),
             "mqtt_connected": self._mqtt_connected(),
+            "mqtt_broker": self.mqtt_broker,
+            "mqtt_source": self.options.get("mqtt_source") or "options",
             "hass_states": self.hass_states(),
         }
 
@@ -764,6 +766,9 @@ class HeatingRuntime:
         return {
             "instance_id": self.instance_id,
             "mqtt_broker": self.mqtt_broker,
+            "mqtt_port": self.options.get("mqtt_port", 1883),
+            "mqtt_username": self.options.get("mqtt_username") or "",
+            "mqtt_source": self.options.get("mqtt_source") or "options",
             "mqtt_connected": self._mqtt_connected(),
             "bindings_count": len(self.bindings),
             "control": self._control_status(),

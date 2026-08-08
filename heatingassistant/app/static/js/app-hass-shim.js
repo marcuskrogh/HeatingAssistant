@@ -222,6 +222,7 @@
       ) {
         this.mqttConnected = false;
       }
+      this.mqttSource = stateSnapshot.mqtt_source || null;
       this._emitStateChanges(previous, this.states);
       const entityCount = Object.keys(this.states).length;
       this._setStatus(
