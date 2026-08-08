@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-268 | Bug | KPIs and room fields empty after START with configured room | Done | — | — | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/553 |
+| SWD-268 | Task | [Iterate] Ingress 502 Bad Gateway after MQTT update — App not ready | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-268` — https://github.com/marcuskrogh/HeatingAssistant/pull/554 |
 | SWD-267 | Task | [Iterate] Ingress entity picker only shows App sensors — cannot wire HA room temperatures | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/551 |
 | SWD-266 | Task | [Iterate] Ingress panel LOAD ERROR — bare module path fails dynamic import | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/550 |
 | SWD-265 | Task | [Iterate] Ingress UI stuck on Loading App API | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/549 |
@@ -24,7 +24,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
-- 2026-08-08 — shipped SWD-268 via PR #553: App connects to Mosquitto + panel live state sync; KPIs/room temps populate; v2.0.7.
+- 2026-08-08 — SWD-268 In Review + PR #554: non-blocking MQTT so Ingress binds without Mosquitto; v2.0.8; Next `/review-fix SWD-268`.
+- 2026-08-08 — `/iterate` SWD-268: Ingress 502 after v2.0.7 MQTT ship (PR #553); Paho connect raised before HTTP bind; v2.0.8; branch `cursor/swd-268-mqtt-ingress-502-72da`.
+- 2026-08-08 — shipped KPI MQTT live sync via PR #553 (v2.0.7): App connects to Mosquitto + panel live state sync; KPIs/room temps populate. (Mirror previously labeled this SWD-268 before the Ingress-502 iterate claimed that key in Jira.)
 - 2026-08-08 — shipped SWD-267 via PR #551: typed HA entity IDs + auto MQTT bindings; v2.0.6.
 - 2026-08-08 — SWD-267 PR #551: free-text HA entity IDs + auto MQTT bindings; v2.0.6; In Review.
 - 2026-08-08 — `/iterate` SWD-267: Ingress entity picker only shows App sensors; free-text entity IDs + auto MQTT bindings; v2.0.6; branch `cursor/swd-267-ha-entity-wiring-5d31`.

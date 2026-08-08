@@ -13,7 +13,11 @@ from typing import Any
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
+import logging
+
 from heatingassistant.mqtt.bridge import InMemoryMqttBus, MqttBus, Unsubscribe
+
+_logger = logging.getLogger(__name__)
 from heatingassistant.mqtt.topics import (
     DEFAULT_QOS,
     MqttTagPayload,
@@ -88,7 +92,12 @@ class HeatingRuntime:
         self._recompute_room_temperatures()
 
     async def start(self) -> None:
-        """Subscribe to inbound tags and publish retained App metadata."""
+        """Subscribe to inbound tags and publish retained App metadata.
+
+        MQTT publish failures must not prevent Ingress HTTP from coming up —
+        the broker may still be starting. Retained metadata is republished when
+        the Paho bus reports a successful connect.
+        """
 
         if self._started:
             return
@@ -98,10 +107,32 @@ class HeatingRuntime:
                 self._handle_tag_message,
             )
         )
+        add_connect = getattr(self.bus, "add_connect_handler", None)
+        if callable(add_connect):
+            add_connect(self._on_mqtt_connected)
         self._started = True
-        await self.publish_bindings()
-        await self.run_control_cycle()
-        await self.publish_status()
+        await self._publish_startup_metadata()
+
+    async def _on_mqtt_connected(self) -> None:
+        """Republish retained metadata after (re)connect."""
+
+        await self._publish_startup_metadata()
+
+    async def _publish_startup_metadata(self) -> None:
+        """Best-effort bindings / control / status publish for Ingress readiness."""
+
+        try:
+            await self.publish_bindings()
+        except Exception:
+            _logger.exception("Failed to publish MQTT bindings; will retry on connect")
+        try:
+            await self.run_control_cycle()
+        except Exception:
+            _logger.exception("Control cycle failed during runtime start")
+        try:
+            await self.publish_status()
+        except Exception:
+            _logger.exception("Failed to publish MQTT status; will retry on connect")
 
     async def stop(self) -> None:
         """Unsubscribe from MQTT topics."""
@@ -618,9 +649,16 @@ class HeatingRuntime:
     def status(self) -> dict[str, Any]:
         """Expose a compact health/status snapshot for HTTP and MQTT."""
 
+        mqtt_connected = getattr(self.bus, "connected", None)
+        if callable(mqtt_connected):
+            mqtt_connected = mqtt_connected()
+        elif mqtt_connected is None:
+            # In-memory bus is always "connected" for local/dev.
+            mqtt_connected = True
         return {
             "instance_id": self.instance_id,
             "mqtt_broker": self.mqtt_broker,
+            "mqtt_connected": bool(mqtt_connected),
             "bindings_count": len(self.bindings),
             "control": self._control_status(),
             "actuator_outputs": dict(self.actuator_outputs),
