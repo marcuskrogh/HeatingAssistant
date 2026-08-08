@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-266 | Task | [Iterate] Ingress panel LOAD ERROR — bare module path fails dynamic import | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-266` |
+| SWD-266 | Task | [Iterate] Ingress panel LOAD ERROR — bare module path fails dynamic import | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-266` — https://github.com/marcuskrogh/HeatingAssistant/pull/550 |
 | SWD-265 | Task | [Iterate] Ingress UI stuck on Loading App API | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/549 |
 | SWD-264 | Task | [Iterate] Ingress UI 404 — static assets missing from pip install | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/548 |
 | SWD-263 | Task | [Iterate] App rejects --options-path and crash-loops on start | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/547 |

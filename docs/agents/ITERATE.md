@@ -36,6 +36,7 @@ names and fail module resolution.
 - Task: SWD-266
 - Relates: SWD-265
 - Branch: `cursor/swd-266-ingress-module-url-f9b0`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/550
 
 ## Next
 `/review-fix SWD-266` — Review and auto-fix (single pass)
