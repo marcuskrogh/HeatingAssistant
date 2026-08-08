@@ -1,6 +1,6 @@
-import { setPanelHash } from '../panel-hash.js?v=116';
-import { ICONS } from './config-icons.js?v=116';
-import { el } from './config-ui.js?v=116';
+import { setPanelHash } from '../panel-hash.js?v=118';
+import { ICONS } from './config-icons.js?v=118';
+import { el } from './config-ui.js?v=118';
 
 // Landing page — cards linking to each configuration area
 // ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ const LANDING_CARDS = [
     hash: '#config/system',
     icon: ICONS.system,
     title: 'Environment',
-    desc: 'Outdoor temperature, weather, solar irradiance and electricity-price sensors.',
+    desc: 'Recommended weather and electricity-price sensors, with optional outdoor temperature.',
   },
   {
     hash: '#config/params',

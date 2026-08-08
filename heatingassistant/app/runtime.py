@@ -23,6 +23,7 @@ from heatingassistant.mqtt.topics import (
     DEFAULT_QOS,
     MqttTagPayload,
     bindings as bindings_topic,
+    entities as entities_topic,
     parse_tag_topic,
     status as status_topic,
     tag_in,
@@ -92,6 +93,9 @@ class HeatingRuntime:
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
         self.control_engine = ControlEngine(self.options)
+        # HA entity catalog published by the thin bridge for Ingress pickers
+        # (SWD-271). Not persisted — refreshed over MQTT when the bridge starts.
+        self._ha_entity_catalog: list[dict[str, str]] = []
         self._subscriptions: list[Unsubscribe] = []
         self._started = False
         self._history: dict[str, deque[dict[str, Any]]] = {}
@@ -127,6 +131,16 @@ class HeatingRuntime:
                 self._handle_tag_message,
             )
         )
+        self._subscriptions.append(
+            self.bus.subscribe(
+                entities_topic(self.instance_id),
+                self._handle_entities_catalog_message,
+            )
+        )
+        # Replay retained catalog for in-memory bus / late subscribers.
+        replay = getattr(self.bus, "replay_retained", None)
+        if callable(replay):
+            await replay(entities_topic(self.instance_id), self._handle_entities_catalog_message)
         add_connect = getattr(self.bus, "add_connect_handler", None)
         if callable(add_connect):
             add_connect(self._on_mqtt_connected)
@@ -217,6 +231,50 @@ class HeatingRuntime:
         tag_payload = MqttTagPayload.decode(payload)
         self.update_tag(parsed.tag, tag_payload)
         await self.run_control_cycle()
+
+    async def _handle_entities_catalog_message(
+        self,
+        topic: str,
+        payload: str | bytes,
+        qos: int,
+        retain: bool,
+    ) -> None:
+        """Accept a retained HA entity catalog from the thin bridge (SWD-271)."""
+
+        if topic != entities_topic(self.instance_id):
+            return
+        try:
+            if isinstance(payload, (bytes, bytearray)):
+                payload = payload.decode("utf-8")
+            data = json.loads(payload)
+            raw = data.get("entities", data) if isinstance(data, dict) else data
+            if not isinstance(raw, list):
+                raise ValueError("entities catalog must be a list")
+        except (TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            _logger.warning("Ignoring invalid HA entity catalog payload")
+            return
+
+        catalog: list[dict[str, str]] = []
+        for item in raw:
+            if not isinstance(item, Mapping):
+                continue
+            entity_id = item.get("entity_id")
+            if not isinstance(entity_id, str) or "." not in entity_id:
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) or not name:
+                name = entity_id
+            entry: dict[str, str] = {
+                "entity_id": entity_id,
+                "name": name,
+                "state": str(item.get("state", "unknown")),
+            }
+            unit = item.get("unit")
+            if isinstance(unit, str) and unit:
+                entry["unit"] = unit
+            catalog.append(entry)
+        self._ha_entity_catalog = catalog
+        _logger.debug("Loaded HA entity catalog (%d entities)", len(catalog))
 
     def update_tag(self, tag: str, payload: MqttTagPayload) -> None:
         """Store a tag payload and recompute any affected room averages."""
@@ -758,6 +816,30 @@ class HeatingRuntime:
                 },
                 now,
             )
+
+        # Merge the thin-bridge HA entity catalog so Ingress pickers can search
+        # all configured HA entities (SWD-271). Do not overwrite App synthetics
+        # or already-bound live values.
+        for item in self._ha_entity_catalog:
+            entity_id = item["entity_id"]
+            if entity_id in states:
+                # Prefer live friendly names / units from the catalog when the
+                # binding stub only has the raw entity_id as its name.
+                attrs = states[entity_id].setdefault("attributes", {})
+                if attrs.get("friendly_name") in (None, "", entity_id):
+                    attrs["friendly_name"] = item["name"]
+                if item.get("unit") and not attrs.get("unit_of_measurement"):
+                    attrs["unit_of_measurement"] = item["unit"]
+                continue
+            attrs = {"friendly_name": item["name"]}
+            if item.get("unit"):
+                attrs["unit_of_measurement"] = item["unit"]
+            states[entity_id] = self._ha_state(
+                entity_id,
+                item.get("state", "unknown"),
+                attrs,
+                now,
+            )
         return states
 
     def status(self) -> dict[str, Any]:
@@ -940,29 +1022,50 @@ class HeatingRuntime:
             outdoor_tag = bind(outdoor_entity, "in", "outdoor_temp")
             if outdoor_tag:
                 self.options["outdoor_temp_tag"] = outdoor_tag
+        else:
+            self.options.pop("outdoor_temp_tag", None)
 
         weather_entity = self.options.get(const.CONF_WEATHER_ENTITY)
         if isinstance(weather_entity, str) and weather_entity.strip():
             weather_tag = bind(weather_entity, "in", "weather_forecast")
             if weather_tag:
                 self.options["weather_tag"] = weather_tag
+        else:
+            self.options.pop("weather_tag", None)
 
         solar_entity = self.options.get(const.CONF_SOLAR_RADIATION_ENTITY)
         if isinstance(solar_entity, str) and solar_entity.strip():
             solar_tag = bind(solar_entity, "in", "solar_radiation")
             if solar_tag:
                 self.options["solar_radiation_tag"] = solar_tag
+        else:
+            # Cleared from Environment UI (SWD-271) — drop derived tag/binding.
+            self.options.pop("solar_radiation_tag", None)
+            self.options[const.CONF_SOLAR_RADIATION_ENTITY] = ""
 
         price_entity = self.options.get(const.CONF_PRICE_ENTITY)
         if isinstance(price_entity, str) and price_entity.strip():
             price_tag = bind(price_entity, "in", "energy_price")
             if price_tag:
                 self.options["price_tag"] = price_tag
+        else:
+            self.options.pop("price_tag", None)
+
+        # Known system tags that are fully regenerated from entity fields —
+        # never keep a stale leftover if the entity was cleared.
+        regenerated_system_tags = {
+            "outdoor_temp",
+            "weather_forecast",
+            "solar_radiation",
+            "energy_price",
+        }
 
         # Keep any leftover explicit bindings (e.g. set via /api/bindings) that
         # were not regenerated from entity fields.
         for (entity_id, direction), tag in previous.items():
             if any(item["entity_id"] == entity_id and item["direction"] == direction for item in bindings):
+                continue
+            if tag in regenerated_system_tags and tag not in used_tags:
                 continue
             if tag in used_tags and not any(item["tag"] == tag for item in bindings):
                 # Tag already reserved by a regenerated binding under another entity.

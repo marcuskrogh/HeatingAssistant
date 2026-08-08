@@ -67,6 +67,13 @@ def bindings(instance_id: str) -> str:
     return f"{TOPIC_ROOT}/{instance_id}/bindings"
 
 
+def entities(instance_id: str) -> str:
+    """Retained HA entity catalog topic for Ingress entity pickers."""
+
+    _validate_topic_part(instance_id, "instance_id")
+    return f"{TOPIC_ROOT}/{instance_id}/entities"
+
+
 @dataclass(frozen=True)
 class ParsedTagTopic:
     """Structured representation of a tag topic."""

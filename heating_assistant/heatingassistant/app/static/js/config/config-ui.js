@@ -1,6 +1,6 @@
 // Shared DOM builders for configuration sub-pages.
-import { createCollapsible } from '../components/collapsible.js?v=116';
-import { setPanelHash } from '../panel-hash.js?v=116';
+import { createCollapsible } from '../components/collapsible.js?v=118';
+import { setPanelHash } from '../panel-hash.js?v=118';
 
 function el(tag, className, html) {
   const node = document.createElement(tag);
@@ -249,11 +249,13 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   // Ingress App shim only exposes Heating Assistant's own synthetic states —
-  // not the full HA registry — so free-text entity IDs are the normal path.
-  const limitedCatalog = entities.length > 0
-    && entities.every((e) => e.id.startsWith('sensor.heating_assistant_')
-      || e.id.startsWith('climate.heating_assistant_')
-      || e.id.startsWith('binary_sensor.heating_assistant_'));
+  // not the full HA registry — unless the thin bridge has published a catalog
+  // (SWD-271). Free-text entity IDs remain available as a fallback.
+  const limitedCatalog = entities.length === 0
+    || (entities.length > 0
+      && entities.every((e) => e.id.startsWith('sensor.heating_assistant_')
+        || e.id.startsWith('climate.heating_assistant_')
+        || e.id.startsWith('binary_sensor.heating_assistant_')));
 
   function close() { overlay.remove(); }
 
@@ -270,11 +272,13 @@ function openEntityPicker(root, hass, { title, domains, onSelect }) {
       (e) => !f || e.name.toLowerCase().includes(f) || e.id.toLowerCase().includes(f),
     );
 
-    if (limitedCatalog || entities.length === 0) {
-      hintEl.textContent = `Home Assistant entity list is not available here. `
-        + `Type a full entity ID (${domainHint}), then tap Use entity ID.`;
+    if (limitedCatalog) {
+      hintEl.textContent = `Home Assistant entity list is not available yet. `
+        + `Type a full entity ID (${domainHint}), then tap Use entity ID — `
+        + `or wait for MQTT to deliver the entity catalog from the thin bridge.`;
     } else {
-      hintEl.textContent = `Search the list, or type a full entity ID (${domainHint}).`;
+      hintEl.textContent = `Search by name or entity ID (${domainHint}). `
+        + `You can also type a full entity ID if it is missing from the list.`;
     }
 
     const typedId = isValidEntityId(raw, domains) ? raw.toLowerCase() : '';
