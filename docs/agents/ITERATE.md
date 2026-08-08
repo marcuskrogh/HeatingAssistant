@@ -39,5 +39,9 @@ file is absent in the installed package. Wheel build contains **0** static files
 - Branch: `cursor/swd-264-ingress-static-01f0`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/548
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/548
+- Version: **2.0.3** — Ingress static assets included in pip wheel (`package-data`).
+
 ## Next
-`/review-fix SWD-264` — Review and auto-fix (single pass)
+Done

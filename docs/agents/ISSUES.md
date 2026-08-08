@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-264 | Task | [Iterate] Ingress UI 404 — static assets missing from pip install | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-264` |
+| SWD-264 | Task | [Iterate] Ingress UI 404 — static assets missing from pip install | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/548 |
 | SWD-263 | Task | [Iterate] App rejects --options-path and crash-loops on start | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/547 |
 | SWD-262 | Task | [Iterate] Finish HAOS App: Ingress parity, thin-only tree, port clash | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/546 |
 | SWD-255 | Task | HAOS App + thin MQTT integration (compute isolation) | Done | — | docs/agents/PLAN-haos-app-mqtt.md | Done |
