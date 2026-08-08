@@ -1,5 +1,7 @@
-#!/usr/bin/env sh
-# HeatingAssistant HA App entry (SWD-255 / SWD-258).
+#!/usr/bin/with-contenv bashio
+# HeatingAssistant HA App entry (SWD-255 / SWD-258 / SWD-275).
+# with-contenv exports SUPERVISOR_TOKEN from the s6 container environment
+# (hassio_api alone is not enough — see SWD-274 / SWD-275).
 # Supervisor mounts persistent storage at /data and HA config at /homeassistant.
 set -eu
 
@@ -35,7 +37,7 @@ fi
 if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
   echo "HeatingAssistant: Supervisor token present — App will discover MQTT credentials when options leave username/password blank."
 else
-  echo "HeatingAssistant: SUPERVISOR_TOKEN missing; MQTT discovery unavailable. Rebuild/update the App so config.yaml has hassio_api: true (Supervisor injects the token). Or set mqtt_username/mqtt_password in App options if Mosquitto requires auth." >&2
+  echo "HeatingAssistant: SUPERVISOR_TOKEN missing; MQTT discovery unavailable. Rebuild/update the App to a build whose run.sh uses #!/usr/bin/with-contenv (and config.yaml has hassio_api: true). Or set mqtt_username/mqtt_password in App options if Mosquitto requires auth." >&2
 fi
 
 app_version() {

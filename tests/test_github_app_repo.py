@@ -47,7 +47,7 @@ def test_heatingassistant_app_config_shape():
 
     assert config["name"] == "HeatingAssistant"
     assert config["slug"] == "heatingassistant"
-    assert config["version"] == "2.0.13"
+    assert config["version"] == "2.0.14"
     assert config["arch"] == ["amd64", "aarch64"]
     assert config["init"] is False
     assert config["startup"] == "application"
@@ -113,7 +113,7 @@ def test_app_version_lock_across_app_context_and_package_metadata():
         app_manifest["version"],
         root_project["version"],
         app_project["version"],
-    } == {"2.0.13"}
+    } == {"2.0.14"}
 
 
 def test_app_dockerfile_uses_synced_package_and_bundled_integration():
@@ -129,6 +129,9 @@ def test_app_dockerfile_uses_synced_package_and_bundled_integration():
     )
     assert (APP_DIR / "heatingassistant" / "__init__.py").is_file()
     assert (APP_DIR / "heatingassistant" / "app" / "__main__.py").is_file()
+    # SWD-275: SUPERVISOR_TOKEN is only visible via with-contenv.
+    run_sh = (APP_DIR / "run.sh").read_text(encoding="utf-8")
+    assert run_sh.splitlines()[0].strip() == "#!/usr/bin/with-contenv bashio"
 
 
 def test_ha_app_directory_is_docs_only():
