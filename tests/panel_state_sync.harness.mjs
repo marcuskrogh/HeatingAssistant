@@ -19,7 +19,9 @@ const src = readFileSync(DASHBOARD, 'utf8');
 assert(/function controllerConfigAttrsChanged/.test(src), 'dashboard must compare controller-config attrs');
 assert(/function snapshotConfigAttrs/.test(src), 'dashboard must snapshot controller-config attrs');
 assert(/function sensorStateChanged/.test(src), 'dashboard must define sensorStateChanged');
+assert(/function isHeatingAssistantEntity/.test(src), 'dashboard must define isHeatingAssistantEntity');
 assert(/function applySensorStateToPanel/.test(src), 'dashboard must apply sensor state via applySensorStateToPanel');
+assert(/async _subscribeToStateChanges/.test(src), 'dashboard must subscribe to state_changed after boot');
 assert(
   /sensorStateChanged\(panelState\[id\], state, snapshot\)/.test(src),
   'dashboard must use sensorStateChanged with config snapshot in hass state sync',

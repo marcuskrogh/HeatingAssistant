@@ -45,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '116';
+  return '117';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -140,6 +140,11 @@ function _installPanelHashGuard() {
 _installPanelHashGuard();
 
 const CONTROLLER_CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
+
+/** Return true for synthetic HA/App entities the panel tracks locally. */
+function isHeatingAssistantEntity(entityId) {
+  return typeof entityId === 'string' && entityId.includes('heating_assistant_');
+}
 
 /** Return true when slug-keyed room schedule payloads differ. */
 function roomSchedulesChanged(prevSchedules, nextSchedules) {
@@ -334,6 +339,7 @@ class HaIndustrialPanel extends HTMLElement {
     // Stable reference so the same listener can be added/removed across
     // disconnect/reconnect cycles without accumulating duplicates.
     this._onHashChange = () => this._updateActiveNav();
+    this._unsubState = null;
   }
 
   // HA may batch property updates via setProperties instead of individual setters.
@@ -364,7 +370,7 @@ class HaIndustrialPanel extends HTMLElement {
   _applyHassState(hass) {
     let changed = false;
     for (const [id, state] of Object.entries(hass.states)) {
-      if (!id.startsWith('sensor.heating_assistant_')) continue;
+      if (!isHeatingAssistantEntity(id)) continue;
       const result = applySensorStateToPanel(this._state, id, state, this._configAttrSnapshot);
       if (result.changed) {
         if (result.configAttrSnapshot !== undefined) {
@@ -464,6 +470,7 @@ class HaIndustrialPanel extends HTMLElement {
       // closes the window between the state snapshot above and subscription
       // activation where state_changed events could be missed.
       this._syncLatestState();
+      await this._subscribeToStateChanges();
     } catch (err) {
       if (generation !== this._bootGeneration) {
         this._clearBootWatchdog();
@@ -491,7 +498,7 @@ class HaIndustrialPanel extends HTMLElement {
     if (!this._hass || !this._router) return;
     let changed = false;
     for (const [id, state] of Object.entries(this._hass.states)) {
-      if (!id.startsWith('sensor.heating_assistant_')) continue;
+      if (!isHeatingAssistantEntity(id)) continue;
       const result = applySensorStateToPanel(this._state, id, state, this._configAttrSnapshot);
       if (result.changed) {
         if (result.configAttrSnapshot !== undefined) {
@@ -501,6 +508,35 @@ class HaIndustrialPanel extends HTMLElement {
       }
     }
     if (changed) this._router.update(this._state);
+  }
+
+  async _subscribeToStateChanges() {
+    if (!this._connection || this._unsubState) return;
+    this._unsubState = await this._connection.subscribe((event) => {
+      if (event?.event_type !== 'state_changed') return;
+      const entityId = event.data?.entity_id;
+      const newState = event.data?.new_state;
+      if (!entityId || !newState || !isHeatingAssistantEntity(entityId)) return;
+
+      if (this._hass?.states) {
+        this._hass.states[entityId] = newState;
+      }
+
+      const result = applySensorStateToPanel(
+        this._state,
+        entityId,
+        newState,
+        this._configAttrSnapshot,
+      );
+      if (!result.changed) return;
+      if (result.configAttrSnapshot !== undefined) {
+        this._configAttrSnapshot = result.configAttrSnapshot;
+      }
+      if (this._router) {
+        this._router.update(this._state);
+        this._syncSystemRunning();
+      }
+    });
   }
 
   _syncSystemRunning() {
@@ -743,6 +779,10 @@ class HaIndustrialPanel extends HTMLElement {
     if (this._router) {
       this._router.destroy();
       this._router = null;
+    }
+    if (this._unsubState) {
+      this._unsubState();
+      this._unsubState = null;
     }
     this._connection = null;
     this._menuButton = null;

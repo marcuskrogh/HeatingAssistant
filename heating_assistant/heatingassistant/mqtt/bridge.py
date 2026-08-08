@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 from typing import Any, Awaitable, Callable, Protocol
 
 MessageHandler = Callable[[str, str | bytes, int, bool], Awaitable[None] | None]
@@ -89,6 +90,37 @@ class InMemoryMqttBus:
                 result = handler(topic, payload, qos, True)
                 if inspect.isawaitable(result):
                     await result
+
+
+def create_mqtt_bus(options: Mapping[str, Any] | None = None) -> MqttBus:
+    """Return a real MQTT bus when broker settings exist, else the in-memory bus."""
+
+    config = dict(options or {})
+    broker = config.get("mqtt_broker")
+    if not isinstance(broker, str) or not broker.strip():
+        return InMemoryMqttBus()
+
+    from heatingassistant.mqtt.paho_bus import PahoMqttBus
+
+    port_raw = config.get("mqtt_port", 1883)
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = 1883
+
+    username = config.get("mqtt_username")
+    password = config.get("mqtt_password")
+    if isinstance(username, str) and not username.strip():
+        username = None
+    if isinstance(password, str) and not password.strip():
+        password = None
+
+    return PahoMqttBus(
+        host=broker.strip(),
+        port=port,
+        username=username if isinstance(username, str) else None,
+        password=password if isinstance(password, str) else None,
+    )
 
 
 def _topic_matches(topic_filter: str, topic: str) -> bool:
