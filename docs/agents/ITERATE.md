@@ -1,43 +1,40 @@
-# Iterate: Finish HAOS App (Ingress parity, thin-only tree, port clash)
+# Iterate: App rejects --options-path (startup crash-loop)
 
 ## Prior work
-- Task: SWD-255
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/545 (merge `973a2c5`)
-- Spec context: docs/agents/PLAN-haos-app-mqtt.md
+- Task: SWD-262
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/546 (merge `8713980`)
+- Spec context: docs/agents/PLAN-haos-app-mqtt.md / prior ITERATE.md
 
 ## Problem
-1. Ingress UI is a stripped shell; the industrial panel still expects Home Assistant websocket/`hass` APIs.
-2. Legacy fat `custom_components/heating_assistant` remains for unit-test imports; App installs already sync the thin bridge.
-3. Starting the App fails with `port 8099 is already in use` because PLCAssistant also binds 8099.
+HAOS App crash-loops after thin-integration sync:
 
-## Clarifications
-- Port change: HeatingAssistant uses **8100** (ingress + host publish); PLCAssistant keeps 8099.
-- Yes — PLCAssistant occupying 8099 is the likely cause of the start failure.
+```
+__main__.py: error: unrecognized arguments: --options-path /data/options.json
+```
+
+`heating_assistant/run.sh` passes `--options-path`, `--data-dir`, and `--ha-runtime`, but
+`heatingassistant.app` argparse only knows `--host` / `--port` / `--data-dir` / `--ha-runtime`.
 
 ## Acceptance criteria
-1. App `config.yaml` / Dockerfile / run.sh / docs / tests use **8100**, not 8099; version bump so Supervisor offers Update.
-2. Ingress loads the industrial panel UX backed by App `/api/*` (no live HA websocket required for core navigation/config/status/bindings/schedules surfaces that the App owns).
-3. Repo root `custom_components/heating_assistant` is the **thin MQTT bridge only**; compute modules live under `heatingassistant/engine/`; pytest imports retargeted; App sync script continues to version-lock.
+1. `python3 -m heatingassistant.app` accepts `--options-path` (default `/data/options.json`).
+2. Supervisor options (`instance_id`, MQTT broker/port/credentials) load from that file and merge into App config without wiping durable `config.json` fields (rooms, schedules, bindings, …).
+3. The `run.sh` argv shape starts without argparse failure (CLI parse smoke test).
+4. Version bump so Supervisor offers Update.
 
 ## Out of scope
-- Changing PLCAssistant ports.
-- Official HA Apps store publication.
-- Re-introducing Heating Assistant–owned HA climate/diagnostic entities.
+- Changing Supervisor options schema beyond existing MQTT/instance fields.
+- Broader MQTT broker client wiring beyond loading options into runtime config.
 
 ## Work packages
-1. Port clash fix (8100) + version bump 2.0.1
-2. Ingress panel App API shim + expanded `/api/*`
-3. Thin-only custom_components + test retarget
+1. Accept `--options-path` + merge Supervisor options into config
+2. Version bump 2.0.2 + regression test
+3. Sync App package / handoff
 
 ## Tracker
-- Task: SWD-262
-- Relates: SWD-255
-- Branch: `cursor/swd-262-finish-haos-app-01f0`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/546
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/546
-- Version: 2.0.1 — App port **8100**; Ingress industrial panel via App hass shim; thin-only `custom_components/heating_assistant`; engine helpers restored for CI (`history`, `schedule_migration`, `recorder_resample`).
+- Task: SWD-263
+- Relates: SWD-262
+- Branch: `cursor/swd-263-options-path-01f0`
+- PR: (pending)
 
 ## Next
-Done
+`/review-fix SWD-263` — Review and auto-fix (single pass)
