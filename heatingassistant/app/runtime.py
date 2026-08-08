@@ -110,6 +110,9 @@ class HeatingRuntime:
             unsubscribe()
         self._subscriptions.clear()
         self._started = False
+        close = getattr(self.bus, "close", None)
+        if callable(close):
+            close()
 
     async def publish_bindings(self) -> None:
         """Publish the retained bridge binding map."""

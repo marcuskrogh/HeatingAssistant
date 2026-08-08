@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from heatingassistant.app.runtime import HeatingRuntime
+from heatingassistant.mqtt.bridge import create_mqtt_bus
 from heatingassistant.persistence import load_config
 
 _STATIC_DIR = Path(__file__).with_name("static")
@@ -59,7 +60,7 @@ def merge_supervisor_options(
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.6"
+    server_version = "HeatingAssistantApp/2.0.7"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
@@ -349,7 +350,8 @@ def main(argv: list[str] | None = None) -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
 
     options = merge_supervisor_options(data_dir, args.options_path)
-    runtime = HeatingRuntime(data_dir, options=options)
+    bus = create_mqtt_bus(options) if args.ha_runtime else None
+    runtime = HeatingRuntime(data_dir, bus=bus, options=options)
     asyncio.run(_start_runtime(runtime))
 
     handler = type("HeatingAssistantHandler", (_Handler,), {"runtime": runtime})
