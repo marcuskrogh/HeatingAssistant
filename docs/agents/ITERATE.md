@@ -41,5 +41,9 @@ Supervisor Ingress returned 502.
 - Branch: `cursor/swd-268-mqtt-ingress-502-72da`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/554
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/554
+- Version: **2.0.8** — Ingress binds without waiting on Mosquitto; MQTT reconnects in background.
+
 ## Next
-`/review-fix SWD-268` — Review and auto-fix (single pass)
+Done
