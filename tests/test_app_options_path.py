@@ -78,4 +78,6 @@ def test_merge_supervisor_options_overlays_mqtt_without_wiping_rooms(
 def test_merge_supervisor_options_missing_file_keeps_config(tmp_path: Path) -> None:
     save_config(tmp_path, {"instance_id": "kept", "rooms": []})
     merged = merge_supervisor_options(tmp_path, tmp_path / "missing.json")
-    assert merged == {"instance_id": "kept", "rooms": []}
+    assert merged["instance_id"] == "kept"
+    assert merged["rooms"] == []
+    assert merged["mqtt_source"] == "options"

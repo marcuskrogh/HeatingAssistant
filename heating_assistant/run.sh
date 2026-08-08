@@ -17,6 +17,8 @@ mkdir -p "${DATA_DIR}"
 
 # Supervisor writes App options here; seed defaults when missing so the runtime
 # has the MQTT connection settings expected by the HAOS App skeleton.
+# Leave mqtt_username/password blank: Mosquitto rejects anonymous logins, and
+# the App fills credentials from Supervisor `services/mqtt` (requires mqtt:need).
 if [ ! -f "${OPTIONS_PATH}" ]; then
   cat > "${OPTIONS_PATH}" <<'EOF'
 {
@@ -27,7 +29,13 @@ if [ ! -f "${OPTIONS_PATH}" ]; then
   "mqtt_password": ""
 }
 EOF
-  echo "HeatingAssistant: seeded default ${OPTIONS_PATH} (mqtt_broker=core-mosquitto)"
+  echo "HeatingAssistant: seeded default ${OPTIONS_PATH} (mqtt_broker=core-mosquitto; credentials via Supervisor discovery)"
+fi
+
+if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+  echo "HeatingAssistant: Supervisor token present — App will discover MQTT credentials when options leave username/password blank."
+else
+  echo "HeatingAssistant: SUPERVISOR_TOKEN missing; MQTT discovery unavailable. Set mqtt_username/mqtt_password in App options if Mosquitto requires auth." >&2
 fi
 
 app_version() {

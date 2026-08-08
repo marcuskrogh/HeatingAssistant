@@ -47,7 +47,7 @@ def test_heatingassistant_app_config_shape():
 
     assert config["name"] == "HeatingAssistant"
     assert config["slug"] == "heatingassistant"
-    assert config["version"] == "2.0.9"
+    assert config["version"] == "2.0.10"
     assert config["arch"] == ["amd64", "aarch64"]
     assert config["init"] is False
     assert config["startup"] == "application"
@@ -58,6 +58,7 @@ def test_heatingassistant_app_config_shape():
     assert config["ingress_port"] == 8100
     assert config["panel_icon"] == "mdi:radiator"
     assert config["panel_title"] == "HeatingAssistant"
+    assert config["services"] == ["mqtt:need"]
     assert config["ports"] == {"8100/tcp": 8100}
     assert config["map"] == [
         {"type": "data", "read_only": False},
@@ -108,7 +109,7 @@ def test_app_version_lock_across_app_context_and_package_metadata():
         app_manifest["version"],
         root_project["version"],
         app_project["version"],
-    } == {"2.0.9"}
+    } == {"2.0.10"}
 
 
 def test_app_dockerfile_uses_synced_package_and_bundled_integration():

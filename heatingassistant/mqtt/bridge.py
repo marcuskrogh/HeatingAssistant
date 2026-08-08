@@ -96,8 +96,10 @@ def create_mqtt_bus(options: Mapping[str, Any] | None = None) -> MqttBus:
     """Return a real MQTT bus when broker settings exist, else the in-memory bus."""
 
     config = dict(options or {})
-    broker = config.get("mqtt_broker")
-    if not isinstance(broker, str) or not broker.strip():
+    from heatingassistant.mqtt.supervisor import normalize_mqtt_broker
+
+    broker = normalize_mqtt_broker(config.get("mqtt_broker"))
+    if not broker:
         return InMemoryMqttBus()
 
     from heatingassistant.mqtt.paho_bus import PahoMqttBus
@@ -116,7 +118,7 @@ def create_mqtt_bus(options: Mapping[str, Any] | None = None) -> MqttBus:
         password = None
 
     return PahoMqttBus(
-        host=broker.strip(),
+        host=broker,
         port=port,
         username=username if isinstance(username, str) else None,
         password=password if isinstance(password, str) else None,
