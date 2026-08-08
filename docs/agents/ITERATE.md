@@ -44,6 +44,7 @@ for mqtt:need + Services API).
 - Task: SWD-274
 - Relates: SWD-273
 - Branch: `cursor/swd-274-hassio-api-token-f56e`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/563
 
 ## Next
 `/review-fix SWD-274` — Review and auto-fix (single pass)
