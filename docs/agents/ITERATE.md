@@ -44,6 +44,10 @@ Root cause:
 - Branch: `cursor/swd-267-ha-entity-wiring-5d31`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/551
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/551 (merged)
+- Version: **2.0.6** — typed HA entity IDs in Ingress picker + auto MQTT bindings/temp_tags.
+
 ## Setup guide (operator)
 1. Update the HeatingAssistant App to **2.0.6** and restart if Supervisor asks.
 2. Ensure Mosquitto is running and the thin `heating_assistant` integration is
@@ -57,4 +61,4 @@ Root cause:
    into App tags. Multi-sensor rooms are averaged in the App.
 
 ## Next
-Review-fix / ship after HAOS soak
+Done
