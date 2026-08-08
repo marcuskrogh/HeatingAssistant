@@ -36,5 +36,9 @@ __main__.py: error: unrecognized arguments: --options-path /data/options.json
 - Branch: `cursor/swd-263-options-path-01f0`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/547
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/547
+- Version: **2.0.2** — accepts `--options-path`; merges Supervisor MQTT/instance options into durable config.
+
 ## Next
-`/review-fix SWD-263` — Review and auto-fix (single pass)
+Done
