@@ -146,12 +146,14 @@ def test_app_http_exposes_mqtt_diagnostics(tmp_path) -> None:
         assert health["mqtt_source"] == "options"
         assert health["mqtt_last_error"] == "not authorised (rc=5)"
         assert "mqtt_discovery_error" in health
+        assert health["supervisor_token_present"] is False
         assert health["mqtt_username"] == "addons"
         assert "mqtt_password" not in health or health["mqtt_password"] in {"", "***"}
 
         state = get_json(base_url, "/api/state")
         assert state["mqtt_connected"] is False
         assert state["mqtt_last_error"] == "not authorised (rc=5)"
+        assert state["supervisor_token_present"] is False
         assert state["mqtt_username"] == "addons"
         assert "mqtt_password" not in state or state["mqtt_password"] in {"", "***"}
 

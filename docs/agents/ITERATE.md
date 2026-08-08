@@ -46,5 +46,8 @@ for mqtt:need + Services API).
 - Branch: `cursor/swd-274-hassio-api-token-f56e`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/563
 
+## Review-fix
+CLEAN — `hassio_api` + `homeassistant_api` match zigbee2mqtt Services API pattern; user logs still show v2.0.12 (fix not installed yet). Added `supervisor_token_present` on `/api/health` and `/api/state` so HAOS can verify token injection after rebuild.
+
 ## Next
-`/review-fix SWD-274` — Review and auto-fix (single pass)
+`/ship SWD-274` — merge PR #563, rebuild/update App on HAOS to v2.0.13
