@@ -100,44 +100,92 @@ def apply_supervisor_mqtt_discovery(
     *,
     discovered: dict[str, Any] | None = None,
     token: str | None = None,
+    fallback: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Fill blank MQTT credentials from Supervisor discovery.
+    """Fill blank MQTT settings from Supervisor discovery.
 
-    Explicit non-blank option values always win. Discovery only supplies missing
-    broker/auth fields so Mosquitto's no-anonymous policy can be satisfied on
-    HAOS without forcing operators to paste add-on passwords.
+    Rules:
+    - Explicit non-blank option values always win.
+    - Username/password are treated as a pair: discover credentials only when
+      **both** are blank. If either is set, leave the other alone.
+    - When ``fallback`` has durable non-blank credentials and discovery fails
+      (or is skipped), restore those instead of leaving blank auth.
+    - ``mqtt_source`` is ``supervisor`` only when discovery actually filled a
+      field.
     """
 
     merged = dict(options)
+    prior = dict(fallback or {})
     broker = normalize_mqtt_broker(merged.get("mqtt_broker"))
     if broker is not None:
         merged["mqtt_broker"] = broker
 
-    needs_discovery = _blank(merged.get("mqtt_username")) or _blank(
+    both_creds_blank = _blank(merged.get("mqtt_username")) and _blank(
         merged.get("mqtt_password")
-    ) or _blank(merged.get("mqtt_broker"))
-    if not needs_discovery:
-        merged.setdefault("mqtt_source", "options")
-        return merged
-
-    service = discovered if discovered is not None else fetch_supervisor_mqtt_service(token=token)
-    if not service:
-        merged.setdefault("mqtt_source", "options")
-        return merged
-
-    if _blank(merged.get("mqtt_broker")) and service.get("mqtt_broker"):
-        merged["mqtt_broker"] = service["mqtt_broker"]
-    if "mqtt_port" not in merged or merged.get("mqtt_port") in (None, ""):
-        merged["mqtt_port"] = service.get("mqtt_port", 1883)
-    if _blank(merged.get("mqtt_username")) and not _blank(service.get("mqtt_username")):
-        merged["mqtt_username"] = service["mqtt_username"]
-    if _blank(merged.get("mqtt_password")) and not _blank(service.get("mqtt_password")):
-        merged["mqtt_password"] = service["mqtt_password"]
-    merged["mqtt_source"] = "supervisor"
-    _logger.info(
-        "Using Supervisor MQTT service at %s:%s (user=%s)",
-        merged.get("mqtt_broker"),
-        merged.get("mqtt_port"),
-        merged.get("mqtt_username") or "(none)",
     )
+    needs_broker = _blank(merged.get("mqtt_broker"))
+    needs_port = "mqtt_port" not in merged or merged.get("mqtt_port") in (None, "")
+    needs_discovery = both_creds_blank or needs_broker or needs_port
+
+    filled_from_supervisor = False
+    service: dict[str, Any] | None = None
+    if needs_discovery:
+        service = (
+            discovered if discovered is not None else fetch_supervisor_mqtt_service(token=token)
+        )
+
+    if service:
+        if needs_broker and service.get("mqtt_broker"):
+            merged["mqtt_broker"] = service["mqtt_broker"]
+            filled_from_supervisor = True
+        if needs_port:
+            merged["mqtt_port"] = service.get("mqtt_port", 1883)
+            filled_from_supervisor = True
+        if both_creds_blank:
+            if not _blank(service.get("mqtt_username")):
+                merged["mqtt_username"] = service["mqtt_username"]
+                filled_from_supervisor = True
+            if not _blank(service.get("mqtt_password")):
+                merged["mqtt_password"] = service["mqtt_password"]
+                filled_from_supervisor = True
+
+    # Preserve durable secrets when options left credentials blank and discovery
+    # did not supply a replacement (Supervisor down / mqtt:need not yet active).
+    if both_creds_blank and _blank(merged.get("mqtt_username")) and not _blank(
+        prior.get("mqtt_username")
+    ):
+        merged["mqtt_username"] = prior["mqtt_username"]
+    if both_creds_blank and _blank(merged.get("mqtt_password")) and not _blank(
+        prior.get("mqtt_password")
+    ):
+        merged["mqtt_password"] = prior["mqtt_password"]
+    if _blank(merged.get("mqtt_broker")) and not _blank(prior.get("mqtt_broker")):
+        prior_broker = normalize_mqtt_broker(prior.get("mqtt_broker"))
+        if prior_broker:
+            merged["mqtt_broker"] = prior_broker
+
+    merged["mqtt_source"] = "supervisor" if filled_from_supervisor else "options"
+    if filled_from_supervisor:
+        _logger.info(
+            "Using Supervisor MQTT service at %s:%s (user=%s)",
+            merged.get("mqtt_broker"),
+            merged.get("mqtt_port"),
+            merged.get("mqtt_username") or "(none)",
+        )
     return merged
+
+
+def redact_mqtt_secrets(payload: Any) -> Any:
+    """Return a deep copy of ``payload`` with MQTT passwords removed for HTTP."""
+
+    if isinstance(payload, dict):
+        redacted: dict[str, Any] = {}
+        for key, value in payload.items():
+            if key == "mqtt_password":
+                redacted[key] = "" if value in (None, "") else "***"
+                continue
+            redacted[key] = redact_mqtt_secrets(value)
+        return redacted
+    if isinstance(payload, list):
+        return [redact_mqtt_secrets(item) for item in payload]
+    return payload

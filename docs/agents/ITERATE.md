@@ -42,6 +42,7 @@ Root cause:
 - Relates: SWD-269
 - Branch: `cursor/swd-270-mqtt-supervisor-creds-65c0`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/558
+- Status: review-fix CLEAN (credential pair, durable fallback, honest mqtt_source, password redaction)
 
 ## Next
-`/review-fix SWD-270` — Review and auto-fix (single pass)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/558
