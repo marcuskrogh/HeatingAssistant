@@ -13,6 +13,22 @@ _logger = logging.getLogger(__name__)
 
 _SUPERVISOR_MQTT_URL = "http://supervisor/services/mqtt"
 
+# Last discovery failure reason (process-wide) for /api/health diagnostics.
+_last_discovery_error: str | None = None
+
+
+def get_last_discovery_error() -> str | None:
+    """Return the most recent Supervisor MQTT discovery failure, if any."""
+
+    return _last_discovery_error
+
+
+def set_last_discovery_error(message: str | None) -> None:
+    """Update the process-wide discovery error (None clears it)."""
+
+    global _last_discovery_error
+    _last_discovery_error = message
+
 
 def normalize_mqtt_broker(value: Any) -> str | None:
     """Return a bare MQTT hostname from options / discovery values."""
@@ -55,6 +71,7 @@ def fetch_supervisor_mqtt_service(
 
     bearer = token if token is not None else os.environ.get("SUPERVISOR_TOKEN")
     if not bearer:
+        set_last_discovery_error("SUPERVISOR_TOKEN missing")
         return None
     request = Request(
         url,
@@ -67,16 +84,41 @@ def fetch_supervisor_mqtt_service(
     try:
         with urlopen(request, timeout=timeout_s) as response:  # noqa: S310 — Supervisor internal URL
             payload = json.load(response)
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+    except HTTPError as exc:
+        detail = ""
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+            if body:
+                parsed = json.loads(body)
+                if isinstance(parsed, dict):
+                    detail = str(parsed.get("message") or parsed.get("error") or body)[:200]
+                else:
+                    detail = body[:200]
+        except Exception:  # noqa: BLE001 - best-effort error body
+            detail = str(exc.reason or exc)
+        message = f"HTTP {exc.code}: {detail or exc.reason}"
+        _logger.warning("Supervisor MQTT discovery failed: %s", message)
+        set_last_discovery_error(message)
+        return None
+    except (URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
         _logger.warning("Supervisor MQTT discovery failed: %s", exc)
+        set_last_discovery_error(str(exc))
         return None
     if not isinstance(payload, dict):
+        set_last_discovery_error("Supervisor MQTT response was not an object")
+        return None
+    if payload.get("result") == "error":
+        message = str(payload.get("message") or "Service not enabled")
+        _logger.warning("Supervisor MQTT discovery: %s", message)
+        set_last_discovery_error(message)
         return None
     data = payload.get("data", payload)
     if not isinstance(data, dict):
+        set_last_discovery_error("Supervisor MQTT data was not an object")
         return None
     host = normalize_mqtt_broker(data.get("host") or data.get("broker"))
     if not host:
+        set_last_discovery_error("Supervisor MQTT response missing host")
         return None
     username = data.get("username")
     password = data.get("password")
@@ -85,6 +127,7 @@ def fetch_supervisor_mqtt_service(
         port = int(port_raw)
     except (TypeError, ValueError):
         port = 1883
+    set_last_discovery_error(None)
     return {
         "mqtt_broker": host,
         "mqtt_port": port,
@@ -105,9 +148,11 @@ def apply_supervisor_mqtt_discovery(
     """Fill blank MQTT settings from Supervisor discovery.
 
     Rules:
-    - Explicit non-blank option values always win.
-    - Username/password are treated as a pair: discover credentials only when
-      **both** are blank. If either is set, leave the other alone.
+    - Explicit non-blank username/password always win (treated as a pair).
+    - When **both** credentials are blank, discover the full Supervisor MQTT
+      endpoint (host/port/ssl/username/password). Stock App options ship with
+      non-blank ``mqtt_broker``/``mqtt_port`` defaults; those must not block
+      the provisioned ``mqtt:need`` endpoint (SWD-273).
     - When ``fallback`` has durable non-blank credentials and discovery fails
       (or is skipped), restore those instead of leaving blank auth.
     - ``mqtt_source`` is ``supervisor`` only when discovery actually filled a
@@ -125,6 +170,9 @@ def apply_supervisor_mqtt_discovery(
     )
     needs_broker = _blank(merged.get("mqtt_broker"))
     needs_port = "mqtt_port" not in merged or merged.get("mqtt_port") in (None, "")
+    # When filling blank credentials from Supervisor, also take the provisioned
+    # host/port/ssl — option defaults are not an intentional override.
+    take_supervisor_endpoint = both_creds_blank
     needs_discovery = both_creds_blank or needs_broker or needs_port
 
     filled_from_supervisor = False
@@ -135,19 +183,41 @@ def apply_supervisor_mqtt_discovery(
         )
 
     if service:
-        if needs_broker and service.get("mqtt_broker"):
-            merged["mqtt_broker"] = service["mqtt_broker"]
-            filled_from_supervisor = True
-        if needs_port:
-            merged["mqtt_port"] = service.get("mqtt_port", 1883)
-            filled_from_supervisor = True
-        if both_creds_blank:
+        if take_supervisor_endpoint:
+            # Blank option credentials ⇒ use the full provisioned mqtt:need
+            # endpoint (host/port/ssl), not just the username/password pair.
+            if service.get("mqtt_broker"):
+                if merged.get("mqtt_broker") != service["mqtt_broker"]:
+                    filled_from_supervisor = True
+                merged["mqtt_broker"] = service["mqtt_broker"]
+            port = service.get("mqtt_port", 1883)
+            if merged.get("mqtt_port") != port:
+                filled_from_supervisor = True
+            merged["mqtt_port"] = port
+            ssl = bool(service.get("mqtt_ssl", False))
+            if bool(merged.get("mqtt_ssl", False)) != ssl or "mqtt_ssl" not in merged:
+                filled_from_supervisor = True
+            merged["mqtt_ssl"] = ssl
             if not _blank(service.get("mqtt_username")):
                 merged["mqtt_username"] = service["mqtt_username"]
                 filled_from_supervisor = True
             if not _blank(service.get("mqtt_password")):
                 merged["mqtt_password"] = service["mqtt_password"]
                 filled_from_supervisor = True
+        else:
+            if needs_broker and service.get("mqtt_broker"):
+                merged["mqtt_broker"] = service["mqtt_broker"]
+                filled_from_supervisor = True
+            if needs_port:
+                merged["mqtt_port"] = service.get("mqtt_port", 1883)
+                filled_from_supervisor = True
+            if both_creds_blank:
+                if not _blank(service.get("mqtt_username")):
+                    merged["mqtt_username"] = service["mqtt_username"]
+                    filled_from_supervisor = True
+                if not _blank(service.get("mqtt_password")):
+                    merged["mqtt_password"] = service["mqtt_password"]
+                    filled_from_supervisor = True
 
     # Preserve durable secrets when options left credentials blank and discovery
     # did not supply a replacement (Supervisor down / mqtt:need not yet active).
@@ -163,13 +233,16 @@ def apply_supervisor_mqtt_discovery(
         prior_broker = normalize_mqtt_broker(prior.get("mqtt_broker"))
         if prior_broker:
             merged["mqtt_broker"] = prior_broker
+    if both_creds_blank and "mqtt_ssl" not in merged and prior.get("mqtt_ssl") is not None:
+        merged["mqtt_ssl"] = bool(prior.get("mqtt_ssl"))
 
     merged["mqtt_source"] = "supervisor" if filled_from_supervisor else "options"
     if filled_from_supervisor:
         _logger.info(
-            "Using Supervisor MQTT service at %s:%s (user=%s)",
+            "Using Supervisor MQTT service at %s:%s ssl=%s (user=%s)",
             merged.get("mqtt_broker"),
             merged.get("mqtt_port"),
+            bool(merged.get("mqtt_ssl", False)),
             merged.get("mqtt_username") or "(none)",
         )
     return merged

@@ -13,6 +13,14 @@ from heatingassistant.mqtt.bridge import _topic_matches
 
 _logger = logging.getLogger(__name__)
 
+_CONNACK_MESSAGES = {
+    1: "incorrect protocol version",
+    2: "invalid client identifier",
+    3: "server unavailable",
+    4: "bad username or password",
+    5: "not authorised",
+}
+
 
 class PahoMqttBus:
     """Bridge the App runtime to a real Mosquitto broker.
@@ -29,17 +37,23 @@ class PahoMqttBus:
         port: int = 1883,
         username: str | None = None,
         password: str | None = None,
+        ssl: bool = False,
         client_id: str | None = None,
         connect_timeout_s: float = 0.0,
         publish_timeout_s: float = 10.0,
     ) -> None:
         self._host = host
         self._port = port
+        self._username = username
+        self._password = password
+        self._ssl = bool(ssl)
+        self._client_id = client_id or f"heatingassistant-{threading.get_ident()}"
         self._publish_timeout_s = publish_timeout_s
         self._subscriptions: list[tuple[str, Any]] = []
         self._on_connect_handlers: list[Any] = []
         self._lock = threading.Lock()
         self._connected = threading.Event()
+        self._last_error: str | None = None
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(
             target=self._loop.run_forever,
@@ -48,19 +62,8 @@ class PahoMqttBus:
         )
         self._loop_thread.start()
 
-        client_id = client_id or f"heatingassistant-{threading.get_ident()}"
-        self._client = mqtt.Client(
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
-            client_id=client_id,
-            protocol=mqtt.MQTTv311,
-        )
-        if username:
-            self._client.username_pw_set(username, password or "")
-        self._client.reconnect_delay_set(min_delay=1, max_delay=30)
-        self._client.on_connect = self._on_connect
-        self._client.on_disconnect = self._on_disconnect
-        self._client.on_message = self._on_message
-        self._client.connect_async(host, port, keepalive=60)
+        self._client = self._build_client()
+        self._client.connect_async(self._host, self._port, keepalive=60)
         self._client.loop_start()
         if connect_timeout_s > 0 and not self._connected.wait(timeout=connect_timeout_s):
             _logger.warning(
@@ -69,6 +72,29 @@ class PahoMqttBus:
                 port,
                 connect_timeout_s,
             )
+            if self._last_error is None:
+                self._last_error = (
+                    f"not connected within {connect_timeout_s:.1f}s to {host}:{port}"
+                )
+
+    def _build_client(self) -> mqtt.Client:
+        client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+            client_id=self._client_id,
+            protocol=mqtt.MQTTv311,
+        )
+        if self._username:
+            client.username_pw_set(self._username, self._password or "")
+        if self._ssl:
+            # Local Mosquitto addon certs are typically self-signed; accept them
+            # for the provisioned mqtt:need endpoint on the Supervisor network.
+            client.tls_set()
+            client.tls_insecure_set(True)
+        client.reconnect_delay_set(min_delay=1, max_delay=30)
+        client.on_connect = self._on_connect
+        client.on_disconnect = self._on_disconnect
+        client.on_message = self._on_message
+        return client
 
     def _on_connect(
         self,
@@ -79,10 +105,25 @@ class PahoMqttBus:
         _properties: Any = None,
     ) -> None:
         if rc != 0:
-            _logger.error("MQTT connect to %s:%s failed with rc=%s", self._host, self._port, rc)
+            reason = _CONNACK_MESSAGES.get(rc, f"connect failed rc={rc}")
+            _logger.error(
+                "MQTT connect to %s:%s failed with rc=%s (%s)",
+                self._host,
+                self._port,
+                rc,
+                reason,
+            )
+            self._last_error = f"{reason} (rc={rc}) @ {self._host}:{self._port}"
             self._connected.clear()
             return
-        _logger.info("MQTT connected to %s:%s", self._host, self._port)
+        _logger.info(
+            "MQTT connected to %s:%s ssl=%s user=%s",
+            self._host,
+            self._port,
+            self._ssl,
+            self._username or "(none)",
+        )
+        self._last_error = None
         self._connected.set()
         with self._lock:
             topic_filters = [topic_filter for topic_filter, _handler in self._subscriptions]
@@ -107,6 +148,8 @@ class PahoMqttBus:
                 self._port,
                 rc,
             )
+            if self._last_error is None:
+                self._last_error = f"unexpected disconnect rc={rc} @ {self._host}:{self._port}"
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
         with self._lock:
@@ -150,6 +193,75 @@ class PahoMqttBus:
         """Whether the client currently has an MQTT session."""
 
         return self._connected.is_set()
+
+    @property
+    def last_error(self) -> str | None:
+        """Most recent connect/disconnect failure reason, if any."""
+
+        return self._last_error
+
+    @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    @property
+    def ssl(self) -> bool:
+        return self._ssl
+
+    def reconfigure(
+        self,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        ssl: bool | None = None,
+    ) -> None:
+        """Update broker endpoint/credentials and restart the MQTT client.
+
+        Used when Supervisor discovery succeeds after a blank/anonymous start
+        (SWD-273). Safe to call from a background thread.
+        """
+
+        with self._lock:
+            if host is not None and host.strip():
+                self._host = host.strip()
+            if port is not None:
+                self._port = int(port)
+            if username is not None:
+                cleaned = username.strip()
+                self._username = cleaned or None
+            if password is not None:
+                self._password = password
+            if ssl is not None:
+                self._ssl = bool(ssl)
+            self._restart_client_locked()
+
+    def _restart_client_locked(self) -> None:
+        try:
+            self._client.loop_stop()
+        except Exception:  # noqa: BLE001 - best-effort stop
+            pass
+        try:
+            self._client.disconnect()
+        except Exception:  # noqa: BLE001 - best-effort disconnect
+            pass
+        self._connected.clear()
+        self._last_error = f"reconfiguring MQTT client for {self._host}:{self._port}"
+        self._client = self._build_client()
+        self._client.connect_async(self._host, self._port, keepalive=60)
+        self._client.loop_start()
+        _logger.info(
+            "MQTT client reconfigured for %s:%s ssl=%s user=%s",
+            self._host,
+            self._port,
+            self._ssl,
+            self._username or "(none)",
+        )
 
     def add_connect_handler(self, handler: Any) -> None:
         """Register a sync/async callback invoked after each successful connect."""

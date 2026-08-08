@@ -6,7 +6,9 @@ from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import json
+import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -14,11 +16,12 @@ from typing import Any
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
-import logging
 
 from heatingassistant.mqtt.bridge import InMemoryMqttBus, MqttBus, Unsubscribe
-
-_logger = logging.getLogger(__name__)
+from heatingassistant.mqtt.supervisor import (
+    apply_supervisor_mqtt_discovery,
+    get_last_discovery_error,
+)
 from heatingassistant.mqtt.topics import (
     DEFAULT_QOS,
     MqttTagPayload,
@@ -31,9 +34,15 @@ from heatingassistant.mqtt.topics import (
 )
 from heatingassistant.persistence import load_config, load_state, save_config, save_state
 
+_logger = logging.getLogger(__name__)
+
 # Keep ~48h of 15s samples in memory for Ingress plots (SWD-269).
 _HISTORY_MAX_SAMPLES = 12_000
 _HISTORY_MIN_INTERVAL_S = 5.0
+
+# Retry Supervisor MQTT discovery while disconnected (SWD-273).
+_MQTT_DISCOVERY_RETRY_INITIAL_S = 2.0
+_MQTT_DISCOVERY_RETRY_MAX_S = 60.0
 
 
 @dataclass(frozen=True)
@@ -112,6 +121,11 @@ class HeatingRuntime:
         # Do not restore the energy clock from disk — integrating across App
         # downtime would spike Daily Energy on the first control cycle (SWD-269).
         self._energy_last_ts: float | None = None
+        # Retry Supervisor discovery when we started without a live MQTT session
+        # and credentials were blank / supervisor-sourced (SWD-273).
+        self._mqtt_discovery_retry = self._should_retry_mqtt_discovery(self.options)
+        self._mqtt_discovery_stop = threading.Event()
+        self._mqtt_discovery_thread: threading.Thread | None = None
         self._recompute_room_temperatures()
         self._record_history_samples(force=True)
 
@@ -145,12 +159,122 @@ class HeatingRuntime:
         if callable(add_connect):
             add_connect(self._on_mqtt_connected)
         self._started = True
+        self._start_mqtt_discovery_retry()
         await self._publish_startup_metadata()
 
     async def _on_mqtt_connected(self) -> None:
         """Republish retained metadata after (re)connect."""
 
         await self._publish_startup_metadata()
+
+    @staticmethod
+    def _blank_mqtt_value(value: Any) -> bool:
+        return value is None or (isinstance(value, str) and not value.strip())
+
+    @classmethod
+    def _should_retry_mqtt_discovery(cls, options: Mapping[str, Any]) -> bool:
+        """Retry when Supervisor may still provision mqtt:need credentials."""
+
+        if options.get("mqtt_source") == "supervisor":
+            return True
+        return cls._blank_mqtt_value(options.get("mqtt_username")) and cls._blank_mqtt_value(
+            options.get("mqtt_password")
+        )
+
+    def _start_mqtt_discovery_retry(self) -> None:
+        """Background thread: rediscover Mosquitto creds while disconnected."""
+
+        if not self._mqtt_discovery_retry:
+            return
+        if self._mqtt_discovery_thread is not None and self._mqtt_discovery_thread.is_alive():
+            return
+        reconfigure = getattr(self.bus, "reconfigure", None)
+        if not callable(reconfigure):
+            return
+        self._mqtt_discovery_stop.clear()
+        self._mqtt_discovery_thread = threading.Thread(
+            target=self._mqtt_discovery_retry_loop,
+            name="heatingassistant-mqtt-discovery",
+            daemon=True,
+        )
+        self._mqtt_discovery_thread.start()
+
+    def _mqtt_discovery_retry_loop(self) -> None:
+        delay = _MQTT_DISCOVERY_RETRY_INITIAL_S
+        while not self._mqtt_discovery_stop.wait(timeout=delay):
+            if self._mqtt_connected():
+                delay = _MQTT_DISCOVERY_RETRY_INITIAL_S
+                continue
+            if not self._try_apply_supervisor_mqtt_discovery():
+                delay = min(delay * 2.0, _MQTT_DISCOVERY_RETRY_MAX_S)
+                continue
+            delay = _MQTT_DISCOVERY_RETRY_INITIAL_S
+
+    def _try_apply_supervisor_mqtt_discovery(self) -> bool:
+        """Fetch Supervisor MQTT details and reconfigure the bus when useful."""
+
+        prior = {
+            "mqtt_broker": self.options.get("mqtt_broker"),
+            "mqtt_port": self.options.get("mqtt_port"),
+            "mqtt_username": self.options.get("mqtt_username"),
+            "mqtt_password": self.options.get("mqtt_password"),
+            "mqtt_ssl": self.options.get("mqtt_ssl", False),
+        }
+        # Force a fresh discovery pass: blank the credential pair so merge takes
+        # the full Supervisor endpoint (host/port/ssl/user/pass).
+        probe = dict(self.options)
+        probe["mqtt_username"] = ""
+        probe["mqtt_password"] = ""
+        merged = apply_supervisor_mqtt_discovery(probe, fallback=prior)
+        if merged.get("mqtt_source") != "supervisor":
+            return False
+
+        changed = any(
+            merged.get(key) != prior.get(key)
+            for key in (
+                "mqtt_broker",
+                "mqtt_port",
+                "mqtt_username",
+                "mqtt_password",
+                "mqtt_ssl",
+            )
+        )
+        # Even without a dict diff, anonymous starts need an explicit reconfigure
+        # once Supervisor finally returns credentials.
+        has_creds = not self._blank_mqtt_value(merged.get("mqtt_username"))
+        if not changed and has_creds and not self._blank_mqtt_value(prior.get("mqtt_username")):
+            return False
+
+        self.options["mqtt_broker"] = merged.get("mqtt_broker")
+        self.options["mqtt_port"] = merged.get("mqtt_port", 1883)
+        self.options["mqtt_username"] = merged.get("mqtt_username") or ""
+        self.options["mqtt_password"] = merged.get("mqtt_password") or ""
+        self.options["mqtt_ssl"] = bool(merged.get("mqtt_ssl", False))
+        self.options["mqtt_source"] = "supervisor"
+        self.mqtt_broker = self.options.get("mqtt_broker")
+        save_config(self.data_dir, self.options)
+
+        reconfigure = getattr(self.bus, "reconfigure", None)
+        if not callable(reconfigure):
+            return False
+        try:
+            reconfigure(
+                host=str(self.options.get("mqtt_broker") or ""),
+                port=int(self.options.get("mqtt_port") or 1883),
+                username=str(self.options.get("mqtt_username") or "") or None,
+                password=str(self.options.get("mqtt_password") or ""),
+                ssl=bool(self.options.get("mqtt_ssl", False)),
+            )
+        except Exception:
+            _logger.exception("Failed to reconfigure MQTT bus after Supervisor discovery")
+            return False
+        _logger.info(
+            "Applied Supervisor MQTT discovery retry for %s:%s (user=%s)",
+            self.options.get("mqtt_broker"),
+            self.options.get("mqtt_port"),
+            self.options.get("mqtt_username") or "(none)",
+        )
+        return True
 
     async def _publish_startup_metadata(self) -> None:
         """Best-effort bindings / control / status publish for Ingress readiness."""
@@ -171,6 +295,10 @@ class HeatingRuntime:
     async def stop(self) -> None:
         """Unsubscribe from MQTT topics."""
 
+        self._mqtt_discovery_stop.set()
+        if self._mqtt_discovery_thread is not None:
+            self._mqtt_discovery_thread.join(timeout=2)
+            self._mqtt_discovery_thread = None
         for unsubscribe in self._subscriptions:
             unsubscribe()
         self._subscriptions.clear()
@@ -615,6 +743,10 @@ class HeatingRuntime:
             "mqtt_connected": self._mqtt_connected(),
             "mqtt_broker": self.mqtt_broker,
             "mqtt_source": self.options.get("mqtt_source") or "options",
+            "mqtt_ssl": bool(self.options.get("mqtt_ssl", False)),
+            "mqtt_username": self.options.get("mqtt_username") or "",
+            "mqtt_last_error": self._mqtt_last_error(),
+            "mqtt_discovery_error": get_last_discovery_error(),
             "hass_states": self.hass_states(),
         }
 
@@ -855,8 +987,11 @@ class HeatingRuntime:
             "mqtt_broker": self.mqtt_broker,
             "mqtt_port": self.options.get("mqtt_port", 1883),
             "mqtt_username": self.options.get("mqtt_username") or "",
+            "mqtt_ssl": bool(self.options.get("mqtt_ssl", False)),
             "mqtt_source": self.options.get("mqtt_source") or "options",
             "mqtt_connected": self._mqtt_connected(),
+            "mqtt_last_error": self._mqtt_last_error(),
+            "mqtt_discovery_error": get_last_discovery_error(),
             "bindings_count": len(self.bindings),
             "control": self._control_status(),
             "actuator_outputs": dict(self.actuator_outputs),
@@ -882,6 +1017,14 @@ class HeatingRuntime:
             # In-memory bus is always "connected" for local/dev.
             mqtt_connected = True
         return bool(mqtt_connected)
+
+    def _mqtt_last_error(self) -> str | None:
+        last_error = getattr(self.bus, "last_error", None)
+        if callable(last_error):
+            last_error = last_error()
+        if isinstance(last_error, str) and last_error.strip():
+            return last_error
+        return None
 
     def _control_status(self) -> dict[str, Any]:
         return {

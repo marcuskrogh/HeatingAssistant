@@ -1,49 +1,61 @@
-# Iterate: Streamline config UX — searchable HA entity picker + Environment recommendations
+# Iterate: MQTT still disconnected after mqtt:need — retry discovery + SSL
 
 ## Prior work
 - Task: SWD-270
-- Also: SWD-267 (Ingress entity picker free-text + MQTT bindings)
+- Also: SWD-269 (soft MQTT / local KPIs), SWD-271 (config UX, shipped between)
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/558 (v2.0.10)
 - Spec context: docs/agents/ITERATE.md, docs/agents/MQTT-TOPICS.md
 
 ## Problem
-The configuration pipeline is cumbersome for first-time setup:
+After updating to v2.0.10/2.0.11, Ingress still shows:
 
-1. Under Ingress, entity selectors only see App-synthetic / already-bound entities.
-   Users must remember and type full HA entity IDs (SWD-267 workaround).
-2. Environment config expands every sensor option. Solar irradiance is not a
-   practical integration path. Weather alone is the low-friction outdoor signal
-   (forecast + outdoor temp for the location); a dedicated outdoor temp sensor
-   is optional. Electricity price should be recommended alongside weather.
+`API connected - N entities · MQTT disconnected`
+
+MPC LOAD and NEXT CONTROL populate (local App control cycle from SWD-269), but
+room CURRENT / MODEL FIT stay `—`, heating power and daily energy stay at 0, and
+plots stay empty because MQTT tags never arrive.
+
+Remaining gaps after SWD-270:
+
+1. Supervisor MQTT discovery runs **once** at process start. When
+   `/services/mqtt` returns "Service not enabled" (common until `mqtt:need` is
+   fully provisioned), the App creates an anonymous Paho client and never
+   re-discovers credentials.
+2. Stock options keep non-blank `mqtt_broker` / `mqtt_port`, so discovery only
+   fills username/password and **ignores** Supervisor host/port/`ssl`.
+3. `mqtt_ssl` is parsed but never applied to `PahoMqttBus`.
+4. Health/status lack a clear last discovery/connect error for operators.
 
 ## Acceptance criteria
-1. All entity selectors can search HA entities (friendly name + entity ID)
-   without requiring users to memorize IDs. Manual ID entry remains as fallback.
-2. Environment page: electricity price and weather forecast are recommended and
-   expanded (price on top with weather).
-3. Outdoor temperature sensor is collapsed/expandable as an optional extension
-   below the weather forecast entity.
-4. Solar irradiance option is removed from the Environment UI (cleared on save).
-5. Regression tests cover entity catalog MQTT path + Environment field
-   ordering/collapse behavior.
-6. Version bump to **2.0.11**.
+1. When MQTT is disconnected and credentials were blank / sourced from
+   Supervisor, App retries Supervisor `/services/mqtt` discovery with backoff
+   and applies credentials without requiring an App rebuild.
+2. When credentials are discovered from Supervisor (blank option creds), also
+   apply Supervisor host/port/ssl for the provisioned MQTT endpoint.
+3. `PahoMqttBus` applies TLS when `mqtt_ssl` is true; reconnects after
+   credential/endpoint updates.
+4. `/api/health` (and state) expose mqtt connect/discovery diagnostics
+   (connected, source, last error, username present — password redacted).
+5. Regression tests cover retry/reconfigure, supervisor endpoint+ssl merge, and
+   diagnostics.
+6. Version bump to **2.0.12**.
 
 ## Out of scope
-- Removing backend solar-radiation engine support (UI-only removal for now).
-- Full HA websocket custom-panel parity outside Ingress.
+- Changing Mosquitto addon config itself.
+- Full offline message queue persistence.
 
 ## Work packages
-1. Thin HA bridge publishes a retained MQTT entity catalog for picker domains.
-2. App consumes catalog and merges into Ingress `hass_states` for all pickers.
-3. Environment UX reorder / collapse / remove solar.
-4. Tests + version 2.0.11 + sync App package.
+1. Discovery merge: when filling blank creds from Supervisor, also take
+   host/port/ssl; improve error logging for "Service not enabled".
+2. PahoMqttBus: TLS support + `reconfigure()` for auth/endpoint updates.
+3. Runtime/main: background discovery retry while disconnected; persist
+   discovered settings; expose diagnostics.
+4. Tests + version 2.0.12 + sync App package.
 
 ## Tracker
-- Task: SWD-271
+- Task: SWD-273
 - Relates: SWD-270
-- Branch: `cursor/swd-271-config-ux-entity-picker-7676`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/559
-- Status: review-fix CLEAN (catalog flag + weather outdoor °C fallback)
+- Branch: `cursor/swd-273-mqtt-discovery-retry-f56e`
 
 ## Next
-Done — https://github.com/marcuskrogh/HeatingAssistant/pull/559
+`/review-fix SWD-273` — Review and auto-fix (single pass)
