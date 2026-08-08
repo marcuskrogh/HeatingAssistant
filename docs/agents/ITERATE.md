@@ -41,6 +41,7 @@ Root cause:
 - Task: SWD-270
 - Relates: SWD-269
 - Branch: `cursor/swd-270-mqtt-supervisor-creds-65c0`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/558
 
 ## Next
 `/review-fix SWD-270` — Review and auto-fix (single pass)
