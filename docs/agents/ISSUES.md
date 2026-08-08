@@ -4,9 +4,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-273 | Task | [Iterate] MQTT still disconnected after mqtt:need — one-shot discovery + ignored SSL/endpoint | In Progress | — | docs/agents/ITERATE.md | In Progress — branch `cursor/swd-273-mqtt-discovery-retry-f56e` |
+| SWD-273 | Task | [Iterate] MQTT still disconnected after mqtt:need — one-shot discovery + ignored SSL/endpoint | In Review | — | docs/agents/ITERATE.md | In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/560 |
 | SWD-271 | Task | [Iterate] Streamline config UX — searchable HA entity picker + Environment recommendations | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/559 |
-| SWD-273 | Task | [Iterate] MQTT still disconnected after mqtt:need — one-shot discovery + ignored SSL/endpoint | In Progress | — | docs/agents/ITERATE.md | In Progress — branch `cursor/swd-273-mqtt-discovery-retry-f56e` |
 | SWD-270 | Task | [Iterate] Ingress shows MQTT disconnected — App missing Supervisor Mosquitto credentials | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/558 |
 | SWD-269 | Task | [Iterate] Ingress features empty / Controller Tuning 502 after MQTT non-blocking start | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/557 |
 | SWD-268 | Task | [Iterate] Ingress 502 Bad Gateway after MQTT update — App not ready | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/554 |
@@ -28,6 +27,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-08 — SWD-273 In Review + PR #560: retry Supervisor MQTT discovery + SSL endpoint; v2.0.12; Next `/review-fix SWD-273`.
 - 2026-08-08 — `/iterate` SWD-273 from SWD-270: MQTT still disconnected after mqtt:need — retry discovery + apply host/port/ssl + TLS + diagnostics; v2.0.12; branch `cursor/swd-273-mqtt-discovery-retry-f56e`.
 
 - 2026-08-08 — shipped SWD-271 via PR #559 (`1306eab`): searchable HA entity catalog + Environment UX; v2.0.11; review-fix CLEAN (catalog flag + weather outdoor °C fallback).
