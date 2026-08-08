@@ -42,7 +42,8 @@ The configuration pipeline is cumbersome for first-time setup:
 - Task: SWD-271
 - Relates: SWD-270
 - Branch: `cursor/swd-271-config-ux-entity-picker-7676`
-- Status: In Progress
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/559
+- Status: In Review
 
 ## Next
 `/review-fix SWD-271` — Review and auto-fix (single pass)
