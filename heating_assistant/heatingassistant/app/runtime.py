@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -761,6 +762,7 @@ class HeatingRuntime:
             "mqtt_username": self.options.get("mqtt_username") or "",
             "mqtt_last_error": self._mqtt_last_error(),
             "mqtt_discovery_error": get_last_discovery_error(),
+            "supervisor_token_present": bool(os.environ.get("SUPERVISOR_TOKEN")),
             "hass_states": self.hass_states(),
         }
 
@@ -1006,6 +1008,7 @@ class HeatingRuntime:
             "mqtt_connected": self._mqtt_connected(),
             "mqtt_last_error": self._mqtt_last_error(),
             "mqtt_discovery_error": get_last_discovery_error(),
+            "supervisor_token_present": bool(os.environ.get("SUPERVISOR_TOKEN")),
             "bindings_count": len(self.bindings),
             "control": self._control_status(),
             "actuator_outputs": dict(self.actuator_outputs),
