@@ -45,7 +45,7 @@
 ## Tracker
 - Tasks: SWD-286, SWD-287
 - Branch: `cursor/swd-286-schedule-comfort-constraints-7e7d`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/582
 
 ## Next
 `/review-fix` → ship; rebuild App on HAOS to v2.0.25.
