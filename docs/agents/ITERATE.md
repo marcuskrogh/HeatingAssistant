@@ -42,6 +42,7 @@ Root causes:
 - Task: SWD-277
 - Relates: SWD-276
 - Branch: `cursor/swd-277-plot-cadence-forecasts-f56e`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
 
 ## Next
 `/review-fix SWD-277` — Review and auto-fix (single pass)
