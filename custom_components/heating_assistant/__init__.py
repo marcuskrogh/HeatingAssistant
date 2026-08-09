@@ -22,6 +22,7 @@ from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import CONF_INSTANCE_ID, DATA_MANAGERS, DEFAULT_INSTANCE_ID, DOMAIN, QOS
+from .forecast_publish import forecast_attributes_for_publish
 from .mqtt_topics import (
     PICKER_DOMAINS,
     MqttTagPayload,
@@ -226,15 +227,44 @@ class _BridgeManager:
                     except (TypeError, ValueError):
                         pass
             # Carry selected HA attributes so the App can build day-ahead price
-            # and weather/solar forecast series (SWD-278).
-            attributes = _forecast_attributes_for_publish(state)
-            payload = MqttTagPayload(
-                value,
-                status="GOOD",
-                reason=reason,
-                ts=time.time(),
-                attributes=attributes,
+            # and weather/solar forecast series (SWD-278/279).
+            attributes = await forecast_attributes_for_publish(self.hass, state)
+            try:
+                payload = MqttTagPayload(
+                    value,
+                    status="GOOD",
+                    reason=reason,
+                    ts=time.time(),
+                    attributes=attributes,
+                )
+                encoded = payload.encode()
+            except (TypeError, ValueError) as exc:
+                # Last-resort: publish scalar only so a bad attribute blob does
+                # not drop the live outdoor/price reading entirely.
+                _LOGGER.warning(
+                    "Forecast attributes for %s not JSON-serializable (%s); "
+                    "publishing scalar only",
+                    tag,
+                    exc,
+                )
+                payload = MqttTagPayload(
+                    value,
+                    status="GOOD",
+                    reason=reason,
+                    ts=time.time(),
+                    attributes=None,
+                )
+                encoded = payload.encode()
+            await _maybe_await(
+                mqtt.async_publish(
+                    self.hass,
+                    tag_in(self.instance_id, tag),
+                    encoded,
+                    qos=QOS,
+                    retain=True,
+                )
             )
+            return
         # Retain last-known tag values so the App receives them on (re)subscribe
         # after a late MQTT connect (SWD-269). Without retain, the bind-time
         # snapshot is lost until the next HA state change.
@@ -292,35 +322,3 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.lower() in {"1", "true", "on", "open", "heat"}
     return bool(value)
-
-
-# Attributes the App needs for MPC disturbance / price forecasts (SWD-278).
-_FORECAST_ATTR_KEYS = (
-    "forecast",
-    "temperature",
-    "cloud_coverage",
-    "wind_speed",
-    "wind_speed_unit",
-    "raw_today",
-    "raw_tomorrow",
-    "today",
-    "tomorrow",
-    "prices_today",
-    "prices_tomorrow",
-    "unit_of_measurement",
-)
-
-
-def _forecast_attributes_for_publish(state: State) -> dict[str, Any] | None:
-    """Return a compact attribute subset for forecast builders, or None."""
-
-    attrs = getattr(state, "attributes", None) or {}
-    selected: dict[str, Any] = {}
-    for key in _FORECAST_ATTR_KEYS:
-        if key in attrs and attrs[key] is not None:
-            selected[key] = attrs[key]
-    # Solar irradiance integrations often use one of these list keys.
-    for key in ("forecast", "forecasts", "data", "entries"):
-        if key in attrs and attrs[key] is not None and key not in selected:
-            selected[key] = attrs[key]
-    return selected or None

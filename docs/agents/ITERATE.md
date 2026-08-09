@@ -1,57 +1,60 @@
-# Iterate: Incomplete plot forecasts (outdoor / solar / price / linearised)
+# Iterate: Plot forecasts still flat (attrs / weather service / estimated bridge)
 
 ## Prior work
-- Task: SWD-277
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566 (v2.0.16)
-- Spec context: docs/agents/ITERATE.md
+- Task: SWD-278
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/567 (v2.0.17)
+- Spec context: docs/agents/ITERATE.md (prior)
 
 ## Problem
-After SWD-277, temperature Forecast appears, but Linearised looks flat/useless,
-Planned Power sits at 0, Price Forecast is a flat scalar hold, and the
-Disturbances plot stays empty (no outdoor / solar forecasts).
+After SWD-278, room plots still look wrong: linearised prediction does not
+start from the EKF estimated output, Price Forecast remains a flat scalar
+hold (not the day-ahead entity series), and outdoor/solar forecasts stay
+constant (persistence).
 
 Root causes:
-1. `ControlEngine.compute_actions` forces `solar_gains={room: 0}` and never
-   passes outdoor / cloud / GHI / price forecasts into `controller.compute()`.
-2. Thin MQTT bridge publishes only scalar tag values — Nord Pool `raw_today` /
-   weather `forecast` attributes never reach the App.
-3. Controller `price_forecast` is not cached; App payload only holds the current
-   scalar price across the horizon.
+1. Thin bridge `json.dumps` of Nord Pool `raw_today` fails when entries
+   contain `datetime` objects — attributes never reach the App.
+2. Modern HA weather entities no longer expose `forecast` on state
+   attributes; SWD-278 only read attrs and skipped `weather.get_forecasts`.
+3. App forecast bridge omits `linearised_temperature` at `now` and uses
+   measured room temp instead of EKF `filtered_temperatures`; solar future
+   steps index the N+1 series as if it were N-aligned.
 
 ## Acceptance criteria
-1. After a control cycle with weather (+ optional solar/price) wired,
-   `/api/forecasts` room steps include non-null `outdoor_temp` and `solar_gain`
-   over the horizon (geometry and/or GHI; outdoor may be persistence when no
-   weather forecast attrs).
-2. `price_forecast` uses day-ahead attribute series when present; scalar hold
-   remains the fallback when only a current price is available.
-3. Linearised temperatures use the same room-name keys as nonlinear predictions
-   and are present when the QP trajectory exists.
-4. Regression tests; version **2.0.17**.
+1. Price entity with `raw_today`/`raw_tomorrow` (including datetime-valued
+   starts) publishes JSON-safe MQTT attributes; `/api/forecasts`
+   `price_forecast` varies with the day-ahead series (not only scalar hold).
+2. Weather-bound outdoor forecast uses `weather.get_forecasts` when the
+   service is available so outdoor (and cloud-driven solar) vary over the
+   horizon when forecast data exists.
+3. Forecast bridge at `now` sets `temperature` and `linearised_temperature`
+   from EKF estimated/filtered output when available; solar future steps use
+   `solar_forecast[i+1]` for the N+1 series.
+4. Regression tests; version **2.0.18**.
 
 ## Out of scope
-- Polling `weather.get_forecasts` beyond attribute / Core state attrs.
 - History persistence across App restart.
 - MODEL FIT / solar KPI completeness.
+- Changing MPC linearisation point away from setpoint equilibrium.
 
 ## Work packages
-1. MQTT tag `attributes` + thin integration publish for weather/price/solar.
-2. Runtime builds outdoor/cloud/GHI/price series; ControlEngine stops zeroing
-   solar and forwards forecasts; cache + payload for price series.
-3. Version 2.0.17 + tests + tracker.
+1. Thin bridge: JSON-safe attribute sanitisation + `weather.get_forecasts`.
+2. ControlEngine caches filtered temps; forecast payload bridges from
+   estimated output and fixes solar N+1 indexing.
+3. Version 2.0.18 + tests + tracker.
 
 ## Tracker
-- Task: SWD-278
-- Relates: SWD-277
-- Branch: `cursor/swd-278-forecast-disturbances-f56e`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/567
+- Task: SWD-279
+- Relates: SWD-278
+- Branch: `cursor/swd-279-forecast-bridge-attrs-4b6c`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568
 
 ## Review-fix
-CLEAN — MQTT attrs + MPC disturbance wiring; cleared stale attrs; solar attr keys aligned.
+CLEAN — weather forecast cache on service failure; UTC naive datetimes; price series regression.
 
 ## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/567
-- Version: **2.0.17**
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568
+- Version: **2.0.18**
 
 ## Next
-Done — rebuild/update App on HAOS to v2.0.17; confirm Disturbances (outdoor/solar) and day-ahead Price Forecast after weather/price entities refresh. `/iterate` if weather.get_forecasts service path or history persistence still needed.
+Done — rebuild/update App on HAOS to v2.0.18; confirm day-ahead Price Forecast, Disturbances outdoor/solar, and Linearised bridging from Filtered at NOW. `/iterate` if still wrong after rebuild.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 import json
 from typing import Any, Literal
 
@@ -13,6 +14,20 @@ VALID_DIRECTIONS = frozenset({"in", "out"})
 
 TagStatus = Literal["GOOD", "BAD", "UNCERTAIN"]
 TagDirection = Literal["in", "out"]
+
+
+def _json_default(value: Any) -> Any:
+    """Serialize HA attribute types that plain json.dumps rejects."""
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, set):
+        return list(value)
+    if hasattr(value, "as_dict") and callable(value.as_dict):
+        return value.as_dict()
+    return str(value)
 
 
 def _validate_topic_part(value: str, name: str) -> str:
@@ -135,7 +150,12 @@ class MqttTagPayload:
     def encode(self) -> str:
         """Encode the payload as compact JSON for MQTT."""
 
-        return json.dumps(self.to_dict(), separators=(",", ":"), sort_keys=True)
+        return json.dumps(
+            self.to_dict(),
+            separators=(",", ":"),
+            sort_keys=True,
+            default=_json_default,
+        )
 
     @classmethod
     def decode(cls, payload: str | bytes | bytearray | dict[str, Any]) -> "MqttTagPayload":

@@ -39,6 +39,7 @@ class ControlEngine:
         self._last_outdoor_forecast: list[float] = []
         self._last_solar_forecast: list[dict[str, float]] = []
         self._last_price_forecast: list[float] = []
+        self._last_filtered_temperatures: dict[str, float] = {}
         self._last_compute_ts: datetime | None = None
         self._forecast_lock = threading.Lock()
         self.update_config(config or {})
@@ -125,6 +126,7 @@ class ControlEngine:
                 "outdoor_forecast": list(self._last_outdoor_forecast),
                 "solar_forecast": [dict(item) for item in self._last_solar_forecast],
                 "price_forecast": list(self._last_price_forecast),
+                "filtered_temperatures": dict(self._last_filtered_temperatures),
                 "dt": float(self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
                 "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
             }
@@ -188,6 +190,14 @@ class ControlEngine:
         price_forecast = [
             float(value) for value in list(getattr(controller, "price_forecast", []) or [])
         ]
+        filtered: dict[str, float] = {}
+        raw_filtered = getattr(controller, "filtered_temperatures", None) or {}
+        if isinstance(raw_filtered, Mapping):
+            for key, value in raw_filtered.items():
+                try:
+                    filtered[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
         with self._forecast_lock:
             self._last_predictions = predictions
             self._last_linearised_predictions = linearised
@@ -195,6 +205,7 @@ class ControlEngine:
             self._last_outdoor_forecast = outdoor_forecast
             self._last_solar_forecast = solar_forecast
             self._last_price_forecast = price_forecast
+            self._last_filtered_temperatures = filtered
             self._last_compute_ts = datetime.now(timezone.utc)
 
     def _clear_controller_forecast(self) -> None:
@@ -205,6 +216,7 @@ class ControlEngine:
             self._last_outdoor_forecast = []
             self._last_solar_forecast = []
             self._last_price_forecast = []
+            self._last_filtered_temperatures = {}
             self._last_compute_ts = None
 
     def _try_build_controller(self) -> Any:

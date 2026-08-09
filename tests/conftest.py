@@ -83,6 +83,7 @@ _HA_PACKAGES = [
     "homeassistant.helpers.reload",
     "homeassistant.helpers.service",
     "homeassistant.components",
+    "homeassistant.components.mqtt",
     "homeassistant.components.websocket_api",
     "homeassistant.components.sensor",
     "homeassistant.components.climate",

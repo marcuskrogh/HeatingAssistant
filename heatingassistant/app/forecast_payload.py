@@ -39,6 +39,9 @@ def build_app_forecast_payload(
     heating_schedule = list(snapshot.get("heating_schedule") or [])
     outdoor_forecast = list(snapshot.get("outdoor_forecast") or [])
     solar_forecast = list(snapshot.get("solar_forecast") or [])
+    filtered_temps = snapshot.get("filtered_temperatures") or {}
+    if not isinstance(filtered_temps, Mapping):
+        filtered_temps = {}
     power_meta = room_power_meta or {}
 
     n_pred = len(predictions)
@@ -61,6 +64,16 @@ def build_app_forecast_payload(
         current_temp = room_temperatures.get(name)
         if current_temp is None:
             current_temp = _as_float(room.get("temperature"), setpoint)
+        # Bridge from EKF estimated output when available (classic forecast
+        # sensor behaviour); fall back to measured room temperature.
+        estimated = filtered_temps.get(name)
+        if estimated is None:
+            bridge_temp = float(current_temp)
+        else:
+            try:
+                bridge_temp = float(estimated)
+            except (TypeError, ValueError):
+                bridge_temp = float(current_temp)
         meta = dict(power_meta.get(name) or {})
 
         bridge_capacity = _capacity_at(
@@ -69,7 +82,8 @@ def build_app_forecast_payload(
         forecast: list[dict[str, Any]] = [
             {
                 "time": now.isoformat(),
-                "temperature": round(float(current_temp), 2),
+                "temperature": round(bridge_temp, 2),
+                "linearised_temperature": round(bridge_temp, 2),
                 "heating_power": _step_heating(heating_schedule, 0, name),
                 "solar_gain": _step_solar(solar_forecast, 0, name),
                 "outdoor_temp": None if outdoor_temp is None else round(float(outdoor_temp), 2),
@@ -101,7 +115,10 @@ def build_app_forecast_payload(
             power = _step_heating(heating_schedule, i, name)
             if power is not None:
                 entry["heating_power"] = power
-            solar = _step_solar(solar_forecast, i, name)
+            # solar_forecast is N+1 (index 0 = now); future step i uses i+1.
+            solar = _step_solar(solar_forecast, i + 1, name)
+            if solar is None:
+                solar = _step_solar(solar_forecast, i, name)
             if solar is not None:
                 entry["solar_gain"] = solar
             step_outdoor: float | None = None
@@ -120,13 +137,20 @@ def build_app_forecast_payload(
         # Hold final actuation flat when the plot horizon exceeds the MPC horizon.
         if extra > 0 and main_n > 0:
             last_power = _step_heating(heating_schedule, main_n - 1, name)
-            last_solar = _step_solar(solar_forecast, main_n - 1, name)
+            last_solar = _step_solar(solar_forecast, main_n, name)
+            if last_solar is None:
+                last_solar = _step_solar(solar_forecast, main_n - 1, name)
             last_outdoor = (
                 float(outdoor_forecast[min(main_n - 1, len(outdoor_forecast) - 1)])
                 if outdoor_forecast
                 else outdoor_temp
             )
-            last_temp = trajectory[-1] if trajectory else float(current_temp)
+            last_temp = trajectory[-1] if trajectory else bridge_temp
+            last_lin = None
+            if main_n - 1 < len(linearised) and isinstance(linearised[main_n - 1], Mapping):
+                raw_lin = linearised[main_n - 1].get(name)
+                if raw_lin is not None:
+                    last_lin = round(float(raw_lin), 2)
             last_capacity = _capacity_at(power_meta, name, last_outdoor)
             for k in range(extra):
                 step_time = now + timedelta(seconds=dt * (main_n + k + 1))
@@ -139,6 +163,8 @@ def build_app_forecast_payload(
                     "enabled": enabled,
                     "extended": True,
                 }
+                if last_lin is not None:
+                    entry["linearised_temperature"] = last_lin
                 if last_power is not None:
                     entry["heating_power"] = last_power
                 if last_solar is not None:
