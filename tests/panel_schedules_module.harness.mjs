@@ -110,6 +110,26 @@ function scanSchedulesDetailDoesNotExportPatchStateSchedule() {
   );
 }
 
+/** SWD-287: live schedule refreshes must not wipe an expanded period editor. */
+function scanSchedulesDetailPreservesExpandedOnRefresh() {
+  const source = readFileSync(SCHEDULES_DETAIL, 'utf8');
+  assert(
+    /function\s+initLocalPeriods\s*\(\s*schedData\s*,\s*\{\s*resetExpanded\s*=\s*true\s*\}\s*=\s*\{\}\s*\)/.test(
+      source,
+    ),
+    'initLocalPeriods must accept resetExpanded option (default true)',
+  );
+  assert(
+    /initLocalPeriods\(\s*newData\s*,\s*\{\s*resetExpanded:\s*false\s*\}\s*\)/.test(source),
+    'applySchedulePayload must re-init with resetExpanded: false on live refresh',
+  );
+  assert(
+    /unchanged\s*&&\s*localPeriods\.length\s*>\s*0/.test(source)
+      || /periodsMatch\(p,\s*localPeriods\[i\]\)/.test(source),
+    'applySchedulePayload should skip re-render when periods are unchanged',
+  );
+}
+
 async function loadSchedulesModuleChain() {
   const pageUrl = `${pathToFileURL(SCHEDULES_PAGE).href}?v=94`;
   const mod = await import(pageUrl);
@@ -128,5 +148,6 @@ async function loadSchedulesModuleChain() {
 
 scanForImportExportShadowing();
 scanSchedulesDetailDoesNotExportPatchStateSchedule();
+scanSchedulesDetailPreservesExpandedOnRefresh();
 await loadSchedulesModuleChain();
 console.log('panel schedules module harness: ok');

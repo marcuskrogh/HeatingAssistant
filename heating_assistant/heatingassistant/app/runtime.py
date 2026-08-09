@@ -35,6 +35,12 @@ from heatingassistant.engine.electricity_price import (
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
 from heatingassistant.engine.heat_sources import HeatSource
+from heatingassistant.engine.schedule import EffectiveControlParams
+from heatingassistant.engine.schedule_control import (
+    ControlTrajectory,
+    compute_control_trajectory,
+    resolve_room_effective_params,
+)
 
 from heatingassistant.mqtt.bridge import InMemoryMqttBus, MqttBus, Unsubscribe
 from heatingassistant.mqtt.supervisor import (
@@ -145,6 +151,8 @@ class HeatingRuntime:
         self._last_control_duration_s: float = float(
             self._coerce_number(self.state.get("last_control_duration_s")) or 0.0
         )
+        self._last_control_trajectory: ControlTrajectory | None = None
+        self._last_effective_params: dict[str, EffectiveControlParams] = {}
         self._energy_total_wh: dict[str, float] = {
             str(key): float(value)
             for key, value in dict(self.state.get("energy_total_wh") or {}).items()
@@ -578,12 +586,19 @@ class HeatingRuntime:
             self._recompute_room_temperatures()
             outdoor = self._outdoor_temperature()
             disturbances = self._mpc_disturbance_inputs(outdoor)
+            schedule_ctx = self._schedule_control_context()
             outputs = self.control_engine.compute_actions(
                 self.room_temperatures,
                 outdoor,
-                self._setpoints(),
+                schedule_ctx["setpoints"],
+                comfort_offsets=schedule_ctx["comfort_offsets"],
+                control_trajectory=schedule_ctx["trajectory"],
+                disabled_sources=schedule_ctx["disabled_sources"],
+                now=schedule_ctx["now_utc"],
                 **disturbances,
             )
+            self._last_control_trajectory = schedule_ctx["trajectory"]
+            self._last_effective_params = schedule_ctx["effective"]
             self.actuator_outputs = dict(outputs)
             now = time.time()
             self._accumulate_energy(now)
@@ -879,6 +894,14 @@ class HeatingRuntime:
         if energy_price is None and price_tag != "energy_price":
             energy_price = self._coerce_number(self.tag_values.get("energy_price"))
         outdoor_temp = self._outdoor_temperature()
+        dt = float(snapshot.get("dt") or self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        n_pred = len(list(snapshot.get("predictions") or []))
+        if plot_forecast_hours is not None and dt > 0:
+            target_steps = max(0, int(round(float(plot_forecast_hours) * 3600.0 / dt)))
+        else:
+            target_steps = n_pred
+        traj_steps = max(n_pred, target_steps, 1) + 1  # cover now + futures
+        trajectory = self._build_control_trajectory(n_steps=traj_steps, dt_seconds=dt)
         return build_app_forecast_payload(
             rooms=self._rooms(),
             room_temperatures=self.room_temperatures,
@@ -887,6 +910,7 @@ class HeatingRuntime:
             snapshot=snapshot,
             plot_forecast_hours=plot_forecast_hours,
             room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
+            control_trajectory=trajectory,
         )
 
     def preview_tuning_forecast(
@@ -962,6 +986,15 @@ class HeatingRuntime:
             if energy_price is None and price_tag != "energy_price":
                 energy_price = self._coerce_number(self.tag_values.get("energy_price"))
 
+            # When previewing a global comfort_offset, hold that draft band flat
+            # (SWD-285) — skip schedule trajectory so rooms[] overrides win.
+            trajectory = None
+            if comfort_override is None:
+                trajectory = self._build_control_trajectory(
+                    n_steps=max(preview_horizon, 1) + 1,
+                    dt_seconds=preview_dt,
+                )
+
             return build_app_forecast_payload(
                 rooms=rooms,
                 room_temperatures=self.room_temperatures,
@@ -970,6 +1003,7 @@ class HeatingRuntime:
                 snapshot=snapshot,
                 plot_forecast_hours=plot_forecast_hours,
                 room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
+                control_trajectory=trajectory,
             )
         finally:
             self._control_lock.release()
@@ -1207,18 +1241,28 @@ class HeatingRuntime:
 
         setpoints = self._setpoints()
         schedules = self.schedules()
+        now_local = self._schedule_now_local()
+        effective_by_room = self._resolve_effective_params(now_local=now_local)
         for room in self._rooms():
             name = room.get("name")
             if not isinstance(name, str) or not name:
                 continue
             slug = self._room_slug(name)
             temperature = self.room_temperatures.get(name)
-            setpoint = setpoints.get(name, self._coerce_number(room.get("setpoint")) or 21.0)
-            offset = self._coerce_number(room.get("comfort_offset"))
-            if offset is None:
-                offset = float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET))
-            enabled = self._room_enabled(room)
-            schedule = schedules.get(slug, {"enabled": enabled, "periods": []})
+            base_setpoint = setpoints.get(name, self._coerce_number(room.get("setpoint")) or 21.0)
+            effective = effective_by_room.get(name)
+            if effective is None:
+                offset = self._coerce_number(room.get("comfort_offset"))
+                if offset is None:
+                    offset = float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET))
+                setpoint = float(base_setpoint)
+                schedule_heating = True
+            else:
+                setpoint = float(effective.setpoint)
+                offset = float(effective.comfort_offset)
+                schedule_heating = bool(effective.enabled)
+            enabled = self._room_enabled(room) and schedule_heating
+            schedule = schedules.get(slug) or {"enabled": True, "periods": []}
             power = self._room_power(name)
             energy_wh = float(self._energy_total_wh.get(slug, 0.0))
 
@@ -1831,6 +1875,133 @@ class HeatingRuntime:
             if value is not None:
                 setpoints[name] = value
         return setpoints
+
+    def _schedule_now_local(self) -> datetime:
+        """Wall-clock local time for schedule window matching."""
+
+        return datetime.now().astimezone()
+
+    def _resolve_effective_params(
+        self, *, now_local: datetime | None = None
+    ) -> dict[str, EffectiveControlParams]:
+        """Resolve schedule-aware setpoint / comfort for every configured room."""
+
+        now_local = now_local or self._schedule_now_local()
+        schedules = self.schedules()
+        base_setpoints = self._setpoints()
+        default_global = float(
+            self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET)
+        )
+        result: dict[str, EffectiveControlParams] = {}
+        for room in self._rooms():
+            name = room.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            slug = self._room_slug(name)
+            base = base_setpoints.get(
+                name, self._coerce_number(room.get("setpoint")) or const.DEFAULT_SETPOINT
+            )
+            room_offset = self._coerce_number(room.get("comfort_offset"))
+            default_offset = (
+                float(room_offset) if room_offset is not None else default_global
+            )
+            result[name] = resolve_room_effective_params(
+                schedule_payload=schedules.get(slug),
+                base_setpoint=float(base),
+                measured_temp=self.room_temperatures.get(name),
+                now=now_local,
+                default_comfort_offset=default_offset,
+            )
+        return result
+
+    def _build_control_trajectory(
+        self,
+        *,
+        n_steps: int,
+        dt_seconds: float,
+        now_local: datetime | None = None,
+        current_effective: Mapping[str, EffectiveControlParams] | None = None,
+    ) -> ControlTrajectory:
+        """Project schedule setpoints / comfort corridors over ``n_steps``."""
+
+        now_local = now_local or self._schedule_now_local()
+        effective = current_effective or self._resolve_effective_params(
+            now_local=now_local
+        )
+        base_setpoints = self._setpoints()
+        default_global = float(
+            self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET)
+        )
+        default_offsets: dict[str, float] = {}
+        room_enabled: dict[str, bool] = {}
+        for room in self._rooms():
+            name = room.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            room_offset = self._coerce_number(room.get("comfort_offset"))
+            default_offsets[name] = (
+                float(room_offset) if room_offset is not None else default_global
+            )
+            room_enabled[name] = self._room_enabled(room)
+            base_setpoints.setdefault(
+                name,
+                float(self._coerce_number(room.get("setpoint")) or const.DEFAULT_SETPOINT),
+            )
+        return compute_control_trajectory(
+            rooms=self._rooms(),
+            schedules_by_slug=self.schedules(),
+            room_slug_fn=self._room_slug,
+            base_setpoints=base_setpoints,
+            default_comfort_offsets=default_offsets,
+            room_enabled=room_enabled,
+            now_local=now_local,
+            n_steps=n_steps,
+            dt_seconds=dt_seconds,
+            current_effective=effective,
+        )
+
+    def _schedule_control_context(self) -> dict[str, Any]:
+        """Build setpoints, comfort offsets, trajectory, and disabled sources."""
+
+        now_local = self._schedule_now_local()
+        now_utc = now_local.astimezone(timezone.utc)
+        effective = self._resolve_effective_params(now_local=now_local)
+        dt = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        horizon = int(self.options.get("horizon", const.DEFAULT_HORIZON))
+        trajectory = self._build_control_trajectory(
+            n_steps=max(horizon, 1),
+            dt_seconds=dt,
+            now_local=now_local,
+            current_effective=effective,
+        )
+        setpoints = {
+            name: float(params.setpoint) for name, params in effective.items()
+        }
+        comfort_offsets = {
+            name: float(params.comfort_offset) for name, params in effective.items()
+        }
+        disabled_rooms = {
+            name
+            for name, params in effective.items()
+            if not params.enabled
+        }
+        for room in self._rooms():
+            name = room.get("name")
+            if isinstance(name, str) and name and not self._room_enabled(room):
+                disabled_rooms.add(name)
+        disabled_sources: set[str] = set()
+        for source in self.control_engine.heat_sources:
+            if source.room in disabled_rooms:
+                disabled_sources.add(source.name)
+        return {
+            "now_local": now_local,
+            "now_utc": now_utc,
+            "effective": effective,
+            "setpoints": setpoints,
+            "comfort_offsets": comfort_offsets,
+            "trajectory": trajectory,
+            "disabled_sources": disabled_sources,
+        }
 
     async def _update_room_value(
         self, payload: Mapping[str, Any], field: str

@@ -135,12 +135,21 @@ class ControlEngine:
         ghi_forecast: list[float | None] | None = None,
         ghi_now: float | None = None,
         price_forecast: list[float] | None = None,
+        comfort_offsets: Mapping[str, float] | None = None,
+        control_trajectory: Any | None = None,
+        disabled_sources: set[str] | None = None,
+        now: datetime | None = None,
     ) -> dict[str, float]:
         """Return MQTT output tag values for the current room temperatures."""
 
         setpoints = dict(setpoints or {})
         outdoor = _as_float(outdoor_temp, 0.0)
         self._apply_measurements(room_temps, setpoints)
+        if comfort_offsets:
+            for name, offset in comfort_offsets.items():
+                room = self.model.rooms.get(name)
+                if room is not None:
+                    room.comfort_offset = float(offset)
 
         if self._controller is not None and self.heat_sources:
             try:
@@ -149,13 +158,15 @@ class ControlEngine:
                 actions = self._controller.compute(
                     outdoor,
                     solar_gains=None,
-                    now=datetime.now(timezone.utc),
+                    now=now or datetime.now(timezone.utc),
                     outdoor_forecast=outdoor_forecast,
                     cloud_forecast=cloud_forecast,
                     cloud_cover_now=cloud_cover_now,
                     ghi_forecast=ghi_forecast,
                     ghi_now=ghi_now,
                     price_forecast=price_forecast,
+                    control_trajectory=control_trajectory,
+                    disabled_sources=disabled_sources,
                 )
                 self._cache_controller_forecast(self._controller)
                 self.mode = "mpc"

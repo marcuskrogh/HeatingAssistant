@@ -2,9 +2,9 @@ import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastT
 import { createGauge, updateGauge } from '../components/gauge.js?v=118';
 import { createClimateCard } from '../components/climate-card.js?v=118';
 import { createCountdown } from '../components/countdown.js?v=118';
-import { createScheduleOverview } from '../components/schedule-overview.js?v=118';
-import { getRoomScheduleData } from '../schedule-utils.js?v=118';
-import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=118';
+import { createScheduleOverview } from '../components/schedule-overview.js?v=119';
+import { getRoomScheduleData } from '../schedule-utils.js?v=119';
+import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=119';
 import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=118';
 import {
   KPI_SEVERITY,

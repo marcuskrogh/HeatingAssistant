@@ -14,11 +14,11 @@ import {
   SCHEDULE_TYPE_DATE_RANGE,
   SCHEDULE_TYPE_WEEKLY,
   serializeSchedulePeriod,
-} from '../schedule-utils.js?v=118';
-import { setPanelHash } from '../panel-hash.js?v=118';
-import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=118';
-import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=118';
-import { renderExperimentsSection } from './schedules-experiments.js?v=118';
+} from '../schedule-utils.js?v=119';
+import { setPanelHash } from '../panel-hash.js?v=119';
+import { setScheduleEnabled, updateRoomSchedule } from '../ha-services.js?v=119';
+import { getScheduleDataForRoom, patchStateSchedule, periodsMatch, resolveRoomScheduleData, CONFIG_ENTITY } from './schedules-shared.js?v=119';
+import { renderExperimentsSection } from './schedules-experiments.js?v=119';
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // Touch hold duration before a card enters drag mode (SWD-24). Chosen so
@@ -251,14 +251,21 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
       (enabled ? 'schedule-detail__toggle-btn--active' : 'schedule-detail__toggle-btn--inactive');
   }
 
-  function initLocalPeriods(schedData) {
+  function initLocalPeriods(schedData, { resetExpanded = true } = {}) {
     const periods = schedData?.periods || [];
     localPeriods = periods.map((p) => normalizePeriodForEditor({
       ...p,
       days: [...(p.days || [0, 1, 2, 3, 4, 5, 6])],
       enabled: p.enabled !== false,
     }));
-    expandedSet = new Set();
+    if (resetExpanded) {
+      expandedSet = new Set();
+    } else {
+      // Keep open editors across live refreshes (SWD-287); drop stale indices.
+      expandedSet = new Set(
+        [...expandedSet].filter((idx) => idx >= 0 && idx < localPeriods.length),
+      );
+    }
     dirty = false;
     dirtyPeriodIndices = new Set();
   }
@@ -267,7 +274,18 @@ export function renderScheduleDetail(container, roomSlug, rooms, state, connecti
     const newData = resolveScheduleData(roomSchedules);
     renderToggle(newData);
     if (!dirty && !saveInFlight) {
-      initLocalPeriods(newData);
+      const incoming = (newData?.periods || []).map((p) => normalizePeriodForEditor({
+        ...p,
+        days: [...(p.days || [0, 1, 2, 3, 4, 5, 6])],
+        enabled: p.enabled !== false,
+      }));
+      const unchanged = incoming.length === localPeriods.length
+        && incoming.every((p, i) => periodsMatch(p, localPeriods[i]));
+      if (unchanged && localPeriods.length > 0) {
+        // Schedule content identical — skip re-render so expand/focus stay put.
+        return;
+      }
+      initLocalPeriods(newData, { resetExpanded: false });
       renderPeriodForms();
     }
   }

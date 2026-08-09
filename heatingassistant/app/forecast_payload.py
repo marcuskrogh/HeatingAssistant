@@ -7,6 +7,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from heatingassistant.engine.naming import room_slug
+from heatingassistant.engine.schedule_control import (
+    ControlTrajectory,
+    step_setpoint_offset,
+)
 
 
 def build_app_forecast_payload(
@@ -19,12 +23,17 @@ def build_app_forecast_payload(
     plot_forecast_hours: float | None = None,
     now: datetime | None = None,
     room_power_meta: Mapping[str, Mapping[str, float]] | None = None,
+    control_trajectory: ControlTrajectory | None = None,
 ) -> dict[str, Any]:
     """Assemble dashboard forecast arrays from cached MPC trajectories.
 
     Timestamps use ``now + k·dt`` with ``dt`` from the control snapshot
     (``update_interval``). A bridge sample at ``now`` mirrors the classic
     coordinator payload shape expected by Ingress charts.
+
+    When ``control_trajectory`` is provided, per-step setpoint / comfort
+    corridors follow the schedule projection (SWD-286). Otherwise the room's
+    static setpoint ± comfort_offset is held flat across the horizon.
 
     Room keys use :func:`room_slug` so they match synthetic entity / UI slugs.
     """
@@ -58,12 +67,12 @@ def build_app_forecast_payload(
         if not isinstance(name, str) or not name:
             continue
         slug = room_slug(name)
-        setpoint = _as_float(room.get("setpoint"), 21.0)
-        comfort = _as_float(room.get("comfort_offset"), 2.0)
-        enabled = bool(room.get("enabled", True))
+        base_setpoint = _as_float(room.get("setpoint"), 21.0)
+        base_comfort = _as_float(room.get("comfort_offset"), 2.0)
+        room_enabled = bool(room.get("enabled", True))
         current_temp = room_temperatures.get(name)
         if current_temp is None:
-            current_temp = _as_float(room.get("temperature"), setpoint)
+            current_temp = _as_float(room.get("temperature"), base_setpoint)
         # Bridge from EKF estimated output when available (classic forecast
         # sensor behaviour); fall back to measured room temperature.
         estimated = filtered_temps.get(name)
@@ -79,6 +88,15 @@ def build_app_forecast_payload(
         bridge_capacity = _capacity_at(
             power_meta, name, outdoor_temp if outdoor_temp is not None else None
         )
+        now_sp, now_off, now_on = step_setpoint_offset(
+            control_trajectory,
+            name,
+            0,
+            fallback_setpoint=base_setpoint,
+            fallback_offset=base_comfort,
+            fallback_enabled=room_enabled,
+        )
+        now_on = now_on and room_enabled
         forecast: list[dict[str, Any]] = [
             {
                 "time": now.isoformat(),
@@ -87,24 +105,42 @@ def build_app_forecast_payload(
                 "heating_power": _step_heating(heating_schedule, 0, name),
                 "solar_gain": _step_solar(solar_forecast, 0, name),
                 "outdoor_temp": None if outdoor_temp is None else round(float(outdoor_temp), 2),
-                "setpoint": round(setpoint, 2) if enabled else None,
-                "constraint_upper": round(setpoint + comfort, 2) if enabled else None,
-                "constraint_lower": round(setpoint - comfort, 2) if enabled else None,
-                "enabled": enabled,
+                "setpoint": round(now_sp, 2) if now_on else None,
+                "constraint_upper": round(now_sp + now_off, 2) if now_on else None,
+                "constraint_lower": round(now_sp - now_off, 2) if now_on else None,
+                "enabled": now_on,
             }
         ]
         if bridge_capacity is not None:
             forecast[0]["heating_capacity"] = bridge_capacity
 
         trajectory: list[float] = []
+        sp_arr = (
+            control_trajectory.setpoints.get(name) if control_trajectory else None
+        )
         for i in range(main_n):
             step_time = now + timedelta(seconds=dt * (i + 1))
+            # Wall-clock alignment: forecast point at now+(i+1)·dt uses
+            # trajectory step i+1 (k=0 is "now"). Clamp to the last known
+            # step when the plot horizon exceeds the trajectory length.
+            traj_idx = i + 1
+            if sp_arr is not None and len(sp_arr) > 0:
+                traj_idx = min(traj_idx, len(sp_arr) - 1)
+            step_sp, step_off, step_on = step_setpoint_offset(
+                control_trajectory,
+                name,
+                traj_idx if control_trajectory is not None else i,
+                fallback_setpoint=base_setpoint,
+                fallback_offset=base_comfort,
+                fallback_enabled=room_enabled,
+            )
+            step_on = step_on and room_enabled
             entry: dict[str, Any] = {
                 "time": step_time.isoformat(),
-                "setpoint": round(setpoint, 2) if enabled else None,
-                "constraint_upper": round(setpoint + comfort, 2) if enabled else None,
-                "constraint_lower": round(setpoint - comfort, 2) if enabled else None,
-                "enabled": enabled,
+                "setpoint": round(step_sp, 2) if step_on else None,
+                "constraint_upper": round(step_sp + step_off, 2) if step_on else None,
+                "constraint_lower": round(step_sp - step_off, 2) if step_on else None,
+                "enabled": step_on,
             }
             pred = predictions[i] if isinstance(predictions[i], Mapping) else {}
             temp = pred.get(name)
@@ -152,15 +188,24 @@ def build_app_forecast_payload(
                 if raw_lin is not None:
                     last_lin = round(float(raw_lin), 2)
             last_capacity = _capacity_at(power_meta, name, last_outdoor)
+            last_sp, last_off, last_on = step_setpoint_offset(
+                control_trajectory,
+                name,
+                max(0, (len(sp_arr) - 1) if sp_arr is not None else main_n - 1),
+                fallback_setpoint=base_setpoint,
+                fallback_offset=base_comfort,
+                fallback_enabled=room_enabled,
+            )
+            last_on = last_on and room_enabled
             for k in range(extra):
                 step_time = now + timedelta(seconds=dt * (main_n + k + 1))
                 entry = {
                     "time": step_time.isoformat(),
                     "temperature": last_temp,
-                    "setpoint": round(setpoint, 2) if enabled else None,
-                    "constraint_upper": round(setpoint + comfort, 2) if enabled else None,
-                    "constraint_lower": round(setpoint - comfort, 2) if enabled else None,
-                    "enabled": enabled,
+                    "setpoint": round(last_sp, 2) if last_on else None,
+                    "constraint_upper": round(last_sp + last_off, 2) if last_on else None,
+                    "constraint_lower": round(last_sp - last_off, 2) if last_on else None,
+                    "enabled": last_on,
                     "extended": True,
                 }
                 if last_lin is not None:
@@ -179,8 +224,8 @@ def build_app_forecast_payload(
         room_block: dict[str, Any] = {
             "trajectory": trajectory,
             "forecast": forecast,
-            "setpoint": round(setpoint, 2),
-            "comfort_offset": comfort,
+            "setpoint": round(now_sp, 2),
+            "comfort_offset": now_off,
             "horizon_steps": n_pred,
             "plot_horizon_steps": target_steps,
             "step_seconds": dt,

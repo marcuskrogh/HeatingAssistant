@@ -1,52 +1,51 @@
-# Bug: Controller Tuning preview ignores unapplied params
+# Bug: Schedule comfort_offset ignored in room plot + expanded schedule collapses
 
 ## Summary
-- On **Controller Tuning**, **Preview Controller Behaviour** should run a one-off MPC solve with the *configured but unapplied* tuning parameters and show predicted trajectories without touching the live controller.
-- After the HAOS App / thin-bridge cutover, `POST /api/forecasts/preview` ignores the posted tuning body and returns the live (already-applied) forecast snapshot.
-- Symptom: preview only changes after **Apply Changes**.
+- After the HAOS App rewrite, comfort schedules with a non-default `comfort_offset` (e.g. Night Mode = **3** while the room default is **1**) do not change the room-view temperature plot constraint bands — historically or predictively.
+- Separately, an expanded period on the Schedules detail page collapses on its own during live state refreshes.
 
 ## Repro
-1. Open Controller Tuning with outdoor temperature available and MPC configured.
-2. Change a live weight (e.g. tracking weight) — do **not** click Apply.
-3. Click **Preview Controller Behaviour** and inspect room trajectories.
+### SWD-286 — plot constraints
+1. Configure Night Mode (Mon–Sun 22:00–05:00) with comfort interval / `comfort_offset` = 3.
+2. Open the room view while Night Mode shows the NOW badge.
+3. Inspect TEMPERATURE constraint bands around NOW and into the forecast.
+
+### SWD-287 — expand collapse
+1. Open Schedules → room detail → expand a period for editing.
+2. Leave the panel open while MQTT / control ticks update panel state.
+3. Observe the card collapse without user action.
 
 ## Expected
-- Preview charts reflect the draft (unapplied) MPC parameters.
-- Live controller / applied config / persisted options are unchanged by Preview.
+- Constraint upper/lower (and setpoint overrides) follow the active schedule both as history samples and across the forecast horizon.
+- Expanded periods stay expanded until the user collapses them, starts drag-reorder, or navigates away.
 
 ## Actual
-- Preview matches the currently applied live forecast; draft params are ignored until Apply.
+- Bands stay at the room default comfort_offset (e.g. ±1) through Night Mode; no step at 22:00.
+- Expanded period cards collapse spontaneously on live refresh.
 
 ## Impact
-- Users cannot evaluate tuning changes before applying them to the live controller, defeating the preview workflow.
+- Users cannot verify scheduled comfort corridors on the room plot; controller / sensors also ignored schedule comfort after SWD-262.
+- Schedule reconfiguration is interrupted by unexpected collapses.
 
 ## Suspected area
-- `heatingassistant/app/__main__.py` — POST `/api/forecasts/preview` calls `runtime.forecasts()` only.
-- Missing App-side `preview_tuning_forecast` (fat coordinator path removed in SWD-262; UI still posts tuning params).
-- `heatingassistant/app/runtime.py` / `heatingassistant/engine/control_loop.py` — need a one-off solve that does not mutate live forecast caches.
+- `HeatingRuntime.hass_states()` / `build_app_forecast_payload` / `ControlEngine.compute_actions` never rewired schedule → effective setpoint/comfort after fat coordinator removal (classic `schedule_control.py`).
+- `schedules-detail.js` `initLocalPeriods()` clears `expandedSet` on every non-dirty `fetchSchedules()` from `update()`.
 
 ## Acceptance criteria
-- [x] `POST /api/forecasts/preview` runs a one-off MPC solve using posted MPC params (not only `plot_forecast_hours`).
-- [x] Preview does not persist or apply tuning to live options / controller config.
-- [x] Live forecast snapshot used by room views is unchanged by Preview.
-- [x] Outdoor temperature unavailable returns `{ "error": "outdoor_temperature_unavailable" }` (UI already handles this).
-- [x] Regression tests cover draft-vs-applied behaviour.
-- [x] Version bump; App package synced via `scripts/sync-ha-app-package.sh`.
+- [x] Live setpoint / constraint sensors reflect `resolve_effective_control_params` when the schedule is enabled.
+- [x] `/api/forecasts` per-step setpoint/constraints follow schedule projection.
+- [x] Control compute applies schedule effective params + horizon `control_trajectory`.
+- [x] Expanded schedule survives live panel state refreshes (dirty edits still block overwrite).
+- [x] Regression tests; version bump; App package synced.
 
 ## Out of scope
-- Window-detection parameter preview (debounce / settle / Q inflation) — not part of the MPC preview solve.
-- Changing Apply / persistence behaviour for controller tuning.
-- Restoring the fat HA WebSocket `preview_tuning_forecast` coordinator path.
+- Rebuilding historical constraint samples recorded before this fix (forward-looking only).
+- Full experiment clamp / window-override schedule interaction polish beyond trajectory + disabled sources.
 
 ## Tracker
-- Task: SWD-285
-- Branch: `cursor/swd-285-tuning-preview-unapplied-ebd3`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/580
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/580
-- Merge: `093e547`
-- Version: **2.0.24**
+- Tasks: SWD-286, SWD-287
+- Branch: `cursor/swd-286-schedule-comfort-constraints-7e7d`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/582
 
 ## Next
-Done — rebuild App on HAOS to v2.0.24; confirm Preview reflects draft params before Apply.
+`/review-fix` → ship; rebuild App on HAOS to v2.0.25.
