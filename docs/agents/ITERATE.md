@@ -46,10 +46,15 @@ Root causes:
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/570
 
 ## Review-fix
-(pending)
+CLEAN — version lock tests bumped to 2.0.19; climate `{output_tag}_state`
+feedback no longer re-triggers MPC (write→state→write thrash guard).
 
 ## Shipped
-(pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/570
+- Version: **2.0.19**
 
 ## Next
-`/review-fix SWD-280` then rebuild App on HAOS to v2.0.19.
+Done — rebuild/update App on HAOS to v2.0.19; confirm climate entity receives
+cool/heat_cool + lowered setpoint when Planned Power is strongly negative,
+and measured power reports kilowatts (not −1 W). `/iterate` if still wrong
+after rebuild.

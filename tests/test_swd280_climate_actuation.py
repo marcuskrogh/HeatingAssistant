@@ -350,3 +350,52 @@ async def test_thin_bridge_publishes_climate_feedback_attrs() -> None:
     assert payload.attributes is not None
     assert payload.attributes["current_temperature"] == pytest.approx(24.2)
     assert payload.attributes["hvac_modes"] == ["heat_cool", "cool", "off"]
+
+@pytest.mark.asyncio
+async def test_climate_state_feedback_does_not_retrigger_control_cycle(tmp_path) -> None:
+    """Climate tag/in must update attrs without re-running MPC (thrash guard)."""
+
+    bus = InMemoryMqttBus()
+    runtime = HeatingRuntime(
+        tmp_path,
+        bus=bus,
+        options={
+            "instance_id": "haos",
+            "system_enabled": True,
+            "rooms": [{"name": "Living Room", "setpoint": 22.0, "enabled": True}],
+            "heat_sources": [
+                {
+                    "name": "living_hp",
+                    "room": "Living Room",
+                    "type": "heat_pump",
+                    "max_power": 5000.0,
+                    "heater_entity": "climate.living_hp",
+                    "output_tag": "living_hp_heat",
+                }
+            ],
+        },
+    )
+    runtime.actuator_outputs["living_hp_heat"] = -1.0
+    cycles = {"n": 0}
+
+    async def counted() -> dict[str, float]:
+        cycles["n"] += 1
+        return dict(runtime.actuator_outputs)
+
+    runtime.run_control_cycle = counted  # type: ignore[method-assign]
+
+    await runtime._handle_tag_message(
+        "heatingassistant/haos/tag/living_hp_heat_state/in",
+        MqttTagPayload(
+            value="cool",
+            status="GOOD",
+            attributes={"current_temperature": 24.5, "hvac_modes": ["cool", "off"]},
+        ).encode(),
+        qos=0,
+        retain=False,
+    )
+    assert cycles["n"] == 0
+    assert runtime.tag_attributes["living_hp_heat_state"]["current_temperature"] == pytest.approx(
+        24.5
+    )
+

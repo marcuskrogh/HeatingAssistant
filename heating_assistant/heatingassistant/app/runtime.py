@@ -463,6 +463,11 @@ class HeatingRuntime:
             return
         tag_payload = MqttTagPayload.decode(payload)
         self.update_tag(parsed.tag, tag_payload)
+        # Climate heater feedback tags only refresh anchoring inputs. Re-running
+        # MPC here would thrash: write setpoint → HA state change → tag/in →
+        # compute → write again (SWD-280 review-fix).
+        if self._is_heater_state_feedback_tag(parsed.tag):
+            return
         await self.run_control_cycle()
 
     async def _handle_entities_catalog_message(
@@ -1607,6 +1612,12 @@ class HeatingRuntime:
             if source.get("output_tag") == tag:
                 return source
         return None
+
+    def _is_heater_state_feedback_tag(self, tag: str) -> bool:
+        for source in self._heat_sources():
+            if source.get("state_tag") == tag:
+                return True
+        return False
 
     def _source_actuation_enabled(self, source_cfg: Mapping[str, Any] | None) -> bool:
         if not bool(self.options.get("system_enabled", False)):
