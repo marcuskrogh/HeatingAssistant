@@ -37,7 +37,8 @@
 ## Tracker
 - Task: SWD-284
 - Branch: `cursor/swd-284-price-history-a08d`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/578
 
 ## Next
-Implement + `/review-fix SWD-284`.
+`/review-fix SWD-284`
+
