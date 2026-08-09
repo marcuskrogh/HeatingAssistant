@@ -140,3 +140,79 @@ async def test_history_empty_without_price_tag(tmp_path: Path) -> None:
     states = runtime.hass_states()
     assert states[_ELECTRICITY_PRICE_ENTITY]["state"] == "unknown"
     await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_history_keeps_ring_samples_before_first_day_ahead_slot(
+    tmp_path: Path,
+) -> None:
+    """Ring samples overnight before midnight raw_today must not be dropped."""
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
+    await runtime.start()
+
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    early_lu = (now - timedelta(hours=5)).timestamp()
+    with runtime._history_lock:
+        runtime._history[_ELECTRICITY_PRICE_ENTITY] = [
+            {"s": "0.99", "lu": early_lu},
+        ]
+
+    raw_today = [
+        {"start": (now - timedelta(hours=1)).isoformat(), "value": 0.30},
+        {"start": now.isoformat(), "value": 0.40},
+    ]
+    runtime.update_tag(
+        "energy_price",
+        MqttTagPayload(
+            value=0.40,
+            status="GOOD",
+            reason=None,
+            ts=now.timestamp(),
+            attributes={"raw_today": raw_today},
+        ),
+    )
+
+    samples = runtime.history(
+        entity_ids=[_ELECTRICITY_PRICE_ENTITY],
+        start_ts=(now - timedelta(hours=6)).timestamp(),
+        end_ts=(now + timedelta(minutes=30)).timestamp(),
+    )[_ELECTRICITY_PRICE_ENTITY]
+    assert float(samples[0]["s"]) == pytest.approx(0.99)
+    assert float(samples[0]["lu"]) == pytest.approx(early_lu)
+    assert any(float(s["s"]) == pytest.approx(0.45) for s in samples)
+    await runtime.stop()
+
+
+@pytest.mark.asyncio
+async def test_history_prefers_known_day_ahead_over_forecast_attrs(
+    tmp_path: Path,
+) -> None:
+    """Overlapping forecast attrs must not zigzag historical Price."""
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
+    await runtime.start()
+
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    slot = now - timedelta(hours=1)
+    runtime.update_tag(
+        "energy_price",
+        MqttTagPayload(
+            value=0.30,
+            status="GOOD",
+            reason=None,
+            ts=now.timestamp(),
+            attributes={
+                "raw_today": [{"start": slot.isoformat(), "value": 0.30}],
+                "forecast": [{"start": slot.isoformat(), "value": 0.90}],
+            },
+        ),
+    )
+
+    samples = runtime.history(
+        entity_ids=[_ELECTRICITY_PRICE_ENTITY],
+        start_ts=(now - timedelta(hours=2)).timestamp(),
+        end_ts=(now + timedelta(minutes=10)).timestamp(),
+    )[_ELECTRICITY_PRICE_ENTITY]
+    values = [float(s["s"]) for s in samples]
+    assert any(v == pytest.approx(0.45) for v in values)  # 0.30 + 0.15
+    assert not any(v == pytest.approx(1.05) for v in values)  # forecast 0.90+0.15
+    await runtime.stop()

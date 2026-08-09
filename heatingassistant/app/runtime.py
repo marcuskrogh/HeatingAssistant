@@ -1021,13 +1021,19 @@ class HeatingRuntime:
             synthesized = self._synthesize_price_history(start_ts=start, end_ts=end)
             if synthesized:
                 ring = result.get(_ELECTRICITY_PRICE_ENTITY, [])
+                first_syn = float(synthesized[0]["lu"])
                 last_syn = float(synthesized[-1]["lu"])
-                extras = [
+                before = [
+                    sample
+                    for sample in ring
+                    if float(sample["lu"]) < first_syn - 1e-6
+                ]
+                after = [
                     sample
                     for sample in ring
                     if float(sample["lu"]) > last_syn + 1e-6
                 ]
-                result[_ELECTRICITY_PRICE_ENTITY] = synthesized + extras
+                result[_ELECTRICITY_PRICE_ENTITY] = before + synthesized + after
         return result
 
     def hass_states(self) -> dict[str, dict[str, Any]]:
@@ -1674,7 +1680,17 @@ class HeatingRuntime:
         if end < start:
             return []
 
-        sorted_series = sorted(series, key=lambda tp: tp[0])
+        # Collapse same-instant duplicates by priority, then prefer known
+        # day-ahead (today/tomorrow) over Carnot forecast — matches MPC lookup.
+        by_start: dict[float, tuple[Any, ...]] = {}
+        for timed in series:
+            key = timed[0].timestamp()
+            prev = by_start.get(key)
+            if prev is None or timed[2] > prev[2]:
+                by_start[key] = timed
+        collapsed = list(by_start.values())
+        known = [timed for timed in collapsed if timed[3] in {"today", "tomorrow"}]
+        sorted_series = sorted(known or collapsed, key=lambda timed: timed[0])
         samples: list[dict[str, Any]] = []
 
         # Zero-order hold at the window start so stepped charts fill from the left.
