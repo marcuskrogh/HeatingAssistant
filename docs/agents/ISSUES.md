@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-285 | Bug | [Bug] Controller Tuning preview ignores unapplied params — only works after Apply | To Do | — | docs/agents/BUG.md | `/implement SWD-285` — then `/ship SWD-285` |
+| SWD-285 | Bug | [Bug] Controller Tuning preview ignores unapplied params — only works after Apply | In Review | — | docs/agents/BUG.md | `/review-fix SWD-285` → `/ship SWD-285` — https://github.com/marcuskrogh/HeatingAssistant/pull/580 |
 | SWD-284 | Bug | [Bug] Room view Price plot missing historical data — App never publishes electricity_price sensor | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/578 |
 | SWD-283 | Bug | [Bug] Large whitespace between Save Current Window inputs on mobile | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/576 |
 | SWD-282 | Bug | [Bug] Solar gain plot stuck at zero despite High exposure — App room build drops aperture | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/574 |

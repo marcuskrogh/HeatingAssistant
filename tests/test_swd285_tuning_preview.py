@@ -174,3 +174,42 @@ def test_control_engine_preview_builds_with_overrides(_mock_unused) -> None:
     assert snapshot["horizon"] == 2
     # Live cache still empty / untouched.
     assert engine._last_predictions == []
+
+
+def test_control_engine_preview_compute_failure_returns_error() -> None:
+    engine = ControlEngine(
+        {
+            "update_interval": 900,
+            "horizon": 4,
+            "rooms": [{"name": "Living Room", "setpoint": 22.0}],
+            "heat_sources": [
+                {
+                    "name": "heater",
+                    "type": "electric_heater",
+                    "room": "Living Room",
+                    "max_power": 1500.0,
+                }
+            ],
+        }
+    )
+    preview_ctrl = MagicMock()
+    preview_ctrl.compute.side_effect = RuntimeError("solver boom")
+    with patch.object(engine, "_build_controller_from_config", return_value=preview_ctrl):
+        result = engine.preview_tuning_forecast(
+            {"tracking_weight": 1.0},
+            {"Living Room": 21.0},
+            5.0,
+            {"Living Room": 22.0},
+        )
+    assert result == {"error": "preview_compute_failed"}
+
+
+def test_preview_returns_busy_when_control_lock_held(tmp_path: Path) -> None:
+    runtime = _runtime_with_room(tmp_path)
+    fake_lock = MagicMock()
+    fake_lock.acquire.return_value = False
+    runtime._control_lock = fake_lock
+    result = runtime.preview_tuning_forecast({"tracking_weight": 1.0}, 0.5)
+    assert result == {"error": "controller_busy"}
+    fake_lock.acquire.assert_called_once()
+    fake_lock.release.assert_not_called()

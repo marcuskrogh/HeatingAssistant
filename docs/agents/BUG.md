@@ -41,7 +41,7 @@
 ## Tracker
 - Task: SWD-285
 - Branch: `cursor/swd-285-tuning-preview-unapplied-ebd3`
-- PR: *(pending)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/580
 
 ## Next
 `/review-fix SWD-285` — then `/ship SWD-285`

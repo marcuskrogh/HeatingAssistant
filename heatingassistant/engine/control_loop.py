@@ -265,18 +265,24 @@ class ControlEngine:
 
             self._apply_measurements(room_temps, dict(setpoints or {}))
             compute_now = now or datetime.now(timezone.utc)
-            preview_ctrl.compute(
-                outdoor_temp,
-                solar_gains=None,
-                now=compute_now,
-                outdoor_forecast=outdoor_forecast,
-                cloud_forecast=cloud_forecast,
-                cloud_cover_now=cloud_cover_now,
-                ghi_forecast=ghi_forecast,
-                ghi_now=ghi_now,
-                price_forecast=price_forecast,
-                run_optimization=True,
-            )
+            try:
+                preview_ctrl.compute(
+                    outdoor_temp,
+                    solar_gains=None,
+                    now=compute_now,
+                    outdoor_forecast=outdoor_forecast,
+                    cloud_forecast=cloud_forecast,
+                    cloud_cover_now=cloud_cover_now,
+                    ghi_forecast=ghi_forecast,
+                    ghi_now=ghi_now,
+                    price_forecast=price_forecast,
+                    run_optimization=True,
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "preview_tuning_forecast: MPC compute failed: %s", exc
+                )
+                return {"error": "preview_compute_failed"}
             return _snapshot_from_controller(
                 preview_ctrl,
                 dt=preview_dt,

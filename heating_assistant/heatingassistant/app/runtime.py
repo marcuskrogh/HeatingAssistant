@@ -928,44 +928,51 @@ class HeatingRuntime:
                 self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL),
             )
         )
-        disturbances = self._mpc_disturbance_inputs(
-            outdoor_temp,
-            horizon=preview_horizon,
-            dt_s=preview_dt,
-        )
-        snapshot = self.control_engine.preview_tuning_forecast(
-            overrides,
-            self.room_temperatures,
-            outdoor_temp,
-            self._setpoints(),
-            **disturbances,
-        )
-        if snapshot.get("error"):
-            return snapshot
+        # Serialize against live control cycles — preview mutates shared model
+        # comfort/temps briefly and must not race actuator publishes.
+        if not self._control_lock.acquire(blocking=True, timeout=30.0):
+            return {"error": "controller_busy"}
+        try:
+            disturbances = self._mpc_disturbance_inputs(
+                outdoor_temp,
+                horizon=preview_horizon,
+                dt_s=preview_dt,
+            )
+            snapshot = self.control_engine.preview_tuning_forecast(
+                overrides,
+                self.room_temperatures,
+                outdoor_temp,
+                self._setpoints(),
+                **disturbances,
+            )
+            if snapshot.get("error"):
+                return snapshot
 
-        rooms = [dict(room) for room in self._rooms()]
-        comfort_override = overrides.get(const.CONF_COMFORT_OFFSET)
-        if comfort_override is not None:
-            preview_comfort = float(comfort_override)
-            for room in rooms:
-                room["comfort_offset"] = preview_comfort
+            rooms = [dict(room) for room in self._rooms()]
+            comfort_override = overrides.get(const.CONF_COMFORT_OFFSET)
+            if comfort_override is not None:
+                preview_comfort = float(comfort_override)
+                for room in rooms:
+                    room["comfort_offset"] = preview_comfort
 
-        price_tag = self.options.get("price_tag") or "energy_price"
-        if not isinstance(price_tag, str) or not price_tag:
-            price_tag = "energy_price"
-        energy_price = self._coerce_number(self.tag_values.get(price_tag))
-        if energy_price is None and price_tag != "energy_price":
-            energy_price = self._coerce_number(self.tag_values.get("energy_price"))
+            price_tag = self.options.get("price_tag") or "energy_price"
+            if not isinstance(price_tag, str) or not price_tag:
+                price_tag = "energy_price"
+            energy_price = self._coerce_number(self.tag_values.get(price_tag))
+            if energy_price is None and price_tag != "energy_price":
+                energy_price = self._coerce_number(self.tag_values.get("energy_price"))
 
-        return build_app_forecast_payload(
-            rooms=rooms,
-            room_temperatures=self.room_temperatures,
-            outdoor_temp=outdoor_temp,
-            energy_price=energy_price,
-            snapshot=snapshot,
-            plot_forecast_hours=plot_forecast_hours,
-            room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
-        )
+            return build_app_forecast_payload(
+                rooms=rooms,
+                room_temperatures=self.room_temperatures,
+                outdoor_temp=outdoor_temp,
+                energy_price=energy_price,
+                snapshot=snapshot,
+                plot_forecast_hours=plot_forecast_hours,
+                room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
+            )
+        finally:
+            self._control_lock.release()
 
     def _mpc_disturbance_inputs(
         self,
