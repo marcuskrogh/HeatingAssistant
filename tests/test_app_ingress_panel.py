@@ -147,7 +147,9 @@ def test_ingress_panel_json_endpoints_and_schedule_persistence(tmp_path) -> None
     assert controller["config"]["room_comfort_offsets"]["living_room"] == 1.5
     assert set(ui_settings) == {"ui_settings"}
     assert model_config["rooms"][0]["name"] == "Living Room"
-    assert forecasts == {"plot_forecast_hours": None, "price_forecast": [], "rooms": {}}
+    assert "rooms" in forecasts
+    assert "price_forecast" in forecasts
+    assert forecasts["plot_forecast_hours"] is None
     assert datasets == {"datasets": []}
     assert experiments == {"experiments": []}
     assert "sensor.heating_assistant_controller_config" in state["hass_states"]

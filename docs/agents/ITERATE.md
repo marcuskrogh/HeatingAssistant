@@ -1,58 +1,56 @@
-# Iterate: KPIs/plots flat overnight — App has no wall-clock history/control ticker
+# Iterate: Plot samples too dense + empty forecasts
 
 ## Prior work
-- Task: SWD-275
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/564 (v2.0.14)
+- Task: SWD-276
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/565 (v2.0.15)
 - Spec context: docs/agents/ITERATE.md
 
 ## Problem
-MQTT is connected (`API connected · MQTT ok`), but Ingress KPIs/plots stay empty
-or flat overnight. Temperature and power charts show samples near session start,
-then a long hold until the panel is opened again. Live gauges appear to update
-only while Ingress is open on the device.
+Overview KPIs populate, but room plots sample many times per minute (not at
+`update_interval`, e.g. 15 min) and Forecast / Planned Power / Price Forecast
+lines stay empty.
 
-Root cause: App history recording and control cycles run only on MQTT
-`tag/+/in` events (plus config writes / startup). There is **no wall-clock
-sampler** driven by `update_interval`. Overnight, stable HA sensors emit no
-`state_changed`, so the thin bridge publishes no new `tag/in`, so the in-memory
-history ring gets no new points. Ingress polls `api/state` every 5s **only while
-the panel is loaded** (client-side), which matches “updates when open.”
-
-Screenshot evidence: overnight flat Filtered/Power lines, then a vertical jump
-at open time (~06:44); price/forecast series absent (separate stub gap).
+Root causes:
+1. SWD-276 capped quiet-period history at ≤60s and still force-recorded on
+   every MQTT tag + control cycle.
+2. `HeatingRuntime.forecasts()` is still an empty stub; MPC trajectories from
+   `ControlEngine` are never exposed to `/api/forecasts`.
 
 ## Acceptance criteria
-1. Background ticker records history on a wall-clock cadence (≤60s) without
-   Ingress being open.
-2. Background ticker runs control cycles on `update_interval` when no recent
-   MQTT-driven cycle occurred.
-3. With panel closed ≥1 sample period, `/api/history` shows new samples spanning
-   that window (even without new tag events).
-4. Regression tests cover ticker start/stop and history growth without tags.
-5. Version bump to **2.0.15**.
+1. With `update_interval=900`, history advances ~once per 900s — not every
+   ≤60s / tag spam.
+2. After an MPC control cycle, `/api/forecasts` returns non-empty
+   `rooms[slug].forecast` with ISO times at `now + k·dt`
+   (`dt=update_interval`), including `temperature` and `heating_power` where
+   available.
+3. Planned Power chart can read `heating_power` from that payload.
+4. When `energy_price` tag is present, `price_forecast` is non-empty (current
+   price held across horizon); empty OK when unwired.
+5. Regression tests for history gate + forecast shape; version **2.0.16**.
 
 ## Out of scope
-- Filling stub `/api/forecasts` / price forecast series (follow-up iterate).
-- Persisting history ring across App restarts.
-- Full MODEL FIT / solar KPI completeness.
+- Full Nord Pool attribute-based day-ahead price series over MQTT.
+- History persistence across App restart.
+- MODEL FIT / solar KPI completeness.
 
 ## Work packages
-1. Add background history + control ticker to `HeatingRuntime`.
-2. Version 2.0.15 + packaging sync.
-3. Unit tests + tracker.
+1. Gate history recording to `update_interval`.
+2. Cache MPC trajectories on ControlEngine; build App forecast payload.
+3. Version 2.0.16 + tests + tracker.
 
 ## Tracker
-- Task: SWD-276
-- Relates: SWD-275
-- Branch: `cursor/swd-276-wall-clock-ticker-f56e`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/565
+- Task: SWD-277
+- Relates: SWD-276
+- Branch: `cursor/swd-277-plot-cadence-forecasts-f56e`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
 
 ## Review-fix
-CLEAN — wall-clock ticker samples history without Ingress; control skips when MQTT recently ran; packaging/tests green.
+CLEAN — history gated to `update_interval`; MPC forecasts exposed at `now+k·dt`;
+room_slug keys, price_tag, capacity meta, forecast lock.
 
 ## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/565
-- Version: **2.0.15**
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
+- Version: **2.0.16**
 
 ## Next
-Done — rebuild/update App on HAOS to v2.0.15; leave panel closed a few minutes then confirm history fills. `/iterate` for forecast/price stubs or MODEL FIT if still empty.
+Done — rebuild/update App on HAOS to v2.0.16; confirm ~15 min history grid and Forecast / Planned Power after an MPC cycle. `/iterate` for Nord Pool day-ahead prices or history persistence if still needed.

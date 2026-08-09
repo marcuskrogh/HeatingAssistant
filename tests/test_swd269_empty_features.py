@@ -95,6 +95,8 @@ async def test_history_and_kpi_sensors_populate_after_tag_update(tmp_path) -> No
     )
     await runtime.start()
     await publish_tag_in(runtime, "living_temp", 21.25)
+    # History is gated to update_interval (SWD-277); force one sample for the KPI ring.
+    runtime._record_history_samples(force=True)
 
     assert runtime.room_temperatures["Living Room"] == pytest.approx(21.25)
     states = runtime.hass_states()
