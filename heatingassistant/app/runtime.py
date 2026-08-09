@@ -889,11 +889,103 @@ class HeatingRuntime:
             room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
         )
 
-    def _mpc_disturbance_inputs(self, outdoor_temp: float | None) -> dict[str, Any]:
+    def preview_tuning_forecast(
+        self,
+        tuning_params: Mapping[str, Any] | None = None,
+        plot_forecast_hours: float | None = None,
+    ) -> dict[str, Any]:
+        """One-off MPC solve with proposed tuning params (not applied).
+
+        Returns the same payload shape as :meth:`forecasts`, or
+        ``{"error": "..."}`` when a required input is missing.
+        """
+
+        overrides = {
+            key: value
+            for key, value in dict(tuning_params or {}).items()
+            if key
+            not in {
+                "type",
+                "id",
+                "plot_forecast_hours",
+                "plot_forecast_steps",
+            }
+            and value is not None
+        }
+        outdoor_temp = self._outdoor_temperature()
+        if outdoor_temp is None:
+            return {"error": "outdoor_temperature_unavailable"}
+
+        preview_horizon = int(
+            overrides.get(
+                const.CONF_HORIZON,
+                self.options.get("horizon", const.DEFAULT_HORIZON),
+            )
+        )
+        preview_dt = float(
+            overrides.get(
+                const.CONF_UPDATE_INTERVAL,
+                self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL),
+            )
+        )
+        disturbances = self._mpc_disturbance_inputs(
+            outdoor_temp,
+            horizon=preview_horizon,
+            dt_s=preview_dt,
+        )
+        snapshot = self.control_engine.preview_tuning_forecast(
+            overrides,
+            self.room_temperatures,
+            outdoor_temp,
+            self._setpoints(),
+            **disturbances,
+        )
+        if snapshot.get("error"):
+            return snapshot
+
+        rooms = [dict(room) for room in self._rooms()]
+        comfort_override = overrides.get(const.CONF_COMFORT_OFFSET)
+        if comfort_override is not None:
+            preview_comfort = float(comfort_override)
+            for room in rooms:
+                room["comfort_offset"] = preview_comfort
+
+        price_tag = self.options.get("price_tag") or "energy_price"
+        if not isinstance(price_tag, str) or not price_tag:
+            price_tag = "energy_price"
+        energy_price = self._coerce_number(self.tag_values.get(price_tag))
+        if energy_price is None and price_tag != "energy_price":
+            energy_price = self._coerce_number(self.tag_values.get("energy_price"))
+
+        return build_app_forecast_payload(
+            rooms=rooms,
+            room_temperatures=self.room_temperatures,
+            outdoor_temp=outdoor_temp,
+            energy_price=energy_price,
+            snapshot=snapshot,
+            plot_forecast_hours=plot_forecast_hours,
+            room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
+        )
+
+    def _mpc_disturbance_inputs(
+        self,
+        outdoor_temp: float | None,
+        *,
+        horizon: int | None = None,
+        dt_s: float | None = None,
+    ) -> dict[str, Any]:
         """Build outdoor / solar / price series for the next control compute."""
 
-        horizon = int(self.options.get("horizon", const.DEFAULT_HORIZON))
-        dt_s = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        use_horizon = int(
+            horizon
+            if horizon is not None
+            else self.options.get("horizon", const.DEFAULT_HORIZON)
+        )
+        use_dt = float(
+            dt_s
+            if dt_s is not None
+            else self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+        )
         weather_tag = self.options.get("weather_tag") or "weather_forecast"
         if not isinstance(weather_tag, str) or not weather_tag:
             weather_tag = "weather_forecast"
@@ -919,8 +1011,8 @@ class HeatingRuntime:
             price_attrs=self.tag_attributes.get(price_tag),
             solar_value=self._coerce_number(self.tag_values.get(solar_tag)),
             solar_attrs=self.tag_attributes.get(solar_tag),
-            horizon=horizon,
-            dt_s=dt_s,
+            horizon=use_horizon,
+            dt_s=use_dt,
             price_adder=net + surcharge,
         )
 

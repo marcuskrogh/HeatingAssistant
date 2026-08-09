@@ -1,7 +1,7 @@
 {
   "domain": "heating_assistant",
   "name": "Heating Assistant",
-  "version": "2.0.23",
+  "version": "2.0.24",
   "documentation": "https://github.com/marcuskrogh/HeatingAssistant",
   "issue_tracker": "https://github.com/marcuskrogh/HeatingAssistant/issues",
   "requirements": [],

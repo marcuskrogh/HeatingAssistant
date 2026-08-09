@@ -14,6 +14,65 @@ from .thermal_model import HouseModel, Room, RoomConnection, Window
 
 _LOGGER = logging.getLogger(__name__)
 
+# MPC tuning keys accepted by Controller Tuning preview (exclude window detection).
+_PREVIEW_TUNING_KEYS = frozenset(
+    {
+        const.CONF_COMFORT_OFFSET,
+        const.CONF_TRACKING_WEIGHT,
+        const.CONF_ENERGY_WEIGHT,
+        const.CONF_ENERGY_PRICE_WEIGHT,
+        const.CONF_SMOOTHING_WEIGHT,
+        const.CONF_SOFT_CONSTRAINT_WEIGHT,
+        const.CONF_SOFT_CONSTRAINT_LINEAR_WEIGHT,
+        const.CONF_TERMINAL_WEIGHT,
+        const.CONF_UPDATE_INTERVAL,
+        const.CONF_HORIZON,
+    }
+)
+
+
+def _snapshot_from_controller(
+    controller: Any,
+    *,
+    dt: float,
+    horizon: int,
+    compute_ts: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a forecast snapshot dict from a one-off controller solve."""
+
+    filtered: dict[str, float] = {}
+    raw_filtered = getattr(controller, "filtered_temperatures", None) or {}
+    if isinstance(raw_filtered, Mapping):
+        for key, value in raw_filtered.items():
+            try:
+                filtered[str(key)] = float(value)
+            except (TypeError, ValueError):
+                continue
+    return {
+        "mode": "mpc",
+        "compute_ts": compute_ts or datetime.now(timezone.utc),
+        "predictions": [dict(item) for item in list(getattr(controller, "predictions", []) or [])],
+        "linearised_predictions": [
+            dict(item)
+            for item in list(getattr(controller, "linearised_predictions", []) or [])
+        ],
+        "heating_schedule": [
+            dict(item) for item in list(getattr(controller, "heating_schedule", []) or [])
+        ],
+        "outdoor_forecast": [
+            float(value) for value in list(getattr(controller, "outdoor_forecast", []) or [])
+        ],
+        "solar_forecast": [
+            dict(item) for item in list(getattr(controller, "solar_forecast", []) or [])
+        ],
+        "price_forecast": [
+            float(value) for value in list(getattr(controller, "price_forecast", []) or [])
+        ],
+        "filtered_temperatures": filtered,
+        "dt": float(dt),
+        "horizon": int(horizon),
+    }
+
 
 class ControlEngine:
     """Build and step the control model from App configuration.
@@ -131,6 +190,105 @@ class ControlEngine:
                 "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
             }
 
+    def preview_tuning_forecast(
+        self,
+        overrides: Mapping[str, Any] | None,
+        room_temps: Mapping[str, float | None],
+        outdoor_temp: float,
+        setpoints: Mapping[str, float] | None = None,
+        *,
+        outdoor_forecast: list[float] | None = None,
+        cloud_forecast: list[float] | None = None,
+        cloud_cover_now: float | None = None,
+        ghi_forecast: list[float | None] | None = None,
+        ghi_now: float | None = None,
+        price_forecast: list[float] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Run a one-off MPC solve with proposed tuning parameters.
+
+        Does not mutate the live forecast caches used by room views. Room
+        temperatures / setpoints on the shared model are updated to the supplied
+        measurements (same as a normal compute). ``comfort_offset`` overrides are
+        applied temporarily and restored afterwards.
+        """
+
+        ov = {
+            key: value
+            for key, value in dict(overrides or {}).items()
+            if key in _PREVIEW_TUNING_KEYS and value is not None
+        }
+        preview_dt = float(
+            ov.get(
+                const.CONF_UPDATE_INTERVAL,
+                self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL),
+            )
+        )
+        preview_horizon = int(
+            ov.get(const.CONF_HORIZON, self.config.get("horizon", const.DEFAULT_HORIZON))
+        )
+
+        comfort_override = ov.get(const.CONF_COMFORT_OFFSET)
+        saved_comfort: dict[str, float] = {}
+        if comfort_override is not None:
+            preview_comfort = float(comfort_override)
+            for name, room in self.model.rooms.items():
+                saved_comfort[name] = float(
+                    getattr(room, "comfort_offset", const.DEFAULT_COMFORT_OFFSET)
+                )
+                room.comfort_offset = preview_comfort
+
+        try:
+            try:
+                preview_ctrl = self._build_controller_from_config(
+                    {**self.config, **ov},
+                    horizon=preview_horizon,
+                    dt=preview_dt,
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "preview_tuning_forecast: controller build failed: %s", exc
+                )
+                return {"error": "controller_unavailable"}
+            if preview_ctrl is None:
+                return {"error": "controller_unavailable"}
+
+            if self._controller is not None:
+                try:
+                    x_hat, P = self._controller.ekf_state
+                    preview_ctrl.restore_ekf_state(x_hat, P)
+                except Exception:  # pragma: no cover - defensive
+                    _LOGGER.debug(
+                        "preview_tuning_forecast: could not copy EKF state",
+                        exc_info=True,
+                    )
+
+            self._apply_measurements(room_temps, dict(setpoints or {}))
+            compute_now = now or datetime.now(timezone.utc)
+            preview_ctrl.compute(
+                outdoor_temp,
+                solar_gains=None,
+                now=compute_now,
+                outdoor_forecast=outdoor_forecast,
+                cloud_forecast=cloud_forecast,
+                cloud_cover_now=cloud_cover_now,
+                ghi_forecast=ghi_forecast,
+                ghi_now=ghi_now,
+                price_forecast=price_forecast,
+                run_optimization=True,
+            )
+            return _snapshot_from_controller(
+                preview_ctrl,
+                dt=preview_dt,
+                horizon=preview_horizon,
+                compute_ts=compute_now,
+            )
+        finally:
+            for name, value in saved_comfort.items():
+                room = self.model.rooms.get(name)
+                if room is not None:
+                    room.comfort_offset = value
+
     def room_power_meta(
         self, outdoor_temp: float | None = None
     ) -> dict[str, dict[str, float]]:
@@ -226,66 +384,94 @@ class ControlEngine:
             return None
 
         try:
-            from .controller.factory import (  # noqa: PLC0415
-                ControllerBuildConfig,
-                build_mpc_controller,
-            )
-
-            build_config = ControllerBuildConfig(
-                model=self.model,
-                heat_sources=self.heat_sources,
-                horizon=int(self.config.get("horizon", const.DEFAULT_HORIZON)),
-                dt=float(self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
-                measurement_dt=float(
-                    self.config.get("measurement_dt", self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
-                ),
-                latitude=float(self.config.get("latitude", 0.0)),
-                longitude=float(self.config.get("longitude", 0.0)),
-                tracking_weight=float(
-                    self.config.get("tracking_weight", const.DEFAULT_TRACKING_WEIGHT)
-                ),
-                energy_weight=float(
-                    self.config.get("energy_weight", const.DEFAULT_ENERGY_WEIGHT)
-                ),
-                smoothing_weight=float(
-                    self.config.get("smoothing_weight", const.DEFAULT_SMOOTHING_WEIGHT)
-                ),
-                soft_constraint_weight=float(
-                    self.config.get(
-                        "soft_constraint_weight",
-                        const.DEFAULT_SOFT_CONSTRAINT_WEIGHT,
-                    )
-                ),
-                soft_constraint_linear_weight=float(
-                    self.config.get(
-                        "soft_constraint_linear_weight",
-                        const.DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
-                    )
-                ),
-                terminal_weight=float(
-                    self.config.get("terminal_weight", const.DEFAULT_TERMINAL_WEIGHT)
-                ),
-                sigma_w=float(self.config.get("sigma_w", const.DEFAULT_SIGMA_W)),
-                sigma_v=float(self.config.get("sigma_v", const.DEFAULT_SIGMA_V)),
-                sigma_b=float(self.config.get("sigma_b", const.DEFAULT_SIGMA_B)),
-                energy_price_weight=float(
-                    self.config.get(
-                        "energy_price_weight",
-                        const.DEFAULT_ENERGY_PRICE_WEIGHT,
-                    )
-                ),
-                albedo=float(self.config.get("ground_albedo", const.DEFAULT_GROUND_ALBEDO)),
-            )
-            controller = build_mpc_controller(build_config)
+            controller = self._build_controller_from_config(self.config)
         except Exception as exc:  # pragma: no cover - exercised when optional deps differ
             self.mode = "proportional"
             self.fallback_reason = f"controller unavailable: {exc}"
             _LOGGER.info("HeatingAssistant engine using fallback control: %s", exc)
             return None
 
+        if controller is None:
+            self.mode = "proportional"
+            self.fallback_reason = "no heat sources or rooms configured"
+            return None
+
         self.mode = "mpc"
         self.fallback_reason = None
         return controller
+
+    def _build_controller_from_config(
+        self,
+        config: Mapping[str, Any],
+        *,
+        horizon: int | None = None,
+        dt: float | None = None,
+    ) -> Any:
+        """Construct an MPC controller from a config mapping (may raise)."""
+
+        if not self.heat_sources or not self.model.rooms:
+            return None
+
+        from .controller.factory import (  # noqa: PLC0415
+            ControllerBuildConfig,
+            build_mpc_controller,
+        )
+
+        preview_dt = float(
+            dt
+            if dt is not None
+            else config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+        )
+        build_config = ControllerBuildConfig(
+            model=self.model,
+            heat_sources=self.heat_sources,
+            horizon=int(
+                horizon
+                if horizon is not None
+                else config.get("horizon", const.DEFAULT_HORIZON)
+            ),
+            dt=preview_dt,
+            measurement_dt=float(
+                config.get("measurement_dt", preview_dt)
+            ),
+            latitude=float(config.get("latitude", 0.0)),
+            longitude=float(config.get("longitude", 0.0)),
+            tracking_weight=float(
+                config.get("tracking_weight", const.DEFAULT_TRACKING_WEIGHT)
+            ),
+            energy_weight=float(
+                config.get("energy_weight", const.DEFAULT_ENERGY_WEIGHT)
+            ),
+            smoothing_weight=float(
+                config.get("smoothing_weight", const.DEFAULT_SMOOTHING_WEIGHT)
+            ),
+            soft_constraint_weight=float(
+                config.get(
+                    "soft_constraint_weight",
+                    const.DEFAULT_SOFT_CONSTRAINT_WEIGHT,
+                )
+            ),
+            soft_constraint_linear_weight=float(
+                config.get(
+                    "soft_constraint_linear_weight",
+                    const.DEFAULT_SOFT_CONSTRAINT_LINEAR_WEIGHT,
+                )
+            ),
+            terminal_weight=float(
+                config.get("terminal_weight", const.DEFAULT_TERMINAL_WEIGHT)
+            ),
+            sigma_w=float(config.get("sigma_w", const.DEFAULT_SIGMA_W)),
+            sigma_v=float(config.get("sigma_v", const.DEFAULT_SIGMA_V)),
+            sigma_b=float(config.get("sigma_b", const.DEFAULT_SIGMA_B)),
+            energy_price_weight=float(
+                config.get(
+                    "energy_price_weight",
+                    const.DEFAULT_ENERGY_PRICE_WEIGHT,
+                )
+            ),
+            albedo=float(config.get("ground_albedo", const.DEFAULT_GROUND_ALBEDO)),
+        )
+        return build_mpc_controller(build_config)
 
     def _apply_measurements(
         self,
