@@ -48,6 +48,7 @@ Deferred: rebuild store when `instance_id` changes mid-process.
 
 ## Shipped
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/572
+- Merge: `11325cc`
 - Version: **2.0.20**
 
 ## Next
