@@ -20,3 +20,14 @@ def slugify(value: str) -> str:
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[-\s]+", "_", text).strip("_")
     return text or "_"
+
+
+def room_slug(value: str) -> str:
+    """App / Ingress room slug used for synthetic entity IDs and forecast keys.
+
+    Unlike :func:`slugify`, punctuation becomes underscores rather than being
+    stripped — ``Erik's Room`` → ``erik_s_room``. Keep this in sync with
+    Ingress discovery and ``HeatingRuntime`` entity naming (SWD-277).
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    return re.sub(r"_+", "_", slug)

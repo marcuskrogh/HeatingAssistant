@@ -45,4 +45,4 @@ Root causes:
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
 
 ## Next
-`/review-fix SWD-277` — Review and auto-fix (single pass)
+`/ship SWD-277` — review-fix CLEAN (slug keys, price_tag, capacity meta, forecast lock)

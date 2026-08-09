@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-277 | Task | [Iterate] Plot samples too dense + empty forecasts — gate history to update_interval and expose MPC trajectories | In Progress | — | docs/agents/ITERATE.md | In Progress — branch `cursor/swd-277-plot-cadence-forecasts-f56e` |
+| SWD-277 | Task | [Iterate] Plot samples too dense + empty forecasts — gate history to update_interval and expose MPC trajectories | In Review | — | docs/agents/ITERATE.md | review-fix CLEAN — `/ship SWD-277` · https://github.com/marcuskrogh/HeatingAssistant/pull/566 |
 | SWD-276 | Task | [Iterate] KPIs/plots flat overnight — App has no wall-clock history/control ticker | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/565 |
 | SWD-275 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without with-contenv entrypoint | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/564 |
 | SWD-274 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without hassio_api | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/563 |

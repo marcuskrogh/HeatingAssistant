@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 import logging
+import threading
 from typing import Any
 
 from . import const
@@ -38,6 +39,7 @@ class ControlEngine:
         self._last_outdoor_forecast: list[float] = []
         self._last_solar_forecast: list[dict[str, float]] = []
         self._last_compute_ts: datetime | None = None
+        self._forecast_lock = threading.Lock()
         self.update_config(config or {})
 
     def update_config(self, config: Mapping[str, Any]) -> None:
@@ -95,43 +97,93 @@ class ControlEngine:
     def forecast_snapshot(self) -> dict[str, Any]:
         """Return the last MPC trajectories for Ingress forecast plots."""
 
-        return {
-            "mode": self.mode,
-            "compute_ts": self._last_compute_ts,
-            "predictions": [dict(item) for item in self._last_predictions],
-            "linearised_predictions": [
-                dict(item) for item in self._last_linearised_predictions
-            ],
-            "heating_schedule": [dict(item) for item in self._last_heating_schedule],
-            "outdoor_forecast": list(self._last_outdoor_forecast),
-            "solar_forecast": [dict(item) for item in self._last_solar_forecast],
-            "dt": float(self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
-            "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
-        }
+        with self._forecast_lock:
+            return {
+                "mode": self.mode,
+                "compute_ts": self._last_compute_ts,
+                "predictions": [dict(item) for item in self._last_predictions],
+                "linearised_predictions": [
+                    dict(item) for item in self._last_linearised_predictions
+                ],
+                "heating_schedule": [dict(item) for item in self._last_heating_schedule],
+                "outdoor_forecast": list(self._last_outdoor_forecast),
+                "solar_forecast": [dict(item) for item in self._last_solar_forecast],
+                "dt": float(self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
+                "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
+            }
+
+    def room_power_meta(
+        self, outdoor_temp: float | None = None
+    ) -> dict[str, dict[str, float]]:
+        """Configured / rated heating capacity per room name for plot bounds."""
+
+        outdoor = float(outdoor_temp) if outdoor_temp is not None else 0.0
+        by_room: dict[str, dict[str, float]] = {}
+        for source in self.heat_sources:
+            room = str(source.room)
+            bucket = by_room.setdefault(
+                room,
+                {
+                    "max_power": 0.0,
+                    "current_rated_max_power": 0.0,
+                    "max_cooling_power": 0.0,
+                },
+            )
+            bucket["max_power"] += float(source.max_power)
+            try:
+                rated = float(source.rated_heating_capacity(outdoor))
+            except Exception:  # pragma: no cover - defensive
+                rated = float(source.max_power)
+            bucket["current_rated_max_power"] += rated
+            cooling = getattr(source, "max_cooling_power", None)
+            if cooling is None:
+                cooling = getattr(source, "rated_cooling_capacity", None)
+                if callable(cooling):
+                    try:
+                        cooling = cooling(outdoor)
+                    except Exception:  # pragma: no cover
+                        cooling = 0.0
+            if cooling is not None:
+                try:
+                    bucket["max_cooling_power"] += abs(float(cooling))
+                except (TypeError, ValueError):
+                    pass
+        for meta in by_room.values():
+            meta["current_max_power"] = meta["current_rated_max_power"]
+            for key, value in list(meta.items()):
+                meta[key] = round(float(value), 1)
+        return by_room
 
     def _cache_controller_forecast(self, controller: Any) -> None:
-        self._last_predictions = [dict(item) for item in list(getattr(controller, "predictions", []) or [])]
-        self._last_linearised_predictions = [
+        predictions = [dict(item) for item in list(getattr(controller, "predictions", []) or [])]
+        linearised = [
             dict(item) for item in list(getattr(controller, "linearised_predictions", []) or [])
         ]
-        self._last_heating_schedule = [
+        heating_schedule = [
             dict(item) for item in list(getattr(controller, "heating_schedule", []) or [])
         ]
-        self._last_outdoor_forecast = [
+        outdoor_forecast = [
             float(value) for value in list(getattr(controller, "outdoor_forecast", []) or [])
         ]
-        self._last_solar_forecast = [
+        solar_forecast = [
             dict(item) for item in list(getattr(controller, "solar_forecast", []) or [])
         ]
-        self._last_compute_ts = datetime.now(timezone.utc)
+        with self._forecast_lock:
+            self._last_predictions = predictions
+            self._last_linearised_predictions = linearised
+            self._last_heating_schedule = heating_schedule
+            self._last_outdoor_forecast = outdoor_forecast
+            self._last_solar_forecast = solar_forecast
+            self._last_compute_ts = datetime.now(timezone.utc)
 
     def _clear_controller_forecast(self) -> None:
-        self._last_predictions = []
-        self._last_linearised_predictions = []
-        self._last_heating_schedule = []
-        self._last_outdoor_forecast = []
-        self._last_solar_forecast = []
-        self._last_compute_ts = None
+        with self._forecast_lock:
+            self._last_predictions = []
+            self._last_linearised_predictions = []
+            self._last_heating_schedule = []
+            self._last_outdoor_forecast = []
+            self._last_solar_forecast = []
+            self._last_compute_ts = None
 
     def _try_build_controller(self) -> Any:
         if not self.heat_sources or not self.model.rooms:

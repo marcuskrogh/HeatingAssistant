@@ -19,6 +19,7 @@ from heatingassistant.app.forecast_payload import build_app_forecast_payload
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
+from heatingassistant.engine.naming import room_slug
 
 from heatingassistant.mqtt.bridge import InMemoryMqttBus, MqttBus, Unsubscribe
 from heatingassistant.mqtt.supervisor import (
@@ -790,14 +791,21 @@ class HeatingRuntime:
         """Return MPC trajectories for Ingress plots (SWD-277)."""
 
         snapshot = self.control_engine.forecast_snapshot()
-        energy_price = self._coerce_number(self.tag_values.get("energy_price"))
+        price_tag = self.options.get("price_tag") or "energy_price"
+        if not isinstance(price_tag, str) or not price_tag:
+            price_tag = "energy_price"
+        energy_price = self._coerce_number(self.tag_values.get(price_tag))
+        if energy_price is None and price_tag != "energy_price":
+            energy_price = self._coerce_number(self.tag_values.get("energy_price"))
+        outdoor_temp = self._outdoor_temperature()
         return build_app_forecast_payload(
             rooms=self._rooms(),
             room_temperatures=self.room_temperatures,
-            outdoor_temp=self._outdoor_temperature(),
+            outdoor_temp=outdoor_temp,
             energy_price=energy_price,
             snapshot=snapshot,
             plot_forecast_hours=plot_forecast_hours,
+            room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
         )
 
     def datasets(self, room_slug: str | None = None) -> list[dict[str, Any]]:
@@ -1500,8 +1508,7 @@ class HeatingRuntime:
 
     @staticmethod
     def _room_slug(name: str) -> str:
-        slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
-        return re.sub(r"_+", "_", slug)
+        return room_slug(name)
 
     @staticmethod
     def _normalise_schedule(value: Any) -> dict[str, Any]:
