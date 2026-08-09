@@ -45,6 +45,7 @@ at open time (~06:44); price/forecast series absent (separate stub gap).
 - Task: SWD-276
 - Relates: SWD-275
 - Branch: `cursor/swd-276-wall-clock-ticker-f56e`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/565
 
 ## Next
 `/review-fix SWD-276` — Review and auto-fix (single pass)
