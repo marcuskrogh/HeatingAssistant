@@ -66,7 +66,7 @@ def merge_supervisor_options(
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.24"
+    server_version = "HeatingAssistantApp/2.0.25"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)

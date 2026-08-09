@@ -10,7 +10,7 @@
 import {
   findActivePeriod, findNextPeriod,
   periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml,
-} from '../schedule-utils.js?v=118';
+} from '../schedule-utils.js?v=119';
 import {
   experimentRowHtml, findNextScheduledExperiment,
 } from '../experiment-utils.js?v=118';
