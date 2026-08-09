@@ -590,7 +590,12 @@
    Stored-datasets section (System Identification page)
    --------------------------------------------------------------------------- */
 
-/* Save-current-window row: name + notes + action, aligned on one line. */
+/* Save-current-window row: name + notes + action, aligned on one line.
+
+   Use flex-basis:auto + min-width (not flex-basis:220px).  When the mobile
+   rule below switches this row to flex-direction:column, a 220px flex-basis
+   would become a 220px *height* and leave a large empty gap under each input.
+   min-width still triggers wrap on narrow widths while keeping content height. */
 .ds-save-row {
   display: flex;
   flex-wrap: wrap;
@@ -598,8 +603,12 @@
   gap: 12px;
   margin-bottom: 14px;
 }
-.ds-save-row__name { flex: 1 1 220px; margin: 0; }
-.ds-save-row__notes { flex: 1 1 220px; margin: 0; }
+.ds-save-row__name,
+.ds-save-row__notes {
+  flex: 1 1 auto;
+  min-width: min(220px, 100%);
+  margin: 0;
+}
 .ds-save-row__action {
   display: flex;
   align-items: center;
@@ -839,11 +848,18 @@ input[type="time"] {
   .window-datetime-inputs {
     grid-template-columns: 1fr;
   }
-  /* Stack the save-dataset row and its action button. */
+  /* Stack the save-dataset row and its action button.
+     Reset flex so stacked fields size to content, not a leftover row basis. */
   .ds-save-row {
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
+  }
+  .ds-save-row__name,
+  .ds-save-row__notes {
+    flex: none;
+    width: 100%;
+    min-width: 0;
   }
   .ds-save-row--compact .form-group + .form-group {
     margin-top: 0;
