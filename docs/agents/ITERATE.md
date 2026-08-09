@@ -47,5 +47,12 @@ at open time (~06:44); price/forecast series absent (separate stub gap).
 - Branch: `cursor/swd-276-wall-clock-ticker-f56e`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/565
 
+## Review-fix
+CLEAN — wall-clock ticker samples history without Ingress; control skips when MQTT recently ran; packaging/tests green.
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/565
+- Version: **2.0.15**
+
 ## Next
-`/review-fix SWD-276` — Review and auto-fix (single pass)
+Done — rebuild/update App on HAOS to v2.0.15; leave panel closed a few minutes then confirm history fills. `/iterate` for forecast/price stubs or MODEL FIT if still empty.
