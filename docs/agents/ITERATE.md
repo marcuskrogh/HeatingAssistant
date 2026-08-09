@@ -43,7 +43,7 @@ Root causes:
 - Task: SWD-280
 - Relates: SWD-262, SWD-259
 - Branch: `cursor/swd-280-climate-actuation-c648`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/570
 
 ## Review-fix
 (pending)
@@ -52,4 +52,4 @@ Root causes:
 (pending)
 
 ## Next
-Implement → tests → `/review-fix SWD-280`.
+`/review-fix SWD-280` then rebuild App on HAOS to v2.0.19.
