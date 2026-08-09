@@ -41,5 +41,15 @@ never rewired after the HAOS App cutover.
 - Branch: `cursor/swd-281-history-persistence-32e0`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/572
 
+## Review-fix
+CLEAN — public ID store sync API; `_history_lock`; async plot/ID persist from
+control cycle; JSON default encoder; once-per-day purge guard; retention tests.
+Deferred: rebuild store when `instance_id` changes mid-process.
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/572
+- Version: **2.0.20**
+
 ## Next
-`/review-fix SWD-281` — Review and auto-fix (single pass)
+Done — rebuild/update App on HAOS to v2.0.20; confirm room-view plots keep
+history across an App update. `/iterate` if history still clears after rebuild.
