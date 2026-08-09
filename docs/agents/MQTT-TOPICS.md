@@ -33,8 +33,13 @@ Bindings are retained JSON with this shape:
 
 Direction `in` means HA publishes entity state to the App. Direction `out` means
 the thin bridge subscribes to App tag output and writes to the HA entity. The
-initial thin bridge supports sensor reads, `switch.turn_on`/`switch.turn_off`,
-`number.set_value`, and basic climate setpoint/HVAC mode writes.
+thin bridge supports sensor reads, `switch.turn_on`/`switch.turn_off`,
+`number.set_value`, and climate writes via App payloads shaped as
+`{"hvac_mode": "cool"|"heat"|"heat_cool"|"off", "temperature": 21.5}`
+(SWD-280). Internal App actuator state remains an MPC fraction in `[-1, 1]`;
+domain-specific HA commands are derived at publish time. Climate heaters also
+auto-bind an inbound `{output_tag}_state` tag so the App receives
+`current_temperature` / `hvac_modes` for setpoint anchoring.
 
 When you configure rooms / heat sources / environment sensors in the Ingress UI
 with Home Assistant entity IDs (`temp_sensors`, `heater_entity`,

@@ -421,8 +421,22 @@ def _build_heat_sources(sources_cfg: list[Mapping[str, Any]]) -> list[HeatSource
                             source_cfg.get("max_temp_offset"),
                             const.DEFAULT_MAX_TEMP_OFFSET,
                         ),
+                        delta_sat=_as_float(
+                            source_cfg.get("delta_sat"), const.DEFAULT_DELTA_SAT
+                        ),
                         hvac_mode=str(
                             source_cfg.get("hvac_mode") or const.DEFAULT_SOURCE_HVAC_MODE
+                        ),
+                        cooling_cop=_as_float(
+                            source_cfg.get("cooling_cop"), const.DEFAULT_COOLING_COP
+                        ),
+                        cooling_efficiency=_as_float(
+                            source_cfg.get("cooling_efficiency"),
+                            const.DEFAULT_COOLING_EFFICIENCY,
+                        ),
+                        heating_efficiency=_as_float(
+                            source_cfg.get("heating_efficiency"),
+                            const.DEFAULT_EFFICIENCY,
                         ),
                     )
                 )

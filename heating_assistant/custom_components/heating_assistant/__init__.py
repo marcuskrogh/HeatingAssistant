@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 import time
+from collections.abc import Mapping
 from typing import Any, Callable
 
 from homeassistant.components import mqtt
@@ -227,8 +228,13 @@ class _BridgeManager:
                     except (TypeError, ValueError):
                         pass
             # Carry selected HA attributes so the App can build day-ahead price
-            # and weather/solar forecast series (SWD-278/279).
+            # and weather/solar forecast series (SWD-278/279), plus climate
+            # feedback for heat-pump setpoint anchoring (SWD-280).
             attributes = await forecast_attributes_for_publish(self.hass, state)
+            if state.domain == "climate":
+                climate_attrs = climate_attributes_for_publish(state)
+                if climate_attrs:
+                    attributes = {**(attributes or {}), **climate_attrs}
             try:
                 payload = MqttTagPayload(
                     value,
@@ -294,6 +300,57 @@ class _BridgeManager:
                 {"entity_id": entity_id, "value": float(value)},
                 blocking=False,
             )
+        elif domain == "climate":
+            await self._write_climate_entity(entity_id, value)
+
+    async def _write_climate_entity(self, entity_id: str, value: Any) -> None:
+        """Apply App climate commands (SWD-280).
+
+        Expected ``value`` shapes:
+        - ``{"hvac_mode": "off"}`` — turn the unit off
+        - ``{"hvac_mode": "cool"|"heat"|"heat_cool"|..., "temperature": 21.5}``
+        - bare number — ``set_temperature`` only (legacy / partial)
+        """
+
+        if isinstance(value, Mapping):
+            mode = value.get("hvac_mode")
+            if isinstance(mode, str) and mode:
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_hvac_mode",
+                    {"entity_id": entity_id, "hvac_mode": mode},
+                    blocking=False,
+                )
+            if "temperature" in value and value.get("temperature") is not None:
+                try:
+                    temperature = float(value["temperature"])
+                except (TypeError, ValueError):
+                    _LOGGER.warning(
+                        "Ignoring non-numeric climate temperature for %s: %r",
+                        entity_id,
+                        value.get("temperature"),
+                    )
+                    return
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_temperature",
+                    {"entity_id": entity_id, "temperature": temperature},
+                    blocking=False,
+                )
+            return
+        if isinstance(value, (int, float)):
+            await self.hass.services.async_call(
+                "climate",
+                "set_temperature",
+                {"entity_id": entity_id, "temperature": float(value)},
+                blocking=False,
+            )
+            return
+        _LOGGER.warning(
+            "Ignoring unsupported climate write payload for %s: %r",
+            entity_id,
+            value,
+        )
 
     def _clear_binding_subscriptions(self) -> None:
         while self._binding_subs:
@@ -321,4 +378,25 @@ def _coerce_state_value(value: str) -> Any:
 def _truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.lower() in {"1", "true", "on", "open", "heat"}
+    # Signed MPC fractions must not turn a switch on via bool(-1.0) == True.
+    if isinstance(value, (int, float)):
+        return float(value) > 0.5
     return bool(value)
+
+
+def climate_attributes_for_publish(state: State) -> dict[str, Any]:
+    """Select climate attributes needed for App setpoint anchoring (SWD-280)."""
+
+    attrs = getattr(state, "attributes", None) or {}
+    selected: dict[str, Any] = {}
+    for key in (
+        "current_temperature",
+        "temperature",
+        "hvac_modes",
+        "hvac_action",
+        "min_temp",
+        "max_temp",
+    ):
+        if key in attrs and attrs[key] is not None:
+            selected[key] = attrs[key]
+    return selected

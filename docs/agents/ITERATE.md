@@ -1,60 +1,55 @@
-# Iterate: Plot forecasts still flat (attrs / weather service / estimated bridge)
+# Iterate: Climate heat-pump actuation missing after thin bridge
 
 ## Prior work
-- Task: SWD-278
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/567 (v2.0.17)
-- Spec context: docs/agents/ITERATE.md (prior)
+- Task: SWD-279
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568 (v2.0.18)
+- Spec context: docs/agents/PLAN-haos-app-mqtt.md (heaters commanded correctly)
 
 ## Problem
-After SWD-278, room plots still look wrong: linearised prediction does not
-start from the EKF estimated output, Price Forecast remains a flat scalar
-hold (not the day-ahead entity series), and outdoor/solar forecasts stay
-constant (persistence).
+Dashboard shows planned power ≈ −3.5 kW (max cooling) while measured power
+stays ≈ −1 W and the heat pump does not cool. MQTT/API report connected.
 
 Root causes:
-1. Thin bridge `json.dumps` of Nord Pool `raw_today` fails when entries
-   contain `datetime` objects — attributes never reach the App.
-2. Modern HA weather entities no longer expose `forecast` on state
-   attributes; SWD-278 only read attrs and skipped `weather.get_forecasts`.
-3. App forecast bridge omits `linearised_temperature` at `now` and uses
-   measured room temp instead of EKF `filtered_temperatures`; solar future
-   steps index the N+1 series as if it were N-aligned.
+1. Thin bridge `_write_entity` only handled `switch`/`number` — climate
+   writes were a silent no-op despite MQTT docs claiming climate support.
+2. App published raw MPC **fractions** on tag/out; fraction →
+   `(hvac_mode, temperature)` (old `climate_hp_command`) was never ported
+   after SWD-262 deleted coordinator actuation.
+3. `heating_power_measured` summed fractions and labeled them as **W**, so
+   u=−1 displayed as −1 W.
 
 ## Acceptance criteria
-1. Price entity with `raw_today`/`raw_tomorrow` (including datetime-valued
-   starts) publishes JSON-safe MQTT attributes; `/api/forecasts`
-   `price_forecast` varies with the day-ahead series (not only scalar hold).
-2. Weather-bound outdoor forecast uses `weather.get_forecasts` when the
-   service is available so outdoor (and cloud-driven solar) vary over the
-   horizon when forecast data exists.
-3. Forecast bridge at `now` sets `temperature` and `linearised_temperature`
-   from EKF estimated/filtered output when available; solar future steps use
-   `solar_forecast[i+1]` for the N+1 series.
-4. Regression tests; version **2.0.18**.
+1. Climate-bound heat pumps receive `climate.set_hvac_mode` +
+   `climate.set_temperature` for cooling/heating fractions (incl. u≈−1).
+2. Measured room heating power reports thermal watts via
+   `display_smooth_thermal_power` (not raw fraction).
+3. `number` heaters write `round(fraction*100)`; `switch` uses
+   `fraction > 0.5` (signed fractions must not turn switches on).
+4. Climate entity feedback (`current_temperature`, `hvac_modes`) reaches
+   the App via a `{output_tag}_state` inbound binding.
+5. Regression tests; version **2.0.19**.
 
 ## Out of scope
-- History persistence across App restart.
-- MODEL FIT / solar KPI completeness.
-- Changing MPC linearisation point away from setpoint equilibrium.
+- Full actuation watchdog / fast setpoint re-apply between MPC ticks.
+- Restoring fat HA climate platforms.
 
 ## Work packages
-1. Thin bridge: JSON-safe attribute sanitisation + `weather.get_forecasts`.
-2. ControlEngine caches filtered temps; forecast payload bridges from
-   estimated output and fixes solar N+1 indexing.
-3. Version 2.0.18 + tests + tracker.
+1. App `actuation.py` + publish-time domain command conversion.
+2. Thin bridge climate writes + climate attribute publish; switch truthy fix.
+3. Measured/total power from thermal watts; HP cooling config passthrough.
+4. Version 2.0.19 + tests + tracker.
 
 ## Tracker
-- Task: SWD-279
-- Relates: SWD-278
-- Branch: `cursor/swd-279-forecast-bridge-attrs-4b6c`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568
+- Task: SWD-280
+- Relates: SWD-262, SWD-259
+- Branch: `cursor/swd-280-climate-actuation-c648`
+- PR: (pending)
 
 ## Review-fix
-CLEAN — weather forecast cache on service failure; UTC naive datetimes; price series regression.
+(pending)
 
 ## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568
-- Version: **2.0.18**
+(pending)
 
 ## Next
-Done — rebuild/update App on HAOS to v2.0.18; confirm day-ahead Price Forecast, Disturbances outdoor/solar, and Linearised bridging from Filtered at NOW. `/iterate` if still wrong after rebuild.
+Implement → tests → `/review-fix SWD-280`.
