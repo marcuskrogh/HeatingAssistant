@@ -39,10 +39,11 @@
 - Task: SWD-284
 - Branch: `cursor/swd-284-price-history-a08d`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/578
-- Merge: (pending)
+- Merge: `afcbea7`
 
 ## Shipped
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/578
+- Merge: `afcbea7`
 - Version: **2.0.23**
 
 ## Next

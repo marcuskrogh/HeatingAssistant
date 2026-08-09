@@ -38,7 +38,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-08-09 — shipped SWD-284 via PR #578: publish electricity_price + day-ahead history backfill; v2.0.23; review-fix CLEAN. Rebuild App on HAOS so room Price shows left of NOW.
+- 2026-08-09 — shipped SWD-284 via PR #578 (`afcbea7`): publish electricity_price + day-ahead history backfill; v2.0.23; review-fix CLEAN. Rebuild App on HAOS so room Price shows left of NOW.
 - 2026-08-09 — SWD-284 review-fix CLEAN on PR #578; shipping closeout (v2.0.23).
 - 2026-08-09 — `/ship` SWD-284: room view Price plot missing historical data — App never publishes electricity_price; v2.0.23; branch `cursor/swd-284-price-history-a08d`.
 - 2026-08-09 — SWD-284 In Review + PR #578: publish electricity_price + day-ahead history backfill; v2.0.23; Next `/review-fix SWD-284`.
