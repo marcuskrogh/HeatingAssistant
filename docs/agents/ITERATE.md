@@ -44,5 +44,13 @@ Root causes:
 - Branch: `cursor/swd-277-plot-cadence-forecasts-f56e`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
 
+## Review-fix
+CLEAN — history gated to `update_interval`; MPC forecasts exposed at `now+k·dt`;
+room_slug keys, price_tag, capacity meta, forecast lock.
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
+- Version: **2.0.16**
+
 ## Next
-`/ship SWD-277` — review-fix CLEAN (slug keys, price_tag, capacity meta, forecast lock)
+Done — rebuild/update App on HAOS to v2.0.16; confirm ~15 min history grid and Forecast / Planned Power after an MPC cycle. `/iterate` for Nord Pool day-ahead prices or history persistence if still needed.
