@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-279 | Task | [Iterate] Plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-279` |
+| SWD-279 | Task | [Iterate] Plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output | In Review | — | docs/agents/ITERATE.md | `/review-fix SWD-279` |
 | SWD-278 | Task | [Iterate] Incomplete plot forecasts — wire outdoor/solar/price into MPC compute + MQTT attrs | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/567 |
 | SWD-277 | Task | [Iterate] Plot samples too dense + empty forecasts — gate history to update_interval and expose MPC trajectories | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/566 |
 | SWD-276 | Task | [Iterate] KPIs/plots flat overnight — App has no wall-clock history/control ticker | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/565 |
@@ -33,6 +33,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — SWD-279 In Review + PR #568: JSON-safe attrs, weather.get_forecasts, EKF bridge; v2.0.18; Next `/review-fix SWD-279`.
 - 2026-08-09 — `/iterate` SWD-279 from SWD-278: plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output; v2.0.18; branch `cursor/swd-279-forecast-bridge-attrs-4b6c`.
 - 2026-08-09 — shipped SWD-278 via PR #567: outdoor/solar/price into MPC + MQTT attrs; v2.0.17; review-fix CLEAN. Rebuild App on HAOS for Disturbances + day-ahead Price Forecast.
 - 2026-08-09 — SWD-278 In Review + PR #567: outdoor/solar/price into MPC + MQTT attrs; v2.0.17; Next `/review-fix SWD-278`.

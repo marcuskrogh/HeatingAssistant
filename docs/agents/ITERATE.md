@@ -47,6 +47,7 @@ Root causes:
 - Task: SWD-279
 - Relates: SWD-278
 - Branch: `cursor/swd-279-forecast-bridge-attrs-4b6c`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568
 
 ## Next
 `/review-fix SWD-279` — Review and auto-fix (single pass)
