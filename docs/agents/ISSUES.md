@@ -37,7 +37,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-08-09 — shipped SWD-283 via PR #576: Save Current Window mobile flex gap; v2.0.22; review-fix CLEAN. Rebuild App on HAOS so identification save fields stack tightly on phone.
+- 2026-08-09 — shipped SWD-283 via PR #576 (`f117f93`): Save Current Window mobile flex gap; v2.0.22; review-fix CLEAN. Rebuild App on HAOS so identification save fields stack tightly on phone.
 - 2026-08-09 — SWD-283 review-fix CLEAN on PR #576; shipping closeout (v2.0.22).
 - 2026-08-09 — `/ship` SWD-283: large whitespace between Save Current Window inputs on mobile — `flex: 1 1 220px` became height under column layout; v2.0.22; branch `cursor/fix-sysid-save-row-mobile-gap-6a4c`.
 - 2026-08-09 — shipped SWD-282 via PR #574 (`38846fb`): Option A solar exposure aperture wired in App room build; v2.0.21; review-fix CLEAN. Rebuild App on HAOS so DISTURBANCES Solar Gain shows dynamics.
