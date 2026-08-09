@@ -192,9 +192,18 @@ def build_app_forecast_payload(
         )
 
     price_data: list[dict[str, Any]] = []
-    if energy_price is not None:
-        # Persist the latest scalar price across the horizon (full day-ahead
-        # attribute series needs a separate MQTT transport).
+    price_series = list(snapshot.get("price_forecast") or [])
+    if price_series:
+        for i, price in enumerate(price_series):
+            price_data.append(
+                {
+                    "time": (now + timedelta(seconds=dt * i)).isoformat(),
+                    "price": round(float(price), 5),
+                }
+            )
+    elif energy_price is not None:
+        # Persist the latest scalar price across the horizon when no day-ahead
+        # attribute series was available (SWD-277/278).
         steps = max(main_n + extra, n_pred, 1)
         for i in range(steps):
             price_data.append(

@@ -1,7 +1,7 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.20
 # Supervisor passes BUILD_VERSION from config.yaml on every App build/update.
 # Keep the default equal to heating_assistant/config.yaml version for local builds.
-ARG BUILD_VERSION=2.0.16
+ARG BUILD_VERSION=2.0.17
 ARG BUILD_ARCH=amd64
 FROM ${BUILD_FROM}
 

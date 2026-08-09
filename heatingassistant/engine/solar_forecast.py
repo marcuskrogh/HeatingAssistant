@@ -38,11 +38,14 @@ STALE_SECONDS_DEFAULT = 3 * 3600
 # solar irradiance in W/m².
 _FORECAST_ATTR_NAMES = (
     "forecast",
+    "forecasts",
     "shortwave_radiation",
     "ghi",
     "irradiance",
     "radiation",
     "detailedForecast",
+    "data",
+    "entries",
 )
 _TS_KEYS = ("datetime", "period_start", "time", "timestamp")
 _VALUE_KEYS = ("ghi", "shortwave_radiation", "irradiance", "radiation", "value")

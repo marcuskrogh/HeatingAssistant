@@ -65,31 +65,37 @@ class MqttTagPayload:
     status: str = "GOOD"
     reason: str | None = None
     ts: float | None = None
+    attributes: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in VALID_STATUSES:
             raise ValueError("status must be GOOD, BAD, or UNCERTAIN")
+        if self.attributes is not None and not isinstance(self.attributes, dict):
+            raise TypeError("attributes must be a dict or None")
 
     def encode(self) -> str:
-        return json.dumps(
-            {
-                "value": self.value,
-                "status": self.status,
-                "reason": self.reason,
-                "ts": float(self.ts) if self.ts is not None else None,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        )
+        data = {
+            "value": self.value,
+            "status": self.status,
+            "reason": self.reason,
+            "ts": float(self.ts) if self.ts is not None else None,
+        }
+        if self.attributes is not None:
+            data["attributes"] = self.attributes
+        return json.dumps(data, separators=(",", ":"), sort_keys=True)
 
     @classmethod
     def decode(cls, payload: str | bytes) -> "MqttTagPayload":
         if isinstance(payload, bytes):
             payload = payload.decode("utf-8")
         data = json.loads(payload)
+        attributes = data.get("attributes")
+        if attributes is not None and not isinstance(attributes, dict):
+            raise ValueError("attributes must be an object when present")
         return cls(
             value=data["value"],
             status=data["status"],
             reason=data["reason"],
             ts=data["ts"],
+            attributes=attributes,
         )

@@ -107,6 +107,7 @@ class MqttTagPayload:
     status: TagStatus = "GOOD"
     reason: str | None = None
     ts: float | None = None
+    attributes: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in VALID_STATUSES:
@@ -115,16 +116,21 @@ class MqttTagPayload:
             raise TypeError("reason must be a string or None")
         if self.ts is not None and not isinstance(self.ts, (int, float)):
             raise TypeError("ts must be a number or None")
+        if self.attributes is not None and not isinstance(self.attributes, dict):
+            raise TypeError("attributes must be a dict or None")
 
     def to_dict(self) -> dict[str, Any]:
         """Return the canonical payload dictionary."""
 
-        return {
+        data = {
             "value": self.value,
             "status": self.status,
             "reason": self.reason,
             "ts": float(self.ts) if self.ts is not None else None,
         }
+        if self.attributes is not None:
+            data["attributes"] = self.attributes
+        return data
 
     def encode(self) -> str:
         """Encode the payload as compact JSON for MQTT."""
@@ -152,9 +158,13 @@ class MqttTagPayload:
         missing = {"value", "status", "reason", "ts"} - data.keys()
         if missing:
             raise ValueError(f"payload missing keys: {', '.join(sorted(missing))}")
+        attributes = data.get("attributes")
+        if attributes is not None and not isinstance(attributes, dict):
+            raise ValueError("attributes must be an object when present")
         return cls(
             value=data["value"],
             status=data["status"],
             reason=data["reason"],
             ts=data["ts"],
+            attributes=attributes,
         )

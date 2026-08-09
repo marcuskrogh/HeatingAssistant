@@ -38,6 +38,7 @@ class ControlEngine:
         self._last_heating_schedule: list[dict[str, float]] = []
         self._last_outdoor_forecast: list[float] = []
         self._last_solar_forecast: list[dict[str, float]] = []
+        self._last_price_forecast: list[float] = []
         self._last_compute_ts: datetime | None = None
         self._forecast_lock = threading.Lock()
         self.update_config(config or {})
@@ -67,6 +68,13 @@ class ControlEngine:
         room_temps: Mapping[str, float | None],
         outdoor_temp: float | None,
         setpoints: Mapping[str, float] | None = None,
+        *,
+        outdoor_forecast: list[float] | None = None,
+        cloud_forecast: list[float] | None = None,
+        cloud_cover_now: float | None = None,
+        ghi_forecast: list[float | None] | None = None,
+        ghi_now: float | None = None,
+        price_forecast: list[float] | None = None,
     ) -> dict[str, float]:
         """Return MQTT output tag values for the current room temperatures."""
 
@@ -76,10 +84,18 @@ class ControlEngine:
 
         if self._controller is not None and self.heat_sources:
             try:
+                # Do not force solar_gains=0 — let the controller compute
+                # geometric / GHI-driven gains (SWD-278).
                 actions = self._controller.compute(
                     outdoor,
-                    solar_gains={name: 0.0 for name in self.model.rooms},
+                    solar_gains=None,
                     now=datetime.now(timezone.utc),
+                    outdoor_forecast=outdoor_forecast,
+                    cloud_forecast=cloud_forecast,
+                    cloud_cover_now=cloud_cover_now,
+                    ghi_forecast=ghi_forecast,
+                    ghi_now=ghi_now,
+                    price_forecast=price_forecast,
                 )
                 self._cache_controller_forecast(self._controller)
                 self.mode = "mpc"
@@ -108,6 +124,7 @@ class ControlEngine:
                 "heating_schedule": [dict(item) for item in self._last_heating_schedule],
                 "outdoor_forecast": list(self._last_outdoor_forecast),
                 "solar_forecast": [dict(item) for item in self._last_solar_forecast],
+                "price_forecast": list(self._last_price_forecast),
                 "dt": float(self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
                 "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
             }
@@ -168,12 +185,16 @@ class ControlEngine:
         solar_forecast = [
             dict(item) for item in list(getattr(controller, "solar_forecast", []) or [])
         ]
+        price_forecast = [
+            float(value) for value in list(getattr(controller, "price_forecast", []) or [])
+        ]
         with self._forecast_lock:
             self._last_predictions = predictions
             self._last_linearised_predictions = linearised
             self._last_heating_schedule = heating_schedule
             self._last_outdoor_forecast = outdoor_forecast
             self._last_solar_forecast = solar_forecast
+            self._last_price_forecast = price_forecast
             self._last_compute_ts = datetime.now(timezone.utc)
 
     def _clear_controller_forecast(self) -> None:
@@ -183,6 +204,7 @@ class ControlEngine:
             self._last_heating_schedule = []
             self._last_outdoor_forecast = []
             self._last_solar_forecast = []
+            self._last_price_forecast = []
             self._last_compute_ts = None
 
     def _try_build_controller(self) -> Any:
