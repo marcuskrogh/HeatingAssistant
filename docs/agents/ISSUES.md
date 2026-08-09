@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-281 | Task | [Iterate] App update clears room-plot / ID history — persist under /data like original integration | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-281` |
 | SWD-280 | Task | [Iterate] Climate heat-pump actuation missing after thin bridge — planned cooling never reaches HA entity | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/570 |
 | SWD-279 | Task | [Iterate] Plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/568 |
 | SWD-278 | Task | [Iterate] Incomplete plot forecasts — wire outdoor/solar/price into MPC compute + MQTT attrs | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/567 |

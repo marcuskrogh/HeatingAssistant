@@ -35,6 +35,7 @@ stored so the full record is preserved for future diagnostics.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -43,22 +44,39 @@ from typing import Any, Dict, List, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
+# App-owned layout under the Supervisor data volume (SWD-281).
+_APP_ID_HISTORY_DIRNAME = "id_history"
+# Legacy fat-integration layout under HA config_dir.
+_LEGACY_ID_HISTORY_DIRNAME = ".heating_assistant_id_history"
+
 
 class IdentificationHistoryStore:
-    """Append-only per-day JSONL history store for system-identification data."""
+    """Append-only per-day JSONL history store for system-identification data.
+
+    Construct with either a Home Assistant ``hass`` object (legacy integration
+    path under ``config_dir/.heating_assistant_id_history``) or an App
+    ``data_dir`` (HAOS App path under ``<data_dir>/id_history``).
+    """
 
     def __init__(
         self,
-        hass: Any,
-        entry_id: str,
+        hass: Any = None,
+        entry_id: str = "default",
         retention_days: int = 90,
+        *,
+        data_dir: str | Path | None = None,
     ) -> None:
         self._hass = hass
-        self._dir = (
-            Path(hass.config.config_dir)
-            / ".heating_assistant_id_history"
-            / entry_id
-        )
+        if data_dir is not None:
+            self._dir = Path(data_dir) / _APP_ID_HISTORY_DIRNAME / entry_id
+        elif hass is not None:
+            self._dir = (
+                Path(hass.config.config_dir)
+                / _LEGACY_ID_HISTORY_DIRNAME
+                / entry_id
+            )
+        else:
+            raise ValueError("IdentificationHistoryStore requires hass or data_dir")
         self._retention_days = max(1, retention_days)
         self._last_purge_date: Optional[date] = None
 
@@ -66,13 +84,20 @@ class IdentificationHistoryStore:
     # Public async API
     # ------------------------------------------------------------------
 
+    async def _run(self, fn: Any, *args: Any) -> Any:
+        """Run a sync helper in the HA executor or a thread (App path)."""
+
+        if self._hass is not None:
+            return await self._hass.async_add_executor_job(fn, *args)
+        return await asyncio.to_thread(fn, *args)
+
     async def async_setup(self) -> None:
         """Create the storage directory and run an initial purge."""
-        await self._hass.async_add_executor_job(self._sync_setup)
+        await self._run(self._sync_setup)
 
     async def async_append(self, record: Dict[str, Any]) -> None:
         """Append a single record to today's JSONL file (non-blocking)."""
-        await self._hass.async_add_executor_job(self._sync_append, record)
+        await self._run(self._sync_append, record)
 
     async def async_query_range(
         self,
@@ -84,22 +109,18 @@ class IdentificationHistoryStore:
         Reads only the day-files that overlap the requested range.  Returns an
         empty list when no data exists for the window.
         """
-        return await self._hass.async_add_executor_job(
-            self._sync_query_range, start_ts, end_ts
-        )
+        return await self._run(self._sync_query_range, start_ts, end_ts)
 
     async def async_query_recent(self, max_records: int) -> List[Dict[str, Any]]:
         """Return the most recent ``max_records`` records across all stored days."""
-        return await self._hass.async_add_executor_job(
-            self._sync_query_recent, max_records
-        )
+        return await self._run(self._sync_query_recent, max_records)
 
     async def async_purge_old(self) -> None:
         """Delete day-files older than ``retention_days`` (runs in executor)."""
         today = date.today()
         if self._last_purge_date == today:
             return  # already ran today
-        await self._hass.async_add_executor_job(self._sync_purge_old)
+        await self._run(self._sync_purge_old)
         self._last_purge_date = today
 
     def update_retention_days(self, days: int) -> None:

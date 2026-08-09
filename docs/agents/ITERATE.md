@@ -1,61 +1,45 @@
-# Iterate: Climate heat-pump actuation missing after thin bridge
+# Iterate: App update clears room-plot / ID history
 
 ## Prior work
-- Task: SWD-279
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568 (v2.0.18)
-- Spec context: docs/agents/PLAN-haos-app-mqtt.md (heaters commanded correctly)
+- Task: SWD-279 (deferred "History persistence across App restart"); SWD-269 (in-memory `/api/history`)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568 (v2.0.18); latest ship SWD-280 v2.0.19
+- Spec context: docs/agents/PLAN-haos-app-mqtt.md (App owns history on data volume)
 
 ## Problem
-Dashboard shows planned power ≈ −3.5 kW (max cooling) while measured power
-stays ≈ −1 W and the heat pump does not cool. MQTT/API report connected.
-
-Root causes:
-1. Thin bridge `_write_entity` only handled `switch`/`number` — climate
-   writes were a silent no-op despite MQTT docs claiming climate support.
-2. App published raw MPC **fractions** on tag/out; fraction →
-   `(hvac_mode, temperature)` (old `climate_hp_command`) was never ported
-   after SWD-262 deleted coordinator actuation.
-3. `heating_power_measured` summed fractions and labeled them as **W**, so
-   u=−1 displayed as −1 W.
+Every App update/restart clears room-view plot history. Ingress `/api/history`
+is an in-memory ring only (`HeatingRuntime._history`); `/data` survives updates
+but history is never written there. `IdentificationHistoryStore` (JSONL) was
+never rewired after the HAOS App cutover.
 
 ## Acceptance criteria
-1. Climate-bound heat pumps receive `climate.set_hvac_mode` +
-   `climate.set_temperature` for cooling/heating fractions (incl. u≈−1).
-2. Measured room heating power reports thermal watts via
-   `display_smooth_thermal_power` (not raw fraction).
-3. `number` heaters write `round(fraction*100)`; `switch` uses
-   `fraction > 0.5` (signed fractions must not turn switches on).
-4. Climate entity feedback (`current_temperature`, `hvac_modes`) reaches
-   the App via a `{output_tag}_state` inbound binding.
-5. Regression tests; version **2.0.19**.
+1. Plot entity samples used by room-view charts persist under the App data
+   volume and restore into `/api/history` after restart/update.
+2. Identification observation records (`y`/`u`/`d_outdoor`/`d_solar`/`timestamp`)
+   append to an App-owned JSONL store under `/data` and restore into an
+   in-memory `history_buffer` on startup (same schema as the original
+   integration).
+3. Retention respects configured `identification_history_days` for ID history;
+   plot history retention covers at least the configured `plot_history_hours`
+   window.
+4. Regression tests cover round-trip across a new `HeatingRuntime` instance on
+   the same `data_dir`.
+5. Version bump to **2.0.20**.
 
 ## Out of scope
-- Full actuation watchdog / fast setpoint re-apply between MPC ticks.
-- Restoring fat HA climate platforms.
+- Full sysid service ownership / ending sysid no-ops (separate iterate).
+- HA Recorder rebuild path (no HA-owned synthetic sensors in thin bridge).
 
 ## Work packages
-1. App `actuation.py` + publish-time domain command conversion.
-2. Thin bridge climate writes + climate attribute publish; switch truthy fix.
-3. Measured/total power from thermal watts; HP cooling config passthrough.
-4. Version 2.0.19 + tests + tracker.
+1. Adapt `IdentificationHistoryStore` for App `data_dir` (no HA `hass`).
+2. Persist + restore plot entity history under `/data`.
+3. Append ID observation records on history ticks; restore `history_buffer`.
+4. Version 2.0.20 + regression tests + tracker.
 
 ## Tracker
-- Task: SWD-280
-- Relates: SWD-262, SWD-259
-- Branch: `cursor/swd-280-climate-actuation-c648`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/570
-
-## Review-fix
-CLEAN — version lock tests bumped to 2.0.19; climate `{output_tag}_state`
-feedback no longer re-triggers MPC (write→state→write thrash guard).
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/570
-- Merge: `7106752`
-- Version: **2.0.19**
+- Task: SWD-281
+- Relates: SWD-279, SWD-269
+- Branch: `cursor/swd-281-history-persistence-32e0`
+- PR: (pending)
 
 ## Next
-Done — rebuild/update App on HAOS to v2.0.19; confirm climate entity receives
-cool/heat_cool + lowered setpoint when Planned Power is strongly negative,
-and measured power reports kilowatts (not −1 W). `/iterate` if still wrong
-after rebuild.
+`/review-fix SWD-281` — Review and auto-fix (single pass)

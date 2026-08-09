@@ -23,9 +23,11 @@ from heatingassistant.app.actuation import (
     number_write_payload,
     switch_write_payload,
 )
+from heatingassistant.app.plot_history import PlotHistoryStore
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
+from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
 from heatingassistant.engine.heat_sources import HeatSource
 
@@ -49,6 +51,7 @@ from heatingassistant.persistence import load_config, load_state, save_config, s
 _logger = logging.getLogger(__name__)
 
 # Keep ~48h of update_interval samples in memory for Ingress plots (SWD-269/277).
+# Durable copy lives under ``<data_dir>/plot_history/`` (SWD-281).
 _HISTORY_MAX_SAMPLES = 12_000
 _HISTORY_MIN_INTERVAL_S = 5.0
 
@@ -126,6 +129,10 @@ class HeatingRuntime:
         self._started = False
         self._history: dict[str, deque[dict[str, Any]]] = {}
         self._history_last_ts: float = 0.0
+        self._history_buffer: deque[dict[str, Any]] = deque(
+            maxlen=const.HISTORY_BUFFER_SIZE
+        )
+        self._id_history_last_ts: float = 0.0
         self._last_control_ts: float | None = self._coerce_number(self.state.get("last_control_ts"))
         self._last_control_duration_s: float = float(
             self._coerce_number(self.state.get("last_control_duration_s")) or 0.0
@@ -147,6 +154,26 @@ class HeatingRuntime:
         self._ticker_stop = threading.Event()
         self._ticker_thread: threading.Thread | None = None
         self._control_lock = threading.Lock()
+        # Durable plot + identification history on the App data volume (SWD-281).
+        plot_hours = float(
+            self.options.get(const.CONF_PLOT_HISTORY_HOURS, const.DEFAULT_PLOT_HISTORY_HOURS)
+        )
+        self._plot_history_store = PlotHistoryStore(
+            self.data_dir,
+            retention_days=PlotHistoryStore.retention_days_for_plot_hours(plot_hours),
+        )
+        id_days = int(
+            self.options.get(
+                const.CONF_IDENTIFICATION_HISTORY_DAYS,
+                const.DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+            )
+        )
+        self.id_history_store = IdentificationHistoryStore(
+            entry_id=self.instance_id,
+            retention_days=id_days,
+            data_dir=self.data_dir,
+        )
+        self._restore_durable_history(plot_hours=plot_hours)
         self._recompute_room_temperatures()
         self._record_history_samples(force=True)
 
@@ -555,6 +582,7 @@ class HeatingRuntime:
             self._last_control_duration_s = max(0.0, now - started)
             # Gate on update_interval — do not force a sample every control/tag.
             self._record_history_samples()
+            self._record_identification_sample(now)
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             await self._best_effort_mqtt(self.publish_status(), "status")
@@ -572,6 +600,7 @@ class HeatingRuntime:
         self.bindings = self._load_bindings()
         save_config(self.data_dir, self.options)
         self.control_engine.update_config(self.options)
+        self._sync_history_retention()
         self._recompute_room_temperatures()
         self._record_history_samples(force=True)
         self._save_runtime_state()
@@ -926,6 +955,12 @@ class HeatingRuntime:
             "hass_states": self.hass_states(),
         }
 
+    @property
+    def history_buffer(self) -> deque[dict[str, Any]]:
+        """Identification observation ring restored from / persisted to JSONL."""
+
+        return self._history_buffer
+
     def history(
         self,
         *,
@@ -933,7 +968,11 @@ class HeatingRuntime:
         start_ts: float | None = None,
         end_ts: float | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
-        """Return in-memory entity history in HA ``history_during_period`` shape."""
+        """Return entity history in HA ``history_during_period`` shape.
+
+        Samples are kept in memory for Ingress plots and durably mirrored under
+        ``<data_dir>/plot_history/`` so App updates do not clear room charts.
+        """
 
         wanted = {eid for eid in (entity_ids or []) if isinstance(eid, str) and eid}
         start = float(start_ts) if start_ts is not None else None
@@ -1791,11 +1830,69 @@ class HeatingRuntime:
         self.state["config"] = dict(self.options)
         save_state(self.data_dir, self.state)
 
+    def _restore_durable_history(self, *, plot_hours: float) -> None:
+        """Load plot + identification history from the App data volume (SWD-281)."""
+
+        try:
+            self._plot_history_store.setup()
+            restored = self._plot_history_store.load_recent(
+                hours_back=max(plot_hours, const.DEFAULT_PLOT_HISTORY_HOURS),
+                max_per_entity=_HISTORY_MAX_SAMPLES,
+            )
+            self._history = restored
+            if restored:
+                last_ts = 0.0
+                for samples in restored.values():
+                    if samples:
+                        last_ts = max(last_ts, float(samples[-1]["lu"]))
+                if last_ts > 0.0:
+                    self._history_last_ts = last_ts
+                _logger.info(
+                    "Restored plot history for %d entities from App data volume",
+                    len(restored),
+                )
+        except Exception:
+            _logger.exception("Failed to restore plot history from App data volume")
+
+        try:
+            self.id_history_store._sync_setup()
+            rebuilt = self.id_history_store._sync_query_recent(const.HISTORY_BUFFER_SIZE)
+            if rebuilt:
+                self._history_buffer.extend(rebuilt[-const.HISTORY_BUFFER_SIZE :])
+                try:
+                    self._id_history_last_ts = float(self._history_buffer[-1].get("timestamp") or 0.0)
+                except (TypeError, ValueError, IndexError):
+                    self._id_history_last_ts = 0.0
+                _logger.info(
+                    "Restored %d identification history steps from JSONL store",
+                    len(self._history_buffer),
+                )
+        except Exception:
+            _logger.exception("Failed to restore identification history from JSONL")
+
+    def _sync_history_retention(self) -> None:
+        """Refresh store retention from the current options."""
+
+        plot_hours = float(
+            self.options.get(const.CONF_PLOT_HISTORY_HOURS, const.DEFAULT_PLOT_HISTORY_HOURS)
+        )
+        self._plot_history_store.update_retention_days(
+            PlotHistoryStore.retention_days_for_plot_hours(plot_hours)
+        )
+        id_days = int(
+            self.options.get(
+                const.CONF_IDENTIFICATION_HISTORY_DAYS,
+                const.DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+            )
+        )
+        self.id_history_store.update_retention_days(id_days)
+
     def _record_history_samples(self, *, force: bool = False) -> None:
-        """Append current synthetic entity values into the in-memory history ring.
+        """Append current synthetic entity values into the history ring + JSONL.
 
         Samples are gated to ``update_interval`` so Ingress plots align with the
         control cadence (SWD-277). ``force=True`` is reserved for init/config.
+        Durable appends keep room charts alive across App updates (SWD-281).
         """
 
         now = time.time()
@@ -1804,6 +1901,7 @@ class HeatingRuntime:
             return
         self._history_last_ts = now
         states = self.hass_states()
+        persisted: list[dict[str, Any]] = []
         for entity_id, state in states.items():
             if not entity_id.startswith("sensor.heating_assistant_"):
                 continue
@@ -1816,10 +1914,114 @@ class HeatingRuntime:
                 float(raw)
             except (TypeError, ValueError):
                 continue
+            sample = {"s": str(raw), "lu": now}
             bucket = self._history.setdefault(
                 entity_id, deque(maxlen=_HISTORY_MAX_SAMPLES)
             )
-            bucket.append({"s": str(raw), "lu": now})
+            bucket.append(sample)
+            persisted.append({"entity_id": entity_id, "s": sample["s"], "lu": now})
+        if persisted:
+            try:
+                self._plot_history_store.append_samples(persisted)
+                self._plot_history_store.purge_old()
+            except Exception:
+                _logger.exception("Failed to persist plot history samples")
+
+    def _record_identification_sample(
+        self, now: float | None = None, *, force: bool = False
+    ) -> None:
+        """Append one identification observation (same schema as the fat integration).
+
+        Called from the control cycle (update_interval), not from plot sampling,
+        matching the original coordinator tick behaviour.
+        """
+
+        now_ts = float(now if now is not None else time.time())
+        interval = self._history_tick_interval_s()
+        if not force and (now_ts - self._id_history_last_ts) < interval:
+            return
+
+        room_names = [
+            name
+            for room in self._rooms()
+            if isinstance((name := room.get("name")), str) and name
+        ]
+        if not room_names:
+            return
+        # Do not seed empty/unknown ticks into ID history (startup before MQTT).
+        if not any(self.room_temperatures.get(name) is not None for name in room_names):
+            return
+
+        y: list[float] = []
+        for name in room_names:
+            temp = self.room_temperatures.get(name)
+            if temp is None:
+                temp = self._coerce_number(
+                    getattr(self.control_engine.model.rooms.get(name), "temperature", None)
+                )
+            y.append(float(temp) if temp is not None else 0.0)
+
+        u: list[float] = []
+        source_tags = getattr(self.control_engine, "_source_output_tags", {}) or {}
+        for source in self.control_engine.heat_sources:
+            tag = source_tags.get(source.name, source.name)
+            value = self._coerce_number(self.actuator_outputs.get(tag))
+            if value is None:
+                value = self._coerce_number(self.tag_values.get(tag))
+            u.append(float(value) if value is not None else 0.0)
+
+        outdoor = self._outdoor_temperature()
+        if outdoor is None:
+            outdoor = 0.0
+
+        solar: dict[str, float] = {}
+        forecast = self.control_engine.forecast_snapshot()
+        solar_steps = forecast.get("solar_forecast") or []
+        if solar_steps and isinstance(solar_steps[0], Mapping):
+            for name in room_names:
+                try:
+                    solar[name] = float(solar_steps[0].get(name, 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    solar[name] = 0.0
+        else:
+            for name in room_names:
+                solar[name] = 0.0
+
+        y_pred_aligned = None
+        if self._history_buffer:
+            y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
+
+        filtered = forecast.get("filtered_temperatures") or {}
+        predictions = forecast.get("predictions") or []
+        if predictions and isinstance(predictions[0], Mapping):
+            y_pred_for_next = [
+                float(predictions[0].get(name, y[idx] if idx < len(y) else 0.0) or 0.0)
+                for idx, name in enumerate(room_names)
+            ]
+        elif isinstance(filtered, Mapping) and filtered:
+            y_pred_for_next = [
+                float(filtered.get(name, y[idx] if idx < len(y) else 0.0) or 0.0)
+                for idx, name in enumerate(room_names)
+            ]
+        else:
+            y_pred_for_next = list(y)
+
+        record = {
+            "y": y,
+            "y_pred": y_pred_aligned,
+            "y_pred_for_next": y_pred_for_next,
+            "u": u,
+            "d_outdoor": float(outdoor),
+            "d_solar": solar,
+            "timestamp": now_ts,
+        }
+        self._history_buffer.append(record)
+        self._id_history_last_ts = now_ts
+        try:
+            self.id_history_store._sync_append(record)
+            self.id_history_store._sync_purge_old()
+        except Exception:
+            _logger.exception("Failed to persist identification history record")
 
     def _accumulate_energy(self, now: float) -> None:
         """Integrate room heating power into cumulative energy totals."""
