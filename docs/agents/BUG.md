@@ -1,46 +1,43 @@
-# Bug: Large whitespace between Save Current Window inputs on mobile
+# Bug: Room view Price plot missing historical data
 
 ## Summary
-- On the System Identification page, **Save Current Window** shows a large empty vertical gap between **New dataset name** and **Notes** on narrow/mobile screens.
-- Wide layouts are fine (fields sit side-by-side).
-- Root cause: `.ds-save-row__name` / `__notes` used `flex: 1 1 220px` for desktop row layout; the mobile rule sets `flex-direction: column`, so the **220px flex-basis became height**.
+- On the room view **HEATING POWER & PRICE** chart, the solid green **Price** series (left of NOW) is empty.
+- Dashed **Price Forecast** (right of NOW) renders correctly from `/api/forecasts`.
+- Root cause: after the HAOS App / thin-bridge cutover, the UI still requests history for `sensor.heating_assistant_electricity_price`, but `HeatingRuntime.hass_states()` never publishes that synthetic sensor, so plot history never records it and `/api/history` returns nothing.
 
 ## Repro
-1. Open System Identification for a room on a phone / narrow viewport (≤600px).
-2. Scroll to **Save Current Window**.
+1. Wire an electricity price entity (e.g. Nord Pool) under Environment.
+2. Open a room view with MQTT connected and history/forecast hours > 0.
+3. Inspect **HEATING POWER & PRICE**.
 
 ## Expected
-- Name, notes, and Save button stack with normal form spacing (~8–12px).
+- Solid **Price** line shows historical / current price left of NOW (from day-ahead attrs when available, otherwise sampled tag value).
+- Price is recorded into plot history like outdoor temperature.
 
 ## Actual
-- Each stacked field box is ~220px tall; a large empty band appears under the first input before the notes label.
+- Historical Price series missing; only Price Forecast is visible.
 
 ## Impact
-- Save form looks broken / hard to scan on mobile; wastes vertical space.
+- Users cannot compare planned power against recent electricity prices on the room chart.
 
 ## Suspected area
-- `heatingassistant/app/static/css/pages/climate-card.css` — `.ds-save-row` / `@media (max-width: 600px)`.
+- `heatingassistant/app/runtime.py` — `hass_states()` / `history()` (missing `electricity_price` synthetic; no day-ahead backfill).
+- UI already correct: `room-detail.js` + `room-charts.js` request and plot `systemEntity('electricity_price')`.
 
 ## Acceptance criteria
-- [x] Narrow viewport (≤600px): name, notes, and Save button stack tightly with no large gap.
-- [x] Wide viewport: name and notes remain horizontally aligned.
-- [x] App package synced via `scripts/sync-ha-app-package.sh`.
-- [x] Version bump to **2.0.22** (CSS loaded as `?v=${version}`).
+- [x] `hass_states()` exposes `sensor.heating_assistant_electricity_price` from the configured price tag.
+- [x] `/api/history` for that entity returns points for the plot window (sampled and/or synthesized from day-ahead price attrs when present).
+- [x] Room power chart can show a solid Price series left of NOW when a price entity is wired.
+- [x] Regression tests; version bump to **2.0.23**; App package synced via `scripts/sync-ha-app-package.sh`.
 
 ## Out of scope
-- Broader identification page layout redesign.
-- Container-query stacking for HA sidebar narrow cards when viewport stays wide (row wrap already avoids the height bug).
+- Measured Power flat-at-bottom from pre-SWD-280 fraction history (separate unit/history migration).
+- Changing the Price Forecast `/api/forecasts` path.
 
 ## Tracker
-- Task: SWD-283
-- Branch: `cursor/fix-sysid-save-row-mobile-gap-6a4c`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/576
-- Merge: `f117f93`
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/576
-- Merge: `f117f93`
-- Version: **2.0.22**
+- Task: SWD-284
+- Branch: `cursor/swd-284-price-history-a08d`
+- PR: (pending)
 
 ## Next
-Done — rebuild App on HAOS to v2.0.22; confirm Save Current Window stacks tightly on mobile.
+Implement + `/review-fix SWD-284`.

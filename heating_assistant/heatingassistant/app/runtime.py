@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import asyncio
 import json
 import logging
@@ -27,6 +28,10 @@ from heatingassistant.app.plot_history import PlotHistoryStore
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
+from heatingassistant.engine.electricity_price import (
+    align_prices_to_horizon,
+    collect_price_series,
+)
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
 from heatingassistant.engine.heat_sources import HeatSource
@@ -54,6 +59,9 @@ _logger = logging.getLogger(__name__)
 # Durable copy lives under ``<data_dir>/plot_history/`` (SWD-281).
 _HISTORY_MAX_SAMPLES = 12_000
 _HISTORY_MIN_INTERVAL_S = 5.0
+
+# Synthetic sensor the room Price plot reads via /api/history (SWD-284).
+_ELECTRICITY_PRICE_ENTITY = "sensor.heating_assistant_electricity_price"
 
 # Retry Supervisor MQTT discovery while disconnected (SWD-273).
 _MQTT_DISCOVERY_RETRY_INITIAL_S = 2.0
@@ -1006,6 +1014,20 @@ class HeatingRuntime:
                 filtered.append({"s": sample["s"], "lu": lu})
             if filtered:
                 result[entity_id] = filtered
+
+        # SWD-284: backfill Price history from day-ahead attrs when the ring is
+        # empty/sparse so the room plot shows historical Price immediately.
+        if not wanted or _ELECTRICITY_PRICE_ENTITY in wanted:
+            synthesized = self._synthesize_price_history(start_ts=start, end_ts=end)
+            if synthesized:
+                ring = result.get(_ELECTRICITY_PRICE_ENTITY, [])
+                last_syn = float(synthesized[-1]["lu"])
+                extras = [
+                    sample
+                    for sample in ring
+                    if float(sample["lu"]) > last_syn + 1e-6
+                ]
+                result[_ELECTRICITY_PRICE_ENTITY] = synthesized + extras
         return result
 
     def hass_states(self) -> dict[str, dict[str, Any]]:
@@ -1065,6 +1087,16 @@ class HeatingRuntime:
             "sensor.heating_assistant_outdoor_temperature_measured",
             "unknown" if outdoor is None else outdoor,
             {"unit_of_measurement": "°C"},
+            now,
+        )
+
+        # SWD-284: publish electricity price so plot history + live extend work.
+        price_value = self._electricity_price_value()
+        price_attrs = self._electricity_price_state_attrs()
+        states[_ELECTRICITY_PRICE_ENTITY] = self._ha_state(
+            _ELECTRICITY_PRICE_ENTITY,
+            "unknown" if price_value is None else round(float(price_value), 5),
+            price_attrs,
             now,
         )
 
@@ -1559,6 +1591,113 @@ class HeatingRuntime:
                 if binding.direction == "in" and binding.entity_id == weather_entity:
                     return self._coerce_number(self.tag_values.get(binding.tag))
         return None
+
+    def _price_tag(self) -> str:
+        """Return the configured electricity price tag (defaults to energy_price)."""
+
+        price_tag = self.options.get("price_tag") or "energy_price"
+        if not isinstance(price_tag, str) or not price_tag:
+            return "energy_price"
+        return price_tag
+
+    def _price_adder(self) -> float:
+        """Net tariff + spot surcharge applied to raw spot for display / MPC."""
+
+        net = float(
+            self.options.get(const.CONF_PRICE_NET_TARIFF, const.DEFAULT_PRICE_NET_TARIFF)
+            or 0.0
+        )
+        surcharge = float(
+            self.options.get(
+                const.CONF_PRICE_SPOT_SURCHARGE, const.DEFAULT_PRICE_SPOT_SURCHARGE
+            )
+            or 0.0
+        )
+        return net + surcharge
+
+    def _electricity_price_value(self) -> float | None:
+        """Current electricity price for the synthetic sensor / live chart extend.
+
+        Prefers day-ahead series at ``now`` (with tariff adder) so Price matches
+        the first Price Forecast step; falls back to the scalar tag value.
+        """
+
+        price_tag = self._price_tag()
+        raw = self._coerce_number(self.tag_values.get(price_tag))
+        if raw is None and price_tag != "energy_price":
+            raw = self._coerce_number(self.tag_values.get("energy_price"))
+        attrs = dict(self.tag_attributes.get(price_tag) or {})
+        adder = self._price_adder()
+        now = datetime.now(timezone.utc)
+        series = collect_price_series(attrs, now)
+        if series:
+            aligned = align_prices_to_horizon(series, now, 1, 900.0, adder)
+            if aligned:
+                return float(aligned[0])
+        if raw is None:
+            return None
+        # Match build_price_forecast scalar fallback (adder + non-negative clamp).
+        return max(0.0, float(raw) + adder)
+
+    def _electricity_price_state_attrs(self) -> dict[str, Any]:
+        """Attributes for the synthetic electricity price sensor."""
+
+        price_tag = self._price_tag()
+        src = dict(self.tag_attributes.get(price_tag) or {})
+        attrs: dict[str, Any] = {}
+        unit = src.get("unit_of_measurement") or src.get("unit")
+        if isinstance(unit, str) and unit:
+            attrs["unit_of_measurement"] = unit
+        attrs["price_tag"] = price_tag
+        return attrs
+
+    def _synthesize_price_history(
+        self, *, start_ts: float | None, end_ts: float | None
+    ) -> list[dict[str, Any]]:
+        """Build stepped Price samples from day-ahead attrs for the plot window.
+
+        Used when the history ring has never recorded ``electricity_price``
+        (SWD-284) so historical Price appears immediately left of NOW.
+        """
+
+        price_tag = self._price_tag()
+        attrs = dict(self.tag_attributes.get(price_tag) or {})
+        now = datetime.now(timezone.utc)
+        series = collect_price_series(attrs, now)
+        if not series:
+            return []
+
+        adder = self._price_adder()
+        now_ts = now.timestamp()
+        end = now_ts if end_ts is None else min(float(end_ts), now_ts)
+        start = float(start_ts) if start_ts is not None else end - 12 * 3600.0
+        if end < start:
+            return []
+
+        sorted_series = sorted(series, key=lambda tp: tp[0])
+        samples: list[dict[str, Any]] = []
+
+        # Zero-order hold at the window start so stepped charts fill from the left.
+        active: float | None = None
+        for start_dt, price, _priority, _source in sorted_series:
+            if start_dt.timestamp() <= start:
+                active = max(0.0, float(price) + adder)
+            else:
+                break
+        if active is not None:
+            samples.append({"s": str(round(active, 5)), "lu": float(start)})
+
+        for start_dt, price, _priority, _source in sorted_series:
+            ts = start_dt.timestamp()
+            if ts <= start or ts > end:
+                continue
+            display = max(0.0, float(price) + adder)
+            point = {"s": str(round(display, 5)), "lu": float(ts)}
+            if samples and abs(float(samples[-1]["lu"]) - ts) < 1e-6:
+                samples[-1] = point
+            else:
+                samples.append(point)
+        return samples
 
     def _setpoints(self) -> dict[str, float]:
         setpoints: dict[str, float] = {}

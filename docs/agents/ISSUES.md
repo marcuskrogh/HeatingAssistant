@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-284 | Bug | [Bug] Room view Price plot missing historical data — App never publishes electricity_price sensor | In Progress | — | docs/agents/BUG.md | Implement + `/review-fix SWD-284` |
 | SWD-283 | Bug | [Bug] Large whitespace between Save Current Window inputs on mobile | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/576 |
 | SWD-282 | Bug | [Bug] Solar gain plot stuck at zero despite High exposure — App room build drops aperture | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/574 |
 | SWD-281 | Task | [Iterate] App update clears room-plot / ID history — persist under /data like original integration | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/572 |
@@ -37,6 +38,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — `/bug` SWD-284: room view Price plot missing historical data — App never publishes `electricity_price` synthetic; synthesize from day-ahead attrs; v2.0.23; branch `cursor/swd-284-price-history-a08d`.
 - 2026-08-09 — shipped SWD-283 via PR #576 (`f117f93`): Save Current Window mobile flex gap; v2.0.22; review-fix CLEAN. Rebuild App on HAOS so identification save fields stack tightly on phone.
 - 2026-08-09 — SWD-283 review-fix CLEAN on PR #576; shipping closeout (v2.0.22).
 - 2026-08-09 — `/ship` SWD-283: large whitespace between Save Current Window inputs on mobile — `flex: 1 1 220px` became height under column layout; v2.0.22; branch `cursor/fix-sysid-save-row-mobile-gap-6a4c`.
