@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from heatingassistant.app.forecast_payload import build_app_forecast_payload
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
@@ -38,11 +39,9 @@ from heatingassistant.persistence import load_config, load_state, save_config, s
 
 _logger = logging.getLogger(__name__)
 
-# Keep ~48h of 15s samples in memory for Ingress plots (SWD-269).
+# Keep ~48h of update_interval samples in memory for Ingress plots (SWD-269/277).
 _HISTORY_MAX_SAMPLES = 12_000
 _HISTORY_MIN_INTERVAL_S = 5.0
-# Wall-clock history samples when MQTT tags are quiet (SWD-276).
-_HISTORY_TICK_MAX_S = 60.0
 
 # Retry Supervisor MQTT discovery while disconnected (SWD-273).
 _MQTT_DISCOVERY_RETRY_INITIAL_S = 2.0
@@ -300,10 +299,10 @@ class HeatingRuntime:
         return True
 
     def _history_tick_interval_s(self) -> float:
-        """Seconds between forced history samples when tags are quiet."""
+        """Seconds between history samples — matches control update_interval."""
 
         update = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
-        return max(_HISTORY_MIN_INTERVAL_S, min(_HISTORY_TICK_MAX_S, update))
+        return max(_HISTORY_MIN_INTERVAL_S, update)
 
     def _control_tick_interval_s(self) -> float:
         """Seconds between background control cycles."""
@@ -337,7 +336,7 @@ class HeatingRuntime:
             now = time.time()
             if now >= next_history:
                 try:
-                    self._record_history_samples(force=True)
+                    self._record_history_samples()
                 except Exception:
                     _logger.exception("Wall-clock history sample failed")
                 history_every = self._history_tick_interval_s()
@@ -518,7 +517,8 @@ class HeatingRuntime:
             self._accumulate_energy(now)
             self._last_control_ts = now
             self._last_control_duration_s = max(0.0, now - started)
-            self._record_history_samples(force=True)
+            # Gate on update_interval — do not force a sample every control/tag.
+            self._record_history_samples()
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             await self._best_effort_mqtt(self.publish_status(), "status")
@@ -787,13 +787,18 @@ class HeatingRuntime:
         }
 
     def forecasts(self, plot_forecast_hours: float | None = None) -> dict[str, Any]:
-        """Return an empty but structured forecast payload for chart callers."""
+        """Return MPC trajectories for Ingress plots (SWD-277)."""
 
-        return {
-            "rooms": {},
-            "price_forecast": [],
-            "plot_forecast_hours": plot_forecast_hours,
-        }
+        snapshot = self.control_engine.forecast_snapshot()
+        energy_price = self._coerce_number(self.tag_values.get("energy_price"))
+        return build_app_forecast_payload(
+            rooms=self._rooms(),
+            room_temperatures=self.room_temperatures,
+            outdoor_temp=self._outdoor_temperature(),
+            energy_price=energy_price,
+            snapshot=snapshot,
+            plot_forecast_hours=plot_forecast_hours,
+        )
 
     def datasets(self, room_slug: str | None = None) -> list[dict[str, Any]]:
         """Return persisted dataset metadata when configured, otherwise an empty list."""
@@ -1560,10 +1565,15 @@ class HeatingRuntime:
         save_state(self.data_dir, self.state)
 
     def _record_history_samples(self, *, force: bool = False) -> None:
-        """Append current synthetic entity values into the in-memory history ring."""
+        """Append current synthetic entity values into the in-memory history ring.
+
+        Samples are gated to ``update_interval`` so Ingress plots align with the
+        control cadence (SWD-277). ``force=True`` is reserved for init/config.
+        """
 
         now = time.time()
-        if not force and (now - self._history_last_ts) < _HISTORY_MIN_INTERVAL_S:
+        interval = self._history_tick_interval_s()
+        if not force and (now - self._history_last_ts) < interval:
             return
         self._history_last_ts = now
         states = self.hass_states()

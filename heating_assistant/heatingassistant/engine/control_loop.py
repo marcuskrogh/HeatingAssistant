@@ -32,6 +32,12 @@ class ControlEngine:
         self._controller: Any = None
         self._source_output_tags: dict[str, str] = {}
         self._room_output_tags: dict[str, list[str]] = {}
+        self._last_predictions: list[dict[str, float]] = []
+        self._last_linearised_predictions: list[dict[str, float]] = []
+        self._last_heating_schedule: list[dict[str, float]] = []
+        self._last_outdoor_forecast: list[float] = []
+        self._last_solar_forecast: list[dict[str, float]] = []
+        self._last_compute_ts: datetime | None = None
         self.update_config(config or {})
 
     def update_config(self, config: Mapping[str, Any]) -> None:
@@ -73,13 +79,59 @@ class ControlEngine:
                     solar_gains={name: 0.0 for name in self.model.rooms},
                     now=datetime.now(timezone.utc),
                 )
+                self._cache_controller_forecast(self._controller)
+                self.mode = "mpc"
+                self.fallback_reason = None
                 return self._actions_to_tags(actions)
             except Exception as exc:  # pragma: no cover - depends on optional MPC stack
                 self.mode = "proportional"
                 self.fallback_reason = f"controller compute failed: {exc}"
+                self._clear_controller_forecast()
                 _LOGGER.warning("HeatingAssistant engine MPC compute failed: %s", exc)
 
+        self._clear_controller_forecast()
         return self._fallback_actions(room_temps, setpoints, outdoor)
+
+    def forecast_snapshot(self) -> dict[str, Any]:
+        """Return the last MPC trajectories for Ingress forecast plots."""
+
+        return {
+            "mode": self.mode,
+            "compute_ts": self._last_compute_ts,
+            "predictions": [dict(item) for item in self._last_predictions],
+            "linearised_predictions": [
+                dict(item) for item in self._last_linearised_predictions
+            ],
+            "heating_schedule": [dict(item) for item in self._last_heating_schedule],
+            "outdoor_forecast": list(self._last_outdoor_forecast),
+            "solar_forecast": [dict(item) for item in self._last_solar_forecast],
+            "dt": float(self.config.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)),
+            "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
+        }
+
+    def _cache_controller_forecast(self, controller: Any) -> None:
+        self._last_predictions = [dict(item) for item in list(getattr(controller, "predictions", []) or [])]
+        self._last_linearised_predictions = [
+            dict(item) for item in list(getattr(controller, "linearised_predictions", []) or [])
+        ]
+        self._last_heating_schedule = [
+            dict(item) for item in list(getattr(controller, "heating_schedule", []) or [])
+        ]
+        self._last_outdoor_forecast = [
+            float(value) for value in list(getattr(controller, "outdoor_forecast", []) or [])
+        ]
+        self._last_solar_forecast = [
+            dict(item) for item in list(getattr(controller, "solar_forecast", []) or [])
+        ]
+        self._last_compute_ts = datetime.now(timezone.utc)
+
+    def _clear_controller_forecast(self) -> None:
+        self._last_predictions = []
+        self._last_linearised_predictions = []
+        self._last_heating_schedule = []
+        self._last_outdoor_forecast = []
+        self._last_solar_forecast = []
+        self._last_compute_ts = None
 
     def _try_build_controller(self) -> Any:
         if not self.heat_sources or not self.model.rooms:
