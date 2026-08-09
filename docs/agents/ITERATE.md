@@ -1,56 +1,49 @@
-# Iterate: Plot samples too dense + empty forecasts
+# Iterate: Incomplete plot forecasts (outdoor / solar / price / linearised)
 
 ## Prior work
-- Task: SWD-276
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/565 (v2.0.15)
+- Task: SWD-277
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566 (v2.0.16)
 - Spec context: docs/agents/ITERATE.md
 
 ## Problem
-Overview KPIs populate, but room plots sample many times per minute (not at
-`update_interval`, e.g. 15 min) and Forecast / Planned Power / Price Forecast
-lines stay empty.
+After SWD-277, temperature Forecast appears, but Linearised looks flat/useless,
+Planned Power sits at 0, Price Forecast is a flat scalar hold, and the
+Disturbances plot stays empty (no outdoor / solar forecasts).
 
 Root causes:
-1. SWD-276 capped quiet-period history at ≤60s and still force-recorded on
-   every MQTT tag + control cycle.
-2. `HeatingRuntime.forecasts()` is still an empty stub; MPC trajectories from
-   `ControlEngine` are never exposed to `/api/forecasts`.
+1. `ControlEngine.compute_actions` forces `solar_gains={room: 0}` and never
+   passes outdoor / cloud / GHI / price forecasts into `controller.compute()`.
+2. Thin MQTT bridge publishes only scalar tag values — Nord Pool `raw_today` /
+   weather `forecast` attributes never reach the App.
+3. Controller `price_forecast` is not cached; App payload only holds the current
+   scalar price across the horizon.
 
 ## Acceptance criteria
-1. With `update_interval=900`, history advances ~once per 900s — not every
-   ≤60s / tag spam.
-2. After an MPC control cycle, `/api/forecasts` returns non-empty
-   `rooms[slug].forecast` with ISO times at `now + k·dt`
-   (`dt=update_interval`), including `temperature` and `heating_power` where
-   available.
-3. Planned Power chart can read `heating_power` from that payload.
-4. When `energy_price` tag is present, `price_forecast` is non-empty (current
-   price held across horizon); empty OK when unwired.
-5. Regression tests for history gate + forecast shape; version **2.0.16**.
+1. After a control cycle with weather (+ optional solar/price) wired,
+   `/api/forecasts` room steps include non-null `outdoor_temp` and `solar_gain`
+   over the horizon (geometry and/or GHI; outdoor may be persistence when no
+   weather forecast attrs).
+2. `price_forecast` uses day-ahead attribute series when present; scalar hold
+   remains the fallback when only a current price is available.
+3. Linearised temperatures use the same room-name keys as nonlinear predictions
+   and are present when the QP trajectory exists.
+4. Regression tests; version **2.0.17**.
 
 ## Out of scope
-- Full Nord Pool attribute-based day-ahead price series over MQTT.
+- Polling `weather.get_forecasts` beyond attribute / Core state attrs.
 - History persistence across App restart.
 - MODEL FIT / solar KPI completeness.
 
 ## Work packages
-1. Gate history recording to `update_interval`.
-2. Cache MPC trajectories on ControlEngine; build App forecast payload.
-3. Version 2.0.16 + tests + tracker.
+1. MQTT tag `attributes` + thin integration publish for weather/price/solar.
+2. Runtime builds outdoor/cloud/GHI/price series; ControlEngine stops zeroing
+   solar and forwards forecasts; cache + payload for price series.
+3. Version 2.0.17 + tests + tracker.
 
 ## Tracker
-- Task: SWD-277
-- Relates: SWD-276
-- Branch: `cursor/swd-277-plot-cadence-forecasts-f56e`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
-
-## Review-fix
-CLEAN — history gated to `update_interval`; MPC forecasts exposed at `now+k·dt`;
-room_slug keys, price_tag, capacity meta, forecast lock.
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/566
-- Version: **2.0.16**
+- Task: SWD-278
+- Relates: SWD-277
+- Branch: `cursor/swd-278-forecast-disturbances-f56e`
 
 ## Next
-Done — rebuild/update App on HAOS to v2.0.16; confirm ~15 min history grid and Forecast / Planned Power after an MPC cycle. `/iterate` for Nord Pool day-ahead prices or history persistence if still needed.
+`/review-fix SWD-278` — Review and auto-fix (single pass)

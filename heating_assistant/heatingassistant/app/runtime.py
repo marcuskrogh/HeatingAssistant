@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from heatingassistant.app.forecast_payload import build_app_forecast_payload
+from heatingassistant.app.disturbance_forecasts import build_mpc_disturbance_inputs
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
@@ -101,6 +102,11 @@ class HeatingRuntime:
         save_config(self.data_dir, self.options)
         self.tag_values: dict[str, Any] = dict(self.state.get("tag_values") or {})
         self.tag_statuses: dict[str, str] = dict(self.state.get("tag_statuses") or {})
+        self.tag_attributes: dict[str, dict[str, Any]] = {
+            str(key): dict(value)
+            for key, value in dict(self.state.get("tag_attributes") or {}).items()
+            if isinstance(value, Mapping)
+        }
         self.room_temperatures: dict[str, float | None] = dict(
             self.state.get("room_temperatures") or {}
         )
@@ -495,6 +501,10 @@ class HeatingRuntime:
 
         self.tag_values[tag] = payload.value
         self.tag_statuses[tag] = payload.status
+        if payload.attributes:
+            self.tag_attributes[tag] = dict(payload.attributes)
+        elif tag in self.tag_attributes and payload.status == "BAD":
+            self.tag_attributes.pop(tag, None)
         self._recompute_room_temperatures()
         self._record_history_samples()
         self._save_runtime_state()
@@ -508,10 +518,13 @@ class HeatingRuntime:
         try:
             started = time.time()
             self._recompute_room_temperatures()
+            outdoor = self._outdoor_temperature()
+            disturbances = self._mpc_disturbance_inputs(outdoor)
             outputs = self.control_engine.compute_actions(
                 self.room_temperatures,
-                self._outdoor_temperature(),
+                outdoor,
                 self._setpoints(),
+                **disturbances,
             )
             self.actuator_outputs = dict(outputs)
             now = time.time()
@@ -788,7 +801,7 @@ class HeatingRuntime:
         }
 
     def forecasts(self, plot_forecast_hours: float | None = None) -> dict[str, Any]:
-        """Return MPC trajectories for Ingress plots (SWD-277)."""
+        """Return MPC trajectories for Ingress plots (SWD-277/278)."""
 
         snapshot = self.control_engine.forecast_snapshot()
         price_tag = self.options.get("price_tag") or "energy_price"
@@ -806,6 +819,41 @@ class HeatingRuntime:
             snapshot=snapshot,
             plot_forecast_hours=plot_forecast_hours,
             room_power_meta=self.control_engine.room_power_meta(outdoor_temp),
+        )
+
+    def _mpc_disturbance_inputs(self, outdoor_temp: float | None) -> dict[str, Any]:
+        """Build outdoor / solar / price series for the next control compute."""
+
+        horizon = int(self.options.get("horizon", const.DEFAULT_HORIZON))
+        dt_s = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        weather_tag = self.options.get("weather_tag") or "weather_forecast"
+        if not isinstance(weather_tag, str) or not weather_tag:
+            weather_tag = "weather_forecast"
+        price_tag = self.options.get("price_tag") or "energy_price"
+        if not isinstance(price_tag, str) or not price_tag:
+            price_tag = "energy_price"
+        solar_tag = self.options.get("solar_radiation_tag") or "solar_radiation"
+        if not isinstance(solar_tag, str) or not solar_tag:
+            solar_tag = "solar_radiation"
+        net = float(
+            self.options.get(const.CONF_PRICE_NET_TARIFF, const.DEFAULT_PRICE_NET_TARIFF) or 0.0
+        )
+        surcharge = float(
+            self.options.get(
+                const.CONF_PRICE_SPOT_SURCHARGE, const.DEFAULT_PRICE_SPOT_SURCHARGE
+            )
+            or 0.0
+        )
+        return build_mpc_disturbance_inputs(
+            outdoor_temp=outdoor_temp,
+            weather_attrs=self.tag_attributes.get(weather_tag),
+            price_value=self._coerce_number(self.tag_values.get(price_tag)),
+            price_attrs=self.tag_attributes.get(price_tag),
+            solar_value=self._coerce_number(self.tag_values.get(solar_tag)),
+            solar_attrs=self.tag_attributes.get(solar_tag),
+            horizon=horizon,
+            dt_s=dt_s,
+            price_adder=net + surcharge,
         )
 
     def datasets(self, room_slug: str | None = None) -> list[dict[str, Any]]:
@@ -1562,6 +1610,9 @@ class HeatingRuntime:
         self.state["bindings"] = self.binding_dicts()
         self.state["tag_values"] = dict(self.tag_values)
         self.state["tag_statuses"] = dict(self.tag_statuses)
+        self.state["tag_attributes"] = {
+            key: dict(value) for key, value in self.tag_attributes.items()
+        }
         self.state["room_temperatures"] = dict(self.room_temperatures)
         self.state["actuator_outputs"] = dict(self.actuator_outputs)
         self.state["last_control_ts"] = self._last_control_ts

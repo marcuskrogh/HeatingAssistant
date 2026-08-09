@@ -225,7 +225,16 @@ class _BridgeManager:
                         reason = str(state.state)
                     except (TypeError, ValueError):
                         pass
-            payload = MqttTagPayload(value, status="GOOD", reason=reason, ts=time.time())
+            # Carry selected HA attributes so the App can build day-ahead price
+            # and weather/solar forecast series (SWD-278).
+            attributes = _forecast_attributes_for_publish(state)
+            payload = MqttTagPayload(
+                value,
+                status="GOOD",
+                reason=reason,
+                ts=time.time(),
+                attributes=attributes,
+            )
         # Retain last-known tag values so the App receives them on (re)subscribe
         # after a late MQTT connect (SWD-269). Without retain, the bind-time
         # snapshot is lost until the next HA state change.
@@ -283,3 +292,35 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.lower() in {"1", "true", "on", "open", "heat"}
     return bool(value)
+
+
+# Attributes the App needs for MPC disturbance / price forecasts (SWD-278).
+_FORECAST_ATTR_KEYS = (
+    "forecast",
+    "temperature",
+    "cloud_coverage",
+    "wind_speed",
+    "wind_speed_unit",
+    "raw_today",
+    "raw_tomorrow",
+    "today",
+    "tomorrow",
+    "prices_today",
+    "prices_tomorrow",
+    "unit_of_measurement",
+)
+
+
+def _forecast_attributes_for_publish(state: State) -> dict[str, Any] | None:
+    """Return a compact attribute subset for forecast builders, or None."""
+
+    attrs = getattr(state, "attributes", None) or {}
+    selected: dict[str, Any] = {}
+    for key in _FORECAST_ATTR_KEYS:
+        if key in attrs and attrs[key] is not None:
+            selected[key] = attrs[key]
+    # Solar irradiance integrations often use one of these list keys.
+    for key in ("forecast", "forecasts", "data", "entries"):
+        if key in attrs and attrs[key] is not None and key not in selected:
+            selected[key] = attrs[key]
+    return selected or None
