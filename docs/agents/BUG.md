@@ -39,7 +39,13 @@
 - Task: SWD-282
 - Relates: SWD-278, SWD-279
 - Branch: `cursor/swd-282-solar-exposure-aperture-3296`
-- PR: *(pending)*
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/574
+- Merge: `38846fb`
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/574
+- Merge: `38846fb`
+- Version: **2.0.21**
 
 ## Next
-`/review-fix SWD-282` — Review and auto-fix (single pass)
+Done — rebuild App on HAOS to v2.0.21; confirm DISTURBANCES Solar Gain shows daytime dynamics with High exposure.
