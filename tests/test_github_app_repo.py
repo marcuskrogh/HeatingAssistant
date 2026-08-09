@@ -47,7 +47,7 @@ def test_heatingassistant_app_config_shape():
 
     assert config["name"] == "HeatingAssistant"
     assert config["slug"] == "heatingassistant"
-    assert config["version"] == "2.0.14"
+    assert config["version"] == "2.0.15"
     assert config["arch"] == ["amd64", "aarch64"]
     assert config["init"] is False
     assert config["startup"] == "application"
@@ -113,7 +113,7 @@ def test_app_version_lock_across_app_context_and_package_metadata():
         app_manifest["version"],
         root_project["version"],
         app_project["version"],
-    } == {"2.0.14"}
+    } == {"2.0.15"}
 
 
 def test_app_dockerfile_uses_synced_package_and_bundled_integration():

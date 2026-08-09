@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-276 | Task | [Iterate] KPIs/plots flat overnight — App has no wall-clock history/control ticker | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/565 |
 | SWD-275 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without with-contenv entrypoint | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/564 |
 | SWD-274 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without hassio_api | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/563 |
 | SWD-273 | Task | [Iterate] MQTT still disconnected after mqtt:need — one-shot discovery + ignored SSL/endpoint | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/560 |
@@ -29,6 +30,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — shipped SWD-276 via PR #565: wall-clock history/control ticker; v2.0.15; review-fix CLEAN. Rebuild App on HAOS so quiet-period plots keep sampling.
+- 2026-08-09 — SWD-276 In Review + PR #565: wall-clock history/control ticker; v2.0.15; Next `/review-fix SWD-276`.
+- 2026-08-09 — `/iterate` SWD-276 from SWD-275: MQTT ok but KPIs/plots flat overnight — no wall-clock history/control ticker; v2.0.15; branch `cursor/swd-276-wall-clock-ticker-f56e`.
+- 2026-08-08 — shipped SWD-275 via PR #564: with-contenv entrypoint for SUPERVISOR_TOKEN; v2.0.14; review-fix CLEAN. Rebuild App on HAOS to pick up token export.
 - 2026-08-08 — SWD-275 In Review + PR #564: with-contenv entrypoint for SUPERVISOR_TOKEN; v2.0.14; Next `/review-fix SWD-275`.
 - 2026-08-08 — `/iterate` SWD-275 from SWD-274: SUPERVISOR_TOKEN still missing after hassio_api — run.sh lacked with-contenv; v2.0.14; branch `cursor/swd-275-with-contenv-token-f56e`.
 - 2026-08-08 — shipped SWD-274 via PR #563: hassio_api + homeassistant_api for SUPERVISOR_TOKEN; v2.0.13; review-fix CLEAN (`supervisor_token_present`). Rebuild App on HAOS to pick up token injection.
