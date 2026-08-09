@@ -14,6 +14,7 @@ THIN_FILES=(
   __init__.py
   const.py
   mqtt_topics.py
+  forecast_publish.py
   config_flow.py
   version_sync.py
   update.py

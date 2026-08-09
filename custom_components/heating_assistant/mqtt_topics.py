@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 import json
 from typing import Any
 
 TOPIC_ROOT = "heatingassistant"
 VALID_STATUSES = frozenset({"GOOD", "BAD", "UNCERTAIN"})
 VALID_DIRECTIONS = frozenset({"in", "out"})
+
+
+def _json_default(value: Any) -> Any:
+    """Serialize HA attribute types that plain json.dumps rejects."""
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, set):
+        return list(value)
+    if hasattr(value, "as_dict") and callable(value.as_dict):
+        return value.as_dict()
+    return str(value)
 
 
 def _validate_part(value: str, name: str) -> str:
@@ -82,7 +97,12 @@ class MqttTagPayload:
         }
         if self.attributes is not None:
             data["attributes"] = self.attributes
-        return json.dumps(data, separators=(",", ":"), sort_keys=True)
+        return json.dumps(
+            data,
+            separators=(",", ":"),
+            sort_keys=True,
+            default=_json_default,
+        )
 
     @classmethod
     def decode(cls, payload: str | bytes) -> "MqttTagPayload":
