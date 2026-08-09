@@ -46,5 +46,12 @@ Root causes:
 - Branch: `cursor/swd-278-forecast-disturbances-f56e`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/567
 
+## Review-fix
+CLEAN — MQTT attrs + MPC disturbance wiring; cleared stale attrs; solar attr keys aligned.
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/567
+- Version: **2.0.17**
+
 ## Next
-`/review-fix SWD-278` — Review and auto-fix (single pass)
+Done — rebuild/update App on HAOS to v2.0.17; confirm Disturbances (outdoor/solar) and day-ahead Price Forecast after weather/price entities refresh. `/iterate` if weather.get_forecasts service path or history persistence still needed.
