@@ -35,9 +35,11 @@
 - Task: SWD-283
 - Branch: `cursor/fix-sysid-save-row-mobile-gap-6a4c`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/576
+- Merge: `f117f93`
 
 ## Shipped
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/576
+- Merge: `f117f93`
 - Version: **2.0.22**
 
 ## Next
