@@ -369,6 +369,21 @@ def _build_house_model(rooms_cfg: list[Mapping[str, Any]]) -> HouseModel:
                 )
             )
 
+        # Option A (quick estimate): map solar_exposure → effective aperture.
+        # Without this, rooms with High/Medium/Low exposure but no windows
+        # silently get aperture 0 and solar gain stays flat at zero (SWD-282).
+        exposure_raw = room_cfg.get(const.CONF_SOLAR_EXPOSURE, const.DEFAULT_SOLAR_EXPOSURE)
+        exposure_key = str(exposure_raw or const.DEFAULT_SOLAR_EXPOSURE).strip().lower()
+        aperture = float(
+            const.SOLAR_EXPOSURE_TO_APERTURE.get(
+                exposure_key,
+                const.SOLAR_EXPOSURE_TO_APERTURE[const.DEFAULT_SOLAR_EXPOSURE],
+            )
+        )
+        facing = _as_float(
+            room_cfg.get(const.CONF_SOLAR_FACING), const.DEFAULT_SOLAR_FACING
+        )
+
         rooms.append(
             Room(
                 name=name,
@@ -381,6 +396,8 @@ def _build_house_model(rooms_cfg: list[Mapping[str, Any]]) -> HouseModel:
                     room_cfg.get("comfort_offset"), const.DEFAULT_COMFORT_OFFSET
                 ),
                 temperature=_as_float(room_cfg.get("temperature"), const.DEFAULT_SETPOINT),
+                solar_exposure_aperture=aperture,
+                solar_facing=facing,
             )
         )
     return HouseModel(rooms)

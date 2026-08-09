@@ -156,6 +156,10 @@ def _build_rooms_from_theta(
             facade_absorptance=r.facade_absorptance,
             facade_solar_share=r.facade_solar_share,
             thermal_bridge_psi_l=r.thermal_bridge_psi_l,
+            # Option A solar quick-estimate — preserve across ID rebuilds
+            # so geometric solar does not silently drop to zero (SWD-282).
+            solar_exposure_aperture=r.solar_exposure_aperture,
+            solar_facing=r.solar_facing,
         ))
     return new_rooms
 
