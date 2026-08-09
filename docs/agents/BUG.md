@@ -47,5 +47,10 @@
 - Branch: `cursor/swd-286-schedule-comfort-constraints-7e7d`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/582
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/582
+- Merge: `bc6b090`
+- Version: **2.0.25**
+
 ## Next
-`/review-fix` → ship; rebuild App on HAOS to v2.0.25.
+Done — rebuild App on HAOS to v2.0.25; confirm Night Mode ±3 on room plot and that expanded schedules stay open through live ticks.

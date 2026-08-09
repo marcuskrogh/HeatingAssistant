@@ -4,8 +4,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-286 | Bug | [Bug] Room temperature plot ignores schedule comfort_offset — constraints stay at room default | In Review | — | docs/agents/BUG.md | Next `/review-fix SWD-286` — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
-| SWD-287 | Bug | [Bug] Expanded schedule on Schedules detail collapses on its own during reconfiguration | In Review | — | docs/agents/BUG.md | Next `/review-fix SWD-287` — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
+| SWD-286 | Bug | [Bug] Room temperature plot ignores schedule comfort_offset — constraints stay at room default | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
+| SWD-287 | Bug | [Bug] Expanded schedule on Schedules detail collapses on its own during reconfiguration | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/582 |
 | SWD-285 | Bug | [Bug] Controller Tuning preview ignores unapplied params — only works after Apply | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/580 |
 | SWD-284 | Bug | [Bug] Room view Price plot missing historical data — App never publishes electricity_price sensor | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/578 |
 | SWD-283 | Bug | [Bug] Large whitespace between Save Current Window inputs on mobile | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/576 |
@@ -41,6 +41,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — shipped SWD-286/SWD-287 via PR #582 (`bc6b090`): schedule comfort constraints + expand collapse; v2.0.25; rebuild App on HAOS so Night Mode ±3 shows on room plot and expanded schedules stay open.
 - 2026-08-09 — SWD-286/SWD-287 In Review + PR #582: schedule comfort constraints + expand collapse; v2.0.25; Next `/review-fix`.
 - 2026-08-09 — `/bug`+implement SWD-286/SWD-287: schedule comfort_offset on plot/controller + schedules expand collapse; v2.0.25; branch `cursor/swd-286-schedule-comfort-constraints-7e7d`.
 - 2026-08-09 — shipped SWD-285 via PR #580 (`093e547`): Controller Tuning preview uses unapplied draft params; v2.0.24; review-fix CLEAN. Rebuild App on HAOS so Preview reflects draft weights before Apply.
