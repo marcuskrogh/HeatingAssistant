@@ -2,7 +2,9 @@
 Integration-managed append-only identification history store.
 
 Writes one JSONL record per coordinator tick (every dt seconds, typically 15 min)
-to a per-day file under ``<config_dir>/.heating_assistant_id_history/<entry_id>/``.
+to a per-day file under ``<config_dir>/.heating_assistant_id_history/<entry_id>/``
+(legacy HA path) or ``<data_dir>/id_history/<entry_id>/`` (HAOS App path).
+
 Reads back the exact files that overlap a requested time window without touching
 any other day's data.
 
@@ -17,10 +19,14 @@ Design goals
 
 File layout::
 
-    .heating_assistant_id_history/
+    .heating_assistant_id_history/   # legacy HA config_dir
         <entry_id>/
             2025-06-01.jsonl
-            2025-06-02.jsonl
+            ...
+
+    id_history/                      # App data_dir (SWD-281)
+        <entry_id>/
+            2025-06-01.jsonl
             ...
 
 Each line in a ``.jsonl`` file is one JSON-serialised history record with the
@@ -48,6 +54,23 @@ _LOGGER = logging.getLogger(__name__)
 _APP_ID_HISTORY_DIRNAME = "id_history"
 # Legacy fat-integration layout under HA config_dir.
 _LEGACY_ID_HISTORY_DIRNAME = ".heating_assistant_id_history"
+
+
+def _json_default(value: Any) -> Any:
+    """Best-effort encoder for diagnostic values (e.g. numpy scalars/arrays)."""
+
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except Exception:
+            pass
+    if hasattr(value, "tolist"):
+        try:
+            return value.tolist()
+        except Exception:
+            pass
+    return str(value)
 
 
 class IdentificationHistoryStore:
@@ -79,6 +102,30 @@ class IdentificationHistoryStore:
             raise ValueError("IdentificationHistoryStore requires hass or data_dir")
         self._retention_days = max(1, retention_days)
         self._last_purge_date: Optional[date] = None
+
+    # ------------------------------------------------------------------
+    # Public sync API (App startup / tests; mirror PlotHistoryStore)
+    # ------------------------------------------------------------------
+
+    def setup(self) -> None:
+        """Create the storage directory and run an initial purge."""
+        self._sync_setup()
+
+    def append(self, record: Dict[str, Any]) -> None:
+        """Append a single record to today's JSONL file."""
+        self._sync_append(record)
+
+    def query_recent(self, max_records: int) -> List[Dict[str, Any]]:
+        """Return the most recent ``max_records`` records across all stored days."""
+        return self._sync_query_recent(max_records)
+
+    def query_range(self, start_ts: float, end_ts: float) -> List[Dict[str, Any]]:
+        """Return all records with timestamp in ``[start_ts, end_ts]``."""
+        return self._sync_query_range(start_ts, end_ts)
+
+    def purge_old(self) -> None:
+        """Delete day-files older than ``retention_days`` (at most once per day)."""
+        self._sync_purge_old()
 
     # ------------------------------------------------------------------
     # Public async API
@@ -117,15 +164,11 @@ class IdentificationHistoryStore:
 
     async def async_purge_old(self) -> None:
         """Delete day-files older than ``retention_days`` (runs in executor)."""
-        today = date.today()
-        if self._last_purge_date == today:
-            return  # already ran today
         await self._run(self._sync_purge_old)
-        self._last_purge_date = today
 
     def update_retention_days(self, days: int) -> None:
         """Update the retention period and reset the daily-purge guard so the
-        new cutoff is applied at the next ``async_purge_old`` call."""
+        new cutoff is applied at the next ``purge_old`` call."""
         self._retention_days = max(1, int(days))
         self._last_purge_date = None
 
@@ -146,10 +189,10 @@ class IdentificationHistoryStore:
 
         path = self._dir / f"{day.isoformat()}.jsonl"
         try:
-            line = json.dumps(record, separators=(",", ":")) + "\n"
+            line = json.dumps(record, separators=(",", ":"), default=_json_default) + "\n"
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(line)
-        except OSError as exc:
+        except (OSError, TypeError, ValueError) as exc:
             _LOGGER.warning("ID history store: append failed: %s", exc)
 
     def _sync_query_range(
@@ -227,7 +270,10 @@ class IdentificationHistoryStore:
         return records
 
     def _sync_purge_old(self) -> None:
-        cutoff = date.today() - timedelta(days=self._retention_days)
+        today = date.today()
+        if self._last_purge_date == today:
+            return
+        cutoff = today - timedelta(days=self._retention_days)
         try:
             for path in list(self._dir.glob("*.jsonl")):
                 try:
@@ -239,4 +285,4 @@ class IdentificationHistoryStore:
                     pass
         except OSError:
             pass
-        self._last_purge_date = date.today()
+        self._last_purge_date = today

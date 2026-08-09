@@ -154,6 +154,7 @@ class HeatingRuntime:
         self._ticker_stop = threading.Event()
         self._ticker_thread: threading.Thread | None = None
         self._control_lock = threading.Lock()
+        self._history_lock = threading.Lock()
         # Durable plot + identification history on the App data volume (SWD-281).
         plot_hours = float(
             self.options.get(const.CONF_PLOT_HISTORY_HOURS, const.DEFAULT_PLOT_HISTORY_HOURS)
@@ -581,8 +582,16 @@ class HeatingRuntime:
             self._last_control_ts = now
             self._last_control_duration_s = max(0.0, now - started)
             # Gate on update_interval — do not force a sample every control/tag.
-            self._record_history_samples()
-            self._record_identification_sample(now)
+            pending_plot = self._record_history_samples(persist=False)
+            if pending_plot:
+                await asyncio.to_thread(
+                    self._plot_history_store.append_samples, pending_plot
+                )
+                await asyncio.to_thread(self._plot_history_store.purge_old)
+            id_record = self._take_identification_sample(now)
+            if id_record is not None:
+                await self.id_history_store.async_append(id_record)
+                await self.id_history_store.async_purge_old()
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             await self._best_effort_mqtt(self.publish_status(), "status")
@@ -978,7 +987,13 @@ class HeatingRuntime:
         start = float(start_ts) if start_ts is not None else None
         end = float(end_ts) if end_ts is not None else None
         result: dict[str, list[dict[str, Any]]] = {}
-        for entity_id, samples in self._history.items():
+        with self._history_lock:
+            items = list(self._history.items())
+            snapshots = {
+                entity_id: [dict(sample) for sample in samples]
+                for entity_id, samples in items
+            }
+        for entity_id, samples in snapshots.items():
             if wanted and entity_id not in wanted:
                 continue
             filtered: list[dict[str, Any]] = []
@@ -1839,14 +1854,16 @@ class HeatingRuntime:
                 hours_back=max(plot_hours, const.DEFAULT_PLOT_HISTORY_HOURS),
                 max_per_entity=_HISTORY_MAX_SAMPLES,
             )
-            self._history = restored
+            with self._history_lock:
+                self._history = restored
+                if restored:
+                    last_ts = 0.0
+                    for samples in restored.values():
+                        if samples:
+                            last_ts = max(last_ts, float(samples[-1]["lu"]))
+                    if last_ts > 0.0:
+                        self._history_last_ts = last_ts
             if restored:
-                last_ts = 0.0
-                for samples in restored.values():
-                    if samples:
-                        last_ts = max(last_ts, float(samples[-1]["lu"]))
-                if last_ts > 0.0:
-                    self._history_last_ts = last_ts
                 _logger.info(
                     "Restored plot history for %d entities from App data volume",
                     len(restored),
@@ -1855,8 +1872,8 @@ class HeatingRuntime:
             _logger.exception("Failed to restore plot history from App data volume")
 
         try:
-            self.id_history_store._sync_setup()
-            rebuilt = self.id_history_store._sync_query_recent(const.HISTORY_BUFFER_SIZE)
+            self.id_history_store.setup()
+            rebuilt = self.id_history_store.query_recent(const.HISTORY_BUFFER_SIZE)
             if rebuilt:
                 self._history_buffer.extend(rebuilt[-const.HISTORY_BUFFER_SIZE :])
                 try:
@@ -1887,59 +1904,68 @@ class HeatingRuntime:
         )
         self.id_history_store.update_retention_days(id_days)
 
-    def _record_history_samples(self, *, force: bool = False) -> None:
+    def _record_history_samples(
+        self, *, force: bool = False, persist: bool = True
+    ) -> list[dict[str, Any]]:
         """Append current synthetic entity values into the history ring + JSONL.
 
         Samples are gated to ``update_interval`` so Ingress plots align with the
         control cadence (SWD-277). ``force=True`` is reserved for init/config.
         Durable appends keep room charts alive across App updates (SWD-281).
+
+        When ``persist=False``, durable writes are skipped and the pending samples
+        are returned so an async caller can offload them via ``asyncio.to_thread``.
         """
 
         now = time.time()
         interval = self._history_tick_interval_s()
-        if not force and (now - self._history_last_ts) < interval:
-            return
-        self._history_last_ts = now
+        # Build states outside the lock — only the ring mutation needs serialization.
         states = self.hass_states()
         persisted: list[dict[str, Any]] = []
-        for entity_id, state in states.items():
-            if not entity_id.startswith("sensor.heating_assistant_"):
-                continue
-            if entity_id.endswith("_model_fit_quality"):
-                continue
-            raw = state.get("state")
-            if raw in {None, "unknown", "unavailable"}:
-                continue
-            try:
-                float(raw)
-            except (TypeError, ValueError):
-                continue
-            sample = {"s": str(raw), "lu": now}
-            bucket = self._history.setdefault(
-                entity_id, deque(maxlen=_HISTORY_MAX_SAMPLES)
-            )
-            bucket.append(sample)
-            persisted.append({"entity_id": entity_id, "s": sample["s"], "lu": now})
-        if persisted:
+        with self._history_lock:
+            if not force and (now - self._history_last_ts) < interval:
+                return []
+            self._history_last_ts = now
+            for entity_id, state in states.items():
+                if not entity_id.startswith("sensor.heating_assistant_"):
+                    continue
+                if entity_id.endswith("_model_fit_quality"):
+                    continue
+                raw = state.get("state")
+                if raw in {None, "unknown", "unavailable"}:
+                    continue
+                try:
+                    float(raw)
+                except (TypeError, ValueError):
+                    continue
+                sample = {"s": str(raw), "lu": now}
+                bucket = self._history.setdefault(
+                    entity_id, deque(maxlen=_HISTORY_MAX_SAMPLES)
+                )
+                bucket.append(sample)
+                persisted.append({"entity_id": entity_id, "s": sample["s"], "lu": now})
+        if persist and persisted:
             try:
                 self._plot_history_store.append_samples(persisted)
                 self._plot_history_store.purge_old()
             except Exception:
                 _logger.exception("Failed to persist plot history samples")
+            return []
+        return persisted
 
-    def _record_identification_sample(
+    def _take_identification_sample(
         self, now: float | None = None, *, force: bool = False
-    ) -> None:
-        """Append one identification observation (same schema as the fat integration).
+    ) -> dict[str, Any] | None:
+        """Build + buffer one identification observation; return it for durable write.
 
-        Called from the control cycle (update_interval), not from plot sampling,
-        matching the original coordinator tick behaviour.
+        Called from the control cycle (update_interval), matching the original
+        coordinator tick behaviour. Returns ``None`` when gated or unwired.
         """
 
         now_ts = float(now if now is not None else time.time())
         interval = self._history_tick_interval_s()
         if not force and (now_ts - self._id_history_last_ts) < interval:
-            return
+            return None
 
         room_names = [
             name
@@ -1947,10 +1973,10 @@ class HeatingRuntime:
             if isinstance((name := room.get("name")), str) and name
         ]
         if not room_names:
-            return
+            return None
         # Do not seed empty/unknown ticks into ID history (startup before MQTT).
         if not any(self.room_temperatures.get(name) is not None for name in room_names):
-            return
+            return None
 
         y: list[float] = []
         for name in room_names:
@@ -2017,9 +2043,19 @@ class HeatingRuntime:
         }
         self._history_buffer.append(record)
         self._id_history_last_ts = now_ts
+        return record
+
+    def _record_identification_sample(
+        self, now: float | None = None, *, force: bool = False
+    ) -> None:
+        """Sync helper for tests: buffer + durable append on the calling thread."""
+
+        record = self._take_identification_sample(now, force=force)
+        if record is None:
+            return
         try:
-            self.id_history_store._sync_append(record)
-            self.id_history_store._sync_purge_old()
+            self.id_history_store.append(record)
+            self.id_history_store.purge_old()
         except Exception:
             _logger.exception("Failed to persist identification history record")
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 import time
 
@@ -129,17 +130,48 @@ def test_identification_history_store_accepts_data_dir(tmp_path: Path) -> None:
         retention_days=7,
         data_dir=tmp_path,
     )
-    store._sync_setup()
-    store._sync_append(
+    store.setup()
+    store.append(
         {
             "y": [20.0],
             "u": [0.2],
             "d_outdoor": 5.0,
             "d_solar": {"Living Room": 0.0},
-            "timestamp": 1_700_000_000.0,
+            "timestamp": time.time(),
         }
     )
-    recent = store._sync_query_recent(10)
+    recent = store.query_recent(10)
     assert len(recent) == 1
     assert recent[0]["y"] == [20.0]
     assert (tmp_path / "id_history" / "default").is_dir()
+
+
+def test_plot_and_id_retention_purge_old_day_files(tmp_path: Path) -> None:
+    plot = PlotHistoryStore(tmp_path, retention_days=2)
+    plot.setup()
+    today = date.today()
+    old_day = today - timedelta(days=10)
+    keep_day = today - timedelta(days=1)
+    (tmp_path / "plot_history" / f"{old_day.isoformat()}.jsonl").write_text(
+        '{"e":"sensor.heating_assistant_a","s":"1","lu":1}\n', encoding="utf-8"
+    )
+    (tmp_path / "plot_history" / f"{keep_day.isoformat()}.jsonl").write_text(
+        '{"e":"sensor.heating_assistant_a","s":"2","lu":2}\n', encoding="utf-8"
+    )
+    plot._last_purge_date = None
+    plot.purge_old()
+    assert not (tmp_path / "plot_history" / f"{old_day.isoformat()}.jsonl").exists()
+    assert (tmp_path / "plot_history" / f"{keep_day.isoformat()}.jsonl").exists()
+
+    store = IdentificationHistoryStore(
+        entry_id="haos", retention_days=3, data_dir=tmp_path
+    )
+    store.setup()
+    old_id = tmp_path / "id_history" / "haos" / f"{old_day.isoformat()}.jsonl"
+    keep_id = tmp_path / "id_history" / "haos" / f"{keep_day.isoformat()}.jsonl"
+    old_id.write_text('{"y":[1],"timestamp":1}\n', encoding="utf-8")
+    keep_id.write_text('{"y":[2],"timestamp":2}\n', encoding="utf-8")
+    store._last_purge_date = None
+    store.purge_old()
+    assert not old_id.exists()
+    assert keep_id.exists()
