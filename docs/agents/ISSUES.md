@@ -31,6 +31,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — shipped SWD-277 via PR #566: history gated to update_interval + MPC forecasts; v2.0.16; review-fix CLEAN. Rebuild App on HAOS for ~15 min plot cadence and Forecast / Planned Power.
 - 2026-08-09 — SWD-277 review-fix CLEAN: room_slug keys, price_tag, power capacity meta, forecast lock; Next `/ship SWD-277`.
 - 2026-08-09 — SWD-277 In Review + PR #566: history gated to update_interval + MPC forecast payload; v2.0.16; Next `/review-fix SWD-277`.
 - 2026-08-09 — `/iterate` SWD-277 from SWD-276: plot samples too dense + empty forecasts — gate history to update_interval + expose MPC trajectories; v2.0.16; branch `cursor/swd-277-plot-cadence-forecasts-f56e`.
