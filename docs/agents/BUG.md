@@ -43,5 +43,9 @@
 - Branch: `cursor/swd-285-tuning-preview-unapplied-ebd3`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/580
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/580
+- Version: **2.0.24**
+
 ## Next
-`/review-fix SWD-285` — then `/ship SWD-285`
+Done — rebuild App on HAOS to v2.0.24; confirm Preview reflects draft params before Apply.
