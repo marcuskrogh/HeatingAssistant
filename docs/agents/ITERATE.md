@@ -49,5 +49,12 @@ Root causes:
 - Branch: `cursor/swd-279-forecast-bridge-attrs-4b6c`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568
 
+## Review-fix
+CLEAN — weather forecast cache on service failure; UTC naive datetimes; price series regression.
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/568
+- Version: **2.0.18**
+
 ## Next
-`/review-fix SWD-279` — Review and auto-fix (single pass)
+Done — rebuild/update App on HAOS to v2.0.18; confirm day-ahead Price Forecast, Disturbances outdoor/solar, and Linearised bridging from Filtered at NOW. `/iterate` if still wrong after rebuild.
