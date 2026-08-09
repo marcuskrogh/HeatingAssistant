@@ -66,7 +66,7 @@ def merge_supervisor_options(
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.23"
+    server_version = "HeatingAssistantApp/2.0.24"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
@@ -204,9 +204,9 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 result = asyncio.run(self.runtime.apply_service(domain, service, data))
             else:
-                result = self.runtime.forecasts(
-                    self._optional_float(payload.get("plot_forecast_hours"))
-                )
+                # Controller Tuning preview: one-off MPC with posted draft params.
+                plot_hours = self._optional_float(payload.get("plot_forecast_hours"))
+                result = self.runtime.preview_tuning_forecast(payload, plot_hours)
         except ValueError as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
