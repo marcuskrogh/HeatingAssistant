@@ -191,3 +191,9 @@ async def test_runtime_stores_tag_attributes_and_builds_disturbances(
     inputs = runtime._mpc_disturbance_inputs(5.0)
     assert inputs["outdoor_forecast"]
     assert inputs["price_forecast"]
+    # Scalar-only GOOD update must clear stale forecast attrs (review-fix).
+    runtime.update_tag(
+        "energy_price",
+        MqttTagPayload(value=0.21, status="GOOD", reason=None, ts=2.0),
+    )
+    assert "energy_price" not in runtime.tag_attributes

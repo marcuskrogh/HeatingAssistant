@@ -32,6 +32,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — SWD-278 In Review + PR #567: outdoor/solar/price into MPC + MQTT attrs; v2.0.17; Next `/review-fix SWD-278`.
 - 2026-08-09 — `/iterate` SWD-278 from SWD-277: incomplete outdoor/solar/price/linearised forecasts — MQTT attrs + stop zeroing solar; v2.0.17; branch `cursor/swd-278-forecast-disturbances-f56e`.
 - 2026-08-09 — shipped SWD-277 via PR #566: history gated to update_interval + MPC forecasts; v2.0.16; review-fix CLEAN. Rebuild App on HAOS for ~15 min plot cadence and Forecast / Planned Power.
 - 2026-08-09 — SWD-277 review-fix CLEAN: room_slug keys, price_tag, power capacity meta, forecast lock; Next `/ship SWD-277`.

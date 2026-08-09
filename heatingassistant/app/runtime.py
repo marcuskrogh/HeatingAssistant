@@ -501,9 +501,13 @@ class HeatingRuntime:
 
         self.tag_values[tag] = payload.value
         self.tag_statuses[tag] = payload.status
-        if payload.attributes:
+        if payload.status == "BAD":
+            self.tag_attributes.pop(tag, None)
+        elif payload.attributes is not None:
+            # Explicit empty dict clears prior forecast attrs (SWD-278).
             self.tag_attributes[tag] = dict(payload.attributes)
-        elif tag in self.tag_attributes and payload.status == "BAD":
+        else:
+            # GOOD scalar-only update: drop stale day-ahead / weather attrs.
             self.tag_attributes.pop(tag, None)
         self._recompute_room_temperatures()
         self._record_history_samples()
