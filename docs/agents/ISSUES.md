@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-281 | Task | [Iterate] App update clears room-plot / ID history — persist under /data like original integration | In Review | — | docs/agents/ITERATE.md | `/ship SWD-281` — https://github.com/marcuskrogh/HeatingAssistant/pull/572 (review-fix CLEAN) |
 | SWD-280 | Task | [Iterate] Climate heat-pump actuation missing after thin bridge — planned cooling never reaches HA entity | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/570 |
 | SWD-279 | Task | [Iterate] Plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/568 |
 | SWD-278 | Task | [Iterate] Incomplete plot forecasts — wire outdoor/solar/price into MPC compute + MQTT attrs | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/567 |
@@ -34,6 +35,9 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — SWD-281 review-fix CLEAN on PR #572; shipping closeout (v2.0.20).
+- 2026-08-09 — SWD-281 In Review + PR #572: persist plot/ID history under `/data`; v2.0.20; Next `/review-fix SWD-281`.
+- 2026-08-09 — `/iterate` SWD-281 from SWD-279 deferred scope: App update clears room-plot / ID history — persist under `/data`; v2.0.20; branch `cursor/swd-281-history-persistence-32e0`.
 - 2026-08-09 — shipped SWD-280 via PR #570 (`7106752`): climate HP actuation + thermal measured power; v2.0.19; review-fix CLEAN. Rebuild App on HAOS so planned cooling reaches the climate entity.
 - 2026-08-09 — SWD-280 review-fix CLEAN on PR #570; shipping closeout (v2.0.19).
 - 2026-08-09 — SWD-280 In Review + PR #570: climate HP actuation + thermal measured power; v2.0.19; Next `/review-fix SWD-280`.

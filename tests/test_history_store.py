@@ -87,6 +87,8 @@ def test_purge_old_respects_retention_days(tmp_path):
     assert old_path.exists()
     assert recent_path.exists()
 
+    # Setup already purged once today; reset the guard so this call runs.
+    store._last_purge_date = None
     store._sync_purge_old()
 
     assert not old_path.exists()
