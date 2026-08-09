@@ -51,6 +51,7 @@ feedback no longer re-triggers MPC (write→state→write thrash guard).
 
 ## Shipped
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/570
+- Merge: `7106752`
 - Version: **2.0.19**
 
 ## Next
