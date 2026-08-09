@@ -39,7 +39,7 @@ never rewired after the HAOS App cutover.
 - Task: SWD-281
 - Relates: SWD-279, SWD-269
 - Branch: `cursor/swd-281-history-persistence-32e0`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/572
 
 ## Next
 `/review-fix SWD-281` — Review and auto-fix (single pass)
