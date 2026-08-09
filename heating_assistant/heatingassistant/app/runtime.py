@@ -17,10 +17,17 @@ from typing import Any
 
 from heatingassistant.app.forecast_payload import build_app_forecast_payload
 from heatingassistant.app.disturbance_forecasts import build_mpc_disturbance_inputs
+from heatingassistant.app.actuation import (
+    climate_write_payload,
+    coerce_climate_attrs,
+    number_write_payload,
+    switch_write_payload,
+)
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
 from heatingassistant.engine.naming import room_slug
+from heatingassistant.engine.heat_sources import HeatSource
 
 from heatingassistant.mqtt.bridge import InMemoryMqttBus, MqttBus, Unsubscribe
 from heatingassistant.mqtt.supervisor import (
@@ -420,12 +427,18 @@ class HeatingRuntime:
         )
 
     async def publish_actuator_outputs(self) -> None:
-        """Publish the latest App -> HA actuator tag values."""
+        """Publish the latest App -> HA actuator tag values.
+
+        Internal ``actuator_outputs`` stay as MPC fractions in ``[-1, 1]``.
+        Domain-specific HA write payloads (climate mode/setpoint, number %,
+        switch bool) are derived at publish time (SWD-280).
+        """
 
         for tag, value in sorted(self.actuator_outputs.items()):
+            command = self._actuator_write_value(tag, float(value))
             await self.bus.publish(
                 tag_out(self.instance_id, tag),
-                MqttTagPayload(value=value, status="GOOD").encode(),
+                MqttTagPayload(value=command, status="GOOD").encode(),
                 qos=DEFAULT_QOS,
                 retain=True,
             )
@@ -450,6 +463,11 @@ class HeatingRuntime:
             return
         tag_payload = MqttTagPayload.decode(payload)
         self.update_tag(parsed.tag, tag_payload)
+        # Climate heater feedback tags only refresh anchoring inputs. Re-running
+        # MPC here would thrash: write setpoint → HA state change → tag/in →
+        # compute → write again (SWD-280 review-fix).
+        if self._is_heater_state_feedback_tag(parsed.tag):
+            return
         await self.run_control_cycle()
 
     async def _handle_entities_catalog_message(
@@ -949,7 +967,11 @@ class HeatingRuntime:
             self.controller_config(),
             now,
         )
-        total_power = sum(self.actuator_outputs.values()) if self.actuator_outputs else 0.0
+        total_power = 0.0
+        for room in self._rooms():
+            name = room.get("name")
+            if isinstance(name, str) and name:
+                total_power += self._room_power(name)
         states["sensor.heating_assistant_system_summary"] = self._ha_state(
             "sensor.heating_assistant_system_summary",
             str(total_power),
@@ -1316,11 +1338,22 @@ class HeatingRuntime:
                 tag = bind(heater_entity, "out", preferred)
                 if tag:
                     source_cfg["output_tag"] = tag
+                    # Climate heat pumps need inbound feedback (internal temp /
+                    # hvac_modes) so the App can anchor logit setpoints (SWD-280).
+                    if heater_entity.strip().split(".", 1)[0] == "climate":
+                        state_tag = bind(heater_entity, "in", f"{tag}_state")
+                        if state_tag:
+                            source_cfg["state_tag"] = state_tag
+                        else:
+                            source_cfg.pop("state_tag", None)
+                    else:
+                        source_cfg.pop("state_tag", None)
             else:
                 source_cfg.setdefault("output_tag", preferred)
                 tag_name = source_cfg.get("output_tag")
                 if isinstance(tag_name, str) and tag_name and tag_name not in used_tags:
                     used_tags.add(tag_name)
+                source_cfg.pop("state_tag", None)
             sources_out.append(source_cfg)
         self.options["heat_sources"] = sources_out
 
@@ -1524,16 +1557,148 @@ class HeatingRuntime:
         return await self.update_config({"rooms": rooms})
 
     def _room_power(self, room_name: str) -> float:
+        """Return commanded thermal power [W] for a room (not raw fraction)."""
+
+        outdoor = self._outdoor_temperature()
+        outdoor_f = float(outdoor) if outdoor is not None else 0.0
+        sources_by_name = {src.name: src for src in self.control_engine.heat_sources}
         total = 0.0
-        for source in self._heat_sources():
-            if source.get("room") != room_name:
+        for source_cfg in self._heat_sources():
+            if source_cfg.get("room") != room_name:
                 continue
-            tag = source.get("output_tag")
-            if isinstance(tag, str):
-                value = self._coerce_number(self.actuator_outputs.get(tag))
-                if value is not None:
-                    total += value
+            tag = source_cfg.get("output_tag")
+            if not isinstance(tag, str):
+                continue
+            fraction = self._coerce_number(self.actuator_outputs.get(tag))
+            if fraction is None:
+                continue
+            name = source_cfg.get("name")
+            source = sources_by_name.get(name) if isinstance(name, str) else None
+            if source is None:
+                continue
+            total += self._source_display_power(source, float(fraction), outdoor_f)
         return total
+
+    @staticmethod
+    def _source_display_power(
+        source: HeatSource, fraction: float, outdoor_temp: float
+    ) -> float:
+        if hasattr(source, "display_smooth_thermal_power"):
+            return float(source.display_smooth_thermal_power(fraction, outdoor_temp))
+        return float(source.display_thermal_power(fraction, outdoor_temp))
+
+    def _actuator_write_value(self, tag: str, fraction: float) -> Any:
+        """Map an MPC fraction to the HA write payload for ``tag``."""
+
+        binding = next(
+            (b for b in self.bindings if b.tag == tag and b.direction == "out"),
+            None,
+        )
+        if binding is None:
+            return fraction
+        domain = binding.entity_id.split(".", 1)[0]
+        source_cfg = self._source_cfg_for_output_tag(tag)
+        enabled = self._source_actuation_enabled(source_cfg)
+        if domain == "number":
+            return number_write_payload(fraction, enabled=enabled)
+        if domain == "switch":
+            return switch_write_payload(fraction, enabled=enabled)
+        if domain == "climate":
+            return self._climate_write_value(source_cfg, fraction, enabled=enabled)
+        return fraction
+
+    def _source_cfg_for_output_tag(self, tag: str) -> Mapping[str, Any] | None:
+        for source in self._heat_sources():
+            if source.get("output_tag") == tag:
+                return source
+        return None
+
+    def _is_heater_state_feedback_tag(self, tag: str) -> bool:
+        for source in self._heat_sources():
+            if source.get("state_tag") == tag:
+                return True
+        return False
+
+    def _source_actuation_enabled(self, source_cfg: Mapping[str, Any] | None) -> bool:
+        if not bool(self.options.get("system_enabled", False)):
+            return False
+        if source_cfg is None:
+            return True
+        room_name = source_cfg.get("room")
+        if not isinstance(room_name, str) or not room_name:
+            return True
+        for room in self._rooms():
+            name = room.get("name")
+            if isinstance(name, str) and name == room_name:
+                return self._room_enabled(room)
+        return True
+
+    def _climate_write_value(
+        self,
+        source_cfg: Mapping[str, Any] | None,
+        fraction: float,
+        *,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        outdoor = self._outdoor_temperature()
+        outdoor_f = float(outdoor) if outdoor is not None else 0.0
+        source = self._heat_source_object(source_cfg)
+        room_name = source_cfg.get("room") if source_cfg else None
+        room_temp = (
+            self.room_temperatures.get(room_name)
+            if isinstance(room_name, str)
+            else None
+        )
+        setpoints = self._setpoints()
+        room_setpoint = setpoints.get(room_name) if isinstance(room_name, str) else None
+
+        state_tag = source_cfg.get("state_tag") if source_cfg else None
+        attrs = coerce_climate_attrs(
+            self.tag_attributes.get(state_tag) if isinstance(state_tag, str) else None
+        )
+        internal_temp = self._coerce_number(attrs.get("current_temperature"))
+        supported = attrs.get("hvac_modes")
+        if not isinstance(supported, (list, tuple)):
+            supported = None
+
+        if source is None:
+            # Config present but engine has not built the source yet — still
+            # turn climate off when disabled; otherwise pass a simple offset.
+            if not enabled:
+                return {"hvac_mode": "off"}
+            base = (
+                internal_temp
+                if internal_temp is not None
+                else (float(room_temp) if room_temp is not None else 21.0)
+            )
+            return {
+                "hvac_mode": "heat_cool" if fraction < 0.0 else "heat",
+                "temperature": base + (3.0 * float(fraction)),
+            }
+
+        return climate_write_payload(
+            source,
+            fraction,
+            enabled=enabled,
+            internal_temp=internal_temp,
+            outdoor_temp=outdoor_f,
+            room_temp=float(room_temp) if room_temp is not None else None,
+            room_setpoint=float(room_setpoint) if room_setpoint is not None else None,
+            supported_modes=supported,
+        )
+
+    def _heat_source_object(
+        self, source_cfg: Mapping[str, Any] | None
+    ) -> HeatSource | None:
+        if source_cfg is None:
+            return None
+        name = source_cfg.get("name")
+        if not isinstance(name, str) or not name:
+            return None
+        for source in self.control_engine.heat_sources:
+            if source.name == name:
+                return source
+        return None
 
     def _room_comfort_offsets(self) -> dict[str, float]:
         offsets: dict[str, float] = {}

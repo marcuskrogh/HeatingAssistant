@@ -127,7 +127,7 @@ async def test_energy_accumulation_does_not_integrate_across_restart_gap(tmp_pat
         {
             "energy_total_wh": {"living_room": 100.0},
             "energy_last_ts": 1_700_000_000.0,  # hours in the past vs now
-            "actuator_outputs": {"living_heater": 2000.0},
+            "actuator_outputs": {"living_heater": 1.0},
         },
     )
     runtime = HeatingRuntime(
@@ -146,15 +146,18 @@ async def test_energy_accumulation_does_not_integrate_across_restart_gap(tmp_pat
             ],
             "heat_sources": [
                 {
+                    "name": "living_heater",
                     "room": "Living Room",
                     "type": "electric",
+                    "max_power": 2000.0,
+                    "efficiency": 1.0,
                     "output_tag": "living_heater",
                 }
             ],
             "system_enabled": True,
         },
     )
-    runtime.actuator_outputs["living_heater"] = 2000.0
+    runtime.actuator_outputs["living_heater"] = 1.0
     before = float(runtime._energy_total_wh.get("living_room", 0.0))
     assert runtime._energy_last_ts is None
 
@@ -165,7 +168,7 @@ async def test_energy_accumulation_does_not_integrate_across_restart_gap(tmp_pat
     assert runtime._energy_last_ts is not None
 
     # Second tick with a large gap is capped at 2 × update_interval (1800s).
-    runtime.actuator_outputs["living_heater"] = 2000.0
+    runtime.actuator_outputs["living_heater"] = 1.0
     runtime._accumulate_energy(runtime._energy_last_ts + 7200.0)
     after = float(runtime._energy_total_wh.get("living_room", 0.0))
     assert after - mid == pytest.approx(2000.0 * (1800.0 / 3600.0))
