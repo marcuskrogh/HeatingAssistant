@@ -33,12 +33,17 @@
 ## Out of scope
 - Measured Power flat-at-bottom from pre-SWD-280 fraction history (separate unit/history migration).
 - Changing the Price Forecast `/api/forecasts` path.
+- Scalar forecast fallback tariff adder parity (deferred note).
 
 ## Tracker
 - Task: SWD-284
 - Branch: `cursor/swd-284-price-history-a08d`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/578
+- Merge: (pending)
+
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/578
+- Version: **2.0.23**
 
 ## Next
-`/review-fix SWD-284`
-
+Done — rebuild App on HAOS to v2.0.23; confirm room Price line left of NOW.
