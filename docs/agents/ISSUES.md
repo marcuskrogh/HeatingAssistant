@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-282 | Bug | [Bug] Solar gain plot stuck at zero despite High exposure — App room build drops aperture | In Progress | — | docs/agents/BUG.md | `/review-fix SWD-282` |
+| SWD-282 | Bug | [Bug] Solar gain plot stuck at zero despite High exposure — App room build drops aperture | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/574 |
 | SWD-281 | Task | [Iterate] App update clears room-plot / ID history — persist under /data like original integration | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/572 |
 | SWD-280 | Task | [Iterate] Climate heat-pump actuation missing after thin bridge — planned cooling never reaches HA entity | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/570 |
 | SWD-279 | Task | [Iterate] Plot forecasts still flat — JSON-safe attrs, weather.get_forecasts, linearised from estimated output | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/568 |
@@ -36,6 +36,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — shipped SWD-282 via PR #574 (`38846fb`): Option A solar exposure aperture wired in App room build; v2.0.21; review-fix CLEAN. Rebuild App on HAOS so DISTURBANCES Solar Gain shows dynamics.
+- 2026-08-09 — SWD-282 review-fix CLEAN on PR #574; shipping closeout (v2.0.21).
 - 2026-08-09 — `/ship` SWD-282: solar gain flat zero despite High exposure — `_build_house_model` dropped aperture; v2.0.21; branch `cursor/swd-282-solar-exposure-aperture-3296`.
 - 2026-08-09 — shipped SWD-281 via PR #572 (`11325cc`): persist plot/ID history under `/data`; v2.0.20; review-fix CLEAN. Rebuild App on HAOS so room plots survive updates.
 - 2026-08-09 — SWD-281 review-fix CLEAN on PR #572; shipping closeout (v2.0.20).
