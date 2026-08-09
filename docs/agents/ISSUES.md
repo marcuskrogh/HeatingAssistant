@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-285 | Bug | [Bug] Controller Tuning preview ignores unapplied params — only works after Apply | In Review | — | docs/agents/BUG.md | `/ship SWD-285` closeout — https://github.com/marcuskrogh/HeatingAssistant/pull/580 |
+| SWD-285 | Bug | [Bug] Controller Tuning preview ignores unapplied params — only works after Apply | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/580 |
 | SWD-284 | Bug | [Bug] Room view Price plot missing historical data — App never publishes electricity_price sensor | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/578 |
 | SWD-283 | Bug | [Bug] Large whitespace between Save Current Window inputs on mobile | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/576 |
 | SWD-282 | Bug | [Bug] Solar gain plot stuck at zero despite High exposure — App room build drops aperture | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/574 |
@@ -39,6 +39,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — shipped SWD-285 via PR #580 (`093e547`): Controller Tuning preview uses unapplied draft params; v2.0.24; review-fix CLEAN. Rebuild App on HAOS so Preview reflects draft weights before Apply.
 - 2026-08-09 — SWD-285 review-fix CLEAN on PR #580; shipping closeout (v2.0.24).
 - 2026-08-09 — `/bug`+implement SWD-285: Controller Tuning preview ignores unapplied params — restore App `preview_tuning_forecast`; v2.0.24; branch `cursor/swd-285-tuning-preview-unapplied-ebd3`.
 - 2026-08-09 — shipped SWD-284 via PR #578 (`afcbea7`): publish electricity_price + day-ahead history backfill; v2.0.23; review-fix CLEAN. Rebuild App on HAOS so room Price shows left of NOW.

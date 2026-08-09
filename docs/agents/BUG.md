@@ -45,6 +45,7 @@
 
 ## Shipped
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/580
+- Merge: `093e547`
 - Version: **2.0.24**
 
 ## Next
