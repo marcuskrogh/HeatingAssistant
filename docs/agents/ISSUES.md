@@ -34,7 +34,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-08-09 — shipped SWD-280 via PR #570: climate HP actuation + thermal measured power; v2.0.19; review-fix CLEAN (version pins + state-tag thrash guard). Rebuild App on HAOS so planned cooling reaches the climate entity.
+- 2026-08-09 — shipped SWD-280 via PR #570 (`7106752`): climate HP actuation + thermal measured power; v2.0.19; review-fix CLEAN. Rebuild App on HAOS so planned cooling reaches the climate entity.
 - 2026-08-09 — SWD-280 review-fix CLEAN on PR #570; shipping closeout (v2.0.19).
 - 2026-08-09 — SWD-280 In Review + PR #570: climate HP actuation + thermal measured power; v2.0.19; Next `/review-fix SWD-280`.
 - 2026-08-09 — `/iterate` SWD-280: climate HP actuation missing after thin bridge — planned −3.5 kW cooling never reaches HA entity; measured −1 W was raw fraction; v2.0.19; branch `cursor/swd-280-climate-actuation-c648`.
