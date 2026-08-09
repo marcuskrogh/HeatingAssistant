@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+import asyncio
 import json
 import logging
 import os
@@ -40,6 +41,8 @@ _logger = logging.getLogger(__name__)
 # Keep ~48h of 15s samples in memory for Ingress plots (SWD-269).
 _HISTORY_MAX_SAMPLES = 12_000
 _HISTORY_MIN_INTERVAL_S = 5.0
+# Wall-clock history samples when MQTT tags are quiet (SWD-276).
+_HISTORY_TICK_MAX_S = 60.0
 
 # Retry Supervisor MQTT discovery while disconnected (SWD-273).
 _MQTT_DISCOVERY_RETRY_INITIAL_S = 2.0
@@ -127,6 +130,10 @@ class HeatingRuntime:
         self._mqtt_discovery_retry = self._should_retry_mqtt_discovery(self.options)
         self._mqtt_discovery_stop = threading.Event()
         self._mqtt_discovery_thread: threading.Thread | None = None
+        # Wall-clock history + control when tag events are quiet (SWD-276).
+        self._ticker_stop = threading.Event()
+        self._ticker_thread: threading.Thread | None = None
+        self._control_lock = threading.Lock()
         self._recompute_room_temperatures()
         self._record_history_samples(force=True)
 
@@ -161,6 +168,7 @@ class HeatingRuntime:
             add_connect(self._on_mqtt_connected)
         self._started = True
         self._start_mqtt_discovery_retry()
+        self._start_background_ticker()
         await self._publish_startup_metadata()
 
     async def _on_mqtt_connected(self) -> None:
@@ -291,6 +299,65 @@ class HeatingRuntime:
         )
         return True
 
+    def _history_tick_interval_s(self) -> float:
+        """Seconds between forced history samples when tags are quiet."""
+
+        update = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        return max(_HISTORY_MIN_INTERVAL_S, min(_HISTORY_TICK_MAX_S, update))
+
+    def _control_tick_interval_s(self) -> float:
+        """Seconds between background control cycles."""
+
+        update = float(self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL))
+        return max(30.0, update)
+
+    def _start_background_ticker(self) -> None:
+        """Start wall-clock history + control when MQTT tag events are quiet."""
+
+        if self._ticker_thread is not None and self._ticker_thread.is_alive():
+            return
+        self._ticker_stop.clear()
+        self._ticker_thread = threading.Thread(
+            target=self._background_ticker_loop,
+            name="heatingassistant-wall-clock-ticker",
+            daemon=True,
+        )
+        self._ticker_thread.start()
+
+    def _background_ticker_loop(self) -> None:
+        """Record history and run control without relying on Ingress or tag spam."""
+
+        history_every = self._history_tick_interval_s()
+        control_every = self._control_tick_interval_s()
+        next_history = time.time() + history_every
+        # First control soon after start so energy/actuators move without waiting
+        # a full update_interval when tags are silent.
+        next_control = time.time() + min(control_every, history_every)
+        while not self._ticker_stop.is_set():
+            now = time.time()
+            if now >= next_history:
+                try:
+                    self._record_history_samples(force=True)
+                except Exception:
+                    _logger.exception("Wall-clock history sample failed")
+                history_every = self._history_tick_interval_s()
+                next_history = now + history_every
+            if now >= next_control:
+                last = self._last_control_ts
+                if last is not None and (now - last) < (control_every * 0.5):
+                    # MQTT tag path already ran control recently — skip.
+                    next_control = last + control_every
+                else:
+                    try:
+                        asyncio.run(self.run_control_cycle())
+                    except Exception:
+                        _logger.exception("Wall-clock control cycle failed")
+                    control_every = self._control_tick_interval_s()
+                    next_control = time.time() + control_every
+            sleep_for = max(0.2, min(next_history, next_control) - time.time())
+            if self._ticker_stop.wait(timeout=sleep_for):
+                return
+
     async def _publish_startup_metadata(self) -> None:
         """Best-effort bindings / control / status publish for Ingress readiness."""
 
@@ -308,8 +375,12 @@ class HeatingRuntime:
             _logger.exception("Failed to publish MQTT status; will retry on connect")
 
     async def stop(self) -> None:
-        """Unsubscribe from MQTT topics."""
+        """Unsubscribe from MQTT topics and stop background workers."""
 
+        self._ticker_stop.set()
+        if self._ticker_thread is not None:
+            self._ticker_thread.join(timeout=2)
+            self._ticker_thread = None
         self._mqtt_discovery_stop.set()
         if self._mqtt_discovery_thread is not None:
             self._mqtt_discovery_thread.join(timeout=2)
@@ -431,23 +502,29 @@ class HeatingRuntime:
     async def run_control_cycle(self) -> dict[str, float]:
         """Compute and publish actuator outputs for the current runtime state."""
 
-        started = time.time()
-        self._recompute_room_temperatures()
-        outputs = self.control_engine.compute_actions(
-            self.room_temperatures,
-            self._outdoor_temperature(),
-            self._setpoints(),
-        )
-        self.actuator_outputs = dict(outputs)
-        now = time.time()
-        self._accumulate_energy(now)
-        self._last_control_ts = now
-        self._last_control_duration_s = max(0.0, now - started)
-        self._record_history_samples(force=True)
-        self._save_runtime_state()
-        await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
-        await self._best_effort_mqtt(self.publish_status(), "status")
-        return self.actuator_outputs
+        if not self._control_lock.acquire(blocking=False):
+            # Another cycle (MQTT tag or ticker) is already running.
+            return dict(self.actuator_outputs)
+        try:
+            started = time.time()
+            self._recompute_room_temperatures()
+            outputs = self.control_engine.compute_actions(
+                self.room_temperatures,
+                self._outdoor_temperature(),
+                self._setpoints(),
+            )
+            self.actuator_outputs = dict(outputs)
+            now = time.time()
+            self._accumulate_energy(now)
+            self._last_control_ts = now
+            self._last_control_duration_s = max(0.0, now - started)
+            self._record_history_samples(force=True)
+            self._save_runtime_state()
+            await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
+            await self._best_effort_mqtt(self.publish_status(), "status")
+            return dict(self.actuator_outputs)
+        finally:
+            self._control_lock.release()
 
     async def update_config(self, updates: Mapping[str, Any]) -> dict[str, Any]:
         """Persist config updates and rebuild runtime-derived state."""

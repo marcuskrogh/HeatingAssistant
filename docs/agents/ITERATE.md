@@ -1,48 +1,50 @@
-# Iterate: MQTT rc=5 — SUPERVISOR_TOKEN missing without with-contenv entrypoint
+# Iterate: KPIs/plots flat overnight — App has no wall-clock history/control ticker
 
 ## Prior work
-- Task: SWD-274
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/563 (v2.0.13)
+- Task: SWD-275
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/564 (v2.0.14)
 - Spec context: docs/agents/ITERATE.md
 
 ## Problem
-After v2.0.13 (`hassio_api: true` / `homeassistant_api: true`), the App still
-logs `SUPERVISOR_TOKEN missing` and Mosquitto `rc=5 (not authorised)`.
+MQTT is connected (`API connected · MQTT ok`), but Ingress KPIs/plots stay empty
+or flat overnight. Temperature and power charts show samples near session start,
+then a long hold until the panel is opened again. Live gauges appear to update
+only while Ingress is open on the device.
 
-Root cause: `heating_assistant/run.sh` starts with `#!/usr/bin/env sh`.
-Home Assistant base images store Supervisor secrets (including
-`SUPERVISOR_TOKEN`) in the s6 container environment; they are only exported
-into the App process when the entrypoint is wrapped with
-`/usr/bin/with-contenv` (official tutorial: `#!/usr/bin/with-contenv bashio`).
-Declaring `hassio_api` alone does not put the token in a bare `sh` process.
+Root cause: App history recording and control cycles run only on MQTT
+`tag/+/in` events (plus config writes / startup). There is **no wall-clock
+sampler** driven by `update_interval`. Overnight, stable HA sensors emit no
+`state_changed`, so the thin bridge publishes no new `tag/in`, so the in-memory
+history ring gets no new points. Ingress polls `api/state` every 5s **only while
+the panel is loaded** (client-side), which matches “updates when open.”
+
+Screenshot evidence: overnight flat Filtered/Power lines, then a vertical jump
+at open time (~06:44); price/forecast series absent (separate stub gap).
 
 ## Acceptance criteria
-1. `heating_assistant/run.sh` shebang is `#!/usr/bin/with-contenv bashio`.
-2. Regression test asserts the with-contenv entrypoint (and keeps hassio_api).
-3. Version bump to **2.0.14**.
-4. Missing-token log mentions with-contenv / rebuild guidance.
+1. Background ticker records history on a wall-clock cadence (≤60s) without
+   Ingress being open.
+2. Background ticker runs control cycles on `update_interval` when no recent
+   MQTT-driven cycle occurred.
+3. With panel closed ≥1 sample period, `/api/history` shows new samples spanning
+   that window (even without new tag events).
+4. Regression tests cover ticker start/stop and history growth without tags.
+5. Version bump to **2.0.15**.
 
 ## Out of scope
-- Changing Mosquitto addon config.
-- Manual credential UX redesign.
+- Filling stub `/api/forecasts` / price forecast series (follow-up iterate).
+- Persisting history ring across App restarts.
+- Full MODEL FIT / solar KPI completeness.
 
 ## Work packages
-1. Fix `run.sh` shebang + missing-token message.
-2. Version 2.0.14 across App/package/integration mirrors.
-3. Packaging regression + tracker.
+1. Add background history + control ticker to `HeatingRuntime`.
+2. Version 2.0.15 + packaging sync.
+3. Unit tests + tracker.
 
 ## Tracker
-- Task: SWD-275
-- Relates: SWD-274
-- Branch: `cursor/swd-275-with-contenv-token-f56e`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/564
-
-## Review-fix
-CLEAN — with-contenv shebang matches HA tutorial; hassio_api retained from SWD-274; packaging asserts entrypoint + v2.0.14.
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/564
-- Version: **2.0.14**
+- Task: SWD-276
+- Relates: SWD-275
+- Branch: `cursor/swd-276-wall-clock-ticker-f56e`
 
 ## Next
-Done — rebuild/update App on HAOS to v2.0.14; expect “Supervisor token present” then MQTT without rc=5. `/iterate` if still broken after install.
+`/review-fix SWD-276` — Review and auto-fix (single pass)
