@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from heatingassistant.app.disturbance_forecasts import build_mpc_disturbance_inputs
 from heatingassistant.app.forecast_payload import build_app_forecast_payload
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.mqtt.topics import MqttTagPayload
@@ -39,6 +40,14 @@ def _load_forecast_publish():
 _forecast_publish = _load_forecast_publish()
 json_safe = _forecast_publish.json_safe
 forecast_attributes_for_publish = _forecast_publish.forecast_attributes_for_publish
+clear_weather_forecast_cache = _forecast_publish.clear_weather_forecast_cache
+
+
+@pytest.fixture(autouse=True)
+def _clear_weather_cache() -> None:
+    clear_weather_forecast_cache()
+    yield
+    clear_weather_forecast_cache()
 
 
 def test_mqtt_tag_payload_encodes_datetime_attributes() -> None:
@@ -72,6 +81,40 @@ def test_json_safe_converts_nested_datetimes() -> None:
     assert safe["raw_today"][0]["start"] == "2026-08-09T09:00:00+00:00"
 
 
+def test_json_safe_naive_datetime_becomes_utc() -> None:
+    safe = json_safe({"start": datetime(2026, 8, 9, 10, 0)})
+    assert safe["start"] == "2026-08-09T10:00:00+00:00"
+
+
+def test_datetime_raw_today_builds_varying_price_forecast() -> None:
+    now = datetime(2026, 8, 9, 8, 0, tzinfo=timezone.utc)
+    attrs = json_safe(
+        {
+            "raw_today": [
+                {"start": datetime(2026, 8, 9, 0, 0, tzinfo=timezone.utc), "value": 0.10},
+                {"start": datetime(2026, 8, 9, 8, 0, tzinfo=timezone.utc), "value": 0.25},
+                {"start": datetime(2026, 8, 9, 9, 0, tzinfo=timezone.utc), "value": 0.40},
+            ]
+        }
+    )
+    out = build_mpc_disturbance_inputs(
+        outdoor_temp=5.0,
+        weather_attrs=None,
+        price_value=0.25,
+        price_attrs=attrs,
+        solar_value=None,
+        solar_attrs=None,
+        horizon=8,
+        dt_s=900.0,
+        now=now,
+    )
+    assert out["price_forecast"]
+    # Steps at 08:00..08:45 hold 0.25; from 09:00 the series jumps to 0.40.
+    assert out["price_forecast"][0] == pytest.approx(0.25)
+    assert out["price_forecast"][4] == pytest.approx(0.40)
+    assert len(set(out["price_forecast"])) > 1
+
+
 @pytest.mark.asyncio
 async def test_forecast_attributes_call_weather_get_forecasts() -> None:
     forecast = [
@@ -93,6 +136,32 @@ async def test_forecast_attributes_call_weather_get_forecasts() -> None:
     assert attrs["forecast"] == forecast
     assert attrs["temperature"] == pytest.approx(5.0)
     hass.services.async_call.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_weather_forecast_cache_survives_service_failure() -> None:
+    forecast = [
+        {"datetime": "2026-08-09T10:00:00+00:00", "temperature": 7.0},
+        {"datetime": "2026-08-09T11:00:00+00:00", "temperature": 8.5},
+    ]
+    hass = MagicMock()
+    hass.services.has_service.return_value = True
+    hass.services.async_call = AsyncMock(
+        return_value={"weather.home": {"forecast": forecast}}
+    )
+    state = SimpleNamespace(
+        domain="weather",
+        entity_id="weather.home",
+        attributes={"temperature": 5.0, "cloud_coverage": 40},
+    )
+    first = await forecast_attributes_for_publish(hass, state)
+    assert first is not None and first.get("forecast") == forecast
+
+    hass.services.async_call = AsyncMock(side_effect=RuntimeError("upstream"))
+    second = await forecast_attributes_for_publish(hass, state)
+    assert second is not None
+    assert second["forecast"] == forecast
+    assert second["temperature"] == pytest.approx(5.0)
 
 
 def test_forecast_bridge_uses_filtered_estimated_output() -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import logging
 from typing import Any
 
@@ -23,6 +23,17 @@ FORECAST_ATTR_KEYS = (
     "prices_tomorrow",
     "unit_of_measurement",
 )
+
+# Last successful weather.get_forecasts payload per entity_id. Survives a
+# transient service failure so App tag attrs are not wiped to scalar-only
+# temperature/cloud keys (review-fix SWD-279).
+_LAST_WEATHER_FORECAST: dict[str, list[Any]] = {}
+
+
+def clear_weather_forecast_cache() -> None:
+    """Clear the in-memory weather forecast cache (tests)."""
+
+    _LAST_WEATHER_FORECAST.clear()
 
 
 async def forecast_attributes_for_publish(
@@ -45,9 +56,15 @@ async def forecast_attributes_for_publish(
     # Modern HA weather entities no longer expose ``forecast`` on state attrs;
     # call weather.get_forecasts so outdoor/cloud series reach the App (SWD-279).
     if domain == "weather" and entity_id and not selected.get("forecast"):
-        forecast = await fetch_weather_forecast_entries(hass, str(entity_id))
+        entity_key = str(entity_id)
+        forecast = await fetch_weather_forecast_entries(hass, entity_key)
         if forecast:
+            _LAST_WEATHER_FORECAST[entity_key] = list(forecast)
             selected["forecast"] = forecast
+        else:
+            cached = _LAST_WEATHER_FORECAST.get(entity_key)
+            if cached:
+                selected["forecast"] = list(cached)
 
     if not selected:
         return None
@@ -100,6 +117,8 @@ def json_safe(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()
