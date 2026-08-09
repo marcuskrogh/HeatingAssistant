@@ -44,6 +44,7 @@ Root causes:
 - Task: SWD-278
 - Relates: SWD-277
 - Branch: `cursor/swd-278-forecast-disturbances-f56e`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/567
 
 ## Next
 `/review-fix SWD-278` — Review and auto-fix (single pass)

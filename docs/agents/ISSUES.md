@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-278 | Task | [Iterate] Incomplete plot forecasts — wire outdoor/solar/price into MPC compute + MQTT attrs | In Review | — | docs/agents/ITERATE.md | In Review — PR pending |
+| SWD-278 | Task | [Iterate] Incomplete plot forecasts — wire outdoor/solar/price into MPC compute + MQTT attrs | In Review | — | docs/agents/ITERATE.md | In Review — https://github.com/marcuskrogh/HeatingAssistant/pull/567 |
 | SWD-277 | Task | [Iterate] Plot samples too dense + empty forecasts — gate history to update_interval and expose MPC trajectories | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/566 |
 | SWD-276 | Task | [Iterate] KPIs/plots flat overnight — App has no wall-clock history/control ticker | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/565 |
 | SWD-275 | Task | [Iterate] MQTT rc=5 — SUPERVISOR_TOKEN missing without with-contenv entrypoint | Done | — | docs/agents/ITERATE.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/564 |
@@ -32,6 +32,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-09 — `/iterate` SWD-278 from SWD-277: incomplete outdoor/solar/price/linearised forecasts — MQTT attrs + stop zeroing solar; v2.0.17; branch `cursor/swd-278-forecast-disturbances-f56e`.
 - 2026-08-09 — shipped SWD-277 via PR #566: history gated to update_interval + MPC forecasts; v2.0.16; review-fix CLEAN. Rebuild App on HAOS for ~15 min plot cadence and Forecast / Planned Power.
 - 2026-08-09 — SWD-277 review-fix CLEAN: room_slug keys, price_tag, power capacity meta, forecast lock; Next `/ship SWD-277`.
 - 2026-08-09 — SWD-277 In Review + PR #566: history gated to update_interval + MPC forecast payload; v2.0.16; Next `/review-fix SWD-277`.
