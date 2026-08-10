@@ -1,56 +1,48 @@
-# Bug: Schedule comfort_offset ignored in room plot + expanded schedule collapses
+# Bug: Climate card setpoints reset to default (overview + room view)
 
 ## Summary
-- After the HAOS App rewrite, comfort schedules with a non-default `comfort_offset` (e.g. Night Mode = **3** while the room default is **1**) do not change the room-view temperature plot constraint bands — historically or predictively.
-- Separately, an expanded period on the Schedules detail page collapses on its own during live state refreshes.
+- Changing TARGET or COMFORT BAND on climate cards (overview tiles and room-view card) snaps back to the previous/default values after the debounce commit. Users cannot change setpoints.
 
 ## Repro
-### SWD-286 — plot constraints
-1. Configure Night Mode (Mon–Sun 22:00–05:00) with comfort interval / `comfort_offset` = 3.
-2. Open the room view while Night Mode shows the NOW badge.
-3. Inspect TEMPERATURE constraint bands around NOW and into the forecast.
-
-### SWD-287 — expand collapse
-1. Open Schedules → room detail → expand a period for editing.
-2. Leave the panel open while MQTT / control ticks update panel state.
-3. Observe the card collapse without user action.
+1. Open Overview or a room detail climate card (e.g. Living Room).
+2. Use +/- to change TARGET temperature.
+3. Use +/- to change COMFORT BAND.
+4. Wait ~700 ms for the debounced commit.
 
 ## Expected
-- Constraint upper/lower (and setpoint overrides) follow the active schedule both as history samples and across the forecast horizon.
-- Expanded periods stay expanded until the user collapses them, starts drag-reorder, or navigates away.
+- New target and comfort-band values persist in config and remain visible after commit / live refresh.
 
 ## Actual
-- Bands stay at the room default comfort_offset (e.g. ±1) through Night Mode; no step at 22:00.
-- Expanded period cards collapse spontaneously on live refresh.
+- Values reset to the prior/default values and stay unchanged.
 
 ## Impact
-- Users cannot verify scheduled comfort corridors on the room plot; controller / sensors also ignored schedule comfort after SWD-262.
-- Schedule reconfiguration is interrupted by unexpected collapses.
+- Panel climate controls are unusable for retargeting rooms.
 
 ## Suspected area
-- `HeatingRuntime.hass_states()` / `build_app_forecast_payload` / `ControlEngine.compute_actions` never rewired schedule → effective setpoint/comfort after fat coordinator removal (classic `schedule_control.py`).
-- `schedules-detail.js` `initLocalPeriods()` clears `expandedSet` on every non-dirty `fetchSchedules()` from `update()`.
+- After SWD-262, `HeatingRuntime.apply_service` accepted `climate.set_temperature` / `turn_on` / `turn_off` as no-ops (`{"accepted": True}`) without writing room config.
+- Overview + room climate cards called `setClimateTemperature` (climate domain) instead of `set_room_setpoint`.
+- Comfort-band commits cleared optimistic edit guards before the async service settled, so live refreshes could overwrite the optimistic value.
 
 ## Acceptance criteria
-- [x] Live setpoint / constraint sensors reflect `resolve_effective_control_params` when the schedule is enabled.
-- [x] `/api/forecasts` per-step setpoint/constraints follow schedule projection.
-- [x] Control compute applies schedule effective params + horizon `control_trajectory`.
-- [x] Expanded schedule survives live panel state refreshes (dirty edits still block overwrite).
+- [x] `climate.set_temperature` persists room setpoint via config update.
+- [x] `climate.turn_on` / `turn_off` persist room enablement.
+- [x] Overview and room climate cards commit target via `set_room_setpoint` and power via `set_room_enabled`.
+- [x] Optimistic edit guards stay active until the commit promise settles.
 - [x] Regression tests; version bump; App package synced.
 
 ## Out of scope
-- Rebuilding historical constraint samples recorded before this fix (forward-looking only).
-- Full experiment clamp / window-override schedule interaction polish beyond trajectory + disabled sources.
+- Schedule-period setpoint / comfort overrides (editing a period on the Schedules page).
+- Reintroducing fat HA climate entities outside the App Ingress shim.
 
 ## Tracker
-- Tasks: SWD-286, SWD-287
-- Branch: `cursor/swd-286-schedule-comfort-constraints-7e7d`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/582
+- Task: SWD-288
+- Branch: `cursor/swd-288-climate-setpoint-reset-d3ac`
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/584
 
 ## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/582
-- Merge: `bc6b090`
-- Version: **2.0.25**
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/584
+- Version: **2.0.26**
+- review-fix: CLEAN
 
 ## Next
-Done — rebuild App on HAOS to v2.0.25; confirm Night Mode ±3 on room plot and that expanded schedules stay open through live ticks.
+Done — rebuild App on HAOS to v2.0.26; confirm TARGET and COMFORT BAND stick on Overview and room view after debounce.

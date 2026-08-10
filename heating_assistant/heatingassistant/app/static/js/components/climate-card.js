@@ -203,8 +203,17 @@ export function createClimateCard({
     if (st.commitTimer) clearTimeout(st.commitTimer);
     st.commitTimer = setTimeout(() => {
       st.commitTimer = null;
-      st.editing = false;
-      if (typeof onSetpointChange === 'function') onSetpointChange(st.setpoint);
+      // Keep editing=true until the service call settles so a live state refresh
+      // cannot overwrite the optimistic setpoint (SWD-288).
+      const pending = st.setpoint;
+      const release = () => {
+        if (st.setpoint === pending) st.editing = false;
+      };
+      if (typeof onSetpointChange === 'function') {
+        Promise.resolve(onSetpointChange(pending)).then(release, release);
+      } else {
+        release();
+      }
     }, COMMIT_DEBOUNCE_MS);
   }
 
@@ -225,8 +234,15 @@ export function createClimateCard({
     if (st.offsetCommitTimer) clearTimeout(st.offsetCommitTimer);
     st.offsetCommitTimer = setTimeout(() => {
       st.offsetCommitTimer = null;
-      st.offsetEditing = false;
-      if (typeof onComfortOffsetChange === 'function') onComfortOffsetChange(st.comfortOffset);
+      const pending = st.comfortOffset;
+      const release = () => {
+        if (st.comfortOffset === pending) st.offsetEditing = false;
+      };
+      if (typeof onComfortOffsetChange === 'function') {
+        Promise.resolve(onComfortOffsetChange(pending)).then(release, release);
+      } else {
+        release();
+      }
     }, COMMIT_DEBOUNCE_MS);
   }
 

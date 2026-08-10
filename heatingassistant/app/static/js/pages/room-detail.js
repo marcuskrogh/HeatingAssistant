@@ -1,6 +1,6 @@
 import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=118';
 import { createGauge, updateGauge } from '../components/gauge.js?v=118';
-import { createClimateCard } from '../components/climate-card.js?v=118';
+import { createClimateCard } from '../components/climate-card.js?v=120';
 import { createCountdown } from '../components/countdown.js?v=118';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=119';
 import { getRoomScheduleData } from '../schedule-utils.js?v=119';
@@ -17,11 +17,10 @@ import {
 } from '../kpi-engine.js?v=118';
 import { setPanelHash } from '../panel-hash.js?v=118';
 import {
-  setClimateTemperature,
   setRoomComfortOffset,
-  turnClimateOff,
-  turnClimateOn,
-} from '../ha-services.js?v=118';
+  setRoomEnabled,
+  setRoomSetpoint,
+} from '../ha-services.js?v=120';
 import {
   formatPower, formatPowerKw, formatPrice,
   entityValue, entityAttr, systemEntity,
@@ -108,7 +107,6 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
   const setpointVal = entityValue(state, room.entities['setpoint']);
   const comfortLowerVal = entityValue(state, room.entities['constraint_lower']);
   const comfortUpperVal = entityValue(state, room.entities['constraint_upper']);
-  const climateEntityId = `climate.heating_assistant_${roomSlug}`;
   const offVal = computeRoomOff(state, roomSlug);
 
   // Climate card replaces the standalone Temperature + Setpoint KPIs: it shows
@@ -125,7 +123,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     off: offVal,
     onSetpointChange: async (newSp) => {
       try {
-        await setClimateTemperature(hass, climateEntityId, newSp);
+        await setRoomSetpoint(hass, roomSlug, newSp);
       } catch (err) {
         // Service call failed; the display self-corrects on the next state update.
       }
@@ -140,8 +138,7 @@ export function renderRoomDetail(container, roomSlug, rooms, state, connection, 
     },
     onPowerToggle: async (turnOff) => {
       try {
-        if (turnOff) await turnClimateOff(hass, climateEntityId);
-        else await turnClimateOn(hass, climateEntityId);
+        await setRoomEnabled(hass, roomSlug, !turnOff);
       } catch (err) {
         // Service call failed; the display self-corrects on the next state update.
       }
