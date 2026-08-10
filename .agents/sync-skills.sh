@@ -129,7 +129,22 @@ mirror_home() {
 if [ -n "${HOME:-}" ]; then
   mirror_home "${HOME}/.cursor/skills"
   mirror_home "${HOME}/.agents/skills"
-  echo "Mirrored skills to ${HOME}/.cursor/skills and ${HOME}/.agents/skills"
+  # Cursor Cloud currently injects ~/.cursor/skills-cursor into
+  # <agent_skills>; also land model-visible skills there so agents can
+  # discover the workflows router without relying on project-path injection.
+  skills_cursor="${HOME}/.cursor/skills-cursor"
+  mkdir -p "$skills_cursor"
+  for visible in workflows help; do
+    if [ -f "$TARGET_DIR/$visible/SKILL.md" ]; then
+      rm -rf "$skills_cursor/$visible"
+      copy_tree "$TARGET_DIR/$visible" "$skills_cursor/"
+    fi
+  done
+  if [ -d "$TARGET_DIR/concepts" ]; then
+    rm -rf "$skills_cursor/concepts"
+    copy_tree "$TARGET_DIR/concepts" "$skills_cursor/"
+  fi
+  echo "Mirrored skills to ${HOME}/.cursor/skills, ${HOME}/.agents/skills, and model-visible skills into ${skills_cursor}"
 fi
 
 echo "Synced skills + concepts to $TARGET_DIR"
