@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-298 | Bug | [Bug] Door/window sensors do not turn off heaters after configured debounce — App missing window override | To Do | — | docs/agents/PLAN-window-heater-override.md | `/implement SWD-298` |
+| SWD-298 | Bug | [Bug] Door/window sensors do not turn off heaters after configured debounce — App missing window override | To Do | — | docs/agents/PLAN-window-heater-override.md | `/implement SWD-298` — https://github.com/marcuskrogh/HeatingAssistant/pull/592 |
 | SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
 | SWD-296 | Bug | [Bug] Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/588 |
 | SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | Done | — | docs/agents/PLAN-sysid-services.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |

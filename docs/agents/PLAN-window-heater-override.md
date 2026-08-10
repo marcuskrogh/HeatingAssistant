@@ -76,7 +76,7 @@
 - Sub-tasks: — (single package)
 - Relates: [SWD-262](https://marcusknielsen.atlassian.net/browse/SWD-262)
 - Branch: `cursor/swd-298-window-heater-override-1125` (maps to `swd-298-window-heater-override`)
-- PR: _(set after draft open)_
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/592
 - Classification: bug
 - Workflow: fix-fast
 
