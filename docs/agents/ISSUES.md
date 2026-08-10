@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | To Do | — | docs/agents/BUG.md | `/implement SWD-297` |
 | SWD-296 | Bug | [Bug] Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/588 |
 | SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | Done | — | docs/agents/PLAN-sysid-services.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
 | SWD-293 | Sub-task | Fix sysid panel ES-module imports/exports + cache bust | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
@@ -50,6 +51,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — `/define` SWD-297: applied/measured solar gain stuck at 0 while forecast is correct — `hass_states` hardcodes `solar_gain_measured`; BUG `docs/agents/BUG.md`; branch `cursor/swd-297-measured-solar-gain-zero-f475`; Next `/implement SWD-297`.
 - 2026-08-10 — shipped SWD-296 via PR #588 (`6ccce63`): restore sysid Apply params + panel route; v2.0.28; review-fix CLEAN. Rebuild App on HAOS so Apply Parameters stick and the panel keeps the current page across remounts.
 - 2026-08-10 — SWD-296 review-fix CLEAN on PR #588; restore sysid Apply params + panel route; v2.0.28; CI green. Next: merge + rebuild HAOS.
 - 2026-08-10 — SWD-296 In Review + PR #588: restore sysid Apply params + panel route; v2.0.28; Next `/review-fix SWD-296`.

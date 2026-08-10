@@ -1,53 +1,56 @@
-# Bug: Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview
+# Bug: Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured
 
 ## Summary
-- After Apply Parameters on System Identification, thermal/heater params land in `estimated_params` / `parameter_history` but the live `ControlEngine` is rebuilt from base room config without restoring the snapshot.
-- On reload the form shows DEFAULTS because `temperature_filtered` never publishes live model attrs.
-- Ingress UI periodically remounts and lands on overview when the URL hash is empty.
+- Room DISTURBANCES **Solar Gain** (solid / historical) stays flat at 0 kW while **Solar Gain Forecast** (dashed) shows correct daytime peaks.
+- Left-of-NOW history and the live value are always zero even though MPC solar geometry is working (post SWD-282).
 
 ## Repro
-1. Open System Identification → room.
-2. Change thermal mass / heater scale → Apply Parameters.
-3. Reload the Ingress panel (or wait for a remount with a cleared hash).
+1. Open a room view with Option A solar exposure and a daytime horizon.
+2. Confirm DISTURBANCES: Outdoor + Solar Gain Forecast move; Solar Gain (measured) is a flat zero to NOW.
+3. Check `sensor.heating_assistant_<room>_solar_gain_measured` state — always `0.0`.
 
 ## Expected
-- Applied params remain in the live model and reappear in the form after reload.
-- Navigation stays on the current hash route across remounts.
+- Current applied solar gain matches the geometric/GHI model used by MPC (`_current_solar` / applied disturbance step).
+- Historical Solar Gain left of NOW tracks daytime dynamics (non-zero when sun is up).
+- Forecast path remains unchanged.
 
 ## Actual
-- Params snap back to configured/default room values.
-- UI returns to overview.
+- Measured / historical Solar Gain is constant 0.
+- Forecast Solar Gain looks correct.
 
 ## Impact
-- System identification Apply is ineffective for control and confusing in the UI; users cannot keep identified parameters.
+- DISTURBANCES plot misleads operators: solar appears unused historically while the controller is forecasting (and applying) real gains.
+- Plot history and KPI solar gauge stay dead; ID history is less affected because `d_solar` already prefers `solar_forecast[0]`.
 
 ## Suspected area
-- `HeatingRuntime.update_config` / `__init__` call `ControlEngine.update_config` without `restore_estimated_parameters`.
-- Apply's follow-up `update_estimation_params` triggers that rebuild and wipes the just-applied live model.
-- `hass_states()` `temperature_filtered` attrs omit thermal params (docs still claim them).
-- Ingress remount with empty hash → `readPanelRoute()` defaults to overview; no sessionStorage route restore.
+- `HeatingRuntime.hass_states()` hardcodes:
+  ```python
+  states[f"sensor.heating_assistant_{slug}_solar_gain_measured"] = self._ha_state(..., 0.0, ...)
+  ```
+- `_record_history_samples()` samples `hass_states()`, so every durable plot sample is also 0.
+- Forecast plots read `solar_forecast` from the controller cache (working).
+- Same App synthetic-stub pattern as SWD-284 (`electricity_price`).
 
 ## Acceptance criteria
-- [x] `store_identified_parameters` then `update_estimation_params` leaves live model + heater scales at applied values.
-- [x] App restart restores `estimated_params` into `ControlEngine`.
-- [x] `temperature_filtered` attrs expose live thermal params; sysid form populates from them (with `parameter_history` fallback).
-- [x] Panel remembers last hash across remount/reload when URL hash is empty.
-- [x] Regression tests; version bump; App package synced.
+- [ ] After a control cycle with daytime solar geometry, `hass_states()[…_solar_gain_measured].state` is non-zero and matches the applied current-step solar gain for that room.
+- [ ] DISTURBANCES historical Solar Gain left of NOW shows daytime dynamics (not a flat zero); Solar Gain Forecast remains correct.
+- [ ] Regression test: `hass_states` / history sample must not hardcode `0.0` when the engine has non-zero solar.
+- [ ] Version bump to **2.0.29**; App package synced.
 
 ## Out of scope
-- Scheduled identification experiments.
-- Reintroducing fat HA Core diagnostic entities.
+- `heat_loss` synthetic also stubbed at `0.0` (separate follow-up unless trivial in the same fix).
+- Re-estimating solar_scale / aperture.
+- Changing forecast solar geometry (SWD-282).
+
+## Relates
+- SWD-282 (forecast aperture)
+- SWD-278 (stop zeroing MPC solar)
+- SWD-284 (similar App synthetic stub)
 
 ## Tracker
-- Task: [SWD-296](https://marcusknielsen.atlassian.net/browse/SWD-296)
-- Branch: `cursor/swd-296-sysid-params-overview-5009`
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/588
-
-## Shipped
-- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/588
-- Merge: `6ccce63`
-- Version: **2.0.28**
-- review-fix: CLEAN
+- Task: [SWD-297](https://marcusknielsen.atlassian.net/browse/SWD-297)
+- Branch: `cursor/swd-297-measured-solar-gain-zero-f475`
+- PR: —
 
 ## Next
-Done — rebuild App on HAOS to v2.0.28; confirm Apply Parameters stick and the panel keeps the current page across remounts.
+`/implement SWD-297` → `/review-fix` → closeout
