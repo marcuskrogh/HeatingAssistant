@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from heatingassistant.engine import const
-from heatingassistant.engine.controller import HouseThermalSDE
 from heatingassistant.engine.datasets import build_dataset
 from heatingassistant.engine.history.datasets import (
     dataset_boundaries,
@@ -47,6 +46,7 @@ from heatingassistant.persistence import save_config
 
 _LOGGER = logging.getLogger(__name__)
 _LEADING_HOURS = 6.0
+HouseThermalSDE: Any | None = None
 
 
 def _payload(data: Mapping[str, Any] | Any) -> dict[str, Any]:
@@ -71,6 +71,15 @@ def _model(runtime: Any) -> Any:
 
 def _heat_sources(runtime: Any) -> list[Any]:
     return list(runtime.control_engine.heat_sources)
+
+
+def _house_thermal_sde(*args: Any, **kwargs: Any) -> Any:
+    global HouseThermalSDE
+    if HouseThermalSDE is None:
+        from heatingassistant.engine.controller import HouseThermalSDE as _HouseThermalSDE
+
+        HouseThermalSDE = _HouseThermalSDE
+    return HouseThermalSDE(*args, **kwargs)
 
 
 def _room_names(runtime: Any) -> list[str]:
@@ -319,7 +328,7 @@ async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> 
 
     try:
         sim_model = build_sim_model(_model(runtime), room_params, room_names)
-        init_system = HouseThermalSDE(
+        init_system = _house_thermal_sde(
             sim_model,
             sim_heat_sources,
             dt,
@@ -420,7 +429,7 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
     system = None
     if room_params or heater_scales:
         sim_model = build_sim_model(_model(runtime), room_params, room_names)
-        system = HouseThermalSDE(
+        system = _house_thermal_sde(
             sim_model,
             base_heat_sources,
             dt,
@@ -432,7 +441,7 @@ async def handle_run_open_loop_simulation(runtime: Any, data: Mapping[str, Any])
         controller = getattr(runtime.control_engine, "_controller", None)
         system = getattr(controller, "_system", None)
         if system is None:
-            system = HouseThermalSDE(
+            system = _house_thermal_sde(
                 _model(runtime),
                 base_heat_sources,
                 dt,
