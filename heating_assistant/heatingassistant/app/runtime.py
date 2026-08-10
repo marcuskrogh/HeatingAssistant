@@ -24,16 +24,19 @@ from heatingassistant.app.actuation import (
     number_write_payload,
     switch_write_payload,
 )
+from heatingassistant.app import sysid_services
 from heatingassistant.app.plot_history import PlotHistoryStore
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
+from heatingassistant.engine.datasets import DatasetStore
 from heatingassistant.engine.electricity_price import (
     align_prices_to_horizon,
     collect_price_series,
 )
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
+from heatingassistant.engine.parameter_lifecycle import PARAMETER_HISTORY_KEY
 from heatingassistant.engine.heat_sources import HeatSource
 from heatingassistant.engine.schedule import EffectiveControlParams
 from heatingassistant.engine.schedule_control import (
@@ -117,6 +120,8 @@ class HeatingRuntime:
         self.options = dict(options) if options is not None else load_config(self.data_dir)
         self.state = load_state(self.data_dir)
         self.instance_id = str(self.options.get("instance_id") or "default")
+        self.dataset_store = DatasetStore(self.data_dir, entry_id=self.instance_id)
+        self.dataset_store.load()
         self.mqtt_broker = self.options.get("mqtt_broker")
         self.bus = bus or InMemoryMqttBus()
         # Derive MQTT tags/bindings from configured HA entity IDs (Ingress UI
@@ -136,6 +141,9 @@ class HeatingRuntime:
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
         self.control_engine = ControlEngine(self.options)
+        self.sysid_results: dict[str, Any] = {}
+        self.open_loop_results: dict[str, Any] = {}
+        self._last_identified_heater_scales: dict[str, float] = {}
         # HA entity catalog published by the thin bridge for Ingress pickers
         # (SWD-271). Not persisted — refreshed over MQTT when the bridge starts.
         self._ha_entity_catalog: list[dict[str, str]] = []
@@ -627,6 +635,11 @@ class HeatingRuntime:
 
         self.options = {**self.options, **dict(updates)}
         self.instance_id = str(self.options.get("instance_id") or "default")
+        if getattr(getattr(self, "dataset_store", None), "path", None) is not None:
+            expected_name = f"{self.instance_id}.json"
+            if self.dataset_store.path.name != expected_name:
+                self.dataset_store = DatasetStore(self.data_dir, entry_id=self.instance_id)
+                self.dataset_store.load()
         self.mqtt_broker = self.options.get("mqtt_broker")
         self._apply_entity_wiring()
         self.bindings = self._load_bindings()
@@ -713,6 +726,18 @@ class HeatingRuntime:
                 return {"config": await self._update_room_value(payload, "comfort_offset")}
             if service == "set_room_enabled":
                 return {"config": await self._set_room_enabled(payload)}
+            sysid_handler = {
+                "estimate_parameters_ml": sysid_services.handle_estimate_parameters_ml,
+                "run_sysid_simulation": sysid_services.handle_run_sysid_simulation,
+                "run_open_loop_simulation": sysid_services.handle_run_open_loop_simulation,
+                "store_identified_parameters": sysid_services.handle_store_identified_parameters,
+                "update_estimation_params": sysid_services.handle_update_estimation_params,
+                "delete_parameter_history": sysid_services.handle_delete_parameter_history,
+                "create_dataset": sysid_services.handle_create_dataset,
+                "delete_dataset": sysid_services.handle_delete_dataset,
+            }.get(service)
+            if sysid_handler is not None:
+                return await sysid_handler(self, payload)
             # Mutating sysid/experiment services are accepted as no-ops until the
             # App runtime owns those stores.
             return {"accepted": True, "domain": domain, "service": service}
@@ -782,6 +807,26 @@ class HeatingRuntime:
     def controller_config(self) -> dict[str, Any]:
         """Return the industrial panel's controller-configuration snapshot."""
 
+        estimated_snapshot = self.options.get(const.CONF_ESTIMATED_PARAMS)
+        parameter_history = self.options.get(PARAMETER_HISTORY_KEY)
+        if not isinstance(parameter_history, list):
+            parameter_history = []
+            if isinstance(estimated_snapshot, Mapping):
+                snapshot_history = estimated_snapshot.get("history")
+                if isinstance(snapshot_history, list):
+                    parameter_history = [
+                        dict(item) for item in snapshot_history if isinstance(item, Mapping)
+                    ]
+        current_heater_scales: dict[str, dict[str, Any]] = {}
+        for source in self.control_engine.heat_sources:
+            name = getattr(source, "name", None)
+            if name is None:
+                continue
+            room_name = str(getattr(source, "room", ""))
+            current_heater_scales[str(name)] = {
+                "room_slug": self._room_slug(room_name),
+                "power_scale": float(getattr(source, "power_scale", 1.0)),
+            }
         config = {
             "comfort_offset": float(self.options.get("comfort_offset", const.DEFAULT_COMFORT_OFFSET)),
             "tracking_weight": float(self.options.get("tracking_weight", 1.0)),
@@ -817,6 +862,16 @@ class HeatingRuntime:
             "room_enabled": self._room_enabled_map(),
             "room_active": self._room_enabled_map(),
             "system_enabled": bool(self.options.get("system_enabled", False)),
+            "parameter_history": parameter_history,
+            "sigma_w": float(self.options.get(const.CONF_SIGMA_W, const.DEFAULT_SIGMA_W)),
+            "sigma_v": float(self.options.get(const.CONF_SIGMA_V, const.DEFAULT_SIGMA_V)),
+            "identification_horizon_hours": float(
+                self.options.get(
+                    const.CONF_IDENTIFICATION_HORIZON_HOURS,
+                    const.DEFAULT_IDENTIFICATION_HORIZON_HOURS,
+                )
+            ),
+            "current_heater_scales": current_heater_scales,
         }
         return config
 
@@ -1058,23 +1113,14 @@ class HeatingRuntime:
         )
 
     def datasets(self, room_slug: str | None = None) -> list[dict[str, Any]]:
-        """Return persisted dataset metadata when configured, otherwise an empty list."""
+        """Return persisted system-identification dataset metadata."""
 
-        source = self.options.get("datasets", [])
-        if not isinstance(source, list):
-            return []
-        datasets = [dict(item) for item in source if isinstance(item, Mapping)]
-        if room_slug:
-            datasets = [item for item in datasets if item.get("room_slug") == room_slug]
-        return datasets
+        return self.dataset_store.list_meta(room_slug)
 
     def dataset(self, dataset_id: str) -> dict[str, Any] | None:
-        """Return one persisted dataset when present."""
+        """Return one persisted system-identification dataset when present."""
 
-        for item in self.datasets():
-            if item.get("id") == dataset_id:
-                return item
-        return None
+        return self.dataset_store.get(dataset_id)
 
     def experiments(self) -> list[dict[str, Any]]:
         """Return persisted experiments when configured, otherwise an empty list."""
@@ -1307,6 +1353,22 @@ class HeatingRuntime:
                 f"sensor.heating_assistant_{slug}_heating_power_measured",
                 power,
                 {"room": name, "unit_of_measurement": "W"},
+                now,
+            )
+            sysid_attrs = sysid_services.sysid_sensor_attrs(self, name)
+            states[f"sensor.heating_assistant_{slug}_sysid_simulation"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_sysid_simulation",
+                "unknown" if sysid_attrs.get("rmse") is None else sysid_attrs["rmse"],
+                sysid_attrs,
+                now,
+            )
+            open_loop_attrs = sysid_services.open_loop_sensor_attrs(self, name)
+            states[f"sensor.heating_assistant_{slug}_open_loop_rmse"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_open_loop_rmse",
+                "unknown"
+                if open_loop_attrs.get("open_loop_rmse") is None
+                else open_loop_attrs["open_loop_rmse"],
+                open_loop_attrs,
                 now,
             )
             states[f"sensor.heating_assistant_{slug}_solar_gain_measured"] = self._ha_state(

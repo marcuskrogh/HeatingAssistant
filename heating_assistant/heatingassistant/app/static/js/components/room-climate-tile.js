@@ -16,14 +16,14 @@
  *      setpoint, comfort corridor and temperature marker.
  */
 
-import { entityValue } from '../utils.js?v=118';
-import { setPanelHash } from '../panel-hash.js?v=118';
+import { entityValue } from '../utils.js?v=119';
+import { setPanelHash } from '../panel-hash.js?v=119';
 import { findActivePeriod, findNextPeriod, periodRowHtml, scheduleEnabledBadgeHtml, scheduleSectionHeaderHtml } from '../schedule-utils.js?v=119';
 import {
   findActiveExperiment, experimentPanelHtml, experimentPanelEls,
   paintExperimentPanel, paintExperimentProgress,
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=118';
+} from '../experiment-utils.js?v=119';
 import {
   setRoomComfortOffset,
   setRoomEnabled,
