@@ -201,6 +201,52 @@ class ControlEngine:
                 "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
             }
 
+    def applied_solar_gains(
+        self,
+        *,
+        now: datetime | None = None,
+        cloud_cover_now: float | None = None,
+        ghi_now: float | None = None,
+    ) -> dict[str, float]:
+        """Return current-step solar gains [W] per room (applied / measured).
+
+        Prefers ``solar_forecast[0]`` from the last MPC compute — that step is
+        built with the same GHI/cloud inputs as the applied disturbance
+        (``_current_solar``). Falls back to a live geometric compute when the
+        forecast cache is empty but the controller is available (SWD-297).
+        """
+
+        with self._forecast_lock:
+            steps = [dict(item) for item in self._last_solar_forecast]
+        if steps:
+            first = steps[0]
+            out: dict[str, float] = {}
+            for name in self.model.rooms:
+                try:
+                    out[name] = float(first.get(name, 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    out[name] = 0.0
+            return out
+
+        controller = self._controller
+        if controller is not None and hasattr(controller, "_current_solar"):
+            try:
+                return {
+                    str(name): float(value)
+                    for name, value in dict(
+                        controller._current_solar(
+                            now or datetime.now(timezone.utc),
+                            cloud_cover=cloud_cover_now,
+                            ghi=ghi_now,
+                        )
+                    ).items()
+                }
+            except Exception:  # pragma: no cover - defensive
+                _LOGGER.debug(
+                    "applied_solar_gains live compute failed", exc_info=True
+                )
+        return {name: 0.0 for name in self.model.rooms}
+
     def preview_tuning_forecast(
         self,
         overrides: Mapping[str, Any] | None,

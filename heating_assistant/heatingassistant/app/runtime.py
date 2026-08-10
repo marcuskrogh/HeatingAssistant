@@ -1316,6 +1316,7 @@ class HeatingRuntime:
         schedules = self.schedules()
         now_local = self._schedule_now_local()
         effective_by_room = self._resolve_effective_params(now_local=now_local)
+        solar_gains = self._applied_solar_gains()
         for room in self._rooms():
             name = room.get("name")
             if not isinstance(name, str) or not name:
@@ -1338,6 +1339,18 @@ class HeatingRuntime:
             schedule = schedules.get(slug) or {"enabled": True, "periods": []}
             power = self._room_power(name)
             energy_wh = float(self._energy_total_wh.get(slug, 0.0))
+            try:
+                solar_gain = float(solar_gains.get(name, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                solar_gain = 0.0
+            windows = room.get("windows") if isinstance(room.get("windows"), list) else []
+            total_window_area = 0.0
+            for window in windows:
+                if not isinstance(window, Mapping):
+                    continue
+                area = self._coerce_number(window.get("area"))
+                if area is not None:
+                    total_window_area += float(area)
 
             states[f"sensor.heating_assistant_{slug}_temperature_measured"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_temperature_measured",
@@ -1402,8 +1415,13 @@ class HeatingRuntime:
             )
             states[f"sensor.heating_assistant_{slug}_solar_gain_measured"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_solar_gain_measured",
-                0.0,
-                {"room": name, "unit_of_measurement": "W"},
+                round(float(solar_gain), 1),
+                {
+                    "room": name,
+                    "unit_of_measurement": "W",
+                    "window_count": len(windows),
+                    "total_window_area": round(total_window_area, 2),
+                },
                 now,
             )
             states[f"sensor.heating_assistant_{slug}_heat_loss"] = self._ha_state(
@@ -2201,6 +2219,16 @@ class HeatingRuntime:
             total += self._source_display_power(source, float(fraction), outdoor_f)
         return total
 
+    def _applied_solar_gains(self) -> dict[str, float]:
+        """Return applied current-step solar gains [W] per room (SWD-297)."""
+
+        disturbances = self._mpc_disturbance_inputs(self._outdoor_temperature())
+        return self.control_engine.applied_solar_gains(
+            now=datetime.now(timezone.utc),
+            cloud_cover_now=disturbances.get("cloud_cover_now"),
+            ghi_now=disturbances.get("ghi_now"),
+        )
+
     @staticmethod
     def _source_display_power(
         source: HeatSource, fraction: float, outdoor_temp: float
@@ -2605,23 +2633,16 @@ class HeatingRuntime:
         if outdoor is None:
             outdoor = 0.0
 
-        solar: dict[str, float] = {}
-        forecast = self.control_engine.forecast_snapshot()
-        solar_steps = forecast.get("solar_forecast") or []
-        if solar_steps and isinstance(solar_steps[0], Mapping):
-            for name in room_names:
-                try:
-                    solar[name] = float(solar_steps[0].get(name, 0.0) or 0.0)
-                except (TypeError, ValueError):
-                    solar[name] = 0.0
-        else:
-            for name in room_names:
+        solar = self.control_engine.applied_solar_gains()
+        for name in room_names:
+            if name not in solar:
                 solar[name] = 0.0
 
         y_pred_aligned = None
         if self._history_buffer:
             y_pred_aligned = self._history_buffer[-1].get("y_pred_for_next")
 
+        forecast = self.control_engine.forecast_snapshot()
         filtered = forecast.get("filtered_temperatures") or {}
         predictions = forecast.get("predictions") or []
         if predictions and isinstance(predictions[0], Mapping):
