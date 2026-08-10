@@ -1431,6 +1431,20 @@ class HeatingRuntime:
                 open_loop_attrs,
                 now,
             )
+            fit_state, fit_attrs = sysid_services.model_fit_quality_sensor(self, name)
+            states[f"sensor.heating_assistant_{slug}_model_fit_quality"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_model_fit_quality",
+                fit_state,
+                fit_attrs,
+                now,
+            )
+            conf_state, conf_attrs = sysid_services.parameter_confidence_sensor(self, name)
+            states[f"sensor.heating_assistant_{slug}_parameter_confidence"] = self._ha_state(
+                f"sensor.heating_assistant_{slug}_parameter_confidence",
+                conf_state,
+                conf_attrs,
+                now,
+            )
             states[f"sensor.heating_assistant_{slug}_solar_gain_measured"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_solar_gain_measured",
                 round(float(solar_gain), 1),
