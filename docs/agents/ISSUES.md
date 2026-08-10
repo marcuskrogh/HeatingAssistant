@@ -52,6 +52,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — shipped marcuskrogh/skills Cloud install via PR #594: committed `.agents/skills/`, prefer-workflow pointers, install+start sync + home mirrors; review-fix CLEAN. Start a new Cloud Agent on main to pick up skills; if `<agent_skills>` still empty, enable skills as a Required marketplace plugin.
 - 2026-08-10 — shipped SWD-298 via PR #592: App door/window heater override after debounce; v2.0.30; review-fix CLEAN. Rebuild App on HAOS so open sensors shut heaters after `window_open_debounce`.
 - 2026-08-10 — `/ship` SWD-298 implement: App window override + timers + disabled_sources/Q inflation; v2.0.30; PR #592; Next `/review-fix SWD-298`.
 - 2026-08-10 — `/define` SWD-298: door/window sensors do not turn off heaters after debounce — App missing window override deleted in SWD-262; PLAN `docs/agents/PLAN-window-heater-override.md`; branch `cursor/swd-298-window-heater-override-1125`; Next `/implement SWD-298`.
