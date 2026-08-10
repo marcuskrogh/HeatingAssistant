@@ -26,6 +26,7 @@ from heatingassistant.app.actuation import (
 )
 from heatingassistant.app import sysid_services
 from heatingassistant.app.plot_history import PlotHistoryStore
+from heatingassistant.app import window_override as window_ov
 from heatingassistant.fusion.averaging import average_numeric_tags
 from heatingassistant.engine.control_loop import ControlEngine
 from heatingassistant.engine import const
@@ -184,6 +185,13 @@ class HeatingRuntime:
         self._ticker_thread: threading.Thread | None = None
         self._control_lock = threading.Lock()
         self._history_lock = threading.Lock()
+        # Open-window / door override (SWD-298): state machine + debounce timers.
+        self._window_tags: dict[str, list[str]] = {}
+        self._window_tag_to_room: dict[str, str] = {}
+        self._window_state: dict[str, str] = {}
+        self._window_state_since: dict[str, datetime] = {}
+        self._window_pending: dict[str, asyncio.Task[Any]] = {}
+        self._rebuild_window_maps()
         # Durable plot + identification history on the App data volume (SWD-281).
         plot_hours = float(
             self.options.get(const.CONF_PLOT_HISTORY_HOURS, const.DEFAULT_PLOT_HISTORY_HOURS)
@@ -458,6 +466,7 @@ class HeatingRuntime:
         for unsubscribe in self._subscriptions:
             unsubscribe()
         self._subscriptions.clear()
+        self._cancel_all_window_timers()
         self._started = False
         close = getattr(self.bus, "close", None)
         if callable(close):
@@ -519,11 +528,17 @@ class HeatingRuntime:
         if parsed is None or parsed.instance_id != self.instance_id or parsed.direction != "in":
             return
         tag_payload = MqttTagPayload.decode(payload)
+        previous_value = self.tag_values.get(parsed.tag)
         self.update_tag(parsed.tag, tag_payload)
         # Climate heater feedback tags only refresh anchoring inputs. Re-running
         # MPC here would thrash: write setpoint → HA state change → tag/in →
         # compute → write again (SWD-280 review-fix).
         if self._is_heater_state_feedback_tag(parsed.tag):
+            return
+        # Window/door contacts drive the override state machine + debounce timers
+        # without a full MPC cycle (SWD-298).
+        if self._is_window_tag(parsed.tag):
+            await self._on_window_tag_changed(parsed.tag, previous_value, tag_payload.value)
             return
         await self.run_control_cycle()
 
@@ -600,6 +615,7 @@ class HeatingRuntime:
             outdoor = self._outdoor_temperature()
             disturbances = self._mpc_disturbance_inputs(outdoor)
             schedule_ctx = self._schedule_control_context()
+            self._apply_window_q_inflation()
             outputs = self.control_engine.compute_actions(
                 self.room_temperatures,
                 outdoor,
@@ -613,6 +629,7 @@ class HeatingRuntime:
             self._last_control_trajectory = schedule_ctx["trajectory"]
             self._last_effective_params = schedule_ctx["effective"]
             self.actuator_outputs = dict(outputs)
+            self._clamp_window_override_actuators()
             now = time.time()
             self._accumulate_energy(now)
             self._last_control_ts = now
@@ -649,6 +666,7 @@ class HeatingRuntime:
         self._apply_entity_wiring()
         self.bindings = self._load_bindings()
         save_config(self.data_dir, self.options)
+        self._rebuild_window_maps()
         self.control_engine.update_config(self.options)
         self._restore_estimated_parameters()
         self._sync_history_retention()
@@ -1453,6 +1471,16 @@ class HeatingRuntime:
                 },
                 now,
             )
+            if name in self._window_tags:
+                states[f"sensor.heating_assistant_{slug}_window_state"] = self._ha_state(
+                    f"sensor.heating_assistant_{slug}_window_state",
+                    self.get_window_state(name),
+                    {
+                        "room": name,
+                        "override_active": self.is_window_override_active(name),
+                    },
+                    now,
+                )
 
         # Expose configured HA entities (from bindings) so the Ingress entity
         # picker can at least re-select already-wired IDs after a refresh.
@@ -2102,6 +2130,8 @@ class HeatingRuntime:
         for source in self.control_engine.heat_sources:
             if source.room in disabled_rooms:
                 disabled_sources.add(source.name)
+            elif self.is_window_override_active(source.room):
+                disabled_sources.add(source.name)
         return {
             "now_local": now_local,
             "now_utc": now_utc,
@@ -2269,6 +2299,244 @@ class HeatingRuntime:
                 return True
         return False
 
+    def _is_window_tag(self, tag: str) -> bool:
+        return tag in self._window_tag_to_room
+
+    def get_window_state(self, room_name: str) -> str:
+        """Return the window override state for a room."""
+
+        return window_ov.get_window_state(self._window_state, room_name)
+
+    def is_window_override_active(self, room_name: str) -> bool:
+        """Return True while heaters for ``room_name`` must stay off."""
+
+        return window_ov.is_window_override_active(self._window_state, room_name)
+
+    def _rebuild_window_maps(self) -> None:
+        """Refresh room↔window-tag maps after config / wiring changes."""
+
+        self._window_tags = window_ov.build_window_tag_map(self._rooms())
+        self._window_tag_to_room = window_ov.build_tag_to_room(self._window_tags)
+        # Drop state for rooms that no longer have sensors; keep others.
+        known = set(self._window_tags)
+        for room_name in list(self._window_state):
+            if room_name not in known:
+                self._window_state.pop(room_name, None)
+                self._window_state_since.pop(room_name, None)
+                self._cancel_window_timer(room_name)
+        for room_name in known:
+            self._window_state.setdefault(room_name, "closed")
+
+    def _window_debounce_s(self) -> float:
+        return float(
+            self.options.get(
+                "window_open_debounce", const.DEFAULT_WINDOW_OPEN_DEBOUNCE
+            )
+        )
+
+    def _window_settle_s(self) -> float:
+        return float(
+            self.options.get(
+                "window_open_close_settle", const.DEFAULT_WINDOW_OPEN_CLOSE_SETTLE
+            )
+        )
+
+    def _window_q_inflation(self) -> float:
+        return float(
+            self.options.get(
+                "window_open_q_inflation", const.DEFAULT_WINDOW_OPEN_Q_INFLATION
+            )
+        )
+
+    def _cancel_window_timer(self, room_name: str) -> None:
+        task = self._window_pending.pop(room_name, None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _cancel_all_window_timers(self) -> None:
+        for room_name in list(self._window_pending):
+            self._cancel_window_timer(room_name)
+
+    def _schedule_window_timer(
+        self, room_name: str, delay_s: float, coro_factory: Any
+    ) -> None:
+        """Schedule a one-shot debounce/settle callback for ``room_name``."""
+
+        self._cancel_window_timer(room_name)
+
+        async def _runner() -> None:
+            try:
+                await asyncio.sleep(max(0.0, float(delay_s)))
+                await coro_factory()
+            except asyncio.CancelledError:
+                raise
+            finally:
+                current = self._window_pending.get(room_name)
+                if current is asyncio.current_task():
+                    self._window_pending.pop(room_name, None)
+
+        self._window_pending[room_name] = asyncio.create_task(
+            _runner(), name=f"window-override-{room_name}"
+        )
+
+    async def _on_window_tag_changed(
+        self, tag: str, previous_value: Any, new_value: Any
+    ) -> None:
+        """Advance the window state machine from a contact tag edge."""
+
+        room_name = self._window_tag_to_room.get(tag)
+        if room_name is None:
+            return
+        new_open = window_ov.tag_is_open(new_value)
+        old_open = window_ov.tag_is_open(previous_value)
+        if new_open == old_open:
+            return
+
+        now_utc = window_ov.utcnow()
+        tags = self._window_tags.get(room_name, [])
+        any_open_now = window_ov.any_tag_open(self.tag_values, tags)
+        current = self.get_window_state(room_name)
+
+        if new_open:
+            if current in ("open", "pending_open"):
+                return
+            if current == "pending_closed":
+                self._cancel_window_timer(room_name)
+                window_ov.set_window_state(
+                    self._window_state, self._window_state_since, room_name, "open", now_utc
+                )
+                await self.push_window_override()
+                return
+            # closed → pending_open + debounce
+            self._cancel_window_timer(room_name)
+            window_ov.set_window_state(
+                self._window_state,
+                self._window_state_since,
+                room_name,
+                "pending_open",
+                now_utc,
+            )
+
+            async def _advance_open(_rn: str = room_name) -> None:
+                if self.get_window_state(_rn) != "pending_open":
+                    return
+                tags_in = self._window_tags.get(_rn, [])
+                if window_ov.any_tag_open(self.tag_values, tags_in):
+                    window_ov.set_window_state(
+                        self._window_state,
+                        self._window_state_since,
+                        _rn,
+                        "open",
+                        window_ov.utcnow(),
+                    )
+                    _logger.info(
+                        "Window debounce elapsed for %s — heater override active",
+                        _rn,
+                    )
+                await self.push_window_override()
+
+            self._schedule_window_timer(
+                room_name, self._window_debounce_s(), _advance_open
+            )
+            return
+
+        # Sensor closed
+        if any_open_now:
+            return
+        if current == "pending_open":
+            self._cancel_window_timer(room_name)
+            window_ov.set_window_state(
+                self._window_state,
+                self._window_state_since,
+                room_name,
+                "closed",
+                now_utc,
+            )
+            await self.push_window_override()
+            return
+        if current == "open":
+            self._cancel_window_timer(room_name)
+            window_ov.set_window_state(
+                self._window_state,
+                self._window_state_since,
+                room_name,
+                "pending_closed",
+                now_utc,
+            )
+
+            async def _advance_closed(_rn: str = room_name) -> None:
+                if self.get_window_state(_rn) != "pending_closed":
+                    return
+                tags_in = self._window_tags.get(_rn, [])
+                if not window_ov.any_tag_open(self.tag_values, tags_in):
+                    window_ov.set_window_state(
+                        self._window_state,
+                        self._window_state_since,
+                        _rn,
+                        "closed",
+                        window_ov.utcnow(),
+                    )
+                    _logger.info(
+                        "Window settle elapsed for %s — heater override cleared",
+                        _rn,
+                    )
+                await self.push_window_override()
+
+            self._schedule_window_timer(
+                room_name, self._window_settle_s(), _advance_closed
+            )
+
+    async def push_window_override(self) -> None:
+        """Clamp / restore actuators for window override without an MPC solve."""
+
+        shadow = self.control_engine.mpc_actions_by_tag()
+        source_tags = getattr(self.control_engine, "_source_output_tags", {}) or {}
+        for source in self.control_engine.heat_sources:
+            tag = source_tags.get(source.name, source.name)
+            if self.is_window_override_active(source.room):
+                self.actuator_outputs[tag] = 0.0
+                continue
+            # Resume closed rooms at the unconstrained MPC shadow when available.
+            if tag in shadow:
+                room_ok = True
+                for room in self._rooms():
+                    name = room.get("name")
+                    if isinstance(name, str) and name == source.room:
+                        room_ok = self._room_enabled(room)
+                        break
+                if room_ok and bool(self.options.get("system_enabled", False)):
+                    self.actuator_outputs[tag] = float(shadow[tag])
+        self._save_runtime_state()
+        await self._best_effort_mqtt(self.publish_actuator_outputs(), "window override")
+
+    def _clamp_window_override_actuators(self) -> None:
+        """Force override rooms to 0 in the latest actuator map."""
+
+        source_tags = getattr(self.control_engine, "_source_output_tags", {}) or {}
+        for source in self.control_engine.heat_sources:
+            if not self.is_window_override_active(source.room):
+                continue
+            tag = source_tags.get(source.name, source.name)
+            self.actuator_outputs[tag] = 0.0
+
+    def _apply_window_q_inflation(self) -> None:
+        """Inflate EKF process noise for rooms under window override."""
+
+        controller = getattr(self.control_engine, "_controller", None)
+        if controller is None:
+            return
+        setter = getattr(controller, "set_room_process_noise_covariance_scales", None)
+        if not callable(setter):
+            return
+        inflation = self._window_q_inflation()
+        scales = {
+            room_name: (
+                inflation if self.is_window_override_active(room_name) else 1.0
+            )
+            for room_name in self.control_engine.model.room_names
+        }
+        setter(scales)
+
     def _source_actuation_enabled(self, source_cfg: Mapping[str, Any] | None) -> bool:
         if not bool(self.options.get("system_enabled", False)):
             return False
@@ -2277,6 +2545,8 @@ class HeatingRuntime:
         room_name = source_cfg.get("room")
         if not isinstance(room_name, str) or not room_name:
             return True
+        if self.is_window_override_active(room_name):
+            return False
         for room in self._rooms():
             name = room.get("name")
             if isinstance(name, str) and name == room_name:
@@ -2665,6 +2935,9 @@ class HeatingRuntime:
             "u": u,
             "d_outdoor": float(outdoor),
             "d_solar": solar,
+            "window_open": {
+                name: self.is_window_override_active(name) for name in room_names
+            },
             "timestamp": now_ts,
         }
         self._history_buffer.append(record)

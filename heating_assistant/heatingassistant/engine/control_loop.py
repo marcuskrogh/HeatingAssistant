@@ -201,6 +201,18 @@ class ControlEngine:
                 "horizon": int(self.config.get("horizon", const.DEFAULT_HORIZON)),
             }
 
+    def mpc_actions_by_tag(self) -> dict[str, float]:
+        """Unconstrained MPC optimum mapped to output tags (window resume)."""
+
+        controller = self._controller
+        if controller is None:
+            return {}
+        raw = getattr(controller, "mpc_actions", None)
+        if raw is None:
+            return {}
+        actions = dict(raw() if callable(raw) else raw)
+        return self._actions_to_tags(actions)
+
     def applied_solar_gains(
         self,
         *,
