@@ -82,7 +82,7 @@
 - Sub-tasks: — (single package)
 - Relates: [SWD-289](https://marcusknielsen.atlassian.net/browse/SWD-289), [SWD-262](https://marcusknielsen.atlassian.net/browse/SWD-262)
 - Branch: `cursor/swd-299-identification-kpis-3a87` (maps to `swd-299-identification-kpis`)
-- PR: _(pending)_
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/593
 - Classification: bug
 - Workflow: fix-fast
 
