@@ -473,24 +473,42 @@ def delete_parameter_history(
     options: MutableMapping[str, Any],
     history_index: int,
 ) -> Dict[str, Any]:
-    """Delete a parameter-history entry from options."""
+    """Delete a parameter-history entry from the UI-facing list.
+
+    The panel shows ``options[parameter_history]`` as
+    ``[active, *history]`` (newest / current first) and deletes by that
+    displayed index. Index 0 removes the active snapshot (promoting the next
+    entry when present); later indices remove past history rows only.
+    """
 
     snapshot = estimated_params_snapshot(options) or {}
-    entries = _history_from_options(options, snapshot)
-    if not entries and isinstance(snapshot.get("history"), list):
-        entries = [dict(item) for item in snapshot["history"] if isinstance(item, Mapping)]
-    if history_index < 0 or history_index >= len(entries):
+    displayed = _history_from_options(options, snapshot)
+    if not displayed and isinstance(snapshot.get("history"), list):
+        active = _active_from_snapshot(snapshot)
+        history_only = [
+            dict(item) for item in snapshot["history"] if isinstance(item, Mapping)
+        ]
+        displayed = ([dict(active)] if active.get("rooms") else []) + history_only
+    if history_index < 0 or history_index >= len(displayed):
         raise ValueError(
-            f"history_index {history_index} out of range (0..{len(entries) - 1})"
+            f"history_index {history_index} out of range (0..{len(displayed) - 1})"
         )
-    entries.pop(history_index)
-    active = entries[0] if entries else _active_from_snapshot(snapshot)
-    history = entries[1:] if entries and active is entries[0] else entries
+    displayed.pop(history_index)
+    if not displayed:
+        options[PARAMETER_HISTORY_KEY] = []
+        options.pop(CONF_ESTIMATED_PARAMS, None)
+        return {}
+
+    active = dict(displayed[0])
+    history = [dict(item) for item in displayed[1:]]
     new_snapshot = dict(snapshot)
-    if active:
-        new_snapshot["active"] = active
-        new_snapshot["rooms"] = active.get("rooms", new_snapshot.get("rooms", {}))
+    new_snapshot["active"] = active
+    new_snapshot["rooms"] = active.get("rooms", new_snapshot.get("rooms", {}))
     new_snapshot["history"] = history
+    new_snapshot["estimated_at"] = active.get("estimated_at", new_snapshot.get("estimated_at"))
+    new_snapshot["source"] = active.get("source", new_snapshot.get("source"))
+    if "rmse" in active:
+        new_snapshot["rmse"] = active.get("rmse")
     return _persist_snapshot(options, new_snapshot)
 
 

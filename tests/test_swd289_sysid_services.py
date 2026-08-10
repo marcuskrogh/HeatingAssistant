@@ -240,10 +240,17 @@ async def test_store_identified_parameters_updates_controller_config_history(tmp
 
     config = runtime.controller_config()
     assert config["parameter_history"]
-    assert config["parameter_history"][0]["rooms"]["Living Room"]["thermal_mass"] == pytest.approx(
+    assert config["parameter_history"][0]["rooms"]["living_room"]["thermal_mass"] == pytest.approx(
         1_400_000.0
     )
     assert config["current_heater_scales"]["Living Heater"]["power_scale"] == pytest.approx(1.05)
+
+    await runtime.apply_service(
+        "heating_assistant",
+        "delete_parameter_history",
+        {"history_index": 0},
+    )
+    assert runtime.controller_config()["parameter_history"] == []
 
 
 @pytest.mark.asyncio

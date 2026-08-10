@@ -804,8 +804,8 @@ class HeatingRuntime:
             schedules.setdefault(slug, {"enabled": self._room_enabled(room), "periods": []})
         return schedules
 
-    def controller_config(self) -> dict[str, Any]:
-        """Return the industrial panel's controller-configuration snapshot."""
+    def _parameter_history_for_ui(self) -> list[dict[str, Any]]:
+        """Return parameter history with room keys slugified for the panel."""
 
         estimated_snapshot = self.options.get(const.CONF_ESTIMATED_PARAMS)
         parameter_history = self.options.get(PARAMETER_HISTORY_KEY)
@@ -817,6 +817,26 @@ class HeatingRuntime:
                     parameter_history = [
                         dict(item) for item in snapshot_history if isinstance(item, Mapping)
                     ]
+        ui_history: list[dict[str, Any]] = []
+        for entry in parameter_history:
+            if not isinstance(entry, Mapping):
+                continue
+            item = dict(entry)
+            rooms = item.get("rooms")
+            if isinstance(rooms, Mapping):
+                item["rooms"] = {
+                    self._room_slug(str(room_name)): (
+                        dict(room_data) if isinstance(room_data, Mapping) else room_data
+                    )
+                    for room_name, room_data in rooms.items()
+                }
+            ui_history.append(item)
+        return ui_history
+
+    def controller_config(self) -> dict[str, Any]:
+        """Return the industrial panel's controller-configuration snapshot."""
+
+        parameter_history = self._parameter_history_for_ui()
         current_heater_scales: dict[str, dict[str, Any]] = {}
         for source in self.control_engine.heat_sources:
             name = getattr(source, "name", None)
