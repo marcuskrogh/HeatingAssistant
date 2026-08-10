@@ -41,10 +41,11 @@
 ## Tracker
 - Task: [SWD-296](https://marcusknielsen.atlassian.net/browse/SWD-296)
 - Branch: `cursor/swd-296-sysid-params-overview-5009`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/588
 
 ## Shipped
 - Version: **2.0.28**
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/588
 
 ## Next
-Open PR → review-fix → ship closeout; rebuild App on HAOS to v2.0.28.
+review-fix CLEAN → merge → rebuild App on HAOS to v2.0.28.
