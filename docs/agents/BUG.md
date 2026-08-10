@@ -41,6 +41,7 @@
 
 ## Shipped
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/584
+- Merge: `a084c5a`
 - Version: **2.0.26**
 - review-fix: CLEAN
 

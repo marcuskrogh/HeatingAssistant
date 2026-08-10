@@ -42,7 +42,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
-- 2026-08-10 — shipped SWD-288 via PR #584: climate setpoint persistence; v2.0.26; review-fix CLEAN. Rebuild App on HAOS so TARGET / COMFORT BAND stick on Overview and room view.
+- 2026-08-10 — shipped SWD-288 via PR #584 (`a084c5a`): climate setpoint persistence; v2.0.26; review-fix CLEAN. Rebuild App on HAOS so TARGET / COMFORT BAND stick on Overview and room view.
 - 2026-08-10 — SWD-288 review-fix CLEAN on PR #584; shipping closeout (v2.0.26).
 - 2026-08-10 — SWD-288 In Review + PR #584: climate setpoint persistence; v2.0.26; Next `/review-fix SWD-288`.
 - 2026-08-10 — `/bug`+implement SWD-288: climate card setpoints reset — App climate services were no-ops; wire set_temperature/turn_on/off + panel set_room_setpoint; v2.0.26; branch `cursor/swd-288-climate-setpoint-reset-d3ac`.
