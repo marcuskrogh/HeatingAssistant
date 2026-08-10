@@ -67,7 +67,7 @@
 - Sub-tasks: [SWD-293](https://marcusknielsen.atlassian.net/browse/SWD-293), [SWD-292](https://marcusknielsen.atlassian.net/browse/SWD-292), [SWD-294](https://marcusknielsen.atlassian.net/browse/SWD-294), [SWD-290](https://marcusknielsen.atlassian.net/browse/SWD-290), [SWD-295](https://marcusknielsen.atlassian.net/browse/SWD-295), [SWD-291](https://marcusknielsen.atlassian.net/browse/SWD-291)
 - Relates: [SWD-281](https://marcusknielsen.atlassian.net/browse/SWD-281)
 - Branch: `cursor/swd-289-sysid-services-851a` (maps to `swd-289-sysid-services`)
-- PR: _(set after draft open)_
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/586
 
 ## Next
 `/implement SWD-289` — Build per this plan (same branch/PR)

@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | To Do | — | docs/agents/PLAN-sysid-services.md | `/implement SWD-289` |
+| SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | To Do | — | docs/agents/PLAN-sysid-services.md | `/implement SWD-289` — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
 | SWD-293 | Sub-task | Fix sysid panel ES-module imports/exports + cache bust | To Do | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
 | SWD-292 | Sub-task | Restore engine sysid modules deleted in SWD-262 | To Do | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
 | SWD-294 | Sub-task | Wire P0 compute services + publish sysid/open-loop sensors | To Do | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
