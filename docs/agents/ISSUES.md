@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-299 | Bug | [Bug] Identification KPIs (model fit / R² / RMSE / Estimated) not populating Overview or System Identification index | To Do | — | docs/agents/PLAN-identification-kpis.md | `/implement SWD-299` |
 | SWD-298 | Bug | [Bug] Door/window sensors do not turn off heaters after configured debounce — App missing window override | Done | — | docs/agents/PLAN-window-heater-override.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/592 |
 | SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
 | SWD-296 | Bug | [Bug] Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/588 |
@@ -52,6 +53,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — `/define` SWD-299: identification KPIs (model fit / R² / RMSE / Estimated) not populating Overview or System Identification index — App never publishes `*_model_fit_quality` / `*_parameter_confidence` after SWD-262; PLAN `docs/agents/PLAN-identification-kpis.md`; branch `cursor/swd-299-identification-kpis-3a87`; Next `/implement SWD-299`.
 - 2026-08-10 — shipped SWD-298 via PR #592: App door/window heater override after debounce; v2.0.30; review-fix CLEAN. Rebuild App on HAOS so open sensors shut heaters after `window_open_debounce`.
 - 2026-08-10 — `/ship` SWD-298 implement: App window override + timers + disabled_sources/Q inflation; v2.0.30; PR #592; Next `/review-fix SWD-298`.
 - 2026-08-10 — `/define` SWD-298: door/window sensors do not turn off heaters after debounce — App missing window override deleted in SWD-262; PLAN `docs/agents/PLAN-window-heater-override.md`; branch `cursor/swd-298-window-heater-override-1125`; Next `/implement SWD-298`.
