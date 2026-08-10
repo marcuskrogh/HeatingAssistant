@@ -572,10 +572,10 @@ Phase 11 (whole-home co-optimisation).
    iteration count drops measurably on the bundled benchmark
    scenarios; per-cycle work re-runs as the `BENCHMARKS.md` regression
    suite.  No config UI change.
-6. [ ] **Step 6 — W1: Open-window / open-door heater override.**
+6. [x] **Step 6 — W1: Open-window / open-door heater override.**
    High-level handling for rooms whose configured window or door
    binary sensors report `on` for an extended period.  Independent
-   of Steps 1–5; can be developed in parallel.
+   of Steps 1–5; can be developed in parallel. **Done — SWD-298 / PR #592 (App port after SWD-262).**
 
    *Mechanism.*  A small per-room state machine tracks
    `closed → pending_open → open → pending_closed → closed`.

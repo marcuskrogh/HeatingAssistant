@@ -80,5 +80,10 @@
 - Classification: bug
 - Workflow: fix-fast
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/592
+- Version: **2.0.30**
+- review-fix: CLEAN
+
 ## Next
-`/review-fix SWD-298` — Review and auto-fix per Workflow binding
+Done — rebuild App on HAOS to v2.0.30; confirm door/window open past debounce turns room heaters off.
