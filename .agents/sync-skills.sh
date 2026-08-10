@@ -103,5 +103,35 @@ sha=$SHA
 synced_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
+# Keep a project .cursor/skills pointer for Cursor discovery (same tree).
+mkdir -p .cursor
+if [ -L ".cursor/skills" ]; then
+  :
+elif [ -e ".cursor/skills" ]; then
+  rm -rf ".cursor/skills"
+  ln -s "../.agents/skills" ".cursor/skills"
+else
+  ln -s "../.agents/skills" ".cursor/skills"
+fi
+
+# Mirror into agent home dirs (Cursor / Agent Skills user-level paths).
+# Project trees are the primary install; home mirrors keep local harnesses
+# and Cloud VMs aligned after sync.
+mirror_home() {
+  local dest="$1"
+  mkdir -p "$dest"
+  find "$dest" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  for item in "$TARGET_DIR"/* "$TARGET_DIR"/.[!.]*; do
+    [ -e "$item" ] || continue
+    copy_tree "$item" "$dest/"
+  done
+}
+
+if [ -n "${HOME:-}" ]; then
+  mirror_home "${HOME}/.cursor/skills"
+  mirror_home "${HOME}/.agents/skills"
+  echo "Mirrored skills to ${HOME}/.cursor/skills and ${HOME}/.agents/skills"
+fi
+
 echo "Synced skills + concepts to $TARGET_DIR"
 echo "Version: $SKILLS_REF @ $SHORT_SHA ($SKILLS_REPO)"

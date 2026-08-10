@@ -1,0 +1,84 @@
+---
+name: workflows
+description: >-
+  Workflow routing for delivery work. Prefer explore (fog) or define (concrete
+  work — agent classifies and binds a workflow); honor Next/ship continuations.
+  Infer the path from user context, then progressively disclose and run only
+  that skill.
+---
+
+# Workflows
+
+**Model-invoked router.** Default entry for real work in this skills set.
+
+When the user describes work to deliver — with or without naming a skill —
+**prefer a catalog workflow** over freestyle coding. **Front doors:** foggy →
+**explore**; concrete → **define** (classification + workflow binding happen
+inside define). Continuations and explicit `/skill` names still apply.
+
+Pipeline skills stay user-invoked (`disable-model-invocation`). This skill is the
+always-loaded pointer that keeps workflows discoverable without loading every
+pipeline skill into context.
+
+**On invoke:** use the catalog first. For a continuation or in-flight Task, read
+[../workflow/reference.md](../workflow/reference.md) and
+[../workflow/handoff.md](../workflow/handoff.md). After choosing a path, read
+the target skill and only its On-invoke concepts and references.
+
+## Leading words
+
+- **workflow** — named delivery path or bound template after define
+- **prefer workflow** — if a catalog row fits, route; do not freestyle past it
+- **front door** — explore (fog) or define (concrete); primary human entries
+
+## Catalog
+
+Pick the **first matching** row. Prefer continuing an in-flight Task over starting a parallel path.
+
+| Workflow | When | First skill to load |
+|----------|------|---------------------|
+| **setup** | No usable `WORKSPACE.md` (repo or global), or user wants tracker/paths/defaults changed | [setup](../setup/SKILL.md) |
+| **continue** | Bare **next** / persisted **Next** / “continue” on an active Task | Run persisted Next once ([continuation keywords](../workflow/reference.md#continuation-keywords); [entry context](../workflow/handoff.md#entry-context)) |
+| **ship** | Bare **ship** / “finish” / “close it out” / finish remaining through Done | [ship](../ship/SKILL.md) |
+| **help** | Which skill / how workflows relate / navigation overview — explain only | [help](../help/SKILL.md) |
+| **iterate** | Prior Task/PR **already merged**; still broken or incomplete | [iterate](../iterate/SKILL.md) |
+| **fix-forward** | Open PR has review findings / REQUEST_CHANGES | [review-fix](../review-fix/SKILL.md) (or implement fix-forward) |
+| **explore** | Vague, oversized, or foggy initiative — destination felt, way unclear | [explore](../explore/SKILL.md) |
+| **research** | User explicitly wants multi-axis literature/evidence now (not product alignment) | [research](../research/SKILL.md) |
+| **model** | User explicitly wants math formulation now (not product scope/UX) | [model](../model/SKILL.md) |
+| **implement** | Ready-to-build PLAN (or legacy BUG/TWEAK/REFINE/REWORK/ITERATE) exists; build or resume | [implement](../implement/SKILL.md) |
+| **review** | Want findings only on an In Review PR (no auto-fix) | [review](../review/SKILL.md) |
+| **review-fix** | Want one review → fix → CLEAN on the delivery PR | [review-fix](../review-fix/SKILL.md) |
+| **summarise** | Status / “where am I” / “what next” *reported*, not advanced | [summarise](../summarise/SKILL.md) |
+| **define** | Concrete work to pin down (bug, tweak, refine, rework, feature, …) — **default front door** | [define](../define/SKILL.md) |
+| **bug** / **tweak** / **refine** / **rework** | User **explicitly** named that skill (manual override) | matching skill |
+
+Side paths **research** / **model** usually appear via define’s bound `side_paths`
+or an explicit user ask; they do not replace define probes with the user.
+
+## Steps
+
+1. **Check preconditions** — Resolve the effective workspace before selecting delivery work. Done when workspace availability is known and **setup** is selected if missing.
+2. **Gather cheap context** — Read user wording, named keys, and available active ISSUES / branch / open PR signals. Done when enough context exists to compare catalog rows without loading pipeline skills.
+3. **Infer workflow** — Pick the first matching catalog row; ask one question only when equally valid paths would cause material rework. Done when exactly one workflow is selected.
+4. **Announce** — State the chosen workflow and first skill in one short line. Done when the user can see the route being entered.
+5. **Disclose and run** — Read the selected skill and only its On-invoke concepts/references; execute its tracker, artifact, and Handoff contract. Done when that skill's completion criterion holds.
+6. **Honor the boundary** — End at the skill Handoff, except when the selected orchestrator (`ship`, `review-fix`) owns further composition. Done when control is returned with persisted **Next** or the orchestrator's terminal result.
+
+## Invariants
+
+- **Prefer workflow.** If any catalog row fits the ask, route through it. Do not freestyle implement, invent a parallel plan format, or run unstructured intake when a supported path exists.
+- **Front doors.** Without an explicit override or continuation, concrete delivery asks → **define**; foggy asks → **explore**. Do not route silent asks to `/bug` `/tweak` `/refine` `/rework`.
+- **Router, not executor.** This skill chooses and discloses; the target skill owns behaviour.
+- **One path.** Do not start explore and define in parallel for the same ask.
+- **Help explains.** If the user only wants a map or which-skill guidance, prefer **help** over starting a delivery skill.
+- **Prefer continuity.** In-flight Task + valid **Next** → **continue** or **ship**, not a new map.
+- **Honor binding.** When a Task already has a Workflow binding, continuations follow that chain.
+- **No skill dump.** Never load all pipeline skills “just in case.”
+- **Explicit slash wins.** If the user named `/define` or `/bug` (etc.), run that skill — do not re-route unless they ask which workflow fits.
+
+## Out of catalog
+
+Maintaining this skills repo → [manage-skills](../manage-skills/SKILL.md).
+Authoring skill/concept prose → [writing-for-agents](../writing-for-agents/SKILL.md).
+True non-pipeline chatter (pure explanation with no work to deliver) need not route.

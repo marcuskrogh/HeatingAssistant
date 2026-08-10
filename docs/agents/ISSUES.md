@@ -53,6 +53,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — shipped marcuskrogh/skills Cloud install via PR #594: committed `.agents/skills/`, prefer-workflow pointers, install+start sync + home mirrors; review-fix CLEAN. Start a new Cloud Agent on main to pick up skills; if `<agent_skills>` still empty, enable skills as a Required marketplace plugin.
 - 2026-08-10 — shipped SWD-299 via PR #593: publish identification fit KPIs (`*_model_fit_quality` / `*_parameter_confidence`); v2.0.31; review-fix CLEAN. Rebuild App on HAOS so Overview MODEL FIT and System Identification R²/RMSE/Estimated populate.
 - 2026-08-10 — SWD-299 review-fix CLEAN on PR #593; identification fit KPIs; v2.0.31; shipping closeout.
 - 2026-08-10 — `/ship` SWD-299 implement: publish `*_model_fit_quality` + `*_parameter_confidence` in App hass_states; port fit helpers; v2.0.31; PR #593; Next `/review-fix SWD-299`.
