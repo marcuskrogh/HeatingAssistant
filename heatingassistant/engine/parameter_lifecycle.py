@@ -16,7 +16,6 @@ from .const import (
     ESTIMATION_HISTORY_SIZE,
 )
 from .history.window import select_recent_window
-from .parameter_estimator import KalmanMLEstimator
 
 _LOGGER = logging.getLogger(__name__)
 PARAMETER_HISTORY_KEY = "parameter_history"
@@ -522,6 +521,8 @@ async def async_estimate_parameters_ml(
         selected_history = [dict(item) for item in history]
         if eff_horizon_hours > 0 and selected_history:
             selected_history = select_recent_window(selected_history, eff_horizon_hours * 3600.0, dt)
+
+    from .parameter_estimator import KalmanMLEstimator
 
     estimator = KalmanMLEstimator(
         rooms=list((getattr(model, "rooms", {}) or {}).values()),
