@@ -56,12 +56,12 @@
 - Recoverable reference: `git show ef816f8^:custom_components/heating_assistant/coordinator/window.py`
 
 ## Acceptance criteria
-1. Room window sensor held `on` past `window_open_debounce` → all heat sources for that room command 0 W within debounce timing (event-driven push, not MPC-tick-only).
-2. Opens shorter than debounce do not clamp heaters; closing before debounce cancels the pending open.
-3. After all sensors `off` for `window_open_close_settle`, override clears and heaters may resume from shadow MPC actions.
-4. Multi-sensor OR; rooms without window sensors unchanged.
-5. Control cycles include override rooms in `disabled_sources` and apply `window_open_q_inflation`; history records `window_open` when active.
-6. Regression tests cover debounce, settle, bounce/OR, and actuator push; version **2.0.30** + App package synced.
+1. [x] Room window sensor held `on` past `window_open_debounce` → all heat sources for that room command 0 W within debounce timing (event-driven push, not MPC-tick-only).
+2. [x] Opens shorter than debounce do not clamp heaters; closing before debounce cancels the pending open.
+3. [x] After all sensors `off` for `window_open_close_settle`, override clears and heaters may resume from shadow MPC actions.
+4. [x] Multi-sensor OR; rooms without window sensors unchanged.
+5. [x] Control cycles include override rooms in `disabled_sources` and apply `window_open_q_inflation`; history records `window_open` when active.
+6. [x] Regression tests cover debounce, settle, bounce/OR, and actuator push; version **2.0.30** + App package synced.
 
 ## Work packages
 1. **Port window override into App** — state machine + timers + tag-driven transitions; exclude window tags from full control-cycle thrash; immediate actuator clamp/publish; wire `disabled_sources` + Q inflation + history; revive tests; version **2.0.30**.

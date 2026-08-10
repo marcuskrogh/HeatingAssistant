@@ -52,6 +52,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — `/ship` SWD-298 implement: App window override + timers + disabled_sources/Q inflation; v2.0.30; PR #592; Next `/review-fix SWD-298`.
 - 2026-08-10 — `/define` SWD-298: door/window sensors do not turn off heaters after debounce — App missing window override deleted in SWD-262; PLAN `docs/agents/PLAN-window-heater-override.md`; branch `cursor/swd-298-window-heater-override-1125`; Next `/implement SWD-298`.
 - 2026-08-10 — shipped SWD-297 via PR #590 (`6288e22`): publish applied solar_gain_measured; v2.0.29; review-fix CLEAN. Rebuild App on HAOS so DISTURBANCES Solar Gain left of NOW tracks daytime dynamics.
 - 2026-08-10 — `/ship` SWD-297: implement measured solar_gain_measured from applied solar forecast; v2.0.29; PR #590; Next `/review-fix SWD-297`.
