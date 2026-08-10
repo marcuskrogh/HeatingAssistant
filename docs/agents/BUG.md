@@ -46,6 +46,7 @@
 ## Shipped
 - Version: **2.0.28**
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/588
+- review-fix: CLEAN (CI green)
 
 ## Next
-review-fix CLEAN → merge → rebuild App on HAOS to v2.0.28.
+Merge PR #588 → rebuild App on HAOS to v2.0.28; confirm Apply Parameters stick and panel keeps the current page across remounts.
