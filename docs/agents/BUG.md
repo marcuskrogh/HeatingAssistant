@@ -37,7 +37,7 @@
 ## Tracker
 - Task: SWD-288
 - Branch: `cursor/swd-288-climate-setpoint-reset-d3ac`
-- PR: _(pending)_
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/584
 
 ## Next
-Implement + open PR; `/review-fix SWD-288`.
+In Review — `/review-fix SWD-288`.
