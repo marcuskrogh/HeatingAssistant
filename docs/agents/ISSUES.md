@@ -60,6 +60,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — `/iterate` SWD-306 on SWD-300 review findings: module health UI, XSS escape, API-error indicator; branch `cursor/swd-306-system-status-review-fix-c2e7`; v2.0.33; Next `/review-fix SWD-306`.
 - 2026-08-10 — shipped SWD-300 via PR #595: System Status page + health indicator + Parameter Estimation rename; v2.0.32; CI green. Rebuild App on HAOS so System Status / health indicator / Overview split appear.
 - 2026-08-10 — `/define`+`/ship` SWD-300: System Status page + health indicator + Parameter Estimation rename; PLAN `docs/agents/PLAN-system-status.md`; Sub-tasks SWD-304/302/303/301/305; branch `cursor/swd-300-system-status-c2e7`; feature-heavy; Next `/implement SWD-300`.
 - 2026-08-10 — shipped marcuskrogh/skills Cloud install via PR #594: committed `.agents/skills/`, prefer-workflow pointers, install+start sync + home mirrors; review-fix CLEAN. Start a new Cloud Agent on main to pick up skills; if `<agent_skills>` still empty, enable skills as a Required marketplace plugin.
