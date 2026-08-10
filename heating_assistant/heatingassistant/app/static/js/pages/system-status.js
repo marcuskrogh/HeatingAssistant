@@ -8,6 +8,15 @@ const QUALITY_LABEL = {
   error: 'ERROR',
 };
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function qualityFromState(state) {
   const q = entityAttr(state, systemEntity('system_summary'), 'system_quality');
   if (q === 'healthy' || q === 'warning' || q === 'error') return q;
@@ -31,9 +40,31 @@ function row(label, value, quality) {
   const qClass = quality ? ` system-status__value--${quality}` : '';
   return `
     <div class="system-status__row">
-      <span class="system-status__key">${label}</span>
-      <span class="system-status__value${qClass}">${value}</span>
+      <span class="system-status__key">${escapeHtml(label)}</span>
+      <span class="system-status__value${qClass}">${escapeHtml(value)}</span>
     </div>`;
+}
+
+function modulesSection(modules) {
+  const list = Array.isArray(modules) ? modules : [];
+  if (list.length === 0) {
+    return `
+      <section class="system-status__card system-status__card--wide">
+        <div class="system-status__card-title">MODULES</div>
+        ${row('Status', 'no module health published')}
+      </section>`;
+  }
+  const rows = list.map((mod) => {
+    const label = mod?.label || mod?.id || 'module';
+    const detail = mod?.detail || '—';
+    const quality = mod?.quality;
+    return row(label, detail, quality);
+  }).join('');
+  return `
+    <section class="system-status__card system-status__card--wide">
+      <div class="system-status__card-title">MODULES</div>
+      ${rows}
+    </section>`;
 }
 
 export function renderSystemStatus(container, rooms, state, connection, hass) {
@@ -51,6 +82,7 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
     const bindings = entityAttr(s, systemEntity('system_summary'), 'bindings_count');
     const controlMode = entityAttr(s, systemEntity('system_summary'), 'control_mode');
     const fallback = entityAttr(s, systemEntity('system_summary'), 'fallback_reason');
+    const modules = entityAttr(s, systemEntity('system_summary'), 'modules');
     const mpcLoad = mpcLoadPercent(s);
     const lastDuration = entityValue(s, systemEntity('mpc_performance'));
     const lastRun = entityAttr(s, systemEntity('mpc_performance'), 'last_run_ts');
@@ -59,7 +91,7 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
     const hassCount = Object.keys(hass?.states || s || {}).length;
 
     const issueBlock = issue
-      ? `<div class="system-status__issue system-status__issue--${quality}">${issue}</div>`
+      ? `<div class="system-status__issue system-status__issue--${escapeHtml(quality)}">${escapeHtml(issue)}</div>`
       : `<div class="system-status__issue system-status__issue--healthy">No active issues.</div>`;
 
     root.innerHTML = `
@@ -93,6 +125,7 @@ export function renderSystemStatus(container, rooms, state, connection, hass) {
           ${row('Mean tracking err', meanErr == null ? '—' : formatNumber(Number(meanErr), 2))}
           ${row('Last run ts', lastRun == null ? '—' : String(lastRun))}
         </section>
+        ${modulesSection(modules)}
       </div>
     `;
   }

@@ -79,3 +79,5 @@ async def test_runtime_status_exposes_system_health(tmp_path: Path) -> None:
     summary = runtime.hass_states()["sensor.heating_assistant_system_summary"]
     assert summary["attributes"]["system_quality"] == status["quality"]
     assert "uptime_s" in summary["attributes"]
+    assert isinstance(summary["attributes"].get("modules"), list)
+    assert summary["attributes"]["modules"]

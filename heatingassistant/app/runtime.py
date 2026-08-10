@@ -1297,6 +1297,7 @@ class HeatingRuntime:
                 "uptime_s": health.get("uptime_s"),
                 "entity_catalog_count": health.get("entity_catalog_count"),
                 "bindings_count": health.get("bindings_count"),
+                "modules": health.get("modules") or [],
                 "has_heat_pump": any(
                     str(source.get("type", "")).lower() == "heat_pump"
                     for source in self._heat_sources()

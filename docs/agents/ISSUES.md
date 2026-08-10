@@ -4,6 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-306 | Task | [Iterate] SWD-300 review-fix: module health UI, XSS escape, API-error indicator | In Progress | — | docs/agents/ITERATE.md | `/review-fix SWD-306` |
 | SWD-300 | Task | [Feature] System Status page, health indicator, and Parameter Estimation rename | Done | — | docs/agents/PLAN-system-status.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/595 |
 | SWD-304 | Sub-task | Backend quality enum + status payload | Done | SWD-300 | docs/agents/PLAN-system-status.md | — |
 | SWD-302 | Sub-task | System Status page + health indicator + remove pill | Done | SWD-300 | docs/agents/PLAN-system-status.md | — |

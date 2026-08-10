@@ -217,12 +217,7 @@
     async start() {
       await this.refresh();
       this._pollTimer = window.setInterval(() => {
-        this.refresh().catch((err) => {
-          if (this._statusElement) {
-            this._statusElement.style.display = '';
-            this._setStatus(`API error: ${err.message}`, true);
-          }
-        });
+        this.refresh().catch((err) => this._handleApiFailure(err));
       }, this._pollIntervalMs);
       return this;
     }
@@ -231,6 +226,31 @@
       if (this._pollTimer) window.clearInterval(this._pollTimer);
       this._pollTimer = null;
       this._listeners.clear();
+    }
+
+    _handleApiFailure(err) {
+      // Keep the floating pill hidden; force ERROR so the top indicator updates.
+      hideIngressStatusPill(this._statusElement);
+      const previous = this.states;
+      const summaryId = 'sensor.heating_assistant_system_summary';
+      const prev = previous[summaryId] || {};
+      const attrs = {
+        ...(prev.attributes || {}),
+        system_quality: 'error',
+        issue_summary: `API unreachable: ${err?.message || err || 'request failed'}`,
+        mqtt_connected: false,
+      };
+      this.states = {
+        ...previous,
+        [summaryId]: {
+          ...prev,
+          entity_id: summaryId,
+          state: prev.state ?? 'unknown',
+          attributes: attrs,
+        },
+      };
+      this.mqttConnected = false;
+      this._emitStateChanges(previous, this.states);
     }
 
     async refresh() {
