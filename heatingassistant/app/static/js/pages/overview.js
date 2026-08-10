@@ -1,5 +1,5 @@
 import { createGauge, updateGauge } from '../components/gauge.js?v=118';
-import { createRoomClimateTile } from '../components/room-climate-tile.js?v=118';
+import { createRoomClimateTile } from '../components/room-climate-tile.js?v=120';
 import { createCountdown, updateCountdown } from '../components/countdown.js?v=118';
 import { indexExperimentsByRoom } from '../experiment-utils.js?v=118';
 import { mergeRoomSchedulesWithState } from '../schedules/schedules-shared.js?v=119';

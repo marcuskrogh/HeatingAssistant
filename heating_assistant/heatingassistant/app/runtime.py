@@ -718,7 +718,7 @@ class HeatingRuntime:
             return {"accepted": True, "domain": domain, "service": service}
 
         if domain == "climate" and service in {"set_temperature", "turn_on", "turn_off"}:
-            return {"accepted": True, "domain": domain, "service": service}
+            return await self._apply_climate_service(service, payload)
 
         raise ValueError(f"unsupported service {domain}.{service}")
 
@@ -2034,6 +2034,58 @@ class HeatingRuntime:
         if not updated:
             raise ValueError(f"unknown room {room_name!r}")
         return await self.update_config({"rooms": rooms})
+
+    async def _apply_climate_service(
+        self, service: str, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Map HA climate entity services onto room setpoint / enablement config.
+
+        The Ingress panel climate cards historically call ``climate.set_temperature``
+        / ``turn_on`` / ``turn_off``. After the App rewrite those were accepted as
+        no-ops, so UI edits snapped back on the next state refresh (SWD-288).
+        """
+
+        entity_ids = self._climate_entity_ids(payload.get("entity_id"))
+        if not entity_ids:
+            raise ValueError("entity_id is required")
+
+        config: dict[str, Any] | None = None
+        for entity_id in entity_ids:
+            room_name = self._climate_entity_room_name(entity_id)
+            if service == "set_temperature":
+                if "temperature" not in payload:
+                    raise ValueError("temperature is required")
+                config = await self._update_room_value(
+                    {"room_name": room_name, "setpoint": payload["temperature"]},
+                    "setpoint",
+                )
+            elif service == "turn_on":
+                config = await self._set_room_enabled(
+                    {"room_name": room_name, "enabled": True}
+                )
+            else:  # turn_off
+                config = await self._set_room_enabled(
+                    {"room_name": room_name, "enabled": False}
+                )
+        return {"config": config}
+
+    @staticmethod
+    def _climate_entity_ids(entity_id: Any) -> list[str]:
+        if isinstance(entity_id, str) and entity_id:
+            return [entity_id]
+        if isinstance(entity_id, list):
+            return [str(item) for item in entity_id if item]
+        return []
+
+    @classmethod
+    def _climate_entity_room_name(cls, entity_id: str) -> str:
+        prefix = "climate.heating_assistant_"
+        if not entity_id.startswith(prefix):
+            raise ValueError(f"unsupported climate entity {entity_id!r}")
+        slug = entity_id[len(prefix) :]
+        if not slug:
+            raise ValueError(f"unsupported climate entity {entity_id!r}")
+        return slug
 
     def _room_power(self, room_name: str) -> float:
         """Return commanded thermal power [W] for a room (not raw fraction)."""

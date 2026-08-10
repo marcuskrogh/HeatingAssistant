@@ -25,11 +25,10 @@ import {
   experimentRowHtml, findNextScheduledExperiment,
 } from '../experiment-utils.js?v=118';
 import {
-  setClimateTemperature,
   setRoomComfortOffset,
-  turnClimateOff,
-  turnClimateOn,
-} from '../ha-services.js?v=118';
+  setRoomEnabled,
+  setRoomSetpoint,
+} from '../ha-services.js?v=120';
 import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=119';
 
 const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
@@ -242,13 +241,16 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     if (st.commitTimer) clearTimeout(st.commitTimer);
     st.commitTimer = setTimeout(() => {
       st.commitTimer = null;
-      st.editing = false;
+      // Keep editing=true until the service call settles so a live state refresh
+      // cannot overwrite the optimistic setpoint (SWD-288).
+      const pending = st.setpoint;
+      const release = () => {
+        if (st.setpoint === pending) st.editing = false;
+      };
       if (st.hass) {
-        setClimateTemperature(
-          st.hass,
-          `climate.heating_assistant_${room.slug}`,
-          st.setpoint,
-        ).catch(() => {});
+        setRoomSetpoint(st.hass, room.slug, pending).then(release, release);
+      } else {
+        release();
       }
     }, COMMIT_DEBOUNCE_MS);
   }
@@ -267,10 +269,15 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     if (st.offsetCommitTimer) clearTimeout(st.offsetCommitTimer);
     st.offsetCommitTimer = setTimeout(() => {
       st.offsetCommitTimer = null;
-      st.offsetEditing = false;
+      const pending = st.comfortOffset;
+      const release = () => {
+        if (st.comfortOffset === pending) st.offsetEditing = false;
+      };
       if (st.hass) {
-        patchStateComfortOffset(st.state, room.slug, st.comfortOffset);
-        setRoomComfortOffset(st.hass, room.slug, st.comfortOffset).catch(() => {});
+        patchStateComfortOffset(st.state, room.slug, pending);
+        setRoomComfortOffset(st.hass, room.slug, pending).then(release, release);
+      } else {
+        release();
       }
     }, COMMIT_DEBOUNCE_MS);
   }
@@ -327,12 +334,10 @@ export function createRoomClimateTile(room, state, hass, scheduleData, experimen
     st.optimisticOff = turnOff;
     paint();
     if (st.hass) {
-      const entityId = `climate.heating_assistant_${room.slug}`;
-      (turnOff ? turnClimateOff(st.hass, entityId) : turnClimateOn(st.hass, entityId))
-        .catch(() => {
-          st.optimisticOff = null;
-          paint();
-        });
+      setRoomEnabled(st.hass, room.slug, !turnOff).catch(() => {
+        st.optimisticOff = null;
+        paint();
+      });
     }
   }
 
