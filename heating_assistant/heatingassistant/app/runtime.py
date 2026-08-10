@@ -36,7 +36,11 @@ from heatingassistant.engine.electricity_price import (
 )
 from heatingassistant.engine.history.store import IdentificationHistoryStore
 from heatingassistant.engine.naming import room_slug
-from heatingassistant.engine.parameter_lifecycle import PARAMETER_HISTORY_KEY
+from heatingassistant.engine.parameter_lifecycle import (
+    PARAMETER_HISTORY_KEY,
+    estimated_params_snapshot,
+    restore_estimated_parameters,
+)
 from heatingassistant.engine.heat_sources import HeatSource
 from heatingassistant.engine.schedule import EffectiveControlParams
 from heatingassistant.engine.schedule_control import (
@@ -141,6 +145,7 @@ class HeatingRuntime:
         )
         self.actuator_outputs: dict[str, float] = dict(self.state.get("actuator_outputs") or {})
         self.control_engine = ControlEngine(self.options)
+        self._restore_estimated_parameters()
         self.sysid_results: dict[str, Any] = {}
         self.open_loop_results: dict[str, Any] = {}
         self._last_identified_heater_scales: dict[str, float] = {}
@@ -645,6 +650,7 @@ class HeatingRuntime:
         self.bindings = self._load_bindings()
         save_config(self.data_dir, self.options)
         self.control_engine.update_config(self.options)
+        self._restore_estimated_parameters()
         self._sync_history_retention()
         self._recompute_room_temperatures()
         self._record_history_samples(force=True)
@@ -681,6 +687,7 @@ class HeatingRuntime:
         self.options["schedules"] = schedules
         save_config(self.data_dir, self.options)
         self.control_engine.update_config(self.options)
+        self._restore_estimated_parameters()
         self._save_runtime_state()
         await self.run_control_cycle()
         return self.schedules()
@@ -1338,17 +1345,19 @@ class HeatingRuntime:
                 {"room": name, "unit_of_measurement": "°C"},
                 now,
             )
+            filtered_attrs: dict[str, Any] = {
+                "room": name,
+                "unit_of_measurement": "°C",
+                "comfort_deviation": None
+                if temperature is None
+                else abs(float(temperature) - float(setpoint)),
+                "time_in_range_pct_24h": None,
+            }
+            filtered_attrs.update(self._live_room_thermal_attrs(name))
             states[f"sensor.heating_assistant_{slug}_temperature_filtered"] = self._ha_state(
                 f"sensor.heating_assistant_{slug}_temperature_filtered",
                 "unknown" if temperature is None else temperature,
-                {
-                    "room": name,
-                    "unit_of_measurement": "°C",
-                    "comfort_deviation": None
-                    if temperature is None
-                    else abs(float(temperature) - float(setpoint)),
-                    "time_in_range_pct_24h": None,
-                },
+                filtered_attrs,
                 now,
             )
             states[f"sensor.heating_assistant_{slug}_setpoint"] = self._ha_state(
@@ -2339,6 +2348,43 @@ class HeatingRuntime:
     @staticmethod
     def _room_slug(name: str) -> str:
         return room_slug(name)
+
+    def _restore_estimated_parameters(self) -> None:
+        """Re-apply persisted estimated params after ControlEngine rebuilds."""
+
+        snapshot = estimated_params_snapshot(self.options)
+        if not snapshot:
+            return
+        restore_estimated_parameters(
+            self.control_engine.model,
+            self.control_engine.heat_sources,
+            snapshot,
+        )
+
+    def _live_room_thermal_attrs(self, room_name: str) -> dict[str, Any]:
+        """Return live thermal-model attrs for the sysid form / filtered sensor."""
+
+        rooms = getattr(getattr(self.control_engine, "model", None), "rooms", {}) or {}
+        room = rooms.get(room_name)
+        if room is None:
+            return {}
+        attrs: dict[str, Any] = {}
+        for key in (
+            "thermal_mass",
+            "r_external",
+            "internal_gain",
+            "solar_scale",
+            "c_air_fraction",
+            "r_aw_fraction",
+        ):
+            value = getattr(room, key, None)
+            if value is None:
+                continue
+            try:
+                attrs[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return attrs
 
     @staticmethod
     def _normalise_schedule(value: Any) -> dict[str, Any]:

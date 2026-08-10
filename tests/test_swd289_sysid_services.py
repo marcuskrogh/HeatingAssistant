@@ -222,6 +222,73 @@ async def test_simulation_services_populate_caches_and_sensors(
 
 
 @pytest.mark.asyncio
+async def test_store_then_update_estimation_keeps_live_model(tmp_path: Path) -> None:
+    """Apply Parameters calls store then update_estimation_params; live model must stick."""
+    runtime = _runtime(tmp_path)
+
+    await runtime.apply_service(
+        "heating_assistant",
+        "store_identified_parameters",
+        {
+            "room_name": "living_room",
+            "thermal_mass": 1_400_000.0,
+            "r_external": 0.02,
+            "internal_gain": 55.0,
+            "solar_scale": 0.9,
+            "c_air_fraction": 0.07,
+            "r_aw_fraction": 0.11,
+            "heater_scales": {"Living Heater": 1.05},
+        },
+    )
+    await runtime.apply_service(
+        "heating_assistant",
+        "update_estimation_params",
+        {"sigma_w": 0.25, "sigma_v": 0.75, "identification_horizon_hours": 18.0},
+    )
+
+    room = runtime.control_engine.model.rooms["Living Room"]
+    assert room.thermal_mass == pytest.approx(1_400_000.0)
+    assert room.r_external == pytest.approx(0.02)
+    assert room.internal_gain == pytest.approx(55.0)
+    assert room.solar_scale == pytest.approx(0.9)
+    assert room.c_air_fraction == pytest.approx(0.07)
+    assert room.r_aw_fraction == pytest.approx(0.11)
+    heater = next(s for s in runtime.control_engine.heat_sources if s.name == "Living Heater")
+    assert heater.power_scale == pytest.approx(1.05)
+
+    filtered = runtime.hass_states()["sensor.heating_assistant_living_room_temperature_filtered"]
+    assert filtered["attributes"]["thermal_mass"] == pytest.approx(1_400_000.0)
+    assert filtered["attributes"]["r_external"] == pytest.approx(0.02)
+    assert runtime.controller_config()["current_heater_scales"]["Living Heater"][
+        "power_scale"
+    ] == pytest.approx(1.05)
+
+
+@pytest.mark.asyncio
+async def test_estimated_params_restored_on_runtime_restart(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    await runtime.apply_service(
+        "heating_assistant",
+        "store_identified_parameters",
+        {
+            "room_name": "living_room",
+            "thermal_mass": 2_200_000.0,
+            "r_external": 0.03,
+            "heater_scales": {"Living Heater": 1.2},
+        },
+    )
+
+    restarted = HeatingRuntime(tmp_path, bus=InMemoryMqttBus())
+    room = restarted.control_engine.model.rooms["Living Room"]
+    assert room.thermal_mass == pytest.approx(2_200_000.0)
+    assert room.r_external == pytest.approx(0.03)
+    heater = next(s for s in restarted.control_engine.heat_sources if s.name == "Living Heater")
+    assert heater.power_scale == pytest.approx(1.2)
+    filtered = restarted.hass_states()["sensor.heating_assistant_living_room_temperature_filtered"]
+    assert filtered["attributes"]["thermal_mass"] == pytest.approx(2_200_000.0)
+
+
+@pytest.mark.asyncio
 async def test_store_identified_parameters_updates_controller_config_history(tmp_path: Path) -> None:
     runtime = _runtime(tmp_path)
 

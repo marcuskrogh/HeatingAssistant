@@ -1,8 +1,8 @@
-import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=119';
-import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=119';
-import { createCollapsible } from '../components/collapsible.js?v=119';
-import { formatNumber, modelFitLabel } from '../utils.js?v=119';
-import { setPanelHash } from '../panel-hash.js?v=119';
+import { TimeSeriesChart, makeDataset, historyToDataPoints } from '../components/time-series-chart.js?v=120';
+import { createKpiCard, updateKpiCard } from '../components/kpi-card.js?v=120';
+import { createCollapsible } from '../components/collapsible.js?v=120';
+import { formatNumber, modelFitLabel } from '../utils.js?v=120';
+import { setPanelHash } from '../panel-hash.js?v=120';
 import {
   createDataset,
   deleteDataset,
@@ -12,9 +12,9 @@ import {
   runSysidSimulation,
   storeIdentifiedParameters,
   updateEstimationParams,
-} from '../ha-services.js?v=119';
-import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=119';
-import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=119';
+} from '../ha-services.js?v=120';
+import { DEFAULTS, CONFIG_ENTITY, valuesEqual } from './sysid-shared.js?v=120';
+import { setupDatasetsAndExperiments, buildEkfChart, buildOlChart, formatMass } from './sysid-datasets.js?v=120';
 
 export function renderIdentificationDetail(container, roomSlug, rooms, state, connection, hass) {
   const room = rooms.find((r) => r.slug === roomSlug);
@@ -491,6 +491,11 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   function captureAppliedParams(st) {
     const filteredAttrs = st[filteredEntityId(roomSlug)]?.attributes || {};
     const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
+    const historyRooms = Array.isArray(configAttrs.parameter_history)
+      ? (configAttrs.parameter_history[0]?.rooms || {})
+      : {};
+    const historyAttrs = historyRooms[roomSlug] || {};
+    const modelAttrs = { ...historyAttrs, ...filteredAttrs };
     const heaterScales = {};
     const currentScales = configAttrs.current_heater_scales || {};
     for (const [srcName, info] of Object.entries(currentScales)) {
@@ -499,12 +504,12 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       }
     }
     appliedParams = {
-      thermal_mass: filteredAttrs.thermal_mass ?? DEFAULTS.thermal_mass,
-      r_external: filteredAttrs.r_external ?? DEFAULTS.r_external,
-      internal_gain: filteredAttrs.internal_gain ?? DEFAULTS.internal_gain,
-      solar_scale: filteredAttrs.solar_scale ?? DEFAULTS.solar_scale,
-      c_air_fraction: filteredAttrs.c_air_fraction ?? DEFAULTS.c_air_fraction,
-      r_aw_fraction: filteredAttrs.r_aw_fraction ?? DEFAULTS.r_aw_fraction,
+      thermal_mass: modelAttrs.thermal_mass ?? DEFAULTS.thermal_mass,
+      r_external: modelAttrs.r_external ?? DEFAULTS.r_external,
+      internal_gain: modelAttrs.internal_gain ?? DEFAULTS.internal_gain,
+      solar_scale: modelAttrs.solar_scale ?? DEFAULTS.solar_scale,
+      c_air_fraction: modelAttrs.c_air_fraction ?? DEFAULTS.c_air_fraction,
+      r_aw_fraction: modelAttrs.r_aw_fraction ?? DEFAULTS.r_aw_fraction,
       sigma_w: configAttrs.sigma_w ?? DEFAULTS.sigma_w,
       sigma_v: configAttrs.sigma_v ?? DEFAULTS.sigma_v,
       horizon_hours: configAttrs.identification_horizon_hours ?? DEFAULTS.horizon_hours,
@@ -799,18 +804,24 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // Model params come from the active temperature_filtered sensor (authoritative
   // source for the live thermal model). Stochastic params and the identification
   // horizon come from the controller_config sensor (persisted by Apply Parameters).
+  // Fall back to parameter_history[0] when filtered attrs are missing (e.g. older
+  // App builds that never published thermal attrs on temperature_filtered).
   function populateFromState(slug, st) {
-    const filteredAttrs = st[filteredEntityId(slug)]?.attributes;
-    if (filteredAttrs) {
-      if (filteredAttrs.thermal_mass != null) thermalMassInput.value = filteredAttrs.thermal_mass;
-      if (filteredAttrs.r_external != null) rExternalInput.value = filteredAttrs.r_external;
-      if (filteredAttrs.internal_gain != null) internalGainInput.value = filteredAttrs.internal_gain;
-      if (filteredAttrs.solar_scale != null) solarScaleInput.value = filteredAttrs.solar_scale;
-      if (filteredAttrs.c_air_fraction != null) cAirFractionInput.value = filteredAttrs.c_air_fraction;
-      if (filteredAttrs.r_aw_fraction != null) rAwFractionInput.value = filteredAttrs.r_aw_fraction;
-    }
-
+    const filteredAttrs = st[filteredEntityId(slug)]?.attributes || {};
     const configAttrs = st[CONFIG_ENTITY]?.attributes || {};
+    const historyRooms = Array.isArray(configAttrs.parameter_history)
+      ? (configAttrs.parameter_history[0]?.rooms || {})
+      : {};
+    const historyAttrs = historyRooms[slug] || {};
+    const modelAttrs = { ...historyAttrs, ...filteredAttrs };
+
+    if (modelAttrs.thermal_mass != null) thermalMassInput.value = modelAttrs.thermal_mass;
+    if (modelAttrs.r_external != null) rExternalInput.value = modelAttrs.r_external;
+    if (modelAttrs.internal_gain != null) internalGainInput.value = modelAttrs.internal_gain;
+    if (modelAttrs.solar_scale != null) solarScaleInput.value = modelAttrs.solar_scale;
+    if (modelAttrs.c_air_fraction != null) cAirFractionInput.value = modelAttrs.c_air_fraction;
+    if (modelAttrs.r_aw_fraction != null) rAwFractionInput.value = modelAttrs.r_aw_fraction;
+
     if (configAttrs.sigma_w != null) sigmaWInput.value = configAttrs.sigma_w;
     if (configAttrs.sigma_v != null) sigmaVInput.value = configAttrs.sigma_v;
     // Horizon is now persisted in the config entity (set by Apply Parameters).
