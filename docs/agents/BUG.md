@@ -22,20 +22,17 @@
 - DISTURBANCES plot misleads operators: solar appears unused historically while the controller is forecasting (and applying) real gains.
 - Plot history and KPI solar gauge stay dead; ID history is less affected because `d_solar` already prefers `solar_forecast[0]`.
 
-## Suspected area
-- `HeatingRuntime.hass_states()` hardcodes:
-  ```python
-  states[f"sensor.heating_assistant_{slug}_solar_gain_measured"] = self._ha_state(..., 0.0, ...)
-  ```
-- `_record_history_samples()` samples `hass_states()`, so every durable plot sample is also 0.
-- Forecast plots read `solar_forecast` from the controller cache (working).
-- Same App synthetic-stub pattern as SWD-284 (`electricity_price`).
+## Fix
+- `ControlEngine.applied_solar_gains()` returns `solar_forecast[0]` (applied current step) with live geometric fallback.
+- `HeatingRuntime.hass_states()` publishes that value on `…_solar_gain_measured` (plus window attrs).
+- Plot history samples the real state; ID history reuses the same helper.
+- Version **2.0.29**.
 
 ## Acceptance criteria
-- [ ] After a control cycle with daytime solar geometry, `hass_states()[…_solar_gain_measured].state` is non-zero and matches the applied current-step solar gain for that room.
-- [ ] DISTURBANCES historical Solar Gain left of NOW shows daytime dynamics (not a flat zero); Solar Gain Forecast remains correct.
-- [ ] Regression test: `hass_states` / history sample must not hardcode `0.0` when the engine has non-zero solar.
-- [ ] Version bump to **2.0.29**; App package synced.
+- [x] After a control cycle with daytime solar geometry, `hass_states()[…_solar_gain_measured].state` is non-zero and matches the applied current-step solar gain for that room.
+- [x] DISTURBANCES historical Solar Gain left of NOW shows daytime dynamics (not a flat zero); Solar Gain Forecast remains correct.
+- [x] Regression test: `hass_states` / history sample must not hardcode `0.0` when the engine has non-zero solar.
+- [x] Version bump to **2.0.29**; App package synced.
 
 ## Out of scope
 - `heat_loss` synthetic also stubbed at `0.0` (separate follow-up unless trivial in the same fix).
@@ -52,5 +49,9 @@
 - Branch: `cursor/swd-297-measured-solar-gain-zero-f475`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/590
 
+## Shipped
+- Version: **2.0.29**
+- review-fix: pending
+
 ## Next
-`/implement SWD-297` → `/review-fix` → closeout
+`/review-fix SWD-297` → closeout
