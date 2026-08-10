@@ -115,8 +115,8 @@ def test_room_with_nested_window_and_connection():
             "terminal_weight",
         ),
         (
-            _minimal_config(identification_history_days=3),
-            "identification_history_days",
+            _minimal_config(parameter_estimation_history_days=3),
+            "parameter_estimation_history_days",
         ),
         (
             _minimal_config(

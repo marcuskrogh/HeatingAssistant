@@ -7,12 +7,12 @@ export function renderIdentificationIndex(container, rooms, state) {
 
   const header = document.createElement('div');
   header.className = 'section-header';
-  header.textContent = 'SYSTEM IDENTIFICATION';
+  header.textContent = 'PARAMETER ESTIMATION';
   container.appendChild(header);
 
   const desc = document.createElement('p');
   desc.className = 'tuning-section__desc';
-  desc.textContent = 'Select a room to view and configure its system identification parameters, run parameter estimation, and validate model fit.';
+  desc.textContent = 'Select a room to view and configure its parameter estimation settings, run parameter estimation, and validate model fit.';
   container.appendChild(desc);
 
   const grid = document.createElement('div');
@@ -31,7 +31,7 @@ export function renderIdentificationIndex(container, rooms, state) {
       card.innerHTML = buildIdentificationCardHtml(room, st);
       card.addEventListener('click', (event) => {
         if (event.target.closest('[data-dismiss-warning]')) return;
-        setPanelHash(`#identification/${room.slug}`);
+        setPanelHash(`#parameter-estimation/${room.slug}`);
       });
       grid.appendChild(card);
     }

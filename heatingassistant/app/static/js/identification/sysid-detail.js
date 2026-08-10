@@ -28,8 +28,8 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // Back navigation
   const nav = document.createElement('button');
   nav.className = 'nav-back';
-  nav.innerHTML = '<span class="nav-back__arrow">←</span> SYSTEM IDENTIFICATION';
-  nav.addEventListener('click', () => { setPanelHash('#identification'); });
+  nav.innerHTML = '<span class="nav-back__arrow">←</span> PARAMETER ESTIMATION';
+  nav.addEventListener('click', () => { setPanelHash('#parameter-estimation'); });
   container.appendChild(nav);
 
   const header = document.createElement('div');
@@ -50,7 +50,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   actionsCard.innerHTML = `
     <div class="tuning-section__title">Actions</div>
     <p class="tuning-section__desc">
-      Edit the fields below, then click Apply Parameters to activate them. Use the Stored Datasets section to run automatic identification.
+      Edit the fields below, then click Apply Parameters to activate them. Use the Stored Datasets section to run automatic parameter estimation.
     </p>
     <div class="tuning-actions">
       <button class="btn btn--primary tuning-actions__btn" id="btn-apply-params">Apply Parameters</button>
@@ -66,7 +66,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   const paramsCard = document.createElement('div');
   paramsCard.className = 'card tuning-section';
   paramsCard.innerHTML = `
-    <div class="tuning-section__title">Identification Parameters</div>
+    <div class="tuning-section__title">Parameter Estimation Parameters</div>
 
     <div class="params-subsection">
       <div class="params-subsection__title">Model Parameters</div>
@@ -74,7 +74,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-thermal-mass">Thermal Mass (C)</label>
-            <button class="param-lock-btn" data-param="thermal_mass" title="Lock: hold fixed during auto-identification">Fix</button>
+            <button class="param-lock-btn" data-param="thermal_mass" title="Lock: hold fixed during automatic parameter estimation">Fix</button>
           </div>
           <input class="form-input" type="number" id="param-thermal-mass"
             step="100000" min="10000" value="${DEFAULTS.thermal_mass}">
@@ -83,7 +83,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-r-external">Thermal Resistance (R<sub>ext</sub>)</label>
-            <button class="param-lock-btn" data-param="r_external" title="Lock: hold fixed during auto-identification">Fix</button>
+            <button class="param-lock-btn" data-param="r_external" title="Lock: hold fixed during automatic parameter estimation">Fix</button>
           </div>
           <input class="form-input" type="number" id="param-r-external"
             step="0.001" min="0.0001" value="${DEFAULTS.r_external}">
@@ -92,7 +92,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-internal-gain">Internal Gain (Q<sub>int</sub>)</label>
-            <button class="param-lock-btn" data-param="internal_gain" title="Lock: hold fixed during auto-identification">Fix</button>
+            <button class="param-lock-btn" data-param="internal_gain" title="Lock: hold fixed during automatic parameter estimation">Fix</button>
           </div>
           <input class="form-input" type="number" id="param-internal-gain"
             step="10" value="${DEFAULTS.internal_gain}">
@@ -101,7 +101,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-solar-scale">Solar Scale</label>
-            <button class="param-lock-btn" data-param="solar_scale" title="Lock: hold fixed during auto-identification">Fix</button>
+            <button class="param-lock-btn" data-param="solar_scale" title="Lock: hold fixed during automatic parameter estimation">Fix</button>
           </div>
           <input class="form-input" type="number" id="param-solar-scale"
             step="0.01" min="0" value="${DEFAULTS.solar_scale}">
@@ -116,7 +116,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-c-air-fraction">Air-node Mass Fraction</label>
-            <button class="param-lock-btn" data-param="c_air_fraction" title="Lock: hold fixed during auto-identification">Fix</button>
+            <button class="param-lock-btn" data-param="c_air_fraction" title="Lock: hold fixed during automatic parameter estimation">Fix</button>
           </div>
           <input class="form-input" type="number" id="param-c-air-fraction"
             step="0.001" min="0" max="1" value="${DEFAULTS.c_air_fraction}">
@@ -125,7 +125,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-r-aw-fraction">Air&ndash;Wall Resistance Fraction</label>
-            <button class="param-lock-btn" data-param="r_aw_fraction" title="Lock: hold fixed during auto-identification">Fix</button>
+            <button class="param-lock-btn" data-param="r_aw_fraction" title="Lock: hold fixed during parameter estimation">Fix</button>
           </div>
           <input class="form-input" type="number" id="param-r-aw-fraction"
             step="0.001" min="0" max="1" value="${DEFAULTS.r_aw_fraction}">
@@ -134,11 +134,11 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
         <div class="form-group">
           <div class="form-group__header">
             <label class="form-label" for="param-t-wall-initial">Wall Initial Temp (T<sub>wall,0</sub>)</label>
-            <button class="param-lock-btn" data-param="t_wall_initial" title="Lock: hold fixed during auto-identification">Fix</button>
+            <button class="param-lock-btn" data-param="t_wall_initial" title="Lock: hold fixed during parameter estimation">Fix</button>
           </div>
           <input class="form-input form-input--readonly" type="text" id="param-t-wall-initial"
             readonly value="&mdash;" tabindex="-1">
-          <span class="form-hint">&deg;C &mdash; identified envelope temperature at window start (populated after auto-ID; lock to hold fixed)</span>
+          <span class="form-hint">&deg;C &mdash; identified envelope temperature at window start (populated after parameter estimation; lock to hold fixed)</span>
         </div>
       </div>
     </div>
@@ -146,7 +146,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     <div class="params-subsection" id="inter-room-r-subsection" hidden>
       <div class="params-subsection__title">Inter-Room Connections</div>
       <p class="params-subsection__desc">
-        Thermal resistances between this room and neighbours, estimated during auto-identification when enough cross-room excitation is present.
+        Thermal resistances between this room and neighbours, estimated during parameter estimation when enough cross-room excitation is present.
       </p>
       <div class="tuning-params-grid" id="inter-room-r-list"></div>
     </div>
@@ -175,7 +175,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     </div>
 
     <div class="params-subsection">
-      <div class="params-subsection__title">Identification Window</div>
+      <div class="params-subsection__title">Parameter Estimation Window</div>
       <div class="window-mode-toggle">
         <button class="window-mode-btn window-mode-btn--active" id="window-mode-recent" type="button">Recent Horizon</button>
         <button class="window-mode-btn" id="window-mode-custom" type="button">Custom Date Range</button>
@@ -185,7 +185,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
           <label class="form-label" for="param-horizon">Horizon</label>
           <input class="form-input" type="number" id="param-horizon"
             step="0.5" min="0.5" value="${DEFAULTS.horizon_hours}">
-          <span class="form-hint">hours &mdash; history window ending at the most recent record (up to identification-history retention)</span>
+          <span class="form-hint">hours &mdash; history window ending at the most recent record (up to parameter-estimation history retention)</span>
         </div>
       </div>
       <div id="window-panel-custom" class="window-datetime-panel" style="display:none">
@@ -195,14 +195,14 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
             <div class="form-input form-input--datetime-wrap">
               <input class="form-input--datetime" type="datetime-local" id="param-window-start">
             </div>
-            <span class="form-hint">Start of the identification window (local time)</span>
+            <span class="form-hint">Start of the parameter-estimation window (local time)</span>
           </div>
           <div class="form-group">
             <label class="form-label" for="param-window-end">Window End</label>
             <div class="form-input form-input--datetime-wrap">
               <input class="form-input--datetime" type="datetime-local" id="param-window-end">
             </div>
-            <span class="form-hint">End of the identification window (local time)</span>
+            <span class="form-hint">End of the parameter-estimation window (local time)</span>
           </div>
         </div>
         <div class="form-group window-preset-row">
@@ -233,7 +233,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   validationIntro.innerHTML = `
     <div class="tuning-section__title">Model Validation</div>
     <p class="tuning-section__desc">
-      Two complementary fit tests over the identification window configured above.
+      Two complementary fit tests over the parameter-estimation window configured above.
       <strong>One-step EKF reconstruction</strong> measures short-horizon tracking with Kalman
       correction at each timestep; <strong>multi-step open-loop simulation</strong> is a free-run
       drift test with no measurement feedback. A good model should score well on both.
@@ -407,7 +407,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     } catch (_) { return new Set(); }
   }
 
-  // Tracks locked parameters (those held fixed during auto-identification).
+  // Tracks locked parameters (those held fixed during parameter estimation).
   // Keys for room params: 'thermal_mass', 'r_external', etc.
   // Keys for heater scales: 'heater_scale:<source_name>'.
   // Initialised from localStorage so locks survive page reloads.
@@ -420,10 +420,10 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     btnEl.classList.toggle('param-lock-btn--locked', locked);
     if (locked) {
       btnEl.innerHTML = `${_ICON_LOCKED} Fixed`;
-      btnEl.title = 'Unlock: allow auto-identification to vary this parameter';
+      btnEl.title = 'Unlock: allow parameter estimation to vary this parameter';
     } else {
       btnEl.innerHTML = `${_ICON_OPEN} Fix`;
-      btnEl.title = 'Lock: hold fixed during auto-identification';
+      btnEl.title = 'Lock: hold fixed during parameter estimation';
     }
   }
 
@@ -478,7 +478,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     return Object.keys(result).length > 0 ? result : undefined;
   }
 
-  // Tracks whether the user has begun a manual identification process (i.e.
+  // Tracks whether the user has begun a manual parameter-estimation process (i.e.
   // changed any parameter). Once true, the reactive update() callback stops
   // overwriting the form from system state, so running a reconstruction or
   // open-loop simulation — which triggers a state update — cannot reset the
@@ -512,7 +512,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       r_aw_fraction: modelAttrs.r_aw_fraction ?? DEFAULTS.r_aw_fraction,
       sigma_w: configAttrs.sigma_w ?? DEFAULTS.sigma_w,
       sigma_v: configAttrs.sigma_v ?? DEFAULTS.sigma_v,
-      horizon_hours: configAttrs.identification_horizon_hours ?? DEFAULTS.horizon_hours,
+      horizon_hours: configAttrs.parameter_estimation_horizon_hours ?? DEFAULTS.horizon_hours,
       heater_scales: heaterScales,
     };
   }
@@ -631,9 +631,9 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   });
 
   // When a stored dataset is selected for identification, its id is sent with
-  // the EKF reconstruction / open-loop / auto-identification calls so they run
+  // the EKF reconstruction / open-loop / parameter estimation calls so they run
   // over the dataset's permanently snapshotted records. Cleared whenever the
-  // user edits the identification window manually so the selection stays
+  // user edits the parameter-estimation window manually so the selection stays
   // explicit. ``renderDatasetSelection`` is assigned by the dataset section
   // setup below; it updates the "using dataset …" note.
   let selectedDatasetId = null;
@@ -827,8 +827,8 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     // Horizon is now persisted in the config entity (set by Apply Parameters).
     // Fall back to sysid sensor's last-run horizon if the config hasn't been
     // saved yet (e.g. on first use before Apply Parameters is clicked).
-    if (configAttrs.identification_horizon_hours != null) {
-      horizonInput.value = configAttrs.identification_horizon_hours;
+    if (configAttrs.parameter_estimation_horizon_hours != null) {
+      horizonInput.value = configAttrs.parameter_estimation_horizon_hours;
     } else {
       const sysidAttrs = st[sysidEntityId(slug)]?.attributes;
       if (sysidAttrs?.horizon_hours != null) horizonInput.value = sysidAttrs.horizon_hours;
@@ -882,7 +882,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       group.innerHTML = `
         <div class="form-group__header">
           <label class="form-label" for="${inputId}">${srcName}</label>
-          <button class="param-lock-btn" title="Lock: hold fixed during auto-identification">Fix</button>
+          <button class="param-lock-btn" title="Lock: hold fixed during parameter estimation">Fix</button>
         </div>
         <input class="form-input" type="number" id="${inputId}"
           step="0.01" min="0" value="${info.power_scale ?? DEFAULTS.heater_scale}">
@@ -1168,13 +1168,13 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
   // Button interactions
   // -----------------------------------------------------------------------
 
-  // Shared auto-identification routine: runs a dry-run ML estimation over the
+  // Shared parameter estimation routine: runs a dry-run ML estimation over the
   // data described by ``idData`` (a window, horizon, single dataset_id or a
   // list of dataset_ids), then populates the parameter fields from the result
   // for review. Used by the datasets section's "Run on Selected" button.
   // Returns true on success.
   async function runAutoIdentification(idData, statusEl) {
-    setStatus(statusEl, 'Running identification…', 'running');
+    setStatus(statusEl, 'Running parameter estimation…', 'running');
     try {
       const lp = buildLockedParams();
       await estimateParametersMl(hass, {
@@ -1223,7 +1223,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
       await updateEstimationParams(hass, {
         sigma_w: parseFloat(sigmaWInput.value),
         sigma_v: parseFloat(sigmaVInput.value),
-        identification_horizon_hours: parseFloat(horizonInput.value),
+        parameter_estimation_horizon_hours: parseFloat(horizonInput.value),
       });
       // Edits are now the applied parameters; resume syncing the form from
       // system state so it reflects the authoritative committed values.
@@ -1332,7 +1332,7 @@ export function renderIdentificationDetail(container, roomSlug, rooms, state, co
     update(newState) {
       latestState = newState;
       // Only sync the form from system state before the user has begun a manual
-      // identification process and while no field is focused. Once the user has
+      // parameter-estimation process and while no field is focused. Once the user has
       // edited a parameter, running a reconstruction / open-loop simulation (or
       // any other state update) must not reset their values — that should only
       // happen on navigation or page refresh, which re-creates this page.

@@ -28,14 +28,16 @@ globalThis.sessionStorage = {
 globalThis.history = {
   state: null,
   pushState(_state, _title, url) {
-    const path = url.split('?')[0];
     const hashIdx = url.indexOf('#');
+    const pathPart = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+    const path = pathPart.split('?')[0];
     window.location._pathname = path;
     window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
   },
   replaceState(_state, _title, url) {
-    const path = url.split('?')[0];
     const hashIdx = url.indexOf('#');
+    const pathPart = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+    const path = pathPart.split('?')[0];
     window.location._pathname = path;
     window.location._hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
   },
@@ -130,17 +132,24 @@ window.location.hash = '#room/living';
 panelHashMod.clearPanelHash();
 assert(window.location.hash === '', 'clearPanelHash must strip panel hashes');
 
-// SWD-296: empty hash remount restores last remembered panel route
+// SWD-300: parameter-estimation route + legacy identification migration
 sessionStore.clear();
 window.location._pathname = '/ha-industrial';
-panelHashMod.setPanelHash('#identification/living_room');
+panelHashMod.setPanelHash('#parameter-estimation/living_room');
 assert(
-  sessionStore.get('heating_assistant_panel_route_v1') === 'identification/living_room',
+  sessionStore.get('heating_assistant_panel_route_v1') === 'parameter-estimation/living_room',
   'setPanelHash must remember the route',
 );
 window.location._hash = '';
 const restored = panelHashMod.readPanelRoute();
-assert(restored === 'identification/living_room', 'empty hash must restore remembered route');
-assert(window.location.hash === '#identification/living_room', 'restored route must rewrite location hash');
+assert(restored === 'parameter-estimation/living_room', 'empty hash must restore remembered route');
+assert(window.location.hash === '#parameter-estimation/living_room', 'restored route must rewrite location hash');
+
+sessionStore.clear();
+window.location._pathname = '/ha-industrial';
+window.location.hash = '#identification/kitchen';
+const migrated = panelHashMod.readPanelRoute();
+assert(migrated === 'parameter-estimation/kitchen', 'legacy identification hash must migrate');
+assert(window.location.hash === '#parameter-estimation/kitchen', 'legacy hash must rewrite location');
 
 console.log('panel hash guard harness: ok');

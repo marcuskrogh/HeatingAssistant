@@ -25,6 +25,7 @@ const REQUIRED_STYLESHEETS = [
   'css/pages/schedules.css',
   'css/pages/climate-card.css',
   'css/pages/configuration.css',
+  'css/pages/system-status.css',
 ];
 
 const LAYOUT_MARKERS = [

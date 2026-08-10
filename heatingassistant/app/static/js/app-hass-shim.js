@@ -185,9 +185,11 @@
     return text ? `?${text}` : '';
   }
 
-  function mqttStatusLabel(mqttConnected, entityCount) {
-    const mqttPart = mqttConnected ? 'MQTT ok' : 'MQTT disconnected';
-    return `API connected - ${entityCount} entities · ${mqttPart}`;
+  function hideIngressStatusPill(statusElement) {
+    if (!statusElement) return;
+    statusElement.style.display = 'none';
+    statusElement.textContent = '';
+    statusElement.removeAttribute('data-status');
   }
 
   class HeatingAssistantAppHassShim {
@@ -215,7 +217,12 @@
     async start() {
       await this.refresh();
       this._pollTimer = window.setInterval(() => {
-        this.refresh().catch((err) => this._setStatus(`API error: ${err.message}`, true));
+        this.refresh().catch((err) => {
+          if (this._statusElement) {
+            this._statusElement.style.display = '';
+            this._setStatus(`API error: ${err.message}`, true);
+          }
+        });
       }, this._pollIntervalMs);
       return this;
     }
@@ -242,11 +249,8 @@
       }
       this.mqttSource = stateSnapshot.mqtt_source || null;
       this._emitStateChanges(previous, this.states);
-      const entityCount = Object.keys(this.states).length;
-      this._setStatus(
-        mqttStatusLabel(this.mqttConnected, entityCount),
-        !this.mqttConnected,
-      );
+      // SWD-300: connection/entity diagnostics live on System Status page.
+      hideIngressStatusPill(this._statusElement);
       return this.states;
     }
 

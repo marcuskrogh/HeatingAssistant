@@ -37,7 +37,7 @@ export function setupDatasetsAndExperiments(ctx) {
   saveMount.innerHTML = `
     <div class="params-subsection__title">Save Current Window</div>
     <p class="params-subsection__desc">
-      Store the identification window configured above as a named, permanent dataset.
+      Store the parameter-estimation window configured above as a named, permanent dataset.
     </p>
     <div class="ds-save-row ds-save-row--compact">
       <div class="form-group ds-save-row__name">
@@ -61,12 +61,12 @@ export function setupDatasetsAndExperiments(ctx) {
   const dsCollapsible = createCollapsible({ title: 'Stored Datasets', open: false });
   dsCollapsible.body.innerHTML = `
     <p class="tuning-section__desc" style="margin:0 0 12px">
-      Select datasets for joint automatic identification, or load one into the
+      Select datasets for joint automatic parameter estimation, or load one into the
       custom window to inspect, validate, or identify it on its own.
     </p>
     <div class="ds-toolbar">
       <button class="btn btn--accent" id="btn-identify-selected" disabled>
-        Run Automatic Identification (0)
+        Run Automatic Parameter Estimation (0)
       </button>
       <button class="btn btn--ghost btn--sm" id="btn-clear-selection" disabled>Clear selection</button>
       <span class="tuning-actions__status" id="ds-id-status"></span>
@@ -96,7 +96,7 @@ export function setupDatasetsAndExperiments(ctx) {
   }
 
   // Renderer for the "loaded dataset" note (wired back to the page closure).
-  // A loaded dataset drives the top auto-identification / EKF / open-loop tools
+  // A loaded dataset drives the top parameter estimation / EKF / open-loop tools
   // through its snapshotted data; the note offers a way back to the live window.
   onDatasetSelectionRenderer((label) => {
     dsSelectedNote.innerHTML = '';
@@ -117,7 +117,7 @@ export function setupDatasetsAndExperiments(ctx) {
   // ---- Multi-select identification ---------------------------------------
   function updateSelectionToolbar() {
     const n = selectedIds.size;
-    btnIdentifySelected.textContent = `Run Automatic Identification (${n})`;
+    btnIdentifySelected.textContent = `Run Automatic Parameter Estimation (${n})`;
     btnIdentifySelected.disabled = n === 0;
     btnClearSelection.disabled = n === 0;
   }
@@ -202,7 +202,7 @@ export function setupDatasetsAndExperiments(ctx) {
   });
 
   // Load a single dataset into the custom window and mark it as the active
-  // source for the top auto-identification / EKF / open-loop tools, so the user
+  // source for the top parameter estimation / EKF / open-loop tools, so the user
   // can validate or manually identify it on its own.
   function loadDataset(datasetId, datasets) {
     const ds = (datasets || lastDatasets).find((d) => d.id === datasetId);

@@ -19,9 +19,12 @@ const PANEL_HASH_PREFIXES = [
   'room',
   'schedules',
   'tuning',
-  'identification',
+  'parameter-estimation',
+  'system-status',
   'config',
 ];
+
+const LEGACY_ROUTE_PREFIX = 'identification';
 
 const GUARD_FLAG = '__haIndustrialPanelHashGuard';
 const ROUTE_STORAGE_KEY = 'heating_assistant_panel_route_v1';
@@ -36,11 +39,26 @@ export function isOnPanelPath() {
 
 export function isPanelHash(hash) {
   const route = (hash || '').replace(/^#/, '').split('/')[0];
-  return PANEL_HASH_PREFIXES.includes(route);
+  return PANEL_HASH_PREFIXES.includes(route) || route === LEGACY_ROUTE_PREFIX;
+}
+
+function migrateLegacyRoute(route) {
+  const cleaned = String(route || '').replace(/^#/, '');
+  if (!cleaned.startsWith(`${LEGACY_ROUTE_PREFIX}/`) && cleaned !== LEGACY_ROUTE_PREFIX) {
+    return cleaned;
+  }
+  const migrated = cleaned.replace(new RegExp(`^${LEGACY_ROUTE_PREFIX}`), 'parameter-estimation');
+  const hash = `#${migrated}`;
+  if (isOnPanelPath() && window.location.hash !== hash) {
+    const url = window.location.pathname + window.location.search + hash;
+    const replace = _nativeReplaceState || history.replaceState.bind(history);
+    replace(history.state, '', url);
+  }
+  return migrated;
 }
 
 export function rememberPanelRoute(route) {
-  const cleaned = String(route || '').replace(/^#/, '');
+  const cleaned = migrateLegacyRoute(String(route || '').replace(/^#/, ''));
   if (!cleaned || !isPanelHash(cleaned)) return;
   try {
     sessionStorage.setItem(ROUTE_STORAGE_KEY, cleaned);
@@ -52,14 +70,16 @@ export function rememberPanelRoute(route) {
 function _restoreRememberedRoute() {
   try {
     const saved = sessionStorage.getItem(ROUTE_STORAGE_KEY);
-    if (!saved || !isPanelHash(saved)) return null;
-    const normalized = `#${saved}`;
+    if (!saved) return null;
+    const migrated = migrateLegacyRoute(saved);
+    if (!isPanelHash(migrated)) return null;
+    const normalized = `#${migrated}`;
     if (window.location.hash !== normalized) {
       const url = window.location.pathname + window.location.search + normalized;
       const replace = _nativeReplaceState || history.replaceState.bind(history);
       replace(history.state, '', url);
     }
-    return saved;
+    return migrated;
   } catch (_) {
     return null;
   }
@@ -69,8 +89,9 @@ export function readPanelRoute() {
   if (!isOnPanelPath()) return 'overview';
   const hash = window.location.hash.slice(1);
   if (hash) {
-    rememberPanelRoute(hash);
-    return hash;
+    const migrated = migrateLegacyRoute(hash);
+    rememberPanelRoute(migrated);
+    return migrated;
   }
   const restored = _restoreRememberedRoute();
   if (restored) return restored;

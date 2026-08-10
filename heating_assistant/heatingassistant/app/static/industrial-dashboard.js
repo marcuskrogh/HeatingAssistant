@@ -64,6 +64,7 @@ const PANEL_STYLESHEETS = [
   'css/pages/schedules.css',
   'css/pages/climate-card.css',
   'css/pages/configuration.css',
+  'css/pages/system-status.css',
 ];
 
 function panelStylesheetLinks(version) {
@@ -73,7 +74,8 @@ function panelStylesheetLinks(version) {
 }
 
 const PANEL_PATH = '/ha-industrial';
-const PANEL_HASH_PREFIXES = ['overview', 'room', 'schedules', 'tuning', 'identification', 'config'];
+const PANEL_HASH_PREFIXES = ['overview', 'room', 'schedules', 'tuning', 'parameter-estimation', 'system-status', 'config'];
+const LEGACY_ROUTE_PREFIX = 'identification';
 const PANEL_HASH_GUARD_FLAG = '__haIndustrialPanelHashGuard';
 const PANEL_ROUTE_STORAGE_KEY = 'heating_assistant_panel_route_v1';
 
@@ -115,12 +117,28 @@ function _restoreRememberedRoute() {
   }
 }
 
+function _migrateLegacyRoute(route) {
+  const cleaned = String(route || '').replace(/^#/, '');
+  if (!cleaned.startsWith(`${LEGACY_ROUTE_PREFIX}/`) && cleaned !== LEGACY_ROUTE_PREFIX) {
+    return cleaned;
+  }
+  const migrated = cleaned.replace(new RegExp(`^${LEGACY_ROUTE_PREFIX}`), 'parameter-estimation');
+  const hash = `#${migrated}`;
+  if (_isOnPanelPath() && window.location.hash !== hash) {
+    const url = window.location.pathname + window.location.search + hash;
+    const replace = _nativeReplaceState || history.replaceState.bind(history);
+    replace(history.state, '', url);
+  }
+  return migrated;
+}
+
 function _readPanelRoute() {
   if (!_isOnPanelPath()) return 'overview';
   const hash = window.location.hash.slice(1);
   if (hash) {
-    _rememberPanelRoute(hash);
-    return hash;
+    const migrated = _migrateLegacyRoute(hash);
+    _rememberPanelRoute(migrated);
+    return migrated;
   }
   const restored = _restoreRememberedRoute();
   if (restored) return restored;
@@ -453,7 +471,8 @@ class HaIndustrialPanel extends HTMLElement {
         { discoverRooms },
         { renderOverview },
         { renderRoomDetail },
-        { renderSystemIdentification },
+        { renderParameterEstimation },
+        { renderSystemStatus },
         { renderControllerTuning },
         { renderSchedules },
         { renderConfiguration },
@@ -463,7 +482,8 @@ class HaIndustrialPanel extends HTMLElement {
         import(`${BASE_PATH}/js/discovery.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/overview.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/room-detail.js?v=${PANEL_VERSION}`),
-        import(`${BASE_PATH}/js/pages/system-identification.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/parameter-estimation.js?v=${PANEL_VERSION}`),
+        import(`${BASE_PATH}/js/pages/system-status.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/tuning-controller.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/schedules.js?v=${PANEL_VERSION}`),
         import(`${BASE_PATH}/js/pages/configuration.js?v=${PANEL_VERSION}`),
@@ -488,7 +508,8 @@ class HaIndustrialPanel extends HTMLElement {
       this._router = new Router(contentEl, {
         overview: () => renderOverview(contentEl, this._rooms, this._state, this._connection, this._hass),
         room: (slug) => renderRoomDetail(contentEl, slug, this._rooms, this._state, this._connection, this._hass),
-        identification: (slug) => renderSystemIdentification(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+        'parameter-estimation': (slug) => renderParameterEstimation(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
+        'system-status': () => renderSystemStatus(contentEl, this._rooms, this._state, this._connection, this._hass),
         tuning: (slug) => renderControllerTuning(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
         schedules: (slug) => renderSchedules(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
         config: (slug) => renderConfiguration(contentEl, this._rooms, this._state, this._connection, this._hass, slug),
@@ -576,11 +597,40 @@ class HaIndustrialPanel extends HTMLElement {
 
   _syncSystemRunning() {
     const summary = this._state['sensor.heating_assistant_system_summary'];
-    if (!summary) return;
+    if (!summary) {
+      this._updateHealthIndicator();
+      return;
+    }
     const enabled = summary.attributes?.system_enabled;
     if (typeof enabled === 'boolean') {
       this._systemRunning = enabled;
       this._updateRunButton();
+    } else {
+      this._updateHealthIndicator();
+    }
+  }
+
+  _systemQuality() {
+    const summary = this._state?.['sensor.heating_assistant_system_summary'];
+    const q = summary?.attributes?.system_quality;
+    if (q === 'healthy' || q === 'warning' || q === 'error') return q;
+    if (summary?.attributes?.mqtt_connected === false) return 'error';
+    return 'healthy';
+  }
+
+  _updateHealthIndicator() {
+    const quality = this._systemQuality();
+    const labelText = quality === 'warning' ? 'WARNING' : quality === 'error' ? 'ERROR' : 'HEALTHY';
+    const dot = this.shadowRoot?.getElementById('live-dot');
+    const label = this.shadowRoot?.getElementById('live-label');
+    if (dot) {
+      dot.classList.remove('live-dot--live', 'live-dot--stopped', 'live-dot--healthy', 'live-dot--warning', 'live-dot--error');
+      dot.classList.add(`live-dot--${quality}`);
+    }
+    if (label) {
+      label.textContent = labelText;
+      label.classList.remove('live-label--live', 'live-label--stopped', 'live-label--healthy', 'live-label--warning', 'live-label--error');
+      label.classList.add(`live-label--${quality}`);
     }
   }
 
@@ -594,7 +644,8 @@ class HaIndustrialPanel extends HTMLElement {
             <a class="panel-nav__link" href="#overview">OVERVIEW</a>
             <a class="panel-nav__link" href="#schedules">SCHEDULES</a>
             <a class="panel-nav__link" href="#tuning">TUNING</a>
-            <a class="panel-nav__link" href="#identification">SYSTEM IDENTIFICATION</a>
+            <a class="panel-nav__link" href="#parameter-estimation">PARAMETER ESTIMATION</a>
+            <a class="panel-nav__link" href="#system-status">SYSTEM STATUS</a>
             <a class="panel-nav__link" href="#config">CONFIGURATION</a>
           </div>
           <div class="panel-nav__brand">
@@ -608,9 +659,9 @@ class HaIndustrialPanel extends HTMLElement {
           </div>
           <span class="panel-nav__fill"></span>
           <div class="panel-nav__controls">
-            <div class="panel-nav__live-indicator" id="live-indicator">
+            <div class="panel-nav__live-indicator" id="live-indicator" title="System health">
               <span class="live-dot" id="live-dot"></span>
-              <span class="live-label" id="live-label">STOPPED</span>
+              <span class="live-label" id="live-label">HEALTHY</span>
             </div>
             <button class="panel-nav__run-btn" id="run-btn" aria-label="Start or stop the heating assistant">
               ⏻
@@ -674,18 +725,7 @@ class HaIndustrialPanel extends HTMLElement {
     }
 
     btn.classList.toggle('panel-nav__run-btn--running', this._systemRunning);
-
-    const dot = this.shadowRoot.getElementById('live-dot');
-    const label = this.shadowRoot.getElementById('live-label');
-    if (dot) {
-      dot.classList.toggle('live-dot--live', this._systemRunning);
-      dot.classList.toggle('live-dot--stopped', !this._systemRunning);
-    }
-    if (label) {
-      label.textContent = this._systemRunning ? 'LIVE' : 'STOPPED';
-      label.classList.toggle('live-label--live', this._systemRunning);
-      label.classList.toggle('live-label--stopped', !this._systemRunning);
-    }
+    this._updateHealthIndicator();
   }
 
   async _toggleSystem() {

@@ -22,7 +22,7 @@ def _options() -> dict:
     return {
         "instance_id": "haos",
         "plot_history_hours": 12.0,
-        "identification_history_days": 30,
+        "parameter_estimation_history_days": 30,
         "update_interval": 900,
         "rooms": [
             {

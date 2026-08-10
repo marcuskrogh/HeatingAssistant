@@ -261,7 +261,7 @@ Lovelace cards to build by hand. Its pages are:
   health summary.
 - **Room detail** — predicted temperature with the comfort band, the planned
   heating power, disturbance forecasts, and model-fit diagnostics.
-- **System identification** — run parameter estimation and review the model fit.
+- **Parameter estimation** — run parameter estimation and review the model fit.
 - **Tuning** — adjust the controller's behaviour.
 - **Schedules** — per-room comfort/setback periods.
 - **Configuration** — manage rooms, heat sources, sensors and site settings.
@@ -281,18 +281,18 @@ performance and overall efficiency.
 
 It also registers services for setup and diagnostics — simulate a room's
 response, estimate thermal parameters, analyse model fit, run open-loop
-validation, manage identification datasets, and update tuning at runtime.
+validation, manage parameter-estimation datasets, and update tuning at runtime.
 
 - **[Entities & Sensor Reference](docs/ENTITIES.md)** — every entity and its
   attributes, and how controller output is dispatched to your heaters.
 - **[Services Reference](docs/SERVICES.md)** — all setup, diagnostic and
-  system-identification services.
+  parameter-estimation services.
 
 ## Tuning and accuracy
 
 Good predictions need reasonable thermal parameters. You can let the built-in
 maximum-likelihood identifier learn them from your normal operating history
-(from the panel's identification page, or the `estimate_parameters_ml` service),
+(from the panel's parameter estimation page, or the `estimate_parameters_ml` service),
 or set them yourself. If a room oscillates, a heat pump short-cycles, or a room
 never quite reaches setpoint, the controller weights can be adjusted from
 **Configure → Control behaviour** or the panel's tuning page.
@@ -336,7 +336,7 @@ guide and a tuning cheat-sheet.
 |----------|----------|
 | [Configuration Reference](docs/CONFIGURATION.md) | Every room, window, heat-source and schedule setting. |
 | [Entities & Sensor Reference](docs/ENTITIES.md) | All entities, their attributes, and heater dispatch. |
-| [Services Reference](docs/SERVICES.md) | Setup, diagnostic and system-identification services. |
+| [Services Reference](docs/SERVICES.md) | Setup, diagnostic and parameter-estimation services. |
 | [Parameter Estimation & Tuning](docs/TUNING.md) | Estimating thermal parameters and tuning the controller. |
 | [The dashboard & custom cards](docs/DASHBOARDS.md) | The built-in panel, plus optional Lovelace card recipes. |
 | [Physics, Models & Control Theory](docs/THEORY.md) | The thermal model, solar pipeline, MPC and state estimator. |

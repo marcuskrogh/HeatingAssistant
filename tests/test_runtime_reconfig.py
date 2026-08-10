@@ -16,7 +16,7 @@ import pytest
 from heatingassistant.engine.const import (
     CONF_ENERGY_WEIGHT,
     CONF_HORIZON,
-    CONF_IDENTIFICATION_HISTORY_DAYS,
+    CONF_PARAMETER_ESTIMATION_HISTORY_DAYS,
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_OUTDOOR_TEMP_ENTITY,
@@ -42,8 +42,8 @@ def _reconfig_coord():
     coord._pending_runtime_reconfiguration = {}
     coord._plot_history_hours = 24.0
     coord._plot_forecast_hours = 12.0
-    coord._identification_horizon_hours = 6.0
-    coord._identification_history_days = 90
+    coord._parameter_estimation_horizon_hours = 6.0
+    coord._parameter_estimation_history_days = 90
     coord.update_interval = timedelta(seconds=coord._update_interval_s)
     coord._build_controller = MagicMock()
     coord.id_history_store = MagicMock()
@@ -167,13 +167,13 @@ def test_apply_pending_runtime_reconfiguration_rebuilds_when_horizon_queued():
 def test_apply_pending_runtime_reconfiguration_updates_history_retention():
     coord = _reconfig_coord()
     coord._pending_runtime_reconfiguration = {
-        CONF_IDENTIFICATION_HISTORY_DAYS: 30,
+        CONF_PARAMETER_ESTIMATION_HISTORY_DAYS: 30,
     }
 
     rr.apply_pending_runtime_reconfiguration(coord)
 
     coord.id_history_store.update_retention_days.assert_called_once_with(30)
-    assert coord._identification_history_days == 30
+    assert coord._parameter_estimation_history_days == 30
 
 
 def test_apply_pending_runtime_reconfiguration_noop_when_empty():

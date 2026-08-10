@@ -243,7 +243,7 @@ async def test_store_then_update_estimation_keeps_live_model(tmp_path: Path) -> 
     await runtime.apply_service(
         "heating_assistant",
         "update_estimation_params",
-        {"sigma_w": 0.25, "sigma_v": 0.75, "identification_horizon_hours": 18.0},
+        {"sigma_w": 0.25, "sigma_v": 0.75, "parameter_estimation_horizon_hours": 18.0},
     )
 
     room = runtime.control_engine.model.rooms["Living Room"]
@@ -327,16 +327,16 @@ async def test_update_estimation_params_persists_options(tmp_path: Path) -> None
     await runtime.apply_service(
         "heating_assistant",
         "update_estimation_params",
-        {"sigma_w": 0.25, "sigma_v": 0.75, "identification_horizon_hours": 18.0},
+        {"sigma_w": 0.25, "sigma_v": 0.75, "parameter_estimation_horizon_hours": 18.0},
     )
 
     assert runtime.options["sigma_w"] == pytest.approx(0.25)
     assert runtime.options["sigma_v"] == pytest.approx(0.75)
-    assert runtime.options["identification_horizon_hours"] == pytest.approx(18.0)
+    assert runtime.options["parameter_estimation_horizon_hours"] == pytest.approx(18.0)
     config = runtime.controller_config()
     assert config["sigma_w"] == pytest.approx(0.25)
     assert config["sigma_v"] == pytest.approx(0.75)
-    assert config["identification_horizon_hours"] == pytest.approx(18.0)
+    assert config["parameter_estimation_horizon_hours"] == pytest.approx(18.0)
 
 
 @pytest.mark.asyncio

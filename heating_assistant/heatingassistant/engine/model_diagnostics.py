@@ -366,12 +366,12 @@ def validate_parameters(
         if thermal_mass < THERMAL_MASS_MIN:
             warnings.append(
                 f"Thermal mass {thermal_mass:.0f} J/K is unusually low "
-                f"(< {THERMAL_MASS_MIN:.0f} J/K). Check room size or re-run identification."
+                f"(< {THERMAL_MASS_MIN:.0f} J/K). Check room size or re-run parameter estimation."
             )
         else:
             warnings.append(
                 f"Thermal mass {thermal_mass:.0f} J/K is unusually high "
-                f"(> {THERMAL_MASS_MAX:.0f} J/K). Re-run identification or review inputs."
+                f"(> {THERMAL_MASS_MAX:.0f} J/K). Re-run parameter estimation or review inputs."
             )
 
     # Check external resistance
@@ -385,7 +385,7 @@ def validate_parameters(
         else:
             warnings.append(
                 f"Envelope resistance {r_external:.6f} K/W is unusually high "
-                f"(> {R_EXTERNAL_MAX:.1f} K/W). Re-run identification or review inputs."
+                f"(> {R_EXTERNAL_MAX:.1f} K/W). Re-run parameter estimation or review inputs."
             )
 
     # Compute time constant (τ = R × C)
@@ -415,7 +415,7 @@ def validate_parameters(
         warnings.append(
             f"Thermal time constant {time_constant_hours:.0f} h is longer than typical "
             f"(> {TIME_CONSTANT_SOFT_MAX_HOURS:.0f} h) and closed-loop fit is not strong — "
-            "re-run identification or review thermal mass and envelope resistance."
+            "re-run parameter estimation or review thermal mass and envelope resistance."
         )
 
     return ParameterValidation(
@@ -483,7 +483,7 @@ def build_identification_warnings(
     elif not acceptable_fit:
         warnings.append(IdentificationWarning(
             code="poor_fit",
-            message="Poor closed-loop fit — run auto-identification or check heater and sensor configuration.",
+            message="Poor closed-loop fit — run automatic parameter estimation or check heater and sensor configuration.",
             severity="alarm",
         ))
 
@@ -502,7 +502,7 @@ def build_identification_warnings(
                 code="open_loop_high",
                 message=(
                     f"Open-loop error is {open_loop_rmse:.2f} °C despite good closed-loop fit — "
-                    "validate with a fresh identification window before changing parameters."
+                    "validate with a fresh parameter-estimation window before changing parameters."
                 ),
                 severity="warn",
             ))
@@ -511,7 +511,7 @@ def build_identification_warnings(
                 code="open_loop_elevated",
                 message=(
                     f"Open-loop error is {open_loop_rmse:.2f} °C — re-estimate parameters "
-                    "or widen the identification window."
+                    "or widen the parameter-estimation window."
                 ),
                 severity="warn",
             ))

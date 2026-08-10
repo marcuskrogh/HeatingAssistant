@@ -400,7 +400,7 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   EXPERIMENT state ── while a system-identification experiment is exciting the
+   EXPERIMENT state ── while a parameter-estimation experiment is exciting the
    room the setpoint, comfort corridor and power toggle are not in play (the
    controller drives the heaters with the excitation signal regardless), so the
    card swaps them for a progress panel: an EXPERIMENT badge, a live progress
@@ -587,7 +587,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Stored-datasets section (System Identification page)
+   Stored-datasets section (Parameter Estimation page)
    --------------------------------------------------------------------------- */
 
 /* Save-current-window row: name + notes + action, aligned on one line.
@@ -620,7 +620,7 @@
   margin-bottom: 0;
 }
 
-/* Toolbar for the multi-select joint identification. */
+/* Toolbar for the multi-select joint parameter estimation. */
 .ds-toolbar {
   display: flex;
   flex-wrap: wrap;

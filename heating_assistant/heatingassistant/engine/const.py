@@ -526,8 +526,8 @@ DEFAULT_SIGMA_B = 0.002
 DEFAULT_WINDOW_OPEN_DEBOUNCE = 60
 DEFAULT_WINDOW_OPEN_CLOSE_SETTLE = 30
 DEFAULT_WINDOW_OPEN_Q_INFLATION = 10.0
-CONF_IDENTIFICATION_HORIZON_HOURS = "identification_horizon_hours"
-DEFAULT_IDENTIFICATION_HORIZON_HOURS = 6.0
+CONF_PARAMETER_ESTIMATION_HORIZON_HOURS = "parameter_estimation_horizon_hours"
+DEFAULT_PARAMETER_ESTIMATION_HORIZON_HOURS = 6.0
 DEFAULT_WINDOW_TILT = 90.0             # vertical
 DEFAULT_ENERGY_PRICE_WEIGHT = 1.0      # active out of the box when a price entity is configured
 DEFAULT_PRICE_NET_TARIFF = 0.0         # no tariff adder by default
@@ -638,11 +638,11 @@ ACTUATION_WATCHDOG_MIN_INTERVAL_S = 60
 #: Number of update steps to keep in the rolling history buffer.
 #: At DEFAULT_UPDATE_INTERVAL=900 s (15 min) this is exactly 120 hours of data.
 HISTORY_BUFFER_SIZE = 480
-#: Config-entry key for the JSONL identification-history retention period.
-CONF_IDENTIFICATION_HISTORY_DAYS = "identification_history_days"
-#: Default number of days the integration-managed JSONL identification history
+#: Config-entry key for the JSONL parameter-estimation history retention period.
+CONF_PARAMETER_ESTIMATION_HISTORY_DAYS = "parameter_estimation_history_days"
+#: Default number of days the integration-managed JSONL parameter-estimation history
 #: store retains data.  Independent of HA Recorder's ``purge_keep_days``.
-DEFAULT_IDENTIFICATION_HISTORY_DAYS = 90
+DEFAULT_PARAMETER_ESTIMATION_HISTORY_DAYS = 90
 #: Exponential-moving-average time constant [s] for smoothing the live cloud
 #: cover used by the solar model.  Clouds change gradually, so the instantaneous
 #: weather-entity reading is low-pass filtered to keep the solar attenuation
@@ -695,7 +695,7 @@ CONF_PERSISTED_SYSTEM_ENABLED = "persisted_system_enabled"
 CONF_PERSISTED_SCHEDULE_ENABLED = "persisted_schedule_enabled"
 
 # ---------------------------------------------------------------------------
-# System-identification experiments and stored datasets
+# Parameter-estimation experiments and stored datasets
 # ---------------------------------------------------------------------------
 #: Service names for the experiment / dataset features.
 SERVICE_SCHEDULE_EXPERIMENT = "schedule_experiment"
@@ -705,7 +705,7 @@ SERVICE_CREATE_DATASET = "create_dataset"
 SERVICE_DELETE_DATASET = "delete_dataset"
 
 #: Excitation signal types a scheduled experiment can apply to a room's heaters
-#: to gather informative system-identification data.
+#: to gather informative parameter-estimation data.
 EXCITATION_STEP = "step"          # single on-step then off — simple, interpretable
 EXCITATION_PRBS = "prbs"          # pseudo-random binary sequence (rich spectrum)
 EXCITATION_PULSE = "pulse"        # square wave alternating high/low at a fixed period

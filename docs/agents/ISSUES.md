@@ -4,6 +4,12 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-300 | Task | [Feature] System Status page, health indicator, and Parameter Estimation rename | To Do | — | docs/agents/PLAN-system-status.md | `/implement SWD-300` — feature-heavy on `cursor/swd-300-system-status-c2e7` |
+| SWD-304 | Sub-task | Backend quality enum + status payload | To Do | SWD-300 | docs/agents/PLAN-system-status.md | — |
+| SWD-302 | Sub-task | System Status page + health indicator + remove pill | To Do | SWD-300 | docs/agents/PLAN-system-status.md | — |
+| SWD-303 | Sub-task | Overview system strip + controller KPIs split | To Do | SWD-300 | docs/agents/PLAN-system-status.md | — |
+| SWD-301 | Sub-task | Hard-cut Parameter Estimation rename | To Do | SWD-300 | docs/agents/PLAN-system-status.md | — |
+| SWD-305 | Sub-task | Tests + version bump + package sync | To Do | SWD-300 | docs/agents/PLAN-system-status.md | — |
 | SWD-299 | Bug | [Bug] Identification KPIs (model fit / R² / RMSE / Estimated) not populating Overview or System Identification index | Done | — | docs/agents/PLAN-identification-kpis.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/593 |
 | SWD-298 | Bug | [Bug] Door/window sensors do not turn off heaters after configured debounce — App missing window override | Done | — | docs/agents/PLAN-window-heater-override.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/592 |
 | SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
@@ -53,6 +59,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — `/define`+`/ship` SWD-300: System Status page + health indicator + Parameter Estimation rename; PLAN `docs/agents/PLAN-system-status.md`; Sub-tasks SWD-304/302/303/301/305; branch `cursor/swd-300-system-status-c2e7`; feature-heavy; Next `/implement SWD-300`.
 - 2026-08-10 — shipped marcuskrogh/skills Cloud install via PR #594: committed `.agents/skills/`, prefer-workflow pointers, install+start sync + home mirrors; review-fix CLEAN. Start a new Cloud Agent on main to pick up skills; if `<agent_skills>` still empty, enable skills as a Required marketplace plugin.
 - 2026-08-10 — shipped SWD-299 via PR #593: publish identification fit KPIs (`*_model_fit_quality` / `*_parameter_confidence`); v2.0.31; review-fix CLEAN. Rebuild App on HAOS so Overview MODEL FIT and System Identification R²/RMSE/Estimated populate.
 - 2026-08-10 — SWD-299 review-fix CLEAN on PR #593; identification fit KPIs; v2.0.31; shipping closeout.
