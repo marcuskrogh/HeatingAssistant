@@ -87,4 +87,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-299` — Build per PLAN.md workflow binding (same branch/PR)
+`/review-fix SWD-299` — Review and auto-fix per Workflow binding
