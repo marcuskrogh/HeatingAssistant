@@ -2,7 +2,8 @@
  * Panel hash guard harness.
  *
  * Verifies that panel-owned hashes are stripped when HA navigates away via
- * pushState/replaceState (sidebar navigation) while preserving HA deep links.
+ * pushState/replaceState (sidebar navigation) while preserving HA deep links,
+ * and that empty-hash remounts restore the last in-panel route (SWD-296).
  *
  * Run: node tests/panel_hash.harness.mjs
  */
@@ -15,6 +16,14 @@ const WWW = join(ROOT, 'heatingassistant/app/static');
 
 const hashListeners = [];
 const locationChangedListeners = [];
+const sessionStore = new Map();
+
+globalThis.sessionStorage = {
+  getItem(key) { return sessionStore.has(key) ? sessionStore.get(key) : null; },
+  setItem(key, value) { sessionStore.set(key, String(value)); },
+  removeItem(key) { sessionStore.delete(key); },
+  clear() { sessionStore.clear(); },
+};
 
 globalThis.history = {
   state: null,
@@ -69,7 +78,7 @@ const panelHashSrc = readFileSync(join(WWW, 'js/panel-hash.js'), 'utf8')
   .replace(/export const /g, 'const ')
   .replace(/export function /g, 'function ')
   .replace(/\ninstallPanelHashGuard\(\);\s*$/, '');
-const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, isPanelHash, setPanelHash, stripLeakedPanelHash, clearPanelHash, installPanelHashGuard, PANEL_PATH };`)();
+const panelHashMod = new Function(`${panelHashSrc}\nreturn { isOnPanelPath, isPanelHash, setPanelHash, stripLeakedPanelHash, clearPanelHash, installPanelHashGuard, readPanelRoute, rememberPanelRoute, PANEL_PATH };`)();
 
 panelHashMod.installPanelHashGuard();
 
@@ -120,5 +129,18 @@ assert(window.location.hash === '#domain=mqtt', 'clearPanelHash must preserve no
 window.location.hash = '#room/living';
 panelHashMod.clearPanelHash();
 assert(window.location.hash === '', 'clearPanelHash must strip panel hashes');
+
+// SWD-296: empty hash remount restores last remembered panel route
+sessionStore.clear();
+window.location._pathname = '/ha-industrial';
+panelHashMod.setPanelHash('#identification/living_room');
+assert(
+  sessionStore.get('heating_assistant_panel_route_v1') === 'identification/living_room',
+  'setPanelHash must remember the route',
+);
+window.location._hash = '';
+const restored = panelHashMod.readPanelRoute();
+assert(restored === 'identification/living_room', 'empty hash must restore remembered route');
+assert(window.location.hash === '#identification/living_room', 'restored route must rewrite location hash');
 
 console.log('panel hash guard harness: ok');

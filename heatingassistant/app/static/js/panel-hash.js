@@ -6,6 +6,9 @@
  * its integrations dashboard also reads window.location.hash for deep links.
  * These helpers ensure panel hashes are only written while the panel pathname
  * is active, and are stripped when the user navigates away via the HA sidebar.
+ *
+ * Ingress iframe remounts sometimes reload the base URL without a hash. Keep
+ * the last in-panel route in sessionStorage so boot can restore it (SWD-296).
  */
 
 export const PANEL_PATH = '/ha-industrial';
@@ -21,6 +24,7 @@ const PANEL_HASH_PREFIXES = [
 ];
 
 const GUARD_FLAG = '__haIndustrialPanelHashGuard';
+const ROUTE_STORAGE_KEY = 'heating_assistant_panel_route_v1';
 
 let _nativePushState = null;
 let _nativeReplaceState = null;
@@ -35,9 +39,42 @@ export function isPanelHash(hash) {
   return PANEL_HASH_PREFIXES.includes(route);
 }
 
+export function rememberPanelRoute(route) {
+  const cleaned = String(route || '').replace(/^#/, '');
+  if (!cleaned || !isPanelHash(cleaned)) return;
+  try {
+    sessionStorage.setItem(ROUTE_STORAGE_KEY, cleaned);
+  } catch (_) {
+    /* private mode / blocked storage */
+  }
+}
+
+function _restoreRememberedRoute() {
+  try {
+    const saved = sessionStorage.getItem(ROUTE_STORAGE_KEY);
+    if (!saved || !isPanelHash(saved)) return null;
+    const normalized = `#${saved}`;
+    if (window.location.hash !== normalized) {
+      const url = window.location.pathname + window.location.search + normalized;
+      const replace = _nativeReplaceState || history.replaceState.bind(history);
+      replace(history.state, '', url);
+    }
+    return saved;
+  } catch (_) {
+    return null;
+  }
+}
+
 export function readPanelRoute() {
   if (!isOnPanelPath()) return 'overview';
-  return window.location.hash.slice(1) || 'overview';
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    rememberPanelRoute(hash);
+    return hash;
+  }
+  const restored = _restoreRememberedRoute();
+  if (restored) return restored;
+  return 'overview';
 }
 
 /**
@@ -60,6 +97,7 @@ export function stripLeakedPanelHash() {
 export function setPanelHash(hash) {
   if (!isOnPanelPath()) return;
   const normalized = hash.startsWith('#') ? hash : `#${hash}`;
+  rememberPanelRoute(normalized);
   if (window.location.hash === normalized) return;
   window.location.hash = normalized;
 }

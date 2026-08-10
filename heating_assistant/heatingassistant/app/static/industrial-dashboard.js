@@ -45,7 +45,7 @@ const PANEL_VERSION = (() => {
   } catch (e) {
     /* unexpected — fall through to hardcoded fallback */
   }
-  return '119';
+  return '120';
 })();
 
 // If a boot stalls (a hung dynamic import or WebSocket call leaves the panel on
@@ -75,6 +75,7 @@ function panelStylesheetLinks(version) {
 const PANEL_PATH = '/ha-industrial';
 const PANEL_HASH_PREFIXES = ['overview', 'room', 'schedules', 'tuning', 'identification', 'config'];
 const PANEL_HASH_GUARD_FLAG = '__haIndustrialPanelHashGuard';
+const PANEL_ROUTE_STORAGE_KEY = 'heating_assistant_panel_route_v1';
 
 let _nativeReplaceState = null;
 
@@ -88,14 +89,48 @@ function _isPanelHash(hash) {
   return PANEL_HASH_PREFIXES.includes(route);
 }
 
+function _rememberPanelRoute(route) {
+  const cleaned = String(route || '').replace(/^#/, '');
+  if (!cleaned || !_isPanelHash(cleaned)) return;
+  try {
+    sessionStorage.setItem(PANEL_ROUTE_STORAGE_KEY, cleaned);
+  } catch (e) {
+    /* private mode / blocked storage */
+  }
+}
+
+function _restoreRememberedRoute() {
+  try {
+    const saved = sessionStorage.getItem(PANEL_ROUTE_STORAGE_KEY);
+    if (!saved || !_isPanelHash(saved)) return null;
+    const normalized = `#${saved}`;
+    if (window.location.hash !== normalized) {
+      const url = window.location.pathname + window.location.search + normalized;
+      const replace = _nativeReplaceState || history.replaceState.bind(history);
+      replace(history.state, '', url);
+    }
+    return saved;
+  } catch (e) {
+    return null;
+  }
+}
+
 function _readPanelRoute() {
   if (!_isOnPanelPath()) return 'overview';
-  return window.location.hash.slice(1) || 'overview';
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    _rememberPanelRoute(hash);
+    return hash;
+  }
+  const restored = _restoreRememberedRoute();
+  if (restored) return restored;
+  return 'overview';
 }
 
 function _setPanelHash(hash) {
   if (!_isOnPanelPath()) return;
   const normalized = hash.startsWith('#') ? hash : `#${hash}`;
+  _rememberPanelRoute(normalized);
   if (window.location.hash !== normalized) {
     window.location.hash = normalized;
   }

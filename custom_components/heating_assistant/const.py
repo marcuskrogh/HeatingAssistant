@@ -2,7 +2,7 @@
 
 DOMAIN = "heating_assistant"
 NAME = "Heating Assistant"
-VERSION = "2.0.27"
+VERSION = "2.0.28"
 
 CONF_INSTANCE_ID = "instance_id"
 DEFAULT_INSTANCE_ID = "default"

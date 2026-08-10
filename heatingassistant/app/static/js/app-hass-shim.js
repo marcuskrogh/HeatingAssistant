@@ -38,6 +38,14 @@
     };
   }
 
+  /** Compare HA-like states ignoring poll timestamps that always change. */
+  function statesEquivalent(prev, next) {
+    if (prev === next) return true;
+    if (!prev || !next) return false;
+    if (String(prev.state) !== String(next.state)) return false;
+    return JSON.stringify(prev.attributes || {}) === JSON.stringify(next.attributes || {});
+  }
+
   function coerceNumber(value) {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     return null;
@@ -108,7 +116,17 @@
       states[`sensor.heating_assistant_${slug}_temperature_filtered`] = entityState(
         `sensor.heating_assistant_${slug}_temperature_filtered`,
         temperature ?? 'unknown',
-        { room: name, unit_of_measurement: '°C', comfort_deviation: null },
+        {
+          room: name,
+          unit_of_measurement: '°C',
+          comfort_deviation: null,
+          thermal_mass: coerceNumber(room.thermal_mass),
+          r_external: coerceNumber(room.r_external),
+          internal_gain: coerceNumber(room.internal_gain) ?? 0,
+          solar_scale: coerceNumber(room.solar_scale) ?? 1,
+          c_air_fraction: coerceNumber(room.c_air_fraction) ?? 0.05,
+          r_aw_fraction: coerceNumber(room.r_aw_fraction) ?? 0.05,
+        },
       );
       states[`sensor.heating_assistant_${slug}_setpoint`] = entityState(
         `sensor.heating_assistant_${slug}_setpoint`,
@@ -274,7 +292,7 @@
 
     _emitStateChanges(previous, next) {
       for (const [entityId, newState] of Object.entries(next)) {
-        if (JSON.stringify(previous[entityId]) === JSON.stringify(newState)) continue;
+        if (statesEquivalent(previous[entityId], newState)) continue;
         const event = {
           event_type: 'state_changed',
           data: {
