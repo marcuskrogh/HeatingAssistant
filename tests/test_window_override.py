@@ -1,409 +1,284 @@
-"""SWD-262: fat HA integration removed.
+"""SWD-298: App window/door override state machine and heater clamp."""
 
-This test module exercised the removed in-process Home Assistant integration layer.
-"""
 from __future__ import annotations
 
-import pytest
-
-pytest.skip("SWD-262: fat HA integration removed", allow_module_level=True)
-
+import asyncio
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from custom_components.heating_assistant.coordinator import HeatingAssistantCoordinator
-from heatingassistant.engine.heat_sources import ElectricHeater
-
-# Builds real coordinator objects (tests/helpers stubs) — integration tier.
-pytestmark = pytest.mark.integration
+from heatingassistant.app import window_override as window_ov
+from heatingassistant.app.runtime import HeatingRuntime, publish_tag_in
+from heatingassistant.mqtt.bridge import InMemoryMqttBus
 
 
-def _make_hass(binary_states: dict[str, str]) -> SimpleNamespace:
-    hass = SimpleNamespace()
-    hass.services = SimpleNamespace(async_call=AsyncMock())
-
-    def _get_state(entity_id: str):
-        if entity_id not in binary_states:
-            return None
-        return SimpleNamespace(state=binary_states[entity_id], attributes={})
-
-    hass.states = SimpleNamespace(get=_get_state)
-    return hass
+pytestmark = pytest.mark.unit
 
 
-def _make_state_machine_coord(
-    *,
-    binary_states: dict[str, str],
-    sensors: dict[str, list[str]],
-    debounce: float = 60.0,
-    settle: float = 30.0,
-) -> HeatingAssistantCoordinator:
-    coord = object.__new__(HeatingAssistantCoordinator)
-    coord.hass = _make_hass(binary_states)
-    coord.model = SimpleNamespace(room_names=list(sensors))
-    coord._window_sensors = sensors
-    coord._window_state = {room: "closed" for room in sensors}
-    coord._window_state_since = {}
-    coord._window_open_debounce = debounce
-    coord._window_open_close_settle = settle
-    return coord
-
-
-def test_window_override_active_during_open_and_settle_only():
-    coord = _make_state_machine_coord(
-        binary_states={},
-        sensors={"living_room": ["binary_sensor.lr_window"]},
-    )
-    # Opening starts the debounce timer but the heater keeps running.
-    coord._window_state["living_room"] = "pending_open"
-    assert coord.is_window_override_active("living_room") is False
-    # Debounce elapsed: heater forced off.
-    coord._window_state["living_room"] = "open"
-    assert coord.is_window_override_active("living_room") is True
-    # Window closed but settle timer still running: heater must STAY off.
-    coord._window_state["living_room"] = "pending_closed"
-    assert coord.is_window_override_active("living_room") is True
-    # Settle elapsed: override clears, heater may run again.
-    coord._window_state["living_room"] = "closed"
-    assert coord.is_window_override_active("living_room") is False
-
-
-def test_window_state_machine_requires_debounce_before_open():
-    binary = {"binary_sensor.lr_window": "on"}
-    coord = _make_state_machine_coord(
-        binary_states=binary,
-        sensors={"living_room": ["binary_sensor.lr_window"]},
-        debounce=60.0,
-        settle=30.0,
-    )
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-    coord._update_window_state_machine(t0)
-    assert coord.get_window_state("living_room") == "pending_open"
-
-    coord._update_window_state_machine(t0 + timedelta(seconds=30))
-    assert coord.get_window_state("living_room") == "pending_open"
-
-    coord._update_window_state_machine(t0 + timedelta(seconds=61))
-    assert coord.get_window_state("living_room") == "open"
-    assert coord.is_window_override_active("living_room") is True
-
-
-def test_window_state_machine_settle_and_bounce_behavior():
-    binary = {"binary_sensor.lr_window": "on"}
-    coord = _make_state_machine_coord(
-        binary_states=binary,
-        sensors={"living_room": ["binary_sensor.lr_window"]},
-        debounce=10.0,
-        settle=20.0,
-    )
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-    coord._update_window_state_machine(t0)
-    coord._update_window_state_machine(t0 + timedelta(seconds=11))
-    assert coord.get_window_state("living_room") == "open"
-
-    # Start closing: should enter pending_closed first.
-    binary["binary_sensor.lr_window"] = "off"
-    coord._update_window_state_machine(t0 + timedelta(seconds=12))
-    assert coord.get_window_state("living_room") == "pending_closed"
-
-    # Bounce back to on while settling -> return to open.
-    binary["binary_sensor.lr_window"] = "on"
-    coord._update_window_state_machine(t0 + timedelta(seconds=18))
-    assert coord.get_window_state("living_room") == "open"
-
-    # Close for full settle duration -> closed.
-    binary["binary_sensor.lr_window"] = "off"
-    coord._update_window_state_machine(t0 + timedelta(seconds=19))
-    coord._update_window_state_machine(t0 + timedelta(seconds=40))
-    assert coord.get_window_state("living_room") == "closed"
-    assert coord.is_window_override_active("living_room") is False
-
-
-def test_window_state_machine_uses_or_for_multi_sensor_room():
-    binary = {
-        "binary_sensor.win_1": "off",
-        "binary_sensor.win_2": "on",
+def _options(**overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "instance_id": "haos",
+        "system_enabled": True,
+        "update_interval": 900,
+        "window_open_debounce": 0.05,
+        "window_open_close_settle": 0.05,
+        "window_open_q_inflation": 10.0,
+        "rooms": [
+            {
+                "name": "Living Room",
+                "setpoint": 22.0,
+                "temp_sensors": ["sensor.living_temp"],
+                "window_sensors": ["binary_sensor.lr_window"],
+                "enabled": True,
+            }
+        ],
+        "heat_sources": [
+            {
+                "name": "Living Heater",
+                "room": "Living Room",
+                "type": "electric",
+                "heater_entity": "switch.living_heater",
+                "output_tag": "living_heater",
+                "max_power": 1000.0,
+            }
+        ],
+        "bindings": [
+            {
+                "tag": "living_heater",
+                "entity_id": "switch.living_heater",
+                "direction": "out",
+            }
+        ],
     }
-    coord = _make_state_machine_coord(
-        binary_states=binary,
-        sensors={"living_room": ["binary_sensor.win_1", "binary_sensor.win_2"]},
-        debounce=0.0,
-        settle=0.0,
-    )
+    base.update(overrides)
+    return base
+
+
+def test_override_active_only_for_open_and_pending_closed() -> None:
+    states = {"living_room": "pending_open"}
+    assert window_ov.is_window_override_active(states, "living_room") is False
+    states["living_room"] = "open"
+    assert window_ov.is_window_override_active(states, "living_room") is True
+    states["living_room"] = "pending_closed"
+    assert window_ov.is_window_override_active(states, "living_room") is True
+    states["living_room"] = "closed"
+    assert window_ov.is_window_override_active(states, "living_room") is False
+
+
+def test_state_machine_requires_debounce_before_open() -> None:
+    tags = {"Living Room": ["lr_window"]}
+    tag_values = {"lr_window": True}
+    states: dict[str, str] = {"Living Room": "closed"}
+    since: dict[str, datetime] = {}
     t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    coord._update_window_state_machine(t0)
-    coord._update_window_state_machine(t0)
-    assert coord.get_window_state("living_room") == "open"
+
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0,
+        debounce_s=60.0,
+        settle_s=30.0,
+    )
+    assert states["Living Room"] == "pending_open"
+
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0 + timedelta(seconds=30),
+        debounce_s=60.0,
+        settle_s=30.0,
+    )
+    assert states["Living Room"] == "pending_open"
+
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0 + timedelta(seconds=61),
+        debounce_s=60.0,
+        settle_s=30.0,
+    )
+    assert states["Living Room"] == "open"
+    assert window_ov.is_window_override_active(states, "Living Room") is True
+
+
+def test_state_machine_settle_and_bounce() -> None:
+    tags = {"Living Room": ["lr_window"]}
+    tag_values: dict[str, Any] = {"lr_window": True}
+    states: dict[str, str] = {"Living Room": "closed"}
+    since: dict[str, datetime] = {}
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0,
+        debounce_s=10.0,
+        settle_s=20.0,
+    )
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0 + timedelta(seconds=11),
+        debounce_s=10.0,
+        settle_s=20.0,
+    )
+    assert states["Living Room"] == "open"
+
+    tag_values["lr_window"] = False
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0 + timedelta(seconds=12),
+        debounce_s=10.0,
+        settle_s=20.0,
+    )
+    assert states["Living Room"] == "pending_closed"
+
+    tag_values["lr_window"] = True
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0 + timedelta(seconds=18),
+        debounce_s=10.0,
+        settle_s=20.0,
+    )
+    assert states["Living Room"] == "open"
+
+    tag_values["lr_window"] = False
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0 + timedelta(seconds=19),
+        debounce_s=10.0,
+        settle_s=20.0,
+    )
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0 + timedelta(seconds=40),
+        debounce_s=10.0,
+        settle_s=20.0,
+    )
+    assert states["Living Room"] == "closed"
+
+
+def test_state_machine_or_for_multi_sensor() -> None:
+    tags = {"Living Room": ["win_1", "win_2"]}
+    tag_values = {"win_1": False, "win_2": True}
+    states: dict[str, str] = {"Living Room": "closed"}
+    since: dict[str, datetime] = {}
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0,
+        debounce_s=0.0,
+        settle_s=0.0,
+    )
+    window_ov.update_window_state_machine(
+        room_names=["Living Room"],
+        window_tags=tags,
+        tag_values=tag_values,
+        states=states,
+        since=since,
+        now_utc=t0,
+        debounce_s=0.0,
+        settle_s=0.0,
+    )
+    assert states["Living Room"] == "open"
 
 
 @pytest.mark.asyncio
-async def test_apply_actions_forces_switch_off_when_window_override_open():
-    coord = object.__new__(HeatingAssistantCoordinator)
-    source = ElectricHeater(
-        "heater_1", "living_room", max_power=2000.0, heater_entity="switch.lr_heater",
-    )
-    coord.heat_sources = [source]
-    coord.actions = {"heater_1": 1.0}
-    coord._room_enabled = {"living_room": True}
-    coord._schedule_disabled = {"living_room": False}
-    coord._window_state = {"living_room": "open"}
-    coord.model = SimpleNamespace(
-        rooms={"living_room": SimpleNamespace(temperature=20.0, setpoint=21.0)},
-    )
-    coord.hass = SimpleNamespace(
-        services=SimpleNamespace(async_call=AsyncMock()),
-        states=SimpleNamespace(
-            get=lambda entity_id: SimpleNamespace(state="off", attributes={})
-            if entity_id == "switch.lr_heater"
-            else None
-        ),
-    )
-    coord.controller = MagicMock()
-    coord._system_enabled = True
+async def test_runtime_debounce_clamps_heater(tmp_path: Path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
+    await runtime.start()
+    assert "Living Room" in runtime._window_tags
+    window_tag = runtime._window_tags["Living Room"][0]
 
-    await coord._apply_actions(outdoor_temp=5.0)
+    runtime.actuator_outputs["living_heater"] = 1.0
+    await publish_tag_in(runtime, window_tag, True)
+    assert runtime.get_window_state("Living Room") == "pending_open"
+    assert runtime.is_window_override_active("Living Room") is False
+    assert runtime.actuator_outputs.get("living_heater") == 1.0
 
-    calls = coord.hass.services.async_call.call_args_list
-    assert len(calls) == 1
-    assert calls[0].args[:2] == ("switch", "turn_off")
-    coord.controller.notify_applied_u.assert_called_once_with("heater_1", 0.0)
+    await asyncio.sleep(0.12)
+    assert runtime.get_window_state("Living Room") == "open"
+    assert runtime.is_window_override_active("Living Room") is True
+    assert runtime.actuator_outputs.get("living_heater") == 0.0
+
+    states = runtime.hass_states()
+    assert states["sensor.heating_assistant_living_room_window_state"]["state"] == "open"
+    await runtime.stop()
 
 
 @pytest.mark.asyncio
-async def test_push_override_resumes_closed_room_at_mpc_value_keeps_open_off():
-    """When a window-close settle timer expires between scheduled MPC solves,
-    the heater must come back on at the MPC's shadow optimum, while a room whose
-    window is still open stays clamped to 0."""
-    coord = object.__new__(HeatingAssistantCoordinator)
-    s_open = ElectricHeater(
-        "h_open", "open_room", max_power=2000.0, heater_entity="switch.h_open",
-    )
-    s_closed = ElectricHeater(
-        "h_closed", "closed_room", max_power=2000.0, heater_entity="switch.h_closed",
-    )
-    coord.heat_sources = [s_open, s_closed]
-    # Last scheduled solve clamped both override rooms to 0 in self.actions...
-    coord.actions = {"h_open": 0.0, "h_closed": 0.0}
-    # ...but the shadow optimum holds what the MPC kept planning meanwhile.
-    coord._mpc_shadow_actions = {"h_open": 0.6, "h_closed": 0.7}
-    coord._system_enabled = True
-    coord._room_enabled = {"open_room": True, "closed_room": True}
-    coord._schedule_disabled = {"open_room": False, "closed_room": False}
-    # open_room is still under override; closed_room's settle just expired.
-    coord._window_state = {"open_room": "open", "closed_room": "closed"}
+async def test_runtime_brief_open_does_not_clamp(tmp_path: Path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
+    await runtime.start()
+    window_tag = runtime._window_tags["Living Room"][0]
+    # start() already ran one control cycle; seed a known non-zero command.
+    runtime.actuator_outputs["living_heater"] = 0.8
 
-    coord._refresh_live_state = lambda: 5.0
-    applied: dict[str, float] = {}
-
-    async def _fake_apply(outdoor_temp):
-        applied.update(coord.actions)
-
-    coord._apply_actions = _fake_apply
-    coord.async_update_listeners = MagicMock()
-
-    await coord._async_push_window_override()
-
-    # Window still open -> heater stays off.
-    assert coord.actions["h_open"] == 0.0
-    # Window just closed -> resume at the MPC's planned actuation.
-    assert coord.actions["h_closed"] == pytest.approx(0.7)
-    assert applied["h_closed"] == pytest.approx(0.7)
-    coord.async_update_listeners.assert_called_once()
+    await publish_tag_in(runtime, window_tag, True)
+    assert runtime.get_window_state("Living Room") == "pending_open"
+    assert runtime.is_window_override_active("Living Room") is False
+    await publish_tag_in(runtime, window_tag, False)
+    assert runtime.get_window_state("Living Room") == "closed"
+    assert runtime.is_window_override_active("Living Room") is False
+    # Brief open must not leave the heater forced off by override.
+    assert runtime.actuator_outputs.get("living_heater") != 0.0
+    await runtime.stop()
 
 
-class _FakeHass:
-    """Minimal hass exposing binary-sensor states and a no-op task scheduler."""
-
-    def __init__(self, states: dict[str, str]):
-        self._states = states
-
-    @property
-    def states(self):
-        def _get(eid):
-            if eid not in self._states:
-                return None
-            return SimpleNamespace(state=self._states[eid], attributes={})
-
-        return SimpleNamespace(get=_get)
-
-    def async_create_task(self, coro):
-        # We only assert on state transitions here; never run the push.
-        coro.close()
+@pytest.mark.asyncio
+async def test_control_cycle_disables_sources_under_override(tmp_path: Path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
+    await runtime.start()
+    runtime._window_state["Living Room"] = "open"
+    ctx = runtime._schedule_control_context()
+    assert "Living Heater" in ctx["disabled_sources"]
+    await runtime.stop()
 
 
-def test_event_handler_reopen_during_settle_cancels_timer_and_reverts(monkeypatch):
-    """A window re-opening during the close-settle window must cancel the
-    settle timer and return the room to ``open`` (heater stays off), without
-    starting a fresh debounce timer."""
-    import custom_components.heating_assistant.coordinator as coord_mod
-
-    timers: list = []
-
-    def fake_call_later(hass, delay, cb):
-        cancel = MagicMock()
-        timers.append((delay, cb, cancel))
-        return cancel
-
-    captured: dict = {}
-
-    def fake_track(hass, ids, listener):
-        captured["listener"] = listener
-        return MagicMock()
-
-    monkeypatch.setattr(coord_mod, "async_call_later", fake_call_later)
-    monkeypatch.setattr(coord_mod, "async_track_state_change_event", fake_track)
-
-    states = {"binary_sensor.lr": "off"}
-    coord = object.__new__(HeatingAssistantCoordinator)
-    coord.hass = _FakeHass(states)
-    coord._window_sensors = {"living_room": ["binary_sensor.lr"]}
-    coord._window_state = {"living_room": "closed"}
-    coord._window_state_since = {}
-    coord._window_open_debounce = 60.0
-    coord._window_open_close_settle = 30.0
-
-    coord.setup_window_listeners()
-    listener = captured["listener"]
-
-    def fire(new_open: bool, old_open: bool):
-        states["binary_sensor.lr"] = "on" if new_open else "off"
-        listener(SimpleNamespace(data={
-            "entity_id": "binary_sensor.lr",
-            "new_state": SimpleNamespace(state="on" if new_open else "off"),
-            "old_state": SimpleNamespace(state="on" if old_open else "off"),
-        }))
-
-    # 1) Open -> pending_open with a debounce timer.
-    fire(new_open=True, old_open=False)
-    assert coord.get_window_state("living_room") == "pending_open"
-    assert len(timers) == 1 and timers[0][0] == 60.0
-
-    # 2) Debounce elapses -> open.
-    timers[0][1]()  # invoke _advance_open callback
-    assert coord.get_window_state("living_room") == "open"
-
-    # 3) Close -> pending_closed with a settle timer.
-    fire(new_open=False, old_open=True)
-    assert coord.get_window_state("living_room") == "pending_closed"
-    assert len(timers) == 2 and timers[1][0] == 30.0
-    settle_cancel = timers[1][2]
-
-    # 4) Re-open during settle -> back to open, settle timer cancelled, no new timer.
-    fire(new_open=True, old_open=False)
-    assert coord.get_window_state("living_room") == "open"
-    settle_cancel.assert_called_once()
-    assert len(timers) == 2  # no fresh debounce timer was armed
-
-
-def test_event_handler_full_multi_window_walkthrough(monkeypatch):
-    """End-to-end trace of the documented multi-window behaviour for one room
-    with two windows.  Mirrors the consistent logic table exactly."""
-    import custom_components.heating_assistant.coordinator as coord_mod
-
-    timers: list = []
-
-    def fake_call_later(hass, delay, cb):
-        rec = {"delay": delay, "cb": cb, "active": True}
-        cancel = MagicMock(side_effect=lambda: rec.update(active=False))
-        rec["cancel"] = cancel
-        timers.append(rec)
-        return cancel
-
-    captured: dict = {}
-
-    def fake_track(hass, ids, listener):
-        captured["listener"] = listener
-        return MagicMock()
-
-    monkeypatch.setattr(coord_mod, "async_call_later", fake_call_later)
-    monkeypatch.setattr(coord_mod, "async_track_state_change_event", fake_track)
-
-    W1, W2 = "binary_sensor.w1", "binary_sensor.w2"
-    states = {W1: "off", W2: "off"}
-    coord = object.__new__(HeatingAssistantCoordinator)
-    coord.hass = _FakeHass(states)
-    coord._window_sensors = {"lr": [W1, W2]}
-    coord._window_state = {"lr": "closed"}
-    coord._window_state_since = {}
-    coord._window_open_debounce = 60.0
-    coord._window_open_close_settle = 30.0
-
-    coord.setup_window_listeners()
-    listener = captured["listener"]
-
-    def fire(sensor: str, new_open: bool):
-        old = states[sensor]
-        states[sensor] = "on" if new_open else "off"
-        listener(SimpleNamespace(data={
-            "entity_id": sensor,
-            "new_state": SimpleNamespace(state=states[sensor]),
-            "old_state": SimpleNamespace(state=old),
-        }))
-
-    def active():
-        return [t for t in timers if t["active"]]
-
-    def state():
-        return coord.get_window_state("lr")
-
-    # All windows start closed.
-    assert state() == "closed"
-
-    # 1) Open W1 -> timer starts (pending_open).
-    fire(W1, True)
-    assert state() == "pending_open"
-    assert [t["delay"] for t in active()] == [60.0]
-    debounce = active()[0]
-
-    # 2) Open W2 -> timer keeps running, no reset, nothing else.
-    fire(W2, True)
-    assert state() == "pending_open"
-    assert active() == [debounce]
-
-    # 3) Close W1 (W2 still open) -> timer continues unchanged.
-    fire(W1, False)
-    assert state() == "pending_open"
-    assert active() == [debounce]
-
-    # 4) Debounce timer finishes -> open window state (heater off, MPC keeps running).
-    debounce["cb"]()
-    debounce["active"] = False  # a fired timer is no longer pending
-    assert state() == "open"
-
-    # 5) Open another window (W1) -> nothing happens, stay open.
-    fire(W1, True)
-    assert state() == "open"
-    assert active() == []
-
-    # 6) Close one of the two open windows (W2, W1 still open) -> nothing happens.
-    fire(W2, False)
-    assert state() == "open"
-    assert active() == []
-
-    # 7) Close the final open window (all closed) -> settle timer starts (pending_closed).
-    fire(W1, False)
-    assert state() == "pending_closed"
-    assert [t["delay"] for t in active()] == [30.0]
-    settle1 = active()[0]
-
-    # 8) Open a window -> settle timer stops, stay in open window state.
-    fire(W1, True)
-    assert state() == "open"
-    assert settle1["active"] is False  # settle cancelled
-    assert active() == []  # and no fresh timer armed
-
-    # 9) Close window again (all closed) -> fresh settle timer starts (pending_closed).
-    fire(W1, False)
-    assert state() == "pending_closed"
-    assert [t["delay"] for t in active()] == [30.0]
-    settle2 = active()[0]
-    assert settle2 is not settle1
-
-    # 10) Settle timer finishes -> closed window state (heater on at latest MPC actuation).
-    settle2["cb"]()
-    assert state() == "closed"
+@pytest.mark.asyncio
+async def test_push_override_resumes_shadow_mpc(tmp_path: Path) -> None:
+    runtime = HeatingRuntime(tmp_path, bus=InMemoryMqttBus(), options=_options())
+    await runtime.start()
+    runtime.actuator_outputs["living_heater"] = 0.0
+    runtime._window_state["Living Room"] = "closed"
+    runtime.control_engine.mpc_actions_by_tag = lambda: {"living_heater": 0.65}  # type: ignore[method-assign]
+    await runtime.push_window_override()
+    assert runtime.actuator_outputs["living_heater"] == pytest.approx(0.65)
+    await runtime.stop()

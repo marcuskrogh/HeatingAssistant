@@ -81,4 +81,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/implement SWD-298` — Build per this plan (same branch/PR)
+`/review-fix SWD-298` — Review and auto-fix per Workflow binding
