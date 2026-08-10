@@ -195,7 +195,19 @@ const hass = { callService() { return Promise.resolve(); } };
 const container = new DomNode('div');
 const page = renderOverview(container, rooms, state, connection, hass);
 
-assert(container.children.length === 2, 'overview must render a KPI section and a room section');
+assert(container.children.length === 3, 'overview must render system status, controller KPIs, and rooms');
+assert(
+  /SYSTEM STATUS/.test(container.children[0]?._inner || ''),
+  'first section must be SYSTEM STATUS',
+);
+assert(
+  /CONTROLLER KPI/.test(container.children[1]?._inner || ''),
+  'second section must be CONTROLLER KPIs',
+);
+assert(
+  /ROOMS/.test(container.children[2]?._inner || ''),
+  'third section must be ROOMS',
+);
 const tiles = container.querySelectorAll('.room-climate-tile');
 assert(tiles.length === 2, `overview must render one tile per room (got ${tiles.length})`);
 assert(scheduleCalls === 1, 'initial render must fetch schedules exactly once (immediate)');
