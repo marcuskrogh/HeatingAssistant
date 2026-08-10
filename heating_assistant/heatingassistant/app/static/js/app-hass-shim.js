@@ -185,11 +185,6 @@
     return text ? `?${text}` : '';
   }
 
-  function mqttStatusLabel(mqttConnected, entityCount) {
-    const mqttPart = mqttConnected ? 'MQTT ok' : 'MQTT disconnected';
-    return `API connected - ${entityCount} entities · ${mqttPart}`;
-  }
-
   function hideIngressStatusPill(statusElement) {
     if (!statusElement) return;
     statusElement.style.display = 'none';
