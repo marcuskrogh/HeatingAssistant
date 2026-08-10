@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | In Review | — | docs/agents/BUG.md | `/review-fix SWD-297` — https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
+| SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | In Review | — | docs/agents/BUG.md | review-fix CLEAN — merge https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
 | SWD-296 | Bug | [Bug] Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/588 |
 | SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | Done | — | docs/agents/PLAN-sysid-services.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
 | SWD-293 | Sub-task | Fix sysid panel ES-module imports/exports + cache bust | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
