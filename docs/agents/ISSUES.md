@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | In Review | — | docs/agents/BUG.md | review-fix CLEAN — merge https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
+| SWD-297 | Bug | [Bug] Applied / measured solar gain stuck at 0 — App hass_states hardcodes solar_gain_measured | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/590 |
 | SWD-296 | Bug | [Bug] Sysid Apply Parameters not restored — defaults on reload + panel jumps to overview | Done | — | docs/agents/BUG.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/588 |
 | SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | Done | — | docs/agents/PLAN-sysid-services.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
 | SWD-293 | Sub-task | Fix sysid panel ES-module imports/exports + cache bust | Done | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
@@ -51,6 +51,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — shipped SWD-297 via PR #590 (`6288e22`): publish applied solar_gain_measured; v2.0.29; review-fix CLEAN. Rebuild App on HAOS so DISTURBANCES Solar Gain left of NOW tracks daytime dynamics.
 - 2026-08-10 — `/ship` SWD-297: implement measured solar_gain_measured from applied solar forecast; v2.0.29; PR #590; Next `/review-fix SWD-297`.
 - 2026-08-10 — `/define` SWD-297: applied/measured solar gain stuck at 0 while forecast is correct — `hass_states` hardcodes `solar_gain_measured`; BUG `docs/agents/BUG.md`; branch `cursor/swd-297-measured-solar-gain-zero-f475`; Next `/implement SWD-297`.
 - 2026-08-10 — shipped SWD-296 via PR #588 (`6ccce63`): restore sysid Apply params + panel route; v2.0.28; review-fix CLEAN. Rebuild App on HAOS so Apply Parameters stick and the panel keeps the current page across remounts.
