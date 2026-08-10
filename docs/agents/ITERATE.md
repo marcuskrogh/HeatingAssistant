@@ -36,5 +36,5 @@ Shipped System Status slice is incomplete vs acceptance and has a few wiring/sec
 - Task: SWD-306
 - Relates: SWD-300
 - Branch: `cursor/swd-306-system-status-review-fix-c2e7`
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/596
 - Next: `/review-fix SWD-306`
