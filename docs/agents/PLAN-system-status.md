@@ -80,9 +80,11 @@
 - Task: SWD-300
 - Sub-tasks: SWD-304, SWD-302, SWD-303, SWD-301, SWD-305
 - Branch: `cursor/swd-300-system-status-c2e7`
-- PR: (draft — pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/595
 - Classification: feature
 - Workflow: feature-heavy
+- Version: **2.0.32**
 
 ## Next
-`/implement SWD-300` — Build per PLAN.md workflow binding (same branch/PR)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/595
+
