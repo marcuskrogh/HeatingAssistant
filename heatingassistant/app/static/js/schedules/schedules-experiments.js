@@ -27,7 +27,7 @@ export function renderExperimentsSection(container, room, connection, hass) {
   const expDesc = document.createElement('p');
   expDesc.className = 'tuning-section__desc';
   expDesc.style.margin = '0 0 14px';
-  expDesc.textContent = 'Override comfort schedules with test-signal excitation to capture thermal response data for identification.';
+  expDesc.textContent = 'Override comfort schedules with test-signal excitation to capture thermal response data for parameter estimation.';
   sectionWrap.appendChild(expDesc);
 
   const formContainer = document.createElement('div');

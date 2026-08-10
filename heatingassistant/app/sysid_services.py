@@ -306,7 +306,7 @@ async def handle_estimate_parameters_ml(runtime: Any, data: Mapping[str, Any]) -
 
 async def handle_run_sysid_simulation(runtime: Any, data: Mapping[str, Any]) -> dict[str, Any]:
     values = _payload(data)
-    horizon_hours = float(values.get("horizon_hours", const.DEFAULT_IDENTIFICATION_HORIZON_HOURS))
+    horizon_hours = float(values.get("horizon_hours", const.DEFAULT_PARAMETER_ESTIMATION_HORIZON_HOURS))
     dt = _dt(runtime)
     horizon_steps = max(1, int(horizon_hours * 3600.0 / dt))
     window_start = values.get("window_start")
@@ -538,7 +538,7 @@ async def handle_update_estimation_params(runtime: Any, data: Mapping[str, Any])
     for key in (
         const.CONF_SIGMA_W,
         const.CONF_SIGMA_V,
-        const.CONF_IDENTIFICATION_HORIZON_HOURS,
+        const.CONF_PARAMETER_ESTIMATION_HORIZON_HOURS,
     ):
         if key in values:
             updates[key] = float(values[key])

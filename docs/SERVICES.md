@@ -1,11 +1,11 @@
 # Services Reference
 
-> The setup, diagnostic and system-identification services Heating Assistant
+> The setup, diagnostic and parameter-estimation services Heating Assistant
 > registers. Each is callable from **Developer Tools → Actions**, automations,
 > or the bundled dashboards.
 
 These services help you verify configuration, estimate thermal parameters, run
-open-loop validation, and manage identification datasets. The authoritative
+open-loop validation, and manage parameter-estimation datasets. The authoritative
 field definitions live in
 [`custom_components/heating_assistant/services.yaml`](../custom_components/heating_assistant/services.yaml);
 this page documents the most important ones in context. For the sensors many of
@@ -77,7 +77,7 @@ The estimator uses a **continuous-discrete Extended Kalman Filter (CD-EKF)** pre
 3. The optimizer searches for the parameter set that maximizes this likelihood, subject to:
    - Physical bounds (thermal masses in [10 kJ/K, 500 MJ/K], resistances in [10 µK/W, 10 K/W], etc.)
    - Gaussian regularization shrinking parameters toward their prior (the current configured values) to prevent overfitting when data quality is poor.
-4. The service returns the optimized parameters as a persistent notification. Apply them from the panel's identification page, or with the `store_identified_parameters` service.
+4. The service returns the optimized parameters as a persistent notification. Apply them from the panel's parameter estimation page, or with the `store_identified_parameters` service.
 
 **Service data:**
 

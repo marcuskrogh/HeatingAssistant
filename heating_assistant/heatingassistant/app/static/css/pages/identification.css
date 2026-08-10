@@ -151,7 +151,7 @@
   cursor: pointer;
 }
 
-/* Heater scales table in the identification detail view */
+/* Heater scales table in the parameter-estimation detail view */
 .heater-scales-table {
   width: 100%;
   border-collapse: collapse;
@@ -214,7 +214,7 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SYSTEM IDENTIFICATION INDEX CARDS  (.sysid-index-card)
+   PARAMETER ESTIMATION INDEX CARDS  (.sysid-index-card)
    Mirrors the schedule index card layout for internal consistency.
    ═══════════════════════════════════════════════════════════════════════════ */
 

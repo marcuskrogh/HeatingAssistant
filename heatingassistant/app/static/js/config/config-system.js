@@ -21,7 +21,7 @@ function renderSystemParams(container, connection, hass) {
   connection.getModelConfig().then((cfg) => {
     const sp = (cfg && cfg.system_params) || {};
     const working = {
-      identification_history_days: sp.identification_history_days,
+      parameter_estimation_history_days: sp.parameter_estimation_history_days,
     };
 
     body.innerHTML = '';
@@ -29,15 +29,15 @@ function renderSystemParams(container, connection, hass) {
     body.appendChild(actions);
 
     const histCard = sectionCard(
-      'Identification history',
+      'Parameter estimation history',
       'Controls how much past observation data the integration keeps on disk. '
       + 'Each day of operation produces one JSONL file; files older than the '
       + 'retention window are deleted automatically once per day. '
-      + 'Longer retention means more data is available for system identification, '
+      + 'Longer retention means more data is available for parameter estimation, '
       + 'at the cost of a small amount of extra storage (roughly 1–2 MB per day).',
     );
     histCard.appendChild(paramGrid(
-      numberField(working, 'identification_history_days', 'History retention', {
+      numberField(working, 'parameter_estimation_history_days', 'History retention', {
         step: 1, unit: 'days', min: 7,
         hint: 'How many days of JSONL observation files to keep. Default: 90.',
       }),
@@ -51,8 +51,8 @@ function renderSystemParams(container, connection, hass) {
       setStatus(statusEl, 'Applying…', 'running');
       try {
         const data = {};
-        if (working.identification_history_days != null) {
-          data.identification_history_days = Math.round(Number(working.identification_history_days));
+        if (working.parameter_estimation_history_days != null) {
+          data.parameter_estimation_history_days = Math.round(Number(working.parameter_estimation_history_days));
         }
         await updateSystemParams(hass, data);
         setStatus(statusEl, 'Applied.', 'success');

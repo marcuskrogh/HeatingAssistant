@@ -114,7 +114,7 @@ globalThis.__imp = async (spec) => {
   if (spec.includes('/discovery.js')) return { discoverRooms: () => [] };
   if (spec.includes('/pages/overview.js')) return { renderOverview: stub('overview') };
   if (spec.includes('/pages/room-detail.js')) return { renderRoomDetail: stub('room') };
-  if (spec.includes('/pages/system-identification.js')) return { renderSystemIdentification: stub('ident') };
+  if (spec.includes('/pages/parameter-estimation.js')) return { renderParameterEstimation: stub('parameter-estimation') };
   if (spec.includes('/pages/tuning-controller.js')) return { renderControllerTuning: stub('tuning') };
   if (spec.includes('/pages/schedules.js')) return { renderSchedules: stub('schedules') };
   if (spec.includes('/pages/configuration.js')) return { renderConfiguration: stub('config') };

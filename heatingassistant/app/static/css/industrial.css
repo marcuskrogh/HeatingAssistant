@@ -1081,7 +1081,7 @@
   color: var(--text-secondary);
 }
 
-/* Page stylesheets (tuning, identification, schedules, climate-card,
+/* Page stylesheets (tuning, parameter-estimation, schedules, climate-card,
    configuration) are linked explicitly from industrial-dashboard.js.  Avoid
    @import here — it is unreliable inside the panel shadow root on mobile. */
 

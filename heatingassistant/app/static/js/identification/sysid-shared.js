@@ -1,4 +1,4 @@
-// Shared constants and helpers for system identification pages.
+// Shared constants and helpers for parameter estimation pages.
 
 export const DEFAULTS = {
   sigma_w: 0.1,

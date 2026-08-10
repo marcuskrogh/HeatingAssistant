@@ -16,7 +16,7 @@ import {
 } from '../kpi-engine.js?v=120';
 import {
   formatEnergy, formatPercent, formatPowerKw, formatNumber,
-  entityValue,
+  entityValue, entityAttr,
 } from '../utils.js?v=120';
 
 export function renderOverview(container, rooms, state, connection, hass) {
@@ -24,19 +24,27 @@ export function renderOverview(container, rooms, state, connection, hass) {
 
   const kpiSection = document.createElement('div');
   kpiSection.innerHTML = '<div class="section-header">SYSTEM STATUS</div>';
+  const systemGrid = document.createElement('div');
+  systemGrid.className = 'grid-kpi';
+
+  const systemGauges = buildSystemStatusGauges(state);
+  systemGauges.forEach((g) => systemGrid.appendChild(g.element));
+  kpiSection.appendChild(systemGrid);
+  container.appendChild(kpiSection);
+
+  const controllerSection = document.createElement('div');
+  controllerSection.innerHTML = '<div class="section-header">CONTROLLER KPIS</div>';
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'grid-kpi';
 
-  const gauges = buildGauges(state, rooms, connection);
+  const gauges = buildControllerGauges(state, rooms, connection);
   gauges.forEach((g) => kpiGrid.appendChild(g.element));
 
-  // MPC load and the next-control countdown are operational/diagnostic, so they
-  // come last — after the metrics that describe the building's climate state.
   const countdown = createCountdown(state, false);
   kpiGrid.appendChild(countdown.element);
 
-  kpiSection.appendChild(kpiGrid);
-  container.appendChild(kpiSection);
+  controllerSection.appendChild(kpiGrid);
+  container.appendChild(controllerSection);
 
   const roomSection = document.createElement('div');
   roomSection.innerHTML = '<div class="section-header">ROOMS</div>';
@@ -100,6 +108,7 @@ export function renderOverview(container, rooms, state, connection, hass) {
   return {
     update(newState) {
       latestState = newState;
+      systemGauges.forEach((g) => g.updater(newState));
       gauges.forEach((g) => g.updater(newState));
       tiles.forEach((t) => t.tile.update(newState, hass, undefined, latestExperiments));
       updateCountdown(countdown, newState);
@@ -117,7 +126,72 @@ export function renderOverview(container, rooms, state, connection, hass) {
   };
 }
 
-function buildGauges(state, rooms, connection) {
+function buildSystemStatusGauges(state) {
+  const gauges = [];
+  const quality = systemQualityFromState(state);
+  const healthGauge = createGauge({
+    value: qualityToGaugeValue(quality),
+    min: 0,
+    max: 100,
+    label: 'OVERALL HEALTH',
+    format: () => qualityLabel(quality),
+    severity: { good: 80, warning: 40 },
+  });
+  gauges.push({
+    element: healthGauge,
+    updater: (s) => {
+      const q = systemQualityFromState(s);
+      updateGauge(healthGauge, {
+        value: qualityToGaugeValue(q),
+        min: 0,
+        max: 100,
+        format: () => qualityLabel(q),
+        severity: { good: 80, warning: 40 },
+      });
+    },
+  });
+
+  const mpcGauge = createGauge({
+    value: mpcLoadPercent(state) ?? 0,
+    min: 0,
+    max: 100,
+    label: 'MPC LOAD',
+    format: (v) => `${formatNumber(v, 0)}%`,
+    severity: KPI_SEVERITY.mpcLoad,
+  });
+  gauges.push({
+    element: mpcGauge,
+    updater: (s) => updateGauge(mpcGauge, {
+      value: mpcLoadPercent(s) ?? 0, min: 0, max: 100,
+      format: (v) => `${formatNumber(v, 0)}%`,
+      severity: KPI_SEVERITY.mpcLoad,
+    }),
+  });
+
+  return gauges;
+}
+
+function systemQualityFromState(state) {
+  const q = entityAttr(state, 'sensor.heating_assistant_system_summary', 'system_quality');
+  if (q === 'healthy' || q === 'warning' || q === 'error') return q;
+  const mqtt = entityAttr(state, 'sensor.heating_assistant_system_summary', 'mqtt_connected');
+  if (mqtt === false) return 'error';
+  return 'healthy';
+}
+
+function qualityLabel(q) {
+  if (q === 'warning') return 'WARNING';
+  if (q === 'error') return 'ERROR';
+  return 'HEALTHY';
+}
+
+function qualityToGaugeValue(q) {
+  if (q === 'error') return 0;
+  if (q === 'warning') return 50;
+  return 100;
+}
+
+function buildControllerGauges(state, rooms, connection) {
   const gauges = [];
 
   // ── Comfort index ────────────────────────────────────────────────────────────
@@ -257,24 +331,6 @@ function buildGauges(state, rooms, connection) {
         severity: KPI_SEVERITY.modelFit,
       });
     },
-  });
-
-  // ── MPC load ─────────────────────────────────────────────────────────────────
-  const mpcGauge = createGauge({
-    value: mpcLoadPercent(state),
-    min: 0,
-    max: 100,
-    label: 'MPC LOAD',
-    format: formatPercent,
-    severity: KPI_SEVERITY.mpcLoad,
-  });
-  gauges.push({
-    element: mpcGauge,
-    updater: (s) => updateGauge(mpcGauge, {
-      value: mpcLoadPercent(s), min: 0, max: 100,
-      format: formatPercent,
-      severity: KPI_SEVERITY.mpcLoad,
-    }),
   });
 
   return gauges;

@@ -18,6 +18,7 @@ from typing import Any
 
 from heatingassistant.app.forecast_payload import build_app_forecast_payload
 from heatingassistant.app.disturbance_forecasts import build_mpc_disturbance_inputs
+from heatingassistant.app.system_health import evaluate_system_health
 from heatingassistant.app.actuation import (
     climate_write_payload,
     coerce_climate_attrs,
@@ -155,6 +156,7 @@ class HeatingRuntime:
         self._ha_entity_catalog: list[dict[str, str]] = []
         self._subscriptions: list[Unsubscribe] = []
         self._started = False
+        self._started_monotonic: float | None = None
         self._history: dict[str, deque[dict[str, Any]]] = {}
         self._history_last_ts: float = 0.0
         self._history_buffer: deque[dict[str, Any]] = deque(
@@ -202,8 +204,8 @@ class HeatingRuntime:
         )
         id_days = int(
             self.options.get(
-                const.CONF_IDENTIFICATION_HISTORY_DAYS,
-                const.DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+                const.CONF_PARAMETER_ESTIMATION_HISTORY_DAYS,
+                const.DEFAULT_PARAMETER_ESTIMATION_HISTORY_DAYS,
             )
         )
         self.id_history_store = IdentificationHistoryStore(
@@ -245,6 +247,7 @@ class HeatingRuntime:
         if callable(add_connect):
             add_connect(self._on_mqtt_connected)
         self._started = True
+        self._started_monotonic = time.monotonic()
         self._start_mqtt_discovery_retry()
         self._start_background_ticker()
         await self._publish_startup_metadata()
@@ -910,10 +913,10 @@ class HeatingRuntime:
             "parameter_history": parameter_history,
             "sigma_w": float(self.options.get(const.CONF_SIGMA_W, const.DEFAULT_SIGMA_W)),
             "sigma_v": float(self.options.get(const.CONF_SIGMA_V, const.DEFAULT_SIGMA_V)),
-            "identification_horizon_hours": float(
+            "parameter_estimation_horizon_hours": float(
                 self.options.get(
-                    const.CONF_IDENTIFICATION_HORIZON_HOURS,
-                    const.DEFAULT_IDENTIFICATION_HORIZON_HOURS,
+                    const.CONF_PARAMETER_ESTIMATION_HORIZON_HOURS,
+                    const.DEFAULT_PARAMETER_ESTIMATION_HORIZON_HOURS,
                 )
             ),
             "current_heater_scales": current_heater_scales,
@@ -957,10 +960,10 @@ class HeatingRuntime:
             "system": system,
             "ui_settings": self.ui_settings(),
             "system_params": {
-                const.CONF_IDENTIFICATION_HISTORY_DAYS: int(
+                const.CONF_PARAMETER_ESTIMATION_HISTORY_DAYS: int(
                     self.options.get(
-                        const.CONF_IDENTIFICATION_HISTORY_DAYS,
-                        const.DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+                        const.CONF_PARAMETER_ESTIMATION_HISTORY_DAYS,
+                        const.DEFAULT_PARAMETER_ESTIMATION_HISTORY_DAYS,
                     )
                 )
             },
@@ -1278,6 +1281,7 @@ class HeatingRuntime:
             name = room.get("name")
             if isinstance(name, str) and name:
                 total_power += self._room_power(name)
+        health = self.system_health()
         states["sensor.heating_assistant_system_summary"] = self._ha_state(
             "sensor.heating_assistant_system_summary",
             str(total_power),
@@ -1288,9 +1292,15 @@ class HeatingRuntime:
                 "comfort_index_pct": None,
                 "total_heating_power": total_power,
                 "mqtt_connected": self._mqtt_connected(),
+                "system_quality": health["quality"],
+                "issue_summary": health.get("issue_summary"),
+                "uptime_s": health.get("uptime_s"),
+                "entity_catalog_count": health.get("entity_catalog_count"),
+                "bindings_count": health.get("bindings_count"),
                 "has_heat_pump": any(
                     str(source.get("type", "")).lower() == "heat_pump"
                     for source in self._heat_sources()
+                    if isinstance(source, Mapping)
                 ),
             },
             now,
@@ -1548,6 +1558,7 @@ class HeatingRuntime:
     def status(self) -> dict[str, Any]:
         """Expose a compact health/status snapshot for HTTP and MQTT."""
 
+        health = self.system_health()
         return {
             "instance_id": self.instance_id,
             "mqtt_broker": self.mqtt_broker,
@@ -1573,8 +1584,37 @@ class HeatingRuntime:
             ],
             "started": self._started,
             "status": "ok",
+            "quality": health["quality"],
+            "issue_summary": health.get("issue_summary"),
+            "system_health": health,
             "ts": time.time(),
         }
+
+    def system_health(self) -> dict[str, Any]:
+        """Compute overall SystemQuality and module breakdown for Ingress."""
+
+        uptime_s = None
+        if self._started and self._started_monotonic is not None:
+            uptime_s = max(0.0, time.monotonic() - self._started_monotonic)
+        update_interval = float(
+            self.options.get("update_interval", const.DEFAULT_UPDATE_INTERVAL)
+        )
+        return evaluate_system_health(
+            mqtt_connected=self._mqtt_connected(),
+            mqtt_last_error=self._mqtt_last_error(),
+            mqtt_discovery_error=get_last_discovery_error(),
+            api_reachable=True,
+            tag_statuses=self.tag_statuses,
+            control_mode=self.control_engine.mode,
+            fallback_reason=self.control_engine.fallback_reason,
+            bindings_count=len(self.bindings),
+            entity_catalog_count=len(self._ha_entity_catalog),
+            started=self._started,
+            uptime_s=uptime_s,
+            last_control_duration_s=self._last_control_duration_s,
+            last_control_ts=self._last_control_ts,
+            update_interval_s=update_interval,
+        )
 
     def _mqtt_connected(self) -> bool:
         mqtt_connected = getattr(self.bus, "connected", None)
@@ -2815,8 +2855,8 @@ class HeatingRuntime:
         )
         id_days = int(
             self.options.get(
-                const.CONF_IDENTIFICATION_HISTORY_DAYS,
-                const.DEFAULT_IDENTIFICATION_HISTORY_DAYS,
+                const.CONF_PARAMETER_ESTIMATION_HISTORY_DAYS,
+                const.DEFAULT_PARAMETER_ESTIMATION_HISTORY_DAYS,
             )
         )
         self.id_history_store.update_retention_days(id_days)

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from .const import (
     CONF_ESTIMATED_PARAMS,
     CONF_UPDATE_INTERVAL,
-    DEFAULT_IDENTIFICATION_HORIZON_HOURS,
+    DEFAULT_PARAMETER_ESTIMATION_HORIZON_HOURS,
     DEFAULT_UPDATE_INTERVAL,
     ESTIMATION_HISTORY_SIZE,
 )
@@ -531,7 +531,7 @@ async def async_estimate_parameters_ml(
     eff_horizon_hours = (
         float(horizon_hours)
         if horizon_hours is not None
-        else float(options.get("identification_horizon_hours", DEFAULT_IDENTIFICATION_HORIZON_HOURS))
+        else float(options.get("parameter_estimation_horizon_hours", DEFAULT_PARAMETER_ESTIMATION_HORIZON_HOURS))
     )
     if history_override is not None:
         selected_history = list(history_override)
