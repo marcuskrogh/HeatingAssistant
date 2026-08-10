@@ -62,11 +62,11 @@
 - User report: Overview MODEL FIT `—`; System Identification Living Room **NO DATA** with R²/RMSE/Estimated dashes; API connected · MQTT ok
 
 ## Acceptance criteria
-1. With ≥2 aligned `y`/`y_pred` samples for a room in App ID history, `hass_states()[sensor.heating_assistant_<slug>_model_fit_quality]` has a numeric R² state and `rmse` attribute.
-2. Overview **MODEL FIT** gauge shows GOOD / ACCEPTABLE / POOR (not `—`) when any room has valid fit.
-3. System Identification index card shows numeric **R²** and **RMSE**, fit badge (not **NO DATA**), and **Estimated** Yes/No from `parameter_confidence.is_estimated`.
-4. With insufficient aligned history, sensors stay `unknown` / insufficient-data and the panel correctly keeps empty placeholders (no crash).
-5. Regression tests cover sensor publication + fit helper port; version **2.0.31** + App package synced.
+1. [x] With ≥2 aligned `y`/`y_pred` samples for a room in App ID history, `hass_states()[sensor.heating_assistant_<slug>_model_fit_quality]` has a numeric R² state and `rmse` attribute.
+2. [x] Overview **MODEL FIT** gauge shows GOOD / ACCEPTABLE / POOR (not `—`) when any room has valid fit.
+3. [x] System Identification index card shows numeric **R²** and **RMSE**, fit badge (not **NO DATA**), and **Estimated** Yes/No from `parameter_confidence.is_estimated`.
+4. [x] With insufficient aligned history, sensors stay `unknown` / insufficient-data and the panel correctly keeps empty placeholders (no crash).
+5. [x] Regression tests cover sensor publication + fit helper port; version **2.0.31** + App package synced.
 
 ## Work packages
 1. **Publish identification fit KPIs** — port fit/confidence helpers into engine; synthesize `*_model_fit_quality` + `*_parameter_confidence` in `hass_states()`; App regressions; version **2.0.31**.
