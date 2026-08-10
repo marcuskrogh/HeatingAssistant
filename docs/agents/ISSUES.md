@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | To Do | — | docs/agents/PLAN-sysid-services.md | `/implement SWD-289` — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
+| SWD-289 | Task | [Define] Restore system identification page — end App sysid no-ops + fix panel chart imports | In Review | — | docs/agents/PLAN-sysid-services.md | `/ship SWD-289` closeout — https://github.com/marcuskrogh/HeatingAssistant/pull/586 |
 | SWD-293 | Sub-task | Fix sysid panel ES-module imports/exports + cache bust | To Do | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
 | SWD-292 | Sub-task | Restore engine sysid modules deleted in SWD-262 | To Do | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
 | SWD-294 | Sub-task | Wire P0 compute services + publish sysid/open-loop sensors | To Do | SWD-289 | docs/agents/PLAN-sysid-services.md | — |
@@ -49,6 +49,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+- 2026-08-10 — SWD-289 review-fix CLEAN on PR #586; panel imports + App sysid ownership; v2.0.27; shipping closeout.
+- 2026-08-10 — `/ship` SWD-289: implement → review-fix → closeout for system identification restore.
 - 2026-08-10 — `/define` SWD-289: restore system identification page (panel import gaps + end App sysid no-ops deferred from SWD-281); PLAN `docs/agents/PLAN-sysid-services.md`; Sub-tasks SWD-293/292/294/290/295/291; branch `cursor/swd-289-sysid-services-851a`; Next `/implement SWD-289`.
 - 2026-08-10 — shipped SWD-288 via PR #584 (`a084c5a`): climate setpoint persistence; v2.0.26; review-fix CLEAN. Rebuild App on HAOS so TARGET / COMFORT BAND stick on Overview and room view.
 - 2026-08-10 — SWD-288 review-fix CLEAN on PR #584; shipping closeout (v2.0.26).

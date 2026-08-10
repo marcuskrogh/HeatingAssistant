@@ -69,5 +69,10 @@
 - Branch: `cursor/swd-289-sysid-services-851a` (maps to `swd-289-sysid-services`)
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/586
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/586
+- Version: **2.0.27**
+- review-fix: CLEAN
+
 ## Next
-`/implement SWD-289` — Build per this plan (same branch/PR)
+Done — rebuild App on HAOS to v2.0.27; confirm EKF reconstruction, open-loop simulation, and automatic identification on the System Identification page.
