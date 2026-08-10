@@ -114,8 +114,9 @@ else
   ln -s "../.agents/skills" ".cursor/skills"
 fi
 
-# Mirror into agent home dirs so Cursor Cloud injects skills into the
-# available-skills list (project trees alone are not always discovered).
+# Mirror into agent home dirs (Cursor / Agent Skills user-level paths).
+# Project trees are the primary install; home mirrors keep local harnesses
+# and Cloud VMs aligned after sync.
 mirror_home() {
   local dest="$1"
   mkdir -p "$dest"
