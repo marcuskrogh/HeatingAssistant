@@ -50,7 +50,7 @@
 ## Tracker
 - Task: [SWD-297](https://marcusknielsen.atlassian.net/browse/SWD-297)
 - Branch: `cursor/swd-297-measured-solar-gain-zero-f475`
-- PR: —
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/590
 
 ## Next
 `/implement SWD-297` → `/review-fix` → closeout
