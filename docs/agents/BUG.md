@@ -39,5 +39,10 @@
 - Branch: `cursor/swd-288-climate-setpoint-reset-d3ac`
 - PR: https://github.com/marcuskrogh/HeatingAssistant/pull/584
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/584
+- Version: **2.0.26**
+- review-fix: CLEAN
+
 ## Next
-In Review — `/review-fix SWD-288`.
+Done — rebuild App on HAOS to v2.0.26; confirm TARGET and COMFORT BAND stick on Overview and room view after debounce.
