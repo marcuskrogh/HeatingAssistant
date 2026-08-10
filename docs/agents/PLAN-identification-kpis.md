@@ -86,5 +86,10 @@
 - Classification: bug
 - Workflow: fix-fast
 
+## Shipped
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/593
+- Version: **2.0.31**
+- review-fix: CLEAN
+
 ## Next
-`/review-fix SWD-299` — Review and auto-fix per Workflow binding
+Done — rebuild App on HAOS to v2.0.31; confirm Overview MODEL FIT and System Identification R²/RMSE/Estimated populate when ID history has aligned predictions.
