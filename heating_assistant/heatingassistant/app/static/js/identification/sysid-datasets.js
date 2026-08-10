@@ -1,4 +1,6 @@
-import { deleteDataset, createDataset } from '../ha-services.js?v=118';
+import { deleteDataset, createDataset } from '../ha-services.js?v=119';
+import { createCollapsible } from '../components/collapsible.js?v=119';
+import { makeDataset } from '../components/time-series-chart.js?v=119';
 
 function _fmtTs(ts) {
   if (ts == null) return '—';
@@ -322,7 +324,7 @@ export function setupDatasetsAndExperiments(ctx) {
   };
 }
 
-function formatMass(val) {
+export function formatMass(val) {
   const num = parseFloat(val);
   if (isNaN(num)) return '—';
   if (num >= 1e6) return (num / 1e6).toFixed(2) + ' MJ/K';
@@ -331,7 +333,7 @@ function formatMass(val) {
 }
 
 
-function buildEkfChart(chart, simulation) {
+export function buildEkfChart(chart, simulation) {
   if (!simulation || simulation.length === 0) {
     chart.render([], {});
     return;
@@ -397,7 +399,7 @@ function buildEkfChart(chart, simulation) {
   chart.render(datasets, { yMin, yMax });
 }
 
-function buildOlChart(chart, simulation) {
+export function buildOlChart(chart, simulation) {
   if (!simulation || simulation.length === 0) {
     chart.render([], {});
     return;

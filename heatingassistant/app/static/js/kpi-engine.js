@@ -9,7 +9,7 @@ import {
   systemEntity,
   modelFitLabel,
   MAX_SOLVE_TIME_S,
-} from './utils.js?v=118';
+} from './utils.js?v=119';
 
 export const CONFIG_ENTITY = 'sensor.heating_assistant_controller_config';
 

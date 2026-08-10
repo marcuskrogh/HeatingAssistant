@@ -1,11 +1,11 @@
-import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=118';
-import { createGauge, updateGauge } from '../components/gauge.js?v=118';
+import { TimeSeriesChart, historyToDataPoints, historyToEnabledPoints, forecastToDataPoints, forecastToEnabledPoints, loadChartJs, sensorHistoriesToMinMaxSpan } from '../components/time-series-chart.js?v=119';
+import { createGauge, updateGauge } from '../components/gauge.js?v=119';
 import { createClimateCard } from '../components/climate-card.js?v=120';
-import { createCountdown } from '../components/countdown.js?v=118';
+import { createCountdown } from '../components/countdown.js?v=119';
 import { createScheduleOverview } from '../components/schedule-overview.js?v=119';
 import { getRoomScheduleData } from '../schedule-utils.js?v=119';
 import { resolveRoomScheduleData, getRoomComfortOffset, patchStateComfortOffset } from '../schedules/schedules-shared.js?v=119';
-import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=118';
+import { findActiveExperiment, experimentBands } from '../experiment-utils.js?v=119';
 import {
   KPI_SEVERITY,
   isRoomActive,
@@ -14,8 +14,8 @@ import {
   heatLossGaugeMax,
   solarGainGaugeMax,
   roomModelFit,
-} from '../kpi-engine.js?v=118';
-import { setPanelHash } from '../panel-hash.js?v=118';
+} from '../kpi-engine.js?v=119';
+import { setPanelHash } from '../panel-hash.js?v=119';
 import {
   setRoomComfortOffset,
   setRoomEnabled,
@@ -25,7 +25,7 @@ import {
   formatPower, formatPowerKw, formatPrice,
   entityValue, entityAttr, systemEntity,
   wattsToKw, wattsToKwPoints,
-} from '../utils.js?v=118';
+} from '../utils.js?v=119';
 import {
   buildTemperatureChart,
   buildPowerChart,
@@ -33,7 +33,7 @@ import {
   extendDatasetToNow,
   computeYLimits,
   updatePowerChartBounds,
-} from '../charts/room-charts.js?v=118';
+} from '../charts/room-charts.js?v=119';
 
 // Fallback power-gauge span used until the room forecast supplies the actual
 // heating/cooling capacity for this room.

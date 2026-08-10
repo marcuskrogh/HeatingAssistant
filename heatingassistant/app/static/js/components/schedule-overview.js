@@ -13,7 +13,7 @@ import {
 } from '../schedule-utils.js?v=119';
 import {
   experimentRowHtml, findNextScheduledExperiment,
-} from '../experiment-utils.js?v=118';
+} from '../experiment-utils.js?v=119';
 
 function render(card, schedData, experiments = []) {
   const periods = schedData?.periods || [];
