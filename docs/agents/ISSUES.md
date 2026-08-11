@@ -4,7 +4,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-311 | Task | [Refine] App-first README and docs cleanup | In Review | — | docs/agents/PLAN-app-first-docs.md | Done — merging PR #598 |
+| SWD-311 | Task | [Refine] App-first README and docs cleanup | Done | — | docs/agents/PLAN-app-first-docs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/598 (`ebb8aae`) |
 | SWD-312 | Sub-task | Consumer README rewrite + App sync | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
 | SWD-313 | Sub-task | Consumer docs update/delete | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
 | SWD-314 | Sub-task | Maintainer docs + cleanup + remove HACS | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
@@ -67,6 +67,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+
+- 2026-08-11 — shipped SWD-311 via PR #598 (`ebb8aae`): App-first README + docs cleanup; HACS removed; review-fix CLEAN.
 
 - 2026-08-11 — SWD-311 review-fix CLEAN (focused): THEORY App paths, App README `../docs/` links, ISSUES archived artifacts; Next `/ship SWD-311`.
 - 2026-08-11 — `/ship` SWD-311: App-first README + docs cleanup; remove HACS; purge leftover roadmaps; branch `cursor/swd-311-app-first-docs-75fa`.
