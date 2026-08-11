@@ -3,7 +3,7 @@ Performance benchmarks for the active control system and parameter estimation.
 
 Measures wall-clock run-times of:
   • HeatingMPCController.compute()  — EKF predict-update + NLP solve
-  • KalmanMLEstimator.estimate()    — multi-start IPOPT ML estimation
+  • KalmanMLEstimator.estimate()    — multi-start SciPy L-BFGS-B ML estimation
 
 Three representative house configurations are tested:
   1. Studio apartment  — 1 room,  1 electric heater,  MPC horizon = 6
@@ -65,8 +65,8 @@ _BENCHMARKS_FILE = os.path.join(_REPO_ROOT, "BENCHMARKS.md")
 # cases.  The 5-room case takes ~1.1s per call, so 15 reps ≈ 17s total.
 # Set FAST_TESTS=1 (see tests/conftest.py) to use fewer reps in quick passes.
 _MPC_REPS = 3 if os.environ.get("FAST_TESTS") == "1" else 15
-# Parameter estimation is slow (multi-start IPOPT with a Kalman filter
-# objective); a single timed call is sufficient to track regressions.
+# Parameter estimation is slow (multi-start SciPy L-BFGS-B with a Kalman
+# filter objective); a single timed call is sufficient to track regressions.
 _ESTIM_REPS = 1
 
 
@@ -105,15 +105,6 @@ def _read_previous_baseline(path: str) -> Dict[Tuple[str, str, str], float]:
 
 
 _PREVIOUS_BASELINE = _read_previous_baseline(_BENCHMARKS_FILE)
-
-
-def _ipopt_available() -> bool:
-    """Return True when cyipopt is importable in the current environment."""
-    try:
-        import cyipopt  # noqa: F401
-    except Exception:
-        return False
-    return True
 
 
 def _format_comparison_rows(results: List[dict]) -> List[str]:
@@ -442,15 +433,15 @@ class TestParameterEstimationPerformance:
     """Benchmark KalmanMLEstimator.estimate() for different house sizes.
 
     These tests are marked ``slow`` because each run involves multi-start
-    IPOPT optimisation with a Kalman filter objective, which can take tens
-    of seconds.  Skip them in quick CI passes with ``-m "not slow"``.
+    SciPy L-BFGS-B optimisation with a Kalman filter objective, which can take
+    tens of seconds.  Skip them in quick CI passes with ``-m "not slow"``.
     """
 
     _N_HISTORY = MIN_HISTORY_STEPS + 30  # 60 steps of synthetic data
 
     @pytest.mark.slow
     def test_studio_1room(self):
-        """1-room studio: Kalman ML estimation (IPOPT + analytic gradient, 3 params)."""
+        """1-room studio: Kalman ML estimation (L-BFGS-B + analytic gradient, 3 params)."""
         rooms_cfg = [
             Room(name="living_room", thermal_mass=4_000_000.0, r_external=0.05,
                  temperature=18.0, setpoint=21.0)
@@ -467,8 +458,8 @@ class TestParameterEstimationPerformance:
         _record(
             "studio-1room",
             "KalmanMLEstimator.estimate",
-            "IPOPT",
-            "IPOPT",
+            "L-BFGS-B",
+            "L-BFGS-B",
             _ESTIM_REPS,
             mean_ms,
             median_ms,
@@ -483,7 +474,7 @@ class TestParameterEstimationPerformance:
 
     @pytest.mark.slow
     def test_two_bedroom_2room(self):
-        """2-room flat: Kalman ML estimation (IPOPT + analytic gradient, ~7 params)."""
+        """2-room flat: Kalman ML estimation (L-BFGS-B + analytic gradient, ~7 params)."""
         rooms_cfg = [
             Room(name="living_room", thermal_mass=5_000_000.0, r_external=0.05,
                  connections=[RoomConnection("bedroom", 0.3)],
@@ -501,23 +492,21 @@ class TestParameterEstimationPerformance:
             estimator.estimate(history)
 
         mean_ms, median_ms, p95_ms = _time_it(run, _ESTIM_REPS)
-        ipopt_available = _ipopt_available()
-        solver_active = "IPOPT" if ipopt_available else "SLSQP"
         _record(
             "two-bedroom-2room",
             "KalmanMLEstimator.estimate",
-            "IPOPT",
-            solver_active,
+            "L-BFGS-B",
+            "L-BFGS-B",
             _ESTIM_REPS,
             mean_ms,
             median_ms,
             p95_ms,
         )
 
-        threshold_ms = 120_000 if ipopt_available else 180_000
+        threshold_ms = 180_000
         assert median_ms < threshold_ms, (
             f"KalmanMLEstimator.estimate median {median_ms:.0f}ms exceeds "
-            f"{threshold_ms:,}ms for two-bedroom-2room ({solver_active})"
+            f"{threshold_ms:,}ms for two-bedroom-2room (L-BFGS-B)"
         )
 
     @pytest.mark.slow
@@ -547,8 +536,8 @@ class TestParameterEstimationPerformance:
         _record(
             "full-house-5room",
             "KalmanMLEstimator.estimate",
-            "IPOPT",
-            "IPOPT",
+            "L-BFGS-B",
+            "L-BFGS-B",
             _ESTIM_REPS,
             mean_ms,
             median_ms,
@@ -612,7 +601,7 @@ def _write_benchmarks_md() -> None:
         "",
         "One control step consists of:",
         "1. CD-EKF predict-update (integrate nonlinear drift + Riccati ODE, then Kalman gain)",
-        "2. CDTrackingOCP NLP solve via configured backend (IPOPT default, deterministic fallback to SLSQP)",
+        "2. CDTrackingOCP NLP solve via configured backend (QP default)",
         "",
         "| Scenario               | Solver req | Solver active  |  mean (ms) | median (ms) | p95 (ms) |   n |",
         "|------------------------|------------|----------------|------------|-------------|----------|-----|",
@@ -633,8 +622,8 @@ def _write_benchmarks_md() -> None:
         "",
         "One estimation run consists of:",
         "1. Identifiability analysis over the history buffer",
-        "2. Multi-start IPOPT minimisation of negative Kalman prediction-error",
-        "   decomposition log-likelihood with analytical gradients (3 restarts)",
+        "2. Multi-start SciPy L-BFGS-B minimisation of open-loop simulation MSE",
+        "   with analytical gradients (physically-anchored multistart)",
         "",
         f"History buffer: {MIN_HISTORY_STEPS + 30} steps (1-minute samples) of synthetic data.",
         "",

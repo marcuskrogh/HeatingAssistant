@@ -71,14 +71,10 @@ surface and load the **real** source files. Notable:
 New harnesses dropped into `tests/` matching `panel_*.harness.mjs` are picked
 up by CI automatically. Keep each under ~2 s.
 
-## Solver backend visibility
+## Parameter estimation solver
 
-`tests/test_solver_backend.py` asserts the IPOPT backend actually engages when
-`cyipopt` is installed, and **skips loudly** when it isn't — in that case every
-estimation test (including the slow-tier "IPOPT" regressions) runs on the
-scipy L-BFGS-B fallback. Watch for that skip in CI output before trusting
-IPOPT-specific conclusions. `cyipopt` ships no wheels, so CI currently runs
-the fallback path.
+Parameter estimation uses SciPy L-BFGS-B via `ScipyNLPBackend` only (no
+IPOPT / `cyipopt` path).
 
 ## Shared helpers
 
