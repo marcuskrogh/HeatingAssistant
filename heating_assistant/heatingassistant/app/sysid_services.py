@@ -160,7 +160,26 @@ async def resolve_history(
         return records
 
     if horizon_hours is not None:
-        return select_recent_window(buffer, float(horizon_hours) * 3600.0, _dt(runtime))
+        # Option A (SWD-320): reuse the window merge path so durable JSONL is
+        # always consulted — same coverage as an equivalent custom window.
+        horizon = float(horizon_hours)
+        if horizon <= 0:
+            return buffer
+        if buffer:
+            try:
+                end_ts = float(buffer[-1].get("timestamp") or 0.0)
+            except (TypeError, ValueError):
+                end_ts = 0.0
+            if end_ts <= 0:
+                end_ts = time.time()
+        else:
+            end_ts = time.time()
+        start_ts = end_ts - horizon * 3600.0
+        return await resolve_history(
+            runtime,
+            window_start=start_ts,
+            window_end=end_ts,
+        )
 
     return buffer
 

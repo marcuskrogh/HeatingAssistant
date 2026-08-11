@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -56,7 +55,7 @@ async def test_resolve_history_horizon_merges_jsonl_when_buffer_short():
 
 
 @pytest.mark.asyncio
-async def test_resolve_history_horizon_matches_equivalent_window(tmp_path: Path):
+async def test_resolve_history_horizon_matches_equivalent_window():
     """Horizon coverage matches an explicit [end−H, end] window resolve."""
 
     end = 20_000.0
@@ -80,6 +79,32 @@ async def test_resolve_history_horizon_matches_equivalent_window(tmp_path: Path)
     )
 
     assert [r["timestamp"] for r in horizon] == [r["timestamp"] for r in window]
+
+
+@pytest.mark.asyncio
+async def test_resolve_history_horizon_empty_buffer_queries_jsonl(monkeypatch):
+    """Empty buffer still merges JSONL using now as the horizon end."""
+
+    now = 50_000.0
+    monkeypatch.setattr(sysid_services.time, "time", lambda: now)
+    stored = [
+        _record(now - 2 * 3600.0, y=18.0),
+        _record(now - 900.0, y=19.0),
+    ]
+    store = SimpleNamespace(async_query_range=AsyncMock(return_value=stored))
+    runtime = SimpleNamespace(
+        _history_buffer=[],
+        id_history_store=store,
+        options={"update_interval": 900},
+    )
+
+    result = await sysid_services.resolve_history(runtime, horizon_hours=3.0)
+
+    store.async_query_range.assert_awaited_once_with(now - 3 * 3600.0, now)
+    assert [float(r["timestamp"]) for r in result] == [
+        now - 2 * 3600.0,
+        now - 900.0,
+    ]
 
 
 @pytest.mark.asyncio
