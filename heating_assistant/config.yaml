@@ -1,7 +1,7 @@
 name: "HeatingAssistant"
 version: "2026.08.0"
 slug: heatingassistant
-description: "Heating control App for Home Assistant OS (SWD-255)"
+description: "Heating control App for Home Assistant OS"
 url: "https://github.com/marcuskrogh/HeatingAssistant"
 arch:
   - amd64

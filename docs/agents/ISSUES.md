@@ -4,7 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
-| SWD-307 | Task | [Tweak] Calendar versioning YYYY.MM.PATCH (HA-style) | Done | — | docs/agents/PLAN-calver-versioning.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/597 |
+| SWD-311 | Task | [Refine] App-first README and docs cleanup | In Progress | — | docs/agents/PLAN-app-first-docs.md | `/review-fix SWD-311` |
+| SWD-312 | Sub-task | Consumer README rewrite + App sync | In Progress | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
+| SWD-313 | Sub-task | Consumer docs update/delete | In Progress | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
+| SWD-314 | Sub-task | Maintainer docs + cleanup + remove HACS | In Progress | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
+| SWD-307 | Task | [Tweak] Calendar versioning YYYY.MM.PATCH (HA-style) | Done | — | (archived) | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/597 |
 | SWD-308 | Sub-task | Cut over live versions to 2026.08.0 | Done | SWD-307 | docs/agents/PLAN-calver-versioning.md | — |
 | SWD-310 | Sub-task | Encode YYYY.MM.PATCH in sync lock + docs | Done | SWD-307 | docs/agents/PLAN-calver-versioning.md | — |
 | SWD-309 | Sub-task | Tests for calver lock and assertions | Done | SWD-307 | docs/agents/PLAN-calver-versioning.md | — |
@@ -63,6 +67,8 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | SWD-248 | Task | [Bug] stop NMPC hang (executor, timeout, SciPy horizon cap) | Done | — | — | Done — superseded by SWD-254; PR #542 closed |
 
 ## Log
+
+- 2026-08-11 — `/ship` SWD-311: App-first README + docs cleanup; remove HACS; purge leftover roadmaps; branch `cursor/swd-311-app-first-docs-75fa`.
 - 2026-08-11 — shipped SWD-307 via PR #597 (`022c9e8`): calendar versioning `YYYY.MM.PATCH`; v2026.08.0; CI green. Rebuild App on HAOS to pick up the new version stamp.
 - 2026-08-11 — SWD-307 review-fix CLEAN on PR #597; calendar versioning `YYYY.MM.PATCH` / `2026.08.0`; shipping closeout.
 - 2026-08-11 — `/define`+`/ship` SWD-307: calendar versioning `YYYY.MM.PATCH`; PLAN `docs/agents/PLAN-calver-versioning.md`; Sub-tasks SWD-308/310/309; branch `cursor/swd-307-calver-versioning-d25e`; delta-fast; cutover to `2026.08.0`.

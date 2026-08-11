@@ -5,11 +5,10 @@
 > model-predictive controller (MPC) with its continuous-discrete extended
 > Kalman filter (CD-EKF) state estimator.
 
-This document is for readers who want to understand *why* the integration
-behaves the way it does. For installation and day-to-day use, start with the
+This document is for readers who want to understand *why* the App behaves the
+way it does. For installation and day-to-day use, start with the
 [main README](../README.md). For estimating the parameters these models need,
-and for tuning the controller, see the [Parameter Estimation & Tuning
-guide](TUNING.md).
+and for tuning the controller, see the [Tuning guide](TUNING.md).
 
 **Contents**
 

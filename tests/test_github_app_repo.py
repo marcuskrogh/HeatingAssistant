@@ -139,4 +139,4 @@ def test_ha_app_directory_is_docs_only():
 
     assert docs == [Path("INSTALL.md")]
     install_doc = (HA_APP_DIR / "INSTALL.md").read_text(encoding="utf-8")
-    assert "../README.md#home-assistant-os-app-swd-255" in install_doc
+    assert "../README.md#installation" in install_doc
