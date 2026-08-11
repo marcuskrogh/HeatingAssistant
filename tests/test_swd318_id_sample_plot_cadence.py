@@ -126,6 +126,29 @@ def test_durable_first_skips_buffer_on_append_failure(tmp_path: Path) -> None:
     assert len(runtime.history_buffer) == 0
     assert runtime._id_history_last_ts == 0.0
     failing.append.assert_called_once()
+    failing.purge_old.assert_not_called()
+
+
+def test_purge_failure_still_commits_after_append(tmp_path: Path) -> None:
+    """Append success commits buffer even when retention purge fails."""
+
+    runtime = _runtime(tmp_path, update_interval=900)
+    runtime.update_tag("living_temp", MqttTagPayload(value=22.0, status="GOOD"))
+    runtime._history_buffer.clear()
+    runtime._id_history_last_ts = 0.0
+
+    store = MagicMock()
+    store.append = MagicMock()
+    store.purge_old.side_effect = OSError("purge failed")
+    runtime.id_history_store = store
+
+    stamp = time.time()
+    runtime._record_identification_sample(stamp, force=True)
+
+    assert len(runtime.history_buffer) == 1
+    assert runtime._id_history_last_ts == pytest.approx(stamp)
+    store.append.assert_called_once()
+    store.purge_old.assert_called_once()
 
 
 @pytest.mark.asyncio

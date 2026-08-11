@@ -657,13 +657,18 @@ class HeatingRuntime:
             if id_record is not None:
                 try:
                     await self.id_history_store.async_append(id_record)
-                    await self.id_history_store.async_purge_old()
                 except Exception:
                     _logger.exception(
                         "Failed to persist identification history record"
                     )
                 else:
                     self._commit_identification_sample(id_record)
+                    try:
+                        await self.id_history_store.async_purge_old()
+                    except Exception:
+                        _logger.exception(
+                            "Failed to purge old identification history"
+                        )
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             await self._best_effort_mqtt(self.publish_status(), "status")
@@ -3032,11 +3037,14 @@ class HeatingRuntime:
             return
         try:
             self.id_history_store.append(record)
-            self.id_history_store.purge_old()
         except Exception:
             _logger.exception("Failed to persist identification history record")
             return
         self._commit_identification_sample(record)
+        try:
+            self.id_history_store.purge_old()
+        except Exception:
+            _logger.exception("Failed to purge old identification history")
 
     def _accumulate_energy(self, now: float) -> None:
         """Integrate room heating power into cumulative energy totals."""
