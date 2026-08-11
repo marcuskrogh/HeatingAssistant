@@ -4,6 +4,11 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
+| SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | To Do | — | docs/ROADMAP.md | `/define SWD-318` |
+| SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 |
+| SWD-320 | Task | [Bug] resolve_history(horizon) merges id_history JSONL | Done | SWD-316 | docs/agents/PLAN-resolve-history-horizon-jsonl.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/602 |
+| SWD-318 | Task | [Define] Align ID sample write with plot cadence | To Do | SWD-316 | docs/ROADMAP.md | `/define SWD-318` |
+| SWD-317 | Task | [Define] Surface ID history health on System Status | To Do | SWD-316 | docs/ROADMAP.md | `/define SWD-317` (blocked by SWD-318) |
 | SWD-315 | Task | [Tweak] Remove IPOPT from parameter estimation — SciPy only | Done | — | docs/agents/PLAN-remove-ipopt-scipy.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/599 (`0397afa`) |
 | SWD-311 | Task | [Refine] App-first README and docs cleanup | Done | — | docs/agents/PLAN-app-first-docs.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/598 (`ebb8aae`) |
 | SWD-312 | Sub-task | Consumer README rewrite + App sync | Done | SWD-311 | docs/agents/PLAN-app-first-docs.md | — |
@@ -69,6 +74,10 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-11 — shipped SWD-320 via PR #602: resolve_history(horizon) merges id_history JSONL (Option A); review-fix CLEAN; Next `/define SWD-318`.
+- 2026-08-11 — `/define` SWD-320: resolve_history(horizon) merges id_history JSONL (Option A); PLAN `docs/agents/PLAN-resolve-history-horizon-jsonl.md`; bug/fix-fast; branch `cursor/swd-320-resolve-history-horizon-jsonl-2dd4`; Next `/implement SWD-320`.
+- 2026-08-11 — `/research` SWD-319: load-path defect + write asymmetry code-proven; artifact `docs/agents/RESEARCH-estimation-history-hole.md`; Next `/define SWD-320`.
+- 2026-08-11 — `/explore` SWD-316: estimation history hole while plots + control OK; route SWD-319/320/318/317.
 - 2026-08-11 — shipped SWD-315 via PR #599 (`0397afa`): SciPy-only parameter estimation (remove IPOPT/cyipopt path); review-fix CLEAN.
 - 2026-08-11 — SWD-315 review-fix CLEAN (focused): SciPy-only estimation; deferred MPC legacy IPOPT labels in slow perf harness; Next `/ship SWD-315`.
 - 2026-08-11 — `/implement` SWD-315: SciPy-only estimation; PR https://github.com/marcuskrogh/HeatingAssistant/pull/599; Next `/review-fix SWD-315`.
