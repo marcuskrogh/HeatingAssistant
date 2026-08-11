@@ -74,6 +74,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 
 ## Log
 
+- 2026-08-11 — `/define` SWD-318: align ID sample write with plot cadence (Option B + durable-first); PLAN `docs/agents/PLAN-id-sample-plot-cadence.md`; bug/fix-fast; branch `cursor/swd-318-id-sample-plot-cadence-2dd4`; Next `/implement SWD-318`.
 - 2026-08-11 — shipped SWD-320 via PR #602: resolve_history(horizon) merges id_history JSONL (Option A); review-fix CLEAN; Next `/define SWD-318`.
 - 2026-08-11 — `/define` SWD-320: resolve_history(horizon) merges id_history JSONL (Option A); PLAN `docs/agents/PLAN-resolve-history-horizon-jsonl.md`; bug/fix-fast; branch `cursor/swd-320-resolve-history-horizon-jsonl-2dd4`; Next `/implement SWD-320`.
 - 2026-08-11 — `/research` SWD-319: load-path defect + write asymmetry code-proven; artifact `docs/agents/RESEARCH-estimation-history-hole.md`; Next `/define SWD-320`.
