@@ -5,7 +5,7 @@ Continuity mirror for Jira (`SWD`). Upsert rows on create / transition / handoff
 | Key | Type | Title | Status | Parent | Artifact | Next |
 |-----|------|-------|--------|--------|----------|------|
 | SWD-316 | Story | [Explore] Estimation history hole while plots + control OK | To Do | — | docs/ROADMAP.md | `/define SWD-320` |
-| SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — brief ready; Next `/define SWD-320` |
+| SWD-319 | Task | [Research] Discriminate id_history JSONL hole vs horizon load ignoring disk | Done | SWD-316 | docs/agents/RESEARCH-estimation-history-hole.md | Done — https://github.com/marcuskrogh/HeatingAssistant/pull/601 (`5baaeeb`); Next `/define SWD-320` |
 | SWD-320 | Task | [Define] resolve_history(horizon) merges id_history JSONL | To Do | SWD-316 | docs/ROADMAP.md | `/define SWD-320` |
 | SWD-318 | Task | [Define] Align ID sample write with plot cadence | To Do | SWD-316 | docs/ROADMAP.md | `/define SWD-318` (unblocked by SWD-319 Done) |
 | SWD-317 | Task | [Define] Surface ID history health on System Status | To Do | SWD-316 | docs/ROADMAP.md | `/define SWD-317` (blocked by SWD-320, SWD-318) |

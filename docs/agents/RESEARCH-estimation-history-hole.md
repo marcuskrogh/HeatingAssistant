@@ -128,7 +128,7 @@ probes acceptance.
 - Story: SWD-316
 - Artifact: docs/agents/RESEARCH-estimation-history-hole.md
 - Branch: cursor/swd-319-estimation-history-research-2dd4
-- PR: (pending)
+- PR: https://github.com/marcuskrogh/HeatingAssistant/pull/601
 
 ## Next
 
