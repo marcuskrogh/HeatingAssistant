@@ -421,6 +421,12 @@ class HeatingRuntime:
                     self._record_history_samples()
                 except Exception:
                     _logger.exception("Wall-clock history sample failed")
+                try:
+                    # Same cadence as plot history so estimation memory does not
+                    # stall when control is quiet (SWD-318 Option B).
+                    self._record_identification_sample(now)
+                except Exception:
+                    _logger.exception("Wall-clock identification sample failed")
                 history_every = self._history_tick_interval_s()
                 next_history = now + history_every
             if now >= next_control:
@@ -604,6 +610,9 @@ class HeatingRuntime:
             self.tag_attributes.pop(tag, None)
         self._recompute_room_temperatures()
         self._record_history_samples()
+        # Plot writers also feed ID history (SWD-318); interval gate dedupes
+        # against control-cycle samples.
+        self._record_identification_sample()
         self._save_runtime_state()
 
     async def run_control_cycle(self) -> dict[str, float]:
@@ -646,8 +655,15 @@ class HeatingRuntime:
                 await asyncio.to_thread(self._plot_history_store.purge_old)
             id_record = self._take_identification_sample(now)
             if id_record is not None:
-                await self.id_history_store.async_append(id_record)
-                await self.id_history_store.async_purge_old()
+                try:
+                    await self.id_history_store.async_append(id_record)
+                    await self.id_history_store.async_purge_old()
+                except Exception:
+                    _logger.exception(
+                        "Failed to persist identification history record"
+                    )
+                else:
+                    self._commit_identification_sample(id_record)
             self._save_runtime_state()
             await self._best_effort_mqtt(self.publish_actuator_outputs(), "actuator outputs")
             await self._best_effort_mqtt(self.publish_status(), "status")
@@ -2913,10 +2929,12 @@ class HeatingRuntime:
     def _take_identification_sample(
         self, now: float | None = None, *, force: bool = False
     ) -> dict[str, Any] | None:
-        """Build + buffer one identification observation; return it for durable write.
+        """Build one identification observation for durable-first write.
 
-        Called from the control cycle (update_interval), matching the original
-        coordinator tick behaviour. Returns ``None`` when gated or unwired.
+        Does **not** mutate ``_history_buffer`` or ``_id_history_last_ts`` —
+        callers must durable-append first, then
+        :meth:`_commit_identification_sample` (SWD-318). Returns ``None`` when
+        gated by ``update_interval`` or unwired / no measured temps.
         """
 
         now_ts = float(now if now is not None else time.time())
@@ -2982,7 +3000,7 @@ class HeatingRuntime:
         else:
             y_pred_for_next = list(y)
 
-        record = {
+        return {
             "y": y,
             "y_pred": y_pred_aligned,
             "y_pred_for_next": y_pred_for_next,
@@ -2994,14 +3012,20 @@ class HeatingRuntime:
             },
             "timestamp": now_ts,
         }
-        self._history_buffer.append(record)
+
+    def _commit_identification_sample(self, record: Mapping[str, Any]) -> None:
+        """Buffer + advance gate after a successful durable append (SWD-318)."""
+
+        payload = dict(record)
+        now_ts = float(payload.get("timestamp") or time.time())
+        payload["timestamp"] = now_ts
+        self._history_buffer.append(payload)
         self._id_history_last_ts = now_ts
-        return record
 
     def _record_identification_sample(
         self, now: float | None = None, *, force: bool = False
     ) -> None:
-        """Sync helper for tests: buffer + durable append on the calling thread."""
+        """Sync path: durable JSONL append, then buffer (ticker / update_tag)."""
 
         record = self._take_identification_sample(now, force=force)
         if record is None:
@@ -3011,6 +3035,8 @@ class HeatingRuntime:
             self.id_history_store.purge_old()
         except Exception:
             _logger.exception("Failed to persist identification history record")
+            return
+        self._commit_identification_sample(record)
 
     def _accumulate_energy(self, now: float) -> None:
         """Integrate room heating power into cumulative energy totals."""
