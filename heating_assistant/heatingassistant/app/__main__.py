@@ -15,6 +15,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from heatingassistant import __version__
 from heatingassistant.app.runtime import HeatingRuntime
 from heatingassistant.mqtt.bridge import create_mqtt_bus
 from heatingassistant.mqtt.supervisor import (
@@ -66,7 +67,7 @@ def merge_supervisor_options(
 class _Handler(BaseHTTPRequestHandler):
     runtime: HeatingRuntime
 
-    server_version = "HeatingAssistantApp/2.0.32"
+    server_version = f"HeatingAssistantApp/{__version__}"
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlsplit(self.path)
