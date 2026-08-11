@@ -69,4 +69,4 @@
 - Workflow: delta-fast
 
 ## Next
-`/review-fix SWD-315` — focused review after implement verify
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/599
