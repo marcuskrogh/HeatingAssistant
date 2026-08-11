@@ -20,7 +20,7 @@ room temperatures are advancing; horizon load uses the same durable store.
 | Order | Task | Type | Blocked by | Status | Issue |
 |-------|------|------|------------|--------|-------|
 | 1 | Discriminate: id_history JSONL missing rows vs horizon load ignoring disk | research | — | Done | [SWD-319](https://marcusknielsen.atlassian.net/browse/SWD-319) |
-| 2 | Fix `resolve_history(horizon_hours)` to merge id_history JSONL | define | — | To Do (PLAN ready) | [SWD-320](https://marcusknielsen.atlassian.net/browse/SWD-320) |
+| 2 | Fix `resolve_history(horizon_hours)` to merge id_history JSONL | define | — | Done | [SWD-320](https://marcusknielsen.atlassian.net/browse/SWD-320) |
 | 3 | Align ID sample write with plot cadence (durable-first append) | define | SWD-319 | To Do | [SWD-318](https://marcusknielsen.atlassian.net/browse/SWD-318) |
 | 4 | Surface ID append / buffer–disk lag on System Status | define | SWD-320, SWD-318 | To Do | [SWD-317](https://marcusknielsen.atlassian.net/browse/SWD-317) |
 
@@ -53,4 +53,4 @@ room temperatures are advancing; horizon load uses the same durable store.
 
 ## Next
 
-`/implement SWD-320` — horizon→window JSONL merge per PLAN (fix-fast).
+`/define SWD-318` — align ID sample write with plot cadence (SWD-320 shipped).
