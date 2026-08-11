@@ -65,8 +65,8 @@ _BENCHMARKS_FILE = os.path.join(_REPO_ROOT, "BENCHMARKS.md")
 # cases.  The 5-room case takes ~1.1s per call, so 15 reps ≈ 17s total.
 # Set FAST_TESTS=1 (see tests/conftest.py) to use fewer reps in quick passes.
 _MPC_REPS = 3 if os.environ.get("FAST_TESTS") == "1" else 15
-# Parameter estimation is slow (multi-start IPOPT with a Kalman filter
-# objective); a single timed call is sufficient to track regressions.
+# Parameter estimation is slow (multi-start SciPy L-BFGS-B with a Kalman
+# filter objective); a single timed call is sufficient to track regressions.
 _ESTIM_REPS = 1
 
 
