@@ -76,4 +76,4 @@
 - Workflow: fix-fast
 
 ## Next
-`/review-fix SWD-318` — Review and auto-fix per Workflow binding (PR #603)
+Done — https://github.com/marcuskrogh/HeatingAssistant/pull/603 (`58d71a7`)
